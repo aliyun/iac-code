@@ -45,6 +45,71 @@ class _GracePermissionHandoff(_NormalPermissionHandoff):
 
 
 @pytest.mark.asyncio
+async def test_grace_cleanup_starting_during_reply_attachment_keeps_live_execution(tmp_path, monkeypatch):
+    fixture = _GracePermissionHandoff(tmp_path, monkeypatch)
+    attach_entered = asyncio.Event()
+    release_attach = asyncio.Event()
+    cleanup_entered = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    settlement_entered = asyncio.Event()
+    suspension = reply = None
+    try:
+        await fixture.start()
+        coordinator = fixture.executor._permission_wait_coordinator
+        coordinator.policy = PermissionWaitPolicy(resident_timeout_seconds=3600, timeout_grace_seconds=30)
+        fixture.pending.checkpoint_store.transaction(
+            fixture.pending.boundary_id,
+            lambda record: {**record, "residentDeadlineAt": format_utc(utc_now() - timedelta(seconds=1))},
+        )
+        original_attach = fixture.control.attach_task
+        original_suspend = coordinator._suspend_owner
+        original_settle = fixture.control.wait_for_permission_suspension_settlement
+
+        async def gated_attach(*args, **kwargs):
+            attach_entered.set()
+            await release_attach.wait()
+            return await original_attach(*args, **kwargs)
+
+        async def gated_suspend(owner):
+            cleanup_entered.set()
+            await release_cleanup.wait()
+            return await original_suspend(owner)
+
+        async def observed_settlement():
+            if fixture.control._permission_suspension_inflight:
+                settlement_entered.set()
+            await original_settle()
+
+        monkeypatch.setattr(fixture.control, "attach_task", gated_attach)
+        monkeypatch.setattr(coordinator, "_suspend_owner", gated_suspend)
+        monkeypatch.setattr(fixture.control, "wait_for_permission_suspension_settlement", observed_settlement)
+        reply = asyncio.create_task(
+            fixture.executor.execute(permission_reply(tmp_path, input_id=fixture.pending.input_id), FakeEventQueue())
+        )
+        await asyncio.wait_for(attach_entered.wait(), timeout=5)
+        suspension = asyncio.create_task(coordinator.suspend_now(fixture.pending.boundary_id))
+        await asyncio.wait_for(cleanup_entered.wait(), timeout=5)
+        release_attach.set()
+        await asyncio.wait_for(settlement_entered.wait(), timeout=5)
+        release_cleanup.set()
+
+        assert not await suspension
+        await reply
+
+        assert fixture.resumed
+        assert fixture.resumed_control is fixture.control
+        assert fixture.service.get_for_context("ctx-1") is fixture.control
+        assert fixture.response.result() is True
+    finally:
+        release_attach.set()
+        release_cleanup.set()
+        for task in (suspension, reply):
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+        await fixture.close()
+
+
+@pytest.mark.asyncio
 async def test_permission_termination_revokes_handoff_before_cleanup(tmp_path, monkeypatch):
     fixture = _NormalPermissionHandoff(tmp_path, monkeypatch)
     gate = _TerminationCleanupGate()

@@ -23,7 +23,7 @@ from iac_code.services.permission_wait import format_utc, utc_now
 from iac_code.services.session_backup import BackupResult
 from iac_code.services.session_backup_staging import StagedSessionBackupService
 from iac_code.services.session_storage import SessionStorage
-from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
+from iac_code.types.stream_events import PermissionRequestEvent, PermissionWaitOutcome, TextDeltaEvent
 
 from .fakes import FakeEventQueue, FakeRuntime
 from .test_execution_control_regressions import wait_until
@@ -448,6 +448,91 @@ async def test_late_background_agent_completion_allows_cold_executor_permission_
             await asyncio.gather(background, return_exceptions=True)
         if cold_store is not None:
             await cold_store.stop_cleanup_loop()
+        await fixture.close()
+
+
+@pytest.mark.asyncio
+async def test_permission_suspending_before_reply_attachment_uses_validated_recovery(tmp_path, monkeypatch):
+    fixture = _FailureHandoff(tmp_path, monkeypatch)
+    attach_entered = asyncio.Event()
+    release_attach = asyncio.Event()
+    reply = None
+    try:
+        await fixture.start()
+        original_attach = fixture.control.attach_task
+
+        async def attach_after_suspension(*args, **kwargs):
+            attach_entered.set()
+            await release_attach.wait()
+            return await original_attach(*args, **kwargs)
+
+        monkeypatch.setattr(fixture.control, "attach_task", attach_after_suspension)
+        request = permission_reply(tmp_path, input_id=fixture.pending.input_id)
+        reply = asyncio.create_task(fixture.executor.execute(request, FakeEventQueue()))
+        await asyncio.wait_for(attach_entered.wait(), timeout=5)
+        # Force the resident-to-suspended transition after execute's hot-path
+        # check, but before attach_task can register the reply as managed work.
+        await fixture.suspend()
+        fixture.record_decision_audit()
+        recovery = _RecoveryLoop(fixture)
+        monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", recovery.runtime)
+
+        release_attach.set()
+        await reply
+
+        assert recovery.resumed == ["allow_once"]
+        assert fixture.pending.checkpoint_store.load(fixture.pending.boundary_id)["phase"] == "RESOLVED"
+        assert fixture.service.get_for_context("ctx-1").execution_id != fixture.control.execution_id
+        await fixture.executor.execute(request, FakeEventQueue())
+        assert recovery.resumed == ["allow_once"], "Replaying the same answer must not execute its tool twice"
+    finally:
+        release_attach.set()
+        if reply is not None:
+            await asyncio.gather(reply, return_exceptions=True)
+        await fixture.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed_owner", [False, True])
+async def test_permission_attachment_conflict_cannot_bypass_execution_ownership(tmp_path, monkeypatch, changed_owner):
+    fixture = _FailureHandoff(tmp_path, monkeypatch)
+    attach_entered = asyncio.Event()
+    release_attach = asyncio.Event()
+    reply = None
+    try:
+        await fixture.start()
+        original_attach = fixture.control.attach_task
+
+        async def gated_attach(*args, **kwargs):
+            attach_entered.set()
+            await release_attach.wait()
+            if not changed_owner:
+                raise ExecutionControlConflictError("unrelated execution conflict")
+            return await original_attach(*args, **kwargs)
+
+        monkeypatch.setattr(fixture.control, "attach_task", gated_attach)
+        reply = asyncio.create_task(
+            fixture.executor.execute(permission_reply(tmp_path, input_id=fixture.pending.input_id), FakeEventQueue())
+        )
+        await asyncio.wait_for(attach_entered.wait(), timeout=5)
+        if changed_owner:
+            await fixture.suspend()
+            fixture.service._controls.pop("ctx-1")
+        release_attach.set()
+
+        with pytest.raises(InputResponseExecutionControlConflictError):
+            await reply
+        if changed_owner:
+            assert fixture.response.result() is PermissionWaitOutcome.SUSPEND
+        else:
+            assert not fixture.response.done()
+        assert fixture.pending.checkpoint_store.load(fixture.pending.boundary_id)["decision"]["status"] == "none"
+    finally:
+        release_attach.set()
+        if reply is not None:
+            await asyncio.gather(reply, return_exceptions=True)
+        if changed_owner and hasattr(fixture, "control"):
+            fixture.service._controls["ctx-1"] = fixture.control
         await fixture.close()
 
 

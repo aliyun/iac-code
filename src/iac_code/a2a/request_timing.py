@@ -1,17 +1,20 @@
-"""Observe request admission and completed text frames without changing the wire."""
+"""Observe effective A2A display events and new-session content without changing the wire."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import Any
 
+from iac_code.a2a.display_timing import DisplayEventClassifier
 from iac_code.services.first_token_timing import (
     RequestTiming,
     bind_timing,
     mark_timing,
     use_request_timing,
 )
+from iac_code.services.request_progress import is_progress_metadata
 
 _MAX_FRAME_BYTES = 262_144
 
@@ -44,35 +47,72 @@ def observe_request_data(data: Any) -> None:
     mark_timing("request_parsed", once=True)
 
 
-def _pipeline_text(value: Any) -> bool:
+def _pipeline_content(value: Any, *, text_only: bool = False) -> str | None:
     if isinstance(value, dict):
         data = value.get("data")
-        if value.get("eventType") == "text_delta" and isinstance(data, dict):
+        event_type = value.get("eventType")
+        if event_type in ("text_delta", "thinking_delta") and isinstance(data, dict):
             text = data.get("text") or data.get("delta")
-            return isinstance(text, str) and bool(text)
-        return any(_pipeline_text(value.get(key)) for key in ("events", "envelopes"))
+            metadata_only = data.get("is_metadata_only", data.get("isMetadataOnly", False))
+            if isinstance(text, str) and text and not metadata_only and (event_type == "text_delta" or not text_only):
+                return "text" if event_type == "text_delta" else "thinking"
+        for key in ("events", "envelopes"):
+            if content := _pipeline_content(value.get(key), text_only=text_only):
+                return content
     if isinstance(value, list):
-        return any(_pipeline_text(item) for item in value[:1024])
-    return False
+        for item in value[:1024]:
+            if content := _pipeline_content(item, text_only=text_only):
+                return content
+    return None
 
 
-def _text_frame(value: Any, *, budget: int = 16) -> bool:
+def _content_frame(
+    value: Any, *, budget: int = 16, text_only: bool = False, container: str | None = None
+) -> str | None:
     if not isinstance(value, dict) or budget <= 0:
-        return False
+        return None
+    metadata = value.get("metadata")
+    iac = metadata.get("iac_code") if isinstance(metadata, dict) else None
+    if is_progress_metadata(iac):
+        return None
+    if not text_only:
+        # Content summaries describe newly exposed content, excluding snapshots and receipts.
+        if "task" in value or value.get("kind") == "task":
+            return None
+        metadata = value.get("metadata")
+        iac = metadata.get("iac_code") if isinstance(metadata, dict) else None
+        if isinstance(iac, dict) and (iac.get("inputReceived") or iac.get("mcpWarning")):
+            return None
+        parts = value.get("parts")
+        if isinstance(parts, list) and any(
+            isinstance(part, dict)
+            and isinstance(part.get("data"), dict)
+            and part["data"].get("kind") in ("permission_ack", "cloud_resource_selection_ack")
+            for part in parts
+        ):
+            return None
     # AG-UI text deltas, excluding RUN_STARTED, thinking, status, and heartbeats.
     if value.get("type") == "TEXT_MESSAGE_CONTENT":
-        return isinstance(value.get("delta"), str) and bool(value["delta"])
+        return "text" if isinstance(value.get("delta"), str) and value["delta"] else None
     bind_timing(
         context_id=value.get("contextId", value.get("context_id")), task_id=value.get("taskId", value.get("task_id"))
     )
     # Normal A2A text uses this message ID; lifecycle/status messages use other IDs.
     message_id = value.get("messageId", value.get("message_id"))
-    if isinstance(message_id, str) and message_id.endswith("-message") and value.get("role") in {"agent", "ROLE_AGENT"}:
+    if (
+        isinstance(message_id, str)
+        and (
+            message_id.endswith("-message")
+            or container in (None, "result", "message")
+            or value.get("kind") == "message"
+        )
+        and value.get("role") in {"agent", "ROLE_AGENT"}
+    ):
         parts = value.get("parts")
         if isinstance(parts, list) and any(
             isinstance(p, dict) and isinstance(p.get("text"), str) and p["text"] for p in parts
         ):
-            return True
+            return "text"
     message = value.get("message")
     if (
         value.get("state") in ("TASK_STATE_COMPLETED", "completed")
@@ -83,17 +123,53 @@ def _text_frame(value: Any, *, budget: int = 16) -> bool:
         if isinstance(parts, list) and any(
             isinstance(p, dict) and isinstance(p.get("text"), str) and p["text"] for p in parts
         ):
-            return True
+            return "text"
     metadata = value.get("metadata")
     if isinstance(metadata, dict):
         iac = metadata.get("iac_code")
         if isinstance(iac, dict):
-            if _pipeline_text(iac.get("pipeline")) or _pipeline_text(iac.get("pipelineBatch")):
-                return True
+            thinking = iac.get("thinking")
+            if (
+                not text_only
+                and isinstance(thinking, dict)
+                and not thinking.get("is_metadata_only", thinking.get("isMetadataOnly", False))
+                and isinstance(thinking.get("text"), str)
+            ):
+                if thinking["text"]:
+                    return "thinking"
+            for key in ("pipeline", "pipelineBatch"):
+                if content := _pipeline_content(iac.get(key), text_only=text_only):
+                    return content
     # Only protocol containers; never descend into arbitrary tool results or history.
+    for key in ("result", "statusUpdate", "status_update", "task", "status", "message"):
+        child_container = "status_message" if key == "message" and (container == "status" or "state" in value) else key
+        if content := _content_frame(value.get(key), budget=budget - 1, text_only=text_only, container=child_container):
+            return content
+    return None
+
+
+@dataclass
+class _FrameObservation:
+    event_type: str | None = None
+    content_type: str | None = None
+    text: bool = False
+    progress: bool = False
+
+    def merge(self, other: _FrameObservation) -> None:
+        self.event_type = self.event_type or other.event_type
+        self.content_type = self.content_type or other.content_type
+        self.text = self.text or other.text
+        self.progress = self.progress or other.progress
+
+
+def _progress_frame(value: Any, budget: int = 16) -> bool:
+    if not isinstance(value, dict) or budget <= 0 or "task" in value or ("id" in value and "status" in value):
+        return False
+    metadata = value.get("metadata")
+    if isinstance(metadata, dict) and is_progress_metadata(metadata.get("iac_code")):
+        return True
     return any(
-        _text_frame(value.get(key), budget=budget - 1)
-        for key in ("result", "statusUpdate", "status_update", "task", "status", "message")
+        _progress_frame(value.get(key), budget - 1) for key in ("result", "statusUpdate", "status_update", "status")
     )
 
 
@@ -102,10 +178,11 @@ class _FrameObserver:
         self.buffer = bytearray()
         self.discarding = False
         self.terminal_result: str | None = None
+        self.display = DisplayEventClassifier()
 
-    def feed(self, chunk: bytes, *, sse: bool, final: bool) -> bool:
+    def feed(self, chunk: bytes, *, sse: bool, final: bool) -> _FrameObservation:
         # Split before retaining, so an oversized body is never buffered wholesale.
-        found = False
+        found = _FrameObservation()
         for piece in chunk.splitlines(keepends=True):
             if not self.discarding:
                 if len(self.buffer) + len(piece) > _MAX_FRAME_BYTES:
@@ -121,22 +198,31 @@ class _FrameObserver:
                 or (self.discarding and piece.strip() == b"")
             ):
                 if not self.discarding:
-                    found = self._parse(self.buffer, sse=True) or found
+                    found.merge(self._parse(self.buffer, sse=True))
                 self.buffer.clear()
                 self.discarding = False
         if final and not sse and self.buffer and not self.discarding:
-            found = self._parse(self.buffer, sse=sse) or found
+            found.merge(self._parse(self.buffer, sse=sse))
             self.buffer.clear()
         return found
 
-    def _parse(self, frame: bytes | bytearray, *, sse: bool) -> bool:
+    def _parse(self, frame: bytes | bytearray, *, sse: bool) -> _FrameObservation:
         try:
             payload = b"\n".join(line[5:].lstrip() for line in frame.splitlines() if line.startswith(b"data:"))
             data = json.loads(payload if sse else frame)
             self.terminal_result = _terminal_result(data) or self.terminal_result
-            return _text_frame(data)
+            display_type = self.display.classify(data)
+            if self.display.incomplete:
+                bind_timing(wire_observation_incomplete=True)
+                mark_timing("wire_observation_skipped", once=True, result="display_observation_limit")
+            return _FrameObservation(
+                event_type=display_type,
+                content_type=_content_frame(data),
+                text=_content_frame(data, text_only=True) == "text",
+                progress=_progress_frame(data),
+            )
         except (ValueError, TypeError, RecursionError):
-            return False
+            return _FrameObservation()
 
 
 def _terminal_result(value: Any, budget: int = 16) -> str | None:
@@ -201,23 +287,37 @@ class FirstTokenTimingMiddleware:
                 sse = content_type.lower().startswith(b"text/event-stream")
                 json_body = b"json" in content_type.lower()
                 timing.record("response_started", http_status=status)
-            is_text = False
+            observation = _FrameObservation()
             if timing.active and message.get("type") == "http.response.body" and (sse or json_body):
                 try:
-                    is_text = observer.feed(
+                    observation = observer.feed(
                         message.get("body", b""), sse=sse, final=not message.get("more_body", False)
                     )
                 except Exception:
                     # A parser/diagnostic failure must not drop or delay a response.
                     pass
-            if is_text:
+            is_a2a = timing.identity.get("request_kind") == "a2a"
+            event_type = observation.event_type if is_a2a else None
+            content_type = observation.content_type if is_a2a else None
+            if event_type is not None:
+                timing.record("first_event_send_started", once=True)
+            if content_type is not None and timing.identity.get("is_new_session") is True:
+                timing.record("first_content_send_started", once=True)
+            if observation.text:
                 timing.record("first_text_send_started", once=True)
             await send(message)
             if message.get("type") == "http.response.body" and not message.get("more_body", False):
                 response_complete = True
-            if is_text:
-                timing.record("first_text_send_completed", once=True)
-                timing.summary("first_text_sent")
+            if message.get("type") == "http.response.body":
+                if is_a2a and observation.progress:
+                    timing.record("first_progress_send_completed", once=True)
+                timing.record_send_completed(
+                    event_type=event_type,
+                    content_type=content_type,
+                    text=observation.text,
+                    result=observer.terminal_result,
+                )
+            if not timing.active:
                 observer.buffer.clear()
 
         with use_request_timing(timing):

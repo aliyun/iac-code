@@ -722,6 +722,7 @@ class A2ATaskStore(TaskStore):
             if context_id in self._input_handoff_runtime_close_tasks:
                 raise RuntimeError("A2A context runtime is closing for permission handoff")
             if context_id in self._contexts:
+                bind_timing(is_new_session=False)
                 record = self._contexts[context_id]
                 pending_channel = self._pending_context_telemetry_channels.get(context_id)
                 if pending_channel is not None:
@@ -754,8 +755,11 @@ class A2ATaskStore(TaskStore):
                         telemetry_channel = snapshot.telemetry_channel
 
                 if session_id is None:
+                    bind_timing(is_new_session=True)
                     session_id = str(uuid.uuid4())
                     _ensure_new_a2a_session_layout(cwd, session_id, self._backup_service)
+                else:
+                    bind_timing(is_new_session=False)
                 record = A2AContextRecord(
                     context_id=context_id,
                     session_id=session_id,
