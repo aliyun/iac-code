@@ -5,10 +5,10 @@ description: Verwenden Sie das REPL fuer iterative Infrastrukturarbeit.
 
 # Interaktiver Modus
 
-Starten Sie ohne Argumente, um das interaktive REPL zu oeffnen:
+Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 Der interaktive Modus ist nuetzlich, wenn Sie Infrastrukturanforderungen ueber mehrere Durchgaenge verfeinern moechten.

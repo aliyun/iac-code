@@ -49,7 +49,7 @@ def event():
         "version": "2015-12-31",
         "region": "cn-hangzhou",
         "params": {"InstanceName": "offline-instance"},
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "status": "ok",
         "exitCode": 0,
         "rawFile": "raw.json",
@@ -165,7 +165,7 @@ def test_registered_route_uses_own_exact_table_sample(tmp_path, mutation):
     raw = capture()
     report = {
         "purpose": "bounded_cloud_source_preparation_only",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "observedAt": "2026-10-03T23:00:00Z",
         "regionsCovered": ["cn-hangzhou"],
         "results": [

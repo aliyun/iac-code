@@ -120,7 +120,7 @@ async function consoleObservation(context, expectedIdentityCandidates, timeoutMs
     /login\/login\.htm/i.test(finalUrl);
   const loginSignals = /(扫码登录|账号登录|手机号登录|ram用户登录|sign in to alibaba cloud)/i.test(visibleText);
   if (loginPage || loginSignals) throw new Error("Alibaba Cloud console is not logged in");
-  if (!matched) throw new Error("logged-in console does not expose the expected test-guima identity");
+  if (!matched) throw new Error("logged-in console does not expose the expected resource-link-test identity");
   if (screenshot) {
     fs.mkdirSync(path.dirname(path.resolve(screenshot)), { recursive: true, mode: 0o700 });
     await page.bringToFront();

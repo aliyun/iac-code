@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, cast
 import httpx
 
 from iac_code.a2a.transport import A2AAuthConfig, headers_for_auth
+from iac_code.services.first_token_timing import timing_headers
 
 
 class HttpA2AClient:
@@ -39,4 +40,4 @@ class HttpA2AClient:
             await close()
 
     def _headers(self) -> dict[str, str]:
-        return {"A2A-Version": "1.0", **headers_for_auth(self._auth)}
+        return {"A2A-Version": "1.0", **headers_for_auth(self._auth), **timing_headers()}

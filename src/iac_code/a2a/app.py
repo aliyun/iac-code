@@ -43,10 +43,12 @@ from iac_code.a2a.projection import (
     resolve_a2a_public_path_roots,
     resolve_a2a_public_path_roots_for_data,
 )
+from iac_code.a2a.request_timing import FirstTokenTimingMiddleware, observe_request_data
 from iac_code.a2a.types import validate_protocol_id
 from iac_code.i18n import _
 from iac_code.pipeline.config import get_run_mode
 from iac_code.services.configuration_readiness import configuration_readiness
+from iac_code.services.first_token_timing import mark_timing, timing_phase
 from iac_code.services.session_backup import (
     SESSION_BACKUP_NOT_READY_CODE,
     SessionBackupError,
@@ -227,6 +229,7 @@ class A2AProjectionMiddleware(BaseHTTPMiddleware):
         self._task_store = task_store
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        mark_timing("request_admitted", once=True)
         request_data = await _a2a_request_data(request)
         response = await call_next(request)
         request_data = _with_a2a_path_parameters(request, request_data)
@@ -313,13 +316,15 @@ async def _a2a_request_data(request: Request) -> Any:
     data: dict[str, Any] = dict(request.query_params)
     if request.method in {"POST", "PUT", "PATCH"}:
         try:
-            body = await request.json()
+            with timing_phase("request_parse"):
+                body = await request.json()
         except Exception:
             body = None
         if isinstance(body, dict):
             data.update(body)
         elif body is not None:
             data["body"] = body
+    observe_request_data(data)
     return data
 
 
@@ -496,6 +501,7 @@ def create_app(
             return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
         if not isinstance(payload, dict):
             return JSONResponse({"error": "Invalid session restore request."}, status_code=400)
+        observe_request_data(payload)
         raw_cwd = payload.get("cwd")
         raw_session_id = payload.get("sessionId")
         raw_task_id = payload.get("taskId")
@@ -860,6 +866,7 @@ def create_app(
     )
     if idle_controller is not None:
         app.add_middleware(_A2AIdleActivityMiddleware, controller=idle_controller)
+    app.add_middleware(FirstTokenTimingMiddleware)
     return app
 
 

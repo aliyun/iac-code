@@ -55,18 +55,18 @@ pip install iac-code
 
 ## 使用
 
-首次使用需要先配置 LLM 提供商和 IaC 云服务，在交互模式中输入 `/auth` 完成配置。
+在终端运行 `iac-code`，即可启动本地 Web 应用并打开浏览器。首次使用时，在设置中配置 LLM 提供商和阿里云凭证。
 
-### 交互模式
-
-直接运行进入交互式 REPL：
+### Web 应用（默认）
 
 ```bash
 iac-code
 ```
 
+默认会在浏览器中打开 `http://127.0.0.1:8766`（仅限回环地址）。详见 [Web 应用指南](https://aliyun.github.io/iac-code/zh-Hans/docs/web-app)。
+
 <p align="center">
-  <img src="../website/static/img/demo_zh.gif" alt="iac-code 演示" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-web-cn.jpg" alt="IaC Code Web 应用" width="100%">
 </p>
 
 ### 非交互模式
@@ -82,21 +82,6 @@ iac-code --prompt "创建一个 VPC 和两台 ECS 实例"
 ```bash
 echo "创建一个 OSS Bucket" | iac-code --prompt -
 ```
-
-### Web 应用
-
-更喜欢图形界面？可以启动本地 Web 应用，它运行与 CLI 相同的引擎，并共享同一份会话。Web 应用需要 `http` 扩展，请先安装：
-
-```bash
-pip install 'iac-code[http]'
-iac-code web
-```
-
-默认会在浏览器中打开 `http://127.0.0.1:8766`（仅限回环地址）。详见 [Web 应用指南](https://aliyun.github.io/iac-code/zh-Hans/web-app)。
-
-<p align="center">
-  <img src="../website/static/img/screenshots/iac-code-web-cn.jpg" alt="IaC Code Web 应用" width="100%">
-</p>
 
 ### Agent Skill
 

@@ -2450,7 +2450,7 @@ def packet(store, context):
     source = "inputs/cloud.json"
     return {
         "task_id": context["task_id"],
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "terraform": "ros_managed_terraform",
         "requests": {"QUERY": "请只读列出测试地域的示例资源。"},
         "execution_grants": {
@@ -3448,7 +3448,7 @@ def test_bounded_cloud_read_preserves_once_and_timeout_blindspot(store, monkeypa
     monkeypatch.setattr(credentials, "cli_snapshot", snapshot)
 
     def invoke(argv, **kwargs):
-        assert argv[argv.index("--profile") + 1] == "test-guima"
+        assert argv[argv.index("--profile") + 1] == "resource-link-test"
         if credential_source == "shared":
             assert argv[-2:] == ["--config-path", str(store.root / "private/fake-sts.json")]
         else:
@@ -3526,7 +3526,7 @@ def test_ons_preparation_registration_and_read_keep_candidate_official_basis_and
             "ons",
             "OnsInstanceInServiceList",
             "--profile",
-            "test-guima",
+            "resource-link-test",
             "--RegionId",
             "cn-hangzhou",
         ]

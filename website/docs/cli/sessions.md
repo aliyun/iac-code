@@ -5,6 +5,8 @@ description: Persist and resume conversations across runs.
 
 # Sessions
 
+In Web and Desktop, select the project and open a conversation from the sidebar. Use the conversation menu to rename it. The terminal commands below operate on the same session store.
+
 IaC Code automatically persists every conversation to disk. You can resume any previous session to continue where you left off.
 
 ## Resuming Sessions
@@ -39,7 +41,7 @@ You can resume by name when it uniquely identifies a session:
 
 ```text
 /resume deploy-prod
-iac-code --resume deploy-prod
+iac-code tui --resume deploy-prod
 ```
 
 ### CLI: `--resume` and `--continue`
@@ -47,20 +49,20 @@ iac-code --resume deploy-prod
 Resume a specific session from the command line by exact session ID, unique ID prefix, or unique session name:
 
 ```bash
-iac-code --resume <session-id-or-name>
+iac-code tui --resume <session-id-or-name>
 ```
 
 Resume the most recent session:
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 The short flags `-r` and `-c` are also available:
 
 ```bash
-iac-code -r <session-id-or-name>
-iac-code -c
+iac-code tui -r <session-id-or-name>
+iac-code tui -c
 ```
 
 ### Cross-project Sessions
@@ -68,7 +70,7 @@ iac-code -c
 When a session belongs to a different project directory, IaC Code does not hot-swap the working directory. Instead, it prints the command to resume in the correct context:
 
 ```text
-cd /path/to/other/project && iac-code --resume <session-id>
+cd /path/to/other/project && iac-code tui --resume <session-id>
 ```
 
 This command is also copied to the clipboard when possible.

@@ -19,7 +19,7 @@ from scripts.web.e2e.resource_link_workflow.store import Store
 def setup(tmp_path, monkeypatch):
     store = Store.initialize(tmp_path / "state")
     profile = {
-        "name": "test-guima",
+        "name": "resource-link-test",
         "mode": "OAuth",
         "region_id": "cn-hangzhou",
         "oauth_site_type": "CN",
@@ -46,7 +46,7 @@ def setup(tmp_path, monkeypatch):
             return run(argv, **kwargs)
         calls.append(argv)
         assert argv[:3] == ["aliyun", "sts", "GetCallerIdentity"]
-        assert argv[argv.index("--profile") + 1] == "test-guima"
+        assert argv[argv.index("--profile") + 1] == "resource-link-test"
         assert argv[argv.index("--config-path") + 1] == str(cli)
         assert kwargs["timeout"] == 25 and kwargs["capture_output"] is True
         return subprocess.CompletedProcess(argv, 0, '{"AccountId":"123","RequestId":"fake-request"}\n', "")
@@ -80,7 +80,7 @@ def test_adoption_preserves_backups_and_single_source_without_dispatch(setup, mo
     monkeypatch.setattr(AliyunCredentials, "refresh_oauth_if_needed", lambda credential: credential)
     with cli_snapshot(store.root) as snapshot:
         data = read_json(snapshot)
-        assert data["current"] == "test-guima"
+        assert data["current"] == "resource-link-test"
         assert data["profiles"][0]["mode"] == "StsToken"
         assert data["profiles"][0]["sts_token"] == "fake-sts"
         assert not any(k.startswith("oauth_") for k in data["profiles"][0])

@@ -754,9 +754,9 @@ web-attest 必须绑定实际同槽父/子进程：启动加载的门禁、API�
 
 OAuth 登录可以用于测试：正常产品 provider 先刷新为完整、未过期的 STS 三元组，门禁仅绑定这套实际签名凭据，不保存或绑定 OAuth 刷新令牌。首次身份请求必须单独执行，得到真实 AccountId 后再调用其他接口；凭据轮换后需要重新确认身份。缺 token、过期 STS、未知动态凭据来源仍拒绝。不能把管理员身份或登录 UI 当作实际身份验收。
 
-四槽若复制了同一 OAuth 刷新令牌，会发生轮换竞争。修复产品的 canonical 源文件锁和原子保存后，OPS 才能迁移：pause、确认所有回合终态、备份 SQLite、停止四个原 Web，然后运行 `cloud-source-adopt --cli-config <原0600 CLI配置> --account <已批准账号> --region <已批准国内地域>`。命令只做一次有界签名身份核对，从最新 `test-guima` profile 取得完整 OAuth/STS；私有备份各槽旧文件，四个独立 config 的云凭据文件改为同一私有 canonical 文件的符号链接。其他 config/session/token/cwd 不改。部分迁移默认拒绝覆盖，须核对私有备份恢复；重复完整迁移不会再次刷新。迁移不授权云创建、不改 journal、不计 PASS。
+四槽若复制了同一 OAuth 刷新令牌，会发生轮换竞争。修复产品的 canonical 源文件锁和原子保存后，OPS 才能迁移：pause、确认所有回合终态、备份 SQLite、停止四个原 Web，然后运行 `cloud-source-adopt --cli-config <原0600 CLI配置> --account <已批准账号> --region <已批准国内地域>`。命令只做一次有界签名身份核对，从最新 `resource-link-test` profile 取得完整 OAuth/STS；私有备份各槽旧文件，四个独立 config 的云凭据文件改为同一私有 canonical 文件的符号链接。其他 config/session/token/cwd 不改。部分迁移默认拒绝覆盖，须核对私有备份恢复；重复完整迁移不会再次刷新。迁移不授权云创建、不改 journal、不计 PASS。
 
-迁移后，Sol 的 `cloud_read` 从同一 canonical 源正常刷新，只向 CLI 提供一次性的 0600 `StsToken` profile 和显式 `--profile test-guima --config-path`，调用结束或失败都删除临时文件，不复制 OAuth 刷新令牌。共享源失效时硬拒绝，不能回退原 CLI 副本。测试运行期间不再使用原 CLI OAuth profile 进行外部刷新；需要重新登录/更换账号时先暂停并单独核查，不自动重复迁移或换测试名。重启四个原 Web、核对加载 SHA/相同 target 后仍须独立检查正式身份与登录态，不能凭迁移成功恢复 GLM。
+迁移后，Sol 的 `cloud_read` 从同一 canonical 源正常刷新，只向 CLI 提供一次性的 0600 `StsToken` profile 和显式 `--profile resource-link-test --config-path`，调用结束或失败都删除临时文件，不复制 OAuth 刷新令牌。共享源失效时硬拒绝，不能回退原 CLI 副本。测试运行期间不再使用原 CLI OAuth profile 进行外部刷新；需要重新登录/更换账号时先暂停并单独核查，不自动重复迁移或换测试名。重启四个原 Web、核对加载 SHA/相同 target 后仍须独立检查正式身份与登录态，不能凭迁移成功恢复 GLM。
 
 web-stop 对已确认自有启动身份及独立进程组做有界停止（包括 uv 子进程），保留所有状态；五秒未退出才强制停止该自有组。活跃执行租约禁止停止。端口探测使用与 Web 相同的重启语义，TIME_WAIT 不算活跃监听者；其他进程实际监听仍硬拒绝。bootstrap 发现多个同 origin 根页必须 OPS 核对精确旧 target 后清理，不随意选标签或关闭登录页。
 

@@ -2837,7 +2837,7 @@ class Runtime:
                 if intent.exists() or evidence.exists():
                     raise WorkflowError("bounded query already executed or unknown; reuse original evidence")
                 json_write(intent, {"query": query, "state": "may_have_executed"})
-            argv = ["aliyun", query["product"], query["action"], "--profile", "test-guima"]
+            argv = ["aliyun", query["product"], query["action"], "--profile", "resource-link-test"]
             for key, value in query.get("parameters", {}).items():
                 if not key.isalnum() or not key[0].isupper() or not isinstance(value, (str, int)):
                     raise WorkflowError("invalid API parameter")

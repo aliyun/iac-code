@@ -5,6 +5,8 @@ description: Complete reference for built-in interactive commands.
 
 # Slash Commands
 
+This page documents slash commands in the [terminal interface](./interactive-mode.md), started with `iac-code tui`. Web and Desktop expose their own command menus and Settings.
+
 Slash commands control IaC Code from inside an interactive session. Type `/` to see available commands, then continue typing to filter the list. A command is recognized only when it appears at the start of your message.
 
 The `/` listing includes both built-in commands and any skills you have configured. To restrict suggestions to skills only, use `$` instead — `$<name>` lists and invokes skills exclusively, and typing `$` followed by a built-in command name (for example `$help`) prints an error pointing at the `/` equivalent.
@@ -25,7 +27,7 @@ Text after the command name is passed as arguments. In the table below, `<arg>` 
 | `/mcp [enable\|disable\|reconnect ...]` | Manage MCP servers from the interactive REPL. With no arguments, opens the MCP manager for status, diagnostics, tools, resources, prompts, OAuth authentication, approval, enable/disable, reconnect, and removal actions. Quick actions can enable, disable, or reconnect configured servers. |
 | `/model [model_name]` | Show or switch the active model. With `model_name`, it switches directly to that model for the active provider. Without an argument, it opens an interactive model picker when a provider is configured, or prints the current model when no console UI is available. |
 | `/rename <name>` | Name the current session. Names appear in the welcome banner, exit hint, and `/resume` picker, and can be used with `/resume` or `--resume` when they uniquely identify a session. |
-| `/resume [session id\|unique id prefix\|unique session name]` | Resume a previous session. With an argument, IaC Code resolves it as an exact session ID, unique ID prefix, or unique session name. Without an argument, it opens the interactive session picker. Cross-project sessions print a `cd ... && iac-code --resume <id>` command instead of hot-swapping the current project. |
+| `/resume [session id\|unique id prefix\|unique session name]` | Resume a previous session. With an argument, IaC Code resolves it as an exact session ID, unique ID prefix, or unique session name. Without an argument, it opens the interactive session picker. Cross-project sessions print a `cd ... && iac-code tui --resume <id>` command instead of hot-swapping the current project. |
 | `/skills` | Open the skill management picker. Search skills, sort by name/source/size, and enable or disable user and project skills. Bundled skills remain locked on. |
 | `/status` | Show current session ID, provider, model, Alibaba Cloud region, working directory, recorded API token usage, turn count, and context utilization. In debug mode, it also shows memory recall side-call counts and token usage. |
 

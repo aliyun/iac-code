@@ -5,19 +5,17 @@ description: Execute o IaC Code como um aplicativo web local com o mesmo motor d
 
 # Aplicativo web
 
-O IaC Code inclui um aplicativo web local que executa o mesmo motor de agente do terminal, apresentado em um navegador em vez de um REPL. Ele é útil quando você prefere uma interface de chat gráfica, quer gerenciar várias conversas lado a lado ou precisa acompanhar o progresso de um pipeline e a atividade das ferramentas em um layout mais completo.
+Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o navegador. No primeiro uso, configure o provedor LLM e as credenciais da Alibaba Cloud nas configurações.
 
 O aplicativo web lê e grava no mesmo armazenamento de sessões da CLI, então uma conversa iniciada de um lado pode ser retomada no outro.
 
 ## Instalação
 
-O aplicativo web é um recurso opcional que depende do extra `http` (Starlette e Uvicorn). Instale-o junto com o pacote base:
+A instalação padrão inclui as dependências do aplicativo web e do ambiente HTTP. O extra `[http]` permanece como um alias de compatibilidade; não é mais necessário instalá-lo separadamente. No repositório, basta executar `uv sync`.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-Se você executar `iac-code web` sem o extra, o comando falha com uma mensagem pedindo para instalar `iac-code[http]`. Ao trabalhar a partir de um clone do repositório, `uv sync --extra http` instala as mesmas dependências.
 
 ## Iniciar o aplicativo web
 
@@ -31,9 +29,11 @@ Por padrão, ele se vincula a `127.0.0.1:8766` e abre o seu navegador padrão em
 
 | Opção | Padrão | Descrição |
 |---|---|---|
-| `--host` | `127.0.0.1` | Host do servidor HTTP. Apenas endereços de loopback são aceitos. |
+| `--host` | `127.0.0.1` | Host do servidor HTTP. O modo local aceita endereços de loopback; outras IPs exigem `--access-token-file`. |
 | `--port` | `8766` | Porta do servidor HTTP. |
 | `--open` / `--no-open` | `--open` | Abre o navegador ao iniciar. Use `--no-open` para desativar. |
+| `--debug`, `-d` | `false` | Ativar os registros de depuração do servidor nesta execução. |
+| `--access-token-file <path>` | — | Arquivo de token para acesso remoto explícito com transporte de API criptografado. |
 
 ```bash
 iac-code web --port 9000 --no-open
@@ -41,7 +41,7 @@ iac-code web --port 9000 --no-open
 
 ### Segurança
 
-O servidor web vincula-se apenas a interfaces de loopback (`127.0.0.1`, `localhost` ou `::1`). Ele foi projetado para uso na sua própria máquina e rejeita endereços de vínculo públicos. Não o exponha diretamente em uma rede; coloque-o atrás do seu próprio proxy autenticado caso precise de acesso remoto.
+Sem `--access-token-file`, o servidor aceita apenas hosts de loopback (`127.0.0.1`, `localhost` ou `::1`) e verifica as solicitações locais. O modo explícito de token também aceita outras IPs e protege as solicitações de API pelo transporte de token criptografado.
 
 ## Visão geral da interface
 
@@ -53,7 +53,7 @@ A barra lateral lista as conversas do projeto selecionado. A partir daqui, você
 - **Pesquisar** conversas ou abrir a paleta de comandos para executar um comando.
 - **Fixar**, **renomear** ou **arquivar** uma conversa e navegar pelas conversas arquivadas.
 
-Como as sessões são compartilhadas com a CLI, uma conversa que você retoma com `iac-code --resume` também aparece aqui. Consulte [Sessões](./cli/sessions.md) para entender como o armazenamento de sessões funciona.
+Como as sessões são compartilhadas com a CLI, uma conversa que você retoma com `iac-code tui --resume` também aparece aqui. Consulte [Sessões](./cli/sessions.md) para entender como o armazenamento de sessões funciona.
 
 ### Área de composição (composer)
 
@@ -66,6 +66,8 @@ A área de composição é onde você escreve suas solicitações. Ela oferece o
 - **Comandos de barra** (digitados com `/`) e **referências de arquivo `@`** para apontar arquivos do seu espaço de trabalho.
 
 ### Chat normal e modo pipeline
+
+Escolha o modo ao criar uma conversa e também o pipeline se selecionar o modo pipeline. As conversas no mesmo aplicativo podem usar modos diferentes sem reiniciar o servidor.
 
 Uma sessão é executada como chat normal ou no modo **pipeline**. O chat normal transmite em linha as respostas do assistente, as chamadas de ferramentas e os resultados. O modo pipeline adiciona um espaço de trabalho que exibe as linhas do tempo das etapas, os diagnósticos, os diagramas, o progresso da implantação, a limpeza e os detalhes de transferência conforme o pipeline é executado. Consulte [Modo pipeline](./automation/pipeline-mode.md) para saber o que os pipelines fazem.
 
@@ -90,4 +92,4 @@ O aplicativo web está disponível em sete idiomas —English, 简体中文, 日
 
 ## Relação com a CLI
 
-O aplicativo web é uma interface alternativa, não um produto separado. Ele usa os mesmos provedores, credenciais, habilidades, ferramentas e armazenamento de sessões do terminal. Configure os provedores e as credenciais uma única vez com `/auth` na CLI, ou pelas configurações do aplicativo web, e ambas as interfaces os compartilharão.
+Web, Desktop e headless compartilham provedores, credenciais, skills, ferramentas e sessões. Configure o modelo e o acesso à nuvem uma vez em Configurações para reutilizá-los nessas entradas.

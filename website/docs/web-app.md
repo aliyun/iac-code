@@ -5,19 +5,17 @@ description: Run IaC Code as a local web app with the same engine as the CLI.
 
 # Web App
 
-IaC Code ships with a local web app that runs the same agent engine as the terminal, presented in a browser instead of a REPL. It is useful when you prefer a graphical chat interface, want to manage several conversations side by side, or need to watch pipeline progress and tool activity in a richer layout.
+Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
 
 The web app reads and writes the same session store as the CLI, so conversations started in one place can be resumed in the other.
 
 ## Installation
 
-The web app is an optional feature that depends on the `http` extra (Starlette and Uvicorn). Install it alongside the base package:
+Web and HTTP runtime dependencies are included in the default installation. The `[http]` extra remains a compatibility alias; a separate installation is no longer required. From a checkout, `uv sync` is sufficient.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-If you run `iac-code web` without the extra, the command fails with a message telling you to install `iac-code[http]`. When working from a checkout of the repository, `uv sync --extra http` installs the same dependencies.
 
 ## Starting the Web App
 
@@ -31,9 +29,11 @@ By default it binds to `127.0.0.1:8766` and opens your default browser at `http:
 
 | Option | Default | Description |
 |---|---|---|
-| `--host` | `127.0.0.1` | HTTP server host. Only loopback addresses are accepted. |
+| `--host` | `127.0.0.1` | HTTP server host. Local mode accepts loopback addresses; other IP addresses require `--access-token-file`. |
 | `--port` | `8766` | HTTP server port. |
 | `--open` / `--no-open` | `--open` | Open the browser on startup. Use `--no-open` to disable. |
+| `--debug`, `-d` | `false` | Enable server debug logging for this run. |
+| `--access-token-file <path>` | — | Token file for explicit remote access with encrypted API transport. |
 
 ```bash
 iac-code web --port 9000 --no-open
@@ -41,7 +41,7 @@ iac-code web --port 9000 --no-open
 
 ### Security
 
-The web server binds to loopback interfaces only (`127.0.0.1`, `localhost`, or `::1`). It is intended for use on your own machine and rejects public bind addresses. Do not expose it directly to a network; put it behind your own authenticated proxy if remote access is required.
+Without `--access-token-file`, the server accepts only loopback hosts (`127.0.0.1`, `localhost`, or `::1`) and checks local requests. Explicit token mode also accepts other IP addresses and protects API requests with the encrypted token transport.
 
 ## Interface Overview
 
@@ -53,7 +53,7 @@ The sidebar lists conversations for the selected project. From here you can:
 - **Search** conversations, or open the command palette to run a command.
 - **Pin**, **rename**, or **archive** a conversation, and browse archived conversations.
 
-Because sessions are shared with the CLI, a conversation you resume with `iac-code --resume` also appears here. See [Sessions](./cli/sessions.md) for how the session store works.
+Because sessions are shared with the CLI, a conversation you resume with `iac-code tui --resume` also appears here. See [Sessions](./cli/sessions.md) for how the session store works.
 
 ### Composer
 
@@ -66,6 +66,8 @@ The composer is where you type requests. It exposes the same controls the CLI of
 - **Slash commands** (typed with `/`) and **`@` file references** to point at files in your workspace.
 
 ### Normal Chat and Pipeline Mode
+
+Choose the mode and, for Pipeline mode, the pipeline when creating a conversation. Conversations in the same app can use different modes without restarting the server.
 
 A session runs either as a normal chat or in **pipeline** mode. Normal chat streams the assistant's replies, tool calls, and results inline. Pipeline mode adds a workspace that shows step timelines, diagnostics, diagrams, deployment progress, cleanup, and handoff details as the pipeline runs. See [Pipeline Mode](./automation/pipeline-mode.md) for what pipelines do.
 
@@ -90,4 +92,4 @@ The web app is available in seven languages — English, 简体中文, 日本語
 
 ## Relationship to the CLI
 
-The web app is an alternative front end, not a separate product. It uses the same providers, credentials, skills, tools, and session storage as the terminal. Configure providers and credentials once with `/auth` in the CLI, or through the settings in the web app, and both interfaces share them.
+Web, Desktop, and headless use the same providers, credentials, skills, tools, and session store. Configure providers and cloud access in Settings once, then reuse them across these entry points.

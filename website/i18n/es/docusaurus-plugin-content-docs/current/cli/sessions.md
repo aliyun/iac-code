@@ -5,6 +5,8 @@ description: Persistir y reanudar conversaciones entre ejecuciones.
 
 # Sesiones
 
+En Web y Desktop, seleccione el proyecto y abra una conversación de la barra lateral. Use el menú de la conversación para cambiarle el nombre. Los comandos de terminal siguientes usan el mismo almacén de sesiones.
+
 IaC Code guarda automáticamente cada conversación en disco. Puedes reanudar cualquier sesión anterior para continuar donde la dejaste.
 
 ## Reanudar sesiones
@@ -39,7 +41,7 @@ Puedes reanudar por nombre cuando identifica una sesión de forma única:
 
 ```text
 /resume deploy-prod
-iac-code --resume deploy-prod
+iac-code tui --resume deploy-prod
 ```
 
 ### CLI: `--resume` y `--continue`
@@ -47,20 +49,20 @@ iac-code --resume deploy-prod
 Reanuda una sesión concreta desde la línea de comandos por ID exacto, prefijo único de ID o nombre único de sesión:
 
 ```bash
-iac-code --resume <id-o-nombre-de-sesion>
+iac-code tui --resume <id-o-nombre-de-sesion>
 ```
 
 Reanuda la sesión más reciente:
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 También están disponibles las opciones cortas `-r` y `-c`:
 
 ```bash
-iac-code -r <id-o-nombre-de-sesion>
-iac-code -c
+iac-code tui -r <id-o-nombre-de-sesion>
+iac-code tui -c
 ```
 
 ### Sesiones de otros proyectos
@@ -68,7 +70,7 @@ iac-code -c
 Cuando una sesión pertenece a otro directorio de proyecto, IaC Code no cambia el directorio de trabajo en caliente. En su lugar, imprime el comando para reanudarla en el contexto correcto:
 
 ```text
-cd /path/to/other/project && iac-code --resume <session-id>
+cd /path/to/other/project && iac-code tui --resume <session-id>
 ```
 
 El comando también se copia al portapapeles cuando es posible.

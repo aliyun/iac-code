@@ -377,7 +377,7 @@ def test_mcp_manager_dialog_failed_list_shows_debug_hint_like_claude_panel(monke
 
     output = _render_text(dialog.render())
 
-    assert "Run iac-code --debug to see error logs" in output
+    assert "Run iac-code tui --debug to see error logs" in output
 
 
 def test_mcp_manager_dialog_failed_list_shows_debug_enabled_hint_like_claude_panel(monkeypatch) -> None:
@@ -407,7 +407,7 @@ def test_mcp_manager_dialog_failed_list_shows_debug_enabled_hint_like_claude_pan
 
     assert "Debug logging is enabled. Log file:" in output
     assert "iac-code.log" in output
-    assert "Run iac-code --debug to see error logs" not in output
+    assert "Run iac-code tui --debug to see error logs" not in output
 
 
 def test_mcp_manager_dialog_refresh_key_reloads_metadata() -> None:

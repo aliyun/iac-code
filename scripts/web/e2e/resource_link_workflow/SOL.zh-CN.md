@@ -104,11 +104,11 @@ context.dispatch_state 是本次程序直接提供的 revision/paused/review_onl
 
 resolve.arguments.dimensions 必须包含 ROS/TF/CREATE/QUERY 四个完整对象：从 context.resource.dimensions 复制，每个对象单独加入 support 与 official_evidence（state 相对路径，如 inputs/R0001/official.json）；保留 contracts 中每项 id/source_type/historical.iframe/historical.open 和 creation_verified。TF 必须保留 execution=ros_managed_terraform。official_evidence 不能仅放在 arguments 顶层。search_code 参数叫 pattern，不是 query；read_code 仅 path，返回有界文件全文，不接受分页参数。
 
-复用有效原始云响应，不重复全云扫描。先用 register_query（query 参数包含 id/product/action/parameters/official_evidence）从资源专属 query_candidates 登记有界只读调用，再 cloud_read(id)；程序固定 --profile test-guima，记录范围和失败盲区。来源不正确就修输入，不把空计划当无样本。新类型若尚无已审 API 候选，先补产品映射和离线测试、生成新版目录，不使用任意 API 兜底。
+复用有效原始云响应，不重复全云扫描。先用 register_query（query 参数包含 id/product/action/parameters/official_evidence）从资源专属 query_candidates 登记有界只读调用，再 cloud_read(id)；程序固定 --profile resource-link-test，记录范围和失败盲区。来源不正确就修输入，不把空计划当无样本。新类型若尚无已审 API 候选，先补产品映射和离线测试、生成新版目录，不使用任意 API 兜底。
 
 产品映射修复后，冻结任务的旧 query_candidates 为空时，context 可从当前生产目录中自身 QUERY 类型的精确只读响应契约投影候选，并提供 query_candidate_refresh 的目录路径/SHA。旧非空候选不扩展，原冻结计划、场景、历史和额度不改。候选不是执行授权；仍核对官方参数/地域并复用已有有效原始响应，不因此重新扫描、执行写 API 或记 PASS。
 
-用 write 写新 inputs 文件（原始证据不覆盖）；read 读取输入。approve 的 packet 必须包含 task_id、test-guima、ros_managed_terraform、精确缺失维度 requests、每个 scene 的 account/region/source SHA/selector、inputs SHA、budget_cents、UI selector；创建另有清理 recipe 与 cleanup_requests。每条自然语言请求不能含已知 ID/类型字面量/URL。创建引用 ID 未知时 selector 可用 {identifier}，程序从当前会话精确原始 references 唯一绑定，不允许猜测。
+用 write 写新 inputs 文件（原始证据不覆盖）；read 读取输入。approve 的 packet 必须包含 task_id、resource-link-test、ros_managed_terraform、精确缺失维度 requests、每个 scene 的 account/region/source SHA/selector、inputs SHA、budget_cents、UI selector；创建另有清理 recipe 与 cleanup_requests。每条自然语言请求不能含已知 ID/类型字面量/URL。创建引用 ID 未知时 selector 可用 {identifier}，程序从当前会话精确原始 references 唯一绑定，不允许猜测。
 
 packet.execution_grants 按缺失维度分组，每条含 id/kind/quota/call；call 是精确 product/action/region_id/可选 version/params。每组先有 identity（STS GetCallerIdentity），read 使用官方读操作且有界次数，create 的 quota=1，delete 的 quota=1、parent 指向自己的 create、response_path 指向原响应 ID、target_param 对应删除参数，批准 call.params 中此参数填 "$created_id"（不是已知 ID）。完整模板必须内联、预审；TemplateURL、host/签名重载不批准。API 元数据判读写与 grant.kind 不一致也会拒绝。
 

@@ -55,18 +55,18 @@ pip install iac-code
 
 ## Verwendung
 
-Bei der ersten Nutzung konfigurieren Sie den LLM-Anbieter und den IaC-Cloud-Dienst, indem Sie `/auth` im interaktiven Modus eingeben.
+Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
 
-### Interaktiver Modus
-
-Direkt ausführen, um die interaktive REPL zu starten:
+### Web-App (Standard)
 
 ```bash
 iac-code
 ```
 
+Standardmäßig öffnet sie `http://127.0.0.1:8766` in Ihrem Browser (nur Loopback). Weitere Details finden Sie im [Web-App-Leitfaden](https://aliyun.github.io/iac-code/de/docs/web-app).
+
 <p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web-App" width="100%">
 </p>
 
 ### Nicht-interaktiver Modus
@@ -82,21 +82,6 @@ Das Lesen von stdin wird ebenfalls unterstützt:
 ```bash
 echo "Erstelle einen OSS-Bucket" | iac-code --prompt -
 ```
-
-### Web-App
-
-Sie bevorzugen eine grafische Oberfläche? Starten Sie die lokale Web-App, die dieselbe Engine wie die CLI ausführt und dieselben Sitzungen teilt. Die Web-App benötigt das `http`-Extra, installieren Sie es daher zuerst:
-
-```bash
-pip install 'iac-code[http]'
-iac-code web
-```
-
-Standardmäßig öffnet sie `http://127.0.0.1:8766` in Ihrem Browser (nur Loopback). Weitere Details finden Sie im [Web-App-Leitfaden](https://aliyun.github.io/iac-code/de/web-app).
-
-<p align="center">
-  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web-App" width="100%">
-</p>
 
 ### Agent Skill
 

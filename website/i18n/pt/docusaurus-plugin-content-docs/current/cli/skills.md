@@ -79,6 +79,8 @@ paths:
 
 ## Gerenciar habilidades
 
+Em Web e Desktop, abra **Configurações → Plugins → Habilidades** para pesquisar skills e ativar ou desativar os do usuário e do projeto.
+
 Execute `/skills` no REPL interativo para abrir o seletor de gerenciamento de habilidades. O seletor lista as habilidades integradas, de usuário e de projeto descobertas, com origem, tamanho e estado de habilitação. Você pode pesquisar por nome ou descrição, ordenar por nome/origem/tamanho e ativar ou desativar habilidades de usuário ou de projeto.
 
 As habilidades desabilitadas são salvas em `settings.yml` em `disabled_skills`. As habilidades integradas ficam sempre habilitadas e não são gravadas na lista de desabilitadas.

@@ -577,8 +577,8 @@ class TestCLIFlags:
             result = runner_cli.invoke(app, ["-p", "hello"])
 
         assert result.exit_code == 1
-        assert "Pipeline mode requires the interactive REPL" in result.output
-        assert "--prompt" in result.output
+        assert "Single-prompt headless mode does not support pipelines" in result.output
+        assert "iac-code web" in result.output
         assert "IAC_CODE_MODE=normal" in result.output
         mock_runner.assert_not_called()
 
@@ -886,7 +886,7 @@ class TestCLIFlags:
 
         monkeypatch.setattr("iac_code.cli.main.os.open", fail_open)
 
-        result = runner_cli.invoke(app, [], input="/mcp\n")
+        result = runner_cli.invoke(app, ["tui"], input="/mcp\n")
 
         assert result.exit_code == 1
         assert isinstance(result.exception, SystemExit)
@@ -899,7 +899,7 @@ class TestCLIFlags:
         from iac_code.cli.main import app
 
         monkeypatch.setenv("IAC_CODE_PROVIDER", "NotAProvider")
-        result = runner_cli.invoke(app, [])
+        result = runner_cli.invoke(app, ["tui"])
         assert result.exit_code != 0
         assert "Invalid IAC_CODE_PROVIDER" in result.output
 

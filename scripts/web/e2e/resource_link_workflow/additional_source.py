@@ -374,7 +374,7 @@ def _validate_initial_query_approval(root: Path, old: dict[str, Any], scope: str
         requires_execution_review(old) or old.get("budget_cents") != 0
         or set(old.get("requests", {})) != {"QUERY"}
         or set(old.get("execution_grants", {})) != {"QUERY"}
-        or old.get("profile") != "test-guima"
+        or old.get("profile") != "resource-link-test"
     ):
         raise WorkflowError("missing authorization is only valid for an original initial read-only QUERY")
     validate_execution(old, {"QUERY"})
@@ -490,7 +490,7 @@ def _reviewed_sae_application_calls(
         or review.get("sample_selection_approved") != selection
         or len(original) != 2 or len(reads) != 1 or len(identities) != 1
         or any(type(entry.get("quota")) is not int or entry["quota"] != 1 for entry in original)
-        or packet.get("budget_cents") != 0 or packet.get("profile") != "test-guima"
+        or packet.get("budget_cents") != 0 or packet.get("profile") != "resource-link-test"
     ):
         raise WorkflowError("SAE existing sample requires its exact independent one-read OPS review")
     read, identity = reads[0], identities[0]
@@ -840,7 +840,7 @@ def _validate_external_group_cleanup(root: Path, packet: dict[str, Any], request
         expected_intent = {k: c[k] for k in ("product", "action", "version", "endpoint", "params", "started",
                                             "profile", "max_attempts")}
         body = raw.get("body", {})
-        if (intent != expected_intent or c["profile"] != "test-guima" or c["max_attempts"] != 1
+        if (intent != expected_intent or c["profile"] != "resource-link-test" or c["max_attempts"] != 1
                 or type(raw.get("statusCode")) is not int or raw["statusCode"] != 200
                 or not body.get("RequestId") or raw.get("headers", {}).get("x-acs-request-id") != body["RequestId"]
                 or c["endpoint"] != c["product"] + ".aliyuncs.com"
@@ -876,7 +876,7 @@ def _validate_external_group_cleanup(root: Path, packet: dict[str, Any], request
     if (absence.get("task_id") != task or absence.get("resource") != resource or absence.get("absent") is not True
             or absence.get("failed") is not False or absence.get("original_creation") != proof["original_creation"]
             or post.get("task_id") != task or post.get("original_scope") != scope or post.get("account") != account
-            or post.get("cloud_writes") != 0 or post.get("profile") != "test-guima"
+            or post.get("cloud_writes") != 0 or post.get("profile") != "resource-link-test"
             or post.get("original_delete_evidence") != proof["delete_result"]["path"]
             or post.get("original_delete_sha256") != proof["delete_result"]["sha256"]
             or pending.get("source_evidence") != absence["source_evidence"]

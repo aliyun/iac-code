@@ -55,18 +55,18 @@ pip install iac-code
 
 ## 使い方
 
-初回使用時は、インタラクティブモードで `/auth` を入力して LLM プロバイダーと IaC クラウドサービスを設定してください。
+ターミナルで `iac-code` を実行すると、ローカル Web アプリが起動し、ブラウザが開きます。初回は設定画面で LLM プロバイダーと Alibaba Cloud の認証情報を設定してください。
 
-### インタラクティブモード
-
-直接実行してインタラクティブ REPL に入ります：
+### Web アプリ（既定）
 
 ```bash
 iac-code
 ```
 
+デフォルトではブラウザで `http://127.0.0.1:8766` を開きます（ループバックのみ）。詳しくは [Web アプリガイド](https://aliyun.github.io/iac-code/ja/docs/web-app)をご覧ください。
+
 <p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web アプリ" width="100%">
 </p>
 
 ### ノンインタラクティブモード
@@ -82,21 +82,6 @@ stdin からの読み取りもサポートされています：
 ```bash
 echo "OSS バケットを作成" | iac-code --prompt -
 ```
-
-### Web アプリ
-
-グラフィカルな画面がお好みですか？ローカルの Web アプリを起動できます。CLI と同じエンジンで動作し、同じセッションを共有します。Web アプリには `http` エクストラが必要なので、先にインストールしてください：
-
-```bash
-pip install 'iac-code[http]'
-iac-code web
-```
-
-デフォルトではブラウザで `http://127.0.0.1:8766` を開きます（ループバックのみ）。詳しくは [Web アプリガイド](https://aliyun.github.io/iac-code/ja/web-app)をご覧ください。
-
-<p align="center">
-  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web アプリ" width="100%">
-</p>
 
 ### Agent Skill
 

@@ -38,6 +38,7 @@ from iac_code import __version__
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
 from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.session_layout import (
     UnsupportedSessionLayoutError,
     is_supported_session_dir_for_id,
@@ -892,6 +893,7 @@ class SessionStorage:
     # Read
     # ------------------------------------------------------------------
 
+    @timed_phase("session_load")
     def load(self, cwd: str, session_id: str) -> list[Message]:
         """Return the conversation messages, skipping lite-meta rows."""
         path = self._session_path(cwd, session_id)

@@ -222,7 +222,7 @@ def test_sae_own_route_registration_from_raw_not_shared_query_pass(runner, tmp_p
     (tmp_path / "raw.json").write_text(json.dumps(body), encoding="utf-8")
     report = {
         "purpose": "bounded_cloud_source_preparation_only",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "observedAt": "2026-10-04T00:00:00Z",
         "regionsCovered": ["cn-hangzhou"],
         "results": [
@@ -232,7 +232,7 @@ def test_sae_own_route_registration_from_raw_not_shared_query_pass(runner, tmp_p
                     {
                         "product": "sae",
                         "action": action,
-                        "profile": "test-guima",
+                        "profile": "resource-link-test",
                         "region": "cn-hangzhou",
                         "params": {},
                         "status": "ok",

@@ -1605,7 +1605,7 @@ class InlineREPL:
             return update
 
         if result.returncode == 0:
-            self.console.print("[green]{}[/green]".format(_("Update completed. Restart iac-code to continue.")))
+            self.console.print("[green]{}[/green]".format(_("Update completed. Restart iac-code tui to continue.")))
             from iac_code.services.telemetry import graceful_shutdown
 
             graceful_shutdown()
@@ -6043,7 +6043,7 @@ class InlineREPL:
         resume_arg = self._session_name or self._session_id
         self.console.print("[dim]{}[/dim]".format(_("Goodbye!")))
         self.console.print(Text(_("Resume this session with:"), style="dim"))
-        self.console.print(Text("iac-code --resume {}".format(resume_arg), style="dim"))
+        self.console.print(Text("iac-code tui --resume {}".format(resume_arg), style="dim"))
         if self._session_name:
             self.console.print(Text("{}: {}".format(_("Session ID"), self._session_id), style="dim"))
 

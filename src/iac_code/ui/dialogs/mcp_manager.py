@@ -1737,7 +1737,7 @@ def _failed_server_debug_hint() -> str:
         if path is not None:
             return _("※ Debug logging is enabled. Log file: {path}").format(path=path)
         return _("※ Debug logging is enabled; check the log file for MCP error details")
-    return _("※ Run iac-code --debug to see error logs")
+    return _("※ Run iac-code tui --debug to see error logs")
 
 
 def _auth_icon(authenticated: bool) -> str:

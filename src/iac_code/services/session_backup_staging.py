@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from loguru import logger
 
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.session_backup import (
     BACKUP_ENV_VAR,
     BACKUP_STATE_FILENAME,
@@ -457,6 +458,7 @@ class StagedSessionBackupService(SessionBackupService):
                 )
             time.sleep(max(poll_interval, 0.01))
 
+    @timed_phase("backup_restore", restore_result=True)
     def reconcile_session(
         self,
         cwd: str,

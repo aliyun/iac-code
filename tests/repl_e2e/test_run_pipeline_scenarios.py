@@ -31,7 +31,7 @@ def test_pty_spawn_supplies_interactive_terminal_without_changing_parent_env(mon
     spawned = []
     monkeypatch.setattr(runner, 'os', SimpleNamespace(name='posix'))
     monkeypatch.setattr(runner, 'pexpect', SimpleNamespace(
-        spawn=lambda *_args, **kwargs: spawned.append(kwargs) or SimpleNamespace(),
+        spawn=lambda *args, **kwargs: spawned.append({"args": args, **kwargs}) or SimpleNamespace(),
     ))
     environment = {'TEST_MARKER': 'preserved'}
     if term is not None:
@@ -45,6 +45,7 @@ def test_pty_spawn_supplies_interactive_terminal_without_changing_parent_env(mon
 
     assert all(call['env']['TERM'] == expected for call in spawned)
     assert all(call['env']['TEST_MARKER'] == 'preserved' for call in spawned)
+    assert all(call['args'][1][:3] == ['-m', 'iac_code.cli.main', 'tui'] for call in spawned)
     assert environment == original
 
 
@@ -341,7 +342,7 @@ def _install_flow_fake_pty(
 
         def spawn(self, *, extra_args=None):
             actions.append(("spawn", " ".join(extra_args or [])))
-            command = ["uv", "run", "python", "-m", "iac_code.cli.main"]
+            command = ["uv", "run", "python", "-m", "iac_code.cli.main", "tui"]
             if extra_args:
                 command.extend(extra_args)
             self.events.append({"type": "spawn", "command": command, "transcript_offset": 0})

@@ -3951,8 +3951,11 @@ def _route_cloud_source_entry(report_path: Path, source_type: str, region_id: st
     """
     report_path = report_path.resolve()
     report = _load_json_object(report_path, label="route cloud source report")
-    if report.get("purpose") != "bounded_cloud_source_preparation_only" or report.get("profile") != "test-guima":
-        raise MatrixError("route cloud source requires a bounded test-guima raw inventory")
+    if (
+        report.get("purpose") != "bounded_cloud_source_preparation_only"
+        or report.get("profile") != "resource-link-test"
+    ):
+        raise MatrixError("route cloud source requires a bounded resource-link-test raw inventory")
     if not isinstance(report.get("observedAt"), str):
         raise MatrixError("route cloud source requires an observation timestamp")
     _parse_datetime(report["observedAt"], label="route cloud source observedAt")
@@ -3980,7 +3983,7 @@ def _route_cloud_source_entry(report_path: Path, source_type: str, region_id: st
             raise MatrixError("route cloud source has no unique successful API event")
         event = events[0]
         if (event.get("status"), event.get("exitCode"), event.get("profile"), event.get("region")) != (
-            "ok", 0, "test-guima", region_id
+            "ok", 0, "resource-link-test", region_id
         ):
             raise MatrixError("route cloud source API event was not successful")
         matching = [item for item in direct_contracts if (

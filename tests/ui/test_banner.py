@@ -30,6 +30,16 @@ def render_to_str(panel: Any, width: int = 80) -> str:
     return console.file.getvalue()  # type: ignore[attr-defined]
 
 
+def test_welcome_banner_displays_tui_maintenance_notice(tmp_path):
+    from iac_code.ui.banner import render_welcome_banner
+
+    output = render_to_str(render_welcome_banner("model", str(tmp_path)), width=180)
+
+    assert "TUI is no longer updated or maintained." in output
+    assert "iac-code web" in output
+    assert "Desktop app" in output
+
+
 def test_print_welcome_banner_keeps_braille_for_unsupported_terminal(tmp_path):
     from iac_code.ui.banner import BRAILLE_LOGO_LINES, print_welcome_banner
 

@@ -50,13 +50,12 @@ INSTALL_REQUIRES = [
     "keyring>=25.0",
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-bash>=0.25,<0.26",
+    "a2a-sdk[http-server,signing]==1.1.0",
+    "starlette>=0.39.0",
+    "uvicorn[standard]>=0.30.0",
 ]
 EXTRAS_REQUIRE = {
-    "http": [
-        "a2a-sdk[http-server,signing]>=1.0.2,<2",
-        "starlette>=0.39.0",
-        "uvicorn[standard]>=0.30.0",
-    ],
+    "http": [],  # Compatibility alias; HTTP support is installed by default.
     "a2a": [
         "a2a-sdk[http-server,signing]>=1.0.2,<2",
         "cryptography>=42.0",

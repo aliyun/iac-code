@@ -25,19 +25,13 @@ Verwenden Sie `selling_solution_first`, wenn Sie:
 
 ## Pipeline starten
 
-Im interaktiven Terminal:
+Starten Sie die Web-App wie gewohnt (oder öffnen Sie die Desktop-App):
 
 ```bash
-IAC_CODE_MODE=pipeline \
-IAC_CODE_PIPELINE_NAME=selling_solution_first \
 iac-code
 ```
 
-Wählen Sie in der lokalen Web-App beim Erstellen einer Unterhaltung den Pipeline-Modus und starten Sie den Server mit dem Pipeline-Namen:
-
-```bash
-IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
-```
+Wählen Sie beim Erstellen einer Unterhaltung in Web oder Desktop **Pipeline-Modus → Vertriebspipeline (Lösung zuerst)** (`selling_solution_first`). Die Auswahl erfolgt in der Oberfläche, ohne Umgebungsvariablen oder einen Neustart des Servers.
 
 Über A2A kann der Aufrufer Modus und Pipeline pro Nachricht wählen, ohne die Servervoreinstellung zu ändern:
 

@@ -43,6 +43,7 @@ from iac_code.a2a.types import (
     validate_protocol_id,
 )
 from iac_code.i18n import _
+from iac_code.services.first_token_timing import bind_timing, mark_timing, timed_lock, timed_phase
 from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_parent
 from iac_code.services.session_storage import SessionStorage
@@ -706,6 +707,7 @@ class A2ATaskStore(TaskStore):
             self._mirror_task(record)
             return record
 
+    @timed_phase("runtime_acquire")
     async def get_or_create_context(
         self,
         *,
@@ -735,6 +737,8 @@ class A2ATaskStore(TaskStore):
                         self._context_runtime_tasks[context_id] = create_task
                 else:
                     record.touch()
+                    bind_timing(iac_code_session_id=record.session_id)
+                    mark_timing("runtime_reused", once=True, cache_hit=True)
                     self._mirror_context(record)
                     self._pending_context_telemetry_channels.pop(context_id, None)
                     return record
@@ -1090,6 +1094,7 @@ class A2ATaskStore(TaskStore):
                 )
         return token
 
+    @timed_phase("session_admission")
     async def begin_context_execution_after_reconciliation(
         self,
         context_id: str,
@@ -1117,7 +1122,7 @@ class A2ATaskStore(TaskStore):
                     owner_task=owner_task,
                     deadline=deadline,
                 )
-                async with self.reconciliation_lock(context_id):
+                async with timed_lock(self.reconciliation_lock(context_id)):
                     async with self._mutation_lock:
                         if self._context_reconciliation_blockers_locked(context_id, owner_task=owner_task):
                             continue
@@ -1235,6 +1240,7 @@ class A2ATaskStore(TaskStore):
         )
         return blockers
 
+    @timed_phase("context_execution_wait")
     async def _wait_for_context_reconciliation_safe(
         self,
         context_id: str,

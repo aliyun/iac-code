@@ -1958,7 +1958,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-327" in html
-    assert "/static/js/app.js?v=web-repl-ui-390" in html
+    assert "/static/js/app.js?v=web-repl-ui-391" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1994,11 +1994,11 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-390" in index_html
+    assert "web-repl-ui-391" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-325" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v69" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v70" in app_source
     # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
     assert "./components/workspace.js?v=cloud-creds-v57" not in app_source
     assert "workspace-cloud-vendors" in workspace_source
@@ -9460,7 +9460,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v69";'
+    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v70";'
     assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
@@ -10611,11 +10611,34 @@ def test_workspace_cloud_save_uses_secret_inputs_and_redacted_summary(tmp_path) 
             required('[data-workspace-action="workspace-cloud-save"]', content).click();
             await new Promise((resolve) => setTimeout(resolve, 0));
 
-            console.log(JSON.stringify({
-              saves,
+            const savedState = {
               secretType: secret.attributes.type,
               secretValue: secret.value,
               renderedText: textOf(content),
+            };
+            // STS token is only mounted in STS mode; check its hints after switching.
+            const mode = required('[data-workspace-action="workspace-cloud-mode"]', content);
+            mode.value = "StsToken";
+            for (const handler of mode.listeners.change || []) {
+              handler({ type: "change", target: mode });
+            }
+
+            console.log(JSON.stringify({
+              saves,
+              ...savedState,
+              credentialInputs: [
+                "workspace-model-api-key",
+                "workspace-cloud-access-key-secret",
+                "workspace-cloud-sts-token",
+              ].map((marker) => {
+                const input = required(`[data-workspace-action="${marker}"]`, content);
+                return {
+                  type: input.attributes.type,
+                  autocomplete: input.attributes.autocomplete,
+                  autocapitalize: input.attributes.autocapitalize,
+                  spellcheck: input.attributes.spellcheck,
+                };
+              }),
             }));
             """
         ),
@@ -10643,6 +10666,11 @@ def test_workspace_cloud_save_uses_secret_inputs_and_redacted_summary(tmp_path) 
     # 但绝不进入可见的摘要/渲染文本。
     assert output["secretType"] == "password"
     assert output["secretValue"] == "leaked-cloud-secret"
+    # All API credentials opt out of login-password detection while retaining
+    # native masking. Browser-owned password manager UI cannot be asserted here.
+    assert output["credentialInputs"] == [
+        {"type": "password", "autocomplete": "one-time-code", "autocapitalize": "off", "spellcheck": "false"}
+    ] * 3
     assert "leaked-cloud-secret" not in str(output["renderedText"])
     assert "leaked-sts-token" not in str(output["renderedText"])
     assert "fake-cloud-secret" not in str(output["renderedText"])
@@ -11988,7 +12016,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-390" in html
+    assert "web-repl-ui-391" in html
     assert "web-repl-ui-343" not in html
 
 

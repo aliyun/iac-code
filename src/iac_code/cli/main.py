@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from click.core import Group, ParameterSource
 from typer._completion_classes import completion_init
 from typer.completion import install_callback, show_callback
 
@@ -108,6 +109,7 @@ app.add_typer(_mcp_app, name="mcp")
 def web(
     host: str = typer.Option("127.0.0.1", help=_("HTTP server host")),
     port: int = typer.Option(8766, help=_("HTTP server port")),
+    debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
     access_token_file: str | None = typer.Option(
         None,
         "--access-token-file",
@@ -126,7 +128,7 @@ def web(
     from iac_code.web.settings import developer_settings
 
     session_id = "web-server-{}".format(uuid.uuid4())
-    setup_logging(session_id=session_id, debug=bool(developer_settings().get("debug")))
+    setup_logging(session_id=session_id, debug=debug or bool(developer_settings().get("debug")))
     bootstrap_telemetry(session_id=session_id)
     try:
         run_web_server(
@@ -218,6 +220,30 @@ def main(
             print(f"iac-code v{__version__}")
         raise typer.Exit()
     if ctx.invoked_subcommand is not None:
+        if ctx.invoked_subcommand == "tui" and any(
+            ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE for name in ctx.params
+        ):
+            raise typer.BadParameter(_("Place terminal options after the subcommand: iac-code tui [OPTIONS]."))
+        return
+
+    normalized_input_format = (input_format or "text").strip().lower()
+    if normalized_input_format not in {"text", "stream-json"}:
+        typer.echo(_("Invalid --input-format '{}'. Valid values: text, stream-json").format(input_format), err=True)
+        raise typer.Exit(1)
+
+    if not prompt and normalized_input_format != "stream-json":
+        if any(ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE for name in ctx.params):
+            raise typer.BadParameter(
+                _("Use iac-code tui [OPTIONS] for terminal options, or add --prompt for headless execution.")
+            )
+        if not sys.stdin.isatty():
+            raise typer.BadParameter(
+                _("Use iac-code web --no-open to start Web without a terminal, or --prompt - to read stdin.")
+            )
+        assert isinstance(ctx.command, Group)
+        web_command = ctx.command.get_command(ctx, "web")
+        assert web_command is not None
+        ctx.invoke(web_command)
         return
 
     # Enable ANSI/VT escape sequences on Windows consoles.
@@ -230,11 +256,6 @@ def main(
 
     if resume and continue_session:
         typer.echo(_("Error: --resume and --continue cannot be used together."), err=True)
-        raise typer.Exit(1)
-
-    normalized_input_format = (input_format or "text").strip().lower()
-    if normalized_input_format not in {"text", "stream-json"}:
-        typer.echo(_("Invalid --input-format '{}'. Valid values: text, stream-json").format(input_format), err=True)
         raise typer.Exit(1)
 
     if normalized_input_format == "stream-json":
@@ -301,7 +322,10 @@ def main(
 
         if get_run_mode() == RunMode.PIPELINE:
             typer.echo(
-                _("Pipeline mode requires the interactive REPL. Remove --prompt or set IAC_CODE_MODE=normal."),
+                _(
+                    "Single-prompt headless mode does not support pipelines. "
+                    "Use iac-code web or set IAC_CODE_MODE=normal."
+                ),
                 err=True,
             )
             raise typer.Exit(1)
@@ -403,109 +427,141 @@ def main(
             raise SystemExit(1)
         raise SystemExit(exit_code)
 
-    else:
-        # Interactive REPL mode
-        from iac_code.ui.repl import InlineREPL
 
-        # Check if stdin has piped input (not a TTY)
-        initial_prompt = None
-        if not sys.stdin.isatty():
-            piped = sys.stdin.read().strip()
-            if piped:
-                initial_prompt = piped
-            # Replace fd 0 itself with the real console so ALL code (including
-            # low-level termios/os.read on fd 0) sees a real terminal.
-            try:
-                if sys.platform == "win32":
-                    tty_fd = os.open("CONIN$", os.O_RDWR)
-                else:
-                    tty_fd = os.open("/dev/tty", os.O_RDWR)
-            except OSError:
-                typer.echo(_piped_repl_requires_tty_message(piped), err=True)
-                raise typer.Exit(1)
-            os.dup2(tty_fd, 0)
-            os.close(tty_fd)
-            sys.stdin = os.fdopen(0, "r", closefd=False)
+@app.command(help=_("Run the unmaintained terminal UI. Prefer the Web or Desktop app."))
+def tui(
+    model: str = typer.Option("", "--model", "-m", help=_("LLM model to use")),
+    debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
+    resume: str = typer.Option("", "--resume", "-r", help=_("Resume a session by ID or name")),
+    continue_session: bool = typer.Option(False, "--continue", "-c", help=_("Resume the most recent session")),
+    allowed_tools: str = typer.Option(
+        "",
+        "--allowed-tools",
+        help=_("Comma-separated tool permission patterns to allow, e.g. 'bash(git *),write_file'"),
+    ),
+    disallowed_tools: str = typer.Option(
+        "", "--disallowed-tools", help=_("Comma-separated tool permission patterns to deny")
+    ),
+    permission_mode: str = typer.Option(
+        "", "--permission-mode", help=_("Permission mode: default, accept_edits, bypass_permissions, dont_ask")
+    ),
+) -> None:
+    """Run the frozen terminal interface with its existing behavior."""
+    from iac_code.utils.console import enable_virtual_terminal
 
-        resume_arg: str | bool | None = True if continue_session else (resume or None)
-
-        cli_allowed = [s.strip() for s in allowed_tools.split(",") if s.strip()] if allowed_tools else None
-        cli_disallowed = [s.strip() for s in disallowed_tools.split(",") if s.strip()] if disallowed_tools else None
-        cli_perm_mode = permission_mode or None
-
+    enable_virtual_terminal()
+    _require_windows_git_bash()
+    if resume and continue_session:
+        typer.echo(_("Error: --resume and --continue cannot be used together."), err=True)
+        raise typer.Exit(1)
+    if not model:
         try:
-            repl = InlineREPL(
-                model=model,
-                resume_session_id=resume_arg,
-                cli_allowed_tools=cli_allowed,
-                cli_disallowed_tools=cli_disallowed,
-                cli_permission_mode=cli_perm_mode,
-            )
-        except (ValueError, _QwenPawError) as exc:
+            model = load_saved_model() or DEFAULT_MODEL
+        except ValueError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(1)
 
-        setup_logging(session_id=repl.session_id, debug=debug)
-        repl.log_session_started()
+    from iac_code.ui.repl import InlineREPL
 
-        from iac_code.services.telemetry import add_metric, bootstrap_telemetry, graceful_shutdown, log_event
-        from iac_code.services.telemetry.names import Events, Metrics
-
-        bootstrap_telemetry(session_id=repl.session_id)
-        log_event(
-            Events.SESSION_STARTED,
-            {
-                "headless": False,
-                "output_format": "text",
-            },
-        )
-        add_metric(Metrics.SESSION_COUNT, 1, {})
-
-        def _telemetry_excepthook(exc_type, exc_value, traceback_obj):
-            try:
-                log_event(
-                    Events.EXCEPTION_UNCAUGHT,
-                    {
-                        "error_name": exc_type.__name__,
-                        "location": "cli",
-                    },
-                )
-                graceful_shutdown()
-            finally:
-                sys.__excepthook__(exc_type, exc_value, traceback_obj)
-
-        sys.excepthook = _telemetry_excepthook
-
-        def _async_excepthook(loop, context):
-            exc = context.get("exception")
-            try:
-                log_event(
-                    Events.EXCEPTION_UNHANDLED,
-                    {
-                        "error_name": type(exc).__name__ if exc else "Unknown",
-                        "location": "asyncio",
-                    },
-                )
-            except Exception:
-                pass
-            loop.default_exception_handler(context)
-
-        async def _run_with_handler(coro):
-            loop = asyncio.get_running_loop()
-            loop.set_exception_handler(_async_excepthook)
-            return await coro
-
-        import signal as _signal
-
-        def _on_sigterm(signum, frame):
-            sys.exit(0)
-
+    # Check if stdin has piped input (not a TTY)
+    initial_prompt = None
+    if not sys.stdin.isatty():
+        piped = sys.stdin.read().strip()
+        if piped:
+            initial_prompt = piped
+        # Replace fd 0 itself with the real console so ALL code (including
+        # low-level termios/os.read on fd 0) sees a real terminal.
         try:
-            _signal.signal(_signal.SIGTERM, _on_sigterm)
+            if sys.platform == "win32":
+                tty_fd = os.open("CONIN$", os.O_RDWR)
+            else:
+                tty_fd = os.open("/dev/tty", os.O_RDWR)
         except OSError:
-            pass
+            typer.echo(_piped_repl_requires_tty_message(piped), err=True)
+            raise typer.Exit(1)
+        os.dup2(tty_fd, 0)
+        os.close(tty_fd)
+        sys.stdin = os.fdopen(0, "r", closefd=False)
 
-        asyncio.run(_run_with_handler(repl.run(initial_prompt=initial_prompt)))
+    resume_arg: str | bool | None = True if continue_session else (resume or None)
+
+    cli_allowed = [s.strip() for s in allowed_tools.split(",") if s.strip()] if allowed_tools else None
+    cli_disallowed = [s.strip() for s in disallowed_tools.split(",") if s.strip()] if disallowed_tools else None
+    cli_perm_mode = permission_mode or None
+
+    try:
+        repl = InlineREPL(
+            model=model,
+            resume_session_id=resume_arg,
+            cli_allowed_tools=cli_allowed,
+            cli_disallowed_tools=cli_disallowed,
+            cli_permission_mode=cli_perm_mode,
+        )
+    except (ValueError, _QwenPawError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1)
+
+    setup_logging(session_id=repl.session_id, debug=debug)
+    repl.log_session_started()
+
+    from iac_code.services.telemetry import add_metric, bootstrap_telemetry, graceful_shutdown, log_event
+    from iac_code.services.telemetry.names import Events, Metrics
+
+    bootstrap_telemetry(session_id=repl.session_id)
+    log_event(
+        Events.SESSION_STARTED,
+        {
+            "headless": False,
+            "output_format": "text",
+        },
+    )
+    add_metric(Metrics.SESSION_COUNT, 1, {})
+
+    def _telemetry_excepthook(exc_type, exc_value, traceback_obj):
+        try:
+            log_event(
+                Events.EXCEPTION_UNCAUGHT,
+                {
+                    "error_name": exc_type.__name__,
+                    "location": "cli",
+                },
+            )
+            graceful_shutdown()
+        finally:
+            sys.__excepthook__(exc_type, exc_value, traceback_obj)
+
+    sys.excepthook = _telemetry_excepthook
+
+    def _async_excepthook(loop, context):
+        exc = context.get("exception")
+        try:
+            log_event(
+                Events.EXCEPTION_UNHANDLED,
+                {
+                    "error_name": type(exc).__name__ if exc else "Unknown",
+                    "location": "asyncio",
+                },
+            )
+        except Exception:
+            pass
+        loop.default_exception_handler(context)
+
+    async def _run_with_handler(coro):
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(_async_excepthook)
+        return await coro
+
+    import signal as _signal
+
+    def _on_sigterm(signum, frame):
+        sys.exit(0)
+
+    try:
+        _signal.signal(_signal.SIGTERM, _on_sigterm)
+    except OSError:
+        pass
+
+    asyncio.run(_run_with_handler(repl.run(initial_prompt=initial_prompt)))
 
 
 @app.command(help=_("Run iac-code as an ACP server."))

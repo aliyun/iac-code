@@ -5,16 +5,10 @@ description: IaC Code の設定と最初のプロンプトの実行。
 
 # クイックスタート
 
-対話型 CLI を実行します：
+ターミナルで `iac-code` を実行すると、ローカル Web アプリが起動し、ブラウザが開きます。初回は設定画面で LLM プロバイダーと Alibaba Cloud の認証情報を設定してください。
 
 ```bash
 iac-code
-```
-
-初回使用時に、LLM プロバイダーと Alibaba Cloud の認証情報を設定します：
-
-```text
-/auth
 ```
 
 次にインフラを指示します：

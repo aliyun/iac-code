@@ -23,14 +23,9 @@ iac-code --help
 
 ## オプション機能
 
-対話型 CLI は基本パッケージだけで動作します。一部の実行モードは、`iac-code[<extra>]` の構文でインストールするオプションのエクストラに依存します：
+標準インストールには Web アプリと HTTP ランタイムの依存関係が含まれます。`[http]` エクストラは互換性のための別名として残りますが、個別のインストールは不要です。リポジトリから実行する場合は `uv sync` だけで準備できます。
 
-| エクストラ | 有効になる機能 | コマンド |
-|---|---|---|
-| `http` | ローカルの [Web アプリ](../web-app.md)（`iac-code web`） | `pip install 'iac-code[http]'` |
-| `a2a` | [A2A サーバー](../a2a/getting-started.md)（`iac-code a2a`） | `pip install 'iac-code[a2a]'` |
-
-エクストラを入れずに実行モードを起動すると、インストールすべきエクストラを示すメッセージが表示されて失敗します。リポジトリをチェックアウトして開発する場合は、代わりに `uv sync --extra <extra>` を使用してください。
+追加のトランスポートには引き続きオプションのエクストラを使用します。gRPC は `pip install 'iac-code[a2a-grpc]'`、Redis は `pip install 'iac-code[a2a-redis]'` でインストールできます。
 
 ## Windows の要件
 
