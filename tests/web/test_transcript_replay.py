@@ -272,6 +272,40 @@ def test_visible_transcript_groups_tool_calls_thinking_and_markdown_text(tmp_pat
     ]
 
 
+def test_visible_transcript_preserves_turn_id_for_messages_and_tool_segments(tmp_path) -> None:
+    from iac_code.web.session_manager import WebSessionManager
+
+    cwd = str(tmp_path / "project")
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=cwd, session_id="session-turn-id")
+    manager.storage.append(
+        cwd,
+        session.session_id,
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(id="tool-ecs", name="aliyun_api", input={"action": "DescribeInstances"}),
+                TextBlock(text="instance i-test"),
+            ],
+            metadata={"turnId": "turn-ecs", "messageId": "message-ecs"},
+        ),
+    )
+    manager.storage.append(
+        cwd,
+        session.session_id,
+        Message(
+            role="user",
+            content=[ToolResultBlock(tool_use_id="tool-ecs", content='{"Instances": []}')],
+            metadata={"turnId": "turn-ecs"},
+        ),
+    )
+
+    transcript = manager.load_visible_transcript(session.session_id, cwd=cwd)
+
+    assert [message["turnId"] for message in transcript["messages"]] == ["turn-ecs", "turn-ecs"]
+    assert transcript["tools"]["tool-ecs"]["turnId"] == "turn-ecs"
+
+
 def test_normal_web_reload_keeps_business_content_and_omits_internal_aliyun_metadata(tmp_path) -> None:
     from iac_code.web.session_manager import WebSessionManager
 

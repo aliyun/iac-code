@@ -10,6 +10,7 @@ from iac_code.types.permissions import PermissionResult
 from iac_code.types.stream_events import (
     MessageEndEvent,
     PermissionRequestEvent,
+    TextDeltaEvent,
     TombstoneEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -101,6 +102,7 @@ class TestCheckedInjection:
             async def stream(self, messages, system, tools=None):
                 self.calls += 1
                 self.messages_seen.append(messages)
+                yield TextDeltaEvent(text="answer")
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
         from iac_code.agent.agent_loop import AgentLoop
@@ -115,6 +117,7 @@ class TestCheckedInjection:
 
         stream = loop._run_streaming_inner("hello")
         try:
+            assert isinstance(await anext(stream), TextDeltaEvent)
             event = await anext(stream)
 
             assert isinstance(event, MessageEndEvent)
@@ -174,6 +177,7 @@ class TestCheckedInjection:
                 yield ToolUseStartEvent(tool_use_id="tool1", name="quick_tool")
                 yield ToolUseEndEvent(tool_use_id="tool1", name="quick_tool", input={})
                 yield TombstoneEvent(message_id="m1")
+                yield TextDeltaEvent(text="answer after retraction")
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
         from iac_code.agent.agent_loop import AgentLoop
@@ -195,6 +199,7 @@ class TestCheckedInjection:
             assert loop.try_inject_user_message("补充信息") is True
             assert isinstance(await anext(stream), TombstoneEvent)
             assert loop.can_accept_injected_user_message is True
+            assert isinstance(await anext(stream), TextDeltaEvent)
             assert isinstance(await anext(stream), MessageEndEvent)
             assert loop._pending_injections == deque(["补充信息"])
         finally:

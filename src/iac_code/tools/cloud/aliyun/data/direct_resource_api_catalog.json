@@ -1,0 +1,5437 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-05",
+  "sources": {
+    "resourceMeta": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855:86e18bb658baf1524b04d2b52585bfacb64f9b3fb970cedf7348602a5133cfc9",
+    "cleanupConsts": "93f1c8fe1df7d29398407271053370676dc8dbe0a5e0d2ac2833df1f366fcf16"
+  },
+  "resources": [
+    {
+      "resourceType": "ALIYUN::ACM::Configuration",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ACM::Namespace",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ACTIONTRAIL::Trail",
+      "identifierField": "Name",
+      "identifierKind": "name",
+      "scopeKind": "regional",
+      "product": "actiontrail",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "HomeRegion",
+        "Name",
+        "TrailArn"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::ACTIONTRAIL::TrailLogging",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ADB::DBCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ADBLake::DBCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ALB::Acl",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ALB::BackendServerAttachment",
+      "identifierField": "ServerGroupId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "alb",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ALB::HealthCheckTemplate",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ALB::Listener",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "LoadBalancerId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::ALB::LoadBalancer",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ALB::SecurityPolicy",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ALB::ServerGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::AMQP::Instance",
+      "identifierField": "InstanceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "amqp-open",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "InstanceId",
+        "InstanceName",
+        "InstanceType",
+        "Status"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::ARMS::AlertContact",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ARMS::AlertContactGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ARMS::RetcodeApp",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::Api",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::App",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::Group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::Signature",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::StageConfig",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::TrafficControl",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::TrafficControlBinding",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ApiGateway::VpcAccessConfig",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::AppFlow::Flow",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CAS::Certificate",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "CertificateId",
+        "InstanceId",
+        "OrderId",
+        "Upload"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::CDN::Domain",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CEN::CenBandwidthLimit",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CEN::CenBandwidthPackage",
+      "identifierField": "CenBandwidthPackageId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "cbn",
+      "aliases": [
+        "alicloud_cen_bandwidth_package"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CEN::CenBandwidthPackageAssociation",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CEN::CenInstance",
+      "identifierField": "CenId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "cbn",
+      "aliases": [
+        "alicloud_cen_instance"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CEN::CenInstanceAttachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CEN::RouteEntry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CEN::TransitRouter",
+      "identifierField": "TransitRouterId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "cbn",
+      "aliases": [
+        "alicloud_cen_transit_router"
+      ],
+      "parentFields": [
+        "CenId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::CEN::TransitRouterVpcAttachment",
+      "identifierField": "TransitRouterAttachmentId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "cbn",
+      "aliases": [
+        "alicloud_cen_transit_router_vpc_attachment"
+      ],
+      "parentFields": [
+        "CenId",
+        "TransitRouterId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::CLOUDFW::AddressBook",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::Contact",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::ContactGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::EventRule",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::EventRuleTargets",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::GroupMetricRule",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::MetricRuleTemplate",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::MonitorGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CMS::SiteMonitor",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CR::Namespace",
+      "identifierField": "NamespaceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "cr",
+      "aliases": [],
+      "parentFields": [
+        "InstanceId"
+      ],
+      "attributeFields": [
+        "InstanceId",
+        "NamespaceId",
+        "NamespaceName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::CR::Repository",
+      "identifierField": "RepoId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "cr",
+      "aliases": [],
+      "parentFields": [
+        "InstanceId",
+        "RepoNamespaceName"
+      ],
+      "attributeFields": [
+        "InstanceId",
+        "RepoId",
+        "RepoName",
+        "RepoNamespaceName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::CS::App",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CS::Cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CS::KubernetesCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CS::ManagedEdgeKubernetesCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CS::ManagedKubernetesCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::CS::ServerlessKubernetesCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ClickHouse::DBCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::DATAHUB::Project",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::DMS::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::DMS::User",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::DNS::Domain",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::DRDS::DrdsInstance ",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::DTS::MigrationJob",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::EBS::DiskReplicaGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::EBS::DiskReplicaPair",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECI::ContainerGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECI::ImageCache",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "ImageCacheId",
+        "ImageCacheName",
+        "ContainerGroupId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::ECS::AutoProvisioningGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::AutoSnapshotPolicy",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Command",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::CopyImage",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::CustomImage",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::DedicatedHost",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::DeploymentSet",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "ecs",
+      "aliases": [
+        "alicloud_ecs_deployment_set"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Disk",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::DiskAttachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::EIP",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::ForwardEntry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::HpcCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Image",
+      "identifierField": "ImageId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "ecs",
+      "aliases": [
+        "alicloud_image"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::ImageDetail",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::InstanceClone",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::InstanceGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::InstanceGroupClone",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Invocation",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::JoinSecurityGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::LaunchTemplate",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::NatGateway",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::NetworkInterface",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::NetworkInterfaceAttachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::NetworkInterfacePermission",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::PrefixList",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::PrepayInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Region",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Route",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::RunCommand",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::RunCommandOfLifespan",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::SNatEntry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::SSHKeyPair",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::SSHKeyPairAttachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::SecurityGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::SecurityGroupClone",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::SecurityGroupEgress",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::SecurityGroupIngress",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ECS::Snapshot",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::EDAS::Cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::EDAS::UserDefineRegion",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::EHPC::Cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::EMR::Cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::EMR::Cluster2",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ENS::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ESS::AlarmTask",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ESS::LifecycleHook",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ESS::ScalingConfiguration",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ESS::ScalingGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ESS::ScalingGroupEnable",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ESS::ScheduledTask",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ElasticSearch::Instance",
+      "identifierField": "instanceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "elasticsearch",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::FC3::Function",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FunctionName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::FC::CustomDomain",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::FC::Function",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FunctionName",
+        "ServiceName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::FC::FunctionInvoker",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::FC::Service",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "ServiceName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::FC::Trigger",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FunctionName",
+        "ServiceName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::FNF::Flow",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FlowName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::Flink::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::GA::Accelerator",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::GA::BandwidthPackage",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::GPDB::DBInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::GPDB::ElasticDBInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::GWS::Cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::GWS::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::HBR::RestoreJob",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::KAFKA::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::KAFKA::Topic",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::KMS::Alias",
+      "identifierField": "AliasName",
+      "identifierKind": "name",
+      "scopeKind": "regional",
+      "product": "kms",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "AliasArn",
+        "AliasName",
+        "KeyId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::KMS::Key",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::Lindorm::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MEMCACHE::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MNS::Queue",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MNS::Topic",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MONGODB::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MONGODB::PrepayInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MONGODB::ServerlessInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MONGODB::ShardingInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MSE::Cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "mse",
+      "aliases": [
+        "alicloud_mse_cluster"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MSE::Gateway",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::MaxCompute::Project",
+      "identifierField": "name",
+      "identifierKind": "name",
+      "scopeKind": "regional",
+      "product": "maxcompute",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "name",
+        "regionId",
+        "comment",
+        "status",
+        "type"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NAS::AccessGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "nas",
+      "aliases": [
+        "alicloud_nas_access_group"
+      ],
+      "parentFields": [
+        "FileSystemType"
+      ],
+      "attributeFields": [
+        "AccessGroupName",
+        "AccessGroupType",
+        "FileSystemType"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NAS::AccessRule",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "nas",
+      "aliases": [
+        "alicloud_nas_access_rule"
+      ],
+      "parentFields": [
+        "AccessGroupName",
+        "FileSystemType"
+      ],
+      "attributeFields": [
+        "AccessGroupName",
+        "AccessGroupType",
+        "AccessRuleId",
+        "FileSystemType",
+        "SourceCidrIp",
+        "Priority",
+        "RWAccess",
+        "UserAccess"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NAS::DataFlow",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FileSystemId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NAS::FileSystem",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::NAS::Fileset",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FileSystemId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NAS::MountTarget",
+      "identifierField": "MountTargetDomain",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "nas",
+      "aliases": [
+        "alicloud_nas_mount_target"
+      ],
+      "parentFields": [
+        "FileSystemId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NAS::ProtocolMountTarget",
+      "identifierField": "ProtocolMountTargetDomain",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "nas",
+      "aliases": [],
+      "parentFields": [
+        "FileSystemId",
+        "ProtocolServiceId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NAS::ProtocolService",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FileSystemId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::NLB::LoadBalancer",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::NLB::ServerGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "nlb",
+      "aliases": [
+        "alicloud_nlb_server_group"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OOS::Execution",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OOS::Parameter",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OOS::PatchBaseline",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OOS::SecretParameter",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OOS::StateConfiguration",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OOS::Template",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "oos",
+      "aliases": [
+        "alicloud_oos_template"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OSS::Bucket",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OTS::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OTS::Table",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::OTS::VpcBinder",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "InstanceName",
+        "InstanceVpcName",
+        "RegionNo",
+        "VpcId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::PAI::Service",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::PAI::Workspace",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::POLARDB::Account",
+      "identifierField": "AccountName",
+      "identifierKind": "name",
+      "scopeKind": "regional",
+      "product": "polardb",
+      "aliases": [
+        "alicloud_polardb_account"
+      ],
+      "parentFields": [
+        "DBClusterId"
+      ],
+      "attributeFields": [
+        "AccountName",
+        "DBClusterId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::POLARDB::DBCluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "polardb",
+      "aliases": [
+        "alicloud_polardb_cluster"
+      ],
+      "parentFields": [],
+      "attributeFields": [
+        "DBClusterId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::POLARDB::DBClusterAccessWhiteList",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::POLARDB::DBClusterEndpoint",
+      "identifierField": "DBEndpointId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "polardb",
+      "aliases": [
+        "alicloud_polardb_endpoint"
+      ],
+      "parentFields": [
+        "DBClusterId"
+      ],
+      "attributeFields": [
+        "DBEndpointId",
+        "DBClusterId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::POLARDB::DBClusterEndpointAddress",
+      "identifierField": "ConnectionString",
+      "identifierKind": "name",
+      "scopeKind": "regional",
+      "product": "polardb",
+      "aliases": [
+        "alicloud_polardb_endpoint_address"
+      ],
+      "parentFields": [
+        "DBClusterId",
+        "DBEndpointId"
+      ],
+      "attributeFields": [
+        "ConnectionString",
+        "DBClusterId",
+        "DBEndpointId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::POLARDB::DBInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::PVTZ::Zone",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::PVTZ::ZoneRecord",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::PrivateLink::VpcEndpoint",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "privatelink",
+      "aliases": [
+        "alicloud_privatelink_vpc_endpoint"
+      ],
+      "parentFields": [],
+      "attributeFields": [
+        "EndpointId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::PrivateLink::VpcEndpointService",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RAM::AccessKey",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RAM::Group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RAM::ManagedPolicy",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RAM::Role",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RAM::User",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RAM::UserToGroupAddition",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RDS::DBInstance",
+      "identifierField": "DBInstanceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "rds",
+      "aliases": [
+        "alicloud_db_instance",
+        "alicloud_rds_clone_db_instance",
+        "alicloud_rds_upgrade_db_instance"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RDS::DBInstanceClone",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RDS::DBInstanceParameterGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RDS::DBInstanceSecurityIps",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RDS::PrepayDBInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::RDS::ReadOnlyDBInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::REDIS::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::REDIS::PrepayInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROCKETMQ::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "ons",
+      "aliases": [
+        "alicloud_ons_instance"
+      ],
+      "parentFields": [],
+      "attributeFields": [
+        "regionId",
+        "seriesCode",
+        "serviceCode"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::ROS::CommonProblem",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::DocApi",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::DocSDK",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::GuideStart",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::PackageOrder",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::ResourcePackage",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::StackGroup",
+      "identifierField": "StackGroupId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "ros",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "StackGroupName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::ROS::StartUse",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::TemplateExample",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::TemplateScratch",
+      "identifierField": "TemplateScratchId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "ros",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::UnderstandingDetails",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::UseRosIntegrate",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ROS::UserManual",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::ResourceManager::ResourceGroup",
+      "identifierField": "Id",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "resourcemanager",
+      "aliases": [
+        "alicloud_resource_manager_resource_group"
+      ],
+      "parentFields": [],
+      "attributeFields": [
+        "DisplayName",
+        "Id",
+        "Name",
+        "Status"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::SAE::Application",
+      "identifierField": "AppId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "sae",
+      "aliases": [
+        "alicloud_sae_application"
+      ],
+      "parentFields": [],
+      "attributeFields": [
+        "AppId",
+        "AppName",
+        "AppType",
+        "NamespaceName"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::SAE::Namespace",
+      "identifierField": "NamespaceName",
+      "identifierKind": "name",
+      "scopeKind": "regional",
+      "product": "sae",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "NamespaceName",
+        "RegionId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::SAG::ACL",
+      "identifierField": "AclId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "smartag",
+      "aliases": [
+        "alicloud_sag_acl"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SAG::ACLRule",
+      "identifierField": "AcrId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "smartag",
+      "aliases": [
+        "alicloud_sag_acl_rule"
+      ],
+      "parentFields": [
+        "AclId"
+      ],
+      "attributeFields": [
+        "Name",
+        "Direction",
+        "Policy",
+        "IpProtocol",
+        "SourceCidr",
+        "DestCidr",
+        "SourcePortRange",
+        "DestPortRange",
+        "Priority"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::SAG::CloudConnectNetwork",
+      "identifierField": "CcnId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "smartag",
+      "aliases": [
+        "alicloud_cloud_connect_network"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SAG::SmartAccessGateway",
+      "identifierField": "SmartAGId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "smartag",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::AccessControl",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::BackendServerAttachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::Certificate",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::Listener",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::LoadBalancer",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::LoadBalancerClone",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::MasterSlaveServerGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::Rule",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLB::VServerGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "LoadBalancerId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::SLS::Logstore",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLS::MachineGroup",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::SLS::Project",
+      "identifierField": "projectName",
+      "identifierKind": "name",
+      "scopeKind": "account",
+      "product": "sls",
+      "aliases": [
+        "alicloud_log_project"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::TSDB::HiTSDBInstance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::CommonBandwidthPackage",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::CustomerGateway",
+      "identifierField": "CustomerGatewayId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "vpc",
+      "aliases": [
+        "alicloud_vpn_customer_gateway"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::EIP",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::HaVip",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::NatGateway",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "vpc",
+      "aliases": [
+        "alicloud_nat_gateway"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::RouteTable",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::RouteTableAssociation",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::RouterInterface",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "vpc",
+      "aliases": [
+        "alicloud_router_interface"
+      ],
+      "parentFields": [],
+      "attributeFields": [
+        "RouterId",
+        "RouterType"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::VPC::SnatEntry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "vpc",
+      "aliases": [],
+      "parentFields": [
+        "NatGatewayId"
+      ],
+      "attributeFields": [
+        "NatGatewayId"
+      ]
+    },
+    {
+      "resourceType": "ALIYUN::VPC::SslVpnClientCert",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::SslVpnServer",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::VPC",
+      "identifierField": "VpcId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "vpc",
+      "aliases": [
+        "ALIYUN::ECS::VPC",
+        "alicloud_vpc"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::VSwitch",
+      "identifierField": "VSwitchId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "vpc",
+      "aliases": [
+        "ALIYUN::ECS::VSwitch",
+        "alicloud_vswitch"
+      ],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::VpcPeerConnection",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::VpnConnection",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::VPC::VpnGateway",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "ALIYUN::WAF::Instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_actiontrail",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_actiontrail_trail",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_adb_cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_adb_db_cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_alikafka_topic",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_amqp_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_api_gateway_api",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_api_gateway_app",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_api_gateway_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_arms_alert_contact",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_arms_alert_contact_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_auto_provisioning_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cas_certificate",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cdn_domain",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cen_bandwidth_limit",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cen_bandwidth_package_attachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cen_instance_attachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cen_route_entry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cen_transit_router_route_entry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cloud_firewall_address_book",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cms_alarm_contact",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cms_alarm_contact_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cms_event_rule",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cms_group_metric_rule",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cms_metric_rule_template",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cms_monitor_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cms_site_monitor",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_common_bandwidth_package",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_copy_image",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cr_chart_namespace",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cr_chart_repository",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cr_ee_namespace",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cr_namespace",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cs_application",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cs_edge_kubernetes",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cs_kubernetes",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cs_kubernetes_clusters",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cs_managed_kubernetes",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_cs_serverless_kubernetes",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_datahub_project",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_db_readonly_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_dms_enterprise_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_dms_enterprise_user",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_dns_domain",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_drds_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_dts_migration_job",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ebs_disk_replica_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_eci_container_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_eci_image_cache",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_eci_openapi_image_cache",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_auto_snapshot_policy",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_command",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_dedicated_host",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_disk",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_disk_attachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_hpc_cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_instance_set",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_invocation",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_key_pair",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_key_pair_attachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_launch_template",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_network_interface",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_network_interface_attachment",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_network_interface_permission",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_prefix_list",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ecs_snapshot",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_edas_cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_edas_k8s_cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ehpc_cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_eip",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_elasticsearch_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_emr_cluster",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ens_key_pair",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ess_alarm",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ess_eci_scaling_configuration",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ess_lifecycle_hook",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ess_scaling_configuration",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ess_scaling_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ess_scheduled_task",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_fc_custom_domain",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_fc_function",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FunctionName",
+        "ServiceName"
+      ]
+    },
+    {
+      "resourceType": "alicloud_fc_service",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "ServiceName"
+      ]
+    },
+    {
+      "resourceType": "alicloud_fc_trigger",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FunctionName",
+        "ServiceName"
+      ]
+    },
+    {
+      "resourceType": "alicloud_fnf_flow",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": [
+        "FlowName"
+      ]
+    },
+    {
+      "resourceType": "alicloud_forward_entry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ga_accelerator",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ga_bandwidth_package",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_havip",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_hbr_restore_job",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_image_copy",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_images",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_kms_alias",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_kms_key",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_kvstore_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_log_machine_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_log_store",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_mns_queue",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_mns_topic",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_mongodb_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_mongodb_serverless_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_mongodb_sharding_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_nas_file_system",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_oss_bucket",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ots_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ots_table",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_polardb_database",
+      "identifierField": "DBName",
+      "identifierKind": "name",
+      "scopeKind": "regional",
+      "product": "polardb",
+      "aliases": [],
+      "parentFields": [
+        "DBClusterId"
+      ],
+      "attributeFields": [
+        "DBName",
+        "DBClusterId"
+      ]
+    },
+    {
+      "resourceType": "alicloud_privatelink_vpc_endpoint_service",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_pvtz_zone",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_pvtz_zone_record",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ram_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ram_policy",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ram_role",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ram_user",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_rds_parameter_group",
+      "identifierField": "ParameterGroupId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "rds",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_regions",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "account",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_route_entry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_route_table",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_sae_namespace",
+      "identifierField": "NamespaceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "sae",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "NamespaceId",
+        "NamespaceName",
+        "NameSpaceShortId",
+        "RegionId"
+      ]
+    },
+    {
+      "resourceType": "alicloud_security_group",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_slb_ca_certificate",
+      "identifierField": "CACertificateId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "slb",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "CACertificateName",
+        "Fingerprint",
+        "CommonName"
+      ]
+    },
+    {
+      "resourceType": "alicloud_slb_listener",
+      "identifierField": "ListenerId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "slb",
+      "aliases": [],
+      "parentFields": [
+        "load_balancer_id"
+      ],
+      "attributeFields": [
+        "LoadBalancerId",
+        "ListenerPort",
+        "ListenerProtocol",
+        "Description"
+      ]
+    },
+    {
+      "resourceType": "alicloud_slb_load_balancer",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_slb_master_slave_server_group",
+      "identifierField": "MasterSlaveServerGroupId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "slb",
+      "aliases": [],
+      "parentFields": [
+        "LoadBalancerId"
+      ],
+      "attributeFields": [
+        "MasterSlaveServerGroupName"
+      ]
+    },
+    {
+      "resourceType": "alicloud_slb_rule",
+      "identifierField": "RuleId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "slb",
+      "aliases": [],
+      "parentFields": [
+        "LoadBalancerId",
+        "ListenerPort",
+        "ListenerProtocol"
+      ],
+      "attributeFields": [
+        "RuleName",
+        "Domain",
+        "Url",
+        "VServerGroupId"
+      ]
+    },
+    {
+      "resourceType": "alicloud_slb_server_certificate",
+      "identifierField": "ServerCertificateId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "slb",
+      "aliases": [],
+      "parentFields": [],
+      "attributeFields": [
+        "ServerCertificateName",
+        "Fingerprint",
+        "CommonName"
+      ]
+    },
+    {
+      "resourceType": "alicloud_snat_entry",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ssl_vpn_client_cert",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_ssl_vpn_server",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_vpn_connection",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_vpn_gateway",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    },
+    {
+      "resourceType": "alicloud_waf_instance",
+      "identifierField": "PhysicalResourceId",
+      "identifierKind": "id",
+      "scopeKind": "regional",
+      "product": "",
+      "aliases": [],
+      "parentFields": []
+    }
+  ],
+  "responseContracts": [
+    {
+      "product": "actiontrail",
+      "action": "DescribeTrails",
+      "resourceType": "ALIYUN::ACTIONTRAIL::Trail",
+      "path": [
+        "TrailList",
+        "*"
+      ],
+      "identifierField": "Name",
+      "regional": false
+    },
+    {
+      "product": "adb",
+      "action": "DescribeDBClusters",
+      "resourceType": "ALIYUN::ADB::DBCluster",
+      "path": [
+        "Items",
+        "DBCluster",
+        "*"
+      ],
+      "identifierField": "DBClusterId",
+      "regional": true
+    },
+    {
+      "product": "alb",
+      "action": "ListAcls",
+      "resourceType": "ALIYUN::ALB::Acl",
+      "path": [
+        "Acls",
+        "*"
+      ],
+      "identifierField": "AclId",
+      "regional": true
+    },
+    {
+      "product": "alb",
+      "action": "ListHealthCheckTemplates",
+      "resourceType": "ALIYUN::ALB::HealthCheckTemplate",
+      "path": [
+        "HealthCheckTemplates",
+        "*"
+      ],
+      "identifierField": "HealthCheckTemplateId",
+      "regional": true
+    },
+    {
+      "product": "alb",
+      "action": "ListListeners",
+      "resourceType": "ALIYUN::ALB::Listener",
+      "path": [
+        "Listeners",
+        "*"
+      ],
+      "identifierField": "ListenerId",
+      "regional": true
+    },
+    {
+      "product": "alb",
+      "action": "ListLoadBalancers",
+      "resourceType": "ALIYUN::ALB::LoadBalancer",
+      "path": [
+        "LoadBalancers",
+        "*"
+      ],
+      "identifierField": "LoadBalancerId",
+      "regional": true
+    },
+    {
+      "product": "alb",
+      "action": "ListSecurityPolicies",
+      "resourceType": "ALIYUN::ALB::SecurityPolicy",
+      "path": [
+        "SecurityPolicies",
+        "*"
+      ],
+      "identifierField": "SecurityPolicyId",
+      "regional": true
+    },
+    {
+      "product": "alb",
+      "action": "ListServerGroups",
+      "resourceType": "ALIYUN::ALB::ServerGroup",
+      "path": [
+        "ServerGroups",
+        "*"
+      ],
+      "identifierField": "ServerGroupId",
+      "regional": true
+    },
+    {
+      "product": "alidns",
+      "action": "DescribeDomains",
+      "resourceType": "ALIYUN::DNS::Domain",
+      "path": [
+        "Domains",
+        "Domain",
+        "*"
+      ],
+      "identifierField": "DomainName",
+      "regional": false
+    },
+    {
+      "product": "amqp-open",
+      "action": "ListInstances",
+      "resourceType": "ALIYUN::AMQP::Instance",
+      "path": [
+        "Data",
+        "Instances",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true
+    },
+    {
+      "product": "cas",
+      "action": "ListUserCertificateOrder",
+      "resourceType": "ALIYUN::CAS::Certificate",
+      "path": [
+        "CertificateOrderList",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": false
+    },
+    {
+      "product": "cbn",
+      "action": "DescribeCenBandwidthPackages",
+      "resourceType": "ALIYUN::CEN::CenBandwidthPackage",
+      "path": [
+        "CenBandwidthPackages",
+        "CenBandwidthPackage",
+        "*"
+      ],
+      "identifierField": "CenBandwidthPackageId",
+      "regional": false
+    },
+    {
+      "product": "cbn",
+      "action": "DescribeCens",
+      "resourceType": "ALIYUN::CEN::CenInstance",
+      "path": [
+        "Cens",
+        "Cen",
+        "*"
+      ],
+      "identifierField": "CenId",
+      "regional": false
+    },
+    {
+      "product": "cbn",
+      "action": "ListTransitRouterVpcAttachments",
+      "resourceType": "ALIYUN::CEN::TransitRouterVpcAttachment",
+      "path": [
+        "TransitRouterAttachments",
+        "*"
+      ],
+      "identifierField": "TransitRouterAttachmentId",
+      "regional": true
+    },
+    {
+      "product": "cbn",
+      "action": "ListTransitRouters",
+      "resourceType": "ALIYUN::CEN::TransitRouter",
+      "path": [
+        "TransitRouters",
+        "*"
+      ],
+      "identifierField": "TransitRouterId",
+      "regional": true
+    },
+    {
+      "product": "cdn",
+      "action": "DescribeUserDomains",
+      "resourceType": "ALIYUN::CDN::Domain",
+      "path": [
+        "Domains",
+        "PageData",
+        "*"
+      ],
+      "identifierField": "DomainName",
+      "regional": false
+    },
+    {
+      "product": "clickhouse",
+      "action": "DescribeDBClusters",
+      "resourceType": "ALIYUN::ClickHouse::DBCluster",
+      "path": [
+        "DBClusters",
+        "DBCluster",
+        "*"
+      ],
+      "identifierField": "DBClusterId",
+      "regional": true
+    },
+    {
+      "product": "clickhouse",
+      "action": "DescribeDBInstances",
+      "resourceType": "ALIYUN::ClickHouse::DBCluster",
+      "path": [
+        "Data",
+        "DBInstances",
+        "*"
+      ],
+      "identifierField": "DBInstanceId",
+      "regional": true
+    },
+    {
+      "product": "cloudapi",
+      "action": "DescribeApiGroups",
+      "resourceType": "ALIYUN::ApiGateway::Group",
+      "path": [
+        "ApiGroupAttributes",
+        "ApiGroupAttribute",
+        "*"
+      ],
+      "identifierField": "GroupId",
+      "regional": true
+    },
+    {
+      "product": "cloudapi",
+      "action": "DescribeAppAttributes",
+      "resourceType": "ALIYUN::ApiGateway::App",
+      "path": [
+        "Apps",
+        "AppAttribute",
+        "*"
+      ],
+      "identifierField": "AppId",
+      "regional": true
+    },
+    {
+      "product": "cloudapi",
+      "action": "DescribeApps",
+      "resourceType": "ALIYUN::ApiGateway::App",
+      "path": [
+        "Apps",
+        "AppItem",
+        "*"
+      ],
+      "identifierField": "AppId",
+      "regional": true
+    },
+    {
+      "product": "cloudapi",
+      "action": "DescribeSignatures",
+      "resourceType": "ALIYUN::ApiGateway::Signature",
+      "path": [
+        "SignatureInfos",
+        "SignatureInfo",
+        "*"
+      ],
+      "identifierField": "SignatureId",
+      "regional": true
+    },
+    {
+      "product": "cloudapi",
+      "action": "DescribeTrafficControls",
+      "resourceType": "ALIYUN::ApiGateway::TrafficControl",
+      "path": [
+        "TrafficControls",
+        "TrafficControl",
+        "*"
+      ],
+      "identifierField": "TrafficControlId",
+      "regional": true
+    },
+    {
+      "product": "cms",
+      "action": "DescribeContactGroupList",
+      "resourceType": "ALIYUN::CMS::ContactGroup",
+      "path": [
+        "ContactGroupList",
+        "ContactGroup",
+        "*"
+      ],
+      "identifierField": "Name",
+      "regional": false
+    },
+    {
+      "product": "cms",
+      "action": "DescribeContactList",
+      "resourceType": "ALIYUN::CMS::Contact",
+      "path": [
+        "Contacts",
+        "Contact",
+        "*"
+      ],
+      "identifierField": "Name",
+      "regional": false
+    },
+    {
+      "product": "cms",
+      "action": "DescribeMetricRuleTemplateList",
+      "resourceType": "ALIYUN::CMS::MetricRuleTemplate",
+      "path": [
+        "Templates",
+        "Template",
+        "*"
+      ],
+      "identifierField": "TemplateId",
+      "regional": false
+    },
+    {
+      "product": "cms",
+      "action": "DescribeMonitorGroups",
+      "resourceType": "ALIYUN::CMS::MonitorGroup",
+      "path": [
+        "Resources",
+        "Resource",
+        "*"
+      ],
+      "identifierField": "GroupId",
+      "regional": false
+    },
+    {
+      "product": "cms",
+      "action": "DescribeSiteMonitorList",
+      "resourceType": "ALIYUN::CMS::SiteMonitor",
+      "path": [
+        "SiteMonitors",
+        "SiteMonitor",
+        "*"
+      ],
+      "identifierField": "TaskId",
+      "regional": false
+    },
+    {
+      "product": "cr",
+      "action": "ListNamespace",
+      "resourceType": "ALIYUN::CR::Namespace",
+      "path": [
+        "Namespaces",
+        "*"
+      ],
+      "identifierField": "NamespaceId",
+      "regional": true
+    },
+    {
+      "product": "cr",
+      "action": "ListRepository",
+      "resourceType": "ALIYUN::CR::Repository",
+      "path": [
+        "Repositories",
+        "*"
+      ],
+      "identifierField": "RepoId",
+      "regional": true
+    },
+    {
+      "product": "cs",
+      "action": "DescribeClusters",
+      "resourceType": "ALIYUN::CS::KubernetesCluster",
+      "path": [
+        "clusters",
+        "*"
+      ],
+      "identifierField": "cluster_id",
+      "regional": true,
+      "matchField": "cluster_type",
+      "matchValues": [
+        "Kubernetes"
+      ]
+    },
+    {
+      "product": "cs",
+      "action": "DescribeClusters",
+      "resourceType": "ALIYUN::CS::ManagedKubernetesCluster",
+      "path": [
+        "clusters",
+        "*"
+      ],
+      "identifierField": "cluster_id",
+      "regional": true,
+      "matchField": "cluster_type",
+      "matchValues": [
+        "ManagedKubernetes"
+      ]
+    },
+    {
+      "product": "datahub",
+      "action": "ListProjects",
+      "resourceType": "ALIYUN::DATAHUB::Project",
+      "path": [
+        "List",
+        "Project",
+        "*"
+      ],
+      "identifierField": "ProjectName",
+      "regional": true
+    },
+    {
+      "product": "dds",
+      "action": "DescribeDBInstances",
+      "resourceType": "ALIYUN::MONGODB::Instance",
+      "path": [
+        "DBInstances",
+        "DBInstance",
+        "*"
+      ],
+      "identifierField": "DBInstanceId",
+      "regional": true
+    },
+    {
+      "product": "ebs",
+      "action": "DescribeDiskReplicaGroups",
+      "resourceType": "ALIYUN::EBS::DiskReplicaGroup",
+      "path": [
+        "ReplicaGroups",
+        "*"
+      ],
+      "identifierField": "ReplicaGroupId",
+      "regional": true
+    },
+    {
+      "product": "ebs",
+      "action": "DescribeDiskReplicaPairs",
+      "resourceType": "ALIYUN::EBS::DiskReplicaPair",
+      "path": [
+        "ReplicaPairs",
+        "*"
+      ],
+      "identifierField": "ReplicaPairId",
+      "regional": true
+    },
+    {
+      "product": "eci",
+      "action": "DescribeContainerGroups",
+      "resourceType": "ALIYUN::ECI::ContainerGroup",
+      "path": [
+        "ContainerGroups",
+        "*"
+      ],
+      "identifierField": "ContainerGroupId",
+      "regional": true
+    },
+    {
+      "product": "eci",
+      "action": "DescribeContainerGroups",
+      "resourceType": "ALIYUN::VPC::VPC",
+      "path": [
+        "ContainerGroups",
+        "*"
+      ],
+      "identifierField": "VpcId",
+      "regional": true
+    },
+    {
+      "product": "eci",
+      "action": "DescribeContainerGroups",
+      "resourceType": "ALIYUN::VPC::VSwitch",
+      "path": [
+        "ContainerGroups",
+        "*"
+      ],
+      "identifierField": "VSwitchId",
+      "regional": true
+    },
+    {
+      "product": "eci",
+      "action": "DescribeImageCaches",
+      "resourceType": "ALIYUN::ECI::ImageCache",
+      "path": [
+        "ImageCaches",
+        "*"
+      ],
+      "identifierField": "ImageCacheId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeAutoProvisioningGroups",
+      "resourceType": "ALIYUN::ECS::AutoProvisioningGroup",
+      "path": [
+        "AutoProvisioningGroups",
+        "AutoProvisioningGroup",
+        "*"
+      ],
+      "identifierField": "AutoProvisioningGroupId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeAutoSnapshotPolicyEx",
+      "resourceType": "ALIYUN::ECS::AutoSnapshotPolicy",
+      "path": [
+        "AutoSnapshotPolicies",
+        "AutoSnapshotPolicy",
+        "*"
+      ],
+      "identifierField": "AutoSnapshotPolicyId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeCommands",
+      "resourceType": "ALIYUN::ECS::Command",
+      "path": [
+        "Commands",
+        "Command",
+        "*"
+      ],
+      "identifierField": "CommandId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeDedicatedHosts",
+      "resourceType": "ALIYUN::ECS::DedicatedHost",
+      "path": [
+        "DedicatedHosts",
+        "DedicatedHost",
+        "*"
+      ],
+      "identifierField": "DedicatedHostId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeDeploymentSets",
+      "resourceType": "ALIYUN::ECS::DeploymentSet",
+      "path": [
+        "DeploymentSets",
+        "DeploymentSet",
+        "*"
+      ],
+      "identifierField": "DeploymentSetId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeDisks",
+      "resourceType": "ALIYUN::ECS::Disk",
+      "path": [
+        "Disks",
+        "Disk",
+        "*"
+      ],
+      "identifierField": "DiskId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeHpcClusters",
+      "resourceType": "ALIYUN::ECS::HpcCluster",
+      "path": [
+        "HpcClusters",
+        "HpcCluster",
+        "*"
+      ],
+      "identifierField": "HpcClusterId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeImages",
+      "resourceType": "ALIYUN::ECS::Image",
+      "path": [
+        "Images",
+        "Image",
+        "*"
+      ],
+      "identifierField": "ImageId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeInstances",
+      "resourceType": "ALIYUN::ECS::Instance",
+      "path": [
+        "Instances",
+        "Instance",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeInstances",
+      "resourceType": "alicloud_instance",
+      "path": [
+        "Instances",
+        "Instance",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeKeyPairs",
+      "resourceType": "ALIYUN::ECS::SSHKeyPair",
+      "path": [
+        "KeyPairs",
+        "KeyPair",
+        "*"
+      ],
+      "identifierField": "KeyPairName",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeLaunchTemplates",
+      "resourceType": "ALIYUN::ECS::LaunchTemplate",
+      "path": [
+        "LaunchTemplateSets",
+        "LaunchTemplateSet",
+        "*"
+      ],
+      "identifierField": "LaunchTemplateId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeNetworkInterfaces",
+      "resourceType": "ALIYUN::ECS::NetworkInterface",
+      "path": [
+        "NetworkInterfaceSets",
+        "NetworkInterfaceSet",
+        "*"
+      ],
+      "identifierField": "NetworkInterfaceId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribePrefixLists",
+      "resourceType": "ALIYUN::ECS::PrefixList",
+      "path": [
+        "PrefixLists",
+        "PrefixList",
+        "*"
+      ],
+      "identifierField": "PrefixListId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeSecurityGroups",
+      "resourceType": "ALIYUN::ECS::SecurityGroup",
+      "path": [
+        "SecurityGroups",
+        "SecurityGroup",
+        "*"
+      ],
+      "identifierField": "SecurityGroupId",
+      "regional": true
+    },
+    {
+      "product": "ecs",
+      "action": "DescribeSnapshots",
+      "resourceType": "ALIYUN::ECS::Snapshot",
+      "path": [
+        "Snapshots",
+        "Snapshot",
+        "*"
+      ],
+      "identifierField": "SnapshotId",
+      "regional": true
+    },
+    {
+      "product": "ehpc",
+      "action": "ListClusters",
+      "resourceType": "ALIYUN::EHPC::Cluster",
+      "path": [
+        "Clusters",
+        "*"
+      ],
+      "identifierField": "ClusterId",
+      "regional": true
+    },
+    {
+      "product": "ehpc",
+      "action": "ListClusters",
+      "resourceType": "ALIYUN::EHPC::Cluster",
+      "path": [
+        "Clusters",
+        "ClusterInfoSimple",
+        "*"
+      ],
+      "identifierField": "Id",
+      "regional": true
+    },
+    {
+      "product": "elasticsearch",
+      "action": "ListInstance",
+      "resourceType": "ALIYUN::ElasticSearch::Instance",
+      "path": [
+        "Result",
+        "*"
+      ],
+      "identifierField": "instanceId",
+      "regional": true
+    },
+    {
+      "product": "emr",
+      "action": "ListClusters",
+      "resourceType": "ALIYUN::EMR::Cluster",
+      "path": [
+        "Clusters",
+        "*"
+      ],
+      "identifierField": "ClusterId",
+      "regional": true
+    },
+    {
+      "product": "emr",
+      "action": "ListClusters",
+      "resourceType": "ALIYUN::EMR::Cluster",
+      "path": [
+        "Clusters",
+        "ClusterInfo",
+        "*"
+      ],
+      "identifierField": "Id",
+      "regional": true
+    },
+    {
+      "product": "ens",
+      "action": "DescribeInstances",
+      "resourceType": "ALIYUN::ENS::Instance",
+      "path": [
+        "Instances",
+        "Instance",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true
+    },
+    {
+      "product": "ess",
+      "action": "DescribeAlarms",
+      "resourceType": "ALIYUN::ESS::AlarmTask",
+      "path": [
+        "AlarmList",
+        "Alarm",
+        "*"
+      ],
+      "identifierField": "AlarmTaskId",
+      "regional": true
+    },
+    {
+      "product": "ess",
+      "action": "DescribeScalingGroups",
+      "resourceType": "ALIYUN::ESS::ScalingGroup",
+      "path": [
+        "ScalingGroups",
+        "ScalingGroup",
+        "*"
+      ],
+      "identifierField": "ScalingGroupId",
+      "regional": true
+    },
+    {
+      "product": "ess",
+      "action": "DescribeScheduledTasks",
+      "resourceType": "ALIYUN::ESS::ScheduledTask",
+      "path": [
+        "ScheduledTasks",
+        "ScheduledTask",
+        "*"
+      ],
+      "identifierField": "ScheduledTaskId",
+      "regional": true
+    },
+    {
+      "product": "gpdb",
+      "action": "DescribeDBInstances",
+      "resourceType": "ALIYUN::GPDB::DBInstance",
+      "path": [
+        "Items",
+        "DBInstance",
+        "*"
+      ],
+      "identifierField": "DBInstanceId",
+      "regional": true
+    },
+    {
+      "product": "hitsdb",
+      "action": "GetLindormInstanceList",
+      "resourceType": "ALIYUN::Lindorm::Instance",
+      "path": [
+        "InstanceList",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true
+    },
+    {
+      "product": "kms",
+      "action": "ListAliases",
+      "resourceType": "ALIYUN::KMS::Alias",
+      "path": [
+        "Aliases",
+        "Alias",
+        "*"
+      ],
+      "identifierField": "AliasName",
+      "regional": true
+    },
+    {
+      "product": "kms",
+      "action": "ListAliases",
+      "resourceType": "ALIYUN::KMS::Key",
+      "path": [
+        "Aliases",
+        "Alias",
+        "*"
+      ],
+      "identifierField": "KeyId",
+      "regional": true
+    },
+    {
+      "product": "kms",
+      "action": "ListKeys",
+      "resourceType": "ALIYUN::KMS::Key",
+      "path": [
+        "Keys",
+        "Key",
+        "*"
+      ],
+      "identifierField": "KeyId",
+      "regional": true
+    },
+    {
+      "product": "maxcompute",
+      "action": "ListProjects",
+      "resourceType": "ALIYUN::MaxCompute::Project",
+      "path": [
+        "data",
+        "projects",
+        "*"
+      ],
+      "identifierField": "name",
+      "regional": true
+    },
+    {
+      "product": "mns-open",
+      "action": "ListQueue",
+      "resourceType": "ALIYUN::MNS::Queue",
+      "path": [
+        "Data",
+        "PageData",
+        "*"
+      ],
+      "identifierField": "QueueName",
+      "regional": true
+    },
+    {
+      "product": "mns-open",
+      "action": "ListTopic",
+      "resourceType": "ALIYUN::MNS::Topic",
+      "path": [
+        "Data",
+        "PageData",
+        "*"
+      ],
+      "identifierField": "TopicName",
+      "regional": true
+    },
+    {
+      "product": "mse",
+      "action": "ListClusters",
+      "resourceType": "ALIYUN::MSE::Cluster",
+      "path": [
+        "Data",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeAccessGroups",
+      "resourceType": "ALIYUN::NAS::AccessGroup",
+      "path": [
+        "AccessGroups",
+        "AccessGroup",
+        "*"
+      ],
+      "identifierField": "AccessGroupName",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeAccessRules",
+      "resourceType": "ALIYUN::NAS::AccessRule",
+      "path": [
+        "AccessRules",
+        "AccessRule",
+        "*"
+      ],
+      "identifierField": "AccessRuleId",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeDataFlows",
+      "resourceType": "ALIYUN::NAS::DataFlow",
+      "path": [
+        "DataFlowInfo",
+        "DataFlow",
+        "*"
+      ],
+      "identifierField": "DataFlowId",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeFileSystems",
+      "resourceType": "ALIYUN::NAS::FileSystem",
+      "path": [
+        "FileSystems",
+        "FileSystem",
+        "*"
+      ],
+      "identifierField": "FileSystemId",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeFileSystems",
+      "resourceType": "ALIYUN::NAS::MountTarget",
+      "path": [
+        "FileSystems",
+        "FileSystem",
+        "*",
+        "MountTargets",
+        "MountTarget",
+        "*"
+      ],
+      "identifierField": "MountTargetDomain",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeFilesets",
+      "resourceType": "ALIYUN::NAS::Fileset",
+      "path": [
+        "Entries",
+        "Entrie",
+        "*"
+      ],
+      "identifierField": "FsetId",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeMountTargets",
+      "resourceType": "ALIYUN::NAS::MountTarget",
+      "path": [
+        "MountTargets",
+        "MountTarget",
+        "*"
+      ],
+      "identifierField": "MountTargetDomain",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeProtocolMountTarget",
+      "resourceType": "ALIYUN::NAS::ProtocolMountTarget",
+      "path": [
+        "ProtocolMountTargets",
+        "*"
+      ],
+      "identifierField": "ProtocolMountTargetDomain",
+      "regional": true
+    },
+    {
+      "product": "nas",
+      "action": "DescribeProtocolService",
+      "resourceType": "ALIYUN::NAS::ProtocolService",
+      "path": [
+        "ProtocolServices",
+        "*"
+      ],
+      "identifierField": "ProtocolServiceId",
+      "regional": true
+    },
+    {
+      "product": "nlb",
+      "action": "ListLoadBalancers",
+      "resourceType": "ALIYUN::NLB::LoadBalancer",
+      "path": [
+        "LoadBalancers",
+        "*"
+      ],
+      "identifierField": "LoadBalancerId",
+      "regional": true
+    },
+    {
+      "product": "nlb",
+      "action": "ListServerGroups",
+      "resourceType": "ALIYUN::NLB::ServerGroup",
+      "path": [
+        "ServerGroups",
+        "*"
+      ],
+      "identifierField": "ServerGroupId",
+      "regional": true
+    },
+    {
+      "product": "ons",
+      "action": "OnsInstanceInServiceList",
+      "resourceType": "ALIYUN::ROCKETMQ::Instance",
+      "path": [
+        "Data",
+        "InstanceVO",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true
+    },
+    {
+      "product": "oos",
+      "action": "ListExecutions",
+      "resourceType": "ALIYUN::OOS::Execution",
+      "path": [
+        "Executions",
+        "*"
+      ],
+      "identifierField": "ExecutionId",
+      "regional": true
+    },
+    {
+      "product": "oos",
+      "action": "ListParameters",
+      "resourceType": "ALIYUN::OOS::Parameter",
+      "path": [
+        "Parameters",
+        "*"
+      ],
+      "identifierField": "Id",
+      "regional": true
+    },
+    {
+      "product": "oos",
+      "action": "ListPatchBaselines",
+      "resourceType": "ALIYUN::OOS::PatchBaseline",
+      "path": [
+        "PatchBaselines",
+        "*"
+      ],
+      "identifierField": "Id",
+      "regional": true
+    },
+    {
+      "product": "oos",
+      "action": "ListSecretParameters",
+      "resourceType": "ALIYUN::OOS::SecretParameter",
+      "path": [
+        "Parameters",
+        "*"
+      ],
+      "identifierField": "Id",
+      "regional": true
+    },
+    {
+      "product": "oos",
+      "action": "ListStateConfigurations",
+      "resourceType": "ALIYUN::OOS::StateConfiguration",
+      "path": [
+        "StateConfigurations",
+        "*"
+      ],
+      "identifierField": "StateConfigurationId",
+      "regional": true
+    },
+    {
+      "product": "oos",
+      "action": "ListTemplates",
+      "resourceType": "ALIYUN::OOS::Template",
+      "path": [
+        "Templates",
+        "*"
+      ],
+      "identifierField": "TemplateName",
+      "regional": true
+    },
+    {
+      "product": "oss",
+      "action": "ListBuckets",
+      "resourceType": "ALIYUN::OSS::Bucket",
+      "path": [
+        "buckets",
+        "*"
+      ],
+      "identifierField": "name",
+      "regional": true
+    },
+    {
+      "product": "polardb",
+      "action": "DescribeAccounts",
+      "resourceType": "ALIYUN::POLARDB::Account",
+      "path": [
+        "Accounts",
+        "*"
+      ],
+      "identifierField": "AccountName",
+      "regional": true
+    },
+    {
+      "product": "polardb",
+      "action": "DescribeDBClusterEndpoints",
+      "resourceType": "ALIYUN::POLARDB::DBClusterEndpoint",
+      "path": [
+        "Items",
+        "*"
+      ],
+      "identifierField": "DBEndpointId",
+      "regional": true
+    },
+    {
+      "product": "polardb",
+      "action": "DescribeDBClusterEndpoints",
+      "resourceType": "ALIYUN::POLARDB::DBClusterEndpointAddress",
+      "path": [
+        "Items",
+        "*",
+        "AddressItems",
+        "*"
+      ],
+      "identifierField": "ConnectionString",
+      "regional": true
+    },
+    {
+      "product": "polardb",
+      "action": "DescribeDBClusters",
+      "resourceType": "ALIYUN::POLARDB::DBCluster",
+      "path": [
+        "Items",
+        "DBCluster",
+        "*"
+      ],
+      "identifierField": "DBClusterId",
+      "regional": true
+    },
+    {
+      "product": "polardb",
+      "action": "DescribeDatabases",
+      "resourceType": "alicloud_polardb_database",
+      "path": [
+        "Databases",
+        "Database",
+        "*"
+      ],
+      "identifierField": "DBName",
+      "regional": true
+    },
+    {
+      "product": "privatelink",
+      "action": "ListVpcEndpointServices",
+      "resourceType": "ALIYUN::PrivateLink::VpcEndpointService",
+      "path": [
+        "Services",
+        "*"
+      ],
+      "identifierField": "ServiceId",
+      "regional": true
+    },
+    {
+      "product": "privatelink",
+      "action": "ListVpcEndpoints",
+      "resourceType": "ALIYUN::PrivateLink::VpcEndpoint",
+      "path": [
+        "Endpoints",
+        "*"
+      ],
+      "identifierField": "EndpointId",
+      "regional": true
+    },
+    {
+      "product": "pvtz",
+      "action": "DescribeZoneRecords",
+      "resourceType": "ALIYUN::PVTZ::ZoneRecord",
+      "path": [
+        "Records",
+        "Record",
+        "*"
+      ],
+      "identifierField": "RecordId",
+      "regional": true
+    },
+    {
+      "product": "pvtz",
+      "action": "DescribeZones",
+      "resourceType": "ALIYUN::PVTZ::Zone",
+      "path": [
+        "Zones",
+        "Zone",
+        "*"
+      ],
+      "identifierField": "ZoneId",
+      "regional": true
+    },
+    {
+      "product": "r-kvstore",
+      "action": "DescribeInstances",
+      "resourceType": "ALIYUN::MEMCACHE::Instance",
+      "path": [
+        "Instances",
+        "KVStoreInstance",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true,
+      "matchField": "InstanceType",
+      "matchValues": [
+        "Memcache"
+      ]
+    },
+    {
+      "product": "r-kvstore",
+      "action": "DescribeInstances",
+      "resourceType": "ALIYUN::REDIS::Instance",
+      "path": [
+        "Instances",
+        "KVStoreInstance",
+        "*"
+      ],
+      "identifierField": "InstanceId",
+      "regional": true,
+      "matchField": "InstanceType",
+      "matchValues": [
+        "Redis",
+        "Tair",
+        "tair_rdb",
+        "tair_scm",
+        "tair_essd"
+      ]
+    },
+    {
+      "product": "ram",
+      "action": "ListGroups",
+      "resourceType": "ALIYUN::RAM::Group",
+      "path": [
+        "Groups",
+        "Group",
+        "*"
+      ],
+      "identifierField": "GroupId",
+      "regional": false
+    },
+    {
+      "product": "ram",
+      "action": "ListPolicies",
+      "resourceType": "ALIYUN::RAM::ManagedPolicy",
+      "path": [
+        "Policies",
+        "Policy",
+        "*"
+      ],
+      "identifierField": "PolicyName",
+      "regional": false
+    },
+    {
+      "product": "ram",
+      "action": "ListRoles",
+      "resourceType": "ALIYUN::RAM::Role",
+      "path": [
+        "Roles",
+        "Role",
+        "*"
+      ],
+      "identifierField": "RoleId",
+      "regional": false
+    },
+    {
+      "product": "ram",
+      "action": "ListUsers",
+      "resourceType": "ALIYUN::RAM::User",
+      "path": [
+        "Users",
+        "User",
+        "*"
+      ],
+      "identifierField": "UserId",
+      "regional": false
+    },
+    {
+      "product": "rds",
+      "action": "DescribeDBInstances",
+      "resourceType": "ALIYUN::RDS::DBInstance",
+      "path": [
+        "Items",
+        "DBInstance",
+        "*"
+      ],
+      "identifierField": "DBInstanceId",
+      "regional": true
+    },
+    {
+      "product": "rds",
+      "action": "DescribeParameterGroups",
+      "resourceType": "alicloud_rds_parameter_group",
+      "path": [
+        "ParameterGroups",
+        "ParameterGroup",
+        "*"
+      ],
+      "identifierField": "ParameterGroupId",
+      "regional": true
+    },
+    {
+      "product": "resourcemanager",
+      "action": "ListResourceGroups",
+      "resourceType": "ALIYUN::ResourceManager::ResourceGroup",
+      "path": [
+        "ResourceGroups",
+        "ResourceGroup",
+        "*"
+      ],
+      "identifierField": "Id",
+      "regional": false
+    },
+    {
+      "product": "rocketmq",
+      "action": "ListInstances",
+      "resourceType": "ALIYUN::ROCKETMQ::Instance",
+      "path": [
+        "data",
+        "list",
+        "*"
+      ],
+      "identifierField": "instanceId",
+      "regional": true
+    },
+    {
+      "product": "ros",
+      "action": "ListStackGroups",
+      "resourceType": "ALIYUN::ROS::StackGroup",
+      "path": [
+        "StackGroups",
+        "*"
+      ],
+      "identifierField": "StackGroupId",
+      "regional": true
+    },
+    {
+      "product": "ros",
+      "action": "ListTemplateScratches",
+      "resourceType": "ALIYUN::ROS::TemplateScratch",
+      "path": [
+        "TemplateScratches",
+        "*"
+      ],
+      "identifierField": "TemplateScratchId",
+      "regional": true
+    },
+    {
+      "product": "sae",
+      "action": "DescribeNamespaceList",
+      "resourceType": "ALIYUN::SAE::Namespace",
+      "path": [
+        "Data",
+        "*"
+      ],
+      "identifierField": "NamespaceName",
+      "regional": true
+    },
+    {
+      "product": "sae",
+      "action": "DescribeNamespaceList",
+      "resourceType": "alicloud_sae_namespace",
+      "path": [
+        "Data",
+        "*"
+      ],
+      "identifierField": "NamespaceId",
+      "regional": true
+    },
+    {
+      "product": "sae",
+      "action": "DescribeNamespaces",
+      "resourceType": "ALIYUN::SAE::Namespace",
+      "path": [
+        "Data",
+        "Namespaces",
+        "*"
+      ],
+      "identifierField": "NamespaceName",
+      "regional": true
+    },
+    {
+      "product": "sae",
+      "action": "DescribeNamespaces",
+      "resourceType": "alicloud_sae_namespace",
+      "path": [
+        "Data",
+        "Namespaces",
+        "*"
+      ],
+      "identifierField": "NamespaceId",
+      "regional": true
+    },
+    {
+      "product": "sae",
+      "action": "ListApplications",
+      "resourceType": "ALIYUN::SAE::Application",
+      "path": [
+        "Data",
+        "Applications",
+        "*"
+      ],
+      "identifierField": "AppId",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeAccessControlLists",
+      "resourceType": "ALIYUN::SLB::AccessControl",
+      "path": [
+        "Acls",
+        "Acl",
+        "*"
+      ],
+      "identifierField": "AclId",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeCACertificates",
+      "resourceType": "alicloud_slb_ca_certificate",
+      "path": [
+        "CACertificates",
+        "CACertificate",
+        "*"
+      ],
+      "identifierField": "CACertificateId",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeLoadBalancerAttribute",
+      "resourceType": "alicloud_slb_listener",
+      "path": [
+        "ListenerPortsAndProtocol",
+        "ListenerPortAndProtocol",
+        "*"
+      ],
+      "identifierField": "ListenerPort",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeLoadBalancerListeners",
+      "resourceType": "alicloud_slb_listener",
+      "path": [
+        "Listeners",
+        "*"
+      ],
+      "identifierField": "ListenerPort",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeLoadBalancers",
+      "resourceType": "ALIYUN::SLB::LoadBalancer",
+      "path": [
+        "LoadBalancers",
+        "LoadBalancer",
+        "*"
+      ],
+      "identifierField": "LoadBalancerId",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeMasterSlaveServerGroups",
+      "resourceType": "alicloud_slb_master_slave_server_group",
+      "path": [
+        "MasterSlaveServerGroups",
+        "MasterSlaveServerGroup",
+        "*"
+      ],
+      "identifierField": "MasterSlaveServerGroupId",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeRules",
+      "resourceType": "alicloud_slb_rule",
+      "path": [
+        "Rules",
+        "Rule",
+        "*"
+      ],
+      "identifierField": "RuleId",
+      "regional": true
+    },
+    {
+      "product": "slb",
+      "action": "DescribeServerCertificates",
+      "resourceType": "alicloud_slb_server_certificate",
+      "path": [
+        "ServerCertificates",
+        "ServerCertificate",
+        "*"
+      ],
+      "identifierField": "ServerCertificateId",
+      "regional": true
+    },
+    {
+      "product": "sls",
+      "action": "ListProject",
+      "resourceType": "alicloud_log_project",
+      "path": [
+        "projects",
+        "*"
+      ],
+      "identifierField": "projectName",
+      "regional": true
+    },
+    {
+      "product": "smartag",
+      "action": "DescribeACLAttribute",
+      "resourceType": "ALIYUN::SAG::ACLRule",
+      "path": [
+        "Acrs",
+        "Acr",
+        "*"
+      ],
+      "identifierField": "AcrId",
+      "regional": true
+    },
+    {
+      "product": "smartag",
+      "action": "DescribeACLs",
+      "resourceType": "ALIYUN::SAG::ACL",
+      "path": [
+        "Acls",
+        "Acl",
+        "*"
+      ],
+      "identifierField": "AclId",
+      "regional": true
+    },
+    {
+      "product": "smartag",
+      "action": "DescribeCloudConnectNetworks",
+      "resourceType": "ALIYUN::SAG::CloudConnectNetwork",
+      "path": [
+        "CloudConnectNetworks",
+        "CloudConnectNetwork",
+        "*"
+      ],
+      "identifierField": "CcnId",
+      "regional": true
+    },
+    {
+      "product": "smartag",
+      "action": "DescribeSmartAccessGateways",
+      "resourceType": "ALIYUN::SAG::SmartAccessGateway",
+      "path": [
+        "SmartAccessGateways",
+        "SmartAccessGateway",
+        "*"
+      ],
+      "identifierField": "SmartAGId",
+      "regional": true
+    },
+    {
+      "product": "tablestore",
+      "action": "ListInstances",
+      "resourceType": "ALIYUN::OTS::Instance",
+      "path": [
+        "Instances",
+        "*"
+      ],
+      "identifierField": "InstanceName",
+      "regional": true
+    },
+    {
+      "product": "tablestore",
+      "action": "ListTable",
+      "resourceType": "ALIYUN::OTS::Table",
+      "path": [
+        "Tables",
+        "*"
+      ],
+      "identifierField": "TableName",
+      "regional": true
+    },
+    {
+      "product": "tablestore",
+      "action": "ListVpcInfoByInstance",
+      "resourceType": "ALIYUN::OTS::VpcBinder",
+      "path": [
+        "VpcList",
+        "*"
+      ],
+      "identifierField": "InstanceVpcName",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeCommonBandwidthPackages",
+      "resourceType": "ALIYUN::VPC::CommonBandwidthPackage",
+      "path": [
+        "CommonBandwidthPackages",
+        "CommonBandwidthPackage",
+        "*"
+      ],
+      "identifierField": "BandwidthPackageId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeCommonBandwidthPackages",
+      "resourceType": "alicloud_common_bandwidth_package",
+      "path": [
+        "CommonBandwidthPackages",
+        "CommonBandwidthPackage",
+        "*"
+      ],
+      "identifierField": "BandwidthPackageId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeCustomerGateways",
+      "resourceType": "ALIYUN::VPC::CustomerGateway",
+      "path": [
+        "CustomerGateways",
+        "CustomerGateway",
+        "*"
+      ],
+      "identifierField": "CustomerGatewayId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeEipAddresses",
+      "resourceType": "ALIYUN::VPC::EIP",
+      "path": [
+        "EipAddresses",
+        "EipAddress",
+        "*"
+      ],
+      "identifierField": "AllocationId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeHaVips",
+      "resourceType": "ALIYUN::VPC::HaVip",
+      "path": [
+        "HaVips",
+        "HaVip",
+        "*"
+      ],
+      "identifierField": "HaVipId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeNatGateways",
+      "resourceType": "ALIYUN::VPC::NatGateway",
+      "path": [
+        "NatGateways",
+        "NatGateway",
+        "*"
+      ],
+      "identifierField": "NatGatewayId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeRouteTableList",
+      "resourceType": "ALIYUN::VPC::RouteTable",
+      "path": [
+        "RouterTableList",
+        "RouterTableListType",
+        "*"
+      ],
+      "identifierField": "RouteTableId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeRouteTables",
+      "resourceType": "ALIYUN::VPC::RouteTable",
+      "path": [
+        "RouteTables",
+        "RouteTable",
+        "*"
+      ],
+      "identifierField": "RouteTableId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeRouterInterfaces",
+      "resourceType": "ALIYUN::VPC::RouterInterface",
+      "path": [
+        "RouterInterfaceSet",
+        "RouterInterfaceType",
+        "*"
+      ],
+      "identifierField": "RouterInterfaceId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeSnatTableEntries",
+      "resourceType": "ALIYUN::VPC::SnatEntry",
+      "path": [
+        "SnatTableEntries",
+        "SnatTableEntry",
+        "*"
+      ],
+      "identifierField": "SnatEntryId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeVSwitches",
+      "resourceType": "ALIYUN::VPC::VSwitch",
+      "path": [
+        "VSwitches",
+        "VSwitch",
+        "*"
+      ],
+      "identifierField": "VSwitchId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeVpcs",
+      "resourceType": "ALIYUN::VPC::VPC",
+      "path": [
+        "Vpcs",
+        "Vpc",
+        "*"
+      ],
+      "identifierField": "VpcId",
+      "regional": true
+    },
+    {
+      "product": "vpc",
+      "action": "DescribeVpnConnections",
+      "resourceType": "ALIYUN::VPC::VpnConnection",
+      "path": [
+        "VpnConnections",
+        "VpnConnection",
+        "*"
+      ],
+      "identifierField": "VpnConnectionId",
+      "regional": true
+    }
+  ]
+}

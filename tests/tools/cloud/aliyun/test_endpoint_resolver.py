@@ -25,6 +25,7 @@ from iac_code.tools.cloud.aliyun.endpoint_resolver import (
     merge_endpoint_record,
 )
 from iac_code.tools.cloud.aliyun.openmeta import ParameterMetadata
+from iac_code.tools.cloud.aliyun.ots_data_adapter import ots_list_table_metadata
 from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
 from tests.tools.cloud.aliyun._ecs_ram_role_fakes import FakeEcsRuntime
 
@@ -40,6 +41,48 @@ OPENMETA_PRODUCTS_URL = "https://api.aliyun.com/meta/v1/products.json?language=Z
 OPENMETA_PRODUCT_COUNT = 339
 OPENMETA_PRODUCTS_SHA256 = "d226cf4dfe48636261a08cd3b6e94e422831aa0f8e15c08e391023784e27830f"
 PRODUCT_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
+@pytest.mark.asyncio
+async def test_ots_data_endpoint_binds_the_reviewed_instance_and_region(tmp_path: Path) -> None:
+    metadata = ots_list_table_metadata()
+    contract = CanonicalWireContract(
+        metadata_source="explicit_fallback",
+        product=metadata.product,
+        version=metadata.version,
+        action=metadata.action,
+        style=metadata.style,
+        method=metadata.method,
+        pathname=metadata.pathname,
+        operation_type=None,
+        auth_type="AK",
+        signature_scheme="ots_v4",
+        transport="ots_sdk",
+        executable=True,
+        unsupported_reasons=(),
+        parameters=metadata.parameters,
+        consumes=(),
+        produces=("application/json",),
+        policy_digest="test",
+    )
+    resolver = EndpointResolver(cache_dir=tmp_path)
+
+    endpoint = await resolver.resolve(
+        contract,
+        "cn-shenzhen",
+        "credential",
+        host_values={"InstanceName": "fvt-ros"},
+    )
+    final_host = resolver.host_binding_resolver.bind(
+        contract,
+        endpoint.endpoint,
+        endpoint.host_template,
+        {"InstanceName": "fvt-ros"},
+    )
+
+    assert endpoint.endpoint == "cn-shenzhen.ots.aliyuncs.com"
+    assert endpoint.source == "override_pattern"
+    assert final_host == "fvt-ros.cn-shenzhen.ots.aliyuncs.com"
 
 
 class FakeLocation:

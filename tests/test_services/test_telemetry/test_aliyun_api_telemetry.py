@@ -154,6 +154,24 @@ def test_aliyun_api_event_accepts_reviewed_acs1_labels(capture_client) -> None:
     assert capture_client.events[0][1]["signature_scheme"] == "acs1"
 
 
+def test_aliyun_api_event_accepts_reviewed_ots_data_plane_labels(capture_client) -> None:
+    emit_aliyun_api_called(
+        metadata_source="explicit_fallback",
+        api_style="ROA",
+        http_method="POST",
+        transport="ots_sdk",
+        signature_scheme="ots_v4",
+        endpoint_source="override_pattern",
+        host_template_applied=True,
+        contract_override_used=False,
+        openmeta_cache_status="miss",
+        outcome="success",
+    )
+
+    assert capture_client.events[0][1]["transport"] == "ots_sdk"
+    assert capture_client.events[0][1]["signature_scheme"] == "ots_v4"
+
+
 def test_product_resolution_event_has_exact_sanitized_fields(capture_client) -> None:
     emit_aliyun_product_resolution(
         ProductResolution(

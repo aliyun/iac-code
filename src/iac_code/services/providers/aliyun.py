@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, fields
@@ -105,6 +106,8 @@ class AliyunCredential:
     oauth_refresh_token: str = ""
     oauth_access_token_expire: int = 0
     oauth_refresh_token_expire: int = 0
+    # Persisted login generation; token refresh preserves it, explicit login replaces it.
+    oauth_session_id: str = field(default="", repr=False)
     # Runtime-only origin metadata. It lets OAuth refresh reload the same
     # iac-code credential file after acquiring its cross-process lock without
     # changing the persisted credential schema.
@@ -130,7 +133,8 @@ _cloud_credential_thread_lock = threading.RLock()
 @contextmanager
 def _cloud_credential_file_lock(path: Path) -> Iterator[None]:
     """Serialize read-modify-write credential operations across threads and processes."""
-    lock_key = str(path.resolve(strict=False))
+    path = path.resolve(strict=False)
+    lock_key = str(path)
     held_paths = _cloud_credential_lock_paths.get()
     if lock_key in held_paths:
         yield
@@ -152,10 +156,10 @@ def _copy_credential(target: AliyunCredential, source: AliyunCredential) -> None
 
 def _credential_save_path(credential: AliyunCredential, config_path: str | None) -> Path:
     if config_path is not None:
-        return Path(config_path)
+        return Path(config_path).resolve(strict=False)
     if credential.credential_source == "iac_code" and credential.credential_source_path:
-        return Path(credential.credential_source_path)
-    return get_cloud_credentials_path()
+        return Path(credential.credential_source_path).resolve(strict=False)
+    return get_cloud_credentials_path().resolve(strict=False)
 
 
 class _CredentialSaveOperation(Protocol):
@@ -285,7 +289,7 @@ class AliyunCredentials:
             raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth site is missing."))
 
         source_path = (
-            Path(credential.credential_source_path)
+            Path(credential.credential_source_path).resolve(strict=False)
             if credential.credential_source == "iac_code" and credential.credential_source_path
             else None
         )
@@ -364,6 +368,7 @@ class AliyunCredentials:
 
     @staticmethod
     def _load_from_iac_code_path(path: Path) -> AliyunCredential | None:
+        path = path.resolve(strict=False)
         cloud_creds = _load_yaml(path)
         aliyun_data = cloud_creds.get("aliyun")
         if not aliyun_data or not isinstance(aliyun_data, dict):
@@ -396,6 +401,7 @@ class AliyunCredentials:
             oauth_refresh_token=aliyun_data.get("oauth_refresh_token", ""),
             oauth_access_token_expire=int(aliyun_data.get("oauth_access_token_expire") or 0),
             oauth_refresh_token_expire=int(aliyun_data.get("oauth_refresh_token_expire") or 0),
+            oauth_session_id=str(aliyun_data.get("oauth_session_id") or ""),
             credential_source="iac_code",
             credential_source_path=str(path),
         )
@@ -464,6 +470,7 @@ class AliyunCredentials:
             oauth_refresh_token=profile.get("oauth_refresh_token", ""),
             oauth_access_token_expire=oauth_access_token_expire,
             oauth_refresh_token_expire=oauth_refresh_token_expire,
+            oauth_session_id=str(profile.get("oauth_session_id") or ""),
         )
 
     @staticmethod
@@ -481,6 +488,10 @@ class AliyunCredentials:
         config_path: str | None = None,
     ) -> None:
         """Save credentials to ~/.iac-code/.cloud-credentials.yml."""
+        if credential.mode == "OAuth" and (
+            credential.credential_source != "iac_code" or not credential.oauth_session_id
+        ):
+            credential.oauth_session_id = uuid.uuid4().hex
         if config_path is not None:
             # For testing: save to specified path in aliyun CLI format
             AliyunCredentials._save_to_aliyun_cli_format(credential, config_path)
@@ -493,6 +504,8 @@ class AliyunCredentials:
             "mode": credential.mode,
             "region_id": credential.region_id,
         }
+        if credential.mode == "OAuth" and credential.oauth_session_id:
+            aliyun_data["oauth_session_id"] = credential.oauth_session_id
 
         # Save fields relevant to the credential mode
         mode_fields = MODE_FIELDS.get(credential.mode, [])
@@ -557,6 +570,8 @@ class AliyunCredentials:
             "oauth_access_token_expire": credential.oauth_access_token_expire,
             "oauth_refresh_token_expire": credential.oauth_refresh_token_expire,
         }
+        if credential.mode == "OAuth" and credential.oauth_session_id:
+            updated_profile["oauth_session_id"] = credential.oauth_session_id
 
         raw_profiles = data.get("profiles")
         profiles: list[dict[str, Any]] = (

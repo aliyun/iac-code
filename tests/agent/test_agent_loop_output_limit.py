@@ -90,16 +90,18 @@ async def test_text_truncation_continues_with_partial_text_and_no_incomplete_thi
 
 
 @pytest.mark.asyncio
-async def test_truncated_tool_call_is_discarded_before_retry() -> None:
+@pytest.mark.parametrize("complete_input", [False, True])
+async def test_truncated_tool_call_is_discarded_before_retry(complete_input: bool) -> None:
     tool = RecordingTool()
     registry = ToolRegistry()
     registry.register(tool)
+    tool_end = [ToolUseEndEvent(tool_use_id="call-1", name="record", input={"value": 1})] if complete_input else []
     provider = ScriptedProvider(
         [
             [
                 MessageStartEvent(message_id="first"),
                 ToolUseStartEvent(tool_use_id="call-1", name="record"),
-                ToolUseEndEvent(tool_use_id="call-1", name="record", input={"value": 1}),
+                *tool_end,
                 MessageEndEvent(stop_reason="max_tokens", usage=Usage()),
             ],
             reply("second", text="done"),

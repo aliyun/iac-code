@@ -286,7 +286,10 @@ def run_web_server(
         message = _("Web server dependencies are missing. Install with: pip install 'iac-code[http]'")
         raise RuntimeError(message) from exc
 
+    from iac_code.services.execution_policy import on_web_startup
     from iac_code.web.app import create_app
+
+    on_web_startup()
 
     apply_persisted_telemetry_content_settings()
 

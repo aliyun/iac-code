@@ -711,6 +711,7 @@ class WebSessionRuntime:
                         await close_agent_runtime(agent_runtime, lifecycle_owner=self.lifecycle_owner)
                     finally:
                         try:
+                            await self.session.flush_resource_references()
                             await flush_web_telemetry()
                         finally:
                             if self.session.active_turn_task is asyncio.current_task():
@@ -854,6 +855,7 @@ class WebSessionRuntime:
         finally:
             await coordinator.release_restore(boundary_id)
             await close_agent_runtime(agent_runtime, lifecycle_owner=self.lifecycle_owner)
+            await self.session.flush_resource_references()
             if self.session.active_turn_task is asyncio.current_task():
                 self.session.active_turn_task = None
                 self.session.active_agent_loop = None

@@ -1,0 +1,6862 @@
+{
+  "schema_version": 1,
+  "plan_id": "resource-link-catalog-example",
+  "resources": [
+    {
+      "id": "R0001",
+      "key": "ALIYUN::VPC::VSwitch",
+      "service": "VPC",
+      "name": "VSwitch",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0001-ROS-1",
+              "source_type": "ALIYUN::ECS::VSwitch",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0001-TF-1",
+              "source_type": "alicloud_vswitch",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0001-CREATE-1",
+              "source_type": "ALIYUN::VPC::VSwitch",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0001-QUERY-1",
+              "source_type": "ALIYUN::VPC::VSwitch",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeContainerGroups",
+          "product": "eci",
+          "contract": "eci/DescribeContainerGroups/ALIYUN::VPC::VSwitch/ContainerGroups.*"
+        },
+        {
+          "action": "DescribeVSwitches",
+          "product": "vpc",
+          "contract": "vpc/DescribeVSwitches/ALIYUN::VPC::VSwitch/VSwitches.VSwitch.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateVSwitch",
+          "product": "vpc",
+          "contract": "vpc/CreateVSwitch"
+        }
+      ]
+    },
+    {
+      "id": "R0002",
+      "key": "ALIYUN::VPC::CommonBandwidthPackage",
+      "service": "VPC",
+      "name": "CommonBandwidthPackage",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0002-ROS-1",
+              "source_type": "ALIYUN::VPC::CommonBandwidthPackage",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0002-TF-1",
+              "source_type": "alicloud_common_bandwidth_package",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0002-CREATE-1",
+              "source_type": "ALIYUN::VPC::CommonBandwidthPackage",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0002-QUERY-1",
+              "source_type": "ALIYUN::VPC::CommonBandwidthPackage",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeCommonBandwidthPackages",
+          "product": "vpc",
+          "contract": "vpc/DescribeCommonBandwidthPackages/ALIYUN::VPC::CommonBandwidthPackage/CommonBandwidthPackages.CommonBandwidthPackage.*"
+        },
+        {
+          "action": "DescribeCommonBandwidthPackages",
+          "product": "vpc",
+          "contract": "vpc/DescribeCommonBandwidthPackages/alicloud_common_bandwidth_package/CommonBandwidthPackages.CommonBandwidthPackage.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0003",
+      "key": "ALIYUN::VPC::CustomerGateway",
+      "service": "VPC",
+      "name": "CustomerGateway",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0003-ROS-1",
+              "source_type": "ALIYUN::VPC::CustomerGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0003-TF-1",
+              "source_type": "alicloud_vpn_customer_gateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0003-CREATE-1",
+              "source_type": "ALIYUN::VPC::CustomerGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0003-QUERY-1",
+              "source_type": "ALIYUN::VPC::CustomerGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeCustomerGateways",
+          "product": "vpc",
+          "contract": "vpc/DescribeCustomerGateways/ALIYUN::VPC::CustomerGateway/CustomerGateways.CustomerGateway.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0004",
+      "key": "ALIYUN::VPC::EIP",
+      "service": "VPC",
+      "name": "EIP",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0004-ROS-1",
+              "source_type": "ALIYUN::VPC::EIP",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0004-TF-1",
+              "source_type": "alicloud_eip",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0004-CREATE-1",
+              "source_type": "ALIYUN::VPC::EIP",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0004-QUERY-1",
+              "source_type": "ALIYUN::VPC::EIP",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeEipAddresses",
+          "product": "vpc",
+          "contract": "vpc/DescribeEipAddresses/ALIYUN::VPC::EIP/EipAddresses.EipAddress.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "AllocateEipAddress",
+          "product": "vpc",
+          "contract": "vpc/AllocateEipAddress"
+        }
+      ]
+    },
+    {
+      "id": "R0005",
+      "key": "ALIYUN::VPC::NatGateway",
+      "service": "VPC",
+      "name": "NatGateway",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0005-ROS-1",
+              "source_type": "ALIYUN::VPC::NatGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0005-TF-1",
+              "source_type": "alicloud_nat_gateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0005-CREATE-1",
+              "source_type": "ALIYUN::VPC::NatGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0005-QUERY-1",
+              "source_type": "ALIYUN::VPC::NatGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeNatGateways",
+          "product": "vpc",
+          "contract": "vpc/DescribeNatGateways/ALIYUN::VPC::NatGateway/NatGateways.NatGateway.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0006",
+      "key": "ALIYUN::VPC::RouterInterface",
+      "service": "VPC",
+      "name": "RouterInterface",
+      "priority": "P1",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0006-ROS-1",
+              "source_type": "ALIYUN::VPC::RouterInterface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0006-TF-1",
+              "source_type": "alicloud_router_interface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0006-CREATE-1",
+              "source_type": "ALIYUN::VPC::RouterInterface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0006-QUERY-1",
+              "source_type": "ALIYUN::VPC::RouterInterface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeRouterInterfaces",
+          "product": "vpc",
+          "contract": "vpc/DescribeRouterInterfaces/ALIYUN::VPC::RouterInterface/RouterInterfaceSet.RouterInterfaceType.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0007",
+      "key": "ALIYUN::VPC::RouteTable",
+      "service": "VPC",
+      "name": "RouteTable",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0007-ROS-1",
+              "source_type": "ALIYUN::VPC::RouteTable",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0007-TF-1",
+              "source_type": "alicloud_route_table",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0007-CREATE-1",
+              "source_type": "ALIYUN::VPC::RouteTable",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0007-QUERY-1",
+              "source_type": "ALIYUN::VPC::RouteTable",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeRouteTableList",
+          "product": "vpc",
+          "contract": "vpc/DescribeRouteTableList/ALIYUN::VPC::RouteTable/RouterTableList.RouterTableListType.*"
+        },
+        {
+          "action": "DescribeRouteTables",
+          "product": "vpc",
+          "contract": "vpc/DescribeRouteTables/ALIYUN::VPC::RouteTable/RouteTables.RouteTable.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0008",
+      "key": "ALIYUN::VPC::SnatEntry",
+      "service": "VPC",
+      "name": "SnatEntry",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0008-ROS-1",
+              "source_type": "ALIYUN::VPC::SnatEntry",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0008-TF-1",
+              "source_type": "alicloud_snat_entry",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0008-CREATE-1",
+              "source_type": "ALIYUN::VPC::SnatEntry",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0008-QUERY-1",
+              "source_type": "ALIYUN::VPC::SnatEntry",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeSnatTableEntries",
+          "product": "vpc",
+          "contract": "vpc/DescribeSnatTableEntries/ALIYUN::VPC::SnatEntry/SnatTableEntries.SnatTableEntry.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0009",
+      "key": "ALIYUN::VPC::VPC",
+      "service": "VPC",
+      "name": "VPC",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0009-ROS-1",
+              "source_type": "ALIYUN::ECS::VPC",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0009-TF-1",
+              "source_type": "alicloud_vpc",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0009-CREATE-1",
+              "source_type": "ALIYUN::VPC::VPC",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0009-QUERY-1",
+              "source_type": "ALIYUN::VPC::VPC",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeContainerGroups",
+          "product": "eci",
+          "contract": "eci/DescribeContainerGroups/ALIYUN::VPC::VPC/ContainerGroups.*"
+        },
+        {
+          "action": "DescribeVpcs",
+          "product": "vpc",
+          "contract": "vpc/DescribeVpcs/ALIYUN::VPC::VPC/Vpcs.Vpc.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateVpc",
+          "product": "vpc",
+          "contract": "vpc/CreateVpc"
+        }
+      ]
+    },
+    {
+      "id": "R0010",
+      "key": "ALIYUN::VPC::VpnConnection",
+      "service": "VPC",
+      "name": "VpnConnection",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0010-ROS-1",
+              "source_type": "ALIYUN::VPC::VpnConnection",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0010-TF-1",
+              "source_type": "alicloud_vpn_connection",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0010-CREATE-1",
+              "source_type": "ALIYUN::VPC::VpnConnection",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0010-QUERY-1",
+              "source_type": "ALIYUN::VPC::VpnConnection",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeVpnConnections",
+          "product": "vpc",
+          "contract": "vpc/DescribeVpnConnections/ALIYUN::VPC::VpnConnection/VpnConnections.VpnConnection.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0011",
+      "key": "ALIYUN::VPC::VpnGateway",
+      "service": "VPC",
+      "name": "VpnGateway",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0011-ROS-1",
+              "source_type": "ALIYUN::VPC::VpnGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0011-TF-1",
+              "source_type": "alicloud_vpn_gateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0011-CREATE-1",
+              "source_type": "ALIYUN::VPC::VpnGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0011-QUERY-1",
+              "source_type": "ALIYUN::VPC::VpnGateway",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0012",
+      "key": "ALIYUN::ECS::Disk",
+      "service": "ECS",
+      "name": "Disk",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0012-ROS-1",
+              "source_type": "ALIYUN::ECS::Disk",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0012-TF-1",
+              "source_type": "alicloud_ecs_disk",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0012-CREATE-1",
+              "source_type": "ALIYUN::ECS::Disk",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0012-QUERY-1",
+              "source_type": "ALIYUN::ECS::Disk",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeDisks",
+          "product": "ecs",
+          "contract": "ecs/DescribeDisks/ALIYUN::ECS::Disk/Disks.Disk.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateDisk",
+          "product": "ecs",
+          "contract": "ecs/CreateDisk"
+        }
+      ]
+    },
+    {
+      "id": "R0013",
+      "key": "ALIYUN::ECS::Image",
+      "service": "ECS",
+      "name": "Image",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0013-ROS-1",
+              "source_type": "ALIYUN::ECS::Image",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0013-TF-1",
+              "source_type": "alicloud_image",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0013-CREATE-1",
+              "source_type": "ALIYUN::ECS::Image",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0013-QUERY-1",
+              "source_type": "ALIYUN::ECS::Image",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeImages",
+          "product": "ecs",
+          "contract": "ecs/DescribeImages/ALIYUN::ECS::Image/Images.Image.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateImage",
+          "product": "ecs",
+          "contract": "ecs/CreateImage"
+        }
+      ]
+    },
+    {
+      "id": "R0014",
+      "key": "ALIYUN::ECS::Instance",
+      "service": "ECS",
+      "name": "Instance",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0014-ROS-1",
+              "source_type": "ALIYUN::ECS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0014-TF-1",
+              "source_type": "alicloud_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0014-CREATE-1",
+              "source_type": "ALIYUN::ECS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0014-QUERY-1",
+              "source_type": "ALIYUN::ECS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeInstances",
+          "product": "ecs",
+          "contract": "ecs/DescribeInstances/ALIYUN::ECS::Instance/Instances.Instance.*"
+        },
+        {
+          "action": "DescribeInstances",
+          "product": "ecs",
+          "contract": "ecs/DescribeInstances/alicloud_instance/Instances.Instance.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateInstance",
+          "product": "ecs",
+          "contract": "ecs/CreateInstance"
+        },
+        {
+          "action": "RunInstances",
+          "product": "ecs",
+          "contract": "ecs/RunInstances"
+        }
+      ]
+    },
+    {
+      "id": "R0015",
+      "key": "ALIYUN::ECS::LaunchTemplate",
+      "service": "ECS",
+      "name": "LaunchTemplate",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0015-ROS-1",
+              "source_type": "ALIYUN::ECS::LaunchTemplate",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0015-TF-1",
+              "source_type": "alicloud_ecs_launch_template",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0015-CREATE-1",
+              "source_type": "ALIYUN::ECS::LaunchTemplate",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0015-QUERY-1",
+              "source_type": "ALIYUN::ECS::LaunchTemplate",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeLaunchTemplates",
+          "product": "ecs",
+          "contract": "ecs/DescribeLaunchTemplates/ALIYUN::ECS::LaunchTemplate/LaunchTemplateSets.LaunchTemplateSet.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "product": "ecs",
+          "action": "CreateLaunchTemplate"
+        }
+      ]
+    },
+    {
+      "id": "R0016",
+      "key": "ALIYUN::ECS::NetworkInterface",
+      "service": "ECS",
+      "name": "NetworkInterface",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0016-ROS-1",
+              "source_type": "ALIYUN::ECS::NetworkInterface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0016-TF-1",
+              "source_type": "alicloud_ecs_network_interface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0016-CREATE-1",
+              "source_type": "ALIYUN::ECS::NetworkInterface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0016-QUERY-1",
+              "source_type": "ALIYUN::ECS::NetworkInterface",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeNetworkInterfaces",
+          "product": "ecs",
+          "contract": "ecs/DescribeNetworkInterfaces/ALIYUN::ECS::NetworkInterface/NetworkInterfaceSets.NetworkInterfaceSet.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateNetworkInterface",
+          "product": "ecs",
+          "contract": "ecs/CreateNetworkInterface"
+        }
+      ]
+    },
+    {
+      "id": "R0017",
+      "key": "ALIYUN::ECS::PrefixList",
+      "service": "ECS",
+      "name": "PrefixList",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0017-ROS-1",
+              "source_type": "ALIYUN::ECS::PrefixList",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0017-TF-1",
+              "source_type": "alicloud_ecs_prefix_list",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0017-CREATE-1",
+              "source_type": "ALIYUN::ECS::PrefixList",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0017-QUERY-1",
+              "source_type": "ALIYUN::ECS::PrefixList",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribePrefixLists",
+          "product": "ecs",
+          "contract": "ecs/DescribePrefixLists/ALIYUN::ECS::PrefixList/PrefixLists.PrefixList.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "product": "ecs",
+          "action": "CreatePrefixList"
+        }
+      ]
+    },
+    {
+      "id": "R0018",
+      "key": "ALIYUN::ECS::SecurityGroup",
+      "service": "ECS",
+      "name": "SecurityGroup",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0018-ROS-1",
+              "source_type": "ALIYUN::ECS::SecurityGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0018-TF-1",
+              "source_type": "alicloud_security_group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0018-CREATE-1",
+              "source_type": "ALIYUN::ECS::SecurityGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0018-QUERY-1",
+              "source_type": "ALIYUN::ECS::SecurityGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeSecurityGroups",
+          "product": "ecs",
+          "contract": "ecs/DescribeSecurityGroups/ALIYUN::ECS::SecurityGroup/SecurityGroups.SecurityGroup.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateSecurityGroup",
+          "product": "ecs",
+          "contract": "ecs/CreateSecurityGroup"
+        }
+      ]
+    },
+    {
+      "id": "R0019",
+      "key": "ALIYUN::ECS::Snapshot",
+      "service": "ECS",
+      "name": "Snapshot",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0019-ROS-1",
+              "source_type": "ALIYUN::ECS::Snapshot",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0019-TF-1",
+              "source_type": "alicloud_ecs_snapshot",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0019-CREATE-1",
+              "source_type": "ALIYUN::ECS::Snapshot",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0019-QUERY-1",
+              "source_type": "ALIYUN::ECS::Snapshot",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeSnapshots",
+          "product": "ecs",
+          "contract": "ecs/DescribeSnapshots/ALIYUN::ECS::Snapshot/Snapshots.Snapshot.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateSnapshot",
+          "product": "ecs",
+          "contract": "ecs/CreateSnapshot"
+        }
+      ]
+    },
+    {
+      "id": "R0020",
+      "key": "ALIYUN::ECS::SNatEntry",
+      "service": "ECS",
+      "name": "SNatEntry",
+      "priority": "P1",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0020-ROS-1",
+              "source_type": "ALIYUN::ECS::SNatEntry",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0020-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0020-CREATE-1",
+              "source_type": "ALIYUN::ECS::SNatEntry",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0020-QUERY-1",
+              "source_type": "ALIYUN::ECS::SNatEntry",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0021",
+      "key": "ALIYUN::ECS::SSHKeyPair",
+      "service": "ECS",
+      "name": "SSHKeyPair",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0021-ROS-1",
+              "source_type": "ALIYUN::ECS::SSHKeyPair",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0021-TF-1",
+              "source_type": "alicloud_ecs_key_pair",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0021-CREATE-1",
+              "source_type": "ALIYUN::ECS::SSHKeyPair",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0021-QUERY-1",
+              "source_type": "ALIYUN::ECS::SSHKeyPair",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeKeyPairs",
+          "product": "ecs",
+          "contract": "ecs/DescribeKeyPairs/ALIYUN::ECS::SSHKeyPair/KeyPairs.KeyPair.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateKeyPair",
+          "product": "ecs",
+          "contract": "ecs/CreateKeyPair"
+        }
+      ]
+    },
+    {
+      "id": "R0022",
+      "key": "ALIYUN::SLB::AccessControl",
+      "service": "SLB",
+      "name": "AccessControl",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0022-ROS-1",
+              "source_type": "ALIYUN::SLB::AccessControl",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0022-TF-1",
+              "source_type": "alicloud_slb_acl",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0022-CREATE-1",
+              "source_type": "ALIYUN::SLB::AccessControl",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0022-QUERY-1",
+              "source_type": "ALIYUN::SLB::AccessControl",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeAccessControlLists",
+          "product": "slb",
+          "contract": "slb/DescribeAccessControlLists/ALIYUN::SLB::AccessControl/Acls.Acl.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0023",
+      "key": "ALIYUN::SLB::Listener",
+      "service": "SLB",
+      "name": "Listener",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0023-ROS-1",
+              "source_type": "ALIYUN::SLB::Listener",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0023-TF-1",
+              "source_type": "alicloud_slb_listener",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0023-CREATE-1",
+              "source_type": "ALIYUN::SLB::Listener",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0023-QUERY-1",
+              "source_type": "ALIYUN::SLB::Listener",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeLoadBalancerAttribute",
+          "product": "slb",
+          "contract": "slb/DescribeLoadBalancerAttribute/alicloud_slb_listener/ListenerPortsAndProtocol.ListenerPortAndProtocol.*"
+        },
+        {
+          "action": "DescribeLoadBalancerListeners",
+          "product": "slb",
+          "contract": "slb/DescribeLoadBalancerListeners/alicloud_slb_listener/Listeners.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0024",
+      "key": "ALIYUN::SLB::LoadBalancer",
+      "service": "SLB",
+      "name": "LoadBalancer",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0024-ROS-1",
+              "source_type": "ALIYUN::SLB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0024-TF-1",
+              "source_type": "alicloud_slb_load_balancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0024-CREATE-1",
+              "source_type": "ALIYUN::SLB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0024-QUERY-1",
+              "source_type": "ALIYUN::SLB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeLoadBalancers",
+          "product": "slb",
+          "contract": "slb/DescribeLoadBalancers/ALIYUN::SLB::LoadBalancer/LoadBalancers.LoadBalancer.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateLoadBalancer",
+          "product": "slb",
+          "contract": "slb/CreateLoadBalancer"
+        }
+      ]
+    },
+    {
+      "id": "R0025",
+      "key": "ALIYUN::SLB::VServerGroup",
+      "service": "SLB",
+      "name": "VServerGroup",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0025-ROS-1",
+              "source_type": "ALIYUN::SLB::VServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0025-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0025-CREATE-1",
+              "source_type": "ALIYUN::SLB::VServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0025-QUERY-1",
+              "source_type": "ALIYUN::SLB::VServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": [
+        {
+          "action": "CreateVServerGroup",
+          "product": "slb",
+          "contract": "slb/CreateVServerGroup"
+        }
+      ]
+    },
+    {
+      "id": "R0026",
+      "key": "ALIYUN::ALB::Acl",
+      "service": "ALB",
+      "name": "Acl",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0026-ROS-1",
+              "source_type": "ALIYUN::ALB::Acl",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0026-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0026-CREATE-1",
+              "source_type": "ALIYUN::ALB::Acl",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0026-QUERY-1",
+              "source_type": "ALIYUN::ALB::Acl",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListAcls",
+          "product": "alb",
+          "contract": "alb/ListAcls/ALIYUN::ALB::Acl/Acls.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0027",
+      "key": "ALIYUN::ALB::Listener",
+      "service": "ALB",
+      "name": "Listener",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0027-ROS-1",
+              "source_type": "ALIYUN::ALB::Listener",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0027-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0027-CREATE-1",
+              "source_type": "ALIYUN::ALB::Listener",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0027-QUERY-1",
+              "source_type": "ALIYUN::ALB::Listener",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListListeners",
+          "product": "alb",
+          "contract": "alb/ListListeners/ALIYUN::ALB::Listener/Listeners.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateListener",
+          "product": "alb",
+          "contract": "alb/CreateListener"
+        }
+      ]
+    },
+    {
+      "id": "R0028",
+      "key": "ALIYUN::ALB::LoadBalancer",
+      "service": "ALB",
+      "name": "LoadBalancer",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0028-ROS-1",
+              "source_type": "ALIYUN::ALB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0028-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0028-CREATE-1",
+              "source_type": "ALIYUN::ALB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0028-QUERY-1",
+              "source_type": "ALIYUN::ALB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListLoadBalancers",
+          "product": "alb",
+          "contract": "alb/ListLoadBalancers/ALIYUN::ALB::LoadBalancer/LoadBalancers.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateLoadBalancer",
+          "product": "alb",
+          "contract": "alb/CreateLoadBalancer"
+        }
+      ]
+    },
+    {
+      "id": "R0029",
+      "key": "ALIYUN::ALB::SecurityPolicy",
+      "service": "ALB",
+      "name": "SecurityPolicy",
+      "priority": "P1",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0029-ROS-1",
+              "source_type": "ALIYUN::ALB::SecurityPolicy",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0029-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0029-CREATE-1",
+              "source_type": "ALIYUN::ALB::SecurityPolicy",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0029-QUERY-1",
+              "source_type": "ALIYUN::ALB::SecurityPolicy",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListSecurityPolicies",
+          "product": "alb",
+          "contract": "alb/ListSecurityPolicies/ALIYUN::ALB::SecurityPolicy/SecurityPolicies.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0030",
+      "key": "ALIYUN::ALB::ServerGroup",
+      "service": "ALB",
+      "name": "ServerGroup",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0030-ROS-1",
+              "source_type": "ALIYUN::ALB::ServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0030-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0030-CREATE-1",
+              "source_type": "ALIYUN::ALB::ServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0030-QUERY-1",
+              "source_type": "ALIYUN::ALB::ServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListServerGroups",
+          "product": "alb",
+          "contract": "alb/ListServerGroups/ALIYUN::ALB::ServerGroup/ServerGroups.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0031",
+      "key": "ALIYUN::NLB::LoadBalancer",
+      "service": "NLB",
+      "name": "LoadBalancer",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0031-ROS-1",
+              "source_type": "ALIYUN::NLB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0031-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0031-CREATE-1",
+              "source_type": "ALIYUN::NLB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0031-QUERY-1",
+              "source_type": "ALIYUN::NLB::LoadBalancer",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListLoadBalancers",
+          "product": "nlb",
+          "contract": "nlb/ListLoadBalancers/ALIYUN::NLB::LoadBalancer/LoadBalancers.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateLoadBalancer",
+          "product": "nlb",
+          "contract": "nlb/CreateLoadBalancer"
+        }
+      ]
+    },
+    {
+      "id": "R0032",
+      "key": "ALIYUN::NLB::ServerGroup",
+      "service": "NLB",
+      "name": "ServerGroup",
+      "priority": "P0",
+      "group": "network-compute",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0032-ROS-1",
+              "source_type": "ALIYUN::NLB::ServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0032-TF-1",
+              "source_type": "alicloud_nlb_server_group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0032-CREATE-1",
+              "source_type": "ALIYUN::NLB::ServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0032-QUERY-1",
+              "source_type": "ALIYUN::NLB::ServerGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListServerGroups",
+          "product": "nlb",
+          "contract": "nlb/ListServerGroups/ALIYUN::NLB::ServerGroup/ServerGroups.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0033",
+      "key": "ALIYUN::OSS::Bucket",
+      "service": "OSS",
+      "name": "Bucket",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0033-ROS-1",
+              "source_type": "ALIYUN::OSS::Bucket",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0033-TF-1",
+              "source_type": "alicloud_oss_bucket",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0033-CREATE-1",
+              "source_type": "ALIYUN::OSS::Bucket",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0033-QUERY-1",
+              "source_type": "ALIYUN::OSS::Bucket",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListBuckets",
+          "product": "oss",
+          "contract": "oss/ListBuckets/ALIYUN::OSS::Bucket/buckets.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0034",
+      "key": "ALIYUN::NAS::AccessGroup",
+      "service": "NAS",
+      "name": "AccessGroup",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0034-ROS-1",
+              "source_type": "ALIYUN::NAS::AccessGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0034-TF-1",
+              "source_type": "alicloud_nas_access_group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0034-CREATE-1",
+              "source_type": "ALIYUN::NAS::AccessGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0034-QUERY-1",
+              "source_type": "ALIYUN::NAS::AccessGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeAccessGroups",
+          "product": "nas",
+          "contract": "nas/DescribeAccessGroups/ALIYUN::NAS::AccessGroup/AccessGroups.AccessGroup.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "product": "nas",
+          "action": "CreateAccessGroup"
+        }
+      ]
+    },
+    {
+      "id": "R0035",
+      "key": "ALIYUN::NAS::AccessRule",
+      "service": "NAS",
+      "name": "AccessRule",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0035-ROS-1",
+              "source_type": "ALIYUN::NAS::AccessRule",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0035-TF-1",
+              "source_type": "alicloud_nas_access_rule",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0035-CREATE-1",
+              "source_type": "ALIYUN::NAS::AccessRule",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0035-QUERY-1",
+              "source_type": "ALIYUN::NAS::AccessRule",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeAccessRules",
+          "product": "nas",
+          "contract": "nas/DescribeAccessRules/ALIYUN::NAS::AccessRule/AccessRules.AccessRule.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0036",
+      "key": "ALIYUN::NAS::DataFlow",
+      "service": "NAS",
+      "name": "DataFlow",
+      "priority": "P1",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0036-ROS-1",
+              "source_type": "ALIYUN::NAS::DataFlow",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0036-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0036-CREATE-1",
+              "source_type": "ALIYUN::NAS::DataFlow",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0036-QUERY-1",
+              "source_type": "ALIYUN::NAS::DataFlow",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeDataFlows",
+          "product": "nas",
+          "contract": "nas/DescribeDataFlows/ALIYUN::NAS::DataFlow/DataFlowInfo.DataFlow.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0037",
+      "key": "ALIYUN::NAS::Fileset",
+      "service": "NAS",
+      "name": "Fileset",
+      "priority": "P1",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0037-ROS-1",
+              "source_type": "ALIYUN::NAS::Fileset",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0037-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0037-CREATE-1",
+              "source_type": "ALIYUN::NAS::Fileset",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0037-QUERY-1",
+              "source_type": "ALIYUN::NAS::Fileset",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeFilesets",
+          "product": "nas",
+          "contract": "nas/DescribeFilesets/ALIYUN::NAS::Fileset/Entries.Entrie.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0038",
+      "key": "ALIYUN::NAS::FileSystem",
+      "service": "NAS",
+      "name": "FileSystem",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0038-ROS-1",
+              "source_type": "ALIYUN::NAS::FileSystem",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0038-TF-1",
+              "source_type": "alicloud_nas_file_system",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0038-CREATE-1",
+              "source_type": "ALIYUN::NAS::FileSystem",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0038-QUERY-1",
+              "source_type": "ALIYUN::NAS::FileSystem",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeFileSystems",
+          "product": "nas",
+          "contract": "nas/DescribeFileSystems/ALIYUN::NAS::FileSystem/FileSystems.FileSystem.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0039",
+      "key": "ALIYUN::NAS::MountTarget",
+      "service": "NAS",
+      "name": "MountTarget",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0039-ROS-1",
+              "source_type": "ALIYUN::NAS::MountTarget",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0039-TF-1",
+              "source_type": "alicloud_nas_mount_target",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0039-CREATE-1",
+              "source_type": "ALIYUN::NAS::MountTarget",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0039-QUERY-1",
+              "source_type": "ALIYUN::NAS::MountTarget",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeFileSystems",
+          "product": "nas",
+          "contract": "nas/DescribeFileSystems/ALIYUN::NAS::MountTarget/FileSystems.FileSystem.*.MountTargets.MountTarget.*"
+        },
+        {
+          "action": "DescribeMountTargets",
+          "product": "nas",
+          "contract": "nas/DescribeMountTargets/ALIYUN::NAS::MountTarget/MountTargets.MountTarget.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0040",
+      "key": "ALIYUN::NAS::ProtocolMountTarget",
+      "service": "NAS",
+      "name": "ProtocolMountTarget",
+      "priority": "P1",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0040-ROS-1",
+              "source_type": "ALIYUN::NAS::ProtocolMountTarget",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0040-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0040-CREATE-1",
+              "source_type": "ALIYUN::NAS::ProtocolMountTarget",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0040-QUERY-1",
+              "source_type": "ALIYUN::NAS::ProtocolMountTarget",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeProtocolMountTarget",
+          "product": "nas",
+          "contract": "nas/DescribeProtocolMountTarget/ALIYUN::NAS::ProtocolMountTarget/ProtocolMountTargets.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0041",
+      "key": "ALIYUN::NAS::ProtocolService",
+      "service": "NAS",
+      "name": "ProtocolService",
+      "priority": "P1",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0041-ROS-1",
+              "source_type": "ALIYUN::NAS::ProtocolService",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0041-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0041-CREATE-1",
+              "source_type": "ALIYUN::NAS::ProtocolService",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0041-QUERY-1",
+              "source_type": "ALIYUN::NAS::ProtocolService",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeProtocolService",
+          "product": "nas",
+          "contract": "nas/DescribeProtocolService/ALIYUN::NAS::ProtocolService/ProtocolServices.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0042",
+      "key": "ALIYUN::OTS::Instance",
+      "service": "OTS",
+      "name": "Instance",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0042-ROS-1",
+              "source_type": "ALIYUN::OTS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0042-TF-1",
+              "source_type": "alicloud_ots_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0042-CREATE-1",
+              "source_type": "ALIYUN::OTS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0042-QUERY-1",
+              "source_type": "ALIYUN::OTS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListInstances",
+          "product": "tablestore",
+          "contract": "tablestore/ListInstances/ALIYUN::OTS::Instance/Instances.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0043",
+      "key": "ALIYUN::OTS::Table",
+      "service": "OTS",
+      "name": "Table",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0043-ROS-1",
+              "source_type": "ALIYUN::OTS::Table",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0043-TF-1",
+              "source_type": "alicloud_ots_table",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0043-CREATE-1",
+              "source_type": "ALIYUN::OTS::Table",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0043-QUERY-1",
+              "source_type": "ALIYUN::OTS::Table",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListTable",
+          "product": "tablestore",
+          "contract": "tablestore/ListTable/ALIYUN::OTS::Table/Tables.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0044",
+      "key": "ALIYUN::OTS::VpcBinder",
+      "service": "OTS",
+      "name": "VpcBinder",
+      "priority": "P1",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0044-ROS-1",
+              "source_type": "ALIYUN::OTS::VpcBinder",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0044-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0044-CREATE-1",
+              "source_type": "ALIYUN::OTS::VpcBinder",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0044-QUERY-1",
+              "source_type": "ALIYUN::OTS::VpcBinder",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListVpcInfoByInstance",
+          "product": "tablestore",
+          "contract": "tablestore/ListVpcInfoByInstance/ALIYUN::OTS::VpcBinder/VpcList.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0045",
+      "key": "ALIYUN::RDS::DBInstance",
+      "service": "RDS",
+      "name": "DBInstance",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0045-ROS-1",
+              "source_type": "ALIYUN::RDS::DBInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0045-TF-1",
+              "source_type": "alicloud_db_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            },
+            {
+              "id": "R0045-TF-2",
+              "source_type": "alicloud_rds_clone_db_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            },
+            {
+              "id": "R0045-TF-3",
+              "source_type": "alicloud_rds_upgrade_db_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0045-CREATE-1",
+              "source_type": "ALIYUN::RDS::DBInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0045-QUERY-1",
+              "source_type": "ALIYUN::RDS::DBInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeDBInstances",
+          "product": "rds",
+          "contract": "rds/DescribeDBInstances/ALIYUN::RDS::DBInstance/Items.DBInstance.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateDBInstance",
+          "product": "rds",
+          "contract": "rds/CreateDBInstance"
+        }
+      ]
+    },
+    {
+      "id": "R0046",
+      "key": "ALIYUN::POLARDB::Account",
+      "service": "PolarDB",
+      "name": "Account",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0046-ROS-1",
+              "source_type": "ALIYUN::POLARDB::Account",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0046-TF-1",
+              "source_type": "alicloud_polardb_account",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0046-CREATE-1",
+              "source_type": "ALIYUN::POLARDB::Account",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0046-QUERY-1",
+              "source_type": "ALIYUN::POLARDB::Account",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeAccounts",
+          "product": "polardb",
+          "contract": "polardb/DescribeAccounts/ALIYUN::POLARDB::Account/Accounts.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0047",
+      "key": "alicloud_polardb_database",
+      "service": "PolarDB",
+      "name": "Database",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0047-ROS-1",
+              "source_type": "alicloud_polardb_database",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0047-TF-1",
+              "source_type": "alicloud_polardb_database",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0047-CREATE-1",
+              "source_type": "alicloud_polardb_database",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0047-QUERY-1",
+              "source_type": "alicloud_polardb_database",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeDatabases",
+          "product": "polardb",
+          "contract": "polardb/DescribeDatabases/alicloud_polardb_database/Databases.Database.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0048",
+      "key": "ALIYUN::POLARDB::DBCluster",
+      "service": "PolarDB",
+      "name": "DBCluster",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0048-ROS-1",
+              "source_type": "ALIYUN::POLARDB::DBCluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0048-TF-1",
+              "source_type": "alicloud_polardb_cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0048-CREATE-1",
+              "source_type": "ALIYUN::POLARDB::DBCluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0048-QUERY-1",
+              "source_type": "ALIYUN::POLARDB::DBCluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeDBClusters",
+          "product": "polardb",
+          "contract": "polardb/DescribeDBClusters/ALIYUN::POLARDB::DBCluster/Items.DBCluster.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0049",
+      "key": "ALIYUN::MONGODB::Instance",
+      "service": "MongoDB",
+      "name": "Instance",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0049-ROS-1",
+              "source_type": "ALIYUN::MONGODB::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0049-TF-1",
+              "source_type": "alicloud_mongodb_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0049-CREATE-1",
+              "source_type": "ALIYUN::MONGODB::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0049-QUERY-1",
+              "source_type": "ALIYUN::MONGODB::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeDBInstances",
+          "product": "dds",
+          "contract": "dds/DescribeDBInstances/ALIYUN::MONGODB::Instance/DBInstances.DBInstance.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0050",
+      "key": "ALIYUN::REDIS::Instance",
+      "service": "Redis",
+      "name": "Instance",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0050-ROS-1",
+              "source_type": "ALIYUN::REDIS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0050-TF-1",
+              "source_type": "alicloud_kvstore_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0050-CREATE-1",
+              "source_type": "ALIYUN::REDIS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0050-QUERY-1",
+              "source_type": "ALIYUN::REDIS::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeInstances",
+          "product": "r-kvstore",
+          "contract": "r-kvstore/DescribeInstances/ALIYUN::REDIS::Instance/Instances.KVStoreInstance.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateInstance",
+          "product": "r-kvstore",
+          "contract": "r-kvstore/CreateInstance"
+        }
+      ]
+    },
+    {
+      "id": "R0051",
+      "key": "ALIYUN::RAM::Group",
+      "service": "RAM",
+      "name": "Group",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0051-ROS-1",
+              "source_type": "ALIYUN::RAM::Group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0051-TF-1",
+              "source_type": "alicloud_ram_group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0051-CREATE-1",
+              "source_type": "ALIYUN::RAM::Group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0051-QUERY-1",
+              "source_type": "ALIYUN::RAM::Group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListGroups",
+          "product": "ram",
+          "contract": "ram/ListGroups/ALIYUN::RAM::Group/Groups.Group.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0052",
+      "key": "ALIYUN::RAM::ManagedPolicy",
+      "service": "RAM",
+      "name": "ManagedPolicy",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0052-ROS-1",
+              "source_type": "ALIYUN::RAM::ManagedPolicy",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0052-TF-1",
+              "source_type": "alicloud_ram_policy",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0052-CREATE-1",
+              "source_type": "ALIYUN::RAM::ManagedPolicy",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0052-QUERY-1",
+              "source_type": "ALIYUN::RAM::ManagedPolicy",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListPolicies",
+          "product": "ram",
+          "contract": "ram/ListPolicies/ALIYUN::RAM::ManagedPolicy/Policies.Policy.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0053",
+      "key": "ALIYUN::RAM::Role",
+      "service": "RAM",
+      "name": "Role",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0053-ROS-1",
+              "source_type": "ALIYUN::RAM::Role",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0053-TF-1",
+              "source_type": "alicloud_ram_role",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0053-CREATE-1",
+              "source_type": "ALIYUN::RAM::Role",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0053-QUERY-1",
+              "source_type": "ALIYUN::RAM::Role",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListRoles",
+          "product": "ram",
+          "contract": "ram/ListRoles/ALIYUN::RAM::Role/Roles.Role.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateRole",
+          "product": "ram",
+          "contract": "ram/CreateRole"
+        }
+      ]
+    },
+    {
+      "id": "R0054",
+      "key": "ALIYUN::RAM::User",
+      "service": "RAM",
+      "name": "User",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0054-ROS-1",
+              "source_type": "ALIYUN::RAM::User",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0054-TF-1",
+              "source_type": "alicloud_ram_user",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0054-CREATE-1",
+              "source_type": "ALIYUN::RAM::User",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0054-QUERY-1",
+              "source_type": "ALIYUN::RAM::User",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListUsers",
+          "product": "ram",
+          "contract": "ram/ListUsers/ALIYUN::RAM::User/Users.User.*"
+        }
+      ],
+      "creation_candidates": [
+        {
+          "action": "CreateUser",
+          "product": "ram",
+          "contract": "ram/CreateUser"
+        }
+      ]
+    },
+    {
+      "id": "R0055",
+      "key": "ALIYUN::PVTZ::Zone",
+      "service": "PrivateZone",
+      "name": "Zone",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0055-ROS-1",
+              "source_type": "ALIYUN::PVTZ::Zone",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0055-TF-1",
+              "source_type": "alicloud_pvtz_zone",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0055-CREATE-1",
+              "source_type": "ALIYUN::PVTZ::Zone",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0055-QUERY-1",
+              "source_type": "ALIYUN::PVTZ::Zone",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeZones",
+          "product": "pvtz",
+          "contract": "pvtz/DescribeZones/ALIYUN::PVTZ::Zone/Zones.Zone.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0056",
+      "key": "ALIYUN::PVTZ::ZoneRecord",
+      "service": "PrivateZone",
+      "name": "ZoneRecord",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0056-ROS-1",
+              "source_type": "ALIYUN::PVTZ::ZoneRecord",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0056-TF-1",
+              "source_type": "alicloud_pvtz_zone_record",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0056-CREATE-1",
+              "source_type": "ALIYUN::PVTZ::ZoneRecord",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0056-QUERY-1",
+              "source_type": "ALIYUN::PVTZ::ZoneRecord",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeZoneRecords",
+          "product": "pvtz",
+          "contract": "pvtz/DescribeZoneRecords/ALIYUN::PVTZ::ZoneRecord/Records.Record.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0057",
+      "key": "ALIYUN::SLS::Logstore",
+      "service": "SLS",
+      "name": "Logstore",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0057-ROS-1",
+              "source_type": "ALIYUN::SLS::Logstore",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0057-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0057-CREATE-1",
+              "source_type": "ALIYUN::SLS::Logstore",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0057-QUERY-1",
+              "source_type": "ALIYUN::SLS::Logstore",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0058",
+      "key": "ALIYUN::SLS::Project",
+      "service": "SLS",
+      "name": "Project",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0058-ROS-1",
+              "source_type": "ALIYUN::SLS::Project",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0058-TF-1",
+              "source_type": "alicloud_log_project",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0058-CREATE-1",
+              "source_type": "ALIYUN::SLS::Project",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0058-QUERY-1",
+              "source_type": "ALIYUN::SLS::Project",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListProject",
+          "product": "sls",
+          "contract": "sls/ListProject/alicloud_log_project/projects.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0059",
+      "key": "ALIYUN::FC::Function",
+      "service": "FC",
+      "name": "Function",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0059-ROS-1",
+              "source_type": "ALIYUN::FC::Function",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0059-TF-1",
+              "source_type": "alicloud_fc_function",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0059-CREATE-1",
+              "source_type": "ALIYUN::FC::Function",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0059-QUERY-1",
+              "source_type": "ALIYUN::FC::Function",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0060",
+      "key": "ALIYUN::FC::Service",
+      "service": "FC",
+      "name": "Service",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0060-ROS-1",
+              "source_type": "ALIYUN::FC::Service",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0060-TF-1",
+              "source_type": "alicloud_fc_service",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0060-CREATE-1",
+              "source_type": "ALIYUN::FC::Service",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0060-QUERY-1",
+              "source_type": "ALIYUN::FC::Service",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0061",
+      "key": "ALIYUN::FC::Trigger",
+      "service": "FC",
+      "name": "Trigger",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0061-ROS-1",
+              "source_type": "ALIYUN::FC::Trigger",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0061-TF-1",
+              "source_type": "alicloud_fc_trigger",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0061-CREATE-1",
+              "source_type": "ALIYUN::FC::Trigger",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0061-QUERY-1",
+              "source_type": "ALIYUN::FC::Trigger",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0062",
+      "key": "ALIYUN::CS::ManagedKubernetesCluster",
+      "service": "ACK",
+      "name": "ManagedKubernetesCluster",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0062-ROS-1",
+              "source_type": "ALIYUN::CS::ManagedKubernetesCluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0062-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0062-CREATE-1",
+              "source_type": "ALIYUN::CS::ManagedKubernetesCluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0062-QUERY-1",
+              "source_type": "ALIYUN::CS::ManagedKubernetesCluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeClusters",
+          "product": "cs",
+          "contract": "cs/DescribeClusters/ALIYUN::CS::ManagedKubernetesCluster/clusters.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0063",
+      "key": "ALIYUN::CR::Namespace",
+      "service": "CR",
+      "name": "Namespace",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0063-ROS-1",
+              "source_type": "ALIYUN::CR::Namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0063-TF-1",
+              "source_type": "alicloud_cr_namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0063-CREATE-1",
+              "source_type": "ALIYUN::CR::Namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0063-QUERY-1",
+              "source_type": "ALIYUN::CR::Namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListNamespace",
+          "product": "cr",
+          "contract": "cr/ListNamespace/ALIYUN::CR::Namespace/Namespaces.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0064",
+      "key": "ALIYUN::CR::Repository",
+      "service": "CR",
+      "name": "Repository",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0064-ROS-1",
+              "source_type": "ALIYUN::CR::Repository",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0064-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0064-CREATE-1",
+              "source_type": "ALIYUN::CR::Repository",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0064-QUERY-1",
+              "source_type": "ALIYUN::CR::Repository",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListRepository",
+          "product": "cr",
+          "contract": "cr/ListRepository/ALIYUN::CR::Repository/Repositories.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0065",
+      "key": "ALIYUN::SAE::Application",
+      "service": "SAE",
+      "name": "Application",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0065-ROS-1",
+              "source_type": "ALIYUN::SAE::Application",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0065-TF-1",
+              "source_type": "alicloud_sae_application",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0065-CREATE-1",
+              "source_type": "ALIYUN::SAE::Application",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0065-QUERY-1",
+              "source_type": "ALIYUN::SAE::Application",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListApplications",
+          "product": "sae",
+          "contract": "sae/ListApplications/ALIYUN::SAE::Application/Data.Applications.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0066",
+      "key": "ALIYUN::SAE::Namespace",
+      "service": "SAE",
+      "name": "Namespace",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0066-ROS-1",
+              "source_type": "ALIYUN::SAE::Namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0066-TF-1",
+              "source_type": "alicloud_sae_namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0066-CREATE-1",
+              "source_type": "ALIYUN::SAE::Namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0066-QUERY-1",
+              "source_type": "ALIYUN::SAE::Namespace",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeNamespaces",
+          "product": "sae",
+          "contract": "sae/DescribeNamespaces/ALIYUN::SAE::Namespace/Data.Namespaces.*"
+        },
+        {
+          "action": "DescribeNamespaceList",
+          "product": "sae",
+          "contract": "sae/DescribeNamespaceList/alicloud_sae_namespace/Data.*"
+        },
+        {
+          "action": "DescribeNamespaces",
+          "product": "sae",
+          "contract": "sae/DescribeNamespaces/alicloud_sae_namespace/Data.Namespaces.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0067",
+      "key": "ALIYUN::MSE::Cluster",
+      "service": "MSE",
+      "name": "Cluster",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0067-ROS-1",
+              "source_type": "ALIYUN::MSE::Cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0067-TF-1",
+              "source_type": "alicloud_mse_cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0067-CREATE-1",
+              "source_type": "ALIYUN::MSE::Cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0067-QUERY-1",
+              "source_type": "ALIYUN::MSE::Cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListClusters",
+          "product": "mse",
+          "contract": "mse/ListClusters/ALIYUN::MSE::Cluster/Data.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0068",
+      "key": "ALIYUN::CEN::CenInstance",
+      "service": "CEN",
+      "name": "CenInstance",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0068-ROS-1",
+              "source_type": "ALIYUN::CEN::CenInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0068-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0068-CREATE-1",
+              "source_type": "ALIYUN::CEN::CenInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0068-QUERY-1",
+              "source_type": "ALIYUN::CEN::CenInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeCens",
+          "product": "cbn",
+          "contract": "cbn/DescribeCens/ALIYUN::CEN::CenInstance/Cens.Cen.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0069",
+      "key": "ALIYUN::CEN::TransitRouter",
+      "service": "CEN",
+      "name": "TransitRouter",
+      "priority": "P0",
+      "group": "storage-data",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0069-ROS-1",
+              "source_type": "ALIYUN::CEN::TransitRouter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0069-TF-1",
+              "source_type": "alicloud_cen_transit_router",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0069-CREATE-1",
+              "source_type": "ALIYUN::CEN::TransitRouter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0069-QUERY-1",
+              "source_type": "ALIYUN::CEN::TransitRouter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListTransitRouters",
+          "product": "cbn",
+          "contract": "cbn/ListTransitRouters/ALIYUN::CEN::TransitRouter/TransitRouters.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0070",
+      "key": "ALIYUN::OOS::Execution",
+      "service": "OOS",
+      "name": "Execution",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0070-ROS-1",
+              "source_type": "ALIYUN::OOS::Execution",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0070-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0070-CREATE-1",
+              "source_type": "ALIYUN::OOS::Execution",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0070-QUERY-1",
+              "source_type": "ALIYUN::OOS::Execution",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListExecutions",
+          "product": "oos",
+          "contract": "oos/ListExecutions/ALIYUN::OOS::Execution/Executions.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0071",
+      "key": "ALIYUN::OOS::Parameter",
+      "service": "OOS",
+      "name": "Parameter",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0071-ROS-1",
+              "source_type": "ALIYUN::OOS::Parameter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0071-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0071-CREATE-1",
+              "source_type": "ALIYUN::OOS::Parameter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0071-QUERY-1",
+              "source_type": "ALIYUN::OOS::Parameter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListParameters",
+          "product": "oos",
+          "contract": "oos/ListParameters/ALIYUN::OOS::Parameter/Parameters.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0072",
+      "key": "ALIYUN::OOS::SecretParameter",
+      "service": "OOS",
+      "name": "SecretParameter",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0072-ROS-1",
+              "source_type": "ALIYUN::OOS::SecretParameter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0072-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0072-CREATE-1",
+              "source_type": "ALIYUN::OOS::SecretParameter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0072-QUERY-1",
+              "source_type": "ALIYUN::OOS::SecretParameter",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListSecretParameters",
+          "product": "oos",
+          "contract": "oos/ListSecretParameters/ALIYUN::OOS::SecretParameter/Parameters.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0073",
+      "key": "ALIYUN::OOS::StateConfiguration",
+      "service": "OOS",
+      "name": "StateConfiguration",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0073-ROS-1",
+              "source_type": "ALIYUN::OOS::StateConfiguration",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0073-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0073-CREATE-1",
+              "source_type": "ALIYUN::OOS::StateConfiguration",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0073-QUERY-1",
+              "source_type": "ALIYUN::OOS::StateConfiguration",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListStateConfigurations",
+          "product": "oos",
+          "contract": "oos/ListStateConfigurations/ALIYUN::OOS::StateConfiguration/StateConfigurations.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0074",
+      "key": "ALIYUN::OOS::Template",
+      "service": "OOS",
+      "name": "Template",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0074-ROS-1",
+              "source_type": "ALIYUN::OOS::Template",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0074-TF-1",
+              "source_type": "alicloud_oos_template",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0074-CREATE-1",
+              "source_type": "ALIYUN::OOS::Template",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0074-QUERY-1",
+              "source_type": "ALIYUN::OOS::Template",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListTemplates",
+          "product": "oos",
+          "contract": "oos/ListTemplates/ALIYUN::OOS::Template/Templates.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0075",
+      "key": "ALIYUN::ACTIONTRAIL::Trail",
+      "service": "ActionTrail",
+      "name": "Trail",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0075-ROS-1",
+              "source_type": "ALIYUN::ACTIONTRAIL::Trail",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0075-TF-1",
+              "source_type": "alicloud_actiontrail_trail",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0075-CREATE-1",
+              "source_type": "ALIYUN::ACTIONTRAIL::Trail",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0075-QUERY-1",
+              "source_type": "ALIYUN::ACTIONTRAIL::Trail",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeTrails",
+          "product": "actiontrail",
+          "contract": "actiontrail/DescribeTrails/ALIYUN::ACTIONTRAIL::Trail/TrailList.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0076",
+      "key": "ALIYUN::ResourceManager::ResourceGroup",
+      "service": "ResourceManager",
+      "name": "ResourceGroup",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0076-ROS-1",
+              "source_type": "ALIYUN::ResourceManager::ResourceGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0076-TF-1",
+              "source_type": "alicloud_resource_manager_resource_group",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0076-CREATE-1",
+              "source_type": "ALIYUN::ResourceManager::ResourceGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0076-QUERY-1",
+              "source_type": "ALIYUN::ResourceManager::ResourceGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListResourceGroups",
+          "product": "resourcemanager",
+          "contract": "resourcemanager/ListResourceGroups/ALIYUN::ResourceManager::ResourceGroup/ResourceGroups.ResourceGroup.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0077",
+      "key": "ALIYUN::PrivateLink::VpcEndpoint",
+      "service": "PrivateLink",
+      "name": "VpcEndpoint",
+      "priority": "P0",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0077-ROS-1",
+              "source_type": "ALIYUN::PrivateLink::VpcEndpoint",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0077-TF-1",
+              "source_type": "alicloud_privatelink_vpc_endpoint",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0077-CREATE-1",
+              "source_type": "ALIYUN::PrivateLink::VpcEndpoint",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0077-QUERY-1",
+              "source_type": "ALIYUN::PrivateLink::VpcEndpoint",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListVpcEndpoints",
+          "product": "privatelink",
+          "contract": "privatelink/ListVpcEndpoints/ALIYUN::PrivateLink::VpcEndpoint/Endpoints.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0078",
+      "key": "ALIYUN::ESS::AlarmTask",
+      "service": "ESS",
+      "name": "AlarmTask",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0078-ROS-1",
+              "source_type": "ALIYUN::ESS::AlarmTask",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0078-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0078-CREATE-1",
+              "source_type": "ALIYUN::ESS::AlarmTask",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0078-QUERY-1",
+              "source_type": "ALIYUN::ESS::AlarmTask",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeAlarms",
+          "product": "ess",
+          "contract": "ess/DescribeAlarms/ALIYUN::ESS::AlarmTask/AlarmList.Alarm.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0079",
+      "key": "ALIYUN::EHPC::Cluster",
+      "service": "EHPC",
+      "name": "Cluster",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0079-ROS-1",
+              "source_type": "ALIYUN::EHPC::Cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0079-TF-1",
+              "source_type": "alicloud_ehpc_cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0079-CREATE-1",
+              "source_type": "ALIYUN::EHPC::Cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0079-QUERY-1",
+              "source_type": "ALIYUN::EHPC::Cluster",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListClusters",
+          "product": "ehpc",
+          "contract": "ehpc/ListClusters/ALIYUN::EHPC::Cluster/Clusters.*"
+        },
+        {
+          "action": "ListClusters",
+          "product": "ehpc",
+          "contract": "ehpc/ListClusters/ALIYUN::EHPC::Cluster/Clusters.ClusterInfoSimple.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0080",
+      "key": "ALIYUN::GPDB::DBInstance",
+      "service": "GPDB",
+      "name": "DBInstance",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0080-ROS-1",
+              "source_type": "ALIYUN::GPDB::DBInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0080-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0080-CREATE-1",
+              "source_type": "ALIYUN::GPDB::DBInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0080-QUERY-1",
+              "source_type": "ALIYUN::GPDB::DBInstance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeDBInstances",
+          "product": "gpdb",
+          "contract": "gpdb/DescribeDBInstances/ALIYUN::GPDB::DBInstance/Items.DBInstance.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0081",
+      "key": "ALIYUN::ElasticSearch::Instance",
+      "service": "Elasticsearch",
+      "name": "Instance",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0081-ROS-1",
+              "source_type": "ALIYUN::ElasticSearch::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0081-TF-1",
+              "source_type": "alicloud_elasticsearch_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0081-CREATE-1",
+              "source_type": "ALIYUN::ElasticSearch::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0081-QUERY-1",
+              "source_type": "ALIYUN::ElasticSearch::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListInstance",
+          "product": "elasticsearch",
+          "contract": "elasticsearch/ListInstance/ALIYUN::ElasticSearch::Instance/Result.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0082",
+      "key": "ALIYUN::Lindorm::Instance",
+      "service": "Lindorm",
+      "name": "Instance",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0082-ROS-1",
+              "source_type": "ALIYUN::Lindorm::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0082-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0082-CREATE-1",
+              "source_type": "ALIYUN::Lindorm::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0082-QUERY-1",
+              "source_type": "ALIYUN::Lindorm::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "GetLindormInstanceList",
+          "product": "hitsdb",
+          "contract": "hitsdb/GetLindormInstanceList/ALIYUN::Lindorm::Instance/InstanceList.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0083",
+      "key": "ALIYUN::ROCKETMQ::Instance",
+      "service": "ROCKETMQ",
+      "name": "Instance",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0083-ROS-1",
+              "source_type": "ALIYUN::ROCKETMQ::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0083-TF-1",
+              "source_type": "alicloud_ons_instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0083-CREATE-1",
+              "source_type": "ALIYUN::ROCKETMQ::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0083-QUERY-1",
+              "source_type": "ALIYUN::ROCKETMQ::Instance",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "OnsInstanceInServiceList",
+          "product": "ons",
+          "contract": "ons/OnsInstanceInServiceList/ALIYUN::ROCKETMQ::Instance/Data.InstanceVO.*"
+        },
+        {
+          "action": "ListInstances",
+          "product": "rocketmq",
+          "contract": "rocketmq/ListInstances/ALIYUN::ROCKETMQ::Instance/data.list.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0084",
+      "key": "ALIYUN::MaxCompute::Project",
+      "service": "MaxCompute",
+      "name": "Project",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0084-ROS-1",
+              "source_type": "ALIYUN::MaxCompute::Project",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0084-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0084-CREATE-1",
+              "source_type": "ALIYUN::MaxCompute::Project",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0084-QUERY-1",
+              "source_type": "ALIYUN::MaxCompute::Project",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0085",
+      "key": "ALIYUN::ESS::ScheduledTask",
+      "service": "ESS",
+      "name": "ScheduledTask",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0085-ROS-1",
+              "source_type": "ALIYUN::ESS::ScheduledTask",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0085-TF-1",
+              "source_type": "alicloud_ess_scheduled_task",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0085-CREATE-1",
+              "source_type": "ALIYUN::ESS::ScheduledTask",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0085-QUERY-1",
+              "source_type": "ALIYUN::ESS::ScheduledTask",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "DescribeScheduledTasks",
+          "product": "ess",
+          "contract": "ess/DescribeScheduledTasks/ALIYUN::ESS::ScheduledTask/ScheduledTasks.ScheduledTask.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0086",
+      "key": "ALIYUN::ROS::StackGroup",
+      "service": "ROS",
+      "name": "StackGroup",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0086-ROS-1",
+              "source_type": "ALIYUN::ROS::StackGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0086-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0086-CREATE-1",
+              "source_type": "ALIYUN::ROS::StackGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0086-QUERY-1",
+              "source_type": "ALIYUN::ROS::StackGroup",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListStackGroups",
+          "product": "ros",
+          "contract": "ros/ListStackGroups/ALIYUN::ROS::StackGroup/StackGroups.*"
+        }
+      ],
+      "creation_candidates": []
+    },
+    {
+      "id": "R0087",
+      "key": "ALIYUN::ROS::TemplateScratch",
+      "service": "ROS",
+      "name": "TemplateScratch",
+      "priority": "P1",
+      "group": "identity-application",
+      "dependencies": [],
+      "locks": [],
+      "dimensions": {
+        "ROS": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0087-ROS-1",
+              "source_type": "ALIYUN::ROS::TemplateScratch",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "TF": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0087-TF-1",
+              "source_type": "pending-provider-type",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ],
+          "execution": "ros_managed_terraform"
+        },
+        "CREATE": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0087-CREATE-1",
+              "source_type": "ALIYUN::ROS::TemplateScratch",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        },
+        "QUERY": {
+          "support": "unknown",
+          "creation_verified": false,
+          "contracts": [
+            {
+              "id": "R0087-QUERY-1",
+              "source_type": "ALIYUN::ROS::TemplateScratch",
+              "historical": {
+                "iframe": "untested",
+                "open": "untested"
+              }
+            }
+          ]
+        }
+      },
+      "query_candidates": [
+        {
+          "action": "ListTemplateScratches",
+          "product": "ros",
+          "contract": "ros/ListTemplateScratches/ALIYUN::ROS::TemplateScratch/TemplateScratches.*"
+        }
+      ],
+      "creation_candidates": []
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "repo": "/absolute/path/to/iac-code",
+  "node": "node",
+  "uv": "uv",
+  "worker_host": "local",
+  "bailian_cli": "codex-bailian-control",
+  "bailian_endpoint": "ws://127.0.0.1:4501",
+  "sol_endpoint": "ws://127.0.0.1:4502",
+  "cdp_endpoint": "http://127.0.0.1:9225",
+  "chrome_executable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "playwright_root": "/absolute/path/to/node_modules",
+  "macmini_cli": "codex-alilang-macmini",
+  "macmini": {
+    "ip_resolver": "/absolute/local/path/to/macmini-ip",
+    "ssh": "/usr/bin/ssh",
+    "identity_file": "/absolute/local/path/to/ssh-private-key",
+    "known_hosts": "/absolute/local/path/to/known_hosts",
+    "user": "your_user",
+    "python": "/usr/bin/python3",
+    "chrome_executable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "chrome_profile": "/absolute/remote/path/to/resource-link/chrome-profile",
+    "worker_cwd": "/absolute/remote/path/to/resource-link/workers"
+  }
+}

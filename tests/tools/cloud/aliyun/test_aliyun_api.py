@@ -42,6 +42,7 @@ from iac_code.tools.cloud.aliyun.product_resolver import ProductResolver
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
 from iac_code.tools.cloud.aliyun.result_contract import ALIYUN_BODY_CONTRACT_VERSION, ALIYUN_HTTP_METADATA_KEY
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, RetryExhausted, RetryReason, TransportFailure
+from iac_code.tools.cloud.resource_references import RESOURCE_REFERENCES_METADATA_KEY
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import InvocationBinding, PermissionMode, ToolPermissionContext
 from iac_code.types.stream_events import ResourceObservedEvent
@@ -138,6 +139,75 @@ class TestAliyunApiProperties:
         schema = api.input_schema
         assert "product" in schema["required"]
         assert "action" in schema["required"]
+
+    @pytest.mark.parametrize("gate_value", [None, "", "missing-gate.sqlite3"])
+    def test_controlled_schema_matches_exact_gate_without_changing_normal_inputs(
+        self, api: AliyunApi, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, gate_value: str | None
+    ) -> None:
+        from jsonschema import ValidationError, validate
+
+        from iac_code.agent.agent_loop import AgentLoop
+        from scripts.web.e2e.resource_link_workflow import execution_gate as gate
+
+        monkeypatch.delenv(gate.ENV, raising=False)
+        monkeypatch.setattr(api, "_get_default_region", lambda: "")
+        normal_schema = api.input_schema
+        if gate_value is not None:
+            monkeypatch.setenv(gate.ENV, "" if not gate_value else str(tmp_path / gate_value))
+        schema = api.input_schema
+        controlled_fields = {"product", "action", "version", "region_id", "params"}
+        expected_properties = (
+            {key: value for key, value in normal_schema["properties"].items() if key in controlled_fields}
+            if gate_value is not None
+            else normal_schema["properties"]
+        )
+        assert schema["properties"] == expected_properties
+        assert schema["additionalProperties"] is False
+        assert schema["required"] == (
+            ["product", "action", "region_id"] if gate_value is not None else normal_schema["required"]
+        )
+        body = {"CreateBucketConfiguration": {"StorageClass": "Standard", "DataRedundancyType": "LRS"}}
+        approved = {
+            "product": "oss",
+            "action": "PutBucket",
+            "version": "2019-05-17",
+            "region_id": "cn-hangzhou",
+            "params": {"bucket": "test-schema-bucket", "x-oss-acl": "private", "body": body},
+        }
+        validate(approved, schema)
+        assert gate.api_call(approved) == approved
+        override_values = {
+            "body": body,
+            "endpoint": "oss-cn-hangzhou.aliyuncs.com",
+            "style": "ROA",
+            "method": "PUT",
+            "pathname": "/",
+            "body_file": "never-read.bin",
+            "content_type": "application/xml",
+            "max_response_bytes": 1024,
+        }
+        for field, value in override_values.items():
+            call = {**approved, field: value}
+            if gate_value is not None:
+                with pytest.raises(ValidationError):
+                    validate(call, schema)
+            else:
+                validate(call, schema)
+            with pytest.raises(gate.GateDeniedError):
+                gate.api_call(call)
+        if gate_value is not None:
+            with pytest.raises(ValidationError):
+                validate({"product": "sts", "action": "GetCallerIdentity"}, schema)
+            validate({"product": "sts", "action": "GetCallerIdentity", "region_id": "cn-hangzhou"}, schema)
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.tool_registry = MagicMock()
+        loop.tool_registry.list_tools.return_value = [api]
+        assert loop._get_tool_definitions()[0].input_schema == schema
+        assert loop._get_tool_definitions([api])[0].input_schema == schema
+        schema["properties"].clear()
+        assert api.input_schema["properties"] == expected_properties
+        monkeypatch.delenv(gate.ENV, raising=False)
+        assert api.input_schema == normal_schema
 
     def test_is_read_only_for_describe_actions(self, api: AliyunApi) -> None:
         assert api.is_read_only({"action": "DescribeInstances"}) is True
@@ -1312,6 +1382,12 @@ class _ProductionEndpointResolver:
             raise self.failure
         if explicit_endpoint is not None:
             return EndpointResolution(endpoint=explicit_endpoint, source="explicit", host_template=None)
+        if contract.product == "Tablestore":
+            return EndpointResolution(
+                endpoint=f"{region_id}.ots.aliyuncs.com",
+                source="override_pattern",
+                host_template="{InstanceName}.{endpoint}",
+            )
         if contract.product == "Oss":
             return EndpointResolution(
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
@@ -1555,7 +1631,9 @@ def _production_services() -> tuple[Any, _ProductionOpenMeta, _ProductionEndpoin
         request_builder=RequestBuilder(),
         endpoint_resolver=endpoint_resolver,
         host_binding_resolver=HostBindingResolver(("aliyuncs.com",)),
-        transport_router=TransportRouter({"tea": transport, "acs3_streaming": transport, "oss_v4_sdk": transport}),
+        transport_router=TransportRouter(
+            {"tea": transport, "acs3_streaming": transport, "oss_v4_sdk": transport, "ots_sdk": transport}
+        ),
         oss_operation_catalog=catalog,
         contract_store=ResolvedContractStore(),
         credential_provider=lambda: AliyunCredential(
@@ -1572,6 +1650,46 @@ def _production_services() -> tuple[Any, _ProductionOpenMeta, _ProductionEndpoin
     return services, openmeta, endpoint_resolver, transport
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_reviewed_read_wait_precedes_wire_intent_and_transport_timeout(monkeypatch, cancel: bool) -> None:
+    from scripts.web.e2e.resource_link_workflow import execution_gate as gate
+
+    services, _, _, transport = _production_services()
+    stages = []
+    services.execution_stage_observer = lambda stage: stages.append(stage)
+    monkeypatch.setattr(gate, "enabled", lambda: True)
+    # Gate matching/identity/quota behavior is tested with an actual isolated
+    # SQLite journal in test_resource_link_workflow_read_policy.py. This seam
+    # test isolates the API's ordering around that gate and the network budget.
+    monkeypatch.setattr(gate, "check", lambda *_args, **_kwargs: None)
+    waited = []
+
+    async def wait_before_wire(*args, **kwargs):
+        assert not services.budgets
+        assert not transport.calls
+        assert "target" not in stages
+        waited.append(True)
+        if cancel:
+            raise asyncio.CancelledError()
+        return None
+
+    monkeypatch.setattr(gate, "reserve_when_ready", wait_before_wire)
+    invocation = _production_execute(
+        AliyunApi(services=services),
+        {"product": "ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou", "params": {}},
+    )
+    if cancel:
+        with pytest.raises(asyncio.CancelledError):
+            await invocation
+        assert not services.budgets and not transport.calls
+    else:
+        result = await invocation
+        assert result.is_error is False
+        assert len(services.budgets) == len(transport.calls) == 1
+    assert waited == [True]
+
+
 async def _production_execute(
     tool: AliyunApi,
     tool_input: dict[str, Any],
@@ -1580,6 +1698,7 @@ async def _production_execute(
     event_queue: asyncio.Queue | None = None,
     tool_use_id: str | None = "production-call",
     pipeline_mode: bool = False,
+    expected_permission: str | None = None,
 ) -> Any:
     tool_input = tool.prepare_invocation_input(tool_input)
     binding = InvocationBinding(
@@ -1596,6 +1715,8 @@ async def _production_execute(
     )
     permission = await tool.check_permissions(tool_input, permission_context)
     assert permission.behavior in {"allow", "ask"}
+    if expected_permission is not None:
+        assert permission.behavior == expected_permission
     assert permission.snapshot_id is not None
     assert permission.security_digest is not None
     return await tool.execute(
@@ -1612,6 +1733,84 @@ async def _production_execute(
             execution_class=permission.execution_class,
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_ots_list_table_executes_as_read_only_and_publishes_table_resource_facts() -> None:
+    services, _, endpoint_resolver, transport = _production_services()
+    transport.responses["ListTable"] = NormalizedApiResponse(
+        status=200,
+        headers=MappingProxyType({}),
+        body={
+            "InstanceName": "orders-instance",
+            "Tables": [{"TableName": "orders", "InstanceName": "orders-instance"}],
+        },
+        content_type="application/json",
+        content_encoding=None,
+        size=96,
+    )
+
+    result = await _production_execute(
+        AliyunApi(services=services),
+        {
+            "product": "ots",
+            "action": "ListTable",
+            "region_id": "cn-hangzhou",
+            "params": {"InstanceName": "orders-instance"},
+        },
+        expected_permission="allow",
+    )
+
+    assert result.is_error is False
+    contract = transport.calls[-1]["contract"]
+    assert (contract.product, contract.version, contract.transport, contract.signature_scheme) == (
+        "Tablestore",
+        "2015-12-31",
+        "ots_sdk",
+        "ots_v4",
+    )
+    assert endpoint_resolver.calls[-1][3] == {"InstanceName": "orders-instance"}
+    reference = result.metadata[RESOURCE_REFERENCES_METADATA_KEY]["items"][0]
+    assert reference["resource_type"] == "ALIYUN::OTS::Table"
+    assert reference["identifier"] == "orders"
+    assert reference["region_id"] == "cn-hangzhou"
+    assert reference["attributes"]["InstanceName"] == "orders-instance"
+
+
+@pytest.mark.asyncio
+async def test_ots_public_response_limit_rejects_oversized_results_without_publishing_facts(monkeypatch):
+    from iac_code.tools.cloud.aliyun import ots_data_adapter
+
+    async def resolve(value):
+        return value
+
+    monkeypatch.setattr(ots_data_adapter, "resolve_signing_credential", resolve)
+
+    class Client:
+        calls = 0
+        closed = False
+
+        async def list_table(self):
+            self.calls += 1
+            return [f"table_{index}" for index in range(30)]
+
+        async def close(self):
+            self.closed = True
+
+    client = Client()
+    services, _, _, _ = _production_services()
+    services.transport_router._transports["ots_sdk"] = ots_data_adapter.OtsDataAdapter(
+        client_factory=lambda **_: client
+    )
+    result = await _production_execute(
+        AliyunApi(services=services),
+        {"product": "ots", "action": "ListTable", "region_id": "cn-hangzhou",
+         "params": {"InstanceName": "orders-instance"}, "max_response_bytes": 128},
+        expected_permission="allow",
+    )
+    assert result.is_error and "exceeded max_response_bytes" in result.content
+    assert RESOURCE_REFERENCES_METADATA_KEY not in (result.metadata or {})
+    assert client.calls == 1 and client.closed
 
 
 @pytest.mark.asyncio
@@ -3938,3 +4137,106 @@ async def test_production_runtime_leaves_unrelated_credential_failures_unchanged
     # Not an ApiContractError, so it still carries no stage -- but it is no longer silent.
     assert stages == []
     assert "RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["GetPolicy", "GetRole"])
+@pytest.mark.parametrize("status", [200, 404])
+async def test_ram_normalized_transport_preserves_actual_gate_response(
+    tmp_path,
+    monkeypatch,
+    action: str,
+    status: int,
+) -> None:
+    from scripts.web.e2e.resource_link_workflow import execution_gate as gate
+
+    services, openmeta, _, transport = _production_services()
+    role = action == "GetRole"
+    name_key = "RoleName" if role else "PolicyName"
+    params = {name_key: "offline-role" if role else "offline-policy"}
+    if not role:
+        params["PolicyType"] = "Custom"
+    raw = _production_raw_api(
+        "Ram",
+        "2015-05-01",
+        action,
+        parameters=[{"name": key, "in": "query", "required": True, "schema": {"type": "string"}} for key in params],
+    )
+    openmeta.documents[("ram", "2015-05-01", action.casefold())] = raw
+    openmeta.products["ram"] = ProductMetadata(
+        product="Ram",
+        default_version="2015-05-01",
+        versions=("2015-05-01",),
+        documentation_url=None,
+    )
+    openmeta.product_catalog = tuple(openmeta.products.values())
+    request = {
+        "product": "ram",
+        "action": action,
+        "version": "2015-05-01",
+        "region_id": "cn-hangzhou",
+        "params": params,
+    }
+    identity = {"product": "sts", "action": "GetCallerIdentity", "region_id": "cn-hangzhou", "params": {}}
+    path = tmp_path / "ram-api-wire.sqlite3"
+    gate.initialize(path)
+    monkeypatch.setenv(gate.ENV, str(path))
+    monkeypatch.setenv(gate.SLOT_ENV, "0")
+    session = gate.complete_session("session", "")
+    gate.install(
+        path,
+        "0",
+        "offline-api:QUERY",
+        session,
+        "123",
+        None,
+        [
+            {"id": "identity", "kind": "identity", "quota": 1, "call": identity},
+            {"id": "exact-read", "kind": "read", "quota": 1, "call": request, "read_policy": {"phase": "execute"}},
+        ],
+    )
+    credential = services.credential_provider()
+    gate.finish(gate.reserve(identity, session, credential, read_only=True), {"AccountId": "123"}, True)
+    body = {"RequestId": "offline-transport-request"}
+    if status == 404:
+        body.update(
+            {
+                "HostId": "ram.aliyuncs.com",
+                "Code": "EntityNotExist.Role" if role else "EntityNotExist.Policy",
+                "Message": ("The role not exists:" if role else "The policy does not exist: ") + params[name_key],
+            }
+        )
+    else:
+        body["Role" if role else "Policy"] = dict(params)
+    original_body = json.loads(json.dumps(body))
+    headers = {"X-Acs-Request-Id": body["RequestId"], "Set-Cookie": "fake-private"}
+    transport.responses[action] = NormalizedApiResponse(
+        status=status,
+        headers=MappingProxyType(headers),
+        body=body,
+        content_type="application/json",
+        content_encoding=None,
+        size=len(json.dumps(body)),
+    )
+    result = await _production_execute(AliyunApi(services=services), request, expected_permission="allow")
+    assert result.is_error is (status == 404)
+    assert len(transport.calls) == 1 and transport.calls[0]["contract"].action == action
+    assert body == original_body and "statusCode" not in body
+    with gate.database(path) as db:
+        row = dict(
+            db.execute(
+                "SELECT a.state,a.response,g.kind,g.call FROM attempts a JOIN grants g "
+                "ON a.scope=g.scope AND a.grant_id=g.id WHERE g.id='exact-read'",
+            ).fetchone()
+        )
+        assert db.execute("SELECT used FROM grants WHERE id='exact-read'").fetchone()[0] == 1
+        assert db.execute("SELECT used FROM authority_limits WHERE id='exact-read'").fetchone()[0] == 1
+    assert row["state"] == ("succeeded" if status == 200 else "unknown")
+    assert json.loads(row["response"]) == {
+        "body": original_body,
+        "status": status,
+        "headers": {"X-Acs-Request-Id": body["RequestId"]},
+    }
+    from scripts.web.e2e.resource_link_workflow.phases import known_absence_read
+
+    assert known_absence_read(row) is (status == 404)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -18,6 +19,33 @@ def _build_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_frozen_tablestore_list_table_works_without_optional_native_codec() -> None:
+    spec = Path(__file__).parents[2] / "desktop/sidecar/iac-code-sidecar.spec"
+    tree = ast.parse(spec.read_text(encoding="utf-8"))
+    analysis = next(node.value for node in tree.body if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == "sidecar" for target in node.targets))
+    excluded = ast.literal_eval(next(keyword.value for keyword in analysis.keywords if keyword.arg == "excludes"))
+    script = """
+import sys
+for name in sys.argv[1:]:
+    sys.modules[name] = None
+from tablestore.encoder import OTSProtoBufferEncoder
+from tablestore.decoder import OTSProtoBufferDecoder
+from tablestore.protobuf.table_store_pb2 import ListTableRequest, ListTableResponse
+encoder = OTSProtoBufferEncoder('utf-8', enable_native=False)
+request = encoder.encode_request('ListTable')
+assert isinstance(request, ListTableRequest)
+assert request.SerializeToString() == b''
+response = ListTableResponse(table_names=['offline_orders'])
+tables, _ = OTSProtoBufferDecoder('utf-8', enable_native=False).decode_response(
+    'ListTable', response.SerializeToString(), 'offline-request')
+assert tables == ('offline_orders',)
+"""
+    result = subprocess.run([sys.executable, "-c", script, *excluded], capture_output=True,
+                            text=True, encoding="utf-8", timeout=20)
+    assert result.returncode == 0, result.stderr
 
 
 def test_resource_selector_bundle_checkout_preserves_manifest_hash_on_windows() -> None:
@@ -60,6 +88,21 @@ def test_sidecar_staging_materializes_resources_and_desktop_helper_instructions(
     assert len(selector_manifest["selectors"]) == 116
     assert (selector_vendor / "ore-resource-selector.THIRD_PARTY_NOTICES").is_file()
     assert not list(selector_vendor.glob("ore-resource-selector*.map"))
+    for relative in (
+        Path("web/resource_link_catalog.py"),
+        Path("web/static/ros_resource_links.json"),
+    ):
+        assert (package / relative).read_bytes() == (module.SOURCE_PACKAGE / relative).read_bytes()
+    for module_name in (
+        "resource_index.js",
+        "resource_sources.js",
+        "resource_link_rules.js",
+        "resource_occurrences.js",
+        "resource_linkify.js",
+        "components/resource_link_popover.js",
+    ):
+        relative = Path("web/static/js") / module_name
+        assert (package / relative).read_bytes() == (module.SOURCE_PACKAGE / relative).read_bytes()
     markdown = list(package.rglob("*.md"))
     assert markdown
     assert all("tf2ros.py" not in path.read_text(encoding="utf-8") for path in markdown)

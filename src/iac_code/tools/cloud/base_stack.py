@@ -10,6 +10,11 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.cloud.resource_references import (
+    RESOURCE_REFERENCES_METADATA_KEY,
+    resource_reference_metadata,
+    stack_resource_reference,
+)
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus, translate_status
 from iac_code.types.stream_events import ResourceObservedEvent, StackOperationStartedEvent, StackProgressEvent
 
@@ -21,6 +26,8 @@ _STACK_OPERATION_METADATA_KEYS = (
     "stack_name",
     "region_id",
     "error_stage",
+    "account_scope",
+    "console_partition",
 )
 
 
@@ -191,6 +198,9 @@ class BaseCloudStack(Tool):
     def _call_action_kwargs(self, context: ToolContext) -> dict[str, Any]:
         return {}
 
+    def _resource_reference_context(self) -> dict[str, str]:
+        return {}
+
     def render_tool_use_message(self, input: dict, *, verbose: bool = False) -> str | None:
         action = input.get("action", "")
         region = self._resolve_region(input)
@@ -271,6 +281,7 @@ class BaseCloudStack(Tool):
             metadata["stack_name"] = str(stack_name)
         if error_stage:
             metadata["error_stage"] = error_stage
+        metadata.update(self._resource_reference_context())
         return metadata
 
     def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str | None:
@@ -328,6 +339,31 @@ class BaseCloudStack(Tool):
     ) -> ToolResult:
         """Poll an already-started stack operation until it reaches a terminal state."""
         start_time = time.monotonic()
+        # Preserve observations across empty responses, terminal query failures and
+        # replacements. Their timestamps describe observation, not current existence.
+        observations: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+
+        def with_observations(metadata: dict[str, Any]) -> dict[str, Any]:
+            if self.provider_name == "ros" and context.tool_use_id:
+                references = [
+                    reference
+                    for index, row in enumerate(observations.values())
+                    if (
+                        reference := stack_resource_reference(
+                            row,
+                            stack_id=stack_id,
+                            region_id=region,
+                            tool_use_id=context.tool_use_id,
+                            source_path=f"/resource_observations/{index}",
+                            **self._resource_reference_context(),
+                        )
+                    )
+                    is not None
+                ]
+                if references:
+                    metadata[RESOURCE_REFERENCES_METADATA_KEY] = resource_reference_metadata(references)
+            return metadata
+
         # t0 signal so the web output panel shows *_IN_PROGRESS immediately for non-create
         # actions (delete/update/continue), instead of waiting for the first poll (~POLL_INTERVAL).
         # CreateStack already gets its t0 via ResourceObservedEvent in execute(); this deliberately
@@ -359,18 +395,22 @@ class BaseCloudStack(Tool):
                     return ToolResult(
                         content=f"[GetStackStatus] {e}",
                         is_error=True,
-                        metadata=self._started_stack_metadata(
-                            action,
-                            params,
-                            region,
-                            stack_id,
-                            error_stage="status",
+                        metadata=with_observations(
+                            self._started_stack_metadata(
+                                action,
+                                params,
+                                region,
+                                stack_id,
+                                error_stage="status",
+                            )
                         ),
                     )
 
+                resources_fresh = True
                 try:
                     resources = await self.get_stack_resources(stack_id, region)
                 except Exception as e:
+                    resources_fresh = False
                     if self.is_action_terminal(action, status):
                         resources = []
                     else:
@@ -381,35 +421,38 @@ class BaseCloudStack(Tool):
                         return ToolResult(
                             content=f"[GetStackResources] {e}",
                             is_error=True,
-                            metadata=self._started_stack_metadata(
-                                action,
-                                params,
-                                region,
-                                stack_id,
-                                error_stage="resources",
+                            metadata=with_observations(
+                                self._started_stack_metadata(
+                                    action,
+                                    params,
+                                    region,
+                                    stack_id,
+                                    error_stage="resources",
+                                )
                             ),
                         )
 
                 elapsed = int(time.monotonic() - start_time)
+                resource_rows = [resource.to_progress_dict() for resource in resources]
+                observed_at = time.time()
+                for row in resource_rows:
+                    if physical_id := row.get("physical_resource_id"):
+                        key = (row["resource_type"], row["name"], physical_id, row.get("account_scope", ""))
+                        observations[key] = {**row, "observed_at": observed_at}
 
                 if context.event_queue is not None:
+                    reference_context = self._resource_reference_context()
                     event = StackProgressEvent(
                         stack_id=status.stack_id,
                         stack_name=status.stack_name,
                         status=status.status,
                         progress_percentage=status.progress_percentage,
-                        resources=[
-                            {
-                                "name": r.name,
-                                "resource_type": r.resource_type,
-                                "status": r.status,
-                                "status_reason": r.status_reason,
-                            }
-                            for r in resources
-                        ],
+                        resources=resource_rows,
                         elapsed_seconds=elapsed,
                         region_id=region,
                         tool_use_id=context.tool_use_id,
+                        account_scope=reference_context.get("account_scope", ""),
+                        console_partition=reference_context.get("console_partition", ""),
                     )
                     await context.event_queue.put(event)
 
@@ -423,6 +466,10 @@ class BaseCloudStack(Tool):
                         "progress_percentage": status.progress_percentage,
                         "elapsed_seconds": elapsed,
                         "is_success": action_success,
+                        "region_id": region,
+                        "resources": resource_rows,
+                        "resources_fresh": resources_fresh,
+                        "resource_observations": list(observations.values()),
                     }
                     if action_success and status.outputs:
                         result_data["outputs"] = status.outputs
@@ -440,7 +487,7 @@ class BaseCloudStack(Tool):
                     return ToolResult(
                         content=json.dumps(result_data, ensure_ascii=False, indent=2),
                         is_error=not action_success,
-                        metadata=metadata,
+                        metadata=with_observations(metadata),
                     )
         except (KeyboardInterrupt, asyncio.CancelledError):
             elapsed = int(time.monotonic() - start_time)

@@ -6,6 +6,11 @@ from starlette.testclient import TestClient
 
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.tools.cloud.base_stack import STACK_RESULT_METADATA_KEY
+from iac_code.tools.cloud.resource_references import (
+    RESOURCE_REFERENCES_METADATA_KEY,
+    resource_reference_metadata,
+    stack_resource_reference,
+)
 from iac_code.web import outputs
 from iac_code.web.app import create_app
 from iac_code.web.session_manager import WebSessionManager
@@ -181,6 +186,66 @@ def test_payload_stack_dedup_latest_wins():
     payload = outputs.outputs_payload(_FakeManager(messages), _FakeSession("/tmp/x"))
     assert len(payload["stacks"]) == 1
     assert payload["stacks"][0]["status"] == "UPDATE_COMPLETE"
+
+
+@pytest.mark.parametrize("pipeline", [False, True])
+def test_output_stack_prefers_observed_region_to_input_or_current_default(monkeypatch, pipeline):
+    monkeypatch.setattr(outputs, "_default_region_id", lambda: pytest.fail("must not read current default"))
+    result = {"stack_id": "stk-observed", "region_id": "cn-beijing", "console_partition": "alibabacloud"}
+    request = {"action": "CreateStack", "region_id": "cn-shanghai"}
+    messages = [_tool_use("ros_stack", "observed", **request), _tool_result("observed", result)]
+    envelopes = [_env_tool_result("ros_stack", tool_input=request, stack_result=result)]
+    manager = _FakeManager([] if pipeline else messages, envelopes=envelopes if pipeline else [])
+    payload = outputs.outputs_payload(
+        manager, _FakeSession("/tmp/resource-output", context_id="ctx" if pipeline else None)
+    )
+    assert payload["stacks"][0]["regionId"] == "cn-beijing"
+    assert payload["stacks"][0]["consolePartition"] == "alibabacloud"
+
+
+@pytest.mark.parametrize("pipeline", [False, True])
+def test_output_stack_preserves_site_from_matching_fact_metadata(pipeline):
+    result = {"stack_id": "stk-observed", "region_id": "cn-beijing"}
+    fact = stack_resource_reference(
+        {"resource_type": "ALIYUN::ROS::Stack", "physical_resource_id": "stk-observed"},
+        stack_id="stk-observed",
+        region_id="cn-beijing",
+        tool_use_id="observed",
+        source_path="/stack_id",
+        account_scope="fake-output-account",
+        console_partition="alibabacloud",
+    )
+    assert fact is not None
+    references = resource_reference_metadata([fact])
+    request = {"action": "CreateStack"}
+    messages = [
+        _tool_use("ros_stack", "observed", **request),
+        _tool_result("observed", result, metadata={RESOURCE_REFERENCES_METADATA_KEY: references}),
+    ]
+    envelope = _env_tool_result("ros_stack", tool_input=request, stack_result=result)
+    envelope["data"]["resourceReferences"] = references
+    manager = _FakeManager([] if pipeline else messages, envelopes=[envelope] if pipeline else [])
+    payload = outputs.outputs_payload(
+        manager, _FakeSession("/tmp/resource-output", context_id="ctx" if pipeline else None)
+    )
+    assert payload["stacks"][0]["consolePartition"] == "alibabacloud"
+    assert result == {"stack_id": "stk-observed", "region_id": "cn-beijing"}, "do not mutate original results"
+
+
+def test_stack_output_reads_explicit_metadata_context_without_mutating_body():
+    body = {"stack_id": "stk-explicit"}
+    parsed = outputs._stack_result_dict(body, {"region_id": "cn-beijing", "console_partition": "alibabacloud"})
+    assert parsed == {"stack_id": "stk-explicit", "region_id": "cn-beijing", "console_partition": "alibabacloud"}
+    assert body == {"stack_id": "stk-explicit"}
+
+
+def test_output_stack_separates_legacy_default_region_from_locator_evidence(monkeypatch):
+    monkeypatch.setattr(outputs, "_default_region_id", lambda: "cn-hangzhou")
+    messages = [_tool_use("ros_stack", "old", action="CreateStack"), _tool_result("old", {"stack_id": "stk-old"})]
+    stack = outputs.outputs_payload(_FakeManager(messages), _FakeSession("/tmp/resource-output"))["stacks"][0]
+    assert stack["regionId"] == "cn-hangzhou"
+    assert stack["consoleUrl"] == "https://ros.console.aliyun.com/cn-hangzhou/stacks/stk-old"
+    assert stack["resourceRegionId"] == "", "new links must not rely on today's default region"
 
 
 def test_payload_stack_dedup_same_name_different_ids():

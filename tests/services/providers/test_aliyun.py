@@ -759,8 +759,10 @@ class TestAliyunCredentialsSave:
             AliyunCredentials.save(cred)
 
         data = yaml.safe_load(cloud_creds_file.read_text(encoding="utf-8"))
+        assert len(cred.oauth_session_id) == 32
         assert data["aliyun"] == {
             "mode": "OAuth",
+            "oauth_session_id": cred.oauth_session_id,
             "region_id": "cn-hangzhou",
             "oauth_site_type": "INTL",
             "oauth_access_token": "oauth-access",
@@ -1588,3 +1590,207 @@ class TestAliyunCredentialsEcsRamRole:
             for name in self.ECS_ENVIRONMENT_VARIABLES:
                 os.environ.pop(name, None)
             assert AliyunCredentials.is_configured(config_path=str(config_file)) is True
+
+
+class TestAliyunCanonicalCredentialSource:
+    @staticmethod
+    def shared_source(tmp_path):
+        source = tmp_path / "shared" / ".cloud-credentials.yml"
+        source.parent.mkdir()
+        source.write_text(
+            yaml.safe_dump(
+                {
+                    "other_provider": {"fixture": "unchanged"},
+                    "aliyun": {
+                        "mode": "OAuth",
+                        "region_id": "cn-hangzhou",
+                        "oauth_site_type": "CN",
+                        "oauth_access_token": "old-access",
+                        "oauth_refresh_token": "old-refresh",
+                        "oauth_access_token_expire": 900,
+                        "oauth_refresh_token_expire": 5000,
+                        "access_key_id": "old-ak",
+                        "access_key_secret": "old-sk",
+                        "sts_token": "old-sts",
+                        "sts_expiration": 900,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        aliases = []
+        for index in range(4):
+            slot = tmp_path / f"slot-{index}"
+            slot.mkdir()
+            alias = slot / ".cloud-credentials.yml"
+            try:
+                alias.symlink_to(source)
+            except (NotImplementedError, OSError) as error:
+                pytest.skip(f"symlink creation unsupported: {error}")
+            aliases.append(alias)
+        return source, aliases
+
+    def test_load_records_canonical_source_without_changing_config_roots(self, tmp_path):
+        source, aliases = self.shared_source(tmp_path)
+
+        for alias in aliases:
+            with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=alias):
+                credential = AliyunCredentials.load_from_iac_code_config()
+            assert credential is not None
+            assert credential.credential_source_path == str(source.resolve())
+            assert alias.is_symlink()
+            assert alias.parent != source.parent
+
+    def test_refresh_across_aliases_reloads_one_rotated_source(self, tmp_path):
+        source, aliases = self.shared_source(tmp_path)
+        credentials = [AliyunCredentials._load_from_iac_code_path(alias) for alias in aliases]
+        assert all(credential is not None for credential in credentials)
+        start = threading.Barrier(4)
+
+        class RotatingClient:
+            def __init__(self):
+                self.refresh_calls = 0
+                self.exchange_calls = 0
+
+            def refresh_access_token(self, refresh_token, *, now=None):
+                assert self.refresh_calls == 0
+                assert refresh_token == "old-refresh"
+                self.refresh_calls += 1
+                return OAuthToken("new-access", "new-refresh", 4600, 5000)
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "new-access"
+                self.exchange_calls += 1
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+        client = RotatingClient()
+
+        def refresh(credential):
+            start.wait(timeout=5)
+            return AliyunCredentials.refresh_oauth_if_needed(credential, oauth_client=client, now=1000)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(refresh, credentials))
+
+        assert client.refresh_calls == 1
+        assert client.exchange_calls == 1
+        assert all(result.oauth_refresh_token == "new-refresh" for result in results)
+        assert all(result.sts_token == "new-sts" for result in results)
+        assert all(result.credential_source_path == str(source.resolve()) for result in results)
+        assert all(alias.is_symlink() for alias in aliases)
+        stored = yaml.safe_load(source.read_text(encoding="utf-8"))
+        assert stored["aliyun"]["oauth_refresh_token"] == "new-refresh"
+        assert stored["other_provider"] == {"fixture": "unchanged"}
+
+    def test_legacy_alias_origin_persists_rotation_before_failed_exchange(self, tmp_path):
+        source, aliases = self.shared_source(tmp_path)
+        credential = AliyunCredentials._load_from_iac_code_path(aliases[0])
+        assert credential is not None
+        credential.credential_source_path = str(aliases[0])
+
+        class FailingClient:
+            def refresh_access_token(self, refresh_token, *, now=None):
+                assert refresh_token == "old-refresh"
+                return OAuthToken("new-access", "new-refresh", 4600, 5000)
+
+            def exchange_access_token_for_sts(self, access_token):
+                raise AliyunOAuthError("fixture STS exchange failure")
+
+        with pytest.raises(AliyunOAuthError, match="fixture STS"):
+            AliyunCredentials.refresh_oauth_if_needed(credential, oauth_client=FailingClient(), now=1000)
+
+        assert aliases[0].is_symlink()
+        persisted = AliyunCredentials._load_from_iac_code_path(aliases[1])
+        assert persisted is not None
+        assert persisted.oauth_access_token == "new-access"
+        assert persisted.oauth_refresh_token == "new-refresh"
+        assert persisted.sts_expiration == 900
+        assert credential.credential_source_path == str(source.resolve())
+
+    def test_save_and_cross_process_lock_use_canonical_target(self, tmp_path, monkeypatch):
+        from contextlib import contextmanager
+
+        from iac_code.services.providers import aliyun
+
+        source, aliases = self.shared_source(tmp_path)
+        locked_paths = []
+
+        @contextmanager
+        def recording_lock(path):
+            locked_paths.append(path)
+            yield
+
+        monkeypatch.setattr(aliyun, "cross_process_append_lock", recording_lock)
+        with aliyun._cloud_credential_file_lock(aliases[0]):
+            with aliyun._cloud_credential_file_lock(aliases[1]):
+                pass
+        assert locked_paths == [source.resolve()]
+
+        credential = AliyunCredential(mode="AK", access_key_id="fake-ak", access_key_secret="fake-sk")
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=aliases[2]):
+            AliyunCredentials.save(credential)
+        assert aliases[2].is_symlink()
+        assert credential.credential_source_path == str(source.resolve())
+        assert yaml.safe_load(source.read_text(encoding="utf-8"))["aliyun"]["access_key_id"] == "fake-ak"
+        assert locked_paths == [source.resolve(), source.resolve()]
+        if os.name != "nt":
+            assert source.stat().st_mode & 0o777 == 0o600
+
+
+def _refresh_shared_oauth_alias_in_process(alias, start, refresh_count, results):
+    from pathlib import Path
+
+    class RotatingClient:
+        def refresh_access_token(self, refresh_token, *, now=None):
+            with refresh_count.get_lock():
+                assert refresh_count.value == 0
+                assert refresh_token == "old-refresh"
+                refresh_count.value += 1
+            return OAuthToken("new-access", "new-refresh", 4600, 5000)
+
+        def exchange_access_token_for_sts(self, access_token):
+            assert access_token == "new-access"
+            return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+    try:
+        credential = AliyunCredentials._load_from_iac_code_path(Path(alias))
+        assert credential is not None
+        start.wait(timeout=15)
+        refreshed = AliyunCredentials.refresh_oauth_if_needed(credential, oauth_client=RotatingClient(), now=1000)
+        results.put(refreshed.sts_token == "new-sts")
+    except Exception as error:
+        results.put(type(error).__name__)
+
+
+def test_oauth_canonical_aliases_serialize_across_processes(tmp_path):
+    import multiprocessing
+
+    source, aliases = TestAliyunCanonicalCredentialSource.shared_source(tmp_path)
+    context = multiprocessing.get_context("spawn")
+    start = context.Barrier(4)
+    refresh_count = context.Value("i", 0)
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_refresh_shared_oauth_alias_in_process,
+            args=(str(alias), start, refresh_count, results),
+        )
+        for alias in aliases
+    ]
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=20)
+        assert all(not process.is_alive() and process.exitcode == 0 for process in processes)
+        assert [results.get(timeout=5) for _ in processes] == [True] * 4
+        assert refresh_count.value == 1
+        assert all(alias.is_symlink() for alias in aliases)
+        assert yaml.safe_load(source.read_text(encoding="utf-8"))["aliyun"]["sts_token"] == "new-sts"
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+        results.close()
+        results.join_thread()

@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iac-code.local/schemas/resource-link-e2e-status-v1.json",
+  "title": "iac-code resource-link E2E status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "catalogRevisionDigest",
+    "runnerRevisionDigest",
+    "scope",
+    "catalog",
+    "readyForBatchExecution",
+    "browserPreflight",
+    "dimensions",
+    "finalChecks",
+    "outcomes",
+    "legacyHistory",
+    "rawEvidence",
+    "blockers"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "catalogRevisionDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runnerRevisionDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sites", "excludedSites"],
+      "properties": {
+        "sites": {"const": ["aliyun"]},
+        "excludedSites": {"const": ["alibabacloud"]}
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceTypes", "canonicalIdentities", "aliases", "queryResourceTypes", "queryContracts",
+        "createResourceTypes", "createContracts"
+      ],
+      "properties": {
+        "sourceTypes": {"type": "integer", "minimum": 0},
+        "canonicalIdentities": {"type": "integer", "minimum": 0},
+        "aliases": {"type": "integer", "minimum": 0},
+        "queryResourceTypes": {"type": "integer", "minimum": 0},
+        "queryContracts": {"type": "integer", "minimum": 0},
+        "createResourceTypes": {"type": "integer", "minimum": 0},
+        "createContracts": {"type": "integer", "minimum": 0}
+      }
+    },
+    "readyForBatchExecution": {"type": "boolean"},
+    "browserPreflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "browserAccessMode"],
+      "properties": {
+        "status": {"enum": ["missing", "expired", "passed"]},
+        "browserAccessMode": {"type": ["string", "null"]}
+      }
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routeCatalog", "queryApi", "createApi"],
+      "properties": {
+        "routeCatalog": {"$ref": "#/$defs/sourceNavigationDimension"},
+        "queryApi": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total", "sourcePassed", "sourceBlocked", "sourcePending", "normalPassed", "shiftPassed",
+            "fullyPassed", "remaining"
+          ],
+          "properties": {
+            "total": {"type": "integer", "minimum": 0},
+            "sourcePassed": {"type": "integer", "minimum": 0},
+            "sourceBlocked": {"type": "integer", "minimum": 0},
+            "sourcePending": {"type": "integer", "minimum": 0},
+            "normalPassed": {"type": "integer", "minimum": 0},
+            "shiftPassed": {"type": "integer", "minimum": 0},
+            "fullyPassed": {"type": "integer", "minimum": 0},
+            "remaining": {"type": "integer", "minimum": 0}
+          }
+        },
+        "createApi": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total", "fixtureContracts", "replayUnavailable", "sourcePassed", "sourceBlocked", "sourcePending",
+            "normalPassed", "shiftPassed", "fullyPassed", "remaining"
+          ],
+          "properties": {
+            "total": {"type": "integer", "minimum": 0},
+            "fixtureContracts": {"type": "integer", "minimum": 0},
+            "replayUnavailable": {"type": "integer", "minimum": 0},
+            "sourcePassed": {"type": "integer", "minimum": 0},
+            "sourceBlocked": {"type": "integer", "minimum": 0},
+            "sourcePending": {"type": "integer", "minimum": 0},
+            "normalPassed": {"type": "integer", "minimum": 0},
+            "shiftPassed": {"type": "integer", "minimum": 0},
+            "fullyPassed": {"type": "integer", "minimum": 0},
+            "remaining": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "finalChecks": {"$ref": "#/$defs/finalDimension"},
+    "outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latestExecutionBranches", "landingKinds", "failureReasons"],
+      "properties": {
+        "latestExecutionBranches": {"type": "integer", "minimum": 0},
+        "landingKinds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "exact_detail", "product_list", "parent_detail", "parent_list", "shared_tab", "external_only"
+          ],
+          "properties": {
+            "exact_detail": {"type": "integer", "minimum": 0},
+            "product_list": {"type": "integer", "minimum": 0},
+            "parent_detail": {"type": "integer", "minimum": 0},
+            "parent_list": {"type": "integer", "minimum": 0},
+            "shared_tab": {"type": "integer", "minimum": 0},
+            "external_only": {"type": "integer", "minimum": 0}
+          }
+        },
+        "failureReasons": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "legacyHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legacyFormal", "partial", "manualUnverified", "total"],
+      "properties": {
+        "legacyFormal": {"type": "integer", "minimum": 0},
+        "partial": {"type": "integer", "minimum": 0},
+        "manualUnverified": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": 0}
+      }
+    },
+    "rawEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "roots", "batchDirectories", "artifactFiles", "sessionIdentifiers", "normalizedExecutions",
+        "nonPromotableBatches", "historicalReportedOrdinaryExactDetail",
+        "historicalReportedOrdinaryListEntry", "historicalReportedOrdinaryPassed",
+        "historicalReportedShiftPassed", "digest"
+      ],
+      "properties": {
+        "roots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "digest", "batchDirectories", "artifactFiles"],
+            "properties": {
+              "name": {"type": "string"},
+              "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "batchDirectories": {"type": "integer", "minimum": 0},
+              "artifactFiles": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "batchDirectories": {"type": "integer", "minimum": 0},
+        "artifactFiles": {"type": "integer", "minimum": 0},
+        "sessionIdentifiers": {"type": "integer", "minimum": 0},
+        "normalizedExecutions": {"type": "integer", "minimum": 0},
+        "nonPromotableBatches": {"type": "integer", "minimum": 0},
+        "historicalReportedOrdinaryExactDetail": {"type": "integer", "minimum": 0},
+        "historicalReportedOrdinaryListEntry": {"type": "integer", "minimum": 0},
+        "historicalReportedOrdinaryPassed": {"type": "integer", "minimum": 0},
+        "historicalReportedShiftPassed": {"type": "integer", "minimum": 0},
+        "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "historicalCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ledgerPath", "acceptedContracts", "acceptedExecutionBranches"],
+      "properties": {
+        "ledgerPath": {"type": "string", "minLength": 1},
+        "acceptedContracts": {"type": "integer", "minimum": 0},
+        "acceptedExecutionBranches": {"type": "integer", "minimum": 0}
+      }
+    },
+    "webSourceRegistry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "contracts",
+        "supplemented"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contracts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "supplemented": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "blockers": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  },
+  "$defs": {
+    "finalDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "passed", "remaining"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "remaining": {"type": "integer", "minimum": 0}
+      }
+    },
+    "navigationDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "normalPassed", "shiftPassed", "passed", "remaining"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "normalPassed": {"type": "integer", "minimum": 0},
+        "shiftPassed": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "remaining": {"type": "integer", "minimum": 0}
+      }
+    },
+    "sourceNavigationDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total", "sourcePassed", "sourceBlocked", "sourcePending", "replayUnavailable",
+        "normalPassed", "shiftPassed", "passed", "remaining"
+      ],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "sourcePassed": {"type": "integer", "minimum": 0},
+        "sourceBlocked": {"type": "integer", "minimum": 0},
+        "sourcePending": {"type": "integer", "minimum": 0},
+        "replayUnavailable": {"type": "integer", "minimum": 0},
+        "normalPassed": {"type": "integer", "minimum": 0},
+        "shiftPassed": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "remaining": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

@@ -24,8 +24,10 @@ from alibabacloud_oss_v2 import Config
 from alibabacloud_oss_v2 import exceptions as oss_exceptions
 from alibabacloud_oss_v2.aio.client import AsyncClient
 from alibabacloud_oss_v2.credentials import StaticCredentialsProvider
+from alibabacloud_oss_v2.models.bucket_basic import CreateBucketConfiguration
 from alibabacloud_oss_v2.signer.v4 import SignerV4
 from alibabacloud_oss_v2.types import AsyncHttpClient, AsyncHttpResponse, HttpRequest, SigningContext
+from defusedxml import ElementTree
 from requests.structures import CaseInsensitiveDict
 
 from iac_code.services.providers.aliyun import AliyunCredential
@@ -154,6 +156,25 @@ def _operation_spec(raw: Any) -> OssOperationSpec:
         supported=raw.get("supported") is True,
         unsupported_reasons=tuple(str(reason) for reason in reasons),
     )
+    if (
+        operation.supported
+        and operation.body_type == "xml"
+        and not (
+            operation.action == "PutBucket"
+            and operation.sdk_method == "put_bucket"
+            and operation.request_model == "alibabacloud_oss_v2.models.bucket_basic.PutBucketRequest"
+            and operation.method == "PUT"
+            and operation.response_mode == "headers_only"
+            and any(
+                field.location == "body"
+                and field.openmeta_name == "body"
+                and field.sdk_field == "create_bucket_configuration"
+                and field.wire_name == "CreateBucketConfiguration"
+                for field in operation.field_mapping
+            )
+        )
+    ):
+        raise ValueError("unsupported_oss_xml_mapping")
     if not operation.sdk_method or operation.response_mode not in {
         "stream",
         "headers_only",
@@ -172,6 +193,8 @@ class OssResponsePolicy:
     expected_host: str
     max_response_bytes: int
     declared_headers: tuple[str, ...]
+    action: str | None = None
+    body_capture: list[bytes] | None = None
 
 
 _OSS_RESPONSE_POLICY: contextvars.ContextVar[OssResponsePolicy | None] = contextvars.ContextVar(
@@ -327,7 +350,7 @@ class OssStreamingHttpClient(AsyncHttpClient):
         if self._session is None:
             self._session = self._session_factory(
                 auto_decompress=False,
-                skip_auto_headers={"Accept-Encoding"},
+                skip_auto_headers={"Accept-Encoding", "Content-Type"},
             )
 
     async def close(self) -> None:
@@ -363,6 +386,21 @@ class OssStreamingHttpClient(AsyncHttpClient):
         except aiohttp.ClientError as error:
             raise oss_exceptions.RequestError(error=error) from error
         wrapped = _OssHttpResponse(request, response, snapshot)
+        if snapshot.action == "PutBucket":
+            for name in ("location", "x-oss-request-id"):
+                getall = getattr(response.headers, "getall", None)
+                values = (
+                    list(getall(name, []))
+                    if callable(getall)
+                    else [
+                        value
+                        for key, value in response.headers.items()
+                        if isinstance(key, str) and key.casefold() == name
+                    ]
+                )
+                if len(values) > 1:
+                    await wrapped.close()
+                    raise RuntimeError("ambiguous_oss_create_header")
         if not 200 <= wrapped.status_code < 300:
             await _precheck_length(response.headers, _ERROR_RESPONSE_BYTES, wrapped, "error_response_too_large")
             await wrapped.consume(_ERROR_RESPONSE_BYTES, "error_response_too_large")
@@ -373,7 +411,9 @@ class OssStreamingHttpClient(AsyncHttpClient):
         if snapshot.mode == "buffered":
             limit = min(snapshot.max_response_bytes, _BUFFERED_RESPONSE_BYTES)
             await _precheck_length(response.headers, limit, wrapped, "response_too_large")
-            await wrapped.consume(limit, "response_too_large")
+            payload = await wrapped.consume(limit, "response_too_large")
+            if snapshot.body_capture is not None:
+                snapshot.body_capture.append(payload)
             return wrapped
         if snapshot.mode == "stream":
             await _precheck_length(response.headers, snapshot.max_response_bytes, wrapped, "response_too_large")
@@ -470,9 +510,15 @@ class OssV4Adapter:
             raise ValueError("oss_target_binding_required")
         policy = OssResponsePolicy(
             mode=operation.response_mode,
+            action=operation.action,
+            body_capture=[] if operation.action == "ListBuckets" else None,
             expected_host=expected_host,
             max_response_bytes=request.response_policy.max_bytes,
-            declared_headers=request.response_policy.declared_headers,
+            declared_headers=(
+                (*request.response_policy.declared_headers, "location", "x-oss-request-id")
+                if operation.action == "PutBucket"
+                else request.response_policy.declared_headers
+            ),
         )
         sdk_request = _build_sdk_request(operation, contract, request)
         if credential is None:
@@ -535,6 +581,8 @@ class OssV4Adapter:
         method = getattr(client, operation.sdk_method, None)
         if not callable(method):
             raise RuntimeError("oss_sdk_operation_missing")
+        if policy.body_capture is not None:
+            policy.body_capture.clear()
         token = _OSS_RESPONSE_POLICY.set(policy)
         try:
             return await method(sdk_request)
@@ -599,7 +647,10 @@ class OssV4Adapter:
                         reason=reason,
                     ) from error
                 raise
-            return _normalize_sdk_result(result, operation.response_mode, policy.declared_headers)
+            response = _normalize_sdk_result(result, operation.response_mode, policy.declared_headers)
+            if operation.action == "ListBuckets" and policy.body_capture:
+                response = _preserve_empty_bucket_list(response, policy.body_capture[-1])
+            return response
 
     async def _execute_get_object(
         self,
@@ -774,6 +825,9 @@ def _build_sdk_request(
     headers = {str(name).casefold(): str(value) for name, value in request.headers.items()}
     path_values = _path_values(contract.pathname, request.raw_path)
     values: dict[str, Any] = {}
+    put_bucket = operation.action == "PutBucket" and operation.body_type == "xml"
+    if put_bucket and headers.get("x-oss-acl") != "private":
+        raise ValueError("unsupported_oss_bucket_configuration")
     for field in operation.field_mapping:
         value: Any | None = None
         if field.location == "host":
@@ -799,14 +853,71 @@ def _build_sdk_request(
             if field.required:
                 raise ValueError(f"missing_oss_sdk_field:{field.sdk_field}")
             continue
-        values[field.sdk_field] = _sdk_scalar(value, field.sdk_type)
+        if field.location == "body" and operation.body_type == "xml":
+            if not (
+                put_bucket
+                and field.sdk_field == "create_bucket_configuration"
+                and field.openmeta_name == "body"
+                and field.wire_name == "CreateBucketConfiguration"
+            ):
+                raise ValueError("unsupported_oss_xml_mapping")
+            values[field.sdk_field] = _put_bucket_configuration(value)
+        else:
+            values[field.sdk_field] = _sdk_scalar(value, field.sdk_type)
 
+    if put_bucket and "create_bucket_configuration" not in values:
+        raise ValueError("unsupported_oss_bucket_configuration")
+    if put_bucket:
+        headers["content-type"] = "application/xml"
+        headers.pop("content-length", None)
     attributes = getattr(model_class, "_attribute_map", {})
     for header_name, sdk_field in (("content-type", "content_type"), ("content-length", "content_length")):
         if sdk_field in attributes and sdk_field not in values and header_name in headers:
             sdk_type = str(attributes[sdk_field].get("type", "str"))
             values[sdk_field] = _sdk_scalar(headers[header_name], sdk_type)
     return model_class(**values)
+
+
+def _put_bucket_configuration(body: Any) -> CreateBucketConfiguration:
+    def unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for name, value in pairs:
+            if name in result:
+                raise ValueError("unsupported_oss_bucket_configuration")
+            result[name] = value
+        return result
+
+    try:
+        value = json.loads(body, object_pairs_hook=unique_fields)
+    except (TypeError, ValueError) as error:
+        raise ValueError("unsupported_oss_bucket_configuration") from error
+    if value != {"CreateBucketConfiguration": {"StorageClass": "Standard", "DataRedundancyType": "LRS"}}:
+        raise ValueError("unsupported_oss_bucket_configuration")
+    return CreateBucketConfiguration(storage_class="Standard", data_redundancy_type="LRS")
+
+
+def oss_bucket_not_found(response: NormalizedApiResponse, bucket: str) -> bool:
+    body = response.body
+    if not (
+        type(response.status) is int
+        and response.status == 404
+        and isinstance(body, Mapping)
+        and isinstance(response.headers, Mapping)
+        and isinstance(bucket, str)
+        and body.get("Code") == "NoSuchBucket"
+        and body.get("BucketName") == bucket
+        and isinstance(body.get("RequestId"), str)
+        and 0 < len(body["RequestId"]) <= 256
+        and not any(char.isspace() for char in body["RequestId"])
+        and re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", bucket)
+    ):
+        return False
+    request_ids = [
+        value
+        for name, value in response.headers.items()
+        if isinstance(name, str) and name.casefold() == "x-oss-request-id"
+    ]
+    return not request_ids or (len(request_ids) == 1 and request_ids[0] == body["RequestId"])
 
 
 def _copy_sdk_request(request: Any) -> Any:
@@ -925,6 +1036,20 @@ def _normalize_sdk_result(
     )
 
 
+def _preserve_empty_bucket_list(response: NormalizedApiResponse, payload: bytes) -> NormalizedApiResponse:
+    root = ElementTree.fromstring(payload)
+    if root.tag != "ListAllMyBucketsResult" or not isinstance(response.body, Mapping):
+        raise RuntimeError("invalid_response")
+    containers = root.findall("Buckets")
+    if len(containers) > 1:
+        raise RuntimeError("invalid_response")
+    if len(containers) == 1 and not list(containers[0]) and not (containers[0].text or "").strip():
+        if response.body.get("buckets"):
+            raise RuntimeError("invalid_response")
+        return replace(response, body={**response.body, "buckets": []})
+    return response
+
+
 def _sdk_result_body(result: Any) -> Mapping[str, Any]:
     excluded = {"status", "status_code", "request_id", "headers", "body"}
     values = {
@@ -959,9 +1084,20 @@ def _normalize_service_error(
 ) -> NormalizedApiResponse:
     raw_headers = error.headers if isinstance(error.headers, Mapping) else {}
     fields = error.error_fileds if isinstance(error.error_fileds, Mapping) else {}
-    body: dict[str, Any] = dict(fields)
-    if not body:
-        body = {"Code": error.code or "", "Message": error.message or ""}
+    candidates = fields or {"Code": error.code or "", "Message": error.message or ""}
+    body = {
+        name: value
+        for name, value in candidates.items()
+        if name in {"Code", "Message", "RequestId", "HostId", "BucketName", "EC"}
+        and isinstance(value, str)
+        and 0 < len(value) <= 512
+        and not re.search(
+            r"canonicalrequest|stringtosign|signatureprovided|access.?key|security.?token|"
+            r"authorization|credential\s*=|bearer\s|secret|password|cookie",
+            value,
+            re.IGNORECASE,
+        )
+    }
     snapshot = error.snapshot if isinstance(error.snapshot, bytes) else b""
     return NormalizedApiResponse(
         status=int(error.status_code),

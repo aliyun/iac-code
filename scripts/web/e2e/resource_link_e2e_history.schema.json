@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iac-code.local/schemas/resource-link-e2e-history-v1.json",
+  "title": "Historical resource-link evidence registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "sourceDocument", "documentDigest", "counts", "entries"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "sourceDocument": {"type": "string", "minLength": 1},
+    "documentDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["legacyFormal", "partial", "manualUnverified", "total"],
+      "properties": {
+        "legacyFormal": {"type": "integer", "minimum": 0},
+        "partial": {"type": "integer", "minimum": 0},
+        "manualUnverified": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": 0}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resourceType", "source", "status", "evidenceId", "sourceDocument",
+          "documentDigest", "lineNumber", "lineDigest", "navigationEvidence", "missingFields"
+        ],
+        "properties": {
+          "resourceType": {"type": "string", "minLength": 1},
+          "source": {"enum": ["query_api", "ros_stack"]},
+          "status": {"enum": ["legacy-formal", "partial", "manual-unverified"]},
+          "evidenceId": {"type": "string", "pattern": "^legacy-[0-9a-f]{32}$"},
+          "sourceDocument": {"type": "string", "minLength": 1},
+          "documentDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "lineNumber": {"type": "integer", "minimum": 1},
+          "lineDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "navigationEvidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["normal", "shift"],
+            "properties": {
+              "normal": {"const": "unknown"},
+              "shift": {"const": "unknown"}
+            }
+          },
+          "missingFields": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

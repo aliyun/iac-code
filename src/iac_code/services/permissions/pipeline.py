@@ -138,6 +138,11 @@ async def check_tool_permission(
     context: ToolPermissionContext,
 ) -> PermissionResult:
     """Apply tool-level rules, tool-internal checks, mode, and post-processing."""
+    from iac_code.services.execution_policy import check
+
+    binding = context.invocation_binding
+    if error := check(tool.name, input, binding.session_id if binding else "", cwd=context.cwd):
+        return PermissionResult(behavior="deny", message=error)
     ask_rule = _get_tool_rule(tool.name, context.ask_rules)
 
     deny_rule = _get_tool_rule(tool.name, context.deny_rules)

@@ -764,3 +764,41 @@ class TestDashScopeCacheMetrics:
         end = events[-1]
         assert end.usage.cache_read_input_tokens == 0
         assert end.usage.cache_creation_input_tokens == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("configured_limit", [None, 4096, 8192, 16384])
+async def test_deepseek_flash_output_policy_ignores_legacy_ceiling_and_preserves_effort(streaming, configured_limit):
+    client = FakeOpenAIClient(
+        stream_chunks=[
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="length", delta=ns(content="partial", tool_calls=None))],
+            ),
+        ],
+        create_response=ns(
+            id="fake-response",
+            choices=[ns(finish_reason="length", message=ns(content="partial", tool_calls=None))],
+            usage=ns(prompt_tokens=1, completion_tokens=1),
+        ),
+    )
+    provider = DashScopeProvider(
+        model="deepseek-v4-flash-0731",
+        client=client,
+        effort="high",
+        max_completion_tokens=configured_limit,
+    )
+    if streaming:
+        events = [event async for event in provider.stream([Message.user("offline")], "")]
+        assert events[-1].stop_reason == "max_tokens"
+    else:
+        result = await provider.complete([Message.user("offline")], "")
+        assert result.stop_reason == "max_tokens"
+    assert len(client.chat.completions.calls) == 1
+    request = client.chat.completions.calls[0]
+    assert request["model"] == "deepseek-v4-flash-0731"
+    assert "max_tokens" not in request
+    assert "max_completion_tokens" not in request
+    assert request["extra_body"] == {"enable_thinking": True}
+    assert request["reasoning_effort"] == "high"

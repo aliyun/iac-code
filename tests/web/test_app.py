@@ -53,6 +53,7 @@ def _foreign_pipeline_session(tmp_path, *, session_id="foreign-pipeline"):
 
 def test_web_app_exposes_health_and_index() -> None:
     from iac_code.web.app import create_app
+    from iac_code.web.resource_link_catalog import resource_link_catalog
 
     app = create_app()
 
@@ -67,6 +68,12 @@ def test_web_app_exposes_health_and_index() -> None:
     assert "IaC Code Web" in index_response.text
     assert "/static/styles.css" in index_response.text
     assert "/static/js/app.js" in index_response.text
+    assert "window.__IAC_RESOURCE_LINKS__" in index_response.text
+    assert '"resourceCount"' not in index_response.text
+    for digest in resource_link_catalog().hashes.values():
+        assert digest in index_response.text
+    assert '"resourceType": "ALIYUN::ClickHouse::DBCluster"' in index_response.text
+    assert '"identifierField": "DBInstanceId"' in index_response.text
 
 
 def test_index_marks_only_explicit_token_mode() -> None:

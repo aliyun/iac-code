@@ -25,6 +25,7 @@ from iac_code.mcp.progress import mcp_progress_metadata
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.permissions.audit import build_input_summary, build_redacted_tool_input, fingerprint_text
 from iac_code.tools.cloud.base_stack import stack_result_from_metadata
+from iac_code.tools.cloud.resource_references import resource_reference_metadata, resource_references_from_metadata
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
@@ -1556,6 +1557,8 @@ def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
     }
     if stack_result := stack_result_from_metadata(event.metadata):
         data["stackResult"] = to_json_safe(stack_result)
+    if references := resource_references_from_metadata(event.metadata):
+        data["resourceReferences"] = resource_reference_metadata(references)
     return data
 
 
@@ -1640,6 +1643,8 @@ def _stack_progress_data(event: StackProgressEvent) -> dict[str, Any]:
         "status": event.status,
         "progressPercentage": event.progress_percentage,
         "resources": event.resources,
+        **({"accountScope": event.account_scope} if event.account_scope else {}),
+        **({"consolePartition": event.console_partition} if event.console_partition else {}),
         "elapsedSeconds": event.elapsed_seconds,
     }
 

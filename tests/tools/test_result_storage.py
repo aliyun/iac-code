@@ -168,3 +168,64 @@ class TestResultStorage:
         content = "y" * 200
         result = storage.process(tool_use_id="t4", content=content)
         assert "truncated" in result.content.lower() or "..." in result.content
+
+    @pytest.mark.parametrize("limit", [50_000, None])
+    def test_complete_compact_inventory_retains_original_externalized_result(self, tmp_path, limit):
+        payload = {
+            "TotalCount": 48,
+            "PageNumber": 1,
+            "PageSize": 50,
+            "Vpcs": {
+                "Vpc": [
+                    {
+                        "VpcId": f"vpc-fixture-{index}",
+                        "VpcName": f"fixture-network-{index}",
+                        "CidrBlock": "10.0.0.0/24",
+                        "Description": "x" * 400,
+                        "Tags": {"Tag": [{"Key": f"fixture-{tag_index}", "Value": "中文"} for tag_index in range(5)]},
+                    }
+                    for index in range(48)
+                ]
+            },
+        }
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        storage = ResultStorage(storage_dir=str(tmp_path), max_inline_chars=len(compact) if limit is None else limit)
+
+        result = storage.process("inventory", content)
+
+        assert len(content) > 50_000 > len(compact)
+        assert result.content == compact
+        assert json.loads(result.content) == payload
+        assert result.is_externalized is True
+        assert Path(result.file_path).read_text(encoding="utf-8") == content
+
+    def test_compaction_preserves_json_tokens_and_string_whitespace(self, tmp_path):
+        compact = (
+            '{"same":1,"same":2,"precise":1.234567890123456789,"text":'
+            + json.dumps('中文 spaces \t \n " quote \\ slash', ensure_ascii=False)
+            + ',"array":[true,null]}'
+        )
+        content = " \n\t" + compact.replace(',"', ', \n\t"') + "\n "
+        storage = ResultStorage(storage_dir=str(tmp_path), max_inline_chars=len(compact))
+
+        result = storage.process("exact-tokens", content)
+
+        assert result.content == compact
+        assert Path(result.file_path).read_text(encoding="utf-8") == content
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '{"text":"unescaped\nnewline"}' + " " * 200,
+            '{"value":1}' + " " * 200 + "diagnostics",
+            '{"value":"' + "x" * 200 + '"}',
+            '"string scalar"' + " " * 200,
+        ],
+    )
+    def test_uncompactable_results_keep_honest_truncated_preview(self, storage, content):
+        result = storage.process("uncompactable", content)
+
+        assert result.is_externalized is True
+        assert "truncated" in result.content
+        assert Path(result.file_path).read_text(encoding="utf-8") == content

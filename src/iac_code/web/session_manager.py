@@ -50,6 +50,7 @@ from iac_code.services.permissions.trusted_roots import build_session_trusted_re
 from iac_code.services.session_index import SessionEntry, SessionIndex, _trim_title
 from iac_code.services.session_metadata import SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
+from iac_code.tools.cloud.resource_references import resource_references_from_metadata
 from iac_code.types.permissions import PermissionMode, PermissionRuleValue, ToolPermissionContext
 from iac_code.utils.state_io import atomic_write_text
 from iac_code.web.events import WebEventBuffer, normalize_event_payload
@@ -69,6 +70,8 @@ from iac_code.web.permissions import (
     permission_choice_to_allowed,
     question_answer_from_body,
 )
+from iac_code.web.resource_reference_controller import ResourceReferenceController
+from iac_code.web.resource_references import RESOURCE_REFERENCES_FILENAME, resource_fact_to_web
 from iac_code.web.settings import is_foreign_normal_visible, is_foreign_pipeline_visible
 
 logger = logging.getLogger(__name__)
@@ -428,6 +431,8 @@ def _tool_result_payload(block: ToolResultBlock) -> dict[str, Any]:
         "isError": block.is_error,
     }
     metadata = block.metadata if isinstance(block.metadata, Mapping) else {}
+    if references := resource_references_from_metadata(metadata):
+        payload["resourceReferences"] = resource_fact_to_web(references)
     submitted_delta = metadata.get("submitted_delta")
     step_result = metadata.get("step_result")
     normalized_conclusion = (
@@ -829,11 +834,19 @@ class WebSession:
     # contend for the turn lifecycle reservation. This lock only serializes judges.
     pipeline_interrupt_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     events: WebEventBuffer = field(init=False, repr=False)
+    resource_references: ResourceReferenceController | None = field(default=None, repr=False)
     debug_enabled: bool = False
     read_only: bool = False
 
     def __post_init__(self) -> None:
         self.events = WebEventBuffer(self.session_id)
+
+    async def flush_resource_references(self) -> None:
+        if self.resource_references is not None:
+            try:
+                await self.resource_references.flush()
+            except Exception:
+                logger.warning("Resource reference flush failed")
 
     @property
     def web_session_id(self) -> str:
@@ -1012,6 +1025,14 @@ class WebSessionManager:
         self._session_lifecycle_epoch += 1
         self._session_mutation_epochs[(cwd, session_id)] = self._session_lifecycle_epoch
 
+    def _attach_resource_references(self, session: WebSession) -> None:
+        session.resource_references = ResourceReferenceController(
+            self.storage.session_dir(session.cwd, session.session_id) / RESOURCE_REFERENCES_FILENAME,
+            session.events.append,
+            writable=lambda: not self.is_session_read_only(session),
+        )
+        session.events.resource_observer = session.resource_references.on_event
+
     def create_session(
         self,
         *,
@@ -1119,6 +1140,7 @@ class WebSessionManager:
         )
         session.pending_llm_title = not storage_existed
         self._sessions[session_key] = session
+        self._attach_resource_references(session)
         self._restore_permission_requests(session)
         if not storage_existed:
             self._record_session_lifecycle_mutation(actual_cwd, actual_session_id)
@@ -1714,6 +1736,8 @@ class WebSessionManager:
         session = self.get_session(ref)
         if session is None:
             return False
+        if session.resource_references is not None:
+            session.resource_references.close_for_delete()
         removed = self.storage.delete_session(session.cwd, session.session_id)
         self._sessions.pop((session.cwd, session.session_id), None)
         self._record_session_lifecycle_mutation(session.cwd, session.session_id)
@@ -1805,6 +1829,8 @@ class WebSessionManager:
             for session in list(group["sessions"]):
                 if self.is_session_read_only(session):
                     continue
+                if session.resource_references is not None:
+                    session.resource_references.close_for_delete()
                 if self.storage.delete_session(session.cwd, session.session_id):
                     deleted += 1
                 self._sessions.pop((session.cwd, session.session_id), None)
@@ -1854,6 +1880,7 @@ class WebSessionManager:
             pipeline_diagram: dict[str, Any] | None = None,
             elapsed_seconds: float = 0.0,
             message_id: str | None = None,
+            turn_id: str | None = None,
             image_ids: list[str] | None = None,
             file_refs: list[str] | None = None,
             pipeline_input_kind: str = "",
@@ -1877,6 +1904,8 @@ class WebSessionManager:
             }
             if elapsed_seconds:
                 payload["elapsedSeconds"] = elapsed_seconds
+            if turn_id:
+                payload["turnId"] = turn_id
             if kind:
                 payload["kind"] = kind
             if pipeline_step:
@@ -1893,7 +1922,11 @@ class WebSessionManager:
                 payload["pipelineInputStepId"] = pipeline_input_step_id
             visible.append(payload)
             for tool_id, tool in (segment_tools or {}).items():
-                tools[tool_id] = {**tool, "messageId": message_id}
+                tools[tool_id] = {
+                    **tool,
+                    "messageId": message_id,
+                    **({"turnId": turn_id} if turn_id else {}),
+                }
 
         def append_transcript_messages(
             messages: list[Message],
@@ -1912,6 +1945,9 @@ class WebSessionManager:
                     continue
                 if _is_tool_result_only_message(message):
                     continue
+
+                metadata_turn_id = message.metadata.get("turnId")
+                stable_turn_id = metadata_turn_id if isinstance(metadata_turn_id, str) and metadata_turn_id else None
 
                 if isinstance(message.content, list):
                     message_image_ids = _metadata_string_list(message.metadata, "imageIds")
@@ -1941,6 +1977,7 @@ class WebSessionManager:
                             segment_tools=segment_tools,
                             elapsed_seconds=message.elapsed_seconds,
                             message_id=message_id,
+                            turn_id=stable_turn_id,
                             image_ids=message_image_ids if stable_segment_index == 0 else None,
                             file_refs=message_file_refs if stable_segment_index == 0 else None,
                             pipeline_input_kind=str(message.metadata.get("pipelineInputKind") or ""),
@@ -2021,6 +2058,7 @@ class WebSessionManager:
                         content=content,
                         elapsed_seconds=message.elapsed_seconds,
                         message_id=_persisted_message_stable_id(message),
+                        turn_id=stable_turn_id,
                         image_ids=_metadata_string_list(message.metadata, "imageIds"),
                         file_refs=_metadata_string_list(message.metadata, "fileRefs"),
                         pipeline_input_kind=str(message.metadata.get("pipelineInputKind") or ""),
@@ -2235,6 +2273,7 @@ class WebSessionManager:
                         tool_use_ids=list(row.get("toolUseIds") or []),
                         segment_tools=dict(row.get("tools") or {}),
                         message_id=str(row.get("id") or "") or None,
+                        turn_id=str(row.get("turnId") or "") or None,
                         # Carry reconstructed thinking so reloaded pipeline messages show
                         # 思考完成 like live/normal mode (build_pipeline_transcript_rows folds
                         # assistant.thinking.delta into row["thinking"]).
@@ -4155,6 +4194,7 @@ class WebSessionManager:
         )
         session.read_only = is_foreign and session.mode == "pipeline"
         self._sessions[session_key] = session
+        self._attach_resource_references(session)
         return session
 
 
