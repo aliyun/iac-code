@@ -5,15 +5,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+import hashlib
 import inspect
 import json
 import logging
+import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from iac_code.agent.message import ContentBlock, Message
+from iac_code.agent.message import ContentBlock, Message, is_compaction_summary_message, is_hidden_context_message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
 from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
 from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool, CompletionValidationError
@@ -50,6 +52,7 @@ from iac_code.types.stream_events import (
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
+    Usage,
 )
 
 logger = logging.getLogger(__name__)
@@ -285,6 +288,7 @@ class StepExecutor:
             yield ContextUsageEvent(usage=prime_context_usage())
         completion_guard_state = agent_context.completion_guard_state
         visible_answer_message_ids: set[str | None] = set()
+        visible_text_by_message: dict[str | None, list[str]] = {}
         current_message_id: str | None = None
 
         complete_step_ids: set[str] = set()
@@ -333,16 +337,17 @@ class StepExecutor:
                 async for event in stream:
                     if isinstance(event, MessageStartEvent):
                         current_message_id = event.message_id
-                    elif (
-                        isinstance(event, TextDeltaEvent)
-                        and event.text.strip()
-                        and "followup_visible_answer" in completion_guard_state
-                    ):
-                        visible_answer_message_ids.add(current_message_id)
-                        completion_guard_state["followup_visible_answer"] = True
-                    elif isinstance(event, TombstoneEvent) and "followup_visible_answer" in completion_guard_state:
-                        visible_answer_message_ids.discard(event.message_id)
-                        completion_guard_state["followup_visible_answer"] = bool(visible_answer_message_ids)
+                    elif isinstance(event, TextDeltaEvent):
+                        if step.completion_reply_builder is not None:
+                            visible_text_by_message.setdefault(current_message_id, []).append(event.text)
+                        if event.text.strip() and "followup_visible_answer" in completion_guard_state:
+                            visible_answer_message_ids.add(current_message_id)
+                            completion_guard_state["followup_visible_answer"] = True
+                    elif isinstance(event, TombstoneEvent):
+                        visible_text_by_message.pop(event.message_id, None)
+                        if "followup_visible_answer" in completion_guard_state:
+                            visible_answer_message_ids.discard(event.message_id)
+                            completion_guard_state["followup_visible_answer"] = bool(visible_answer_message_ids)
                     elif isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
                         complete_step_ids.add(event.tool_use_id)
                     elif isinstance(event, ToolUseEndEvent):
@@ -400,9 +405,17 @@ class StepExecutor:
                                 last_complete_step_input = pending_complete_input.get(event.tool_use_id)
                     yield event
                     if isinstance(event, MessageEndEvent) and self._current_agent_loop is not None:
-                        last_agent_stop_reason = event.stop_reason if event.stop_reason in {
-                            "stream_error", "max_turns", "length", "max_tokens",
-                        } else None
+                        last_agent_stop_reason = (
+                            event.stop_reason
+                            if event.stop_reason
+                            in {
+                                "stream_error",
+                                "max_turns",
+                                "length",
+                                "max_tokens",
+                            }
+                            else None
+                        )
                         yield ContextUsageEvent(usage=self._current_agent_loop.get_context_usage())
             finally:
                 aclose = getattr(stream, "aclose", None)
@@ -491,6 +504,9 @@ class StepExecutor:
                     },
                 )
                 nudge_msg = self._build_complete_step_nudge(last_complete_step_error, last_complete_step_input, step)
+                reuse_wiki = getattr(agent_loop, "reuse_wiki_query", None)
+                if callable(reuse_wiki):
+                    reuse_wiki()
                 async with contextlib.aclosing(
                     consume_complete_step_events(agent_loop.run_streaming(nudge_msg))
                 ) as events:
@@ -529,6 +545,9 @@ class StepExecutor:
                     last_complete_step_input,
                     step,
                 )
+                reuse_wiki = getattr(recovery_loop, "reuse_wiki_query", None)
+                if callable(reuse_wiki):
+                    reuse_wiki(agent_loop)
                 async with contextlib.aclosing(
                     consume_complete_step_events(recovery_loop.run_streaming(recovery_msg))
                 ) as events:
@@ -585,9 +604,28 @@ class StepExecutor:
             step_result = StepResult(
                 step_id=step.step_id,
                 status=StepStatus.FAILED,
-                error=(f"No conclusion extracted (agent stop reason: {last_agent_stop_reason})"
-                       if last_agent_stop_reason else "No conclusion extracted"),
+                error=(
+                    f"No conclusion extracted (agent stop reason: {last_agent_stop_reason})"
+                    if last_agent_stop_reason
+                    else "No conclusion extracted"
+                ),
             )
+
+        if step_result.status == StepStatus.COMPLETED and step.completion_reply_builder is not None:
+            visible_text = "".join("".join(parts) for parts in visible_text_by_message.values())
+            reply = step.completion_reply_builder(
+                conclusion=step_result.conclusion or {},
+                visible_text=visible_text,
+            )
+            if reply:
+                message_id = "completion-" + uuid.uuid4().hex
+                message = agent_loop.context_manager.add_assistant_message(("\n\n" if visible_text else "") + reply)
+                message.metadata["messageId"] = message_id
+                if self._session_storage is not None:
+                    self._session_storage.append(self._cwd or "", agent_loop.session_id, message)
+                yield MessageStartEvent(message_id=message_id)
+                yield TextDeltaEvent(text=message.get_text())
+                yield MessageEndEvent(stop_reason="stop", usage=Usage())
 
         yield step_result
 
@@ -726,6 +764,43 @@ class StepExecutor:
             trusted_read_roots.append(str(result_storage_dir))
         if transcript_image_cache_dir is not None:
             trusted_read_roots.append(str(transcript_image_cache_dir))
+        wiki_context: dict[str, Any] = {"enabled": False}
+        if step.config.get("wiki_search_on_enter") is True:
+            dependencies = self._pipeline.context_dependencies.get(step.conclusion_field, [])
+            upstream = {name: context.get_field(name) for name in dependencies}
+            valid_upstream = {name: field for name, field in upstream.items() if not field.stale}
+            versions = {name: field.version for name, field in valid_upstream.items()}
+            signature = hashlib.sha256(json.dumps(versions, sort_keys=True).encode()).hexdigest()[:16]
+            scope_id = f"{session_id}:{self._pipeline.name}:{step.step_id}:{signature}"
+            seed_parts = [step.description]
+            for field in valid_upstream.values():
+                value = field.value
+                if isinstance(value, dict):
+                    selected = value.get("selected_candidate", value)
+                    if isinstance(selected, dict):
+                        seed_parts.append(
+                            json.dumps(
+                                {
+                                    key: selected[key]
+                                    for key in ("name", "summary", "products", "intent")
+                                    if key in selected
+                                },
+                                ensure_ascii=False,
+                            )[:2000]
+                        )
+            resuming_question = bool(precompleted_tools and "ask_user_question" in precompleted_tools)
+            has_source = resuming_question or user_message is not None or any(
+                field.value for field in valid_upstream.values()
+            )
+            current_field = context.get_field(step.conclusion_field)
+            wiki_context = {
+                "enabled": has_source,
+                "scope_id": scope_id,
+                "followup": bool(saved_step_conclusion) and not current_field.stale,
+                "resuming_question": resuming_question,
+                "query_source": "user" if user_message is not None else "step_seed",
+                "seed": _content_blocks_text(user_message) if user_message is not None else "\n".join(seed_parts),
+            }
         agent_loop = AgentLoop(
             provider_manager=self._provider_manager,
             system_prompt=system_prompt,
@@ -748,6 +823,7 @@ class StepExecutor:
             pipeline_mode=True,
             tool_context_env_overrides=self._tool_context_env_overrides,
             telemetry_attributes=self._agent_telemetry_attributes(step),
+            wiki_search_context=wiki_context,
         )
         return StepAgentLoopContext(
             agent_loop=agent_loop,
@@ -824,6 +900,23 @@ class StepExecutor:
         tool_registry: ToolRegistry,
         messages: list[Message],
     ) -> StepResult | None:
+        if step.config.get("allow_empty_conclusion_on_resume") is True:
+            # A retained transcript can contain several completed user turns.
+            # Only the latest turn's completion can recover this execution.
+            for index in range(len(messages) - 1, -1, -1):
+                message = messages[index]
+                if (
+                    message.role == "user"
+                    and not is_hidden_context_message(message)
+                    and not is_compaction_summary_message(message)
+                    and (
+                        isinstance(message.content, str) and bool(message.content.strip())
+                        or isinstance(message.content, list)
+                        and any(block.type in {"text", "image"} for block in message.content)
+                    )
+                ):
+                    messages = messages[index:]
+                    break
         complete_step_input = last_successful_tool_input(messages, "complete_step")
         if complete_step_input is None:
             return None

@@ -166,7 +166,7 @@ class TestGrepExecute:
         from unittest.mock import MagicMock
 
         monkeypatch.setattr(
-            "iac_code.tools.grep.normalize_user_path",
+            "iac_code.tools.path_safety.normalize_user_path",
             MagicMock(side_effect=lambda raw: raw),
         )
         from iac_code.tools.base import ToolContext
@@ -177,7 +177,7 @@ class TestGrepExecute:
             context=context,
         )
         assert result.is_error is False
-        from iac_code.tools.grep import normalize_user_path
+        from iac_code.tools.path_safety import normalize_user_path
 
         normalize_user_path.assert_called_once_with(str(tmp_path))
 

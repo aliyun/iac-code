@@ -45,6 +45,13 @@ _TOOL_ACTIONS = {
 }
 
 
+def normalize_ros_template_parameter_alias(tool_input: dict[str, Any]) -> None:
+    """Accept the template-parameter alias without overwriting an explicit canonical value."""
+
+    if "params" in tool_input and "parameters" not in tool_input:
+        tool_input["parameters"] = tool_input.pop("params")
+
+
 def build_delegated_call_shape(tool_input: Mapping[str, Any], *, action: str) -> dict[str, Any]:
     """Build the stable API call shape used by ROS permission and execution."""
 
@@ -154,6 +161,15 @@ class _RosTemplateTool(Tool):
 
     def __init__(self, *, delegated_executor: Any | None = None) -> None:
         self._delegated_executor = delegated_executor
+
+    def normalize_input(self, tool_input: dict[str, Any]) -> None:
+        if "parameters" in self.input_schema["properties"]:
+            normalize_ros_template_parameter_alias(tool_input)
+
+    def prepare_invocation_input(self, tool_input: Mapping[str, Any]) -> dict[str, Any]:
+        prepared = copy.deepcopy(dict(tool_input))
+        self.normalize_input(prepared)
+        return prepared
 
     @property
     def requires_runtime_execution_class(self) -> bool:

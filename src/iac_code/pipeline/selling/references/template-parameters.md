@@ -1,1 +1,0 @@
-../../../skills/bundled/iac_aliyun/references/template-parameters.md

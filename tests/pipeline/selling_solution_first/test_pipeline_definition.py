@@ -191,7 +191,7 @@ class TestTopLevelSteps:
         assert step.config["compact_completion_schema"] is True
         assert step.config["compact_completion_errors"] is True
         assert step.config["completion_validation_error_limit"] == 5
-        assert step.config["fresh_agent_context_on_resume"] is True
+        assert step.config.get("fresh_agent_context_on_resume") is not True
         assert step.config["conclusion_merge_context_field"] == "selected_plan"
         assert step.config["completion_record_contract"] == "v2"
         assert step.config["hard_constraint_evidence_contract"] == "v2"

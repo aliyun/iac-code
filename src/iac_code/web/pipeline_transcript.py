@@ -442,6 +442,26 @@ class PipelineTranscriptTranslator:
 
     # -- event handlers -------------------------------------------------------
 
+    def _on_wiki_search(self, env: Mapping[str, Any]) -> list[dict[str, Any]]:
+        from iac_code.ui.wiki_search import wiki_projection
+
+        data = _as_mapping(env.get("data"))
+        snapshot = _as_mapping(data.get("snapshot"))
+        if not snapshot.get("query_id"):
+            return []
+        marker = self._group_markers.get(self._group_id_for(env))
+        if marker is None:
+            return []
+        return [
+            {
+                "type": "context.wiki_search",
+                "payload": {
+                    "ownerMessageId": marker["payload"]["markerId"],
+                    **wiki_projection(dict(snapshot), str(data.get("phase") or "pending")),
+                },
+            }
+        ]
+
     def _on_context_usage(self, env: Mapping[str, Any]) -> list[dict[str, Any]]:
         """Live per-step context-window usage. Keyed by the SAME group id as the
         scope's markers so the frontend can attach the ring to the active step and
@@ -1380,6 +1400,8 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
             pipeline_step = dict(_as_mapping(payload.get("pipelineStep")))
             existing = by_id.get(marker_id)
             if existing is not None:
+                if "wikiSearch" in existing["pipelineStep"]:
+                    pipeline_step["wikiSearch"] = existing["pipelineStep"]["wikiSearch"]
                 existing["pipelineStep"] = pipeline_step
                 existing["content"] = str(payload.get("content") or "")
                 continue
@@ -1394,6 +1416,10 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
             }
             specs.append(spec)
             by_id[marker_id] = spec
+        elif event_type == "context.wiki_search":
+            owner = by_id.get(str(payload.get("ownerMessageId") or ""))
+            if owner is not None:
+                owner["pipelineStep"]["wikiSearch"] = dict(payload)
         elif event_type == "diagram.render":
             architecture_context = _as_mapping(payload.get("architectureContext"))
             diagram_id = str(payload.get("diagramId") or "")
@@ -1557,4 +1583,11 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
             spec["inputAnswerKind"] = anchor.get("kind") or ""
             spec["inputAnswerStepId"] = anchor.get("stepId") or ""
 
+    for spec in specs:
+        record = _as_mapping(spec.get("pipelineStep")).get("wikiSearch")
+        if isinstance(record, dict) and record.get("phase") in {"extracting", "searching"}:
+            from iac_code.ui.wiki_search import wiki_summary
+
+            record["phase"] = "pending"
+            record["summary"] = wiki_summary({"dispatch_mode": record.get("dispatchMode"), "status": "pending"})
     return specs

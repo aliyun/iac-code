@@ -525,7 +525,12 @@ def test_all_pipeline_event_types_keeps_events_before_intervening_answers() -> N
     assert runner._all_pipeline_event_types([original, answer]) == {"deployment_started", "input_required"}
 
 
-def test_golden_solution_requires_read_and_tagged_write() -> None:
+@pytest.mark.parametrize("path", [
+    "knowledge://clouds/aliyun/solutions/iac-code-web.ros.yml",
+    "/installed/iac_code/knowledge/clouds/aliyun/solutions/iac-code-web.ros.yml",
+    "references/solutions/iac-code-web.ros.yml",
+])
+def test_golden_solution_requires_read_and_tagged_write(path) -> None:
     runner = _load_runner()
     snapshot = {
         "display": {
@@ -534,7 +539,7 @@ def test_golden_solution_requires_read_and_tagged_write() -> None:
                     "sequence": 1,
                     "toolName": "read_file",
                     "isError": False,
-                    "input": {"path": "references/solutions/iac-code-web.ros.yml"},
+                    "input": {"path": path},
                 },
                 {
                     "sequence": 2,
@@ -3836,7 +3841,7 @@ def test_golden_diagnostics_distinguish_source_read_from_tagged_completion():
 def test_golden_structure_diagnostics_distinguish_tag_loss_from_application_loss(remove_metadata):
     runner = _load_runner()
     baseline = runner.yaml.safe_load((runner.E2E_SCRIPTS_DIR.parents[2] /
-        "src/iac_code/skills/bundled/iac_aliyun/references/solutions/iac-code-web.ros.yml").read_text(
+        "src/iac_code/knowledge/clouds/aliyun/solutions/iac-code-web.ros.yml").read_text(
             encoding="utf-8"))
     if remove_metadata:
         baseline.pop("Metadata")
@@ -3865,7 +3870,7 @@ def test_golden_structure_diagnostics_distinguish_tag_loss_from_application_loss
 def test_golden_bootstrap_diagnostics_separate_order_from_actual_content_changes(change):
     runner = _load_runner()
     template = runner.yaml.safe_load((runner.E2E_SCRIPTS_DIR.parents[2] /
-        "src/iac_code/skills/bundled/iac_aliyun/references/solutions/iac-code-web.ros.yml").read_text(
+        "src/iac_code/knowledge/clouds/aliyun/solutions/iac-code-web.ros.yml").read_text(
             encoding="utf-8"))
     bootstrap = template["Resources"]["Bootstrap"]
     if change == "dependency_order":
@@ -3893,7 +3898,7 @@ def test_golden_bootstrap_diagnostics_separate_order_from_actual_content_changes
 def test_golden_structure_diagnostics_use_latest_native_template_not_stale_or_failed_writes():
     runner = _load_runner()
     baseline = (runner.E2E_SCRIPTS_DIR.parents[2] /
-        "src/iac_code/skills/bundled/iac_aliyun/references/solutions/iac-code-web.ros.yml").read_text(
+        "src/iac_code/knowledge/clouds/aliyun/solutions/iac-code-web.ros.yml").read_text(
             encoding="utf-8")
     snapshot = {"display": {"toolResults": [
         {"sequence": 1, "toolName": "write_file", "isError": False, "input": {"content": baseline}},

@@ -218,7 +218,7 @@ ros_validate_template(
 
 修改后校验失败时：
 1. 分析错误信息，定位问题资源/属性
-2. 查阅 [references/](references/) 下的参考文件了解正确的属性和参数规范；如仍不确定 → 调用 `aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})` 查询 Schema
+2. 从 [产品导航](knowledge://clouds/aliyun/products/index.md) 查对应产品的属性，参照 [模板参数规范](knowledge://clouds/aliyun/products/ros/template-parameters.md)；如仍不确定 → 调用 `aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})` 查询 Schema
 3. 修复模板并**写回原文件路径**（后续部署步骤从此路径读取，不写回会导致后续步骤使用错误模板）
 4. 重新校验（最多 7 轮）
 
@@ -234,7 +234,7 @@ PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先
 
 本步骤的裁剪规则：
 - `candidate.hard_constraints` 是进入成本步骤时当前有效的完整用户硬约束快照，也是本步骤的唯一硬约束来源；不比较更早步骤的约束版本。硬约束优先级高于候选推荐、模板 Default、场景推荐和软偏好。
-- 优先使用上下文已有值和模板 Default；库存相关参数缺值时，先通过 `ros_get_template_parameter_constraints` 获取合法 `AllowedValues`，必要时再按 [references/cloud-products/](references/cloud-products/) 的可用性 API 与选型策略补足。
+- 优先使用上下文已有值和模板 Default；库存相关参数缺值时，先通过 `ros_get_template_parameter_constraints` 获取合法 `AllowedValues`，必要时再按 共享知识库产品页关联的可用性 API 与选型策略补足。
 - 每条硬约束都必须在 `hard_constraint_checks` 中原样复制 `constraint`，填写可按其 `operator` 比较的 `actual_value/actual_unit`，以及为满足它选定的 `parameter_values`。`parameter_values` 必须是最终 `deployment_parameters` 的真实子集。
 - 证据来自上下文、模板或工具。每条证据都填写与检查一致的 `actual_value`。`verification_mode: direct` 可由模板或最终参数的实际值证明；`verification_mode: tool` 必须使用对应产品 reference 指定的 API，并提交 `type: tool` 的真实证据。工具证据还要填写真实 `tool_name`、`product/action` 和 API 结果的 `result_path`，不得用推测值替代。
 - 查询结果必须属于最终选择的同一资源或规格，并实际返回约束所需的属性。规格 ID、ROS 参数 AllowedValues、预览成功和询价成功不能代替实际产品属性查询；不得把用户要求的值抄成 `actual_value`。缺少查询或属性不匹配时不要标记 `satisfied`，应按对应产品 reference 继续求解，再用正确参数重新预览和询价。
@@ -277,9 +277,9 @@ ros_estimate_template_cost(
 
 | 文件 | 内容 | 何时查阅 |
 |------|------|----------|
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） | 需要了解产品属性、规格选型、库存相关字段时 |
-| [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 | 修复 Parameters 定义（缺少 AssociationProperty、Label 等）时 |
-| [references/ros-template.md](references/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 | 修复资源定义、内置函数用法等模板结构问题时 |
+| [knowledge://clouds/aliyun/products/index.md](knowledge://clouds/aliyun/products/index.md) | 产品知识与专题导航（共享 Wiki） | 需要了解产品属性、规格选型、库存相关字段时 |
+| [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 | 修复 Parameters 定义（缺少 AssociationProperty、Label 等）时 |
+| [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 | 修复资源定义、内置函数用法等模板结构问题时 |
 
 ### 查询资源属性 Schema
 

@@ -5,6 +5,8 @@ import jsonschema
 import pytest
 import yaml
 
+from iac_code.tools.path_safety import resolve_read_path
+
 SKILL_DIR = (
     Path(__file__).resolve().parents[4] / "src" / "iac_code" / "pipeline" / "selling" / "skills" / "iac-aliyun-cost"
 )
@@ -18,20 +20,6 @@ def _direct_references_dir_or_skip() -> Path:
     if not references.is_dir():
         pytest.skip("references is a Windows symlink placeholder file in this checkout")
     return references
-
-
-def _is_reference_link_or_placeholder(path: Path) -> bool:
-    if path.is_symlink():
-        return True
-    if not path.is_file():
-        return False
-    try:
-        raw_target = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return False
-    if not raw_target or "\n" in raw_target or "\r" in raw_target:
-        return False
-    return (path.parent / raw_target).exists()
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -386,7 +374,7 @@ class TestSkillContentRosOnly:
     def test_parameterization_details_stay_in_references(self, body):
         assert "### 参数化规则" not in body
         assert "| ECS | ZoneId, InstanceType" not in body
-        assert "references/template-parameters.md" in body
+        assert "knowledge://clouds/aliyun/products/ros/template-parameters.md" in body
 
     def test_contains_error_handling(self, body):
         assert "失败" in body
@@ -401,13 +389,13 @@ class TestSkillContentRosOnly:
         assert "不要跳过修复" in body
 
     def test_references_cloud_products(self, body):
-        assert "references/cloud-products/" in body
+        assert "knowledge://clouds/aliyun/products/" in body
 
     def test_references_template_parameters(self, body):
-        assert "references/template-parameters.md" in body
+        assert "knowledge://clouds/aliyun/products/ros/template-parameters.md" in body
 
     def test_references_ros_template(self, body):
-        assert "references/ros-template.md" in body
+        assert "knowledge://clouds/aliyun/products/ros/ros-template.md" in body
 
     def test_no_terraform_template_reference(self, body):
         assert "terraform-template.md" not in body
@@ -435,21 +423,20 @@ class TestReferencesExist:
         assert selling_refs.is_dir()
         assert (selling_refs / "template-parameter-recommendation.md").is_file()
         assert not (selling_refs / "template-parameter-recommendation.md").is_symlink()
-        assert _is_reference_link_or_placeholder(selling_refs / "ros-template.md")
-        assert _is_reference_link_or_placeholder(selling_refs / "template-parameters.md")
-        assert _is_reference_link_or_placeholder(selling_refs / "cloud-products")
+        for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+            assert not (selling_refs / name).exists() and not (selling_refs / name).is_symlink()
+        assert not (selling_refs / "cloud-products").exists() and not (selling_refs / "cloud-products").is_symlink()
 
     def test_cloud_products_accessible(self):
-        cloud_dir = _direct_references_dir_or_skip() / "cloud-products"
+        cloud_dir = Path(resolve_read_path("knowledge://clouds/aliyun/products", str(SKILL_DIR)))
         assert cloud_dir.is_dir()
-        files = list(cloud_dir.glob("*.md"))
+        files = list(cloud_dir.glob("*/*.md"))
         assert len(files) >= 3, f"expected at least 3 cloud product files, got {len(files)}"
 
-    def test_ros_template_accessible(self):
-        assert (_direct_references_dir_or_skip() / "ros-template.md").is_file()
-
-    def test_template_parameters_accessible(self):
-        assert (_direct_references_dir_or_skip() / "template-parameters.md").is_file()
+    @pytest.mark.parametrize("name", ["ros-template.md", "terraform-template.md", "template-parameters.md"])
+    def test_template_knowledge_accessible(self, name):
+        target = resolve_read_path("knowledge://clouds/aliyun/products/ros/" + name, str(SKILL_DIR))
+        assert Path(target).is_file()
 
     def test_template_parameter_recommendation_uses_dedicated_template_tools(self):
         reference = _direct_references_dir_or_skip() / "template-parameter-recommendation.md"
@@ -482,8 +469,15 @@ class TestReferencesExist:
         assert "新建资源受限" in content
 
     def test_ecs_reference_covers_size_and_scenario_driven_public_access(self):
-        reference = _direct_references_dir_or_skip() / "cloud-products" / "ecs.md"
-        content = reference.read_text(encoding="utf-8")
+        reference = Path(resolve_read_path("knowledge://clouds/aliyun/products/ecs/ecs.md", str(SKILL_DIR)))
+        assert "## 镜像选择" in reference.read_text(encoding="utf-8")
+        from iac_code.tools.path_safety import get_iac_code_application_root
+
+        root = get_iac_code_application_root() / "knowledge/clouds/aliyun"
+        content = "\n".join(
+            p.read_text(encoding="utf-8")
+            for p in [root / "products/ecs/ecs.md", root / "products/ecs/availability.md"]
+        )
 
         assert "DescribeInstanceTypes" in content
         assert "CpuCoreCount" in content
@@ -504,8 +498,11 @@ class TestSkillDiscovery:
         assert "iac-aliyun-cost" in loaded.skills
         skill_root = Path(loaded.skill_roots["iac-aliyun-cost"])
         assert skill_root == SKILL_DIR.resolve()
-        assert (skill_root / "references" / "ros-template.md").is_file()
-        assert (skill_root / "references" / "template-parameters.md").is_file()
+        assert (skill_root / "references" / "template-parameter-recommendation.md").is_file()
+        for name in ("ros-template.md", "template-parameters.md"):
+            uri = "knowledge://clouds/aliyun/products/ros/" + name
+            assert uri in loaded.skills["iac-aliyun-cost"]
+            assert Path(resolve_read_path(uri, str(skill_root))).is_file()
 
     def test_skill_content_matches_file(self):
         from iac_code.pipeline.engine.loader import load_pipeline_dir

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 
-from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
+from iac_code.agent.message import ContentBlock, Message, ToolResultBlock, ToolUseBlock
 
 
 def _message_key(message: Message) -> str:
-    return json.dumps(message.to_dict(), ensure_ascii=False, sort_keys=True)
+    data = message.to_dict()
+    # Runtime accounting can change after a message has been persisted.
+    data.pop("token_count", None)
+    data.pop("elapsed_seconds", None)
+    # Runtime Wiki search state does not change the original message's identity.
+    data["metadata"].pop("wiki_auto_search", None)
+    return json.dumps(data, ensure_ascii=False, sort_keys=True)
 
 
 def _tool_result_ids(message: Message) -> set[str]:
@@ -101,12 +107,36 @@ def reconcile_resume_messages(
     return merged or None
 
 
+def last_resume_tool_id(messages: list[Message] | None) -> str | None:
+    for message in reversed(messages or []):
+        for block in reversed(message.content if isinstance(message.content, list) else []):
+            if isinstance(block, ToolResultBlock) and block.tool_use_id:
+                return block.tool_use_id
+            if isinstance(block, ToolUseBlock) and block.id:
+                return block.id
+    return None
+
+
 def user_message_already_in_resume(
     user_message: str | list[ContentBlock] | None,
     resume_messages: list[Message] | None,
+    *,
+    start_index: int = 0,
+    start_after_tool_id: str | None = None,
 ) -> bool:
     if user_message is None or not resume_messages:
         return False
     candidate = Message(role="user", content=user_message)
     candidate_key = _message_key(candidate)
-    return any(_message_key(message) == candidate_key for message in resume_messages)
+    if start_after_tool_id:
+        # Compaction can move the previous turn's boundary or discard it
+        # altogether. Tool ids stay stable; transcript offsets do not.
+        start_index = 0
+        for index, message in enumerate(resume_messages):
+            if isinstance(message.content, list) and any(
+                isinstance(block, ToolResultBlock) and block.tool_use_id == start_after_tool_id
+                or isinstance(block, ToolUseBlock) and block.id == start_after_tool_id
+                for block in message.content
+            ):
+                start_index = index + 1
+    return any(_message_key(message) == candidate_key for message in resume_messages[start_index:])

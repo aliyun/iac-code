@@ -102,7 +102,7 @@ conclusion_schema:
 
 查询步骤：
 1. 解析模板 Parameters，识别库存相关参数及对应产品
-2. 调用各产品可用性 API（具体 API 见 [references/cloud-products/](references/cloud-products/) 各产品文件的「可用性查询」节）
+2. 调用各产品可用性 API（具体 API 见 [产品知识](knowledge://clouds/aliyun/products/index.md) 及产品关联 API 页）
 3. 核对最终部署参数中的可用区和规格是否可用
 4. 参数不可用时按「部署前参数补全」中的优先级恢复
 
@@ -176,6 +176,6 @@ conclusion_schema:
 
 | 文件 | 内容 |
 |------|------|
-| [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 |
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） |
-| [references/ros-template.md](references/ros-template.md) | ROS 原生模板最佳实践：RunCommand、嵌套栈、条件部署 |
+| [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 |
+| [knowledge://clouds/aliyun/products/index.md](knowledge://clouds/aliyun/products/index.md) | 产品知识与专题导航（共享 Wiki） |
+| [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md) | ROS 原生模板最佳实践：RunCommand、嵌套栈、条件部署 |

@@ -1363,42 +1363,88 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
     if aliyun is None:
         pytest.skip("Alibaba Cloud CLI is not installed")
     _require_aliyun_apis(monkeypatch, aliyun, "StartChat")
+    from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
+    from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
+    from iac_code.services.permission_wait import canonical_digest
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.types.stream_events import MessageStartEvent
+
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.delenv("IAC_CODE_MODE", raising=False)
     outcomes: queue.Queue[list[bool]] = queue.Queue()
     prompts: queue.Queue[str] = queue.Queue()
+    runtime_context: dict[str, str] = {}
+    complete_turn = threading.Event()
 
     class SidebandSetup:
         def __init__(self, events: list[SubPipelineStreamEvent]) -> None:
             self.events = events
 
     class SidebandLoop:
+        def __init__(self, options):
+            self.options = options
+
         async def run_streaming(self, prompt: str):
             prompts.put(prompt)
+            cwd, session_id = str(self.options.cwd), str(self.options.session_id)
+            session_dir = SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
+            transcripts = PipelineTranscriptStorage(session_dir / "pipeline")
             futures = [asyncio.get_running_loop().create_future() for _ in range(2)]
-            events = [
-                SubPipelineStreamEvent(
-                    sub_pipeline_id="candidate-{}".format(index),
-                    candidate_index=index,
-                    inner=PermissionRequestEvent(
-                        tool_name="bash",
-                        tool_input={"cmd": "echo candidate-{}".format(index)},
-                        tool_use_id="tool-sideband-{}".format(index),
-                        response_future=future,
-                    ),
+            events = []
+            for index, future in enumerate(futures):
+                candidate_id, tool_id = "candidate-{}".format(index), "tool-sideband-{}".format(index)
+                tool = ToolUseBlock(id=tool_id, name="bash", input={"cmd": "echo candidate-{}".format(index)})
+                transcripts.append(cwd, candidate_id, Message(role="assistant", content=[tool]))
+                events.append(
+                    SubPipelineStreamEvent(
+                        sub_pipeline_id=candidate_id,
+                        candidate_index=index,
+                        inner=PermissionRequestEvent(
+                            tool_name=tool.name,
+                            tool_input=tool.input,
+                            tool_use_id=tool.id,
+                            response_future=future,
+                            continuation_frame={
+                                "assistantMessageRef": "session.jsonl:0",
+                                "assistantMessageDigest": canonical_digest([tool.model_dump(mode="json")]),
+                                "orderedToolUseIds": [tool.id],
+                                "currentIndex": 0,
+                                "decisions": [
+                                    {"toolUseId": tool.id, "state": "pending", "source": None, "deniedResult": None}
+                                ],
+                            },
+                            audit_context={
+                                "session_id": candidate_id, "transcript_id": candidate_id,
+                                "root_session_id": session_id, "cwd": cwd,
+                            },
+                        ),
+                    )
                 )
-                for index, future in enumerate(futures)
-            ]
             yield SidebandSetup([events[0]])
             await asyncio.sleep(0.25)
             yield SidebandSetup([events[1]])
-            outcomes.put(list(await asyncio.gather(*futures)))
+            decisions = list(await asyncio.gather(*futures))
+            # Keep the parent stream alive until the second sideband reply is acknowledged.
+            assert await asyncio.to_thread(complete_turn.wait, 10)
+            completed = []
+            for index, approved in enumerate(decisions):
+                candidate_id, tool_id = "candidate-{}".format(index), "tool-sideband-{}".format(index)
+                transcripts.append(
+                    cwd, candidate_id,
+                    Message(role="user", content=[ToolResultBlock(
+                        tool_use_id=tool_id, content="allowed" if approved else "denied", is_error=not approved,
+                    )]),
+                )
+                completed.append(SubPipelineStreamEvent(candidate_id, index, MessageStartEvent("after-" + tool_id)))
+            yield SidebandSetup(completed)
+            outcomes.put(decisions)
             yield TextDeltaEvent(text="sub pipeline permissions resolved")
 
     def runtime_factory(options):
-        return SimpleNamespace(agent_loop=SidebandLoop(), session_id=options.session_id)
+        runtime_context.update(cwd=str(options.cwd), session_id=str(options.session_id))
+        return SimpleNamespace(agent_loop=SidebandLoop(options), session_id=options.session_id)
 
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", runtime_factory)
     components = create_runtime_components(
@@ -1428,24 +1474,35 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
                 permission_input_registry=permission_input_registry,
                 **kwargs,
             )
-        publisher = PipelineA2AEventPublisher(
-            event_queue=event_queue,
-            translator=PipelineEventTranslator(
-                PipelineA2AContext(
-                    pipeline_run_id=context_id,
-                    task_id=task_id,
-                    context_id=context_id,
-                    pipeline_name="selling",
-                )
-            ),
-            journal=A2APipelineJournal(tmp_path / "pipeline-sideband"),
-            snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline-sideband"),
-            permission_input_registry=permission_input_registry,
-            task_store=components.task_store,
-        )
-        publisher_holder["publisher"] = publisher
+        assert permission_input_registry.durable_permission_wait_enabled
+        publisher = publisher_holder.get("publisher")
+        if publisher is None:
+            publisher = PipelineA2AEventPublisher(
+                event_queue=event_queue,
+                translator=PipelineEventTranslator(
+                    PipelineA2AContext(
+                        pipeline_run_id=context_id,
+                        task_id=task_id,
+                        context_id=context_id,
+                        pipeline_name="selling",
+                    )
+                ),
+                journal=A2APipelineJournal(tmp_path / "pipeline-sideband"),
+                snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline-sideband"),
+                permission_input_registry=permission_input_registry,
+                task_store=components.task_store,
+                permission_wait_cwd=runtime_context["cwd"],
+                permission_wait_session_id=runtime_context["session_id"],
+            )
+            publisher_holder["publisher"] = publisher
         for sideband_event in event.events:
-            await publisher.publish_sub_pipeline_permission(sideband_event)
+            if isinstance(sideband_event.inner, PermissionRequestEvent):
+                await publisher.publish_sub_pipeline_permission(sideband_event)
+                pending = publisher.durable_permission_for_envelope(publisher.last_envelope or {})
+                assert pending is not None
+                permission_input_registry.activate_durable_boundary(pending)
+            else:
+                await publisher.publish(sideband_event)
         return None
 
     monkeypatch.setattr("iac_code.a2a.executor.publish_stream_event", publish_with_sideband)
@@ -1559,6 +1616,7 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
         assert second_ack["state"] == "permission-responded"
         assert second_ack["permissionAck"]["accepted"] is True
         assert second_ack["permissionAck"]["inputId"] == second_permission["inputId"]
+        complete_turn.set()
 
         parent_stdout, parent_stderr = parent_process.communicate(timeout=20)
         final = _summarize_sse(parent_stdout, parent_stderr, session_id=session.session_id, mode="pipeline")
@@ -1579,7 +1637,14 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
 
         assert outcomes.get(timeout=3) == [True, False]
         assert prompts.get(timeout=2) == "start pipeline candidates"
+        checkpoints = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted((tmp_path / "config").rglob("permission-waits/pwb_*.json"))
+        ]
+        assert len(checkpoints) == 2
+        assert all(record["phase"] == "RESOLVED" for record in checkpoints)
     finally:
+        complete_turn.set()
         if parent_process is not None and parent_process.poll() is None:
             parent_process.terminate()
             parent_process.wait(timeout=5)

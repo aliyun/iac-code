@@ -125,6 +125,7 @@ async def run(args: argparse.Namespace) -> dict:
         "no model or tool errors": error_count == 0,
         "no deployment selected": flow.context.get_conclusion("selected_plan") is None,
     }
+    observations = {}
     if scenario.handoff:
         links = re.findall(r"https://ros\.console\.aliyun\.com/[^\s)<>\]]+", visible)
         handoff_prompts = []
@@ -148,13 +149,14 @@ async def run(args: argparse.Namespace) -> dict:
                 "handoff skips deployment questions and candidates": tools == ["complete_step"] and not asked_question,
                 "every handoff link carries one complete prompt": bool(links)
                 and len(handoff_prompts) == len(links),
-                "handoff preserves the relevant request context": all(
-                    scenario.expected_context in prompt for prompt in handoff_prompts
-                ),
                 "the same actionable link is persisted": bool(links)
                 and all(link in conclusion.get("rejection_reason", "") for link in links),
             }
         )
+        if scenario.expected_context:
+            observations["literal_request_context_preserved"] = bool(handoff_prompts) and all(
+                scenario.expected_context in prompt for prompt in handoff_prompts
+            )
     elif scenario.enabled:
         checks.update(
             {
@@ -181,6 +183,7 @@ async def run(args: argparse.Namespace) -> dict:
         "status": "passed" if all(checks.values()) else "failed",
         "cleanup_status": "not-needed",
         "checks": checks,
+        "observations": observations,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
     }

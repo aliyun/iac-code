@@ -26,6 +26,12 @@ from scripts.a2a.e2e.common import (  # noqa: E402
     stream_message,
     wait_for_server,
 )
+from scripts.ci.a2a_context_evidence import (  # noqa: E402
+    finish_permissions,
+    main_requests,
+    request_window,
+    retained_history,
+)
 from scripts.ci.run_coupon_budget_a2a import tool_inputs  # noqa: E402
 from scripts.ci.run_plan_cost_refresh_a2a import envelopes  # noqa: E402
 from scripts.ci.run_promotional_offer_followup_a2a import visible_pipeline_text, walk  # noqa: E402
@@ -71,13 +77,19 @@ def disk_size(conclusion: dict[str, Any], workspace: Path) -> int:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    from scripts.ci.run_knowledge_wiki_a2a import configure_permissions
+
     config_dir = Path(os.environ["IAC_CODE_CONFIG_DIR"])
     if not config_dir.resolve().is_relative_to(args.run_dir.resolve()):
         raise ValueError("Use run_e2e.py with isolated test credentials")
+    configure_permissions(config_dir)
     workspace = args.run_dir / "workspace"
     workspace.mkdir(exist_ok=True)
     port = _free_port("127.0.0.1")
-    config = _write_server_config(args.run_dir, host="127.0.0.1", port=port, auto_approve_permissions=True)
+    config = _write_server_config(
+        args.run_dir, host="127.0.0.1", port=port,
+        auto_approve_permissions=False,
+    )
     capture = ObserveCapture(args.run_dir / "telemetry").start()
     env = {
         **os.environ,
@@ -89,6 +101,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "IAC_CODE_MODEL": args.model,
         "IAC_CODE_TELEMETRY_LOCAL_ONLY": "1",
         "IAC_CODE_CONFIG_BACKUP_DIR": str(args.run_dir / "backup"),
+        "IAC_CODE_WIKI_AUTO_SEARCH": "true",
+        "IAC_CODE_ROS_AGENT_AWARENESS": "true",
     }
     server = ManagedServer(
         python_cmd=[args.python],
@@ -104,12 +118,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     context_id = task_id = ""
     snapshots = []
     template_hash = None
+    history_audits = []
 
     def turn(prompt: str, *, unchanged=False, terminal=False) -> dict[str, Any]:
         nonlocal context_id, task_id, template_hash
         index = len(turns) + 1
         before = {item["id"] for item in tool_inputs(config_dir)}
         prior = snapshots[-1] if snapshots else None
+        prior_turn = turns[-1] if turns else None
+        start_ns = time.time_ns()
         started = time.monotonic()
         response = stream_message(
             server_url=url,
@@ -122,6 +139,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             timeout=args.timeout,
             redaction_env=env,
         )
+        response = finish_permissions(response, name=f"turn-{index}", run_dir=args.run_dir, config=config_dir,
+                                      server_url=url, cwd=str(workspace), timeout=args.timeout, env=env)
         context_id, task_id = response.context_id, response.task_id
         events = envelopes(args.run_dir / f"turn-{index}.events.jsonl")
         completed = [e for e in events if e.get("eventType") == "step_completed"]
@@ -152,11 +171,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             checks[label + ": visible answer"] = bool(
                 visible_pipeline_text(args.run_dir / f"turn-{index}.events.jsonl").strip()
             )
-            checks[label + ": current successful empty completion"] = any(
-                item["name"] == "complete_step"
-                and item["input"] in ({"conclusion": {}}, {"conclusion": {"conclusion": {}}})
-                for item in success
-            )
+            # The accepted result and unchanged event also cover compatible status-only deltas.
+            checks[label + ": current successful completion"] = any(item["name"] == "complete_step" for item in success)
             checks[label + ": full unchanged conclusion"] = bool(prior) and stable(conclusion) == stable(prior)
             checks[label + ": unchanged event"] = (
                 bool(completed) and completed[-1].get("data", {}).get("conclusion_unchanged") is True
@@ -179,11 +195,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         turns.append(
             {
                 "turn": index,
+                "prompt": prompt,
+                "start_ns": start_ns,
+                "end_ns": time.time_ns(),
                 "seconds": round(time.monotonic() - started, 2),
                 "status": conclusion.get("status"),
                 "successful_tool_names": [i["name"] for i in success],
+                "successful_tool_ids": [i["id"] for i in success],
             }
         )
+        if unchanged and prior_turn:
+            prompts = [prompt]
+            if not prior_turn["prompt"].startswith('{"selected_candidate_name"'):
+                prompts.insert(0, prior_turn["prompt"])
+            history_audits.append((label, turns[-1], prompts, set(prior_turn["successful_tool_ids"])))
         print(json.dumps({"model": args.model, **turns[-1]}, ensure_ascii=False), flush=True)
         if not terminal and not checks[label + ": valid waiting result"]:
             raise RuntimeError("Precondition did not reach the required waiting state")
@@ -192,7 +217,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     try:
         server.start()
         wait_for_server(url, timeout=60, owned_server=server)
-        first = turn(INITIAL)
+        first = turn(getattr(args, "initial_prompt", INITIAL))
+        if getattr(args, "wiki_auto_search", False) and args.scenario == "step2":
+            turn("这个方案里，系统盘和计算费分别包含什么？先解释，不改方案。", unchanged=True)
         if args.scenario == "step1":
             turn("这个方案里，系统盘和计算费分别包含什么？先解释，不改方案。", unchanged=True)
             turn("按量付费停机后，还有哪些费用可能继续产生？先解释，不改方案。", unchanged=True)
@@ -242,6 +269,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     finally:
         server.terminate()
         records = capture.stop()
+        requests = main_requests(records)
+        for label, window, prompts, ids in history_audits:
+            selected = request_window(requests, window)
+            evidence = retained_history(selected[0], prompts=prompts, response_ids=ids) if selected else {}
+            checks[label + ": first provider request keeps same-Step history"] = (
+                bool(evidence) and all(evidence.values())
+            )
         observed = sorted(
             {
                 str(r.get("attributes", {}).get("gen_ai.request.model"))

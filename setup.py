@@ -36,6 +36,8 @@ INSTALL_REQUIRES = [
     "pyperclip>=1.8.0",
     "openai>=1.50",
     "httpx>=0.27.0",
+    "markdownify>=1.2.3,<2",
+    "beautifulsoup4>=4.15,<5",
     "packaging>=24.0",
     "tiktoken>=0.7.0",
     "jsonschema>=4.20",
@@ -254,11 +256,15 @@ def _git_symlink_placeholder_target(path: Path) -> Path | None:
 
 
 def _copy_reference_entry(source: Path, target: Path) -> None:
-    placeholder_target = _git_symlink_placeholder_target(source)
-    if placeholder_target is not None:
-        source = placeholder_target
-    elif source.is_symlink():
-        source = source.resolve(strict=True)
+    seen = set()
+    while True:
+        resolved = source.resolve(strict=True) if source.is_symlink() else _git_symlink_placeholder_target(source)
+        if resolved is None:
+            break
+        if resolved in seen:
+            raise RuntimeError("cyclic reference: %s" % source)
+        seen.add(source)
+        source = resolved
 
     if source.is_dir():
         target.mkdir(parents=True, exist_ok=True)
@@ -271,9 +277,7 @@ def _copy_reference_entry(source: Path, target: Path) -> None:
 
 
 def _copy_reference_tree(source: Path, target: Path) -> None:
-    target.mkdir(parents=True, exist_ok=True)
-    for child in source.iterdir():
-        _copy_reference_entry(child, target / child.name)
+    _copy_reference_entry(source, target)
 
 
 def _replace_with_materialized_tree(source: Path, target: Path) -> None:

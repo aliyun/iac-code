@@ -15168,3 +15168,36 @@ msgstr "Mise à jour terminée. Relancez iac-code tui pour continuer."
 #: src/iac_code/ui/dialogs/mcp_manager.py
 msgid "※ Run iac-code tui --debug to see error logs"
 msgstr "※ Exécutez iac-code tui --debug pour consulter les journaux d’erreurs"
+
+#: src/iac_code/ui/wiki_search.py
+#, python-brace-format
+msgid "Matched {count} files"
+msgstr "Fichiers trouvés : {count}"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Extracting keywords"
+msgstr "Extraction des mots-clés"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Searching"
+msgstr "Recherche en cours"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No search needed"
+msgstr "Aucune recherche nécessaire"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No matches"
+msgstr "Aucun résultat"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Cancelled"
+msgstr "Annulé"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Background Wiki search"
+msgstr "Recherche Wiki en arrière-plan"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Wiki search"
+msgstr "Recherche Wiki"

@@ -1885,6 +1885,7 @@ class WebSessionManager:
             file_refs: list[str] | None = None,
             pipeline_input_kind: str = "",
             pipeline_input_step_id: str = "",
+            wiki_search: dict[str, Any] | None = None,
         ) -> None:
             # Pipeline reload rows pass the translator's stable id (``plmk-*`` / ``pl-*``)
             # so a mid-run reload dedups against the replayed live SSE stream; normal rows
@@ -1920,6 +1921,10 @@ class WebSessionManager:
                 payload["pipelineInputKind"] = pipeline_input_kind
             if pipeline_input_step_id:
                 payload["pipelineInputStepId"] = pipeline_input_step_id
+            if wiki_search:
+                from iac_code.ui.wiki_search import wiki_projection
+
+                payload["wikiSearch"] = wiki_projection(wiki_search)
             visible.append(payload)
             for tool_id, tool in (segment_tools or {}).items():
                 tools[tool_id] = {
@@ -1982,6 +1987,7 @@ class WebSessionManager:
                             file_refs=message_file_refs if stable_segment_index == 0 else None,
                             pipeline_input_kind=str(message.metadata.get("pipelineInputKind") or ""),
                             pipeline_input_step_id=str(message.metadata.get("pipelineInputStepId") or ""),
+                            wiki_search=message.metadata.get("wiki_auto_search") if message.role == "user" else None,
                         )
                         stable_segment_index += 1
                         text_blocks = []
@@ -2063,6 +2069,7 @@ class WebSessionManager:
                         file_refs=_metadata_string_list(message.metadata, "fileRefs"),
                         pipeline_input_kind=str(message.metadata.get("pipelineInputKind") or ""),
                         pipeline_input_step_id=str(message.metadata.get("pipelineInputStepId") or ""),
+                        wiki_search=message.metadata.get("wiki_auto_search") if message.role == "user" else None,
                     )
 
         def optional_int(value: Any) -> int | None:

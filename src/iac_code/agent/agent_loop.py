@@ -360,6 +360,7 @@ class AgentLoop:
         result_storage_dir: str | Path | None = None,
         audit_log_path: str | Path | None = None,
         telemetry_attributes: dict[str, Any] | None = None,
+        wiki_search_context: dict[str, Any] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -391,6 +392,21 @@ class AgentLoop:
         self._auto_loaded_skills: set[str] = set()
         self._current_git_branch: str | None = None
         self._memory_recall_service = memory_recall_service
+        from iac_code.services.wiki_auto_search import WikiAutoSearch, enabled
+
+        self._wiki_context = dict(wiki_search_context or {})
+        self._wiki_search: WikiAutoSearch | None = None
+        if enabled() and (not pipeline_mode or self._wiki_context.get("enabled") is True):
+            wiki_storage_root = getattr(session_storage, "_projects_dir", None)
+            if wiki_storage_root is None:
+                wiki_storage_root = getattr(session_storage, "_sidecar_dir", None)
+            wiki_task_owner = (
+                Path(wiki_storage_root).resolve() if isinstance(wiki_storage_root, (str, os.PathLike)) else None
+            )
+            self._wiki_search = WikiAutoSearch(provider_manager, task_owner=wiki_task_owner)
+        self._wiki_work = None
+        self._wiki_internal_next = False
+        self._wiki_extra_tokens = 0
         self._background_task_starter = background_task_starter
         self._recorded_memory_prefetch_ids: set[int] = set()
         self._pending_memory_prefetches: list[Any] = []
@@ -406,6 +422,7 @@ class AgentLoop:
             not auto_trigger_skills
             and not resume_messages
             and memory_recall_service is None
+            and self._wiki_search is None
             and background_task_starter is None
             and system_prompt_refresher is None
         )
@@ -491,6 +508,10 @@ class AgentLoop:
                 injected = injected.content
             message = self.context_manager.add_user_message(injected)
             message.metadata.update(metadata)
+            from iac_code.agent.message import is_hidden_context_message
+
+            if not is_hidden_context_message(message):
+                self._start_wiki_work(message)
             if self._session_storage:
                 self._session_storage.append(
                     self._cwd,
@@ -516,6 +537,8 @@ class AgentLoop:
 
     def _sync_current_provider_context(self) -> None:
         """Synchronize idle ContextManager accounting with the selected provider."""
+        if self._wiki_search is not None:
+            self._wiki_search.manager = self._provider_manager
         get_model_name = getattr(self._provider_manager, "get_model_name", None)
         model_name = get_model_name() if callable(get_model_name) else None
         if isinstance(model_name, str) and model_name:
@@ -919,6 +942,171 @@ class AgentLoop:
                 provider_messages.append(provider_message)
         return provider_messages
 
+    def _wiki_messages(self):
+        """Build disposable request copies; stored user content is never expanded."""
+        messages = self.context_manager.get_context_messages()
+        self._wiki_extra_tokens = 0
+        work = self._wiki_work
+        if self._wiki_search is None or work is None:
+            return messages
+        from iac_code.services.wiki_auto_search import METADATA_KEY, reference
+
+        window = self.context_manager.context_window
+        budget = min(1200, int(window * 0.05), max(0, window - self.context_manager.get_total_tokens() - 8192))
+        block = reference(
+            work.snapshot,
+            self._wiki_search.root,
+            counter=self.context_manager._token_counter,
+            max_tokens=budget,
+            permission=self._permission_context_getter()
+            if callable(self._permission_context_getter)
+            else self._permission_context,
+        )
+        if not block:
+            return messages
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            record = message.metadata.get(METADATA_KEY, {})
+            if not isinstance(record, dict) or record.get("query_id") != work.snapshot["query_id"]:
+                continue
+            content = [TextBlock(text=message.content)] if isinstance(message.content, str) else list(message.content)
+            copy = message.model_copy(update={"content": content + [TextBlock(text=block)]})
+            counter = self.context_manager._token_counter
+            self._wiki_extra_tokens = counter.count_message(copy.to_api_format()) - counter.count_message(
+                message.to_api_format()
+            )
+            return messages[:index] + [copy] + messages[index + 1 :]
+        return messages
+
+    def reuse_wiki_query(self, previous_loop=None) -> None:
+        """Internal complete_step corrections continue the original query, not the nudge."""
+        self._wiki_internal_next = True
+        if previous_loop is None or previous_loop._wiki_work is None:
+            return
+        self._wiki_work = previous_loop._wiki_work
+        self._wiki_search = previous_loop._wiki_search
+
+    def _start_wiki_work(self, message, *, restoring=False):
+        if self._wiki_search is None:
+            return
+        self._wiki_extra_tokens = 0
+        from iac_code.agent.message import is_compaction_summary_message, is_hidden_context_message
+        from iac_code.services.session_storage import PIPELINE_USER_HISTORY_KEY
+        from iac_code.services.wiki_auto_search import METADATA_KEY, WikiWork, input_text, question_answer_text
+
+        messages = self.context_manager.get_messages()
+        if self._wiki_context.pop("resuming_question", False):
+            # A resumed step can replay its original prompt after the accepted
+            # tool result. That execution seed is not the user's latest input.
+            message = next(
+                (entry for entry in reversed(messages) if question_answer_text(entry, messages)),
+                message,
+            )
+            if question_answer_text(message, messages):
+                # A newly accepted answer is new input; an existing query is historical.
+                restoring = METADATA_KEY in message.metadata
+        if restoring and is_compaction_summary_message(message):
+            record = message.metadata.get(METADATA_KEY, {})
+            owner = next(
+                (
+                    candidate
+                    for candidate in reversed(messages)
+                    if not is_compaction_summary_message(candidate)
+                    and candidate.metadata.get(METADATA_KEY, {}).get("query_id") == record.get("query_id")
+                ),
+                None,
+            )
+            if owner is not None:
+                message = owner
+            else:
+                if record.get("status") in {"ready", "fallback_ready", "no_matches", "skipped", "canceled"}:
+                    self._wiki_work = WikiWork(dict(record))
+                return  # Never extract a new query from a natural-language compaction summary.
+        answer = question_answer_text(message, messages)
+        if not answer and not input_text(message.content):
+            return
+        previous = [
+            m
+            for m in messages
+            if m is not message
+            and m.role == "user"
+            and not is_hidden_context_message(m)
+            and input_text(m.content)
+            and (
+                self._pipeline_mode
+                or (
+                    PIPELINE_USER_HISTORY_KEY not in m.metadata
+                    and m.metadata.get("type") != "pipeline_handoff_context"
+                    and (m.metadata.get("source") != "pipeline" or m.metadata.get("normalChat") is True)
+                )
+            )
+        ]
+        serial = not (answer or self._wiki_context.get("followup") or previous)
+        scope = self._wiki_context.get("scope_id", f"{self._cwd}:{self._root_session_id}:normal")
+        storage, cwd, sid = self._session_storage, self._cwd, self._session_id
+
+        def persist(snapshot):
+            message.metadata[METADATA_KEY] = snapshot
+            update = getattr(storage, "update_message_metadata", None)
+            if callable(update):
+                update(cwd, sid, METADATA_KEY, snapshot["query_id"], snapshot)
+
+        def record_usage(usage, attribution):
+            if self._session_id == sid:
+                self._record_session_usage(usage, attribution)
+
+        permission = (
+            self._permission_context_getter()
+            if callable(self._permission_context_getter)
+            else (self._permission_context)
+        )
+        context = ToolContext(
+            cwd=self._cwd,
+            trusted_read_directories=list(self._tool_context_trusted_read_directories),
+            relative_read_directories=list(self._tool_context_relative_read_directories),
+        )
+        self._wiki_work = self._wiki_search.start(
+            message,
+            scope_id=scope,
+            serial=serial,
+            context=context,
+            permission=permission,
+            recent=[input_text(m.content)[:400] for m in previous[-2:]],
+            persist=persist,
+            record_usage=record_usage,
+            query_source="user" if answer else self._wiki_context.get("query_source", "user"),
+            query_text=answer or (
+                self._wiki_context.get("seed") if not previous and not self._wiki_context.get("followup") else None
+            ),
+            restoring=restoring,
+        )
+
+    async def _prepare_wiki(self):
+        work = self._wiki_work
+        if work is None:
+            return
+        if work.snapshot["dispatch_mode"] == "serial" and work.task is not None:
+            pending_event = None
+            try:
+                while not work.task.done():
+                    pending_event = asyncio.create_task(work.events.get())
+                    done, _ = await asyncio.wait({work.task, pending_event}, return_when=asyncio.FIRST_COMPLETED)
+                    if pending_event in done:
+                        yield pending_event.result()
+                    else:
+                        pending_event.cancel()
+                await work.task
+            except asyncio.CancelledError:
+                work.cancel()
+                raise
+            finally:
+                if pending_event is not None and not pending_event.done():
+                    pending_event.cancel()
+                if not work.task.done():
+                    work.cancel()
+        while not work.events.empty():
+            yield work.events.get_nowait()
+
     @timed_phase("context_messages")
     def _get_provider_messages_with_telemetry(self):
         """Build provider wire messages and their non-wire telemetry sidecar together."""
@@ -933,7 +1121,7 @@ class AgentLoop:
         provider_messages = []
         unmatched: dict[str, deque[str]] = defaultdict(deque)
         telemetry_messages: list[TelemetryInputMessage] = []
-        for message in self.context_manager.get_context_messages():
+        for message in self._wiki_messages():
             provider_message = self._provider_message_from_api(message.to_api_format(), message.metadata)
             if provider_message is not None:
                 provider_messages.append(provider_message)
@@ -1048,17 +1236,23 @@ class AgentLoop:
                 # is treated as stable within a single in-flight request.
                 self._refresh_git_branch()
                 await self._apply_auto_triggers(user_input)
-                self.context_manager.add_user_message(user_input)
+                user_message = self.context_manager.add_user_message(user_input)
+                if self._wiki_internal_next:
+                    self._wiki_internal_next = False
+                    if self._wiki_work is not None:
+                        user_message.metadata["wiki_auto_search"] = dict(self._wiki_work.snapshot)
+                else:
+                    self._start_wiki_work(user_message)
                 if self._session_storage:
-                    from iac_code.agent.message import Message
-
                     self._session_storage.append(
                         self._cwd,
                         self._session_id,
-                        Message(role="user", content=user_input),
+                        user_message,
                         git_branch=self._current_git_branch,
                     )
                 memory_prefetch = self._start_memory_prefetch_for_turn(user_input)
+                async for wiki_event in self._prepare_wiki():
+                    yield wiki_event
                 try:
                     async with aclosing(
                         self._run_streaming_inner(
@@ -1081,6 +1275,8 @@ class AgentLoop:
                             yield event
                 except asyncio.CancelledError:
                     turn_cancelled = True
+                    if self._wiki_work is not None:
+                        self._wiki_work.cancel()
                     self._discard_memory_prefetch_for_turn(memory_prefetch)
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
@@ -1154,6 +1350,8 @@ class AgentLoop:
                                 self._record_session_usage(event.usage, event.usage_attribution)
                             yield event
                 except asyncio.CancelledError:
+                    if self._wiki_work is not None:
+                        self._wiki_work.cancel()
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
             finally:
@@ -2147,6 +2345,22 @@ class AgentLoop:
                     await self._pause_event.wait()
                 await execution_checkpoint()
             self._drain_pending_injections()
+            if self._wiki_search is not None and self._wiki_work is None:
+                from iac_code.services.wiki_auto_search import METADATA_KEY, input_text, question_answer_text
+
+                history = self.context_manager.get_context_messages()
+                for original in reversed(history):
+                    if original.role != "user":
+                        continue
+                    answer = question_answer_text(original, history)
+                    if answer or (
+                        input_text(original.content)
+                        and (METADATA_KEY in original.metadata or not original.metadata)
+                    ):
+                        self._start_wiki_work(original, restoring=True)
+                        break
+            async for wiki_event in self._prepare_wiki():
+                yield wiki_event
             self._current_turn_text = ""
 
             request_manager = self._provider_manager
@@ -2224,6 +2438,9 @@ class AgentLoop:
                     )
                 ) as controlled_stream:
                     async for event in controlled_stream:
+                        if self._wiki_work is not None:
+                            while not self._wiki_work.events.empty():
+                                yield self._wiki_work.events.get_nowait()
                         if isinstance(event, ToolUseStartEvent):
                             event = replace(
                                 event,
@@ -2988,7 +3205,11 @@ class AgentLoop:
                         )
                     )
 
-                self.context_manager.add_tool_results(tool_result_blocks)
+                result_message = self.context_manager.add_tool_results(tool_result_blocks)
+                # An ask_user_question result carries accepted user input even
+                # though it is not a new text message. Persist its query owner
+                # with the existing result instead of duplicating the answer.
+                self._start_wiki_work(result_message)
                 if self._session_storage:
                     from iac_code.agent.message import Message
 
@@ -2996,7 +3217,7 @@ class AgentLoop:
                     self._session_storage.append(
                         self._cwd,
                         self._session_id,
-                        Message(role="user", content=result_content),
+                        Message(role="user", content=result_content, metadata=result_message.metadata),
                         git_branch=self._current_git_branch,
                     )
 
@@ -3443,6 +3664,7 @@ class AgentLoop:
         """
         from iac_code.config import get_config_dir
 
+        self._cancel_wiki_preparation()
         self._cancel_pending_memory_prefetches()
         self._memory_recall_generation += 1
         self._last_provider_request_snapshot = None
@@ -3505,7 +3727,15 @@ class AgentLoop:
         except Exception:
             self._current_git_branch = None
 
+    def _cancel_wiki_preparation(self) -> None:
+        if self._wiki_work is not None and self._wiki_search is not None:
+            self._wiki_search.cancel_scope(self._wiki_work.snapshot["scope_id"])
+        self._wiki_work = None
+        self._wiki_extra_tokens = 0
+        self._wiki_internal_next = False
+
     def reset(self) -> None:
+        self._cancel_wiki_preparation()
         self._cancel_pending_memory_prefetches()
         self._memory_recall_generation += 1
         self._last_provider_request_snapshot = None
@@ -3527,7 +3757,14 @@ class AgentLoop:
         return self._max_turns
 
     def get_context_usage(self) -> dict:
-        return self.context_manager.get_usage()
+        usage = self.context_manager.get_usage()
+        if not self._wiki_extra_tokens:
+            return usage
+        usage["user_message_tokens"] += self._wiki_extra_tokens
+        usage["total_tokens"] += self._wiki_extra_tokens
+        if usage["context_window"]:
+            usage["usage_percent"] = usage["total_tokens"] / usage["context_window"] * 100
+        return usage
 
     def get_session_usage(self) -> SessionUsageTotals:
         return self._session_usage_totals.copy()

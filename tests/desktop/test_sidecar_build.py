@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -64,18 +65,40 @@ def test_sidecar_staging_materializes_resources_and_desktop_helper_instructions(
     for skill in ("iac-aliyun-template-generating", "iac-aliyun-cost", "iac-aliyun-deploying"):
         references = package / "pipeline/selling/skills" / skill / "references"
         assert references.is_dir() and not references.is_symlink()
-        assert {path.name for path in (references / "cloud-products").glob("*.md")} >= {
-            "ecs.md",
-            "rds.md",
-            "redis.md",
-            "slb.md",
-            "vpc.md",
-            "oss.md",
-            "ga.md",
-        }
+        for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+            assert not (references / name).exists() and not (references / name).is_symlink()
+        assert (references / "template-parameter-recommendation.md").is_file()
+        assert not (references / "solutions").exists()
+        assert not (references / "coupons.md").exists()
     assert list((package / "i18n/locales").glob("*/LC_MESSAGES/messages.mo"))
     assert list((package / "i18n/locales").glob("*/LC_MESSAGES/webui.mo"))
     assert (package / "pipeline/engine/architecture_rules.json").is_file()
+    wiki = package / "knowledge"
+    assert (wiki / "clouds/aliyun/solutions/iac-code-web.ros.yml").is_file()
+    assert (wiki / "clouds/aliyun/products/bss/coupons.md").is_file()
+    assert not list(package.rglob("cloud-products"))
+    for page in wiki.rglob("*.md"):
+        for href in re.findall(r"\]\(([^)]+)\)", page.read_text(encoding="utf-8")):
+            if not href.startswith(("http://", "https://", "#")):
+                assert href.startswith("knowledge://"), (page, href)
+                assert (wiki / href[len("knowledge://"):]).is_file(), (page, href)
+    for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+        legacy = package / "skills/bundled/iac_aliyun/references" / name
+        assert not legacy.exists() and not legacy.is_symlink()
+    canonical = module.SOURCE_PACKAGE / "knowledge"
+    assert {p.relative_to(wiki) for p in wiki.rglob("*.md")} == {
+        p.relative_to(canonical) for p in canonical.rglob("*.md")
+    }
+    for source in canonical.rglob("*.md"):
+        staged = (wiki / source.relative_to(canonical)).read_text(encoding="utf-8")
+        expected = source.read_text(encoding="utf-8").replace(
+            "python <Skill目录>/scripts/tf2ros.py", "iac-code-tf2ros",
+        ).replace("tf2ros.py", "iac-code-tf2ros")
+        assert staged == expected
+    terraform = (wiki / "clouds/aliyun/products/ros/terraform-template.md").read_text(encoding="utf-8")
+    assert "运行 `iac-code-tf2ros <terraform_dir> <output.yml>`" in terraform
+    assert "python <Skill目录>/scripts/iac-code-tf2ros" not in terraform
+    assert "32 GB GDDR6" in (wiki / "common/hardware/intel-arc-pro-b70.md").read_text(encoding="utf-8")
     assert (package / "tools/cloud/aliyun/ros_validation/data/ros_official_resource_index.json").is_file()
     selector_vendor = package / "web/static/js/vendor"
     selector_bundle = selector_vendor / "ore-resource-selector.min.js"
@@ -209,6 +232,23 @@ def test_copy_materialized_handles_placeholder_resolve_permission_error(tmp_path
     assert (out / "link").is_dir() and not (out / "link").is_symlink()
     assert (out / "link" / "a.md").read_text(encoding="utf-8") == "hi"
 
+
+
+def test_copy_materialized_follows_chained_windows_product_placeholders(tmp_path: Path) -> None:
+    module = _build_module()
+    products = tmp_path / "knowledge/clouds/aliyun/products"
+    (products / "ecs").mkdir(parents=True)
+    (products / "ecs/ecs.md").write_text("# ECS product body", encoding="utf-8")
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    (bundled / "cloud-products").write_text("../knowledge/clouds/aliyun/products", encoding="utf-8")
+    selling = tmp_path / "selling"
+    selling.mkdir()
+    (selling / "cloud-products").write_text("../bundled/cloud-products", encoding="utf-8")
+    out = tmp_path / "staged"
+    module._copy_materialized(selling, out)
+    assert (out / "cloud-products/ecs/ecs.md").read_text(encoding="utf-8") == "# ECS product body"
+    assert (out / "cloud-products").is_dir() and not (out / "cloud-products").is_symlink()
 
 def test_copy_materialized_reads_symlink_when_resolve_is_denied(tmp_path: Path, monkeypatch) -> None:
     module = _build_module()

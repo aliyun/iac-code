@@ -272,6 +272,13 @@ export function reduceEvent(state = {}, event = {}) {
       };
       break;
     }
+    case "context.wiki_search": {
+      const owner = next.messages[payload.ownerMessageId];
+      if (owner?.role === "user" || owner?.pipelineStep) {
+        owner.wikiSearch = payload;
+      }
+      break;
+    }
     case "user.message": {
       const messageId = messageIdFromEvent("user", event, payload);
       const message = ensureMessage(next.messages, messageId);
@@ -823,6 +830,14 @@ export function reduceEvent(state = {}, event = {}) {
     }
     case "turn.done": {
       next.currentTurnActive = false;
+      for (const message of Object.values(next.messages)) {
+        const wiki = message.wikiSearch || message.pipelineStep?.wikiSearch;
+        if (wiki && ["pending", "extracting", "searching"].includes(wiki.phase) &&
+            (!wiki.turnId || !payload.turnId || wiki.turnId === payload.turnId)) {
+          delete message.wikiSearch;
+          if (message.pipelineStep) delete message.pipelineStep.wikiSearch;
+        }
+      }
       // Cancellation can tear down the async generator while automatic compaction is
       // awaiting its provider call, so no compaction.finished event can be yielded.
       // turn.done is the authoritative terminal fallback for the composer state.

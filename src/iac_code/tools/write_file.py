@@ -8,7 +8,7 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_write_path
+from iac_code.tools.path_safety import check_write_path, is_knowledge_path
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -68,11 +68,13 @@ class WriteFileTool(Tool):
             cwd=context.cwd,
             additional_directories=context.additional_directories,
         )
-        if decision.behavior == "ask":
+        if decision.behavior != "allow":
             return decision.to_permission_result()
         return await super().check_permissions(input, context)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        if is_knowledge_path(tool_input["path"]):
+            return ToolResult.error(_("path outside allowed directories"))
         path = normalize_user_path(tool_input["path"])
         content = tool_input["content"]
 
@@ -81,7 +83,7 @@ class WriteFileTool(Tool):
 
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(content)
         except PermissionError:
             return ToolResult.error(f"Permission denied: {path}")

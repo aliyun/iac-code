@@ -30,14 +30,14 @@ user_invocable: false
 
 ## 阶段 A：模板生成与校验
 
-若 `selected_candidate.name` 精确等于 `iac-code-web-single-ecs`，先读取
-`references/solutions/iac-code-web.md`，再复制 `references/solutions/iac-code-web.ros.yml`
-作为模板基线；不要重新设计拓扑。
+若 `selected_candidate.name` 精确等于 `iac-code-web-single-ecs`，先用 `read_file` 读取
+[方案说明](knowledge://clouds/aliyun/solutions/iac-code-web.md) 和 [YAML 基线](knowledge://clouds/aliyun/solutions/iac-code-web.ros.yml)，
+再用 `write_file` 写入 `selected_candidate.output_path`；不要重新设计拓扑。
 
 1. 分析 `selected_candidate`，确定资源列表与参数
-2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
-3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板
-4. 生成 ROS YAML 模板（库存相关属性按 [references/cloud-products/](references/cloud-products/) 与 [references/template-parameters.md](references/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty），并用 `write_file` 写入 `selected_candidate.output_path`
+2. 读取 `knowledge://clouds/aliyun/products/<产品>/<产品>.md` 及相关专题（产品归属不明时查 [产品导航](knowledge://clouds/aliyun/products/index.md)），了解选型策略和库存相关属性
+3. **必须**阅读 [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板
+4. 生成 ROS YAML 模板（库存相关属性按 对应产品文档 与 [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty），并用 `write_file` 写入 `selected_candidate.output_path`
    - 该路径相对当前工作目录；不要写入 `/tmp` 等工作目录外路径，也不要另选文件名
 5. 调用 `ros_validate_template` 校验；`template_url` 必须是刚写入的同一个模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
 6. 校验失败 → 按「模板校验只用 `ros_validate_template`」区分错误性质 → 属于模板问题时**就地修复原路径文件** → 重试（最多 5 轮）
@@ -75,7 +75,7 @@ user_invocable: false
 
 ### 参数化规则
 
-库存相关属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）。具体字段按 [references/cloud-products/](references/cloud-products/) 的产品文件和 [references/template-parameters.md](references/template-parameters.md) 执行，不在本技能重复维护产品字段清单。
+库存相关属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）。具体字段按 对应产品文档 和 [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) 执行，不在本技能重复维护产品字段清单。
 
 以下属性**不需要**参数化，直接使用合理默认值：
 - 网络：VPC CIDR、VSwitch CIDR
@@ -126,7 +126,7 @@ ros_validate_template(
 
 修改后校验失败时：
 1. 按「模板校验只用 `ros_validate_template`」区分错误性质；属于模板诊断时分析错误信息，定位问题资源/属性
-2. 查阅 [references/](references/) 下的参考文件了解正确的属性和参数规范；如仍不确定 → 调用 `aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})` 查询 Schema
+2. 从 [产品导航](knowledge://clouds/aliyun/products/index.md) 查对应产品的属性，参照 [模板参数规范](knowledge://clouds/aliyun/products/ros/template-parameters.md)；如仍不确定 → 调用 `aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})` 查询 Schema
 3. 修复模板并**写回同一文件路径**（部署步骤从此路径读取，不写回会导致后续步骤使用错误模板）
 4. 重新校验（最多 7 轮）
 
@@ -140,7 +140,7 @@ PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先
 
 - `solution_selection.intent.hard_constraints` 是唯一硬约束来源，优先级高于候选推荐、模板 Default、场景推荐和软偏好。
 - 初始 `parameter_overrides` 为 `{}`；Step 1 不接收部署参数。只有本步骤确认交互或参数补齐问答得到的用户值才作为最高优先级覆盖，与其它推荐冲突时以这些 Step 2 用户值为准。
-- 优先使用上下文已有值和模板 Default；库存相关参数缺值时，先通过 `ros_get_template_parameter_constraints` 获取合法 `AllowedValues`，必要时再按 [references/cloud-products/](references/cloud-products/) 的可用性 API 与选型策略补足。
+- 优先使用上下文已有值和模板 Default；库存相关参数缺值时，先通过 `ros_get_template_parameter_constraints` 获取合法 `AllowedValues`，必要时再按 共享知识库产品页关联的可用性 API 与选型策略补足。
 - 每条硬约束只提交 `constraint_id`、LLM 独立判断的 `status`、语义 `actual_value/actual_unit`、相关最终 `parameter_values` 和可用的 evidence locator，不复制 constraint。
 - `type: tool` 证据提交真实 ordered record 的 `record_id` 与 `result_path`，可带 `tool_name`；`type: context` 提交受限 `context_path`；`type: template` 提交 `template_path` 或最终参数 `parameter_name` 二选一。这里的 `template_path` 是最终 ROS YAML **内部字段的点路径**（例如 `Resources.VSwitch.Properties.CidrBlock`），绝不是模板文件路径；模板参数值优先用 `parameter_name`。不要提交 evidence summary 或 evidence actual，Python 会从权威来源读取。
 - 工具已真实尝试但响应没有可定位的结果字段时，`evidence` 提交空数组，不得编造 `record_id`、`result_path` 或工具返回值。Python 会核对可用 locator、实际值、参数子集、operator/value/unit，并生成完整公共 hard_constraint_checks。接受规则保持兼容：LLM `status=satisfied` 或 Python code verification 通过任一成立即放行；只有二者都不通过才阻止确认。
@@ -212,11 +212,11 @@ Preview 明确表明新建资源受配额、容量或账号限制时，先用 `a
 
 | 文件 | 内容 | 何时查阅 |
 |------|------|----------|
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） | 需要了解产品属性、规格选型、库存相关字段时 |
-| [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 | 生成或修复 Parameters 定义时 |
-| [references/ros-template.md](references/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 | 生成或修复资源定义、内置函数用法等模板结构问题时 |
+| [knowledge://clouds/aliyun/products/index.md](knowledge://clouds/aliyun/products/index.md) | 产品知识与专题导航（共享 Wiki） | 需要了解产品属性、规格选型、库存相关字段时 |
+| [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 | 生成或修复 Parameters 定义时 |
+| [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 | 生成或修复资源定义、内置函数用法等模板结构问题时 |
 | [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) | 参数推荐与回溯规则、PreviewStack 参数集形成方法 | 求解库存/已有资源参数并形成预览参数集时 |
-| [references/solutions/](references/solutions/) | 预定义方案基线（如 iac-code-web） | `selected_candidate.name` 命中预定义方案时 |
+| [iac-code Web 方案](knowledge://clouds/aliyun/solutions/iac-code-web.md) | 预定义方案说明与 YAML 基线 | `selected_candidate.name` 命中预定义方案时 |
 
 ## 阶段 C：部署确认
 

@@ -13733,3 +13733,36 @@ msgstr "更新已完成。请重启 iac-code tui 以继续。"
 #: src/iac_code/ui/dialogs/mcp_manager.py
 msgid "※ Run iac-code tui --debug to see error logs"
 msgstr "※ 运行 iac-code tui --debug 查看错误日志"
+
+#: src/iac_code/ui/wiki_search.py
+#, python-brace-format
+msgid "Matched {count} files"
+msgstr "命中 {count} 个文件"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Extracting keywords"
+msgstr "提取关键词"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Searching"
+msgstr "搜索中"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No search needed"
+msgstr "无需搜索"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No matches"
+msgstr "无匹配"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Cancelled"
+msgstr "已取消"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Background Wiki search"
+msgstr "后台 Wiki 搜索"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Wiki search"
+msgstr "Wiki 搜索"

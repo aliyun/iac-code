@@ -100,7 +100,8 @@ class TestGlobBasics:
         selling_refs.mkdir(parents=True)
         bundled_products.mkdir(parents=True)
         (selling_refs / "template-parameter-recommendation.md").write_text("pipeline", encoding="utf-8")
-        (bundled_products / "ecs.md").write_text("ecs", encoding="utf-8")
+        (bundled_products / "ecs").mkdir()
+        (bundled_products / "ecs/ecs.md").write_text("ecs", encoding="utf-8")
         try:
             (skill_root / "references").symlink_to(selling_refs, target_is_directory=True)
             (selling_refs / "cloud-products").symlink_to(bundled_products, target_is_directory=True)
@@ -116,7 +117,7 @@ class TestGlobBasics:
 
         assert result.is_error is False
         assert "template-parameter-recommendation.md" in result.content
-        assert "cloud-products/ecs.md" in result.content.replace("\\", "/")
+        assert "cloud-products/ecs/ecs.md" in result.content.replace("\\", "/")
 
     @pytest.mark.asyncio
     async def test_recursive_glob_permission_asks_for_symlink_escape(self, tool, tmp_path):

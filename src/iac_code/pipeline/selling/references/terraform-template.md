@@ -1,1 +1,0 @@
-../../../skills/bundled/iac_aliyun/references/terraform-template.md

@@ -10,7 +10,14 @@ from typing import Any
 from iac_code.a2a.backup import run_sync_fenced
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_read_path, get_iac_code_application_root, resolve_read_path
+from iac_code.tools.path_safety import (
+    check_read_path,
+    get_iac_code_application_root,
+    is_knowledge_path,
+    knowledge_allowed_roots,
+    knowledge_uri,
+    resolve_read_path,
+)
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -30,6 +37,8 @@ def _glob_path_constraint_result(detail: str, context: ToolPermissionContext) ->
 
 
 def _search_root(path: str, cwd: str, *, relative_read_directories: list[str] | None = None) -> Path:
+    if is_knowledge_path(path):
+        return Path(resolve_read_path(path, cwd, relative_read_directories=relative_read_directories))
     root = Path(normalize_user_path(path))
     if not root.is_absolute():
         root = Path(resolve_read_path(str(root), cwd, relative_read_directories=relative_read_directories))
@@ -179,6 +188,8 @@ def _run_glob_permission_check(
         detail = _("glob pattern outside allowed directories")
         return _glob_path_constraint_result(detail, context)
     for match in matches:
+        if not _path_is_under_any_real_root(str(match), allowed_roots):
+            return _glob_path_constraint_result(_("glob pattern outside allowed directories"), context)
         match_decision = check_read_path(
             str(match),
             cwd=context.cwd,
@@ -203,7 +214,8 @@ class GlobTool(Tool):
         return (
             "Fast file pattern matching using glob patterns. Searches for files "
             "matching the given pattern and returns matching file paths sorted by "
-            "modification time (newest first). Use ** for recursive matching."
+            "modification time (newest first). Use ** for recursive matching. "
+            "Supports knowledge:// paths for the local Wiki."
         )
 
     @property
@@ -217,7 +229,7 @@ class GlobTool(Tool):
                 },
                 "path": {
                     "type": "string",
-                    "description": "The directory to search in. Defaults to current working directory.",
+                    "description": "Search directory: absolute, relative, or knowledge://. Defaults to cwd.",
                 },
             },
             "required": ["pattern"],
@@ -227,7 +239,12 @@ class GlobTool(Tool):
         pattern = tool_input["pattern"]
         path = tool_input.get("path", context.cwd)
 
-        search_root = _search_root(path, context.cwd, relative_read_directories=context.relative_read_directories)
+        try:
+            search_root = _search_root(path, context.cwd, relative_read_directories=context.relative_read_directories)
+            if is_knowledge_path(path) and _glob_pattern_may_escape_root(pattern):
+                return ToolResult.error("Knowledge glob pattern must stay inside its search directory")
+        except (ValueError, OSError, RuntimeError) as error:
+            return ToolResult.error(str(error))
 
         if not search_root.exists():
             return ToolResult.error(f"Path not found: {path}")
@@ -236,7 +253,7 @@ class GlobTool(Tool):
             return ToolResult.error(f"Not a directory: {path}")
 
         try:
-            allowed_roots = _effective_allowed_roots(search_root, context)
+            allowed_roots = knowledge_allowed_roots(path, _effective_allowed_roots(search_root, context))
             matches = await run_sync_fenced(_run_glob_execute, search_root, pattern, allowed_roots)
         except Exception as e:
             return ToolResult.error(f"Error during glob: {e}")
@@ -245,7 +262,10 @@ class GlobTool(Tool):
             return ToolResult.success("No files found")
 
         # Return relative paths
-        relative_paths = [str(p.relative_to(search_root)) for p in matches]
+        relative_paths = []
+        for match in matches:
+            label = knowledge_uri(match)
+            relative_paths.append(label if label != str(match) else str(match.relative_to(search_root)))
         return ToolResult.success("\n".join(relative_paths))
 
     async def check_permissions(self, input: dict, context=None) -> PermissionResult:
@@ -273,7 +293,7 @@ class GlobTool(Tool):
                     context.cwd,
                     relative_read_directories=context.relative_read_directories,
                 )
-                allowed_roots = _effective_allowed_roots(search_root, context)
+                allowed_roots = knowledge_allowed_roots(path, _effective_allowed_roots(search_root, context))
                 return await run_sync_fenced(
                     _run_glob_permission_check,
                     search_root,

@@ -52,7 +52,7 @@ PROMPTS = (
 
 
 def hourly_costs_match(outlines: list[str], details: list[str]) -> bool:
-    """Priced items need the requested unit; free topology resources have no rate."""
+    """Priced items need the requested unit; free/excluded usage rows have no rate."""
     hour_unit = r"小时|(?<![a-z])(?:hours?|hourly|h)(?![a-z])"
     period_pattern = rf"{hour_unit}|月|months?"
 
@@ -81,9 +81,24 @@ def hourly_costs_match(outlines: list[str], details: list[str]) -> bool:
             or re.search(r"免费|无费用|免收|(?:包含|含)在|included\s+in", value, re.I)
         )
 
+    def excluded_usage(value: str) -> bool:
+        # Only unpriced usage exclusions are exempt; a monthly charge still fails.
+        return bool(
+            not re.search(r"[¥￥$]|\d+(?:\.\d+)?\s*元|月|months?", value, re.I)
+            and re.search(r"流量|traffic|data\s+transfer", value, re.I)
+            and re.search(r"另计|另行计费|单独计费|不含|不包含|not\s+included|(?:charged|billed)\s+separately",
+                          value, re.I)
+        )
+
     return bool(outlines) and all(hourly(value) for value in outlines) and all(
-        hourly(value) or free(value) for value in details
+        hourly(value) or free(value) or excluded_usage(value) for value in details
     )
+
+
+def accepted_price_calls(calls: list[dict], outcomes: dict[str, dict]) -> list[dict]:
+    """Failed/unexecuted tool arguments are not prices shown to the user."""
+    return [call for call in calls if call["name"] in {"show_architecture_plan", "show_candidate_detail"}
+            and outcomes.get(call["id"], {}).get("is_error") is False]
 
 
 async def verify_apis(run_dir: Path) -> dict[str, Any]:
@@ -179,6 +194,8 @@ def successful_coupon_queries(config_dir: Path) -> set[str]:
 
 
 def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
+    from scripts.ci.run_step_followup_a2a import results
+
     config_dir = Path(os.environ["IAC_CODE_CONFIG_DIR"])
     if not config_dir.resolve().is_relative_to(args.run_dir.resolve()):
         raise ValueError("Run through run_e2e.py with isolated configuration")
@@ -222,18 +239,19 @@ def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
             completions = completion_inputs(config_dir)
             conclusion = conclusion or (completions[-1] if completions else {})
             calls = tool_inputs(config_dir)[before:]
+            pricing_calls = accepted_price_calls(calls, results(config_dir))
             outline_costs = [
                 str(candidate.get("total_cost", candidate.get("total_monthly_cost", "")))
-                for call in calls if call["name"] == "show_architecture_plan"
+                for call in pricing_calls if call["name"] == "show_architecture_plan"
                 for candidate in call["input"].get("candidates", [])
             ]
             outline_costs.extend(
                 str(call["input"].get("total_cost", ""))
-                for call in calls if call["name"] == "show_candidate_detail"
+                for call in pricing_calls if call["name"] == "show_candidate_detail"
             )
             detail_costs = [
                 str(resource.get("rough_cost", resource.get("rough_monthly_cost", "")))
-                for call in calls if call["name"] == "show_candidate_detail"
+                for call in pricing_calls if call["name"] == "show_candidate_detail"
                 for resource in call["input"].get("resource_inventory", [])
                 if resource.get("rough_cost", resource.get("rough_monthly_cost"))
             ]

@@ -67,8 +67,8 @@ steps:
       # Keep display-tool inputs as runtime-only evidence. Step 1 uses them to ensure the
       # final candidate array is the same batch the user actually saw after replanning.
       completion_record_contract: v2
-      fresh_agent_context_on_resume: true
       conclusion_merge_context_field: solution_selection
+      wiki_search_on_enter: true
       conclusion_merge_statuses: [selected]
       hydrate_selected_candidate: true
       deterministic_structured_candidate_selection: true
@@ -513,8 +513,8 @@ steps:
       compact_completion_schema: true
       compact_completion_errors: true
       completion_validation_error_limit: 5
-      fresh_agent_context_on_resume: true
       conclusion_merge_context_field: selected_plan
+      wiki_search_on_enter: true
       conclusion_merge_statuses: [awaiting_confirmation, confirmed, cancelled, reselect_requested]
       completion_record_contract: v2
       hard_constraint_evidence_contract: v2
