@@ -963,6 +963,7 @@ class _WaitingFirstModel:
         self.calls = 0
         self.fault = fault
         self.requests = []
+        self.wiki_requests = []
         self.before_judge_response = None
 
     async def stream(self, **_kwargs):
@@ -972,6 +973,27 @@ class _WaitingFirstModel:
         yield MessageEndEvent(stop_reason="stop", usage=Usage())
 
     async def handle(self, _request):
+        payload = json.loads(_request.content)
+        from iac_code.services.wiki_auto_search import PROMPT
+
+        if payload["messages"][0].get("content") == PROMPT:
+            self.wiki_requests.append(payload)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "wiki-1",
+                    "object": "chat.completion",
+                    "model": "gpt-4o",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": '{"keywords":["VPC"]}'},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
         self.requests.append(json.loads(_request.content))
         self.calls += 1
         if self.fault in ("request-retry", "fallback-complete", "sdk-retry") and self.calls == 1:
@@ -1292,6 +1314,7 @@ class _ActiveModelStopCase:
     [
         (False, None),
         (True, None),
+        (True, "wiki"),
         (True, "checkpoint-clock"),
         (True, "sdk-retry"),
         (True, "supplement"),
@@ -1338,6 +1361,11 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     cwd.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "shared"))
+    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", "true" if fault == "wiki" else "false")
+    if fault == "wiki":
+        (cwd / "knowledge").mkdir()
+        (cwd / "knowledge" / "index.md").write_text("# Offline Wiki\nNo matching resources.\n", encoding="utf-8")
+        monkeypatch.setattr("iac_code.services.wiki_auto_search.get_iac_code_application_root", lambda: cwd)
     config = tmp_path / "pipeline-config"
     config.mkdir()
     (config / "model.md").write_text("Plan the solution. Do not deploy resources.", encoding="utf-8")
@@ -1347,6 +1375,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             "conclusion_field": "plan",
             "forward": None,
             "prompt": "model.md",
+            "config": {"wiki_search_on_enter": fault == "wiki"},
         }
     ]
     dependencies = {"plan": []}
@@ -1409,6 +1438,23 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     owner = await store.get_or_create_task(task_id="task-old", context_id="ctx-1")
     pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id="session-1")
     case = _ActiveModelStopCase(runner, None, store, owner, pipeline_dir, model)
+    if fault == "wiki":
+        from iac_code.providers import manager as manager_module
+
+        create_provider = manager_module.create_provider
+
+        def offline_provider(*args, **kwargs):
+            adapter = create_provider(*args, **kwargs)
+            case.successor_clients.append(adapter._client)
+            adapter._client = AsyncOpenAI(
+                api_key="offline-test",
+                http_client=httpx.AsyncClient(transport=httpx.MockTransport(model.handle)),
+                max_retries=0,
+            )
+            case.successor_clients.append(adapter._client)
+            return adapter
+
+        monkeypatch.setattr(manager_module, "create_provider", offline_provider)
     control = ExecutionController(
         context_id="ctx-1",
         task_id="task-old",
@@ -1430,6 +1476,10 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     control_service = None
     try:
         await asyncio.wait_for(model.entered.wait(), timeout=3)
+        if fault == "wiki":
+            assert len(model.wiki_requests) == 1
+            work = runner._step_executor.current_agent_loop._wiki_work
+            assert work.snapshot["status"] == "no_matches" and work.task.done()
         old_attempt_id = "att_0002" if fault == "hard-interrupt-earlier" else "att_0001"
         assert runner._execution["active_attempt_id"] == old_attempt_id
         old_transcript_id = f"transcript_{old_attempt_id}"
@@ -1510,6 +1560,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             clock.advance()
         positive = standard_provider and fault in (
             None,
+            "wiki",
             "checkpoint-clock",
             "sdk-retry",
             "supplement",
@@ -1730,12 +1781,27 @@ class _FalseyModelExtension:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "extension_name", [None, "system_prompt_refresher", "background_task_starter", "memory_recall_service"]
+    "extension_name",
+    [
+        None,
+        "system_prompt_refresher",
+        "background_task_starter",
+        "memory_recall_service",
+        "wiki-idle",
+        "wiki-active",
+        "wiki-other-scope",
+        "wiki-foreign-owner",
+        "wiki-custom",
+        "wiki-became-active",
+    ],
 )
 async def test_model_only_provenance_rejects_unknown_falsey_extensions_and_stale_requests(
     tmp_path, monkeypatch, extension_name
 ):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv(
+        "IAC_CODE_WIKI_AUTO_SEARCH", "true" if extension_name and extension_name.startswith("wiki-") else "false"
+    )
     model = _WaitingFirstModel()
     manager = ProviderManager(
         "gpt-4o",
@@ -1751,13 +1817,36 @@ async def test_model_only_provenance_rejects_unknown_falsey_extensions_and_stale
     )
     manager._provider._client = sdk
     extension = _FalseyModelExtension()
+    storage = SessionStorage()
     loop = AgentLoop(
         provider_manager=manager,
         system_prompt="plan",
         tool_registry=ToolRegistry(),
         cwd=str(tmp_path),
-        **({extension_name: extension} if extension_name else {}),
+        session_storage=storage,
+        session_id="session-1",
+        **({extension_name: extension} if extension_name and not extension_name.startswith("wiki-") else {}),
     )
+    from iac_code.services import wiki_auto_search as wiki_module
+
+    monkeypatch.setattr(wiki_module, "_TASKS", {})
+    wiki_task = None
+    if extension_name and extension_name.startswith("wiki-"):
+        wiki = loop._wiki_search
+        loop._wiki_search = wiki if extension_name != "wiki-custom" else SimpleNamespace(has_active_tasks=False)
+        if extension_name in ("wiki-active", "wiki-other-scope", "wiki-foreign-owner", "wiki-became-active"):
+            wiki_task = asyncio.create_task(asyncio.Event().wait())
+            # A terminal-looking snapshot is not proof that its writer exited.
+            work = wiki_module.WikiWork({"status": "ready"}, task=wiki_task)
+            owner = wiki._task_owner
+            if extension_name == "wiki-foreign-owner":
+                other_loop = AgentLoop(
+                    manager, "plan", ToolRegistry(), cwd=str(tmp_path), session_storage=storage, session_id="session-2"
+                )
+                owner = other_loop._wiki_search._task_owner
+            key = (owner, "earlier-scope" if extension_name == "wiki-other-scope" else "scope", "query")
+            if extension_name != "wiki-became-active":
+                wiki_module._TASKS[key] = work
     if extension_name == "system_prompt_refresher":
         loop._refresh_system_prompt()
         assert extension.calls == 1
@@ -1770,12 +1859,17 @@ async def test_model_only_provenance_rejects_unknown_falsey_extensions_and_stale
             active = asyncio.create_task(_ActiveModelStopCase.consume_model_loop(loop, manager))
             try:
                 await asyncio.wait_for(model.entered.wait(), timeout=3)
+                if extension_name == "wiki-became-active":
+                    wiki_module._TASKS[key] = work
             finally:
                 active.cancel()
                 await asyncio.gather(active, return_exceptions=True)
-            if extension_name is None and request_number == 1:
+            if extension_name in (None, "wiki-idle", "wiki-foreign-owner") and request_number == 1:
                 assert loop.canceled_first_model_request == "iac_code.providers.openai_provider.OpenAIProvider"
             else:
                 assert loop.canceled_first_model_request is None
     finally:
+        if wiki_task is not None:
+            wiki_task.cancel()
+            await asyncio.gather(wiki_task, return_exceptions=True)
         await sdk.close()
