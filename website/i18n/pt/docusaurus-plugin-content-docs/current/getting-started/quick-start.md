@@ -1,30 +1,22 @@
 ---
 title: Inicio rapido
-description: Configure o IaC Code e execute seu primeiro prompt.
+description: Iniciar Desktop ou Web, configurar o acesso e enviar o primeiro pedido.
 ---
 
 # Inicio rapido
 
-Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o navegador. No primeiro uso, configure o provedor LLM e as credenciais da Alibaba Cloud nas configurações.
+Os passos valem para Desktop e Web, que usam a mesma interface de conversa.
 
-```bash
-iac-code
-```
+1. Abra o [Desktop](../desktop-app.md) ou execute `iac-code` em um terminal interativo para abrir o Web.
 
-Em seguida, solicite infraestrutura:
+2. Clique em **Nova conversa** e escolha o diretório de destino abaixo da entrada.
 
-```text
-Create a VPC and two ECS instances
-```
+3. Siga a [configuração do modelo](../configuration/llm-providers.md) e defina o modelo atual. Para consultas ou implantação na nuvem, configure também as [credenciais de nuvem](../configuration/alibaba-cloud-credentials.md).
 
-Para um prompt unico, use o modo nao interativo:
+4. Escolha **Modo normal** e envie: “Gere um modelo ROS de VPC em templates/vpc.yml, sem implantá-lo ainda.”
 
-```bash
-iac-code --prompt "Create an OSS Bucket"
-```
+5. Acompanhe as etapas na conversa. Se ocorrer pesquisa Wiki, expanda a entrada para ver palavras-chave e conteúdo encontrado. Confira e responda às aprovações de escrita.
 
-Tambem pode ler o prompt a partir da entrada padrao:
+6. Após a gravação do modelo, clique no nome em **Saída** para visualizar. Peça depois a explicação ou validação dos parâmetros. A conversa permanece salva na barra lateral.
 
-```bash
-echo "Create a VPC and two ECS instances" | iac-code --prompt -
-```
+Para planejamento e implantação guiados, crie uma conversa em [modo Pipeline](../automation/pipeline-mode.md). Consulte as [operações comuns](../cli/commands.md) e a [automação headless](../automation/non-interactive-mode.md).

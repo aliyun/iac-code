@@ -5,88 +5,58 @@ description: Conserver et reprendre les conversations entre les exécutions.
 
 # Sessions
 
-Dans Web et Desktop, sélectionnez le projet et ouvrez une conversation dans la barre latérale. Utilisez son menu pour la renommer. Les commandes de terminal ci-dessous utilisent le même stockage de sessions.
+Web, bureau et headless partagent le même stockage de sessions. Les conversations sont enregistrées automatiquement dans le répertoire de configuration du runtime.
 
-IaC Code enregistre automatiquement chaque conversation sur disque. Vous pouvez reprendre n'importe quelle session précédente pour continuer là où vous vous étiez arrêté.
+## Web et bureau
 
-## Reprendre des sessions
+### Poursuivre une conversation
 
-### Interactif : `/resume`
+1. Dans la barre latérale, ouvrez la conversation sous son projet ou retrouvez-la avec **Rechercher**.
 
-Dans le REPL, utilisez la commande `/resume` :
+2. Consultez les messages et fichiers enregistrés.
 
-```text
-/resume
-```
+3. Saisissez la demande suivante et envoyez-la. Pour une tâche indépendante, utilisez **Nouvelle discussion**.
 
-Cela ouvre un sélecteur interactif qui affiche les sessions récentes du projet courant. Si un nom de session est défini, il sert de titre ; sinon le dernier prompt, ou à défaut le premier prompt, est utilisé.
+### Renommer ou épingler une conversation
 
-Pour reprendre une session précise par identifiant exact, préfixe d'identifiant unique ou nom de session unique :
+1. Ouvrez la conversation, puis son menu **…**.
 
-```text
-/resume abc123
-```
+2. Choisissez **Renommer la conversation**, saisissez le titre et cliquez sur **Enregistrer**. La barre latérale affiche le nouveau titre.
 
-### Nommer les sessions
+3. Choisissez **Épingler la conversation** dans le même menu pour la retrouver facilement. L’action inverse retire l’épingle.
 
-Utilisez `/rename` pour donner à la session active un nom stable et lisible :
+### Archiver et restaurer une conversation
 
-```text
-/rename deploy-prod
-```
+1. Choisissez **Archiver la conversation** dans le menu **…**. Elle quitte la liste active.
 
-Le nom est stocké dans les métadonnées de session. Il apparaît dans la bannière d'accueil lors de la reprise, dans l'indication de sortie et dans le sélecteur `/resume`.
+2. Ouvrez **Paramètres → Conversations archivées** et retrouvez-la avec la recherche et le filtre de projet.
 
-Vous pouvez reprendre par nom lorsqu'il identifie une session de façon unique :
+3. Cliquez sur **Désarchiver**, puis ouvrez-la dans la barre latérale pour continuer.
 
-```text
-/resume deploy-prod
-iac-code tui --resume deploy-prod
-```
+:::note
 
-### CLI : `--resume` et `--continue`
+Les conversations créées via CLI, A2A ou ACP sont masquées par défaut. Pour les consulter, activez l’option de lecture seule correspondante dans **Paramètres → Général → Visibilité des sessions externes**. Le stockage partagé ne permet pas de les modifier dans Web/Desktop.
 
-Reprendre une session précise depuis la ligne de commande par identifiant exact, préfixe d'identifiant unique ou nom de session unique :
+:::
+
+## Continuer en mode headless
+
+Exécutez la commande depuis le répertoire du projet de la session. `--resume` reprend une session précise ; `--continue` utilise la plus récente de ce projet. Les formes courtes sont `-r` et `-c` et ne peuvent pas être combinées.
 
 ```bash
-iac-code tui --resume <id-ou-nom-de-session>
+iac-code --resume deploy-prod --prompt "Générer un modèle VPC"
+iac-code --continue --prompt "Générer un modèle VPC"
 ```
 
-Reprendre la session la plus récente :
+## Autres projets
+
+Dans Web ou Desktop, ouvrez la conversation sous son projet dans la barre latérale. En headless, placez-vous d’abord dans le répertoire du projet :
 
 ```bash
-iac-code tui --continue
+cd /path/to/project
+iac-code --resume <session-id> --prompt "Générer un modèle VPC"
 ```
 
-Les options courtes `-r` et `-c` sont également disponibles :
+## Conversations interrompues
 
-```bash
-iac-code tui -r <id-ou-nom-de-session>
-iac-code tui -c
-```
-
-### Sessions inter-projets
-
-Lorsqu'une session appartient à un autre répertoire de projet, IaC Code ne change pas le répertoire de travail à chaud. Il affiche plutôt la commande permettant de reprendre dans le bon contexte :
-
-```text
-cd /path/to/other/project && iac-code tui --resume <session-id>
-```
-
-Cette commande est aussi copiée dans le presse-papiers lorsque c'est possible.
-
-## Récupération après interruption
-
-Si une session a été interrompue pendant l'exécution, par exemple parce que le processus a été tué pendant qu'un outil tournait, IaC Code détecte les appels d'outil orphelins à la reprise et ajoute des résultats d'erreur synthétiques. Le modèle peut ainsi se rétablir proprement sans rester bloqué en attendant une sortie d'outil qui n'arrivera jamais.
-
-## Sélecteur de sessions
-
-Le sélecteur `/resume` affiche :
-
-| Colonne | Description |
-|---------|-------------|
-| Titre | Nom de session s'il existe ; sinon dernier ou premier prompt utilisateur |
-| Branche | Branche Git au moment de la session |
-| Heure | Dernière modification |
-
-Les sessions sont triées de la plus récente à la plus ancienne. Vous pouvez taper du texte pour filtrer par contenu du titre.
+Rouvrez la conversation enregistrée pour examiner l’historique et continuer. La récupération traite les appels d’outils inachevés. La progression et les décisions en attente suivent la [récupération Pipeline](../automation/pipeline-mode.md). Une exécution unique `--prompt` n’exécute pas de pipeline.

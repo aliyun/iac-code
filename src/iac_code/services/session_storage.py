@@ -338,7 +338,7 @@ class SessionStorage:
                 continue
             session_dir = project_dir / session_id
             if self._is_deletable_session_dir(session_dir, session_id):
-                shutil.rmtree(session_dir)
+                self._remove_session_tree(session_dir)
                 removed = True
 
             legacy_path = project_dir / f"{session_id}.jsonl"
@@ -357,9 +357,31 @@ class SessionStorage:
             for sidecar_dir in sidecar_dirs:
                 if not self._is_sidecar_only_session_dir(sidecar_dir):
                     continue
-                shutil.rmtree(sidecar_dir)
+                self._remove_session_tree(sidecar_dir)
                 removed = True
         return removed
+
+    @classmethod
+    def _remove_session_tree(cls, path: Path) -> None:
+        if os.name == "nt":
+            shutil.rmtree(path, onerror=cls._remove_readonly_result_input)
+        else:
+            shutil.rmtree(path)
+
+    @classmethod
+    def _remove_readonly_result_input(cls, function, path: str, exception_info) -> None:
+        target = Path(path)
+        if (
+            not isinstance(exception_info[1], PermissionError)
+            or target.parent.name != ".bash-inputs"
+            or not cls._is_regular_file_entry(target)
+        ):
+            raise exception_info[1]
+        for parent in target.parents:
+            if parent.is_symlink() or cls._is_reparse_point(parent):
+                raise exception_info[1]
+        target.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        function(path)
 
     def _is_deletable_session_dir(self, session_dir: Path, session_id: str) -> bool:
         if not self._is_directory_entry(session_dir) or not self._is_safe_sidecar_directory_tree(session_dir):

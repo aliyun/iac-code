@@ -1,13 +1,13 @@
 ---
 title: Aplicativo web
-description: Execute o IaC Code como um aplicativo web local com o mesmo motor da CLI.
+description: Iniciar o aplicativo Web local e usar configurações, conversas e controles de entrada.
 ---
 
 # Aplicativo web
 
 Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o navegador. No primeiro uso, configure o provedor LLM e as credenciais da Alibaba Cloud nas configurações.
 
-O aplicativo web lê e grava no mesmo armazenamento de sessões da CLI, então uma conversa iniciada de um lado pode ser retomada no outro.
+Desktop e Web compartilham conversas e configurações. Conversas criadas por outras interfaces podem ser de somente leitura; veja [Sessões](./cli/sessions.md) sobre exibição e continuação.
 
 ## Instalação
 
@@ -43,27 +43,41 @@ iac-code web --port 9000 --no-open
 
 Sem `--access-token-file`, o servidor aceita apenas hosts de loopback (`127.0.0.1`, `localhost` ou `::1`) e verifica as solicitações locais. O modo explícito de token também aceita outras IPs e protege as solicitações de API pelo transporte de token criptografado.
 
+## Implantar um modelo ROS existente
+
+1. Configure as [credenciais de nuvem](./configuration/alibaba-cloud-credentials.md) e abra uma conversa no projeto do modelo.
+
+2. Digite `@`, selecione o arquivo e peça uma verificação do modelo e dos parâmetros necessários.
+
+3. Informe região, nome da pilha e valores dos parâmetros; peça validação antes da criação.
+
+4. Confira o resultado e as mudanças propostas e depois solicite a criação da pilha.
+
+5. Se aparecer um cartão de permissão de API de nuvem, confira a operação e aprove ou negue. Uma criação aprovada pode gerar recursos cobrados.
+
+6. Veja o ID da pilha, progresso e resultado. Em caso de falha, peça o diagnóstico do erro na mesma conversa.
+
 ## Visão geral da interface
 
 ### Barra lateral de sessões
 
-A barra lateral lista as conversas do projeto selecionado. A partir daqui, você pode:
+A barra lateral agrupa as conversas salvas por projeto. Você pode:
 
-- Iniciar um **novo chat** ou trocar de projeto com o seletor de projetos.
+- Iniciar uma **Nova conversa** e escolher o projeto abaixo da entrada.
 - **Pesquisar** conversas ou abrir a paleta de comandos para executar um comando.
 - **Fixar**, **renomear** ou **arquivar** uma conversa e navegar pelas conversas arquivadas.
 
-Como as sessões são compartilhadas com a CLI, uma conversa que você retoma com `iac-code tui --resume` também aparece aqui. Consulte [Sessões](./cli/sessions.md) para entender como o armazenamento de sessões funciona.
+Web, Desktop e headless compartilham as conversas salvas. Consulte [Sessões](./cli/sessions.md) para retomar ou renomear uma conversa.
 
 ### Área de composição (composer)
 
-A área de composição é onde você escreve suas solicitações. Ela oferece os mesmos controles que a CLI expõe por meio de comandos de barra e sinalizadores:
+Descreva a tarefa na entrada e use os controles da interface para escolher como a conversa funciona:
 
 - A seleção de **modelo e provedor** para a sessão ativa.
 - Um botão de **Pensamento** para ativar ou desativar o raciocínio estendido em modelos compatíveis.
 - Um controle de **modo de permissão** que define como as ações das ferramentas são aprovadas.
 - **Anexos de imagem** para modelos multimodais.
-- **Comandos de barra** (digitados com `/`) e **referências de arquivo `@`** para apontar arquivos do seu espaço de trabalho.
+- **Habilidades** selecionados nas sugestões `/` ou `$` e **referências `@` a arquivos** do workspace.
 
 ### Chat normal e modo pipeline
 
@@ -79,7 +93,7 @@ As chamadas de ferramentas são exibidas como cartões na transcrição. Quando 
 
 ### Configurações
 
-A área de configurações reúne a mesma configuração gerenciada pela CLI:
+Desktop e Web compartilham a mesma interface. Use as configurações e os controles visíveis no trabalho diário.
 
 - **Credenciais de nuvem** para o Alibaba Cloud (consulte [Credenciais do Alibaba Cloud](./configuration/alibaba-cloud-credentials.md)).
 - **Modelos** e configuração de provedores (consulte [Provedores de LLM](./configuration/llm-providers.md)).

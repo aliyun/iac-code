@@ -115,7 +115,7 @@ The adapter stores protocol mappings, idempotency data, and pending interrupts i
 | Handle permissions, questions, and option selection in a UI | **AG-UI** |
 | Let another agent or orchestrator call iac-code directly | **A2A** |
 | Integrate an IDE/editor with ACP sessions and terminal features | **ACP** |
-| Operate iac-code manually | **Interactive REPL or Web/Desktop** |
+| Operate iac-code manually | **Web / Desktop** |
 
 AG-UI and A2A can run at the same time. They expose separate HTTP endpoints while sharing the same iac-code execution implementation.
 

@@ -14,7 +14,7 @@ from iac_code.services.telemetry.config import should_capture_content_on_span
 from iac_code.services.telemetry.content_serializer import serialize_tool_arguments, serialize_tool_result
 from iac_code.services.telemetry.names import Events, GenAiAttr, GenAiOperationName, GenAiSpanKind, Metrics, Spans
 from iac_code.services.telemetry.sanitize import sanitize_error_message, sanitize_tool_name
-from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.base import ToolContext, ToolResult, prepare_contextual_tool_input
 from iac_code.types.permissions import ExecutionClass, InvocationBinding
 
 if TYPE_CHECKING:
@@ -70,12 +70,16 @@ class ToolExecutor:
 
         from iac_code.services.execution_policy import check
 
+        try:
+            execution_input = prepare_contextual_tool_input(tool, call.input, context)
+        except (ValueError, OSError) as error:
+            return ToolResult.error(str(error))
         binding = call.invocation_binding or context.invocation_binding
-        if error := check(call.name, call.input, binding.session_id if binding else "", cwd=context.cwd):
+        if error := check(call.name, execution_input, binding.session_id if binding else "", cwd=context.cwd):
             return ToolResult.error(error)
 
         # Input validation
-        valid, error = tool.validate_input(call.input)
+        valid, error = tool.validate_input(execution_input)
         if not valid:
             tool_error = tool.validation_error_result(call.input)
             if tool_error is not None:
@@ -92,6 +96,7 @@ class ToolExecutor:
         # populated for the executing tool — needed so emitted events can be
         # attributed to the specific tool invocation that produced them.
         context = ToolContext(
+            tool_result_directory=context.tool_result_directory,
             cwd=context.cwd,
             event_queue=call.event_queue if call.event_queue is not None else context.event_queue,
             additional_directories=list(context.additional_directories),
@@ -112,8 +117,8 @@ class ToolExecutor:
             trusted_ros_account_context=context.trusted_ros_account_context,
         )
 
-        timeout = tool.execution_timeout(call.input)
-        if timeout is None and not tool.has_unbounded_execution_wait(call.input):
+        timeout = tool.execution_timeout(execution_input)
+        if timeout is None and not tool.has_unbounded_execution_wait(execution_input):
             timeout = self._tool_timeout
 
         # Telemetry instrumentation
@@ -144,7 +149,7 @@ class ToolExecutor:
                     may_spawn_subprocess=call.name in {"bash", "grep"},
                 ):
                     result = await run_with_execution_budget(
-                        tool.execute(tool_input=call.input, context=context),
+                        tool.execute(tool_input=execution_input, context=context),
                         timeout=timeout,
                     )
                 duration_ms = int((time.monotonic() - started) * 1000)

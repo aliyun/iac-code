@@ -362,7 +362,7 @@ def test_serialize_input_messages_keeps_associated_non_aliyun_tool_result_unchan
     assert result[1]["parts"][0]["response"] == "ordinary result output"
 
 
-def test_serialize_input_messages_tool_result_redacts_externalized_file_content_preview(tmp_path):
+def test_serialize_input_messages_tool_result_preserves_externalized_reference_without_file_content(tmp_path):
     raw_result = json.dumps(
         {
             "file_sha256": "sha256-value",
@@ -374,19 +374,20 @@ def test_serialize_input_messages_tool_result_redacts_externalized_file_content_
         ResultStorage(
             storage_dir=str(tmp_path / "tool-results"),
             max_inline_chars=10,
-            preview_chars=180,
         )
         .process("t1", raw_result)
         .content
     )
-    assert "ROSTemplateFormatVersion" in preview
+    reference = preview.split("Complete output saved as ", 1)[1].splitlines()[0]
+    assert reference.startswith("tool-result://local/") and reference.endswith("/t1.txt")
     blocks = [FakeContentBlock(type="tool_result", tool_use_id="t1", text=preview)]
     result = json.loads(serialize_input_messages([FakeMessage(role="tool", content=blocks)]))
 
     response = result[0]["parts"][0]["response"]
+    assert reference in response
     assert "ROSTemplateFormatVersion" not in response
-    assert "file_content" in response
-    assert "sha256-value" in response
+    assert "file_content" not in response
+    assert "sha256-value" not in response
 
 
 def test_serialize_output_messages():

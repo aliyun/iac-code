@@ -24,6 +24,62 @@ class FakeToolAnnotations:
         return {"read_only_hint": True, "destructive_hint": False}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resource", [False, True])
+async def test_artifacts_use_active_loop_directory_in_pipeline(tmp_path, resource):
+    import re
+
+    from iac_code.services.session_layout import SessionPaths
+    from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
+    from iac_code.tools.read_file import ReadFileTool
+    from iac_code.tools.result_storage import ResultStorage
+
+    original = "complete MCP content 中文\n" * 2_000
+
+    class Manager:
+        async def call_tool(self, *args, **kwargs):
+            return {"content": [{"type": "text", "text": original}]}
+
+        async def read_resource(self, *args, **kwargs):
+            return "ros", {"contents": [{"uri": "resource://test", "text": original}]}
+
+    session_dir = tmp_path / "session"
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id="session", cwd=str(tmp_path), layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    result_root = SessionPaths.require_supported(session_dir).transcript_tool_results_dir("transcript")
+    context = ToolContext(tool_result_directory=str(result_root))
+    if resource:
+        tool = ReadMCPResourceTool(manager=Manager(), session_id="session", session_dir=session_dir)
+        arguments = {"server": "ros", "uri": "resource://test"}
+    else:
+        tool = MCPTool(
+            manager=Manager(),
+            session_id="session",
+            session_dir=session_dir,
+            record=MCPToolRecord(
+                server_name="ros",
+                tool_name="query",
+                public_name="mcp__ros__query",
+                description="Query",
+                input_schema={"type": "object"},
+            ),
+        )
+        arguments = {}
+    output = await tool.execute(tool_input=arguments, context=context)
+    assert not output.is_error
+    artifact = output.metadata["mcp"]["artifacts"][0]
+    assert Path(artifact["path"]).is_relative_to(result_root)
+    assert Path(artifact["path"]).read_text(encoding="utf-8") == original
+    reference = re.search(r"tool-result://[^\s]+", output.content)[0].rstrip(".")
+    page = await ReadFileTool().execute(tool_input={"path": reference}, context=context)
+    assert not page.is_error
+    assert "complete MCP content" in page.content
+    assert not ResultStorage(str(result_root)).process("outer", output.content).is_externalized
+    assert len(list(result_root.rglob("*.txt"))) == 1
+
+
 def test_mcp_tool_uses_discovered_schema_and_annotations() -> None:
     tool = MCPTool(
         manager=FakeManager(),

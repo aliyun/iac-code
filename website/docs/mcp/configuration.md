@@ -1,27 +1,18 @@
 ---
 sidebar_position: 2
 title: MCP Configuration
-description: Configure MCP servers through CLI commands, settings files, project files, and ACP sessions.
+description: Manage MCP servers in Plugins; reference CLI commands, scopes, and advanced settings.
 ---
 
 # MCP Configuration
+
+Use the MCP tab in **Plugins** in Desktop or Web to add and manage servers. CLI commands and configuration files are documented below for automation and advanced setup.
 
 MCP servers are configured under the `mcpServers` object. IaC Code supports a Claude Code-compatible core schema for `stdio`, `http`, `sse`, and URL-only `ws` servers.
 
 ## Quick Start
 
-For a remote HTTP MCP server such as Yuque, add the server with the positional URL form, then start OAuth:
-
-```bash
-iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
-iac-code mcp auth yuque
-```
-
-For stdio servers, put the subprocess command after `--`. A remote HTTP server does not need a wrapper: add it with `--transport http` as shown above.
-
-```bash
-iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
-```
+For normal use, add servers in **Plugins → MCP** as shown in [MCP Quick Start](./quick-start.md). The sections below describe persistence scopes, CLI automation, and advanced configuration fields.
 
 ## Configuration Sources
 
@@ -122,13 +113,11 @@ When `--scope` is omitted, IaC Code writes to `local` inside a project and `user
 
 For commands that operate on an existing persisted server, IaC Code can find a unique server across persisted scopes when `--scope` is omitted. If the same name exists in multiple scopes, the command fails with exact `--scope` commands to disambiguate.
 
-## Interactive MCP Manager
+## Manage MCP Servers
 
-Inside the interactive REPL, `/mcp` opens a full-screen MCP manager. It groups servers by source, shows connection state, authentication state, config diagnostics, failure details, and configured location.
+Use the MCP settings in Web or Desktop to inspect connections, tools, resources, and prompts; authenticate remote servers; approve project servers; reconnect, enable, disable, or remove saved servers.
 
-From the manager, you can inspect a connected server's tools, resources, and prompts; authenticate, re-authenticate, or clear authentication for remote servers; reconnect servers; enable or disable persisted servers; approve or reject project `.mcp.json` servers; and remove persisted entries. OAuth flows show the authorization URL, support copying it, and accept a pasted callback URL or authorization code when the browser redirect cannot reach the local callback listener.
-
-`/mcp enable <name>`, `/mcp disable <name>`, and `/mcp reconnect <name>` run quick actions without opening the manager. If `/mcp` is received through piped stdin or another non-TTY input, IaC Code prints a terminal-required message; use `iac-code mcp <command>` for non-interactive automation.
+The `/mcp` conversation command reports server status. For automation, use `iac-code mcp <command>`; the command reference above lists the available operations.
 
 ## Stdio Servers
 
@@ -221,17 +210,13 @@ Do not store plaintext secrets in headers or env values. Use environment-variabl
 
 ## Project Approval
 
-Project `.mcp.json` can be committed to a repository, so IaC Code does not trust it automatically.
+Project `.mcp.json` files are not trusted automatically. Approve a server in the Web or Desktop MCP settings, or from the project directory:
 
-Interactive REPL startup asks:
-
-```text
-Approve project MCP server 'name' from /path/to/.mcp.json? [y/N]
+```bash
+iac-code mcp approve catalog
 ```
 
-Pressing Enter keeps the default `N` and rejects that exact project server config. Type `y` or `yes` to approve it. Approval is stored locally under the IaC Code config directory and includes the workspace path, project file path, server name, and config signature. If the `.mcp.json` server config changes, approval is invalidated and the server becomes pending again.
-
-Headless, ACP, and A2A startup never ask interactive approval questions. Pending project servers are skipped and reported as warnings.
+Approval is saved locally and tied to the workspace, source file, server name, and configuration signature. A configuration change requires approval again. Headless, ACP, and A2A skip pending project servers and report warnings.
 
 ## Disabled Servers
 

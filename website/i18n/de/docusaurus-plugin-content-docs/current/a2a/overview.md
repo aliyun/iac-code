@@ -28,8 +28,8 @@ Verwenden Sie A2A, wenn ein anderer Agent, eine Workflow-Engine oder ein Service
 
 | Modus | Befehl | Am besten fuer |
 |------|---------|----------|
-| **Interaktive REPL** | `iac-code` | Praktische Erkundung und iterative Template-Erstellung |
-| **Nicht interaktive CLI** | `iac-code --prompt "..."` oder `--headless` | Einmalige Skripte und CI-Jobs |
+| **Web** | `iac-code` | Praktische Erkundung und iterative Template-Erstellung |
+| **Nicht interaktive CLI** | `iac-code --prompt "..."` | Einmalige Skripte und CI-Jobs |
 | **ACP-Server** | `iac-code acp` | IDE-/Editor-Integration und Multi-Session-Clientsteuerung |
 | **A2A-Server** | `iac-code a2a` | Agent-zu-Agent-Interoperabilitaet ueber A2A-Transports |
 | **A2A-Client** | `iac-code a2a-client call` | Aufrufen entfernter A2A-Agents aus iac-code |

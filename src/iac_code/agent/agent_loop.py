@@ -1063,6 +1063,7 @@ class AgentLoop:
             else (self._permission_context)
         )
         context = ToolContext(
+            tool_result_directory=self._result_storage.storage_dir,
             cwd=self._cwd,
             trusted_read_directories=list(self._tool_context_trusted_read_directories),
             relative_read_directories=list(self._tool_context_relative_read_directories),
@@ -1077,9 +1078,8 @@ class AgentLoop:
             persist=persist,
             record_usage=record_usage,
             query_source="user" if answer else self._wiki_context.get("query_source", "user"),
-            query_text=answer or (
-                self._wiki_context.get("seed") if not previous and not self._wiki_context.get("followup") else None
-            ),
+            query_text=answer
+            or (self._wiki_context.get("seed") if not previous and not self._wiki_context.get("followup") else None),
             restoring=restoring,
         )
 
@@ -1458,10 +1458,14 @@ class AgentLoop:
             and decision.get("status") == "none"
             and decision.get("value") is None
         )
-        if not rebuild_wait and (decision.get("status") not in {"claimed", "applied"} or decision.get("value") not in {
-            "allow_once",
-            "deny",
-        }):
+        if not rebuild_wait and (
+            decision.get("status") not in {"claimed", "applied"}
+            or decision.get("value")
+            not in {
+                "allow_once",
+                "deny",
+            }
+        ):
             raise ValueError("permission_resume_invalid: permission decision is missing")
 
         messages = self.context_manager.get_messages()
@@ -1530,6 +1534,7 @@ class AgentLoop:
             )
 
         context = ToolContext(
+            tool_result_directory=self._result_storage.storage_dir,
             cwd=self._cwd,
             trusted_read_directories=list(self._tool_context_trusted_read_directories),
             relative_read_directories=list(self._tool_context_relative_read_directories),
@@ -1834,7 +1839,13 @@ class AgentLoop:
                 raise
             for request, result in zip(allowed_requests, results):
                 executed_by_id[request.id] = result
-                processed = self._result_storage.process(request.id, result.content)
+                processed = self._result_storage.process(
+                    request.id,
+                    result.content,
+                    tool_name=request.name,
+                    is_error=result.is_error,
+                    metadata=result.metadata,
+                )
                 self._mark_read_memory_tool_result(request, result)
                 result_metadata = self._tool_result_event_metadata(result.metadata, processed)
                 result_metadata = self._tool_result_render_metadata(
@@ -1960,6 +1971,7 @@ class AgentLoop:
             ),
         )
         context = ToolContext(
+            tool_result_directory=self._result_storage.storage_dir,
             cwd=self._cwd,
             trusted_read_directories=list(self._tool_context_trusted_read_directories),
             relative_read_directories=list(self._tool_context_relative_read_directories),
@@ -1976,7 +1988,9 @@ class AgentLoop:
             prompt=prompt,
             response=response,
         )
-        processed = self._result_storage.process(request.id, result.content)
+        processed = self._result_storage.process(
+            request.id, result.content, tool_name=request.name, is_error=result.is_error, metadata=result.metadata
+        )
         result_metadata = self._tool_result_event_metadata(result.metadata, processed)
         result_metadata = self._tool_result_render_metadata(
             result_metadata,
@@ -2042,6 +2056,7 @@ class AgentLoop:
                     effective_perm_ctx,
                     invocation_binding=request.invocation_binding,
                     pipeline_mode=self._pipeline_mode,
+                    tool_result_directory=self._result_storage.storage_dir,
                 )
             _extend_unique(context.additional_directories, list(effective_perm_ctx.additional_directories))
             _extend_unique(context.trusted_read_directories, list(effective_perm_ctx.trusted_read_directories))
@@ -2061,6 +2076,7 @@ class AgentLoop:
             permission = await tool.check_permissions(
                 request.input,
                 ToolPermissionContext(
+                    tool_result_directory=self._result_storage.storage_dir,
                     cwd=context.cwd,
                     invocation_binding=request.invocation_binding,
                     pipeline_mode=self._pipeline_mode,
@@ -2128,6 +2144,7 @@ class AgentLoop:
             ),
         )
         context = ToolContext(
+            tool_result_directory=self._result_storage.storage_dir,
             cwd=self._cwd,
             trusted_read_directories=list(self._tool_context_trusted_read_directories),
             relative_read_directories=list(self._tool_context_relative_read_directories),
@@ -2383,8 +2400,7 @@ class AgentLoop:
                         continue
                     answer = question_answer_text(original, history)
                     if answer or (
-                        input_text(original.content)
-                        and (METADATA_KEY in original.metadata or not original.metadata)
+                        input_text(original.content) and (METADATA_KEY in original.metadata or not original.metadata)
                     ):
                         self._start_wiki_work(original, restoring=True)
                         break
@@ -2700,6 +2716,7 @@ class AgentLoop:
                         )
                     )
                 context = ToolContext(
+                    tool_result_directory=self._result_storage.storage_dir,
                     cwd=self._cwd,
                     trusted_read_directories=list(self._tool_context_trusted_read_directories),
                     relative_read_directories=list(self._tool_context_relative_read_directories),
@@ -2799,6 +2816,7 @@ class AgentLoop:
                                 effective_perm_ctx,
                                 invocation_binding=request.invocation_binding,
                                 pipeline_mode=self._pipeline_mode,
+                                tool_result_directory=self._result_storage.storage_dir,
                             )
                         _extend_unique(context.additional_directories, list(effective_perm_ctx.additional_directories))
                         _extend_unique(
@@ -2823,6 +2841,7 @@ class AgentLoop:
                         permission = await tool.check_permissions(
                             request.input,
                             ToolPermissionContext(
+                                tool_result_directory=self._result_storage.storage_dir,
                                 cwd=context.cwd,
                                 invocation_binding=request.invocation_binding,
                                 pipeline_mode=self._pipeline_mode,
@@ -3202,7 +3221,9 @@ class AgentLoop:
                         # be handled by the pipeline's next state.
                         self._accepting_injected_user_messages = False
                         terminal_step_result = True
-                    processed = self._result_storage.process(req.id, result.content)
+                    processed = self._result_storage.process(
+                        req.id, result.content, tool_name=req.name, is_error=result.is_error, metadata=result.metadata
+                    )
                     self._mark_read_memory_tool_result(req, result)
                     result_metadata = self._tool_result_event_metadata(result.metadata, processed)
                     result_metadata = self._tool_result_render_metadata(

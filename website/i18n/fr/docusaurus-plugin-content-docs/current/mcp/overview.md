@@ -14,7 +14,7 @@ Utilisez MCP lorsque vous souhaitez qu'IaC Code appelle une fonctionnalité loca
 
 | Surface | MCP support |
 |---|---|
-| REPL interactif | Charge les serveurs de projet utilisateur, locaux et approuvés. Invite avant de faire confiance aux serveurs du nouveau projet `.mcp.json`. |
+| Web / Bureau | Charge les serveurs configurés et approuvés ; gérez les approbations de projet en attente dans les paramètres MCP. |
 | Mode non interactif | Charge les serveurs de projet utilisateur, locaux et approuvés. Ne demande jamais ; les serveurs de projet en attente sont ignorés avec des avertissements. |
 | Serveur ACP | Accepte les configurations de serveur MCP de session des clients ACP et expose les fonctionnalités MCP découvertes au sein de cette session. |
 | Serveur A2A | Charge MCP via l'exécution normale et peut publier les avertissements MCP et la progression de l'outil dans les métadonnées de la tâche A2A. |
@@ -52,7 +52,7 @@ At runtime IaC Code:
 6. Enregistre ces capacités dans les registres d'outils et de commandes existants.
 7. Injecte les instructions du serveur connecté dans l'invite de l'agent en tant que guide à l'échelle du serveur.
 8. Convertit les résultats de l'outil MCP en résultats normaux de l'outil IaC Code, en stockant les artefacts binaires et les artefacts de texte volumineux dans le répertoire de configuration d'exécution.
-9. Déconnecte les clients MCP à la fermeture du REPL, de l'exécution sans tête, de la session ACP ou du runtime A2A.
+9. Déconnecte les clients MCP à la fermeture du Web / Desktop, de l'exécution sans tête, de la session ACP ou du runtime A2A.
 
 Un serveur MCP défaillant ne bloque pas les autres serveurs configurés. Les échecs de connexion et de découverte restent visibles sous forme d’avertissements MCP.
 

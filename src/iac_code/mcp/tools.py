@@ -115,6 +115,7 @@ class MCPTool(Tool):
             tool_name=self._original_tool_name,
             session_id=self._session_id,
             session_dir=self._session_dir,
+            result_storage_dir=context.tool_result_directory,
         )
         if tool_result.metadata is None:
             tool_result.metadata = {}
@@ -237,6 +238,7 @@ class ReadMCPResourceTool(Tool):
             tool_name="read_resource",
             session_id=self._session_id,
             session_dir=self._session_dir,
+            result_storage_dir=context.tool_result_directory,
         )
 
 

@@ -1,13 +1,13 @@
 ---
 title: Application Web
-description: Exécuter IaC Code comme une application web locale, avec le même moteur que la CLI.
+description: Démarrer l’application web locale et utiliser ses paramètres, conversations et contrôles de saisie.
 ---
 
 # Application Web
 
 Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
 
-L'application web lit et écrit le même magasin de sessions que la CLI : une conversation démarrée d'un côté peut donc être reprise de l'autre.
+Desktop et Web partagent les conversations et les paramètres. Les conversations créées ailleurs peuvent être accessibles en lecture seule ; consultez [Sessions](./cli/sessions.md) pour leur affichage et leur poursuite.
 
 ## Installation
 
@@ -43,27 +43,41 @@ iac-code web --port 9000 --no-open
 
 Sans `--access-token-file`, le serveur n’accepte que les hôtes de boucle locale (`127.0.0.1`, `localhost` ou `::1`) et vérifie les requêtes locales. Le mode explicite avec jeton accepte aussi d’autres IP et protège les requêtes d’API par le transport chiffré avec jeton.
 
+## Déployer un modèle ROS existant
+
+1. Configurez les [identifiants cloud](./configuration/alibaba-cloud-credentials.md), puis ouvrez une conversation dans le projet contenant le modèle.
+
+2. Tapez `@`, sélectionnez le fichier et demandez sa vérification ainsi que les paramètres nécessaires.
+
+3. Indiquez la région, le nom de pile et les valeurs des paramètres. Demandez une validation avant la création.
+
+4. Vérifiez le résultat et les changements proposés, puis demandez la création de la pile.
+
+5. Si une carte d’autorisation cloud apparaît, vérifiez l’opération avant de l’approuver ou de la refuser. Une création approuvée peut produire des ressources facturables.
+
+6. Consultez l’ID de pile, la progression et le résultat. En cas d’échec, demandez le diagnostic de l’erreur dans la même conversation.
+
 ## Vue d'ensemble de l'interface
 
 ### Barre latérale des sessions
 
-La barre latérale répertorie les conversations du projet sélectionné. Depuis cet endroit, vous pouvez :
+La barre latérale regroupe les conversations enregistrées par projet. Vous pouvez :
 
-- Démarrer une **nouvelle conversation**, ou changer de projet avec le sélecteur de projet.
+- Démarrer une **Nouvelle discussion**, puis choisir son projet sous la zone de saisie.
 - **Rechercher** des conversations, ou ouvrir la palette de commandes pour exécuter une commande.
 - **Épingler**, **renommer** ou **archiver** une conversation, et parcourir les conversations archivées.
 
-Comme les sessions sont partagées avec la CLI, une conversation que vous reprenez avec `iac-code tui --resume` apparaît aussi ici. Consultez [Sessions](./cli/sessions.md) pour comprendre le fonctionnement du magasin de sessions.
+Web, bureau et headless partagent les conversations enregistrées. Consultez les [sessions](./cli/sessions.md) pour les reprendre ou les renommer.
 
 ### Zone de saisie (composer)
 
-La zone de saisie est l'endroit où vous rédigez vos requêtes. Elle expose les mêmes contrôles que la CLI propose via les commandes slash et les options :
+Décrivez la tâche dans le champ de saisie et utilisez ses contrôles pour choisir le fonctionnement de la conversation :
 
 - La sélection du **modèle et du fournisseur** pour la session active.
 - Un commutateur **Réflexion** pour activer ou désactiver le raisonnement étendu sur les modèles compatibles.
 - Un contrôle de **mode d'autorisation** pour la manière dont les actions des outils sont approuvées.
 - Des **pièces jointes image** pour les modèles multimodaux.
-- Les **commandes slash** (saisies avec `/`) et les **références de fichiers `@`** pour désigner des fichiers de votre espace de travail.
+- **Compétences** choisis dans les suggestions `/` ou `$`, et **références `@` aux fichiers** du workspace.
 
 ### Discussion normale et mode pipeline
 
@@ -79,7 +93,7 @@ Les appels d'outils s'affichent sous forme de cartes dans la transcription. Lors
 
 ### Paramètres
 
-La zone des paramètres regroupe la même configuration que celle gérée par la CLI :
+Les applications de bureau et web partagent la même interface. Les opérations quotidiennes passent par les paramètres et les contrôles visibles.
 
 - Les **identifiants cloud** pour Alibaba Cloud (voir [Identifiants Alibaba Cloud](./configuration/alibaba-cloud-credentials.md)).
 - Les **modèles** et la configuration des fournisseurs (voir [Fournisseurs LLM](./configuration/llm-providers.md)).

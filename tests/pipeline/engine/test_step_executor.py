@@ -254,6 +254,27 @@ def _pipeline_mcp_prompt_command(provider: _FakePipelineMCPPromptProvider) -> Pr
 
 
 class TestStepExecutorToolSetup:
+    @pytest.mark.parametrize("local_ui", [False, True])
+    @pytest.mark.parametrize("search_step", [False, True])
+    def test_web_wiki_is_enabled_only_on_search_steps_without_an_environment_flag(
+        self, tmp_path, monkeypatch, local_ui, search_step
+    ):
+        from contextlib import nullcontext
+
+        from iac_code.services.wiki_auto_search import local_ui_auto_search
+
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+        monkeypatch.delenv("IAC_CODE_WIKI_AUTO_SEARCH", raising=False)
+        executor = _make_executor(tmp_path)
+        executor._surface = "a2a"  # Web pipelines reuse the A2A execution path.
+        step = _make_step()
+        step.config["wiki_search_on_enter"] = search_step
+        with local_ui_auto_search() if local_ui else nullcontext():
+            agent = executor.build_agent_loop_context(
+                step, PipelineContext(SIMPLE_DEPS), "wiki-session", user_message="Explain ECS"
+            ).agent_loop
+        assert (agent._wiki_search is not None) is (local_ui and search_step)
+
     def test_complete_step_tool_registered(self, tmp_path):
         executor = _make_executor(tmp_path)
         step = _make_step()

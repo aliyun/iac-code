@@ -5,7 +5,7 @@ description: Alle unterstuetzten Umgebungsvariablen und Rangfolgeregeln.
 
 # Umgebungsvariablen
 
-IaC Code liest die Konfiguration aus CLI-Argumenten, Umgebungsvariablen und Konfigurationsdateien. Die Rangfolge ist:
+Desktop und Web lassen sich ohne Umgebungsvariablen in den Einstellungen konfigurieren. Die Variablen unten dienen CI, Diensten und Startüberschreibungen. Für den Kommandozeilenstart gilt:
 
 ```text
 CLI-Argumente > Umgebungsvariablen > Konfigurationsdateien

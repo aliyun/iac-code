@@ -14,7 +14,7 @@ IaC Code 可以作为 Model Context Protocol (MCP) host 使用。MCP servers 会
 
 | Surface | MCP support |
 |---|---|
-|交互式 REPL |加载用户、本地和批准的项目服务器。在信任新项目`.mcp.json`服务器之前进行提示。 |
+| Web / 桌面版 | 加载已配置且获批的服务器；在 MCP 设置中处理待审批的项目服务器。 |
 |非交互模式|加载用户、本地和批准的项目服务器。从不提示；待处理的项目服务器将被跳过并带有警告。 |
 | ACP服务器|接受来自 ACP 客户端的会话 MCP 服务器配置，并公开该会话内发现的 MCP 功能。 |
 | A2A服务器|通过正常运行时加载 MCP，并可以在 A2A 任务元数据中发布 MCP 警告和工具进度。 |
@@ -26,7 +26,7 @@ IaC Code 可以作为 Model Context Protocol (MCP) host 使用。MCP servers 会
 |---|---|
 | `stdio` 传输 |支持本地 MCP 服务器进程。 |
 |流式 HTTP 传输 |支持远程 MCP 服务器。 |
-|上交所运输 |支持远程 MCP 服务器。 |
+|SSE 传输 |支持远程 MCP 服务器。 |
 | MCP 工具 |公开为名为`mcp__<server>__<tool>`的代理工具。 |
 | MCP 资源 |通过`list_mcp_resources`和`read_mcp_resource`公开。 |
 | MCP提示|公开为名为`mcp__<server>__<prompt>`的斜杠命令。 |
@@ -52,7 +52,7 @@ At runtime IaC Code:
 6. 将这些能力注册到现有 tool registry 和 command registry。
 7. 将已连接 server 的 instructions 作为 server-scoped guidance 注入 agent prompt。
 8. 将 MCP tool result 转换为普通 IaC Code tool result，并把二进制 artifact 和大文本 artifact 存到运行时配置目录下。
-9. 在 REPL、headless run、ACP session 或 A2A runtime 关闭时断开 MCP client。
+9. 在 Web / Desktop、headless run、ACP session 或 A2A runtime 关闭时断开 MCP client。
 
 一台发生故障的 MCP 服务器不会阻止其他已配置的服务器。连接和发现失败作为 MCP 警告保持可见。
 

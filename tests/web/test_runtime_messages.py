@@ -423,6 +423,7 @@ def test_web_session_runtime_publishes_turn_done_when_agent_loop_fails_after_use
 def test_web_session_runtime_uses_agent_factory_and_translates_stream_events(tmp_path, monkeypatch) -> None:
     from iac_code.agent.message import Message, create_recalled_memory_message
     from iac_code.services.agent_factory import AgentFactoryOptions
+    from iac_code.services.wiki_auto_search import enabled
     from iac_code.types.stream_events import (
         MessageEndEvent,
         MessageStartEvent,
@@ -437,11 +438,14 @@ def test_web_session_runtime_uses_agent_factory_and_translates_stream_events(tmp
     from iac_code.web.runtime import WebSessionRuntime, WebTurnRequest
     from iac_code.web.session_manager import WebSessionManager
 
+    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", "false")
+
     class FakeAgentLoop:
         def __init__(self) -> None:
             self.calls: list[tuple[object, object]] = []
 
         async def run_streaming(self, user_input, queued_input_provider=None):
+            assert enabled() is True
             self.calls.append((user_input, queued_input_provider))
             yield MessageStartEvent(message_id="message-1")
             yield TextDeltaEvent(text="hello")

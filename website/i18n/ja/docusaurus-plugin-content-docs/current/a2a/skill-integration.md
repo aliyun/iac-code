@@ -52,7 +52,7 @@ Runtime のサイズと SHA-256 を検証し、以後は検証済みコピーを
 
 ## モデルと Alibaba Cloud ID の設定
 
-Skill は既定で `~/.iac-code/` を使い、REPL、Web、Desktop アプリの既存設定を再利用します。別の場所は
+Skill は既定で `~/.iac-code/` を使い、Web、Desktop アプリの既存設定を再利用します。別の場所は
 `IAC_CODE_CONFIG_DIR` で指定できます。自動化では認証情報をシークレット管理から注入し、`SKILL.md`、
 プロンプト、プロジェクト、シェル履歴に書かないでください。一時認証情報、RAM ロール、OAuth と最小権限を
 推奨します。詳細は [LLM プロバイダー](../configuration/llm-providers.md)と

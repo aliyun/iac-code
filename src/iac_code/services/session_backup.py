@@ -1916,6 +1916,10 @@ class SessionBackupService:
         while stack:
             current = stack.pop()
             for child in current.iterdir():
+                # Bash's verified input copies are an expendable local cache;
+                # the referenced original results are already in the payload.
+                if child.name == ".bash-inputs" and current.name == "tool-results":
+                    continue
                 if self._is_reparse_point(child):
                     if include_reparse:
                         yield child

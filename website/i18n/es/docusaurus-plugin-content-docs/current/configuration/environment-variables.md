@@ -5,7 +5,7 @@ description: Todas las variables de entorno soportadas y reglas de precedencia.
 
 # Variables de entorno
 
-IaC Code lee la configuracion desde los argumentos del CLI, las variables de entorno y los archivos de configuracion. La precedencia es:
+Escritorio y Web se configuran en Ajustes sin variables de entorno. Las variables siguientes sirven para CI, servicios y sobrescrituras al iniciar. En el inicio por línea de comandos, la prioridad es:
 
 ```text
 CLI arguments > environment variables > configuration files

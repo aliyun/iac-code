@@ -8,6 +8,8 @@ description: Authenticate remote MCP servers and understand the MCP security mod
 
 MCP can start local processes and call remote services, so IaC Code treats MCP configuration and authentication as security-sensitive.
 
+In Desktop or Web, open **Plugins → MCP**, select the server, and choose **Authenticate** or **Re-authenticate**. Complete the browser authorization; the panel also offers **Clear authentication**. The CLI examples below are for terminal automation.
+
 ## OAuth
 
 Remote `http` and `sse` servers can use OAuth. Standards-compliant servers that publish OAuth metadata and support Dynamic Client Registration do not require you to provide a client id. Add the server, then run auth:

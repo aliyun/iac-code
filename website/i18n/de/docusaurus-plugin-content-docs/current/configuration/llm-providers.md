@@ -5,11 +5,29 @@ description: Unterstuetzte Modellanbieter und Umgebungsvariablen.
 
 # LLM-Anbieter
 
-IaC Code unterstuetzt mehrere Modellanbieter-Backends. Die Anbieterauswahl kann ueber CLI-Optionen, Umgebungsvariablen oder Konfigurationsdateien erfolgen. Die Rangfolge ist:
+Diese Schritte gelten für Desktop und Web; beide verwenden dieselbe Gesprächsoberfläche.
 
-```text
-CLI-Argumente > Umgebungsvariablen > Konfigurationsdateien
-```
+## Einen Anbieter in Desktop oder Web einrichten
+
+1. Öffnen Sie **Einstellungen → Modelle**.
+
+2. Wählen Sie links zuerst die Gruppe, dann den Anbieter. Rechts erscheint sein Formular.
+
+3. Wählen oder erfassen Sie das **Modell** und bei Bedarf den **API-Schlüssel**. Ändern Sie die **API-Basis-URL** nur für einen eigenen Endpunkt; ein leeres Feld nutzt den Standard.
+
+4. Wählen Sie, falls unterstützt, den **Reasoning-Aufwand** oder unter **Erweiterte Einstellungen** das Denkbudget.
+
+5. Klicken Sie auf **Konfiguration speichern** und warten Sie auf die Bestätigung. Um das gespeicherte Modell als Standard zu nutzen, klicken Sie danach auf **Als aktuelles Modell festlegen**.
+
+6. Prüfen Sie im Gespräch das Modell unter der Eingabe. Über diese Auswahl bestimmen Sie das Modell für das Gespräch.
+
+:::note
+
+Konfiguration speichern und aktuelles Modell festlegen sind getrennte Aktionen. Speichern Sie Änderungen vor dem Aktivieren des Anbieters.
+
+:::
+
+Unten stehen Anbieter und erweiterte Optionen. Umgebungsvariablen und manuelle Dateien sind für Skripte, Dienste und angepasste Starts gedacht; siehe [Umgebungsvariablen](./environment-variables.md) und [Konfigurationsdateien](./runtime-configuration.md).
 
 ## Cloud-Anbieter
 

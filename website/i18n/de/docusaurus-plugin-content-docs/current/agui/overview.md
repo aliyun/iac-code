@@ -115,7 +115,7 @@ Der Adapter speichert Protokollzuordnungen, Idempotenzdaten und ausstehende Unte
 | Berechtigungen, Fragen und Optionsauswahl in einer Oberfläche | **AG-UI** |
 | Direkter Aufruf von iac-code durch einen Agenten oder Orchestrator | **A2A** |
 | IDE-/Editor-Integration mit ACP-Sitzungen und Terminalfunktionen | **ACP** |
-| Manuelle Bedienung von iac-code | **Interaktive REPL oder Web/Desktop** |
+| Manuelle Bedienung von iac-code | **Web / Desktop** |
 
 AG-UI und A2A können gleichzeitig laufen. Sie stellen getrennte HTTP-Endpunkte bereit, verwenden aber dieselbe Ausführungsimplementierung von iac-code.
 

@@ -1,11 +1,29 @@
 ---
 title: Skills
-description: Create and use reusable prompt templates as slash commands.
+description: Seleccionar skills en la entrada, gestionarlos en Plugins y crear skills propios cuando sea necesario.
 ---
 
 # Skills
 
-Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
+## Gestionar habilidades
+
+1. Abre **Complementos → Habilidades** desde la barra lateral o los ajustes.
+
+2. Elige el proyecto y busca por nombre o descripción.
+
+3. Activa o desactiva los skills de usuario o proyecto con su interruptor. Los integrados permanecen activos y los cambios se guardan automáticamente.
+
+### Seleccionar e invocar un skill
+
+1. Escribe `$` y parte del nombre del skill en la conversación. Las sugerencias `/` también incluyen skills.
+
+2. Selecciona el skill. Aparece una etiqueta junto a la entrada.
+
+3. Añade la solicitud o los argumentos y envía. Responde después a las preguntas y tarjetas de permisos.
+
+Las habilidades deshabilitadas se guardan en `settings.yml` bajo `disabled_skills`. Las habilidades integradas permanecen siempre habilitadas y no se escriben en la lista de deshabilitadas.
+
+El resto se dirige a autores de skills. No necesita escribir `SKILL.md` para usar los skills integrados.
 
 ## Skill File Formats
 
@@ -76,16 +94,6 @@ paths:
 | `context` | No | `"inline"` | Execution mode: `inline` or `fork` |
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
-
-## Gestionar habilidades
-
-En Web y Desktop, abra **Ajustes → Complementos → Habilidades** para buscar skills y activar o desactivar los del usuario y del proyecto.
-
-Ejecuta `/skills` en el REPL interactivo para abrir el selector de gestión de habilidades. El selector muestra las habilidades integradas, de usuario y de proyecto descubiertas, junto con su origen, tamaño y estado de habilitación. Puedes buscar por nombre o descripción, ordenar por nombre/origen/tamaño y activar o desactivar habilidades de usuario o de proyecto.
-
-Las habilidades deshabilitadas se guardan en `settings.yml` bajo `disabled_skills`. Las habilidades integradas permanecen siempre habilitadas y no se escriben en la lista de deshabilitadas.
-
-Usa `$<skill-name>` cuando quieras que el autocompletado y la invocación apunten solo a habilidades. Es útil cuando el nombre de una habilidad se solapa con texto normal o cuando quieres evitar los comandos slash integrados.
 
 ## Execution Modes
 
@@ -179,7 +187,7 @@ Review the current project and generate a pre-deployment checklist covering:
 If a stack name is provided, also check the current stack status.
 ```
 
-Save this as `~/.iac-code/skills/checklist/SKILL.md` or `.iac-code/skills/checklist/SKILL.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
+Guarde el archivo en `~/.iac-code/skills/checklist/SKILL.md` o `.iac-code/skills/checklist/SKILL.md` y ejecute `/checklist` o `$checklist` en el campo de entrada web o de escritorio. `$` filtra solo skills.
 
 ## Permissions
 

@@ -1,30 +1,22 @@
 ---
 title: Inicio rapido
-description: Configurar IaC Code y ejecutar tu primer prompt.
+description: Iniciar escritorio o web, configurar el acceso y enviar la primera petición.
 ---
 
 # Inicio rapido
 
-Ejecuta `iac-code` en una terminal para iniciar la aplicación web local y abrir el navegador. En el primer uso, configura el proveedor LLM y las credenciales de Alibaba Cloud en Ajustes.
+Los pasos se aplican tanto a Desktop como a Web, que comparten la misma interfaz de conversación.
 
-```bash
-iac-code
-```
+1. Abre [Desktop](../desktop-app.md) o ejecuta `iac-code` en una terminal interactiva para abrir Web.
 
-Luego solicita infraestructura:
+2. Pulsa **Nuevo chat** y elige el directorio de destino debajo de la entrada.
 
-```text
-Create a VPC and two ECS instances
-```
+3. Sigue la [configuración del modelo](../configuration/llm-providers.md) y establece el modelo actual. Para consultas o despliegue en nube, configura también las [credenciales de nube](../configuration/alibaba-cloud-credentials.md).
 
-Para un prompt de un solo uso, utiliza el modo no interactivo:
+4. Elige **Modo normal** y envía: «Genera una plantilla ROS de VPC en templates/vpc.yml, sin desplegarla todavía».
 
-```bash
-iac-code --prompt "Create an OSS Bucket"
-```
+5. Sigue el proceso en la conversación. Si se ejecuta una búsqueda Wiki, expande su entrada para ver las palabras clave y el contenido encontrado. Revisa y responde a las aprobaciones de escritura.
 
-Tambien puedes leer el prompt desde la entrada estandar:
+6. Tras escribir la plantilla, pulsa su nombre en **Salida** para previsualizarla. Pide después que explique o valide sus parámetros. La conversación queda guardada en la barra lateral.
 
-```bash
-echo "Create a VPC and two ECS instances" | iac-code --prompt -
-```
+Para planificación y despliegue guiados, crea una conversación en [modo Pipeline](../automation/pipeline-mode.md). Consulta las [operaciones habituales](../cli/commands.md) y la [automatización headless](../automation/non-interactive-mode.md).

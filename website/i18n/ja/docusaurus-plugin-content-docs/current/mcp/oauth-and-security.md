@@ -8,6 +8,8 @@ description: リモート MCP サーバーを認証し、IaC Code の MCP セキ
 
 MCP はローカル プロセスを開始してリモート サービスを呼び出すことができるため、IaC コードは MCP の構成と認証をセキュリティに依存するものとして扱います。
 
+デスクトップまたは Web の**プラグイン → MCP**でサーバーを選び、**認証**または**再認証**を実行してブラウザーで承認します。**認証をクリア**も利用できます。以下は CLI 自動化用の例です。
+
 ## OAuth
 
 リモートの `http` および `sse` servers は OAuth を使用できます。OAuth metadata を公開し Dynamic Client Registration をサポートする標準準拠 server では、事前に client id を用意する必要はありません。server を追加してから auth を実行します。

@@ -1,5 +1,9 @@
 # 阿里云 ECS 选型指南
 
+## 计费方式
+
+新建 ECS 默认使用按量付费（`InstanceChargeType: PostPaid`），只有用户明确要求包年包月时才使用 `PrePaid`；按月预算或月度费用展示不代表预付费。
+
 ## 相关知识
 
 - [实例规格推荐策略](knowledge://clouds/aliyun/products/ecs/sizing.md)

@@ -5,7 +5,27 @@ description: Configurar credenciales de Alibaba Cloud, incluida la autenticació
 
 # Credenciales de Alibaba Cloud
 
-En Web o Desktop, abra **Ajustes → Credenciales de nube** para configurar la autenticación de Alibaba Cloud y la región predeterminada.
+Los pasos se aplican tanto a Desktop como a Web, que comparten la misma interfaz de conversación.
+
+## Configurar el acceso a la nube en Desktop o Web
+
+1. Abre **Ajustes → Credenciales de nube** y elige **Alibaba Cloud**.
+
+2. Selecciona la región de consulta y despliegue, por ejemplo `cn-hangzhou`.
+
+3. Elige el método de autenticación y rellena los campos correspondientes de la tabla.
+
+4. Para AccessKey, STS o roles RAM/ECS RAM, pulsa **Guardar credenciales de nube**. Para OAuth, sigue los pasos de inicio de sesión con navegador que aparecen más abajo.
+
+5. Vuelve a la conversación y describe la tarea. Guardar las credenciales configura el acceso; no crea recursos ni añade permisos RAM.
+
+| Método | Datos necesarios |
+|---|---|
+| AccessKey | `AccessKeyId` y `AccessKeySecret`. |
+| STS Token | `AccessKeyId`, `AccessKeySecret` y `StsToken` de las mismas credenciales temporales. |
+| Rol RAM | Claves de origen `AccessKeyId` y `AccessKeySecret`, destino `RamRoleArn` y `RamSessionName` opcional. |
+| Rol ECS RAM | Nombre de rol opcional; en blanco se descubre en la instancia ECS que ejecuta IaC Code. |
+| OAuth con navegador | Elige el sitio de la cuenta y autoriza en el navegador, sin introducir tokens manualmente. |
 
 Las credenciales de Alibaba Cloud son necesarias para las operaciones que inspeccionan o gestionan recursos en la nube.
 
@@ -15,10 +35,7 @@ Las herramientas `resolve_cloud_resource_selector` y `select_cloud_resource` apl
 
 Usa **ECS RAM Role** cuando IaC Code se ejecute en una instancia ECS de Alibaba Cloud que tenga un rol RAM asociado. IaC Code obtiene credenciales STS temporales del servicio de metadatos de la instancia ECS (IMDS), las renueva automáticamente y no guarda un AccessKey ID, un AccessKey Secret ni un token STS en la configuración.
 
-Puedes configurar este modo desde todas las interfaces de usuario:
-
-- En la aplicación Web o Desktop, abre **Configuración > Credenciales cloud**, elige **Alibaba Cloud** y selecciona **ECS RAM Role** como método de autenticación.
-- En el REPL, ejecuta `/auth`, elige **Configurar servicio cloud de IaC**, luego **Alibaba Cloud** y **ECS RAM Role**.
+En la aplicación Web o Desktop, abre **Configuración > Credenciales cloud**, elige **Alibaba Cloud** y selecciona **ECS RAM Role** como método de autenticación.
 
 Selecciona la región que se usará para las llamadas a las API cloud. El nombre del rol RAM de ECS es opcional: déjalo en blanco para detectar mediante IMDS el rol asociado a la instancia. El nombre guardado en IaC Code tiene prioridad sobre `ALIBABA_CLOUD_ECS_METADATA`; si ninguno está definido, IaC Code solicita a IMDS que detecte el nombre del rol.
 
@@ -37,13 +54,15 @@ La configuración puede guardarse en cualquier equipo, pero las llamadas a las A
 
 ## Inicio de sesión OAuth en el navegador
 
-En Web o Desktop, abra **Ajustes → Credenciales de nube**, seleccione Alibaba Cloud y **Inicio de sesión OAuth en el navegador** e inicie la autorización. IaC Code abre el flujo en el navegador, intercambia el código mediante PKCE y guarda las credenciales OAuth en `.cloud-credentials.yml`.
+1. Abre **Ajustes → Credenciales de nube**, selecciona **Alibaba Cloud** y **Inicio de sesión OAuth con navegador**.
 
-Durante la configuración puedes elegir el sitio OAuth de China o el internacional. IaC Code guarda el sitio elegido junto con el refresh token para que las actualizaciones posteriores usen el mismo endpoint.
+2. Selecciona la región y el **Sitio de inicio de sesión** de la cuenta: China o Internacional.
+
+3. Pulsa **Iniciar sesión con el navegador** y completa la autenticación y autorización en Alibaba Cloud.
+
+4. Vuelve a IaC Code y espera la confirmación. El flujo guarda las credenciales y el sitio seleccionado.
 
 Las credenciales OAuth se renuevan automáticamente cuando el token de acceso o las credenciales STS se acercan a su vencimiento. Si el token de renovación caduca o se revoca, vuelva a autorizar desde **Ajustes → Credenciales de nube**.
-
-Para configurar desde la terminal, inicie `iac-code tui` y ejecute `/auth`.
 
 ## Variables de entorno
 

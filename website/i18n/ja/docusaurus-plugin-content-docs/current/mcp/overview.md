@@ -14,7 +14,7 @@ IaC コードで、プライベート テンプレート カタログ、内部�
 
 | Surface | MCP support |
 |---|---|
-|インタラクティブ REPL |ユーザー、ローカル、および承認されたプロジェクト サーバーを読み込みます。新しいプロジェクトの `.mcp.json` サーバーを信頼する前にプロンプ​​トが表示されます。 |
+| Web / デスクトップ | 設定済みで承認されたサーバーを読み込みます。プロジェクトの承認待ちは MCP 設定で管理します。 |
 |非対話型モード |ユーザー、ローカル、および承認されたプロジェクト サーバーを読み込みます。決してプロンプトを表示しません。保留中のプロジェクト サーバーは警告とともにスキップされます。 |
 | ACPサーバー | ACP クライアントからセッション MCP サーバー設定を受け入れ、そのセッション内で検出された MCP 機能を公開します。 |
 | A2Aサーバー |通常のランタイムを通じて MCP をロードし、MCP 警告とツールの進行状況を A2A タスク メタデータで公開できます。 |
@@ -52,7 +52,7 @@ At runtime IaC Code:
 6. それらの機能を既存の tool registry と command registry に登録します。
 7. 接続済みサーバーの instructions を server-scoped guidance として agent prompt に注入します。
 8. MCP tool result を通常の IaC Code tool result に変換し、バイナリ artifact と大きな text artifact を runtime 設定ディレクトリに保存します。
-9. REPL、headless run、ACP session、A2A runtime の終了時に MCP client を切断します。
+9. Web / Desktop、headless run、ACP session、A2A runtime の終了時に MCP client を切断します。
 
 1 台の MCP サーバーに障害が発生しても、他の構成済みサーバーはブロックされません。接続と検出の失敗は、MCP 警告として表示されたままになります。
 

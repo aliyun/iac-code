@@ -5,7 +5,27 @@ description: ECS RAM ロール認証を含む Alibaba Cloud 認証情報の設�
 
 # Alibaba Cloud 認証情報
 
-Web 版またはデスクトップ版の**設定 → クラウド認証情報**で、Alibaba Cloud の認証方式と既定のリージョンを設定します。
+以下の手順はデスクトップと Web に共通です。両者は同じ会話画面を使用します。
+
+## デスクトップまたは Web でクラウドアクセスを設定する
+
+1. **設定 → クラウド認証情報**を開き、**Alibaba Cloud**を選択します。
+
+2. 照会やデプロイに使うリージョンを選びます。例：`cn-hangzhou`。
+
+3. 認証方法を選び、下表の該当項目を入力します。
+
+4. AccessKey、STS、RAM ロール、ECS RAM ロールでは**クラウド認証情報を保存**をクリックします。OAuth では下のブラウザーログイン手順に従います。
+
+5. 会話に戻り、クラウドの作業を依頼します。認証情報の保存だけではリソースは作成されず、RAM 権限も追加されません。
+
+| 認証方法 | 入力項目 |
+|---|---|
+| AccessKey | `AccessKeyId` と `AccessKeySecret`。 |
+| STS Token | 同じ一時認証情報の `AccessKeyId`、`AccessKeySecret`、`StsToken`。 |
+| RAM ロール | 元の `AccessKeyId`、`AccessKeySecret`、対象の `RamRoleArn`、任意の `RamSessionName`。 |
+| ECS RAM ロール | 任意のロール名。空欄では IaC Code を実行している ECS のメタデータから検出します。 |
+| OAuth ブラウザーログイン | アカウントのサイトを選び、ブラウザーで承認します。トークンの手入力は不要です。 |
 
 Alibaba Cloud の認証情報は、クラウドリソースの検査や管理を行う操作に必要です。
 
@@ -15,10 +35,7 @@ Alibaba Cloud の認証情報は、クラウドリソースの検査や管理を
 
 IaC Code を RAM ロールが割り当てられた Alibaba Cloud ECS インスタンス上で実行する場合は、**ECS RAM Role** を使用できます。IaC Code は ECS インスタンスメタデータサービス（IMDS）から一時 STS 認証情報を取得して自動更新し、AccessKey ID、AccessKey Secret、STS トークンを設定ファイルに保存しません。
 
-このモードはすべてのユーザーインターフェースから設定できます。
-
-- Web または Desktop アプリで **設定 > クラウド認証情報** を開き、**Alibaba Cloud** を選択して、認証方式に **ECS RAM Role** を指定します。
-- REPL で `/auth` を実行し、**IaC クラウドサービスを設定**、**Alibaba Cloud**、**ECS RAM Role** の順に選択します。
+Web または Desktop アプリで **設定 > クラウド認証情報** を開き、**Alibaba Cloud** を選択して、認証方式に **ECS RAM Role** を指定します。
 
 クラウド API 呼び出しに使用するリージョンを選択します。ECS RAM ロール名は任意です。空欄にすると、インスタンスに割り当てられたロールを IMDS から自動検出します。IaC Code に保存されたロール名は `ALIBABA_CLOUD_ECS_METADATA` より優先され、どちらも設定されていない場合は IMDS にロール名の検出を要求します。
 
@@ -37,13 +54,15 @@ aliyun:
 
 ## OAuth ブラウザログイン
 
-Web 版またはデスクトップ版の**設定 → クラウド認証情報**で Alibaba Cloud と **OAuth ブラウザーログイン** を選び、認可を開始します。IaC Code はブラウザーの認可フローを開き、PKCE で認可コードを交換し、OAuth 認証情報を `.cloud-credentials.yml` に保存します。
+1. **設定 → クラウド認証情報**を開き、**Alibaba Cloud**と **OAuth ブラウザーログイン**を選びます。
 
-セットアップ中に、中国または国際版の OAuth サイトを選択できます。IaC Code は選択したサイトを refresh token と一緒に保存し、以降の更新で同じ endpoint を使用します。
+2. リージョンと、アカウントに合う**ログインサイト**（中国または国際）を選択します。
+
+3. **ブラウザーでログイン**をクリックし、Alibaba Cloud のページでログインと承認を完了します。
+
+4. IaC Code に戻って成功表示を待ちます。認証情報と選択したサイトはログイン処理で保存されます。
 
 アクセストークンまたは STS 認証情報の有効期限が近づくと、OAuth 認証情報は自動更新されます。リフレッシュトークンが失効または取り消された場合は、**設定 → クラウド認証情報**から再認可してください。
-
-ターミナルで設定する場合は、`iac-code tui` を起動して `/auth` を実行します。
 
 ## 環境変数
 

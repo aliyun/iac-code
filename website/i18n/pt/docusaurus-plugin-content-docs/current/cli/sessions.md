@@ -5,88 +5,58 @@ description: Persistir e retomar conversas entre execuções.
 
 # Sessões
 
-Em Web e Desktop, selecione o projeto e abra uma conversa na barra lateral. Use o menu da conversa para renomeá-la. Os comandos de terminal abaixo usam o mesmo armazenamento de sessões.
+Web, Desktop e headless compartilham o armazenamento de sessões. As conversas são salvas automaticamente no diretório de configuração do runtime.
 
-O IaC Code persiste automaticamente cada conversa em disco. Você pode retomar qualquer sessão anterior para continuar de onde parou.
+## Web e Desktop
 
-## Retomar sessões
+### Continuar uma conversa
 
-### Interativo: `/resume`
+1. Abra a conversa sob seu projeto na barra lateral ou procure pelo título em **Pesquisar**.
 
-No REPL, use o comando `/resume`:
+2. Confira as mensagens e os arquivos salvos.
 
-```text
-/resume
-```
+3. Digite e envie o próximo pedido. Para uma tarefa independente, use **Nova conversa**.
 
-Isso abre um seletor interativo com as sessões recentes do projeto atual. Quando um nome de sessão está definido, ele aparece como título; caso contrário, o último prompt ou, como fallback, o primeiro prompt é usado.
+### Renomear ou fixar uma conversa
 
-Para retomar uma sessão específica por ID exato, prefixo único de ID ou nome único de sessão:
+1. Abra a conversa e o menu **…**.
 
-```text
-/resume abc123
-```
+2. Escolha **Renomear conversa**, digite o título e clique em **Salvar**. A barra lateral mostra o novo título.
 
-### Nomear sessões
+3. Para encontrá-la facilmente, use a opção de fixar no mesmo menu. Depois, a ação inversa remove a fixação.
 
-Use `/rename` para dar à sessão ativa um nome estável e legível:
+### Arquivar e restaurar uma conversa
 
-```text
-/rename deploy-prod
-```
+1. Escolha **Arquivar conversa** no menu **…**. Ela sai da lista ativa.
 
-O nome é armazenado nos metadados da sessão. Ele aparece no banner de boas-vindas ao retomar, na dica de saída e no seletor de `/resume`.
+2. Abra **Configurações → Conversas arquivadas** e encontre-a com a pesquisa e o filtro de projeto.
 
-Você pode retomar pelo nome quando ele identifica uma sessão de forma única:
+3. Clique em **Desarquivar**, volte à barra lateral e abra a conversa para continuar.
 
-```text
-/resume deploy-prod
-iac-code tui --resume deploy-prod
-```
+:::note
 
-### CLI: `--resume` e `--continue`
+Conversas criadas por CLI, A2A ou ACP ficam ocultas por padrão. Para consultá-las, ative a opção de somente leitura em **Configurações → Geral → Visibilidade de sessões externas**. Compartilhar o armazenamento não permite editá-las no Web/Desktop.
 
-Retome uma sessão específica pela linha de comando por ID exato, prefixo único de ID ou nome único de sessão:
+:::
+
+## Continuar em modo headless
+
+Execute no diretório do projeto da sessão. `--resume` continua uma sessão específica e `--continue` a mais recente do projeto. As formas curtas são `-r` e `-c`, que não podem ser combinadas.
 
 ```bash
-iac-code tui --resume <id-ou-nome-da-sessao>
+iac-code --resume deploy-prod --prompt "Gerar um modelo de VPC"
+iac-code --continue --prompt "Gerar um modelo de VPC"
 ```
 
-Retome a sessão mais recente:
+## Outros projetos
+
+No Web ou Desktop, abra a conversa sob seu projeto na barra lateral. Em headless, entre primeiro no diretório desse projeto:
 
 ```bash
-iac-code tui --continue
+cd /path/to/project
+iac-code --resume <session-id> --prompt "Gerar um modelo de VPC"
 ```
 
-As opções curtas `-r` e `-c` também estão disponíveis:
+## Conversas interrompidas
 
-```bash
-iac-code tui -r <id-ou-nome-da-sessao>
-iac-code tui -c
-```
-
-### Sessões entre projetos
-
-Quando uma sessão pertence a outro diretório de projeto, o IaC Code não troca o diretório de trabalho em tempo real. Em vez disso, imprime o comando para retomar no contexto correto:
-
-```text
-cd /path/to/other/project && iac-code tui --resume <session-id>
-```
-
-Esse comando também é copiado para a área de transferência quando possível.
-
-## Recuperação de interrupções
-
-Se uma sessão foi interrompida durante a execução, por exemplo porque o processo foi encerrado enquanto uma ferramenta estava rodando, o IaC Code detecta as chamadas de ferramenta órfãs ao retomar e adiciona resultados de erro sintéticos. Isso permite que o modelo se recupere sem ficar preso aguardando uma saída de ferramenta que nunca chegará.
-
-## Seletor de sessões
-
-O seletor de `/resume` mostra:
-
-| Coluna | Descrição |
-|--------|-----------|
-| Título | Nome da sessão quando definido; caso contrário, último ou primeiro prompt do usuário |
-| Branch | Branch Git no momento da sessão |
-| Hora | Última modificação |
-
-As sessões são ordenadas da mais recente para a mais antiga. Você pode digitar para filtrar pelo conteúdo do título.
+Reabra a conversa salva para consultar o histórico e continuar. A recuperação concilia chamadas de ferramentas incompletas. O progresso e as decisões pendentes seguem a [recuperação de Pipeline](../automation/pipeline-mode.md). Execuções únicas com `--prompt` não executam pipelines.

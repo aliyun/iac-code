@@ -15,6 +15,7 @@ from iac_code.a2a.backup import run_sync_fenced
 from iac_code.desktop.external_env import create_subprocess_exec, guarded_command, spawn_env_kwargs
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.file_pages import cursor_binding, decode_cursor, encode_cursor, positive_int
 from iac_code.tools.path_safety import (
     check_read_path,
     get_iac_code_application_root,
@@ -23,6 +24,7 @@ from iac_code.tools.path_safety import (
     knowledge_uri,
     resolve_read_path_with_source,
 )
+from iac_code.tools.result_storage import DEFAULT_MAX_INLINE_CHARS, RESULT_URI_PREFIX, resolve_result_reference
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 
 
@@ -158,7 +160,7 @@ async def _run_rg(
     max_results: int = 100,
 ) -> tuple[int, str, str]:
     """Run ripgrep and return (returncode, stdout, stderr)."""
-    cmd: list[str] = ["rg"]
+    cmd: list[str] = ["rg", "--sort", "path"]
     cwd: str | None = None
     search_path = path
     absolutize_output = False
@@ -196,7 +198,7 @@ async def _run_rg(
         **spawn_env_kwargs(),
     )
     stdout_bytes, stderr_bytes = await proc.communicate()
-    stdout = stdout_bytes.decode(errors="replace")
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
     if absolutize_output:
         stdout = _absolutize_rg_output(stdout, path, output_mode=output_mode)
 
@@ -230,7 +232,12 @@ def _python_grep(
     safe_roots = list(allowed_roots) if allowed_roots is not None else [search_root]
     visited_dirs: set[str] = set()
 
-    for dirpath, dirnames, filenames in os.walk(path, followlinks=True):
+    entries = (
+        [(os.path.dirname(path), [], [os.path.basename(path)])]
+        if os.path.isfile(path)
+        else (os.walk(path, followlinks=True))
+    )
+    for dirpath, dirnames, filenames in entries:
         if files_matched >= max_results:
             break
         dir_real = os.path.realpath(dirpath)
@@ -238,9 +245,9 @@ def _python_grep(
             dirnames[:] = []
             continue
         visited_dirs.add(dir_real)
-        dirnames[:] = [
+        dirnames[:] = sorted(
             dirname for dirname in dirnames if _path_is_under_any_real_root(os.path.join(dirpath, dirname), safe_roots)
-        ]
+        )
         for filename in sorted(filenames):
             if files_matched >= max_results:
                 break
@@ -251,22 +258,33 @@ def _python_grep(
             if not _path_is_under_any_real_root(filepath, safe_roots):
                 continue
             try:
-                with open(filepath, encoding="utf-8", errors="replace") as fh:
-                    lines = fh.readlines()
+                with open(filepath, encoding="utf-8", errors="replace", newline="\n") as fh:
+                    matched_lines: list[str] = []
+                    char_offset = 0
+                    for lineno, line in enumerate(fh, start=1):
+                        match = compiled.search(line)
+                        if match:
+                            if output_mode == "positions":
+                                for occurrence in compiled.finditer(line):
+                                    matched_lines.append(
+                                        f"{filepath}:{lineno}: character {char_offset + occurrence.start()}"
+                                    )
+                                    if len(results) + len(matched_lines) >= max_results:
+                                        return "\n".join(results + matched_lines)
+                            elif output_mode == "content":
+                                matched_lines.append(f"{filepath}:{lineno}:{line.rstrip()}")
+                            else:
+                                matched_lines.append(filepath)
+                                break  # files_with_matches — one hit is enough
+                        char_offset += len(line)
+                        if len(results) + len(matched_lines) >= max_results:
+                            return "\n".join(results + matched_lines)
+
             except (PermissionError, OSError):
                 continue
 
-            matched_lines: list[str] = []
-            for lineno, line in enumerate(lines, start=1):
-                if compiled.search(line):
-                    if output_mode == "content":
-                        matched_lines.append(f"{filepath}:{lineno}:{line.rstrip()}")
-                    else:
-                        matched_lines.append(filepath)
-                        break  # files_with_matches — one hit is enough
-
             if matched_lines:
-                if output_mode == "content":
+                if output_mode in {"content", "positions"}:
                     results.extend(matched_lines)
                 else:
                     results.append(filepath)
@@ -287,7 +305,9 @@ class GrepTool(Tool):
             "available for speed, otherwise falls back to a pure-Python implementation. "
             "Call this tool directly instead of running grep/rg through bash. "
             "Returns matching file paths or matching lines depending on output_mode. "
-            "Supports knowledge:// paths for the local Wiki."
+            "Supports knowledge:// paths and current-session tool-result:// references. "
+            "Results have continuation cursors: repeat the same query with cursor to get the next page. "
+            "Use positions mode to find line numbers and 0-based character offsets without returning long lines."
         )
 
     @property
@@ -316,13 +336,14 @@ class GrepTool(Tool):
                 },
                 "output_mode": {
                     "type": "string",
-                    "enum": ["files_with_matches", "content"],
+                    "enum": ["files_with_matches", "content", "positions"],
                     "description": (
                         "Controls output format. "
                         "'files_with_matches' (default) returns only the paths of matching files. "
                         "'content' returns each matching line with its file path and line number."
                     ),
                 },
+                "cursor": {"type": "string", "description": "Continuation cursor for the same query."},
                 "max_results": {
                     "type": "integer",
                     "description": "Maximum number of results to return. Defaults to 100.",
@@ -337,11 +358,21 @@ class GrepTool(Tool):
         glob: str | None = tool_input.get("glob")
         case_insensitive: bool = bool(tool_input.get("case_insensitive", False))
         output_mode: str = tool_input.get("output_mode", "files_with_matches")
-        max_results: int = int(tool_input.get("max_results", 100))
+        try:
+            max_results = positive_int(tool_input.get("max_results", 100), "max_results")
+        except ValueError as error:
+            return ToolResult.error(str(error))
 
         try:
+            effective_path = (
+                resolve_result_reference(raw_path, context.tool_result_directory)
+                if raw_path.startswith(RESULT_URI_PREFIX)
+                else raw_path
+            )
             resolution = resolve_read_path_with_source(
-                raw_path, context.cwd, relative_read_directories=context.relative_read_directories,
+                effective_path,
+                context.cwd,
+                relative_read_directories=context.relative_read_directories,
             )
         except (ValueError, OSError, RuntimeError) as error:
             return ToolResult.error(str(error))
@@ -350,15 +381,33 @@ class GrepTool(Tool):
         if not os.path.exists(path):
             return ToolResult.error(f"Path not found: {knowledge_uri(path)}")
 
+        try:
+            binding = cursor_binding(
+                path,
+                [pattern, glob, case_insensitive, output_mode],
+                reference=raw_path if raw_path.startswith(RESULT_URI_PREFIX) else None,
+            )
+            state = decode_cursor(tool_input["cursor"], binding) if tool_input.get("cursor") else {"offset": 0}
+            if set(state) != {"offset"}:
+                raise ValueError("Invalid search cursor.")
+            offset = state["offset"]
+        except (ValueError, OSError) as error:
+            return ToolResult.error(str(error))
+        scan_limit = offset + max_results + 1
         allowed_roots = knowledge_allowed_roots(raw_path, _effective_allowed_roots(path, context))
-        if _is_rg_available() and not resolution.used_relative_root and not _contains_directory_symlink(path):
+        if (
+            output_mode != "positions"
+            and _is_rg_available()
+            and not resolution.used_relative_root
+            and not _contains_directory_symlink(path)
+        ):
             returncode, stdout, stderr = await _run_rg(
                 pattern,
                 path,
                 glob=glob,
                 case_insensitive=case_insensitive,
                 output_mode=output_mode,
-                max_results=max_results,
+                max_results=scan_limit,
             )
             # rg exits with 1 when no matches found (not an error)
             if returncode > 1:
@@ -375,37 +424,91 @@ class GrepTool(Tool):
                     glob=glob,
                     case_insensitive=case_insensitive,
                     output_mode=output_mode,
-                    max_results=max_results,
+                    max_results=scan_limit,
                     allowed_roots=allowed_roots,
                 )
             ).strip()
 
         if not output:
             return ToolResult.success("No matches")
+        if output.startswith("Invalid pattern:"):
+            return ToolResult.error(output)
 
-        # Enforce max_results on total output lines
         lines = output.splitlines()
-        if len(lines) > max_results:
-            output = "\n".join(lines[:max_results])
+        candidates = lines[offset : offset + max_results]
+        selected: list[str] = []
+        used = 0
+        for candidate in candidates:
+            if len(candidate) > DEFAULT_MAX_INLINE_CHARS - 2_048:
+                # Return a location rather than silently cutting a matching line.
+                if raw_path.startswith(RESULT_URI_PREFIX):
+                    suffix = candidate.removeprefix(path + ":").split(":", 1)[0]
+                    candidate = f"{raw_path}:{suffix}: matching line exceeds page size; read this line with read_file."
+                else:
+                    match = re.match(r"^(.*?):(\d+):", candidate)
+                    candidate = (
+                        f"{match[1]}:{match[2]}: matching line exceeds page size; use read_file."
+                        if match
+                        else candidate
+                    )
+            if selected and used + len(candidate) + 1 > DEFAULT_MAX_INLINE_CHARS - 2_048:
+                break
+            selected.append(candidate)
+            used += len(candidate) + 1
+        next_offset = offset + len(selected)
+        more = next_offset < len(lines)
+        cursor = encode_cursor(binding, {"offset": next_offset}) if more else None
+        output = "\n".join(selected)
+        if raw_path.startswith(RESULT_URI_PREFIX):
+            output = output.replace(path + ":", raw_path + ":")
+            if output_mode == "files_with_matches":
+                output = output.replace(path, raw_path)
 
         prefix = str(get_knowledge_root()) + os.sep
         displayed = []
         path_labels = {}
         for line in output.splitlines():
             if line.startswith(prefix):
-                relative, separator, suffix = line[len(prefix):].partition(":") if output_mode == "content" else (
-                    line[len(prefix):], "", "",
+                relative, separator, suffix = (
+                    line[len(prefix) :].partition(":")
+                    if output_mode == "content"
+                    else (
+                        line[len(prefix) :],
+                        "",
+                        "",
+                    )
                 )
                 if relative not in path_labels:
                     path_labels[relative] = knowledge_uri(prefix + relative)
                 line = path_labels[relative] + separator + suffix
             displayed.append(line)
-        return ToolResult.success("\n".join(displayed))
+        content = "\n".join(displayed)
+        if more or offset or output_mode == "positions":
+            total = f"at least {len(lines)}" if more else str(len(lines))
+            content += f"\nMatches this page: {len(selected)}; total matches: {total}; more: {str(more).lower()}"
+            if cursor:
+                content += f"\nNext cursor: {cursor}"
+        return ToolResult(
+            content=content,
+            metadata={
+                "search_page": {
+                    "count": len(selected),
+                    "has_more": more,
+                    "next_cursor": cursor,
+                }
+            },
+        )
 
     async def check_permissions(self, input: dict, context=None) -> PermissionResult:
         if not isinstance(context, ToolPermissionContext):
             return await super().check_permissions(input, context)
 
+        if str(input.get("path", "")).startswith(RESULT_URI_PREFIX):
+            try:
+                resolve_result_reference(input["path"], context.tool_result_directory)
+            except (ValueError, OSError):
+                return PermissionResult(behavior="deny", message="Invalid current-session tool result reference.")
+            return PermissionResult(behavior="allow")
         decision = check_read_path(
             input.get("path", context.cwd),
             cwd=context.cwd,

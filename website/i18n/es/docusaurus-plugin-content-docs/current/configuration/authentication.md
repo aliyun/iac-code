@@ -1,18 +1,16 @@
 ---
 title: Autenticacion
-description: Configurar credenciales de LLM y de la nube con el flujo de autenticacion.
+description: Configurar el acceso al modelo y a la nube en los ajustes de Desktop o Web.
 ---
 
 # Autenticacion
 
-Ejecuta `iac-code` en una terminal para iniciar la aplicación web local y abrir el navegador. En el primer uso, configura el proveedor LLM y las credenciales de Alibaba Cloud en Ajustes.
+Abre Desktop o ejecuta `iac-code` en una terminal interactiva para abrir Web. Configura el modelo y las credenciales de nube necesarias en los ajustes.
 
-- **Ajustes → Modelos**: seleccione el proveedor, introduzca su clave API y elija un modelo.
-- **Ajustes → Credenciales de nube**: seleccione Alibaba Cloud, el método de autenticación y la región.
+- [Configurar un proveedor en Desktop o Web](./llm-providers.md)
+- [Configurar el acceso a la nube en Desktop o Web](./alibaba-cloud-credentials.md)
 
 Web, Desktop y las ejecuciones headless comparten las credenciales guardadas.
-
-Para configurar desde la terminal, inicie `iac-code tui` y ejecute `/auth`.
 
 La configuracion en tiempo de ejecucion se almacena en el directorio de configuracion del usuario:
 

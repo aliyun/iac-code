@@ -1,13 +1,13 @@
 ---
 title: Aplicación web
-description: Ejecuta IaC Code como una aplicación web local con el mismo motor que la CLI.
+description: Iniciar la aplicación web local y usar sus ajustes, conversaciones y controles de entrada.
 ---
 
 # Aplicación web
 
 Ejecuta `iac-code` en una terminal para iniciar la aplicación web local y abrir el navegador. En el primer uso, configura el proveedor LLM y las credenciales de Alibaba Cloud en Ajustes.
 
-La aplicación web lee y escribe en el mismo almacén de sesiones que la CLI, de modo que una conversación iniciada en un lado puede reanudarse en el otro.
+Desktop y Web comparten conversaciones y ajustes. Las conversaciones creadas desde otras interfaces pueden ser de solo lectura; consulta [Sesiones](./cli/sessions.md) para mostrarlas y continuarlas.
 
 ## Instalación
 
@@ -43,27 +43,41 @@ iac-code web --port 9000 --no-open
 
 Sin `--access-token-file`, el servidor solo acepta hosts de bucle local (`127.0.0.1`, `localhost` o `::1`) y comprueba las solicitudes locales. El modo de token explícito también acepta otras IP y protege las solicitudes de API mediante el transporte de token cifrado.
 
+## Desplegar una plantilla ROS existente
+
+1. Configura las [credenciales de nube](./configuration/alibaba-cloud-credentials.md) y abre una conversación en el proyecto de la plantilla.
+
+2. Escribe `@`, selecciona el archivo y pide una revisión de la plantilla y sus parámetros necesarios.
+
+3. Indica región, nombre de pila y valores de parámetros; solicita validación antes de crearla.
+
+4. Revisa el resultado y los cambios previstos, y después solicita la creación de la pila.
+
+5. Si aparece una aprobación de API de nube, comprueba la operación y aprueba o rechaza. Una creación aprobada puede generar recursos facturables.
+
+6. Consulta el ID de pila, el progreso y el resultado. En caso de fallo, pide un diagnóstico del error en la misma conversación.
+
 ## Descripción general de la interfaz
 
 ### Barra lateral de sesiones
 
-La barra lateral enumera las conversaciones del proyecto seleccionado. Desde aquí puedes:
+La barra lateral agrupa las conversaciones guardadas por proyecto. Puedes:
 
-- Iniciar un **nuevo chat** o cambiar de proyecto con el selector de proyectos.
+- Iniciar un **Nuevo chat** y elegir su proyecto debajo del cuadro de entrada.
 - **Buscar** conversaciones o abrir la paleta de comandos para ejecutar un comando.
 - **Fijar**, **renombrar** o **archivar** una conversación y explorar las conversaciones archivadas.
 
-Como las sesiones se comparten con la CLI, una conversación que reanudes con `iac-code tui --resume` también aparece aquí. Consulta [Sesiones](./cli/sessions.md) para entender cómo funciona el almacén de sesiones.
+Web, escritorio y headless comparten las conversaciones guardadas. Consulte [Sesiones](./cli/sessions.md) para reanudarlas o cambiarles el nombre.
 
 ### Zona de redacción (composer)
 
-La zona de redacción es donde escribes tus solicitudes. Ofrece los mismos controles que la CLI expone mediante comandos de barra y opciones:
+Describa la tarea en el campo de entrada y elija el comportamiento de la conversación con sus controles:
 
 - La selección de **modelo y proveedor** para la sesión activa.
 - Un interruptor de **Pensamiento** para activar o desactivar el razonamiento extendido en los modelos compatibles.
 - Un control de **modo de permisos** que determina cómo se aprueban las acciones de las herramientas.
 - **Adjuntos de imagen** para modelos multimodales.
-- **Comandos de barra** (escritos con `/`) y **referencias de archivo `@`** para señalar archivos de tu espacio de trabajo.
+- **Habilidades** seleccionados de las sugerencias `/` o `$` y **referencias `@` a archivos** del workspace.
 
 ### Chat normal y modo canalización
 
@@ -79,7 +93,7 @@ Las llamadas a herramientas se muestran como tarjetas dentro de la transcripció
 
 ### Configuración
 
-La zona de configuración reúne la misma configuración que gestiona la CLI:
+Escritorio y Web comparten la misma interfaz. Use los ajustes y los controles visibles para el trabajo diario.
 
 - **Credenciales de la nube** para Alibaba Cloud (consulta [Credenciales de Alibaba Cloud](./configuration/alibaba-cloud-credentials.md)).
 - **Modelos** y configuración de proveedores (consulta [Proveedores de LLM](./configuration/llm-providers.md)).

@@ -48,6 +48,7 @@ class ToolContext:
     request_started: bool = False
     ros_preflight_outcome: RosPreflightOutcome | None = None
     trusted_ros_account_context: TrustedRosAccountContext | None = None
+    tool_result_directory: str | None = None
 
     def __init__(
         self,
@@ -69,6 +70,7 @@ class ToolContext:
         telemetry_attributes: dict[str, str | int] | None = None,
         ros_preflight_outcome: RosPreflightOutcome | None = None,
         trusted_ros_account_context: TrustedRosAccountContext | None = None,
+        tool_result_directory: str | None = None,
     ) -> None:
         if isinstance(tool_use_id, list) and isinstance(additional_directories, list):
             old_additional_directories = tool_use_id
@@ -100,6 +102,7 @@ class ToolContext:
         self.ros_preflight_outcome = ros_preflight_outcome
         self.trusted_ros_account_context = trusted_ros_account_context
         self.permission_context = permission_context
+        self.tool_result_directory = tool_result_directory
 
     def set_permission_context(self, permission_context: Any) -> None:
         self.permission_context = permission_context
@@ -177,6 +180,15 @@ class Tool(ABC):
 
         Override in subclasses to handle parameter aliases.
         """
+
+    def prepare_contextual_input(self, tool_input: dict[str, Any], context: Any) -> dict[str, Any]:
+        """Resolve contextual operands identically for permission and execution.
+
+        Implementations must be synchronous, idempotent, and leave the original
+        model arguments unchanged. Invocation bindings continue to identify those
+        original arguments.
+        """
+        return tool_input
 
     def validate_input(self, tool_input: dict[str, Any]) -> tuple[bool, str]:
         """Validate tool_input against input_schema using JSON Schema.
@@ -358,6 +370,13 @@ class Tool(ABC):
         if self.is_read_only(input):
             return PermissionResult(behavior="allow")
         return PermissionResult(behavior="ask", message=_("Allow {}?").format(self.user_facing_name(input)))
+
+
+def prepare_contextual_tool_input(tool: Any, tool_input: dict[str, Any], context: Any) -> dict[str, Any]:
+    # Look up the implementation on the class, not arbitrary dynamic attributes
+    # of legacy duck-typed tools and test doubles.
+    prepare = getattr(type(tool), "prepare_contextual_input", None)
+    return prepare(tool, tool_input, context) if callable(prepare) else tool_input
 
 
 class ToolRegistry:

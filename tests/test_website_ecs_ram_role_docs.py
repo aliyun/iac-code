@@ -61,6 +61,16 @@ ECS_ENVIRONMENT_VARIABLES = {
     "ALIBABA_CLOUD_IMDSV1_DISABLED",
 }
 
+SETTINGS_ENTRY = {
+    "en": "**Settings → Cloud credentials**",
+    "zh-Hans": "**设置 → 云凭证**",
+    "ja": "**設定 → クラウド認証情報**",
+    "fr": "**Paramètres → Identifiants cloud**",
+    "de": "**Einstellungen → Cloud-Anmeldedaten**",
+    "es": "**Ajustes → Credenciales de nube**",
+    "pt": "**Configurações → Credenciais de nuvem**",
+}
+
 
 def test_website_documents_ecs_ram_role_in_all_locales() -> None:
     errors: list[str] = []
@@ -68,8 +78,6 @@ def test_website_documents_ecs_ram_role_in_all_locales() -> None:
         "EcsRamRole",
         "ram_role_name",
         "IMDS",
-        "/auth",
-        "REPL",
         "Web",
         "Desktop",
         ".cloud-credentials.yml",
@@ -89,6 +97,7 @@ def test_website_documents_ecs_ram_role_in_all_locales() -> None:
             AUTO_DISCOVERY_NOTE[locale],
             NO_STATIC_CREDENTIAL_NOTE[locale],
             ECS_RUNTIME_BOUNDARY_NOTE[locale],
+            SETTINGS_ENTRY[locale],
         }
         for token in sorted(required):
             if token not in text:

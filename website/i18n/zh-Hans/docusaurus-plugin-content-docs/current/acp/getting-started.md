@@ -10,7 +10,7 @@ description: 启动 ACP Server 并连接你的第一个客户端。
 
 1. **已安装 iac-code** — 参见 [安装](../getting-started/installation.md) 文档。
 
-2. **已配置 LLM 凭证** — 参见 [认证](../configuration/authentication.md) 文档，通过 `/auth` 命令设置模型提供商凭证。
+2. **已配置 LLM 凭证** — 在桌面版或 Web 的**设置 → 模型**中配置，或为自动化环境提供模型配置。详见[认证](../configuration/authentication.md)。
 
 3. **Python ACP SDK**（可选，用于编程式客户端）
 

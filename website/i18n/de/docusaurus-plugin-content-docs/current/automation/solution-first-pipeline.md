@@ -110,7 +110,7 @@ Wenn die Pipeline abgeschlossen wird, fehlschlägt, vorzeitig endet oder abgebro
 
 ## Oberflächen und Sprachen
 
-Die Pipeline funktioniert im interaktiven Terminal, in der lokalen Web-App, in der Desktop-Web-Hülle, im SDK-Prozessmodus und im A2A-Servermodus. Die Darstellungsfähigkeiten unterscheiden sich — A2A kann beispielsweise strukturierte `rich-v1`-Kandidaten anfordern —, Pipeline-Zustand und Sicherheitsgrenzen sind jedoch gemeinsam.
+Die Pipeline unterstützt die lokale Web-App, Desktop, den SDK-Prozessmodus und den A2A-Server. Die Darstellung unterscheidet sich, etwa durch strukturierte `rich-v1`-Kandidaten in A2A; Zustand und Sicherheitsgrenzen sind gemeinsam.
 
 Sichtbare Pipeline-Texte werden auf Englisch, vereinfachtem Chinesisch, Spanisch, Französisch, Deutsch, Japanisch und Portugiesisch unterstützt. A2A-Aufrufer wählen die Sprache einer Anfrage mit `metadata.iac_code.preferredLanguage`; Protokollfeldnamen, Enum-Werte, IDs und JSON-Strukturen werden nicht übersetzt.
 

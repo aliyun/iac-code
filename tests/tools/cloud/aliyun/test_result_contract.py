@@ -279,7 +279,7 @@ def test_content_state_is_added_only_to_marked_metadata_copy() -> None:
         "keep": "value",
         "aliyun_http": {
             "contract_version": ALIYUN_BODY_CONTRACT_VERSION,
-            "content_state": "externalized_preview",
+            "content_state": "externalized_reference",
         },
     }
     assert original["aliyun_http"] == {"contract_version": ALIYUN_BODY_CONTRACT_VERSION}

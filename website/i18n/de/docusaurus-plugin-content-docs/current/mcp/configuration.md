@@ -1,27 +1,18 @@
 ---
 sidebar_position: 2
 title: MCP-Konfiguration
-description: MCP-Server über CLI-Befehle, Einstellungsdateien, Projektdateien und ACP-Sitzungen konfigurieren.
+description: MCP-Server unter Plugins verwalten; Referenz für CLI, Geltungsbereiche und erweiterte Einstellungen.
 ---
 
 # MCP-Konfiguration
+
+Verwalten Sie Server im Register **MCP** unter **Plugins** in Desktop oder Web. CLI-Befehle und Konfigurationsdateien unten dienen Automatisierung und erweiterten Einstellungen.
 
 MCP servers werden unter dem `mcpServers` object konfiguriert. IaC Code unterstuetzt ein mit Claude Code kompatibles core schema fuer `stdio`, `http`, `sse`, and URL-only `ws` servers.
 
 ## Schnellstart
 
-Fuer einen entfernten HTTP-MCP-Server wie Yuque fuegen Sie den Server mit der positionalen URL-Form hinzu und starten dann OAuth:
-
-```bash
-iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
-iac-code mcp auth yuque
-```
-
-Für stdio-Server setzen Sie den Unterprozessbefehl hinter `--`. Ein Remote-HTTP-Server benötigt keinen Wrapper: Fügen Sie ihn wie oben gezeigt mit `--transport http` hinzu.
-
-```bash
-iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
-```
+Fügen Sie Server im Alltag über **Plugins → MCP** gemäß [MCP-Schnellstart](./quick-start.md) hinzu. Unten folgen Geltungsbereiche, CLI-Automatisierung und erweiterte Felder.
 
 ## Configuration Sources
 
@@ -123,13 +114,11 @@ Wenn `--scope` weggelassen wird, schreibt IaC-Code innerhalb eines Projekts in `
 
 Für Befehle, die auf einem vorhandenen persistenten Server ausgeführt werden, kann IaC-Code einen eindeutigen Server über persistente Bereiche hinweg finden, wenn `--scope` weggelassen wird. Wenn derselbe Name in mehreren Bereichen vorhanden ist, schlägt der Befehl mit genauen `--scope`-Befehlen zur eindeutigen Unterscheidung fehl.
 
-## Interaktiver MCP-Manager
+## MCP-Server verwalten
 
-Im interaktiven REPL öffnet `/mcp` einen Vollbild-MCP-Manager. Er gruppiert Server nach Quelle und zeigt Verbindungsstatus, Authentifizierungsstatus, Konfigurationsdiagnosen, Fehlerdetails und den konfigurierten Ort.
+Prüfen Sie in den MCP-Einstellungen von Web oder Desktop Verbindungen, Werkzeuge, Ressourcen und Prompts. Authentifizieren Sie Remote-Server, genehmigen Sie Projektserver und verbinden, aktivieren, deaktivieren oder entfernen Sie gespeicherte Server.
 
-Im Manager können Sie die Tools, Ressourcen und Prompts eines verbundenen Servers prüfen; Remote-Server authentifizieren, erneut authentifizieren oder die Authentifizierung löschen; Server neu verbinden; persistente Server aktivieren oder deaktivieren; Projektserver aus `.mcp.json` genehmigen oder ablehnen; und persistente Einträge entfernen. OAuth-Flows zeigen die Autorisierungs-URL, unterstützen das Kopieren und akzeptieren eine eingefügte Callback-URL oder einen Autorisierungscode, wenn die Browser-Weiterleitung den lokalen Callback-Listener nicht erreichen kann.
-
-`/mcp enable <name>`, `/mcp disable <name>` und `/mcp reconnect <name>` führen Schnellaktionen aus, ohne den Manager zu öffnen. Wenn `/mcp` über piped stdin oder eine andere Nicht-TTY-Eingabe eingeht, gibt IaC Code eine Meldung aus, dass ein Terminal erforderlich ist; verwenden Sie `iac-code mcp <command>` für nicht interaktive Automatisierung.
+Der Unterhaltungsbefehl `/mcp` zeigt den Status. Für Automatisierung verwenden Sie `iac-code mcp <command>`; die Befehlsreferenz oben beschreibt die Operationen.
 
 ## Stdio Servers
 
@@ -220,19 +209,15 @@ Fehlende Variablen ohne default erzeugen eine MCP warning, und der betroffene se
 
 Speichern Sie keine Klartextgeheimnisse in Headern oder Umgebungswerten. Verwenden Sie Umgebungsvariablenreferenzen oder OAuth-Geheimnisspeicher.
 
-## Project Approval
+## Projektgenehmigung
 
-Das Projekt `.mcp.json` kann in ein Repository übernommen werden, sodass IaC-Code ihm nicht automatisch vertraut.
+Projektdateien `.mcp.json` werden nicht automatisch als vertrauenswürdig eingestuft. Genehmigen Sie den Server in den MCP-Einstellungen von Web oder Desktop oder im Projektverzeichnis:
 
-Interactive REPL startup asks:
-
-```text
-Approve project MCP server 'name' from /path/to/.mcp.json? [y/N]
+```bash
+iac-code mcp approve catalog
 ```
 
-Durch Drücken der Eingabetaste bleibt die Standardeinstellung `N` erhalten und die exakte Projektserverkonfiguration wird abgelehnt. Geben Sie „y“ oder „yes“ ein, um es zu genehmigen. Die Genehmigung wird lokal im IaC-Code-Konfigurationsverzeichnis gespeichert und umfasst den Arbeitsbereichspfad, den Projektdateipfad, den Servernamen und die Konfigurationssignatur. Wenn sich die Serverkonfiguration `.mcp.json` ändert, wird die Genehmigung ungültig und der Server wird wieder ausstehend.
-
-Headless-, ACP- und A2A-Startups stellen niemals interaktive Genehmigungsfragen. Ausstehende Projektserver werden übersprungen und als Warnungen gemeldet.
+Die lokale Genehmigung ist an Workspace, Quelldatei, Servernamen und Konfigurationssignatur gebunden. Änderungen erfordern eine neue Genehmigung. Headless, ACP und A2A überspringen ausstehende Projektserver mit Warnungen.
 
 ## Disabled Servers
 

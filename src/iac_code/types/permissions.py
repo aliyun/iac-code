@@ -129,6 +129,7 @@ class ToolPermissionContext:
     strict_read_directories: list[str] = field(default_factory=list)
     read_path_violation_behavior: Literal["ask", "deny"] = "ask"
     audit_settings: PermissionAuditSettings = field(default_factory=PermissionAuditSettings)
+    tool_result_directory: str | None = None
 
 
 PermissionDecision = Literal["always_allow", "always_deny"]

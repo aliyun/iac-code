@@ -1,49 +1,55 @@
 ---
-title: Mode interactif
-description: Utiliser le REPL pour un travail itératif sur l'infrastructure.
+title: Ancienne interface de terminal
+description: Point d’entrée de compatibilité pour les anciens usages du terminal.
 ---
 
-# Mode interactif
+# Ancienne interface de terminal
 
-L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
+TUI est l’ancienne interface permettant de converser et d’utiliser les outils directement dans un terminal. Cette page s’adresse aux utilisateurs de ces flux existants.
+
+:::note
+
+TUI ne reçoit plus de mises à jour ni de maintenance. Les nouvelles fonctions d’interface ciblent [Web](../web-app.md) et [Desktop](../desktop-app.md) ; les mêmes contrôles et présentations ne sont pas garantis dans le terminal.
+
+:::
+
+## Démarrer et utiliser TUI
+
+1. Installez le [paquet Python](../getting-started/installation.md), puis configurez un [fournisseur de modèle](../configuration/llm-providers.md) et, si nécessaire, les [identifiants Alibaba Cloud](../configuration/alibaba-cloud-credentials.md). TUI peut réutiliser cette configuration enregistrée.
+
+2. Ouvrez un terminal interactif, placez-vous dans le projet et lancez :
+
+   ```bash
+   cd /path/to/project
+   iac-code tui
+   ```
+
+3. Après l’avis de fin de maintenance et l’apparition de la saisie, envoyez votre demande. Les réponses et l’activité des outils s’affichent dans le terminal. Répondez aux questions et demandes d’autorisation qui y apparaissent.
+
+4. Utilisez `/help` pour voir les commandes de la version installée, `/status` pour consulter la session et `/exit` pour quitter.
+
+TUI exige un terminal interactif. Pour les scripts ou la CI sans terminal, utilisez l’[automatisation headless](../automation/non-interactive-mode.md). Sans sous-commande, `iac-code` ouvre Web par défaut.
+
+## Poursuivre une conversation du terminal
+
+Exécutez la commande depuis le répertoire du projet de la conversation. Pour choisir une session par ID ou nom unique :
 
 ```bash
-iac-code tui
+iac-code tui --resume <session-id-or-name>
 ```
 
-Le mode interactif est utile lorsque vous souhaitez affiner les exigences d'infrastructure sur plusieurs échanges.
+Pour continuer la session la plus récente du projet courant :
 
-Commencez par l'authentification :
-
-```text
-/auth
+```bash
+iac-code tui --continue
 ```
 
-Puis décrivez ce que vous souhaitez construire :
+N’utilisez pas `--resume` et `--continue` ensemble. Consultez `iac-code tui --help` pour les options de votre version.
 
-```text
-Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
-```
+## Passer à Web ou Desktop
 
-## Commandes
+1. Lancez `iac-code web` ou ouvrez Desktop, puis choisissez le même répertoire de projet.
 
-Tapez `/` pour découvrir les commandes slash disponibles. Les commandes opérationnelles courantes incluent `/status` pour l'état de la session actuelle, `/skills` pour la gestion des compétences, `/memory` pour les fichiers mémoire de projet et d'utilisateur, `/rename` pour nommer la session active et `/resume` pour changer de session.
+2. Avec le même utilisateur système et `IAC_CODE_CONFIG_DIR`, les modèles, identifiants cloud et instructions mémorisées peuvent être réutilisés. Gérez-les ensuite dans les paramètres ; consultez les [opérations courantes](./commands.md).
 
-Tapez `$` pour découvrir et invoquer uniquement des compétences.
-
-## Modifier la saisie
-
-Utilisez `Shift+Enter` pour insérer une nouvelle ligne sans envoyer le prompt. Appuyez sur `Enter` seul pour envoyer le prompt complet.
-
-Si votre terminal ne signale pas `Shift+Enter` séparément, appuyez sur `Esc` puis sur `Enter` pour insérer une nouvelle ligne. Les prompts multilignes sont enregistrés comme une seule entrée d'historique, donc `Up` restaure le prompt complet.
-
-## Shell escapes
-
-Préfixez une ligne avec `!` pour exécuter une commande shell locale depuis le REPL via l'outil `bash` intégré :
-
-```text
-!pwd
-!git status --short
-```
-
-IaC Code applique les vérifications de permissions d'outil habituelles, exécute la commande dans le contexte du projet actuel et affiche la sortie dans le terminal. La commande n'est pas envoyée au modèle comme message de chat.
+3. Créez une nouvelle conversation pour poursuivre le travail. Pour consulter une ancienne conversation du terminal, activez l’option de lecture seule dans **Paramètres → Général → Visibilité des sessions externes**. Le stockage partagé ne rend pas ces conversations modifiables dans Web/Desktop ; voir [Sessions](./sessions.md).

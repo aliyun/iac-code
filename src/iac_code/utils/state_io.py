@@ -179,6 +179,7 @@ def open_text_no_follow(
     *,
     encoding: str = "utf-8",
     create_mode: int = 0o600,
+    newline: str | None = None,
 ) -> Iterator[TextIO]:
     target = Path(path)
     if mode == "r":
@@ -194,7 +195,7 @@ def open_text_no_follow(
 
     fd = _open_no_follow(target, flags, create_mode)
     try:
-        handle = cast(TextIO, os.fdopen(fd, mode, encoding=encoding))
+        handle = cast(TextIO, os.fdopen(fd, mode, encoding=encoding, newline=newline))
     except Exception:
         os.close(fd)
         raise
@@ -208,9 +209,10 @@ def write_text_no_follow(
     *,
     encoding: str = "utf-8",
     create_mode: int = 0o600,
+    newline: str | None = None,
 ) -> None:
     with _path_lock(Path(path)):
-        with open_text_no_follow(path, "w", encoding=encoding, create_mode=create_mode) as handle:
+        with open_text_no_follow(path, "w", encoding=encoding, create_mode=create_mode, newline=newline) as handle:
             handle.write(content)
 
 

@@ -28,8 +28,8 @@ Use A2A when another agent, workflow engine, or service needs to call iac-code a
 
 | Mode | Command | Best For |
 |------|---------|----------|
-| **Interactive REPL** | `iac-code` | Hands-on exploration and iterative template authoring |
-| **Non-interactive CLI** | `iac-code --prompt "..."` or `--headless` | One-shot scripting and CI jobs |
+| **Web** | `iac-code` | Hands-on exploration and iterative template authoring |
+| **Non-interactive CLI** | `iac-code --prompt "..."` | One-shot scripting and CI jobs |
 | **ACP Server** | `iac-code acp` | IDE/editor integration and multi-session client control |
 | **A2A Server** | `iac-code a2a` | Agent-to-agent interoperability over A2A transports |
 | **A2A Client** | `iac-code a2a-client call` | Calling remote A2A agents from iac-code |

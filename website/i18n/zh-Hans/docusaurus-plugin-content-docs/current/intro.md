@@ -6,7 +6,7 @@ description: IaC Code 的用途以及从哪里开始。
 
 # 概览
 
-IaC Code 是用于规划、生成、部署和管理云基础设施的 AI 助手。你可以通过桌面版、本地 Web 版、交互式终端、自动化接口使用，也可以把它作为 Skill 集成到其他 Agent 中。架构设计面向多云工作流；当前版本支持阿里云 ROS 与 Terraform 工作流。
+IaC Code 是用于规划、生成、部署和管理云基础设施的 AI 助手。你可以通过桌面版、本地 Web 版、自动化接口使用，也可以把它作为 Skill 集成到其他 Agent 中。架构设计面向多云工作流；当前版本支持阿里云 ROS 与 Terraform 工作流。
 
 核心能力：
 
@@ -17,7 +17,7 @@ IaC Code 是用于规划、生成、部署和管理云基础设施的 AI 助手�
 根据使用方式选择入口：
 
 - 下载[桌面版](./desktop-app.md)，直接使用图形化应用。
-- 阅读[安装](./getting-started/installation.md)和[快速开始](./getting-started/quick-start.md)，使用 REPL、无头模式或本地 [Web 版](./web-app.md)。
+- 阅读[安装](./getting-started/installation.md)和[快速开始](./getting-started/quick-start.md)，使用本地 [Web 版](./web-app.md)或 headless 自动化。
 - 通过 [IaC Code 官方 Skills 概览](./a2a/skill-overview.md)选择合适的发行版，让兼容的 Agent 获得 IaC Code 的阿里云基础设施能力。
 - 通过 [ACP](./acp/overview.md)、[A2A](./a2a/overview.md) 或 [AG-UI](./agui/overview.md) 将 IaC Code 集成到其他应用或服务。
 

@@ -789,8 +789,8 @@ class StepExecutor:
                             )[:2000]
                         )
             resuming_question = bool(precompleted_tools and "ask_user_question" in precompleted_tools)
-            has_source = resuming_question or user_message is not None or any(
-                field.value for field in valid_upstream.values()
+            has_source = (
+                resuming_question or user_message is not None or any(field.value for field in valid_upstream.values())
             )
             current_field = context.get_field(step.conclusion_field)
             wiki_context = {
@@ -910,7 +910,8 @@ class StepExecutor:
                     and not is_hidden_context_message(message)
                     and not is_compaction_summary_message(message)
                     and (
-                        isinstance(message.content, str) and bool(message.content.strip())
+                        isinstance(message.content, str)
+                        and bool(message.content.strip())
                         or isinstance(message.content, list)
                         and any(block.type in {"text", "image"} for block in message.content)
                     )
@@ -1319,7 +1320,8 @@ class StepExecutor:
             return content
         return (
             f"Base directory for this skill: {skill_root}\n"
-            "Resolve relative paths in this skill relative to the base directory above.\n\n"
+            "Resolve skill resource links (references, scripts) relative to this directory. "
+            "Resolve generated output paths relative to the working directory, not the skill directory.\n\n"
             f"{content}"
         )
 

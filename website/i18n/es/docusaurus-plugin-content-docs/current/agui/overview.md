@@ -105,7 +105,7 @@ El adaptador guarda por thread las relaciones de protocolo, los datos de idempot
 | Permisos, preguntas y selección desde una UI | **AG-UI** |
 | Otro agente u orquestador llama directamente a iac-code | **A2A** |
 | Integración de IDE/editor con sesiones ACP | **ACP** |
-| Uso manual local | **REPL interactivo o Web/Desktop** |
+| Uso manual local | **Web / Desktop** |
 
 AG-UI y A2A pueden ejecutarse simultáneamente. Exponen endpoints distintos, pero comparten la misma implementación de ejecución.
 

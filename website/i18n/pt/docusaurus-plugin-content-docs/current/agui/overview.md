@@ -115,7 +115,7 @@ O adaptador armazena mapeamentos de protocolo, dados de idempotência e interrup
 | Tratar permissões, perguntas e seleção de opções em uma interface | **AG-UI** |
 | Permitir que outro agente ou orquestrador chame o iac-code diretamente | **A2A** |
 | Integrar um IDE/editor com sessões ACP e recursos de terminal | **ACP** |
-| Operar o iac-code manualmente | **REPL interativo ou Web/Desktop** |
+| Operar o iac-code manualmente | **Web / Desktop** |
 
 AG-UI e A2A podem ser executados ao mesmo tempo. Eles expõem endpoints HTTP separados e compartilham a mesma implementação de execução do iac-code.
 

@@ -49,7 +49,7 @@ In Web and Desktop, select the pipeline when creating a conversation. For A2A an
 
 ## Environment Variables
 
-These variables configure startup defaults for A2A, SDK process mode, and the retained TUI. Web and Desktop select the mode and pipeline per conversation; the Web API only falls back to `IAC_CODE_MODE` and `IAC_CODE_PIPELINE_NAME` when the corresponding request fields are omitted.
+These variables configure defaults for A2A and SDK process mode. Web and Desktop select the mode and pipeline per conversation; the Web API uses `IAC_CODE_MODE` and `IAC_CODE_PIPELINE_NAME` only when the corresponding request fields are omitted.
 
 | Variable | Purpose |
 |---|---|
@@ -98,8 +98,6 @@ ACP does not currently support Pipeline mode. `--prompt` / [Non-interactive Mode
 ## Current Limitations
 
 - The current release includes `selling` and `selling_solution_first`, both mainly for Alibaba Cloud infrastructure workflows. `selling` remains the default.
-- In terminal Pipeline mode, images pasted into the REPL are ignored.
-- `iac-code tui`: Mid-pipeline shell escapes, skill triggers, and most slash commands are restricted unless the pipeline definition explicitly allows them. Basic commands such as `/help`, `/status`, `/resume`, and `/exit` remain available.
 
 
 ## Backup Checkpoints

@@ -5,7 +5,7 @@ description: Run one-shot prompts from arguments or stdin.
 
 # Non-interactive Mode
 
-Non-interactive mode runs a single prompt and exits. Use it when you want IaC Code to produce output for a repeatable task without staying in the REPL.
+Headless mode runs one prompt and exits. Use it for repeatable tasks, scripts, and CI jobs.
 
 Use `--prompt` to pass the prompt directly:
 

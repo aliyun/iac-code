@@ -14,6 +14,8 @@ from iac_code.services.wiki_auto_search import (
     METADATA_KEY,
     WikiAutoSearch,
     extraction_input,
+    input_text,
+    local_ui_auto_search,
     parse_keywords,
     reference,
     search,
@@ -89,6 +91,36 @@ class Extractor:
     ):
         self.calls += 1
         return SimpleNamespace(text=self.text, usage=Usage(input_tokens=3), usage_attribution=None)
+
+
+@pytest.mark.asyncio
+async def test_local_ui_wiki_scope_is_nested_task_local_and_restored_after_failure(monkeypatch):
+    import asyncio
+
+    from iac_code.services.wiki_auto_search import async_local_ui_auto_search, enabled
+
+    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", "false")
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    @async_local_ui_auto_search()
+    async def web_request():
+        assert enabled() is True
+        with local_ui_auto_search():
+            assert enabled() is True
+        assert enabled() is True
+        entered.set()
+        await release.wait()
+        raise RuntimeError("test failure")
+
+    task = asyncio.create_task(web_request())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        assert enabled() is False  # A simultaneous remote request retains its own policy.
+    finally:
+        release.set()
+        with pytest.raises(RuntimeError, match="test failure"):
+            await task
+    assert enabled() is False
 
 
 @pytest.mark.asyncio
@@ -390,6 +422,74 @@ class LoopProvider(Extractor):
         self.main_calls += 1
         yield TextDeltaEvent(text="main answer")
         yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pipeline", [False, True])
+@pytest.mark.parametrize("continuation", [False, True])
+async def test_web_wiki_search_streams_progress_and_enriches_context_without_environment_flag(
+    tmp_path, monkeypatch, pipeline, continuation
+):
+    from iac_code.agent.agent_loop import AgentLoop
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.tools.base import ToolRegistry
+    from iac_code.types.stream_events import MessageEndEvent, TextDeltaEvent, WikiSearchEvent
+    from iac_code.web.events import WebEventTranslator
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.delenv("IAC_CODE_WIKI_AUTO_SEARCH", raising=False)
+    root = tmp_path / "knowledge"
+    root.mkdir()
+    (root / "gpu.md").write_text("# GPU specifications\nB70 has 32 GB GDDR6 memory.\n", encoding="utf-8")
+    requests = []
+
+    class Provider(Extractor):
+        async def stream(self, messages, **kwargs):
+            # A continued turn searches in the background. Let it finish while the
+            # model is streaming, so its completion event is also exercised.
+            if loop._wiki_work.task is not None:
+                await loop._wiki_work.task
+            requests.append(messages)
+            yield TextDeltaEvent(text="answer")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    provider = Provider('{"keywords":["B70"]}')
+    storage = SessionStorage()
+    with local_ui_auto_search():
+        loop = AgentLoop(
+            provider_manager=provider,
+            system_prompt="test",
+            tool_registry=ToolRegistry(),
+            cwd=str(tmp_path),
+            session_id="web-wiki",
+            session_storage=storage,
+            resume_messages=[Message(role="user", content="Earlier question")] if continuation else None,
+            pipeline_mode=pipeline,
+            wiki_search_context={"enabled": True, "scope_id": "step1"} if pipeline else None,
+        )
+        loop._wiki_search.root = root
+        events = [event async for event in loop.run_streaming("Explain B70")]
+    wiki = [event for event in events if isinstance(event, WikiSearchEvent)]
+    assert [event.phase for event in wiki] == ["extracting", "searching", "ready"]
+    assert provider.calls == 1
+    assert loop._wiki_work.snapshot["dispatch_mode"] == ("async" if continuation else "serial")
+    if not continuation:
+        assert "32 GB GDDR6" in str(requests[0])
+    else:
+        assert "32 GB GDDR6" in str(loop._wiki_messages())
+    projected = WebEventTranslator("web-wiki").translate_stream_event(wiki[-1], turn_id="turn1")
+    assert projected["payload"]["files"] == [
+        {
+            "path": "gpu.md",
+            "title": "GPU specifications",
+            "lines": [{"number": 2, "text": "**B70** has 32 GB GDDR6 memory."}],
+        }
+    ]
+    assert projected["payload"]["elapsedMs"] >= 0
+    persisted = storage.load(str(tmp_path), "web-wiki")
+    owner = next(message for message in persisted if message.metadata.get(METADATA_KEY))
+    assert owner.metadata[METADATA_KEY]["status"] == "ready"
+    assert [input_text(message.content) for message in persisted if message.role == "assistant"] == ["answer"]
 
 
 @pytest.mark.asyncio

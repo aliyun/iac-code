@@ -40,7 +40,7 @@ def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = Fa
 
 @pytest.fixture
 def storage(tmp_path):
-    return ResultStorage(storage_dir=str(tmp_path), max_inline_chars=100, preview_chars=50)
+    return ResultStorage(storage_dir=str(tmp_path), max_inline_chars=100)
 
 
 class TestResultStorage:
@@ -55,7 +55,6 @@ class TestResultStorage:
         storage = ResultStorage(
             storage_dir=str(tmp_path / "tool-results"),
             max_inline_chars=50_000,
-            preview_chars=2_000,
         )
 
         new_result = storage.process(tool_use_id="new", content=new_content)
@@ -67,7 +66,7 @@ class TestResultStorage:
         assert new_result.file_path is None
         assert old_result.is_externalized is True
         assert old_result.file_path is not None
-        assert old_result.file_path in old_result.content
+        assert "/old.txt" in old_result.content
 
     def test_large_result_externalized(self, storage):
         content = "x" * 1000
@@ -164,13 +163,14 @@ class TestResultStorage:
         with open(result.file_path) as f:
             assert f.read() == content
 
-    def test_preview_has_truncation_notice(self, storage):
+    def test_large_result_has_reference_without_preview(self, storage):
         content = "y" * 200
         result = storage.process(tool_use_id="t4", content=content)
-        assert "truncated" in result.content.lower() or "..." in result.content
+        assert "/t4.txt" in result.content
+        assert "y" * 20 not in result.content
 
     @pytest.mark.parametrize("limit", [50_000, None])
-    def test_complete_compact_inventory_retains_original_externalized_result(self, tmp_path, limit):
+    def test_json_is_saved_in_full_even_when_compaction_would_fit(self, tmp_path, limit):
         payload = {
             "TotalCount": 48,
             "PageNumber": 1,
@@ -195,12 +195,12 @@ class TestResultStorage:
         result = storage.process("inventory", content)
 
         assert len(content) > 50_000 > len(compact)
-        assert result.content == compact
-        assert json.loads(result.content) == payload
+        assert "/inventory.txt" in result.content
+        assert "VpcId" not in result.content
         assert result.is_externalized is True
         assert Path(result.file_path).read_text(encoding="utf-8") == content
 
-    def test_compaction_preserves_json_tokens_and_string_whitespace(self, tmp_path):
+    def test_original_json_tokens_and_string_whitespace_are_saved(self, tmp_path):
         compact = (
             '{"same":1,"same":2,"precise":1.234567890123456789,"text":'
             + json.dumps('中文 spaces \t \n " quote \\ slash', ensure_ascii=False)
@@ -211,7 +211,7 @@ class TestResultStorage:
 
         result = storage.process("exact-tokens", content)
 
-        assert result.content == compact
+        assert "/exact-tokens.txt" in result.content
         assert Path(result.file_path).read_text(encoding="utf-8") == content
 
     @pytest.mark.parametrize(
@@ -223,9 +223,10 @@ class TestResultStorage:
             '"string scalar"' + " " * 200,
         ],
     )
-    def test_uncompactable_results_keep_honest_truncated_preview(self, storage, content):
+    def test_arbitrary_text_is_saved_without_preview(self, storage, content):
         result = storage.process("uncompactable", content)
 
         assert result.is_externalized is True
-        assert "truncated" in result.content
+        assert "/uncompactable.txt" in result.content
+        assert "unescaped" not in result.content
         assert Path(result.file_path).read_text(encoding="utf-8") == content
