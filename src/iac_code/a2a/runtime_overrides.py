@@ -12,6 +12,7 @@ from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.i18n import SUPPORTED_LANGUAGES, use_request_language
 from iac_code.providers.request_headers import use_provider_request_headers
 from iac_code.providers.request_policy import ProviderRequestPolicy
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.permission_wait import permission_execution_identity_cache_scope
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
 from iac_code.services.telemetry import use_session_id, use_telemetry_channel, use_user_id
@@ -126,6 +127,7 @@ def a2a_request_context(
         yield
 
 
+@timed_phase("runtime_cloud_tools_refresh")
 def refresh_runtime_cloud_tools(runtime: Any) -> None:
     refresh_cloud_tools = getattr(runtime, "refresh_cloud_tools", None)
     if callable(refresh_cloud_tools):
@@ -144,6 +146,7 @@ def refresh_runtime_cloud_tools(runtime: Any) -> None:
     register_cloud_tools(tool_registry, CloudCredentials(), services)
 
 
+@timed_phase("runtime_model_configure")
 def configure_runtime_model(
     runtime: Any,
     model: str,

@@ -802,7 +802,9 @@ async def test_publish_nested_sub_pipeline_permission_resolves_inner_future(tmp_
 
 
 @pytest.mark.asyncio
-async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_out(tmp_path: Path) -> None:
+async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     queue = FakeEventQueue()
     context = PipelineA2AContext(
         pipeline_run_id="run-1",
@@ -836,6 +838,17 @@ async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_o
         permission_wait_cwd=str(tmp_path),
         permission_wait_session_id=session_id,
     )
+    expire_permission = asyncio.Event()
+    timeout_permission = publisher.permission_resolution_owner.timeout_permission
+
+    async def controlled_timeout(pending, timeout_seconds: float) -> None:
+        assert timeout_seconds == 0.02
+        await expire_permission.wait()
+        await timeout_permission(pending, 0)
+
+    # Exercise the real timeout path after candidate B completes, without
+    # assuming its asynchronous durable writes finish within 20 ms under load.
+    monkeypatch.setattr(publisher.permission_resolution_owner, "timeout_permission", controlled_timeout)
     await publisher.publish(
         PipelineEvent(
             type=PipelineEventType.SUB_PIPELINE_STARTED,
@@ -904,7 +917,8 @@ async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_o
     )
 
     assert permission_result.done() is False
-    await asyncio.wait_for(asyncio.shield(permission_result), timeout=0.5)
+    expire_permission.set()
+    await asyncio.wait_for(asyncio.shield(permission_result), timeout=2)
 
     assert permission_result.result() is PermissionWaitOutcome.AUTOMATIC_DENY
     events = publisher.journal.read_all_repairing_tail()
@@ -2753,3 +2767,65 @@ async def test_pipeline_metadata_transport_keeps_input_boundary_without_protocol
     assert [event["sequence"] for event in delivered] == [event["sequence"] for event in persisted]
     assert all(event["status"] == status for event in delivered)
     assert publisher.journal.read_all() == persisted
+
+
+@pytest.mark.asyncio
+async def test_persistence_io_yields_event_loop_and_keeps_sequence_lock(tmp_path, monkeypatch):
+    import threading
+
+    publisher, _queue = _publisher(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    original = publisher.snapshot_store.save
+    calls = []
+
+    def blocked(snapshot, **kwargs):
+        calls.append(snapshot)
+        entered.set()
+        assert release.wait(3), "test did not release its write"
+        return original(snapshot, **kwargs)
+
+    monkeypatch.setattr(publisher.snapshot_store, "save", blocked)
+    first = asyncio.create_task(publisher.publish_manual("working", "pipeline"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        second = asyncio.create_task(publisher.publish_manual("working", "pipeline"))
+        await asyncio.sleep(0)
+        assert not first.done() and not second.done()
+        assert len(calls) == 1
+    finally:
+        release.set()
+    await asyncio.gather(first, second)
+    assert len(calls) == 2
+    assert [event["sequence"] for event in publisher.journal.read_all()] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_persistence_cancellation_drains_write_before_unlock(tmp_path, monkeypatch):
+    import threading
+
+    publisher, _queue = _publisher(tmp_path)
+    entered, release, completed = threading.Event(), threading.Event(), threading.Event()
+    original = publisher.snapshot_store.save
+
+    def blocked(snapshot, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        result = original(snapshot, **kwargs)
+        completed.set()
+        return result
+
+    monkeypatch.setattr(publisher.snapshot_store, "save", blocked)
+    publication = asyncio.create_task(publisher.publish_manual("working", "pipeline"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        publication.cancel()
+        await asyncio.sleep(0)
+        assert not publication.done()
+        assert publisher._sequence_lock.locked()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await publication
+    assert completed.is_set()
+    assert not publisher._sequence_lock.locked()
+    assert publisher.snapshot_store.load() is not None

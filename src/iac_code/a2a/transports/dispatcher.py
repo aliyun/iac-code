@@ -328,6 +328,10 @@ class A2ARuntimeComponents:
     backup_coordinator: SessionBackupCoordinator | None = None
 
     async def start_background_services(self) -> None:
+        from iac_code.a2a.warmup import warmup_enabled, warmup_runtime
+
+        if warmup_enabled():
+            await asyncio.to_thread(warmup_runtime)
         if self.backup_staging_process is not None:
             self.backup_staging_process.start()
         if self.backup_coordinator is not None:

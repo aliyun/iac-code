@@ -24,6 +24,7 @@ from iac_code.pipeline.engine.step_spec import (
     StepSurfaceOverride,
     SubPipelineSpec,
 )
+from iac_code.utils.bundled_data import load_bundled_data
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def load_pipeline_dir(
 ) -> LoadedPipeline:
     """Load a complete pipeline from a directory containing pipeline.yaml."""
     yaml_path = pipeline_dir / "pipeline.yaml"
-    raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    raw = load_bundled_data(yaml_path, format="yaml")
 
     name: str = raw["name"]
     context_dependencies: dict[str, list[str]] = raw["context_dependencies"]

@@ -26,6 +26,7 @@ from iac_code.pipeline.engine.step_spec import LoadedPipeline, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import SessionBackupBlocked
+from iac_code.services.session_prompt_time import SessionPromptTime
 from iac_code.types.stream_events import PermissionRequestEvent, PermissionWaitSuspended, SubPipelineStreamEvent
 from iac_code.utils.public_errors import sanitize_strict_text
 
@@ -81,6 +82,7 @@ class SubPipelineExecutor:
         backup_service: Any | None = None,
         tool_context_env_overrides: dict[str, str] | None = None,
         aliyun_delegated_executor_factory: Callable[[str], Any] | None = None,
+        prompt_time: SessionPromptTime | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -97,6 +99,7 @@ class SubPipelineExecutor:
         self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._active_step_executor = None
+        self._prompt_time = prompt_time
         self._telemetry_correlation: dict[str, str] = {}
         pipeline_name = getattr(pipeline, "name", "")
         if not isinstance(pipeline_name, str):
@@ -177,6 +180,7 @@ class SubPipelineExecutor:
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
             aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
+            prompt_time=self._prompt_time,
         )
         step_executor.set_telemetry_scope(
             sub_pipeline_name=sub_spec.name,
@@ -366,6 +370,7 @@ class SubPipelineExecutor:
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
             aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
+            prompt_time=self._prompt_time,
         )
         self._apply_telemetry_correlation(executor)
         return executor
@@ -641,9 +646,7 @@ class SubPipelineExecutor:
 
                         step_msg = user_message if is_first_step else None
                         step_precompleted_tools = precompleted_tools if is_first_step else None
-                        step_resource_selection_checkpoint = (
-                            resource_selection_checkpoint if is_first_step else None
-                        )
+                        step_resource_selection_checkpoint = resource_selection_checkpoint if is_first_step else None
                         step_permission_checkpoint = permission_checkpoint if is_first_step else None
                         attempt_resume_messages = attempt_info.get("resume_messages")
                         if not isinstance(attempt_resume_messages, list):

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from iac_code.a2a.display_timing import DisplayEventClassifier
+from iac_code.a2a.first_display_persistence import first_display_persistence_scope
 from iac_code.services.first_token_timing import (
     RequestTiming,
     bind_timing,
@@ -317,10 +318,19 @@ class FirstTokenTimingMiddleware:
                     text=observation.text,
                     result=observer.terminal_result,
                 )
+                if (
+                    persistence_window is not None
+                    and persistence_window.active
+                    and (event_type is not None or timing.identity.get("wire_observation_incomplete"))
+                ):
+                    await persistence_window.finish()
             if not timing.active:
                 observer.buffer.clear()
 
-        with use_request_timing(timing):
+        with (
+            use_request_timing(timing),
+            first_display_persistence_scope(enabled=self.protocol == "a2a") as persistence_window,
+        ):
             timing.record("request_received")
             result = "completed"
             try:
@@ -337,6 +347,8 @@ class FirstTokenTimingMiddleware:
                 timing.record("request_failed", error_type=type(error).__name__, result=result, force=True)
                 raise
             finally:
+                if persistence_window is not None:
+                    await persistence_window.aclose()
                 timing.record("request_completed", result=result, http_status=status, force=True)
                 timing.summary(result)
                 timing.closed = True

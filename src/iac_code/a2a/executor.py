@@ -152,7 +152,7 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.resource_selector.capability import ResourceSelectorCapability
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
-from iac_code.services.first_token_timing import bind_timing, mark_timing, timed_lock, timing_phase
+from iac_code.services.first_token_timing import bind_timing, mark_timing, timed_lock, timed_phase, timing_phase
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     RecoveredPermissionAuditBoundary,
@@ -1771,6 +1771,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                 # attachment so its live continuation stays execution-bound.
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        from iac_code.a2a.first_display_persistence import bind_first_display_persistence
+
+        bind_first_display_persistence(
+            getattr(context, "task_id", None) or "",
+            getattr(context, "context_id", None) or "",
+            namespace=id(self._task_store),
+        )
         message = getattr(context, "message", None)
         if (
             not progress_enabled()
@@ -4657,6 +4664,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             await self._permission_wait_coordinator.release_restore(boundary_id)
         return True
 
+    @timed_phase("permission_audit_rebuild")
     async def _rebuild_normal_permission_audit_event(
         self,
         *,

@@ -850,3 +850,24 @@ async def test_agent_runtime_mcp_close_failure_does_not_skip_aliyun_cleanup() ->
 
     manager.disconnect_all.assert_awaited_once()
     services.aclose.assert_awaited_once()
+
+
+def test_provider_ready_callback_precedes_tool_initialization(tmp_path, monkeypatch):
+    from iac_code.services import agent_factory as module
+
+    manager = object()
+    events = []
+    monkeypatch.setattr(module, "_prepare_provider", lambda options: (manager, "fixture-model"))
+
+    def build_tools(options, services, provider_manager, model):
+        assert events == ["provider-ready"]
+        assert provider_manager is manager and model == "fixture-model"
+        events.append("tools")
+        return "runtime"
+
+    monkeypatch.setattr(module, "_create_runtime_tools", build_tools)
+    result = module._create_agent_runtime(
+        AgentFactoryOptions(model="fixture-model", provider_ready=lambda provider: events.append("provider-ready")),
+        object(),
+    )
+    assert result == "runtime" and events == ["provider-ready", "tools"]

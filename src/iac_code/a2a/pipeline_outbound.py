@@ -26,6 +26,9 @@ from iac_code.types.stream_events import (
     PermissionRequestEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
+    ToolEmittedEvent,
+    ToolResultEvent,
 )
 
 OUTBOUND_MAX_BATCH_EVENTS = 64
@@ -168,7 +171,11 @@ class PipelineA2AOutboundQueue:
                 )
             else:
                 self._source_queues.setdefault(item.source_key, deque()).append(item)
-                self._freeze_if_triggered_locked()
+                window = getattr(self._publisher, "first_display_window", lambda: None)()
+                if window is not None and _first_display_candidate(event):
+                    self._freeze_active_locked(trigger_reason="first_display")
+                else:
+                    self._freeze_if_triggered_locked()
             if self._flow_monitor is not None:
                 self._flow_monitor.event_enqueued(_flow_item(item))
             self._wakeup.set()
@@ -797,6 +804,17 @@ class PipelineA2AOutboundQueue:
     def _raise_if_failed(self) -> None:
         if self._fatal_exception is not None:
             raise self._fatal_exception
+
+
+def _first_display_candidate(event: Any) -> bool:
+    from iac_code.pipeline.engine.events import PipelineEvent
+
+    inner = _unwrap_stream_event(event)
+    if isinstance(inner, (TextDeltaEvent, ThinkingDeltaEvent)):
+        return bool(inner.text)
+    # Waking early may include metadata. Only the wire classifier ends the
+    # window, so lifecycle/progress cannot become a first visible token here.
+    return isinstance(inner, (ToolEmittedEvent, ToolResultEvent, PipelineEvent))
 
 
 def _source_key(event: Any) -> Hashable:

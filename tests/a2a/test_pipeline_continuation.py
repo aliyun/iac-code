@@ -1815,6 +1815,7 @@ class _FalseyModelExtension:
     [
         None,
         "system_prompt_refresher",
+        "prompt_time",
         "background_task_starter",
         "memory_recall_service",
         "wiki-idle",

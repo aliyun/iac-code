@@ -30,6 +30,7 @@ from iac_code.pipeline.engine.observability import PipelineObservability
 from iac_code.pipeline.engine.recovery import last_successful_tool_input, reconstruct_completion_guard_state
 from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, render_prompt
 from iac_code.pipeline.engine.types import StepConfig, StepResult, StepStatus
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.session_layout import (
     SESSION_LAYOUT_VERSION_V2,
     SessionPaths,
@@ -37,6 +38,7 @@ from iac_code.services.session_layout import (
     ensure_session_owned_parent,
     require_supported_session_layout,
 )
+from iac_code.services.session_prompt_time import SessionPromptTime
 from iac_code.services.session_usage import SessionUsageStore
 from iac_code.services.telemetry.names import PipelineAttr
 from iac_code.tools.base import ToolRegistry
@@ -115,6 +117,7 @@ class StepExecutor:
         surface: str = "repl",
         tool_context_env_overrides: dict[str, str] | None = None,
         aliyun_delegated_executor_factory: Callable[[str], Any] | None = None,
+        prompt_time: SessionPromptTime | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -131,6 +134,7 @@ class StepExecutor:
         self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._current_agent_loop = None
+        self._prompt_time = prompt_time
         self.canceled_first_model_request: dict[str, str] | None = None
         self._telemetry_correlation: dict[str, str] = {}
         self._telemetry_scope: dict[str, str | int] = {}
@@ -629,6 +633,7 @@ class StepExecutor:
 
         yield step_result
 
+    @timed_phase("pipeline_step_prepare")
     def build_agent_loop_context(
         self,
         step: StepSpec,
@@ -821,6 +826,7 @@ class StepExecutor:
             tool_context_trusted_read_directories=trusted_read_roots,
             tool_context_relative_read_directories=step_skill_roots,
             pipeline_mode=True,
+            prompt_time=self._prompt_time,
             tool_context_env_overrides=self._tool_context_env_overrides,
             telemetry_attributes=self._agent_telemetry_attributes(step),
             wiki_search_context=wiki_context,
@@ -955,6 +961,7 @@ class StepExecutor:
             memory_content=memory_content,
             provider_display=self._runtime_provider_display(),
             model=self._runtime_model(),
+            current_time=self._prompt_time.value if self._prompt_time is not None else None,
         )
 
         prompt_file = step.prompt_file_for_surface(self._surface)
@@ -1476,6 +1483,7 @@ class StepExecutor:
                         AskUserQuestionTool(
                             completion_guard_state,
                             question_answered_observer=observe_question_answered,
+                            on_answer_received=self._prompt_time.begin_turn if self._prompt_time is not None else None,
                         )
                     )
                 elif name == "ros_deploy":

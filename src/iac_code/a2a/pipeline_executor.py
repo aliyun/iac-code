@@ -8,9 +8,11 @@ import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from enum import Enum
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -20,7 +22,7 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import ParseDict
 
 from iac_code.a2a.artifacts import artifact_store_for_session
-from iac_code.a2a.backup import SessionBackupHandoffError, backup_session_async
+from iac_code.a2a.backup import SessionBackupHandoffError, backup_session_async, run_sync_fenced
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
 from iac_code.a2a.execution_control import (
     current_execution_control,
@@ -97,7 +99,7 @@ from iac_code.pipeline.engine.user_input import (
 )
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
-from iac_code.services.first_token_timing import bind_timing
+from iac_code.services.first_token_timing import bind_timing, timed_phase, timing_phase
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary, canonical_digest
 from iac_code.services.pipeline_handoff_context import include_original_user_request, pipeline_handoff_message
 from iac_code.services.providers.aliyun import AliyunCredential
@@ -105,6 +107,7 @@ from iac_code.services.session_backup import BackupReason, SessionBackupBlocked,
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_storage import PipelineUserHistoryRecord, SessionStorage
+from iac_code.services.wiki_auto_search import current_keyword_preparation, keyword_preparation_scope
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CloudResourceSelectionEvent,
@@ -631,6 +634,7 @@ class IacCodeA2APipelineExecutor:
                 return name.strip()
         return None
 
+    @timed_phase("permission_audit_rebuild")
     async def rebuild_permission_audit_event(
         self,
         *,
@@ -684,6 +688,7 @@ class IacCodeA2APipelineExecutor:
         finally:
             await _close_runtime(runtime)
 
+    @keyword_preparation_scope
     async def execute(
         self,
         *,
@@ -705,6 +710,10 @@ class IacCodeA2APipelineExecutor:
         pipeline_input = normalize_pipeline_user_input(pipeline_input)
         prompt = pipeline_input.display_text
         session_storage = SessionStorage()
+        early = current_keyword_preparation()
+        configured_provider: Any = None
+        provider_configuration: Any = None
+        prepared_runtime: Any = None
 
         def runtime_factory(session_id: str) -> Any:
             bind_timing(context_id=context_id, task_id=task_id, iac_code_session_id=session_id)
@@ -713,6 +722,59 @@ class IacCodeA2APipelineExecutor:
                 SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
             else:
                 restore_session(cwd, session_id)
+            from iac_code.services.wiki_auto_search import enabled, input_text
+
+            eligible = (
+                early is not None
+                and enabled()
+                and not active_followup_only
+                and permission_checkpoint is None
+                and resource_selection_checkpoint is None
+                and bool(prompt)
+                and input_text(pipeline_input.content) == prompt
+                and not pipeline_input.has_images
+                and not session_storage.load(cwd, session_id)
+                and not (session_storage.session_dir(cwd, session_id) / "pipeline" / "meta.yaml").exists()
+                and _pipeline_starts_with_wiki(
+                    self._resolve_request_pipeline_name(
+                        cwd=cwd,
+                        session_id=session_id,
+                        session_storage=session_storage,
+                    )
+                )
+            )
+
+            def provider_ready(manager: Any) -> None:
+                nonlocal configured_provider, provider_configuration
+                from iac_code.providers.manager import ProviderManager
+
+                if not isinstance(manager, ProviderManager) or early is None:
+                    return
+                configured = SimpleNamespace(provider_manager=manager)
+                self._configure_provider_for_request(configured)
+                configured_provider, provider_configuration = manager, configured
+
+                def record_usage(usage: Any, attribution: Any) -> None:
+                    if prepared_runtime is not None:
+                        prepared_runtime.agent_loop._record_session_usage(usage, attribution)
+                    elif attribution is not None:
+                        from iac_code.services.session_usage import SessionUsageStore
+
+                        SessionUsageStore().append(
+                            cwd,
+                            session_id,
+                            usage,
+                            provider=attribution.logical_provider_key,
+                            model=attribution.actual_model,
+                        )
+
+                from iac_code.a2a.runtime_overrides import resolve_a2a_llm_headers
+
+                metadata = getattr(context, "metadata", None) or getattr(
+                    getattr(context, "message", None), "metadata", None
+                )
+                early.start_from_thread(manager, prompt, record_usage, headers=resolve_a2a_llm_headers(metadata) or {})
+
             return create_agent_runtime(
                 AgentFactoryOptions(
                     model=self._model,
@@ -726,6 +788,7 @@ class IacCodeA2APipelineExecutor:
                     effort_override=self._effort_override,
                     source="a2a-pipeline",
                     resource_selector_enabled=self._resource_selector_enabled,
+                    provider_ready=provider_ready if eligible else None,
                 )
             )
 
@@ -753,6 +816,8 @@ class IacCodeA2APipelineExecutor:
                     if history is not None:
                         pipeline_input = replace(pipeline_input, acceptance=PipelineInputAcceptance(history.persist))
         except asyncio.CancelledError:
+            if early is not None:
+                await early.aclose()
             # Context creation drains and closes an unfinished runtime before
             # cancellation reaches here, even if no Pipeline exists yet.
             control = current_execution_control()
@@ -788,6 +853,8 @@ class IacCodeA2APipelineExecutor:
                 return
             raise
         except Exception as exc:
+            if early is not None:
+                await early.aclose()
             await self._publish_exception_status(
                 event_queue,
                 task=task,
@@ -860,13 +927,17 @@ class IacCodeA2APipelineExecutor:
 
         lock = ctx.lock
         try:
-            await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
+            with timing_phase("session_lock_wait"):
+                await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
         except TimeoutError:
             if direct_route_gate is not None:
                 direct_route_gate.require_recovery()
             await self._fail_already_active(event_queue, task=task, task_id=task_id, context_id=context_id)
             return
 
+        preparation = contextlib.AsyncExitStack()
+        if early is not None:
+            preparation.push_async_callback(early.aclose)
         try:
             if direct_route_gate is not None:
                 # The SDK lifecycle can outlive the Pipeline's internal owner at
@@ -910,7 +981,41 @@ class IacCodeA2APipelineExecutor:
                         runtime=agent_runtime,
                         iac_code_session_id=ctx.session_id,
                     )
-                    self._configure_agent_runtime_for_request(agent_runtime)
+                    prepared_runtime = agent_runtime
+                    manager = getattr(agent_runtime, "provider_manager", None)
+                    if manager is configured_provider and provider_configuration is not None:
+                        for name, value in vars(provider_configuration).items():
+                            if name.startswith("_iac_code_a2a_"):
+                                setattr(agent_runtime, name, value)
+                        self._refresh_tools_for_request(agent_runtime)
+                    else:
+                        self._configure_agent_runtime_for_request(agent_runtime)
+                    from iac_code.providers.manager import ProviderManager
+                    from iac_code.services.wiki_auto_search import enabled, input_text, prefetch_wiki_keywords
+
+                    manager = getattr(agent_runtime, "provider_manager", None)
+                    prefetch_text = input_text(pipeline_input.content)
+                    early_started = early is not None and early.has_manager(manager)
+                    wiki_prefetch_started = early_started or (
+                        enabled()
+                        and isinstance(manager, ProviderManager)
+                        and _pipeline_starts_with_wiki(request_pipeline_name)
+                        and pipeline_runtime.pipeline is None
+                        and permission_checkpoint is None
+                        and resource_selection_checkpoint is None
+                        and bool(prompt)
+                        and prefetch_text == prompt
+                        and not pipeline_input.has_images
+                        and not session_storage.load(cwd, ctx.session_id)
+                    )
+                    if wiki_prefetch_started and not early_started:
+                        await preparation.enter_async_context(
+                            prefetch_wiki_keywords(
+                                manager,
+                                prefetch_text,
+                                agent_runtime.agent_loop._record_session_usage,
+                            )
+                        )
                     if os.environ.get("IAC_CODE_DESKTOP_RUNTIME") == "1":
                         prerequisite_metadata = await asyncio.to_thread(
                             self._inspect_pipeline_prerequisite_metadata,
@@ -929,13 +1034,19 @@ class IacCodeA2APipelineExecutor:
                             pipeline_name=request_pipeline_name,
                         )
                     else:
-                        pipeline = self._create_pipeline(
+                        create_kwargs: dict[str, Any] = dict(
                             session_id=ctx.session_id,
                             cwd=cwd,
                             runtime=agent_runtime,
                             session_storage=session_storage,
                             pipeline_name=request_pipeline_name,
                         )
+                        if wiki_prefetch_started:
+                            # Let inference progress during local preparation, and
+                            # drain the worker before allowing cancellation/recovery.
+                            pipeline = await run_sync_fenced(self._create_pipeline, **create_kwargs)
+                        else:
+                            pipeline = self._create_pipeline(**create_kwargs)
                     self._set_pipeline_telemetry_correlation(pipeline, task_id=task_id, context_id=context_id)
                     publisher = self._publisher(
                         event_queue=event_queue,
@@ -1312,6 +1423,7 @@ class IacCodeA2APipelineExecutor:
                         state=_a2a_state_from_task_state(task.state),
                     )
             except asyncio.CancelledError:
+                await preparation.aclose()
                 try:
                     task.state = TASK_STATE_CANCELED
                     control = current_execution_control()
@@ -1445,6 +1557,7 @@ class IacCodeA2APipelineExecutor:
                     state=task.state,
                 )
             except Exception as exc:
+                await preparation.aclose()
                 task_persistence_started = True
                 try:
                     await self._publish_exception_status(
@@ -1484,7 +1597,10 @@ class IacCodeA2APipelineExecutor:
                 self._task_store.mirror_context(ctx)
                 await _flush_telemetry_safely()
         finally:
-            lock.release()
+            try:
+                await preparation.aclose()
+            finally:
+                lock.release()
 
     def _request_context(self, *, session_id: str | None = None) -> contextlib.AbstractContextManager[None]:
         return a2a_request_context(
@@ -1500,6 +1616,10 @@ class IacCodeA2APipelineExecutor:
             self._configure_agent_runtime_for_request(agent_runtime)
 
     def _configure_agent_runtime_for_request(self, agent_runtime: Any) -> None:
+        self._configure_provider_for_request(agent_runtime)
+        self._refresh_tools_for_request(agent_runtime)
+
+    def _configure_provider_for_request(self, agent_runtime: Any) -> None:
         configure_runtime_model(
             agent_runtime,
             self._model,
@@ -1513,6 +1633,8 @@ class IacCodeA2APipelineExecutor:
             provider_config_override=self._provider_config_override,
             effort_override=self._effort_override,
         )
+
+    def _refresh_tools_for_request(self, agent_runtime: Any) -> None:
         refresh_runtime_cloud_tools(agent_runtime)
         set_resource_selector_enabled = getattr(agent_runtime, "set_resource_selector_enabled", None)
         if callable(set_resource_selector_enabled):
@@ -2071,6 +2193,7 @@ class IacCodeA2APipelineExecutor:
                 self._task_store.mirror_task(task)
                 self._task_store.mirror_context(ctx)
 
+    @timed_phase("pipeline_prepare")
     def _create_pipeline(
         self,
         *,
@@ -2510,6 +2633,15 @@ class IacCodeA2APipelineExecutor:
                     text = terminal_publication.text
                 else:
                     had_events = True
+                    if (
+                        isinstance(event, PipelineEvent)
+                        and event.type == PipelineEventType.USER_INPUT_REQUIRED
+                        and event.data.get("kind") in {"candidate_selection", "deployment_confirmation"}
+                    ):
+                        # Persistence can now yield before the backup hook activates routing.
+                        # Keep the source drain outside the outbound lock until publication settles;
+                        # replies must still be able to stage during its critical backup.
+                        runtime.pending_resume_boundary_in_flight = True
                     self._prepare_pending_question(runtime, event)
                     await self._publish_pending_mcp_warnings(
                         runtime=runtime,
@@ -2984,6 +3116,7 @@ class IacCodeA2APipelineExecutor:
             permission_input_registry=self._permission_input_registry,
             task_store=self._task_store,
             backup_commit_gate=_requires_backup_committed_publication,
+            first_display_namespace=id(self._task_store),
             flow_monitor=flow_monitor,
             permission_wait_cwd=cwd,
             permission_wait_session_id=session_id,
@@ -3228,9 +3361,15 @@ class IacCodeA2APipelineExecutor:
         if state == TASK_STATE_INPUT_REQUIRED:
             task_snapshot = copy.copy(task)
             task_snapshot.state = state
+            created_at = envelope.get("createdAt")
+            try:
+                publication_time = datetime.fromisoformat(str(created_at).replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError, OverflowError):
+                publication_time = task.updated_at
+            task_snapshot.updated_at = max(task.updated_at, publication_time)
             context_snapshot = copy.copy(ctx)
             context_snapshot.active_task_id = None
-            self._task_store.mirror_task(task_snapshot)
+            self._task_store.mirror_task(task_snapshot, refresh_timestamp=False)
             self._task_store.mirror_context(context_snapshot)
             return
 
@@ -4551,6 +4690,23 @@ class IacCodeA2APipelineExecutor:
 async def _empty_stream() -> AsyncIterator[Any]:
     if False:
         yield None
+
+
+def _pipeline_starts_with_wiki(name: str) -> bool:
+    from iac_code.pipeline import discover_pipelines
+    from iac_code.utils.bundled_data import load_bundled_data
+
+    directory = discover_pipelines().get(name)
+    if directory is None:
+        return False
+    try:
+        raw = load_bundled_data(directory / "pipeline.yaml", format="yaml")
+        first = raw["steps"][0]
+        # Gated entry steps can change the initial query/route. Leave those
+        # to the ordinary step-owned search rather than speculate on inference.
+        return first.get("enabled_when") is None and first.get("config", {}).get("wiki_search_on_enter") is True
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, yaml.YAMLError):
+        return False
 
 
 def _pipeline_runner_input(pipeline_input: PipelineUserInput) -> PipelineUserInput | str:
