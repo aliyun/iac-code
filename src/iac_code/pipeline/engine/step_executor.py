@@ -30,6 +30,7 @@ from iac_code.pipeline.engine.observability import PipelineObservability
 from iac_code.pipeline.engine.recovery import last_successful_tool_input, reconstruct_completion_guard_state
 from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, render_prompt
 from iac_code.pipeline.engine.types import StepConfig, StepResult, StepStatus
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.session_layout import (
     SESSION_LAYOUT_VERSION_V2,
     SessionPaths,
@@ -629,6 +630,7 @@ class StepExecutor:
 
         yield step_result
 
+    @timed_phase("pipeline_step_prepare")
     def build_agent_loop_context(
         self,
         step: StepSpec,

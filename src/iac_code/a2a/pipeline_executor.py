@@ -97,7 +97,7 @@ from iac_code.pipeline.engine.user_input import (
 )
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
-from iac_code.services.first_token_timing import bind_timing
+from iac_code.services.first_token_timing import bind_timing, timed_phase, timing_phase
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary, canonical_digest
 from iac_code.services.pipeline_handoff_context import include_original_user_request, pipeline_handoff_message
 from iac_code.services.providers.aliyun import AliyunCredential
@@ -631,6 +631,7 @@ class IacCodeA2APipelineExecutor:
                 return name.strip()
         return None
 
+    @timed_phase("permission_audit_rebuild")
     async def rebuild_permission_audit_event(
         self,
         *,
@@ -860,7 +861,8 @@ class IacCodeA2APipelineExecutor:
 
         lock = ctx.lock
         try:
-            await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
+            with timing_phase("session_lock_wait"):
+                await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
         except TimeoutError:
             if direct_route_gate is not None:
                 direct_route_gate.require_recovery()
@@ -2071,6 +2073,7 @@ class IacCodeA2APipelineExecutor:
                 self._task_store.mirror_task(task)
                 self._task_store.mirror_context(ctx)
 
+    @timed_phase("pipeline_prepare")
     def _create_pipeline(
         self,
         *,
