@@ -403,7 +403,10 @@ class AgentLoop:
             wiki_task_owner = (
                 Path(wiki_storage_root).resolve() if isinstance(wiki_storage_root, (str, os.PathLike)) else None
             )
-            self._wiki_search = WikiAutoSearch(provider_manager, task_owner=wiki_task_owner)
+            self._wiki_search = WikiAutoSearch(
+                provider_manager,
+                task_owner=(wiki_task_owner, self._cwd, self._root_session_id) if wiki_task_owner is not None else None,
+            )
         self._wiki_work = None
         self._wiki_internal_next = False
         self._wiki_extra_tokens = 0
@@ -422,7 +425,6 @@ class AgentLoop:
             not auto_trigger_skills
             and not resume_messages
             and memory_recall_service is None
-            and self._wiki_search is None
             and background_task_starter is None
             and system_prompt_refresher is None
         )
@@ -1098,6 +1100,21 @@ class AgentLoop:
                 await work.task
             except asyncio.CancelledError:
                 work.cancel()
+                # Do not publish a released checkpoint while Wiki can still
+                # write its final metadata. Its tool-free inference uses the
+                # same exact adapter/lease proof as the first answer request.
+                with suppress(asyncio.CancelledError):
+                    await work.task
+                from iac_code.services.wiki_auto_search import WikiWork
+
+                if (
+                    self._model_only_preflight
+                    and self._model_request_count == 0
+                    and type(work) is WikiWork
+                    and work.model_request_adapter
+                    and self._wiki_preparation_is_idle()
+                ):
+                    self.canceled_first_model_request = work.model_request_adapter
                 raise
             finally:
                 if pending_event is not None and not pending_event.done():
@@ -2135,6 +2152,16 @@ class AgentLoop:
         finally:
             self._reject_owned_contract_snapshot(request.snapshot_id)
 
+    def _wiki_preparation_is_idle(self) -> bool:
+        from iac_code.services.wiki_auto_search import WikiAutoSearch
+
+        # Built-in Wiki preparation only reads knowledge and writes reference
+        # metadata. Prove its writers finished instead of disabling recovery
+        # merely because Wiki is enabled. Unknown extensions remain ineligible.
+        return self._wiki_search is None or (
+            type(self._wiki_search) is WikiAutoSearch and not self._wiki_search.has_active_tasks
+        )
+
     async def _stream_provider(
         self,
         *,
@@ -2156,6 +2183,7 @@ class AgentLoop:
             if type(request_manager) is ProviderManager
             and self._model_request_count == 1
             and self._model_only_preflight
+            and self._wiki_preparation_is_idle()
             else None
         )
         try:
@@ -2195,6 +2223,7 @@ class AgentLoop:
         except asyncio.CancelledError:
             if (
                 adapter
+                and self._wiki_preparation_is_idle()
                 and ProviderManager.model_only_request_adapter(request_manager, lease, interrupted=True) == adapter
             ):
                 self.canceled_first_model_request = adapter

@@ -289,6 +289,7 @@ class WikiWork:
     snapshot: dict[str, Any]
     events: asyncio.Queue[WikiSearchEvent] = field(default_factory=asyncio.Queue)
     task: asyncio.Task[None] | None = None
+    model_request_adapter: str | None = None
 
     def emit(self, phase: str) -> None:
         self.events.put_nowait(
@@ -305,6 +306,14 @@ class WikiAutoSearch:
         self.manager = manager
         self.root = root or get_iac_code_application_root() / "knowledge"
         self._task_owner = task_owner if task_owner is not None else object()
+
+    @property
+    def has_active_tasks(self) -> bool:
+        """Include earlier queries whose final metadata write has not finished."""
+        return any(
+            owner == self._task_owner and work.task is not None and not work.task.done()
+            for (owner, _scope, _query), work in _TASKS.items()
+        )
 
     def cancel_scope(self, scope_id: str) -> None:
         for (owner, scope, _query), work in list(_TASKS.items()):
@@ -402,9 +411,16 @@ class WikiAutoSearch:
             fallback = False
             if not terms or snapshot.get("extractor_version") != EXTRACTOR_VERSION:
                 work.emit("extracting")
+                lease = None
+                adapter = None
                 try:
                     with timing_phase("wiki_keyword_extract"), auxiliary_model_timing("wiki_keyword_extract"):
+                        from iac_code.providers.manager import ProviderManager
+
                         side = self.manager.for_side_call(ProviderRequestPolicy(thinking_enabled=False, effort="low"))
+                        if type(self.manager) is ProviderManager and type(side) is ProviderManager:
+                            lease = side.begin_request(PROMPT)
+                            adapter = ProviderManager.model_only_request_adapter(side, lease)
                         response = await side.complete(
                             messages=[
                                 ProviderMessage.user(
@@ -417,6 +433,7 @@ class WikiAutoSearch:
                             system=PROMPT,
                             tools=None,
                             cache_policy="no_explicit_cache",
+                            **({"lease": lease} if lease is not None else {}),
                         )
                     settings = getattr(side, "session_start_settings", None)
                     try:
@@ -438,6 +455,14 @@ class WikiAutoSearch:
                     fallback_terms = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_.:-]{2,80}", query)))[:8]
                     weights = _group_keywords(fallback_terms)
                     terms = list(weights)
+                finally:
+                    if lease is not None:
+                        if (
+                            adapter
+                            and ProviderManager.model_only_request_adapter(side, lease, interrupted=True) == adapter
+                        ):
+                            work.model_request_adapter = adapter
+                        side.release_request(lease)
             snapshot.update(keywords=terms, keyword_weights=weights,
                             extractor_version=EXTRACTOR_VERSION, corpus_fingerprint=fingerprint)
             if not terms:
