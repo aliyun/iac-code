@@ -2,6 +2,8 @@
 
 import copy
 import json
+import os
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -21,9 +23,11 @@ from scripts.ci.run_ecs_retention_a2a import (
     ("direct", True), ("wiki", True), ("tool-error", False), ("question-tool", False),
     ("question-event", False), ("candidates", False), ("missing-complete", False),
     ("missing-prompt", False), ("not-rejected", False),
+    ("runner-error", None),
 ])
+@pytest.mark.parametrize("prior_environment", [None, "", "existing"])
 async def test_awareness_runner_allows_real_wiki_readers_without_weakening_handoff(
-    monkeypatch, tmp_path, variant, expected,
+    monkeypatch, tmp_path, variant, expected, prior_environment,
 ):
     from iac_code.tools.base import ToolContext
     from iac_code.tools.glob import GlobTool
@@ -39,6 +43,13 @@ async def test_awareness_runner_allows_real_wiki_readers_without_weakening_hando
     )
     from scripts.ci import run_ros_agent_awareness as runner
 
+    environment_names = ("IAC_CODE_CONFIG_BACKUP_DIR", "IAC_CODE_ROS_AGENT_AWARENESS")
+    for name in environment_names:
+        if prior_environment is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, prior_environment)
+    previous_environment = {name: os.environ.get(name) for name in environment_names}
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setattr("iac_code.config.get_provider_config", lambda _: {})
     monkeypatch.setattr("iac_code.config.load_credentials", lambda _: {})
@@ -52,6 +63,8 @@ async def test_awareness_runner_allows_real_wiki_readers_without_weakening_hando
 
     class Flow:
         def __init__(self, **kwargs):
+            if variant == "runner-error":
+                raise RuntimeError("fixture runner failure")
             self.registry = kwargs["base_tool_registry"]
             assert {t.name for t in self.registry.list_tools()} == {"read_file", "grep", "glob"}
             for name, cls in (("read_file", ReadFileTool), ("grep", GrepTool), ("glob", GlobTool)):
@@ -89,9 +102,17 @@ async def test_awareness_runner_allows_real_wiki_readers_without_weakening_hando
             pass
 
     monkeypatch.setattr("iac_code.pipeline.engine.pipeline_runner.PipelineRunner", Flow)
-    report = await runner.run(SimpleNamespace(
-        scenario="billing-explicit", run_dir=tmp_path, provider="fixture", model="fixture",
-    ))
+    expect_error = pytest.raises(RuntimeError, match="fixture runner failure") if expected is None else nullcontext()
+    with expect_error, monkeypatch.context() as environment:
+        for name in environment_names:
+            # setenv also registers cleanup when the runner later writes an initially absent key directly.
+            environment.setenv(name, os.environ.get(name, ""))
+        report = await runner.run(SimpleNamespace(
+            scenario="billing-explicit", run_dir=tmp_path, provider="fixture", model="fixture",
+        ))
+    assert {name: os.environ.get(name) for name in environment_names} == previous_environment
+    if expected is None:
+        return
     assert report["status"] == ("passed" if expected else "failed")
     assert report["checks"]["no model or tool errors"] is (variant != "tool-error")
     if variant in {"wiki", "tool-error"}:

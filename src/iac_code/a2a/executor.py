@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 
 import httpx
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -87,6 +87,7 @@ from iac_code.a2a.pipeline_snapshot import (
     snapshot_needs_backup_commit_repair,
 )
 from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
+from iac_code.a2a.progress import ProgressEventQueue, progress_enabled
 from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.a2a.request_mode import resolve_request_run_mode
 from iac_code.a2a.request_scoped_active_task import (
@@ -163,6 +164,7 @@ from iac_code.services.permissions.audit import emit_permission_boundary_audit
 from iac_code.services.pipeline_handoff_context import pipeline_handoff_message
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
 from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnavailableError
+from iac_code.services.request_progress import observe_progress
 from iac_code.services.session_backup import (
     SESSION_BACKUP_NOT_READY_CODE,
     BackupReason,
@@ -1741,7 +1743,50 @@ class IacCodeA2AExecutor(AgentExecutor):
             expected_natural_handoff_control=existing,
         )
 
+    async def _attach_resident_permission_response_task(
+        self, control: ExecutionController, task: asyncio.Task[Any]
+    ) -> bool:
+        """Attach a hot reply, or leave a suspended reply to checkpoint-validated recovery."""
+        while True:
+            try:
+                await control.attach_task(task, mark_working=True, advance_turn=False)
+                return True
+            except ExecutionControlConflictError:
+                service = self._execution_control_service
+                if (
+                    service is None
+                    or service.get_for_context(control.context_id) is not control
+                    or not control.permission_handoff_requires_admission()
+                ):
+                    raise
+                try:
+                    await control.wait_for_permission_suspension_settlement()
+                except ExecutionControlConflictError as exc:
+                    raise InputResponseExecutionControlConflictError(str(exc), reason="HANDOFF_NOT_COMMITTED") from exc
+                if service.get_for_context(control.context_id) is not control:
+                    raise
+                if control.permission_handoff_requires_admission():
+                    return False
+                # A grace-period cleanup can settle without suspending. Retry
+                # attachment so its live continuation stays execution-bound.
+
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        message = getattr(context, "message", None)
+        if (
+            not progress_enabled()
+            or parse_permission_response(message) is not None
+            or parse_resource_selection_response(message) is not None
+        ):
+            await self._execute_request(context, event_queue)
+            return
+        progress = ProgressEventQueue(event_queue)
+        try:
+            with observe_progress(progress.on_stage):
+                await self._execute_request(context, cast(EventQueue, progress))
+        finally:
+            await progress.finish_progress()
+
+    async def _execute_request(self, context: RequestContext, event_queue: EventQueue) -> None:
         execution_scope = bind_execution_control(None)
         participant_scope = clear_execution_participants()
         metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
@@ -1808,6 +1853,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         and resource_selection_response is None
                         and existing.task_id == context.task_id == input_task_id
                     )
+                    attached_existing = True
                     try:
                         replacement = (
                             await self._begin_proven_normal_handoff_input(
@@ -1850,7 +1896,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 # Permission replies continue the active turn;
                                 # its original stream still owns completion.
                                 if permission_response is not None:
-                                    await existing.attach_task(current_task, mark_working=True, advance_turn=False)
+                                    attached_existing = await self._attach_resident_permission_response_task(
+                                        existing, current_task
+                                    )
                                 else:
                                     await existing.attach_task(current_task, mark_working=True)
                             except ExecutionControlConflictError:
@@ -1874,8 +1922,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 existing = replacement
                     except ExecutionControlConflictError as exc:
                         raise InputResponseExecutionControlConflictError(str(exc)) from exc
-                    await existing.mark_execution_started()
-                    bind_execution_control(existing)
+                    if attached_existing:
+                        await existing.mark_execution_started()
+                        bind_execution_control(existing)
             requested_llm_headers = resolve_a2a_llm_headers(metadata)
             with contextlib.ExitStack() as request_scope:
                 request_scope.enter_context(a2a_request_context(telemetry_channel=telemetry_channel))
