@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -9,18 +10,23 @@ import shutil
 import stat
 import sys
 import tempfile
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Iterator, TextIO, cast
 
 from iac_code.i18n import _
+from iac_code.services.first_token_timing import current_timing, timing_phase
 from iac_code.utils.path_locks import PathLockRegistry
 
 logger = logging.getLogger(__name__)
 _PATH_LOCKS = PathLockRegistry()
 _FILE_OPEN = os.open
+_SNAPSHOT_WRITES: OrderedDict[Path, tuple[bytes, tuple[int, ...]]] = OrderedDict()
+_SNAPSHOT_GUARD = threading.Lock()
 
 
 def _path_lock(path: Path):
@@ -282,6 +288,25 @@ def fsync_parent_dir(path: Path) -> None:
         os.close(fd)
 
 
+def _state_file_kind(path: Path) -> str:
+    parts = set(path.parts)
+    if "execution-control" in parts:
+        return "execution_control"
+    if path.name in {".backup-state.json", "boundary.json"} or parts & {"session-backup-coordinator", ".pending"}:
+        return "backup"
+    if parts & {"permission-waits", "permission-checkpoints"}:
+        return "permission"
+    if path.name == "task.json" or path.parent.name == "tasks":
+        return "task"
+    if path.name == "context.json" or path.parent.name == "contexts":
+        return "context"
+    if path.name in {"snapshot.json", "a2a-snapshot.json"} and "a2a" in parts:
+        return "pipeline_snapshot"
+    if path.name == "metadata.json":
+        return "session_metadata"
+    return "other"
+
+
 def atomic_write_bytes(
     path: str | Path,
     content: bytes,
@@ -289,29 +314,71 @@ def atomic_write_bytes(
     durable: bool = True,
     replace_attempts: int = 3,
     _safe_replace: Callable[[str | Path, str | Path], None] | None = None,
+    _published_signature: list[tuple[int, ...]] | None = None,
 ) -> None:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            if durable:
-                os.fsync(handle.fileno())
-        if _safe_replace is None:
-            safe_replace(tmp_path, target, attempts=replace_attempts)
-        else:
-            _safe_replace(tmp_path, target)
-        if durable:
-            fsync_parent_dir(target)
-    except Exception:
+    kind = _state_file_kind(Path(path))
+    timing = current_timing()
+    started = time.perf_counter_ns() if timing is not None and timing.active else None
+    fsync_ms = 0.0
+    succeeded = False
+    with timing_phase("state_file_write", file_kind=kind):
         try:
-            tmp_path.unlink()
-        except FileNotFoundError:
-            pass
-        raise
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+            tmp_path = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(content)
+                    handle.flush()
+                    if durable:
+                        sync_started = time.perf_counter_ns() if started is not None else None
+                        try:
+                            os.fsync(handle.fileno())
+                        finally:
+                            if sync_started is not None:
+                                fsync_ms += (time.perf_counter_ns() - sync_started) / 1_000_000
+                    written = os.fstat(handle.fileno()) if _published_signature is not None else None
+                if _safe_replace is None:
+                    safe_replace(tmp_path, target, attempts=replace_attempts)
+                else:
+                    _safe_replace(tmp_path, target)
+                if durable:
+                    sync_started = time.perf_counter_ns() if started is not None else None
+                    try:
+                        fsync_parent_dir(target)
+                    finally:
+                        if sync_started is not None:
+                            fsync_ms += (time.perf_counter_ns() - sync_started) / 1_000_000
+                if written is not None and _published_signature is not None:
+                    try:
+                        published = target.lstat()
+
+                        # Atomic concurrent replacements have a different inode. An
+                        # edited/deleted file must not inherit this write's cache proof.
+                        def identity(info: os.stat_result) -> tuple[int, ...]:
+                            return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+                        if identity(published) == identity(written):
+                            _published_signature.append(_snapshot_signature(published))
+                    except OSError:
+                        pass
+            except Exception:
+                try:
+                    tmp_path.unlink()
+                except FileNotFoundError:
+                    pass
+                raise
+
+            succeeded = True
+        finally:
+            if timing is not None and started is not None:
+                timing.record_state_io(
+                    kind,
+                    elapsed_ms=(time.perf_counter_ns() - started) / 1_000_000,
+                    fsync_ms=fsync_ms,
+                    succeeded=succeeded,
+                )
 
 
 def atomic_write_text(
@@ -322,6 +389,7 @@ def atomic_write_text(
     durable: bool = True,
     replace_attempts: int = 3,
     _safe_replace: Callable[[str | Path, str | Path], None] | None = None,
+    _published_signature: list[tuple[int, ...]] | None = None,
 ) -> None:
     atomic_write_bytes(
         path,
@@ -329,6 +397,7 @@ def atomic_write_text(
         durable=durable,
         replace_attempts=replace_attempts,
         _safe_replace=_safe_replace,
+        _published_signature=_published_signature,
     )
 
 
@@ -341,6 +410,56 @@ def atomic_write_json(
 ) -> None:
     content = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
     atomic_write_text(path, content, durable=durable, replace_attempts=replace_attempts)
+
+
+def _snapshot_signature(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        getattr(info, "st_file_attributes", 0),
+    )
+
+
+def _remember_snapshot(target: Path, digest: bytes, signature: tuple[int, ...]) -> None:
+    with _SNAPSHOT_GUARD:
+        _SNAPSHOT_WRITES[target] = (digest, signature)
+        while len(_SNAPSHOT_WRITES) > 256:
+            _SNAPSHOT_WRITES.popitem(last=False)
+
+
+def write_snapshot_text(path: str | Path, content: str) -> None:
+    """Skip only an unchanged file this process has already durably written.
+
+    For task/context mirrors, not execution fences, permissions or commit markers.
+    Replacements, external edits, deletion and process restarts force a fresh write.
+    Retain digests and file identities only, bounded independently of session size.
+    """
+    target = Path(path).absolute()
+    digest = hashlib.sha256(content.encode("utf-8")).digest()
+    with _path_lock(target):
+        with _SNAPSHOT_GUARD:
+            previous = _SNAPSHOT_WRITES.pop(target, None)
+        if previous is not None and previous[0] == digest:
+            try:
+                info = target.lstat()
+                signature = _snapshot_signature(info) if stat.S_ISREG(info.st_mode) else None
+            except OSError:
+                signature = None
+            if signature is not None and previous[1] == signature:
+                _remember_snapshot(target, digest, signature)
+                if timing := current_timing():
+                    timing.record_state_io(_state_file_kind(target), skipped=True)
+                return
+        published: list[tuple[int, ...]] = []
+        atomic_write_text(target, content, durable=True, _published_signature=published)
+        if not published:
+            return
+        _remember_snapshot(target, digest, published[0])
 
 
 @contextmanager

@@ -25,9 +25,11 @@ class AskUserQuestionTool(Tool):
         completion_guard_state: dict[str, Any] | None = None,
         *,
         question_answered_observer: QuestionAnsweredObserver | None = None,
+        on_answer_received: Callable[[], None] | None = None,
     ) -> None:
         self._completion_guard_state = completion_guard_state
         self._question_answered_observer = question_answered_observer
+        self._on_answer_received = on_answer_received
 
     @property
     def name(self) -> str:
@@ -113,6 +115,8 @@ class AskUserQuestionTool(Tool):
             raise
         if answer is None:
             return ToolResult.error(_("User cancelled ask_user_question."))
+        if self._on_answer_received is not None:
+            self._on_answer_received()
 
         if answer.get("selected_id") and answer.get("free_text"):
             answer_type = "option_and_free_text"

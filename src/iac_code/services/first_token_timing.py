@@ -79,6 +79,7 @@ _FIELDS = frozenset(
         "first_event_type",
         "first_content_type",
         "first_model_content_type",
+        "file_kind",
     }
 )
 _current: contextvars.ContextVar[RequestTiming | None] = contextvars.ContextVar("iac_first_token_timing", default=None)
@@ -119,6 +120,7 @@ class RequestTiming:
         self.identity["request_id_source"] = "upstream" if safe_id(request_id) else "local"
         self.milestones: dict[str, float] = {}
         self.phase_totals_ms: dict[str, float] = {}
+        self.state_io_totals: dict[str, dict[str, int | float]] = {}
         self.timeline: list[dict[str, Any]] = []
         self.timeline_events_dropped = 0
         self._open_phases: dict[str, tuple[str, int]] = {}
@@ -187,6 +189,33 @@ class RequestTiming:
                     "first_model_content_summary", "first_model_content_received", elapsed, now, self._open_phases
                 )
                 self._finish_new_session_observation()
+
+    def record_state_io(
+        self, kind: str, *, elapsed_ms: float = 0, fsync_ms: float = 0, succeeded: bool = True, skipped: bool = False
+    ) -> None:
+        # Fixed categories only; never retain paths, data, or per-file cardinality.
+        if kind not in {
+            "task",
+            "context",
+            "execution_control",
+            "pipeline_snapshot",
+            "backup",
+            "permission",
+            "session_metadata",
+            "other",
+        }:
+            kind = "other"
+        with self._lock:
+            if not self.active:
+                return
+            totals = self.state_io_totals.setdefault(
+                kind, {"writes": 0, "skipped": 0, "failed": 0, "elapsed_ms": 0.0, "fsync_ms": 0.0}
+            )
+            totals["skipped" if skipped else "writes"] += 1
+            if not succeeded:
+                totals["failed"] += 1
+            totals["elapsed_ms"] = round(totals["elapsed_ms"] + elapsed_ms, 3)
+            totals["fsync_ms"] = round(totals["fsync_ms"] + fsync_ms, 3)
 
     def _write(self, fields: dict[str, Any]) -> None:
         try:
@@ -325,6 +354,7 @@ class RequestTiming:
                 "first_text_observation_complete": observation_complete,
                 "milestones_ms": dict(self.milestones),
                 "phase_totals_ms": dict(self.phase_totals_ms),
+                "state_io_totals": {kind: dict(totals) for kind, totals in self.state_io_totals.items()},
                 "timeline": list(self.timeline),
                 "timeline_events_dropped": self.timeline_events_dropped,
                 "in_progress_phases": [

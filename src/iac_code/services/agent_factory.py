@@ -5,12 +5,12 @@ import contextlib
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from iac_code.services.first_token_timing import timed_phase
+from iac_code.services.first_token_timing import timed_phase, timing_phase
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,7 @@ class AgentFactoryOptions:
     provider_config_override: dict[str, Any] | None = field(default=None, repr=False)
     source: str | None = None
     resource_selector_enabled: bool = False
+    provider_ready: Callable[[Any], None] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -131,36 +132,17 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
 
 
 def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) -> AgentRuntime:
-    from loguru import logger
+    provider_manager, model = _prepare_provider(options)
+    if options.provider_ready is not None:
+        options.provider_ready(provider_manager)
+    with timing_phase("runtime_tools_prepare"):
+        return _create_runtime_tools(options, aliyun_services, provider_manager, model)
 
-    from iac_code.agent.agent_loop import AgentLoop
-    from iac_code.agent.agent_tool import AgentTool
-    from iac_code.agent.system_prompt import build_system_prompt
-    from iac_code.commands import create_default_registry
-    from iac_code.commands.registry import PromptCommand
-    from iac_code.config import get_config_dir, load_credentials
-    from iac_code.memory.memory_manager import MemoryManager
-    from iac_code.memory.memory_tools import ReadMemoryTool, WriteMemoryTool
-    from iac_code.memory.project_memory import ProjectMemoryRuntime
-    from iac_code.memory.recall import MemoryRecallService
+
+@timed_phase("runtime_provider_prepare")
+def _prepare_provider(options: AgentFactoryOptions) -> tuple[Any, str]:
+    from iac_code.config import load_credentials
     from iac_code.providers.manager import ProviderManager
-    from iac_code.services.cloud_credentials import CloudCredentials
-    from iac_code.services.session_storage import SessionStorage
-    from iac_code.skills.bundled import init_bundled_skills
-    from iac_code.skills.discovery import discover_all_skills
-    from iac_code.skills.listing import build_skill_listing
-    from iac_code.skills.management import build_skill_management_state
-    from iac_code.skills.settings import load_disabled_skills
-    from iac_code.skills.skill_tool import SkillTool
-    from iac_code.tasks.notification_queue import NotificationQueue
-    from iac_code.tasks.task_state import TaskManager
-    from iac_code.tasks.task_tools import TaskGetTool, TaskListTool, TaskStopTool
-    from iac_code.tools.base import ToolRegistry
-    from iac_code.tools.cloud.registry import register_cloud_tools
-
-    cwd = options.cwd or os.getcwd()
-    session_id = options.session_id or str(uuid.uuid4())[:8]
-    runtime_current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     credentials = {} if options.provider_config_frozen else load_credentials(model=options.model)
 
@@ -219,7 +201,44 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
     }
     if options.provider_config_override is not None:
         provider_manager_options["provider_config_override"] = options.provider_config_override
-    provider_manager = ProviderManager(**provider_manager_options)
+    return ProviderManager(**provider_manager_options), model
+
+
+def _create_runtime_tools(
+    options: AgentFactoryOptions,
+    aliyun_services: Any,
+    provider_manager: Any,
+    model: str,
+) -> AgentRuntime:
+    from loguru import logger
+
+    from iac_code.agent.agent_loop import AgentLoop
+    from iac_code.agent.agent_tool import AgentTool
+    from iac_code.agent.system_prompt import build_system_prompt
+    from iac_code.commands import create_default_registry
+    from iac_code.commands.registry import PromptCommand
+    from iac_code.config import get_config_dir
+    from iac_code.memory.memory_manager import MemoryManager
+    from iac_code.memory.memory_tools import ReadMemoryTool, WriteMemoryTool
+    from iac_code.memory.project_memory import ProjectMemoryRuntime
+    from iac_code.memory.recall import MemoryRecallService
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.services.session_prompt_time import SessionPromptTime
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.skills.bundled import init_bundled_skills
+    from iac_code.skills.discovery import discover_all_skills
+    from iac_code.skills.listing import build_skill_listing
+    from iac_code.skills.management import build_skill_management_state
+    from iac_code.skills.settings import load_disabled_skills
+    from iac_code.skills.skill_tool import SkillTool
+    from iac_code.tasks.notification_queue import NotificationQueue
+    from iac_code.tasks.task_state import TaskManager
+    from iac_code.tasks.task_tools import TaskGetTool, TaskListTool, TaskStopTool
+    from iac_code.tools.base import ToolRegistry
+    from iac_code.tools.cloud.registry import register_cloud_tools
+
+    cwd = options.cwd or os.getcwd()
+    session_id = options.session_id or str(uuid.uuid4())[:8]
 
     def aliyun_default_region_provider() -> str:
         from iac_code.services.providers.aliyun import DEFAULT_REGION
@@ -271,6 +290,7 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
 
     session_storage = SessionStorage()
     session_dir = _prepare_session_dir_for_artifacts(session_storage, cwd, session_id)
+    prompt_time = SessionPromptTime(session_storage, cwd, session_id)
 
     memory_runtime = ProjectMemoryRuntime(cwd)
     memory_manager = memory_runtime.memory_manager
@@ -302,7 +322,7 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
         return build_system_prompt(
             cwd=cwd,
             memory_context=memory_runtime.build_memory_context(),
-            current_time=runtime_current_time,
+            current_time=prompt_time.value,
             provider_display=runtime_provider_display(),
             model=runtime_model(),
         )
@@ -473,7 +493,7 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
                 memory_context=memory_runtime.build_memory_context(),
                 skill_listing=skill_listing_holder["value"],
                 mcp_server_instructions=mcp_server_instructions_holder["value"],
-                current_time=runtime_current_time,
+                current_time=prompt_time.value,
                 provider_display=runtime_provider_display(),
                 model=runtime_model(),
             )
@@ -491,6 +511,7 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
             auto_trigger_skills=command_registry.get_model_invocable_skills(),
             memory_recall_service=memory_recall_service,
             system_prompt_refresher=build_agent_system_prompt,
+            prompt_time=prompt_time,
             background_task_starter=lambda: _start_mcp_background_tasks(mcp_manager),
             result_storage_dir=_result_storage_dir_for_session(session_dir),
         )

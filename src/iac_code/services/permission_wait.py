@@ -18,6 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.providers.aliyun_identity import (
     AliyunCallerIdentity,
     AliyunCallerIdentityResolver,
@@ -358,6 +359,7 @@ def _principal_ref(identity: AliyunCallerIdentity) -> str:
     return "aliyun:" + canonical_digest(identity.canonical_value())
 
 
+@timed_phase("permission_identity_check")
 async def resolve_permission_execution_identity(
     *,
     tool_name: str,

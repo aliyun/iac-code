@@ -33,6 +33,7 @@ class SessionMetadata:
     updated_at: str | None = None
     schema_version: int = SESSION_METADATA_SCHEMA_VERSION
     layout_version: int | None = None
+    prompt_time: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SessionMetadata | None:
@@ -52,6 +53,7 @@ class SessionMetadata:
             updated_at=_string_or_none(data.get("updated_at")),
             schema_version=schema_version if type(schema_version) is int else SESSION_METADATA_SCHEMA_VERSION,
             layout_version=layout_version if type(layout_version) is int else None,
+            prompt_time=_string_or_none(data.get("prompt_time")),
         )
 
     def to_dict(self) -> dict[str, Any]:

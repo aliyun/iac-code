@@ -19,6 +19,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ from iac_code.tools.path_safety import (
 )
 from iac_code.types.permissions import ToolPermissionContext
 from iac_code.types.stream_events import WikiSearchEvent
+from iac_code.utils.async_lifecycle import await_task_to_completion
 
 METADATA_KEY = "wiki_auto_search"
 SCHEMA_VERSION = 1
@@ -357,6 +359,180 @@ class WikiWork:
             self.task.cancel()
 
 
+@dataclass
+class _KeywordResult:
+    response: Any
+    policy: dict[str, Any]
+
+
+@dataclass
+class _KeywordPrefetch:
+    manager: Any
+    query: str
+    task: asyncio.Task[_KeywordResult]
+    work: WikiWork
+    started: float = field(default_factory=time.monotonic)
+    used: bool = False
+    closed: bool = False
+
+
+_KEYWORD_PREFETCH: ContextVar[_KeywordPrefetch | KeywordPreparation | None] = ContextVar(
+    "wiki_keyword_prefetch", default=None
+)
+
+
+async def _extract_keywords(manager: Any, query: str, recent: list[str], work: WikiWork) -> _KeywordResult:
+    from iac_code.providers.manager import ProviderManager
+
+    lease = None
+    adapter = None
+    try:
+        with timing_phase("wiki_keyword_extract"), auxiliary_model_timing("wiki_keyword_extract"):
+            side = manager.for_side_call(ProviderRequestPolicy(thinking_enabled=False, effort="low"))
+            if type(manager) is ProviderManager and type(side) is ProviderManager:
+                lease = side.begin_request(PROMPT)
+                adapter = ProviderManager.model_only_request_adapter(side, lease)
+            response = await side.complete(
+                messages=[
+                    ProviderMessage.user(
+                        json.dumps(
+                            extraction_input(query, recent, TokenCounter(side.get_model_name())),
+                            ensure_ascii=False,
+                        )
+                    )
+                ],
+                system=PROMPT,
+                tools=None,
+                cache_policy="no_explicit_cache",
+                **({"lease": lease} if lease is not None else {}),
+            )
+        policy = {}
+        settings = getattr(side, "session_start_settings", None)
+        try:
+            if callable(settings):
+                resolved = settings()
+                policy = {key: resolved.get(key) for key in ("model", "effort", "thinking_enabled", "thinking_budget")}
+        except Exception:
+            pass
+        return _KeywordResult(response, policy)
+    finally:
+        if lease is not None:
+            if adapter and ProviderManager.model_only_request_adapter(side, lease, interrupted=True) == adapter:
+                work.model_request_adapter = adapter
+            side.release_request(lease)
+
+
+class KeywordPreparation:
+    """Own a worker-started inference task on the request event loop."""
+
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+        self.prefetch: _KeywordPrefetch | None = None
+        self.record_usage: Callable[..., None] = lambda *args: None
+        self.closed = False
+
+    def start_from_thread(
+        self,
+        manager: Any,
+        query: str,
+        record_usage: Callable[..., None],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        # An early request precedes the owner's late header activation. Scope its validated
+        # snapshot inside the child task, never enter the owner's ExitStack from another context.
+        request_headers = dict(headers) if headers is not None else None
+
+        async def extract(work: WikiWork):
+            if request_headers is None:
+                return await _extract_keywords(manager, query, [], work)
+            from iac_code.providers.request_headers import use_provider_request_headers
+
+            with use_provider_request_headers(request_headers):
+                return await _extract_keywords(manager, query, [], work)
+
+        def start() -> None:
+            if self.closed or self.prefetch is not None:
+                return
+            work = WikiWork({})
+            self.record_usage = record_usage
+            self.prefetch = _KeywordPrefetch(
+                manager,
+                query,
+                asyncio.create_task(extract(work)),
+                work,
+            )
+
+        self.loop.call_soon_threadsafe(start)
+
+    def has_manager(self, manager: Any) -> bool:
+        return self.prefetch is not None and self.prefetch.manager is manager
+
+    async def aclose(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if self.prefetch is not None:
+            await _close_keyword_prefetch(self.prefetch, self.record_usage)
+
+
+def keyword_preparation_scope(function):
+    @wraps(function)
+    async def scoped(*args, **kwargs):
+        preparation = KeywordPreparation()
+        token = _KEYWORD_PREFETCH.set(preparation)
+        try:
+            return await function(*args, **kwargs)
+        finally:
+            _KEYWORD_PREFETCH.reset(token)
+            await preparation.aclose()
+
+    return scoped
+
+
+def current_keyword_preparation() -> KeywordPreparation | None:
+    value = _KEYWORD_PREFETCH.get()
+    return value if isinstance(value, KeywordPreparation) else None
+
+
+async def _close_keyword_prefetch(prefetch: _KeywordPrefetch, record_usage: Callable[..., None]) -> None:
+    prefetch.closed = True
+    if not prefetch.used and not prefetch.task.done():
+        prefetch.task.cancel()
+
+    async def settle():
+        try:
+            return await prefetch.task
+        except (asyncio.CancelledError, Exception):
+            return None
+
+    result = await await_task_to_completion(asyncio.create_task(settle()))
+    if result is not None and not prefetch.used:
+        try:
+            record_usage(result.response.usage, result.response.usage_attribution)
+        except Exception:
+            pass
+
+
+@asynccontextmanager
+async def prefetch_wiki_keywords(manager: Any, query: str, record_usage: Callable[..., None]):
+    """Request-owned inference only; the step still searches with its own read permissions.
+
+    Exact input/provider matching prevents reuse across users, follow-ups and step seeds.
+    The owner drains cancellation before publishing a recoverable execution boundary.
+    """
+    work = WikiWork({})
+    prefetch = _KeywordPrefetch(manager, query, asyncio.create_task(_extract_keywords(manager, query, [], work)), work)
+    token = _KEYWORD_PREFETCH.set(prefetch)
+    try:
+        # Dispatch inference before synchronous Pipeline preparation begins.
+        await asyncio.sleep(0)
+        yield
+    finally:
+        _KEYWORD_PREFETCH.reset(token)
+        await _close_keyword_prefetch(prefetch, record_usage)
+
+
 class WikiAutoSearch:
     def __init__(self, manager: Any, *, root: Path | None = None, task_owner: object | None = None):
         self.manager = manager
@@ -467,41 +643,33 @@ class WikiAutoSearch:
             fallback = False
             if not terms or snapshot.get("extractor_version") != EXTRACTOR_VERSION:
                 work.emit("extracting")
-                lease = None
-                adapter = None
                 try:
-                    with timing_phase("wiki_keyword_extract"), auxiliary_model_timing("wiki_keyword_extract"):
-                        from iac_code.providers.manager import ProviderManager
-
-                        side = self.manager.for_side_call(ProviderRequestPolicy(thinking_enabled=False, effort="low"))
-                        if type(self.manager) is ProviderManager and type(side) is ProviderManager:
-                            lease = side.begin_request(PROMPT)
-                            adapter = ProviderManager.model_only_request_adapter(side, lease)
-                        response = await side.complete(
-                            messages=[
-                                ProviderMessage.user(
-                                    json.dumps(
-                                        extraction_input(query, recent, TokenCounter(side.get_model_name())),
-                                        ensure_ascii=False,
-                                    )
-                                )
-                            ],
-                            system=PROMPT,
-                            tools=None,
-                            cache_policy="no_explicit_cache",
-                            **({"lease": lease} if lease is not None else {}),
-                        )
-                    settings = getattr(side, "session_start_settings", None)
+                    prefetch = _KEYWORD_PREFETCH.get()
+                    if isinstance(prefetch, KeywordPreparation):
+                        prefetch = prefetch.prefetch
+                    if (
+                        prefetch is not None
+                        and not prefetch.used
+                        and not prefetch.closed
+                        and prefetch.manager is self.manager
+                        and prefetch.query == query
+                        and not recent
+                    ):
+                        prefetch.used = True
+                        started = min(started, prefetch.started)
+                        try:
+                            extracted = await prefetch.task
+                        finally:
+                            work.model_request_adapter = prefetch.work.model_request_adapter
+                    else:
+                        extracted = await _extract_keywords(self.manager, query, recent, work)
+                    if extracted.policy:
+                        snapshot["request_policy"] = extracted.policy
+                    response = extracted.response
                     try:
-                        if callable(settings):
-                            resolved = settings()
-                            snapshot["request_policy"] = {
-                                key: resolved.get(key)
-                                for key in ("model", "effort", "thinking_enabled", "thinking_budget")
-                            }
                         record_usage(response.usage, response.usage_attribution)
                     except Exception:
-                        pass  # Losing auxiliary accounting must not discard otherwise valid keywords.
+                        pass
                     weights = parse_keyword_weights(response.text)
                     terms = list(weights)
                 except asyncio.CancelledError:
@@ -511,14 +679,6 @@ class WikiAutoSearch:
                     fallback_terms = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_.:-]{2,80}", query)))[:8]
                     weights = _group_keywords(fallback_terms)
                     terms = list(weights)
-                finally:
-                    if lease is not None:
-                        if (
-                            adapter
-                            and ProviderManager.model_only_request_adapter(side, lease, interrupted=True) == adapter
-                        ):
-                            work.model_request_adapter = adapter
-                        side.release_request(lease)
             snapshot.update(
                 keywords=terms,
                 keyword_weights=weights,

@@ -408,3 +408,43 @@ def test_parent_directory_fsync_is_best_effort(tmp_path: Path, monkeypatch: pyte
     atomic_write_text(path, "ok", durable=True)
 
     assert path.read_text(encoding="utf-8") == "ok"
+
+
+def test_state_write_timing_aggregates_categories_fsync_and_skips_without_paths(tmp_path, caplog):
+    import json
+    import logging
+
+    from iac_code.services.first_token_timing import RequestTiming, use_request_timing
+    from iac_code.utils.state_io import write_snapshot_text
+
+    timing = RequestTiming("fixture-request", protocol="a2a", request_kind="a2a")
+    caplog.set_level(logging.INFO, logger="iac_code.services.first_token_timing")
+    private_path = tmp_path / "private-project-name" / "a2a" / "context.json"
+    with use_request_timing(timing):
+        write_snapshot_text(private_path, "private fixture contents")
+        write_snapshot_text(private_path, "private fixture contents")
+        timing.summary("done")
+    totals = timing.state_io_totals["context"]
+    assert totals["writes"] == 1 and totals["skipped"] == 1 and totals["failed"] == 0
+    assert totals["elapsed_ms"] >= totals["fsync_ms"] >= 0
+    messages = [record.message for record in caplog.records if record.name == "iac_code.services.first_token_timing"]
+    assert len(messages) == 1
+    assert json.loads(messages[0])["state_io_totals"]["context"] == totals
+    assert "private-project-name" not in messages[0] and "private fixture contents" not in messages[0]
+
+
+def test_state_write_timing_records_failed_commit_without_successful_cache(tmp_path, monkeypatch):
+    from iac_code.services.first_token_timing import RequestTiming, use_request_timing
+    from iac_code.utils import state_io
+
+    timing = RequestTiming(protocol="a2a")
+
+    def fail(*args, **kwargs):
+        raise OSError("fixture replace failure")
+
+    monkeypatch.setattr(state_io, "safe_replace", fail)
+    with use_request_timing(timing), pytest.raises(OSError, match="fixture replace failure"):
+        state_io.write_snapshot_text(tmp_path / "a2a" / "task.json", "fixture")
+    assert timing.state_io_totals["task"]["writes"] == 1
+    assert timing.state_io_totals["task"]["failed"] == 1
+    assert not (tmp_path / "a2a" / "task.json").exists()

@@ -64,6 +64,7 @@ Consultez [Identifiants Alibaba Cloud](./alibaba-cloud-credentials.md) pour plus
 | `IAC_CODE_TENANT_ID` | Identifiant de locataire pour la télémétrie ; préfixé automatiquement avec `iac_tenant_` si ce n'est pas déjà le cas |
 | `IAC_CODE_GIT_BASH_PATH` | Chemin vers `bash.exe` de Git Bash sous Windows lorsqu'il n'est pas dans le PATH |
 | `IAC_CODE_A2A_PUSH_KEYRING` | Trousseau de clés secret push A2A chiffré géré par l'environnement (format JSON) |
+| `IAC_CODE_A2A_STARTUP_WARMUP` | A2A Server uniquement. Précharge les modules SDK des modèles, les compétences intégrées et les règles statiques avant d’accepter les requêtes ; activé par défaut. Utilisez `0`, `false`, `no`, `off` ou `disabled` pour le désactiver. Ne crée aucune session et n’appelle aucune API cloud. |
 | `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | A2A Server uniquement. Active l'annonce et l'enregistrement du sélecteur de ressources avec `1`, `true`, `yes` ou `on` (sans distinction de casse). Une valeur absente, vide ou différente le désactive ; désactivé par défaut |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Point de terminaison OpenTelemetry standard ; lorsqu'il est défini, active l'export OTLP |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Capturer le contenu des messages/outils GenAI sur les spans : `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` |

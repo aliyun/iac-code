@@ -64,6 +64,7 @@ ECS 元数据相关变量仅在凭证模式已配置为 `EcsRamRole` 后生效�
 | `IAC_CODE_TENANT_ID` | 遥测租户标识；如未以 `iac_tenant_` 开头则自动添加前缀 |
 | `IAC_CODE_GIT_BASH_PATH` | Windows 下 Git Bash `bash.exe` 的路径（不在 PATH 中时使用） |
 | `IAC_CODE_A2A_PUSH_KEYRING` | 由环境管理的 A2A 加密推送密钥环（JSON 格式） |
+| `IAC_CODE_A2A_STARTUP_WARMUP` | 仅用于 A2A Server。在接收请求前预加载模型 SDK 模块、内置技能和静态规则，默认开启。设为 `0`、`false`、`no`、`off` 或 `disabled` 可关闭。不会创建会话或调用云接口。 |
 | `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | 仅用于 A2A Server。设为 `1`、`true`、`yes` 或 `on`（不区分大小写）时启用资源选择器能力发布和注册。未设置、空值或其他值均为关闭；默认关闭 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 标准 OpenTelemetry 端点；设置后启用 OTLP 导出 |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | 在 span 上捕获 GenAI 消息/工具内容：`SPAN_ONLY`、`EVENT_ONLY`、`SPAN_AND_EVENT` |

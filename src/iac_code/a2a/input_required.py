@@ -17,6 +17,7 @@ from google.protobuf.json_format import MessageToDict
 from iac_code.a2a.execution_control import current_execution_control
 from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
 from iac_code.i18n import translate_message
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.permission_wait import (
     PermissionCancelOutcome,
     PermissionCancelResult,
@@ -880,6 +881,7 @@ def permission_ack_message(response: PermissionResponse, *, approved: bool) -> M
     )
 
 
+@timed_phase("permission_checkpoint_backup")
 async def backup_permission_wait_checkpoint(
     *,
     store: PermissionWaitCheckpointStore,

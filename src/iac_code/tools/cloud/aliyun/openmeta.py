@@ -37,6 +37,7 @@ from iac_code.tools.cloud.aliyun.retry_policy import (
 )
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.utils.async_lifecycle import await_task_to_completion
+from iac_code.utils.bundled_data import load_bundled_data
 from iac_code.utils.file_security import ensure_private_dir
 
 MetadataSource = Literal["fresh", "cache", "stale_cache"]
@@ -734,7 +735,7 @@ def load_openmeta_exclusions(path: Path | None = _OPENMETA_EXCLUSIONS_PATH) -> O
     if path is None or not path.exists():
         return OpenMetaExclusions.empty()
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = load_bundled_data(path, format="yaml") or {}
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError("invalid OpenMeta exclusions") from exc
     if not isinstance(raw, Mapping):

@@ -361,6 +361,7 @@ class AgentLoop:
         audit_log_path: str | Path | None = None,
         telemetry_attributes: dict[str, Any] | None = None,
         wiki_search_context: dict[str, Any] | None = None,
+        prompt_time: Any = None,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -382,6 +383,7 @@ class AgentLoop:
         self._tool_context_trusted_read_directories = list(tool_context_trusted_read_directories or [])
         self._tool_context_relative_read_directories = list(tool_context_relative_read_directories or [])
         self._pipeline_mode = pipeline_mode
+        self._prompt_time = prompt_time
         scope_attributes: dict[str, Any] = {
             IacCodeAttr.MODE: "pipeline" if pipeline_mode else "normal",
         }
@@ -421,12 +423,18 @@ class AgentLoop:
         self._active_streaming_runs = 0
         self._provider_requests_in_flight = 0
         self._model_request_count = 0
+        builtin_prompt_time = True
+        if prompt_time is not None:
+            from iac_code.services.session_prompt_time import SessionPromptTime
+
+            builtin_prompt_time = type(prompt_time) is SessionPromptTime
         self._model_only_preflight = (
             not auto_trigger_skills
             and not resume_messages
             and memory_recall_service is None
             and background_task_starter is None
             and system_prompt_refresher is None
+            and builtin_prompt_time
         )
         self.canceled_first_model_request: str | None = None
         self._pending_provider_context_sync = False
@@ -513,6 +521,8 @@ class AgentLoop:
             from iac_code.agent.message import is_hidden_context_message
 
             if not is_hidden_context_message(message):
+                if self._prompt_time is not None:
+                    self._prompt_time.begin_turn()
                 self._start_wiki_work(message)
             if self._session_storage:
                 self._session_storage.append(
@@ -821,10 +831,14 @@ class AgentLoop:
         self._recorded_memory_prefetch_ids.discard(id(prefetch))
 
     def _refresh_system_prompt(self) -> None:
-        if self._system_prompt_refresher is None:
+        if self._system_prompt_refresher is None and self._prompt_time is None:
             return
         try:
-            system_prompt = self._system_prompt_refresher()
+            system_prompt = (
+                self._system_prompt_refresher() if self._system_prompt_refresher is not None else self.system_prompt
+            )
+            if self._prompt_time is not None and isinstance(system_prompt, str):
+                system_prompt = self._prompt_time.apply(system_prompt)
         except Exception as exc:
             logger.debug("Failed to refresh system prompt: {}", exc)
             return
@@ -1238,6 +1252,8 @@ class AgentLoop:
             entry_attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(self.system_prompt)
 
         with start_span(Spans.ENTRY, entry_attrs) as entry_span:
+            if self._prompt_time is not None and not self._pipeline_mode:
+                self._prompt_time.begin_turn()
             await self._start_background_tasks()
             interaction_started = time.monotonic()
             first_token_received = False
@@ -3313,6 +3329,8 @@ class AgentLoop:
             text = raw_input.strip()
             if not text:
                 continue
+            if self._prompt_time is not None:
+                self._prompt_time.begin_turn()
             await self._apply_auto_triggers(text)
             message = self.context_manager.add_user_message(text)
             message_id = "queued-{}".format(uuid.uuid4().hex)

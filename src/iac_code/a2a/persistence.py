@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from iac_code.a2a.types import validate_protocol_id
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
-from iac_code.utils.file_security import atomic_write_text
+from iac_code.utils.state_io import write_snapshot_text
 
 _INTERRUPTED_RESTORE_STATES = {"submitted", "working", "auth-required"}
 _FILESYSTEM_SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -76,6 +77,7 @@ class A2APersistenceStore:
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self._write_json(self.tasks_dir / f"{_protocol_id_file_stem(task_id)}.json", asdict(snapshot))
 
+    @timed_phase("task_snapshot_load")
     def load_task(self, task_id: str) -> A2ATaskSnapshot | None:
         task_id = validate_protocol_id(task_id)
         data = self._read_json(self.tasks_dir / f"{_protocol_id_file_stem(task_id)}.json")
@@ -122,6 +124,7 @@ class A2APersistenceStore:
         self.contexts_dir.mkdir(parents=True, exist_ok=True)
         self._write_json(self.contexts_dir / f"{_protocol_id_file_stem(context_id)}.json", asdict(snapshot))
 
+    @timed_phase("context_snapshot_load")
     def load_context(self, context_id: str) -> A2AContextSnapshot | None:
         context_id = validate_protocol_id(context_id)
         data = self._read_json(self.contexts_dir / f"{_protocol_id_file_stem(context_id)}.json")
@@ -236,7 +239,7 @@ class A2APersistenceStore:
 
     @staticmethod
     def _write_json(path: Path, data: dict[str, object]) -> None:
-        atomic_write_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
+        write_snapshot_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, object] | None:
