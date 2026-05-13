@@ -58,16 +58,20 @@ class ACPTerminalBashTool(Tool):
             terminal_id = created.terminal_id
 
             try:
-                async with asyncio.timeout(timeout):
-                    exit_status = await self._conn.wait_for_terminal_exit(
+
+                async def _wait_and_fetch():
+                    _exit = await self._conn.wait_for_terminal_exit(
                         session_id=self._session_id,
                         terminal_id=terminal_id,
                     )
-                    output = await self._conn.terminal_output(
+                    _out = await self._conn.terminal_output(
                         session_id=self._session_id,
                         terminal_id=terminal_id,
                     )
-            except TimeoutError:
+                    return _exit, _out
+
+                exit_status, output = await asyncio.wait_for(_wait_and_fetch(), timeout=timeout)
+            except asyncio.TimeoutError:
                 with suppress(Exception):
                     await self._conn.kill_terminal(session_id=self._session_id, terminal_id=terminal_id)
                 return ToolResult.error(f"Command timed out after {timeout} seconds")

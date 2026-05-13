@@ -1278,7 +1278,7 @@ class Renderer:
         options: list[OptionType] = [
             TextOption(label=_("Yes, allow once"), value="allow_once"),
             TextOption(label=_("Yes, allow always for this tool"), value="always_allow"),
-            TextOption(label=_("No, reject once"), value="reject_once", description=f"({_('default')})"),
+            TextOption(label=_("No, reject once"), value="reject_once", description="({})".format(_("default"))),
             TextOption(label=_("No, always reject this tool"), value="always_deny"),
         ]
 

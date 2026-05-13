@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-12 16:23+0800\n"
+"POT-Creation-Date: 2026-05-13 19:01+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -1128,12 +1128,12 @@ msgstr "命令错误：{error}"
 msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
-#: src/iac_code/ui/repl.py:628
+#: src/iac_code/ui/repl.py:635
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "会话不存在：{session_id}"
 
-#: src/iac_code/ui/repl.py:647
+#: src/iac_code/ui/repl.py:654
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1144,15 +1144,15 @@ msgstr ""
 "请运行以下命令恢复：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:686
+#: src/iac_code/ui/repl.py:693
 msgid "This conversation is from a different directory."
 msgstr "该会话来自另一个目录。"
 
-#: src/iac_code/ui/repl.py:688
+#: src/iac_code/ui/repl.py:695
 msgid "To resume, run:"
 msgstr "请运行以下命令恢复："
 
-#: src/iac_code/ui/repl.py:693
+#: src/iac_code/ui/repl.py:700
 msgid "(Command copied to clipboard)"
 msgstr "（命令已复制到剪贴板）"
 

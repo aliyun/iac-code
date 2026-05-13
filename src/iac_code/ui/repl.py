@@ -308,7 +308,7 @@ class InlineREPL:
                             # Double Ctrl+C within 1.5s → exit
                             break
                         last_ctrl_c_time = now
-                        self.console.print(f"[dim]{_('Press Ctrl+C again to exit.')}[/dim]")
+                        self.console.print("[dim]{}[/dim]".format(_("Press Ctrl+C again to exit.")))
                         continue
                     last_ctrl_c_time = 0.0  # Reset on valid input
                     user_input = user_input.strip()
@@ -324,7 +324,7 @@ class InlineREPL:
                     self._clear_cancel_state()
                 except (KeyboardInterrupt, asyncio.CancelledError):
                     self._clear_cancel_state()
-                    self.console.print(f"\n[dim]{_('Interrupted.')}[/dim]")
+                    self.console.print("\n[dim]{}[/dim]".format(_("Interrupted.")))
                     continue
                 except ExitREPLError:
                     break
@@ -361,7 +361,7 @@ class InlineREPL:
 
         from rich.text import Text
 
-        self.console.print(f"[dim]{_('Goodbye!')}[/dim]")
+        self.console.print("[dim]{}[/dim]".format(_("Goodbye!")))
         self.console.print(Text(_("Resume this session with:"), style="dim"))
         self.console.print(Text(f"iac-code --resume {self._session_id}", style="dim"))
 
@@ -550,11 +550,18 @@ class InlineREPL:
         counter stays positive even though the error was handled.  This
         can interfere with subsequent ``await`` calls.  Calling
         ``uncancel()`` drains the counter back to zero.
+
+        ``Task.cancelling()`` and ``Task.uncancel()`` were added in
+        Python 3.11; on 3.10 the internal counter does not exist, so
+        the workaround is unnecessary and safely skipped.
         """
         task = asyncio.current_task()
         if task:
-            while task.cancelling():
-                task.uncancel()
+            _cancelling = getattr(task, "cancelling", None)
+            _uncancel = getattr(task, "uncancel", None)
+            if _cancelling is not None and _uncancel is not None:
+                while _cancelling():
+                    _uncancel()
 
     # ------------------------------------------------------------------
     # State change callback

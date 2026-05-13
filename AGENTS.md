@@ -4,7 +4,7 @@ This file applies to the entire repository.
 
 ## Project Overview
 
-- `iac-code` is a Python 3.12+ Infrastructure as Code assistant focused on Alibaba Cloud ROS / Terraform template generation and management.
+- `iac-code` is a Python 3.10+ Infrastructure as Code assistant focused on Alibaba Cloud ROS / Terraform template generation and management.
 - Source code uses a `src/` layout with the main package at `src/iac_code/` and tests at `tests/`.
 - The CLI entry point is declared in `pyproject.toml` as `iac-code = "iac_code.cli.main:app"`.
 
@@ -23,7 +23,7 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
 
 ## Code Standards
 
-- Target version is Python 3.12; use modern type annotations and standard library capabilities.
+- Target version is Python 3.10; use modern type annotations and standard library capabilities.
 - Ruff is configured in `pyproject.toml`: line width 120, rules `E/F/I/N/W` enabled.
 - Keep changes focused; do not refactor, rename, or move files outside the scope of the current task.
 - Follow existing module boundaries:

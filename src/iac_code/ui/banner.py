@@ -88,13 +88,13 @@ def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -
 
     items = [
         Text(),
-        Text(f"  {_('Welcome back')} {username}!", style="bold"),
+        Text("  {} {}!".format(_("Welcome back"), username), style="bold"),
         Text(),
         logo_table,
         Text(),
         Text(f"  {model_display}", style="dim") if model_display else Text(),
         Text(f"  {cwd_display}", style="dim"),
-        Text(f"  {_('Session')}: {session_id}", style="dim") if session_id else Text(),
+        Text("  {}: {}".format(_("Session"), session_id), style="dim") if session_id else Text(),
     ]
 
     from iac_code.utils.log import is_debug_enabled
@@ -104,7 +104,7 @@ def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -
 
         log_path = get_config_dir() / "logs" / "latest.log"
         items.append(Text())
-        items.append(Text(f"  {_('Debug mode')}", style="bold yellow"))
-        items.append(Text(f"  {_('Log file')}: {log_path}", style="dim yellow"))
+        items.append(Text("  {}".format(_("Debug mode")), style="bold yellow"))
+        items.append(Text("  {}: {}".format(_("Log file"), log_path), style="dim yellow"))
 
     return Panel(Group(*items), border_style=ACCENT, expand=True)

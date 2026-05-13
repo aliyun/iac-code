@@ -14,7 +14,7 @@ All examples on this page have been verified against the following environment:
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| Python | `3.12` | Uses modern typing (`\|` unions, `match/case` statements) |
+| Python | `3.10` | Uses modern typing (`\|` unions, `match/case` statements) |
 | `agent-client-protocol` | `0.9.0` | Official ACP Python SDK (imported as `acp`) |
 | `httpx` | `0.28.1` | Async HTTP client used by the HTTP+SSE example |
 | `iac-code` | current repo | Provides the `iac-code acp` subcommand used by `spawn_agent_process` |
@@ -22,8 +22,8 @@ All examples on this page have been verified against the following environment:
 Install the client-side dependencies with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-# Create a Python 3.12 virtualenv managed by uv
-uv venv --python 3.12
+# Create a Python 3.10 virtualenv managed by uv
+uv venv --python 3.10
 source .venv/bin/activate
 
 # Install the pinned client-side dependencies into that venv

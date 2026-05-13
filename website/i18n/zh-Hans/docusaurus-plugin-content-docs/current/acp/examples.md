@@ -14,7 +14,7 @@ sidebar_position: 4
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| Python | `3.12` | 使用了现代类型语法（`\|` 联合类型、`match/case` 语句） |
+| Python | `3.10` | 使用了现代类型语法（`\|` 联合类型、`match/case` 语句） |
 | `agent-client-protocol` | `0.9.0` | 官方 ACP Python SDK（导入名为 `acp`） |
 | `httpx` | `0.28.1` | HTTP+SSE 示例使用的异步 HTTP 客户端 |
 | `iac-code` | 当前仓库 | 提供 `spawn_agent_process` 依赖的 `iac-code acp` 子命令 |
@@ -22,8 +22,8 @@ sidebar_position: 4
 使用 [uv](https://docs.astral.sh/uv/) 安装客户端依赖：
 
 ```bash
-# 由 uv 创建并管理 Python 3.12 虚拟环境
-uv venv --python 3.12
+# 由 uv 创建并管理 Python 3.10 虚拟环境
+uv venv --python 3.10
 source .venv/bin/activate
 
 # 将固定版本的客户端依赖安装到该 venv

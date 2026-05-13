@@ -301,7 +301,7 @@ def _select(title: str, options: list[str], default_index: int = 0) -> int | Non
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
-    hints = f"↑↓ {_('Navigate')}  Enter {_('Confirm')}  Esc {_('Back')}"
+    hints = "↑↓ {}  Enter {}  Esc {}".format(_("Navigate"), _("Confirm"), _("Back"))
 
     def draw():
         _clear_screen()
@@ -421,9 +421,9 @@ def _input_masked(title: str, prompt: str, existing: str | None = None) -> str |
     chars: list[str] = []
 
     if has_mask:
-        hints = f"Enter {_('Keep')}  Backspace {_('Re-enter')}  Esc {_('Back')}"
+        hints = "Enter {}  Backspace {}  Esc {}".format(_("Keep"), _("Re-enter"), _("Back"))
     else:
-        hints = f"Enter {_('Confirm')}  Esc {_('Back')}"
+        hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
 
     def draw():
         _clear_screen()
@@ -457,14 +457,14 @@ def _input_masked(title: str, prompt: str, existing: str | None = None) -> str |
                 elif event[0] == "backspace":
                     if has_mask and not chars:
                         has_mask = False
-                        hints = f"Enter {_('Confirm')}  Esc {_('Back')}"
+                        hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
                     elif chars:
                         chars.pop()
                     need_redraw = True
                 elif event[0] == "char":
                     if has_mask:
                         has_mask = False
-                        hints = f"Enter {_('Confirm')}  Esc {_('Back')}"
+                        hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
                     chars.append(event[1])
                     need_redraw = True
 
@@ -488,7 +488,7 @@ def _input_text(title: str, prompt: str) -> str | None | _BackSentinel:
     import tty
 
     chars: list[str] = []
-    hints = f"Enter {_('Confirm')}  Esc {_('Back')}"
+    hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
 
     def draw():
         _clear_screen()
@@ -814,7 +814,7 @@ def _select_with_info(
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
-    hints = f"↑↓ {_('Navigate')}  Enter {_('Confirm')}  Esc {_('Back')}"
+    hints = "↑↓ {}  Enter {}  Esc {}".format(_("Navigate"), _("Confirm"), _("Back"))
 
     def draw():
         _clear_screen()
@@ -860,9 +860,9 @@ def _render_credential_info(credential: AliyunCredential, source: str) -> None:
     """Write current credential info lines (called between title and options)."""
     from iac_code.services.providers.aliyun import MODE_DISPLAY_NAMES, MODE_FIELDS, mask_sensitive
 
-    _write(f"  {_C_DIM}{_('Current configuration')} ({source}){_C_RST}\n")
+    _write("  {}{} ({}){}\n".format(_C_DIM, _("Current configuration"), source, _C_RST))
     mode_display = _(MODE_DISPLAY_NAMES.get(credential.mode, credential.mode))
-    _write(f"  {_C_DIM}{_('Mode')}: {mode_display}{_C_RST}\n")
+    _write("  {}{}: {}{}\n".format(_C_DIM, _("Mode"), mode_display, _C_RST))
 
     mode_fields = MODE_FIELDS.get(credential.mode, [])
     for field_name, label, sensitive in mode_fields:
@@ -872,7 +872,7 @@ def _render_credential_info(credential: AliyunCredential, source: str) -> None:
         display_value = value if value else _("(not set)")
         _write(f"  {_C_DIM}{label}: {display_value}{_C_RST}\n")
 
-    _write(f"  {_C_DIM}{_('Region')}: {credential.region_id}{_C_RST}\n")
+    _write("  {}{}: {}{}\n".format(_C_DIM, _("Region"), credential.region_id, _C_RST))
     _write("\n")
 
 
@@ -1004,7 +1004,7 @@ def _input_text_with_default(title: str, label: str, default: str) -> str | None
     import tty
 
     chars: list[str] = list(default)
-    hints = f"Enter {_('Confirm')}  Esc {_('Back')}"
+    hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
 
     def draw():
         _clear_screen()
