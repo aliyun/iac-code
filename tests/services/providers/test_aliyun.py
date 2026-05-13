@@ -1,0 +1,654 @@
+import json
+import os
+from unittest.mock import patch
+
+import yaml
+
+from iac_code.services.providers.aliyun import (
+    AliyunCredential,
+    AliyunCredentials,
+    mask_sensitive,
+)
+
+
+class TestAliyunCredential:
+    def test_dataclass_fields(self):
+        cred = AliyunCredential(
+            access_key_id="test_id",
+            access_key_secret="test_secret",
+            region_id="cn-beijing",
+        )
+        assert cred.access_key_id == "test_id"
+        assert cred.access_key_secret == "test_secret"
+        assert cred.region_id == "cn-beijing"
+        assert cred.mode == "AK"
+
+    def test_default_region(self):
+        cred = AliyunCredential(
+            access_key_id="id",
+            access_key_secret="secret",
+        )
+        assert cred.region_id == "cn-hangzhou"
+
+    def test_default_mode(self):
+        cred = AliyunCredential()
+        assert cred.mode == "AK"
+        assert cred.access_key_id == ""
+        assert cred.access_key_secret == ""
+
+    def test_sts_token_mode(self):
+        cred = AliyunCredential(
+            mode="StsToken",
+            access_key_id="id",
+            access_key_secret="secret",
+            sts_token="token123",
+        )
+        assert cred.mode == "StsToken"
+        assert cred.sts_token == "token123"
+
+    def test_ram_role_arn_mode(self):
+        cred = AliyunCredential(
+            mode="RamRoleArn",
+            access_key_id="id",
+            access_key_secret="secret",
+            ram_role_arn="acs:ram::123:role/test",
+            ram_session_name="session1",
+        )
+        assert cred.mode == "RamRoleArn"
+        assert cred.ram_role_arn == "acs:ram::123:role/test"
+        assert cred.ram_session_name == "session1"
+
+
+class TestMaskSensitive:
+    def test_mask_normal_string(self):
+        assert mask_sensitive("LTAI5tAbcDefGhi") == "*" * 15
+
+    def test_mask_empty_string(self):
+        assert mask_sensitive("") == ""
+
+    def test_mask_preserves_length(self):
+        value = "my_secret_key_12345"
+        masked = mask_sensitive(value)
+        assert len(masked) == len(value)
+        assert masked == "*" * len(value)
+
+
+class TestAliyunCredentialsLoadFromEnv:
+    def test_load_from_env_vars_defaults_to_cn_hangzhou(self):
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(AliyunCredentials, "_load_from_iac_code_config", return_value=None),
+            patch.object(AliyunCredentials, "_load_from_aliyun_cli", return_value=None),
+        ):
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+            cred = AliyunCredentials.load()
+        assert cred is not None
+        assert cred.access_key_id == "env_id"
+        assert cred.access_key_secret == "env_secret"
+        assert cred.region_id == "cn-hangzhou"
+        assert cred.mode == "AK"
+
+    def test_load_from_env_vars_falls_back_to_cli_region_when_no_iac_code_config(self, tmp_path):
+        """Env has AK/SK but no REGION_ID; iac-code config absent → CLI config region wins."""
+        cli_config = tmp_path / "config.json"
+        cli_config.write_text(
+            json.dumps(
+                {
+                    "current": "default",
+                    "profiles": [
+                        {
+                            "name": "default",
+                            "mode": "AK",
+                            "access_key_id": "file_id",
+                            "access_key_secret": "file_secret",
+                            "region_id": "cn-beijing",
+                        }
+                    ],
+                }
+            )
+        )
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(AliyunCredentials, "_load_from_iac_code_config", return_value=None),
+        ):
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+            cred = AliyunCredentials.load(config_path=str(cli_config))
+        assert cred is not None
+        assert cred.access_key_id == "env_id"
+        assert cred.region_id == "cn-beijing"
+
+    def test_load_from_env_vars_iac_code_region_wins_over_cli_region(self, tmp_path):
+        """Both file sources present — iac-code config region takes precedence over CLI config."""
+        cli_config = tmp_path / "config.json"
+        cli_config.write_text(
+            json.dumps(
+                {
+                    "current": "default",
+                    "profiles": [
+                        {
+                            "name": "default",
+                            "mode": "AK",
+                            "access_key_id": "cli_id",
+                            "access_key_secret": "cli_secret",
+                            "region_id": "cn-shenzhen",
+                        }
+                    ],
+                }
+            )
+        )
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        cloud_creds_file.write_text(
+            yaml.dump(
+                {
+                    "aliyun": {
+                        "mode": "AK",
+                        "access_key_id": "iac_id",
+                        "access_key_secret": "iac_secret",
+                        "region_id": "cn-beijing",
+                    }
+                }
+            )
+        )
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file),
+        ):
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+            cred = AliyunCredentials.load(config_path=str(cli_config))
+        assert cred is not None
+        assert cred.region_id == "cn-beijing"
+
+    def test_load_from_env_vars_uses_iac_code_region(self, tmp_path):
+        """Env vars have AK but no region — should use region from iac-code config."""
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        data = {
+            "aliyun": {
+                "mode": "AK",
+                "access_key_id": "iac_id",
+                "access_key_secret": "iac_secret",
+                "region_id": "cn-beijing",
+            }
+        }
+        cloud_creds_file.write_text(yaml.dump(data))
+
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file),
+        ):
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+            cred = AliyunCredentials.load()
+        assert cred is not None
+        assert cred.access_key_id == "env_id"
+        assert cred.region_id == "cn-beijing"
+
+    def test_load_from_env_vars_with_region(self):
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+            "ALIBABA_CLOUD_REGION_ID": "cn-shanghai",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+            cred = AliyunCredentials.load()
+        assert cred is not None
+        assert cred.region_id == "cn-shanghai"
+
+    def test_load_from_env_vars_with_sts_token(self):
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+            "ALIBABA_CLOUD_SECURITY_TOKEN": "sts_token_123",
+        }
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(AliyunCredentials, "_load_from_iac_code_config", return_value=None),
+        ):
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            cred = AliyunCredentials.load()
+        assert cred is not None
+        assert cred.mode == "StsToken"
+        assert cred.sts_token == "sts_token_123"
+
+    def test_env_vars_take_priority_over_config_file(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "AK",
+                    "access_key_id": "file_id",
+                    "access_key_secret": "file_secret",
+                    "region_id": "cn-beijing",
+                }
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+            cred = AliyunCredentials.load(config_path=str(config_file))
+        assert cred.access_key_id == "env_id"
+        assert cred.access_key_secret == "env_secret"
+
+
+class TestAliyunCredentialsLoadFromAliyunCli:
+    def test_load_from_config_file(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "AK",
+                    "access_key_id": "file_id",
+                    "access_key_secret": "file_secret",
+                    "region_id": "cn-shenzhen",
+                }
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            cred = AliyunCredentials.load(config_path=str(config_file))
+
+        assert cred is not None
+        assert cred.access_key_id == "file_id"
+        assert cred.access_key_secret == "file_secret"
+        assert cred.region_id == "cn-shenzhen"
+        assert cred.mode == "AK"
+
+    def test_load_ram_role_arn_from_config_file(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "RamRoleArn",
+                    "access_key_id": "file_id",
+                    "access_key_secret": "file_secret",
+                    "ram_role_arn": "acs:ram::123:role/test",
+                    "ram_session_name": "session1",
+                    "region_id": "cn-beijing",
+                }
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            cred = AliyunCredentials.load(config_path=str(config_file))
+
+        assert cred is not None
+        assert cred.mode == "RamRoleArn"
+        assert cred.ram_role_arn == "acs:ram::123:role/test"
+        assert cred.ram_session_name == "session1"
+
+    def test_load_returns_none_when_no_config_file(self, tmp_path):
+        config_file = tmp_path / "nonexistent.json"
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            cred = AliyunCredentials.load(config_path=str(config_file))
+        assert cred is None
+
+    def test_load_returns_none_when_unconfigured(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            cred = AliyunCredentials.load(config_path=str(config_file))
+        assert cred is None
+
+    def test_load_uses_default_profile(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "other",
+                    "mode": "AK",
+                    "access_key_id": "other_id",
+                    "access_key_secret": "other_secret",
+                    "region_id": "cn-beijing",
+                },
+                {
+                    "name": "default",
+                    "mode": "AK",
+                    "access_key_id": "default_id",
+                    "access_key_secret": "default_secret",
+                    "region_id": "cn-hangzhou",
+                },
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            cred = AliyunCredentials.load(config_path=str(config_file))
+
+        assert cred.access_key_id == "default_id"
+
+    def test_load_from_aliyun_cli_public(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "RamRoleArn",
+                    "access_key_id": "id",
+                    "access_key_secret": "secret",
+                    "ram_role_arn": "acs:ram::123:role/test",
+                    "ram_session_name": "session1",
+                    "region_id": "cn-hangzhou",
+                }
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
+        assert cred is not None
+        assert cred.mode == "RamRoleArn"
+        assert cred.ram_role_arn == "acs:ram::123:role/test"
+
+
+class TestAliyunCredentialsLoadFromIacCode:
+    def test_load_from_iac_code_config(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        data = {
+            "aliyun": {
+                "mode": "AK",
+                "access_key_id": "iac_id",
+                "access_key_secret": "iac_secret",
+                "region_id": "cn-beijing",
+            }
+        }
+        cloud_creds_file.write_text(yaml.dump(data))
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredentials._load_from_iac_code_config()
+
+        assert cred is not None
+        assert cred.access_key_id == "iac_id"
+        assert cred.access_key_secret == "iac_secret"
+        assert cred.region_id == "cn-beijing"
+
+    def test_load_from_iac_code_returns_none_when_no_file(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredentials._load_from_iac_code_config()
+
+        assert cred is None
+
+    def test_load_from_iac_code_ram_role_arn(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        data = {
+            "aliyun": {
+                "mode": "RamRoleArn",
+                "access_key_id": "iac_id",
+                "access_key_secret": "iac_secret",
+                "ram_role_arn": "acs:ram::456:role/dev",
+                "ram_session_name": "dev-session",
+                "region_id": "cn-shanghai",
+            }
+        }
+        cloud_creds_file.write_text(yaml.dump(data))
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredentials._load_from_iac_code_config()
+
+        assert cred is not None
+        assert cred.mode == "RamRoleArn"
+        assert cred.ram_role_arn == "acs:ram::456:role/dev"
+
+    def test_iac_code_config_takes_priority_over_aliyun_cli(self, tmp_path):
+        # Set up iac-code config
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        iac_data = {
+            "aliyun": {
+                "mode": "AK",
+                "access_key_id": "iac_id",
+                "access_key_secret": "iac_secret",
+                "region_id": "cn-beijing",
+            }
+        }
+        cloud_creds_file.write_text(yaml.dump(iac_data))
+
+        # Set up aliyun CLI config
+        cli_config_file = tmp_path / "config.json"
+        cli_config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "AK",
+                    "access_key_id": "cli_id",
+                    "access_key_secret": "cli_secret",
+                    "region_id": "cn-hangzhou",
+                }
+            ],
+        }
+        cli_config_file.write_text(json.dumps(cli_config))
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file),
+            patch(
+                "iac_code.services.providers.aliyun.DEFAULT_ALIYUN_CLI_CONFIG_PATH",
+                str(cli_config_file),
+            ),
+        ):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            # load() with no config_path uses iac-code config then aliyun CLI
+            cred = AliyunCredentials.load()
+
+        assert cred is not None
+        assert cred.access_key_id == "iac_id"
+
+
+class TestAliyunCredentialsSave:
+    def test_save_to_iac_code_config(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredential(
+                mode="AK",
+                access_key_id="new_id",
+                access_key_secret="new_secret",
+                region_id="cn-hangzhou",
+            )
+            AliyunCredentials.save(cred)
+
+        assert cloud_creds_file.exists()
+        data = yaml.safe_load(cloud_creds_file.read_text())
+        assert data["aliyun"]["mode"] == "AK"
+        assert data["aliyun"]["access_key_id"] == "new_id"
+        assert data["aliyun"]["access_key_secret"] == "new_secret"
+        assert data["aliyun"]["region_id"] == "cn-hangzhou"
+
+    def test_save_ram_role_arn_to_iac_code_config(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredential(
+                mode="RamRoleArn",
+                access_key_id="id",
+                access_key_secret="secret",
+                ram_role_arn="acs:ram::123:role/test",
+                ram_session_name="session1",
+                region_id="cn-beijing",
+            )
+            AliyunCredentials.save(cred)
+
+        data = yaml.safe_load(cloud_creds_file.read_text())
+        assert data["aliyun"]["mode"] == "RamRoleArn"
+        assert data["aliyun"]["ram_role_arn"] == "acs:ram::123:role/test"
+        assert data["aliyun"]["ram_session_name"] == "session1"
+
+    def test_save_to_aliyun_cli_format(self, tmp_path):
+        """Test save with config_path (aliyun CLI format, for testing)."""
+        config_file = tmp_path / "config.json"
+        cred = AliyunCredential(
+            mode="AK",
+            access_key_id="new_id",
+            access_key_secret="new_secret",
+            region_id="cn-hangzhou",
+        )
+        AliyunCredentials.save(cred, config_path=str(config_file))
+
+        assert config_file.exists()
+        data = json.loads(config_file.read_text())
+        assert data["current"] == "default"
+        profiles = {p["name"]: p for p in data["profiles"]}
+        assert "default" in profiles
+        assert profiles["default"]["access_key_id"] == "new_id"
+        assert profiles["default"]["access_key_secret"] == "new_secret"
+        assert profiles["default"]["region_id"] == "cn-hangzhou"
+        assert profiles["default"]["mode"] == "AK"
+
+    def test_save_updates_existing_aliyun_cli_format(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        existing_config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "AK",
+                    "access_key_id": "old_id",
+                    "access_key_secret": "old_secret",
+                    "region_id": "cn-hangzhou",
+                },
+                {
+                    "name": "staging",
+                    "mode": "AK",
+                    "access_key_id": "staging_id",
+                    "access_key_secret": "staging_secret",
+                    "region_id": "cn-shanghai",
+                },
+            ],
+        }
+        config_file.write_text(json.dumps(existing_config))
+
+        cred = AliyunCredential(
+            access_key_id="updated_id",
+            access_key_secret="updated_secret",
+            region_id="cn-beijing",
+        )
+        AliyunCredentials.save(cred, config_path=str(config_file))
+
+        data = json.loads(config_file.read_text())
+        profiles = {p["name"]: p for p in data["profiles"]}
+
+        # Default profile updated
+        assert profiles["default"]["access_key_id"] == "updated_id"
+        assert profiles["default"]["access_key_secret"] == "updated_secret"
+        assert profiles["default"]["region_id"] == "cn-beijing"
+
+        # Staging profile preserved
+        assert "staging" in profiles
+        assert profiles["staging"]["access_key_id"] == "staging_id"
+
+    def test_save_creates_parent_dirs(self, tmp_path):
+        config_file = tmp_path / "nested" / "dir" / "config.json"
+        cred = AliyunCredential(
+            access_key_id="id",
+            access_key_secret="secret",
+            region_id="cn-hangzhou",
+        )
+        AliyunCredentials.save(cred, config_path=str(config_file))
+        assert config_file.exists()
+
+    def test_save_does_not_write_to_aliyun_cli_config(self, tmp_path):
+        """Verify that save() without config_path writes to iac-code, not aliyun CLI."""
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        aliyun_cli_file = tmp_path / "config.json"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredential(
+                access_key_id="id",
+                access_key_secret="secret",
+                region_id="cn-hangzhou",
+            )
+            AliyunCredentials.save(cred)
+
+        assert cloud_creds_file.exists()
+        assert not aliyun_cli_file.exists()
+
+
+class TestAliyunCredentialsIsConfigured:
+    def test_is_configured_true_with_env_vars(self):
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "secret",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            assert AliyunCredentials.is_configured() is True
+
+    def test_is_configured_true_with_config_file(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "AK",
+                    "access_key_id": "file_id",
+                    "access_key_secret": "file_secret",
+                    "region_id": "cn-hangzhou",
+                }
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            result = AliyunCredentials.is_configured(config_path=str(config_file))
+        assert result is True
+
+    def test_is_configured_false_when_unconfigured(self, tmp_path):
+        config_file = tmp_path / "nonexistent.json"
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            result = AliyunCredentials.is_configured(config_path=str(config_file))
+        assert result is False
