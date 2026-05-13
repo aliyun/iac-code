@@ -1,0 +1,343 @@
+# Alibaba Cloud API Endpoints
+# Source: https://help.aliyun.com/zh/[product]/developer-reference/api-xxx-endpoint
+#
+# Format:
+#   endpoint: xxx                          — Global central (all regions)
+#   regional: {pattern, regions, mapping}  — Regionalized (mapping overrides pattern)
+#   central:  {endpoint, regions}          — Central override for specific regions
+#
+# Resolution: YAML lookup → Location API → fallback ({product}.{region_id}.aliyuncs.com)
+
+ros:
+  endpoint: ros.aliyuncs.com
+
+IaCService:
+  endpoint: iac.aliyuncs.com
+
+ecs:
+  regional:
+    pattern: "ecs.{region_id}.aliyuncs.com"
+    regions:
+      - cn-qingdao
+      - cn-beijing
+      - cn-zhangjiakou
+      - cn-huhehaote
+      - cn-wulanchabu
+      - cn-hangzhou
+      - cn-shanghai
+      - cn-nanjing
+      - cn-fuzhou
+      - cn-shenzhen
+      - cn-heyuan
+      - cn-guangzhou
+      - cn-wuhan-lr
+      - cn-zhongwei
+      - cn-chengdu
+      - cn-zhengzhou-jva
+      - cn-hongkong
+      - ap-southeast-1
+      - ap-southeast-2
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-southeast-7
+      - ap-southeast-8
+      - ap-northeast-1
+      - ap-northeast-2
+      - eu-central-1
+      - eu-west-1
+      - us-east-1
+      - us-west-1
+      - us-southeast-1
+      - na-south-1
+      - me-east-1
+      - me-central-1
+      - ap-south-1
+      - cn-beijing-finance-1
+      - cn-shanghai-finance-1
+      - cn-shenzhen-finance-1
+      - cn-heyuan-acdr-1
+  central:
+    endpoint: ecs.aliyuncs.com
+    regions:
+      - cn-hangzhou-finance
+      - cn-north-2-gov-1
+
+rds:
+  regional:
+    pattern: "rds.{region_id}.aliyuncs.com"
+    regions:
+      - cn-zhangjiakou
+      - cn-huhehaote
+      - cn-wulanchabu
+      - cn-guangzhou
+      - cn-chengdu
+      - ap-southeast-1
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-northeast-1
+      - eu-central-1
+      - eu-west-1
+      - us-east-1
+      - us-west-1
+      - na-south-1
+      - me-east-1
+      - cn-shenzhen-finance-1
+  central:
+    endpoint: rds.aliyuncs.com
+    regions:
+      - cn-qingdao
+      - cn-beijing
+      - cn-hangzhou
+      - cn-shanghai
+      - cn-shenzhen
+      - cn-heyuan
+      - cn-hongkong
+      - cn-beijing-finance-1
+      - cn-hangzhou-finance
+      - cn-shanghai-finance-1
+
+r-kvstore:
+  regional:
+    pattern: "r-kvstore.{region_id}.aliyuncs.com"
+    regions:
+      - cn-qingdao
+      - cn-beijing
+      - cn-zhangjiakou
+      - cn-huhehaote
+      - cn-nanjing
+      - cn-fuzhou
+      - cn-shenzhen
+      - cn-guangzhou
+      - cn-wuhan-lr
+      - cn-chengdu
+      - cn-zhengzhou-jva
+      - cn-hongkong
+      - ap-southeast-1
+      - ap-southeast-2
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-southeast-7
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-south-1
+      - eu-central-1
+      - eu-west-1
+      - us-east-1
+      - us-west-1
+      - us-southeast-1
+      - na-south-1
+      - me-east-1
+      - me-central-1
+      - cn-beijing-finance-1
+      - cn-shanghai-finance-1
+      - cn-shenzhen-finance-1
+  central:
+    endpoint: r-kvstore.aliyuncs.com
+    regions:
+      - cn-wulanchabu
+      - cn-hangzhou
+      - cn-shanghai
+      - cn-heyuan
+      - cn-hangzhou-finance
+
+slb:
+  regional:
+    pattern: "slb.{region_id}.aliyuncs.com"
+    regions:
+      - cn-qingdao
+      - cn-beijing
+      - cn-zhangjiakou
+      - cn-huhehaote
+      - cn-wulanchabu
+      - cn-shanghai
+      - cn-nanjing
+      - cn-fuzhou
+      - cn-shenzhen
+      - cn-heyuan
+      - cn-guangzhou
+      - cn-wuhan-lr
+      - cn-chengdu
+      - cn-zhengzhou-jva
+      - cn-hongkong
+      - ap-southeast-1
+      - ap-southeast-2
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-southeast-7
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-south-1
+      - eu-central-1
+      - eu-west-1
+      - us-east-1
+      - us-west-1
+      - na-south-1
+      - me-east-1
+      - me-central-1
+      - cn-beijing-finance-1
+      - cn-heyuan-acdr-1
+  central:
+    endpoint: slb.aliyuncs.com
+    regions:
+      - cn-hangzhou
+      - cn-hangzhou-finance
+      - cn-shanghai-finance-1
+      - cn-shenzhen-finance-1
+
+alb:
+  regional:
+    pattern: "alb.{region_id}.aliyuncs.com"
+    regions:
+      - cn-qingdao
+      - cn-beijing
+      - cn-zhangjiakou
+      - cn-wulanchabu
+      - cn-hangzhou
+      - cn-shanghai
+      - cn-nanjing
+      - cn-fuzhou
+      - cn-shenzhen
+      - cn-heyuan
+      - cn-guangzhou
+      - cn-chengdu
+      - cn-wuhan-lr
+      - cn-zhengzhou-jva
+      - cn-hongkong
+      - ap-southeast-1
+      - ap-southeast-2
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-southeast-7
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-south-1
+      - eu-central-1
+      - eu-west-1
+      - us-east-1
+      - us-west-1
+      - na-south-1
+      - me-central-1
+      - cn-beijing-finance-1
+      - cn-shanghai-finance-1
+      - cn-shenzhen-finance-1
+    mapping:
+      cn-hangzhou-finance: alb.cn-hangzhou.aliyuncs.com
+
+nlb:
+  regional:
+    pattern: "nlb.{region_id}.aliyuncs.com"
+    regions:
+      - cn-qingdao
+      - cn-beijing
+      - cn-zhangjiakou
+      - cn-wulanchabu
+      - cn-hangzhou
+      - cn-shanghai
+      - cn-nanjing
+      - cn-fuzhou
+      - cn-shenzhen
+      - cn-heyuan
+      - cn-guangzhou
+      - cn-wuhan-lr
+      - cn-chengdu
+      - cn-zhengzhou-jva
+      - cn-hongkong
+      - ap-southeast-1
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-southeast-7
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-south-1
+      - eu-central-1
+      - eu-west-1
+      - us-east-1
+      - us-west-1
+      - na-south-1
+      - me-east-1
+      - me-central-1
+      - cn-beijing-finance-1
+      - cn-shanghai-finance-1
+      - cn-shenzhen-finance-1
+
+vpc:
+  regional:
+    pattern: "vpc.{region_id}.aliyuncs.com"
+    regions:
+      - cn-qingdao
+      - cn-beijing
+      - cn-zhangjiakou
+      - cn-huhehaote
+      - cn-wulanchabu
+      - cn-hangzhou
+      - cn-shanghai
+      - cn-nanjing
+      - cn-fuzhou
+      - cn-shenzhen
+      - cn-heyuan
+      - cn-guangzhou
+      - cn-wuhan-lr
+      - cn-chengdu
+      - cn-zhengzhou-jva
+      - cn-hongkong
+      - ap-southeast-1
+      - ap-southeast-2
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-southeast-7
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-south-1
+      - eu-central-1
+      - eu-west-1
+      - us-east-1
+      - us-west-1
+      - na-south-1
+      - me-east-1
+      - me-central-1
+      - cn-beijing-finance-1
+      - cn-shanghai-finance-1
+      - cn-shenzhen-finance-1
+      - cn-heyuan-acdr-1
+
+oss:
+  regional:
+    pattern: "oss-{region_id}.aliyuncs.com"
+    regions:
+      - cn-hangzhou
+      - cn-shanghai
+      - cn-nanjing
+      - cn-fuzhou
+      - cn-wuhan-lr
+      - cn-qingdao
+      - cn-beijing
+      - cn-zhangjiakou
+      - cn-huhehaote
+      - cn-wulanchabu
+      - cn-shenzhen
+      - cn-heyuan
+      - cn-guangzhou
+      - cn-chengdu
+      - cn-zhongwei
+      - cn-hongkong
+      - rg-china-mainland
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-southeast-1
+      - ap-southeast-3
+      - ap-southeast-5
+      - ap-southeast-6
+      - ap-southeast-7
+      - eu-central-1
+      - eu-west-1
+      - us-west-1
+      - us-east-1
+      - na-south-1
+      - me-east-1

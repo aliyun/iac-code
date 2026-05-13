@@ -1,0 +1,26 @@
+{
+  "version.label": {
+    "message": "当前",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.Getting Started": {
+    "message": "开始使用",
+    "description": "The label for category 'Getting Started' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Using IaC Code": {
+    "message": "使用 IaC Code",
+    "description": "The label for category 'Using iac-code' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Configuration": {
+    "message": "配置",
+    "description": "The label for category 'Configuration' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ACP Protocol": {
+    "message": "ACP 协议",
+    "description": "The label for category 'ACP Protocol' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Automation": {
+    "message": "自动化",
+    "description": "The label for category 'Automation' in sidebar 'docsSidebar'"
+  }
+}

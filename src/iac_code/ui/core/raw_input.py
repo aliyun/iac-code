@@ -1,0 +1,302 @@
+"""Raw terminal input capture using terminal raw mode."""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import termios
+import time
+import tty
+from typing import Optional
+
+from iac_code.ui.core.key_event import KeyEvent
+
+_CURSOR_REPORT_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
+
+# SGR-encoded mouse event: ``\x1b[<button;col;row{M|m}``.  Only the
+# leading ``[<button;col;row`` portion is matched against the bytes
+# *after* the ESC byte, since we strip the ESC before parsing escape
+# sequences.
+_MOUSE_SGR_RE = re.compile(r"\[<(\d+);(\d+);(\d+)([Mm])")
+
+
+def query_cursor_row(fd: int, timeout: float = 0.1) -> int | None:
+    """Send Device Status Report 6 and parse the cursor's 1-indexed row.
+
+    The terminal must already be in raw mode — under cooked mode the
+    response (``\\x1b[<row>;<col>R``) wouldn't be readable until a
+    newline. Returns ``None`` if the terminal doesn't reply within
+    ``timeout``.
+    """
+    import select
+
+    try:
+        os.write(fd, b"\x1b[6n")
+    except OSError:
+        return None
+    buf = b""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        ready, _, _ = select.select([fd], [], [], remaining)
+        if not ready:
+            break
+        try:
+            chunk = os.read(fd, 32)
+        except OSError:
+            break
+        if not chunk:
+            break
+        buf += chunk
+        if b"R" in buf:
+            break
+    m = _CURSOR_REPORT_RE.search(buf)
+    if m is None:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
+
+
+# Mapping from escape sequence (after initial ESC byte) to key name
+_ESCAPE_SEQUENCES: dict[str, str] = {
+    "[A": "up",
+    "[B": "down",
+    "[C": "right",
+    "[D": "left",
+    "[H": "home",
+    "[F": "end",
+    "[3~": "delete",
+    "[5~": "pageup",
+    "[6~": "pagedown",
+    "OP": "f1",
+    "OQ": "f2",
+    "OR": "f3",
+    "OS": "f4",
+}
+
+
+class RawInputCapture:
+    """Context manager that puts the terminal into raw mode for key-by-key input.
+
+    Usage:
+        with RawInputCapture() as cap:
+            event = cap.read_key(timeout=1.0)
+    """
+
+    def __init__(self, fd: int | None = None) -> None:
+        self._fd = fd if fd is not None else sys.stdin.fileno()
+        self._old_settings: Optional[list] = None
+
+    def __enter__(self) -> "RawInputCapture":
+        try:
+            self._old_settings = termios.tcgetattr(self._fd)
+            tty.setraw(self._fd)
+            # Enable bracket paste mode so we can distinguish pasted text from typed input
+            os.write(self._fd, b"\033[?2004h")
+        except OSError:
+            # File descriptor may be invalid after interruption (e.g. double Ctrl+C)
+            self._old_settings = None
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        try:
+            # Disable bracket paste mode
+            os.write(self._fd, b"\033[?2004l")
+        except OSError:
+            pass
+        if self._old_settings is not None:
+            try:
+                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
+            except OSError:
+                pass
+
+    def read_key(self, timeout: Optional[float] = None) -> Optional[KeyEvent]:
+        """Read a single key press and return the corresponding KeyEvent.
+
+        Args:
+            timeout: Maximum seconds to wait. None means block indefinitely.
+                     Returns None if no key is available within the timeout.
+
+        Returns:
+            A KeyEvent, or None on timeout.
+        """
+        import select
+
+        if timeout is not None:
+            ready, _, _ = select.select([self._fd], [], [], timeout)
+            if not ready:
+                return None
+
+        first = os.read(self._fd, 1)
+        if not first:
+            return None
+
+        b = first[0]
+
+        # Escape — may begin a multi-byte sequence
+        if b == 27:
+            ready, _, _ = select.select([self._fd], [], [], 0.05)
+
+            if not ready:
+                # Standalone ESC
+                return self._byte_to_key_event(27)
+
+            # 64 bytes is enough for any reasonable single sequence
+            # including SGR mouse events at large coordinates.
+            rest = os.read(self._fd, 64)
+
+            # Bracket paste start: ESC [200~ — check raw bytes before decoding
+            # to avoid splitting multi-byte UTF-8 characters
+            if rest.startswith(b"[200~"):
+                pasted = self._read_bracketed_paste(rest[5:])
+                return KeyEvent(key="paste", char=pasted)
+
+            seq = rest.decode("utf-8", errors="replace")
+            return self._parse_escape_sequence(seq)
+
+        # Multi-byte UTF-8 character (Chinese, etc.)
+        if b >= 0x80:
+            return self._read_utf8_char(first)
+
+        return self._byte_to_key_event(b)
+
+    def _read_bracketed_paste(self, initial: bytes) -> str:
+        """Read pasted content until the bracket paste end sequence ESC [201~.
+
+        Works entirely with raw bytes to avoid splitting multi-byte UTF-8
+        characters during intermediate reads, and only decodes once all
+        content has been collected.
+
+        Args:
+            initial: Any leftover bytes already read after the start marker.
+
+        Returns:
+            The pasted text with the end marker stripped.
+        """
+        import select as _select
+
+        buf = initial
+        end_marker = b"\033[201~"
+
+        while end_marker not in buf:
+            ready, _, _ = _select.select([self._fd], [], [], 1.0)
+            if not ready:
+                break
+            chunk = os.read(self._fd, 4096)
+            if not chunk:
+                break
+            buf += chunk
+
+        idx = buf.find(end_marker)
+        if idx >= 0:
+            buf = buf[:idx]
+
+        text = buf.decode("utf-8", errors="replace")
+        # Normalize \r\n and \r to \n
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        return text
+
+    def _read_utf8_char(self, first_byte: bytes) -> KeyEvent:
+        """Read remaining bytes of a multi-byte UTF-8 character."""
+        b = first_byte[0]
+        # Determine expected byte count from leading byte
+        if b < 0xC0:
+            # Continuation byte alone — shouldn't happen
+            return KeyEvent(key="unknown", char="", ctrl=False, alt=False, shift=False)
+        elif b < 0xE0:
+            remaining = 1
+        elif b < 0xF0:
+            remaining = 2
+        else:
+            remaining = 3
+
+        data = first_byte
+        for _ in range(remaining):
+            extra = os.read(self._fd, 1)
+            if not extra:
+                break
+            data += extra
+
+        try:
+            char = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return KeyEvent(key="unknown", char="", ctrl=False, alt=False, shift=False)
+
+        return KeyEvent(key=char, char=char, ctrl=False, alt=False, shift=False)
+
+    @staticmethod
+    def _byte_to_key_event(b: int) -> KeyEvent:
+        """Convert a single byte value to a KeyEvent.
+
+        Args:
+            b: Integer byte value (0-255).
+
+        Returns:
+            The corresponding KeyEvent.
+        """
+        if b in (13, 10):
+            return KeyEvent(key="enter", char=chr(b))
+
+        if b == 9:
+            return KeyEvent(key="tab", char="\t")
+
+        if b == 127:
+            return KeyEvent(key="backspace", char=chr(127))
+
+        if b == 27:
+            return KeyEvent(key="escape", char="\x1b")
+
+        # Ctrl+a through ctrl+z (bytes 1-26, excluding 9, 10, 13)
+        if 1 <= b <= 26:
+            letter = chr(ord("a") + b - 1)
+            return KeyEvent(key=letter, char=chr(b), ctrl=True)
+
+        # Printable ASCII: 32-126
+        if 32 <= b <= 126:
+            char = chr(b)
+            shift = char.isupper()
+            return KeyEvent(key=char, char=char, shift=shift)
+
+        # Fallback
+        return KeyEvent(key="unknown", char=chr(b) if b < 256 else "")
+
+    @staticmethod
+    def _parse_escape_sequence(seq: str) -> KeyEvent:
+        """Parse the bytes following an ESC byte into a KeyEvent.
+
+        Args:
+            seq: String of characters that came after the ESC byte.
+
+        Returns:
+            The corresponding KeyEvent.
+        """
+        if seq in _ESCAPE_SEQUENCES:
+            return KeyEvent(key=_ESCAPE_SEQUENCES[seq], char="")
+
+        # SGR mouse event — only wheel up/down are useful here.  The
+        # ``rest`` buffer may contain multiple back-to-back wheel events
+        # when the user spins the wheel quickly; ``re.match`` picks up
+        # the first one and the trailing bytes are dropped (each tick
+        # is small, losing a few during a fast spin is fine).
+        m = _MOUSE_SGR_RE.match(seq)
+        if m is not None:
+            button = int(m.group(1))
+            if button == 64:
+                return KeyEvent(key="wheel_up", char="")
+            if button == 65:
+                return KeyEvent(key="wheel_down", char="")
+            # Other mouse events (clicks, motion) — pass through as a
+            # generic ``mouse`` event so callers can ignore them.
+            return KeyEvent(key="mouse", char="")
+
+        # Single printable char → alt+char
+        if len(seq) == 1 and 32 <= ord(seq) <= 126:
+            return KeyEvent(key=seq, char=seq, alt=True)
+
+        return KeyEvent(key="unknown", char="")

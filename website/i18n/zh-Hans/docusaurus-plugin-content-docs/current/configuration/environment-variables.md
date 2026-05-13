@@ -1,0 +1,57 @@
+---
+title: 环境变量
+description: 所有支持的环境变量及优先级规则。
+---
+
+# 环境变量
+
+IaC Code 从 CLI 参数、环境变量和配置文件读取配置。优先级为：
+
+```text
+CLI 参数 > 环境变量 > 配置文件
+```
+
+环境变量适用于 CI/CD 流水线、容器场景，以及无需编辑配置文件的一次性覆盖。
+
+## LLM 配置
+
+| 变量 | 说明 |
+|---|---|
+| `IAC_CODE_PROVIDER` | 模型提供商名称（大小写不敏感）：`Anthropic`、`OpenAI`、`DashScope`、`DashScopeTokenPlan`、`DeepSeek`、`OpenAPICompatible` |
+| `IAC_CODE_MODEL` | 模型名称 |
+| `IAC_CODE_BASE_URL` | `OpenAPICompatible` 使用的 API 端点；其他提供商会忽略此值 |
+| `IAC_CODE_API_KEY` | 提供商 API Key；覆盖 `.credentials.yml` 中活跃提供商的密钥 |
+
+详见 [LLM 提供商](./llm-providers.md)。
+
+## 阿里云凭证
+
+| 变量 | 说明 |
+|---|---|
+| `ALIBABA_CLOUD_ACCESS_KEY_ID` | AccessKey ID |
+| `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | AccessKey Secret |
+| `ALIBABA_CLOUD_SECURITY_TOKEN` | STS token；设置后凭证模式切换为 STS |
+| `ALIBABA_CLOUD_REGION_ID` | 默认地域 |
+
+详见 [阿里云凭证](./alibaba-cloud-credentials.md)。
+
+## 遥测
+
+| 变量 | 说明 |
+|---|---|
+| `IAC_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | 设为 `1` / `true` / `yes` / `on` 可禁用非必要遥测流量 |
+| `DISABLE_TELEMETRY` | 设为 `1` / `true` / `yes` / `on` 可禁用全部遥测 |
+| `IAC_CODE_TELEMETRY_ENDPOINT` | OTLP 基础端点；各信号端点默认使用此值 |
+| `IAC_CODE_TELEMETRY_TRACES_ENDPOINT` | 覆盖 traces 端点 |
+| `IAC_CODE_TELEMETRY_METRICS_ENDPOINT` | 覆盖 metrics 端点 |
+| `IAC_CODE_TELEMETRY_LOGS_ENDPOINT` | 覆盖 logs 端点 |
+| `IAC_CODE_TELEMETRY_HEADERS` | 自定义 OTLP 请求头（JSON 或 key=value 格式） |
+
+## 其他
+
+| 变量 | 说明 |
+|---|---|
+| `IAC_CODE_ENV` | 部署环境标签（默认：`production`） |
+| `IAC_CODE_TENANT_ID` | 遥测租户标识；如未以 `iac_tenant_` 开头则自动添加前缀 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | 标准 OpenTelemetry 端点；设置后启用 OTLP 导出 |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | 在 span 上捕获 GenAI 消息/工具内容：`SPAN_ONLY`、`EVENT_ONLY`、`SPAN_AND_EVENT` |

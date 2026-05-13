@@ -1,0 +1,12 @@
+include LICENSE
+include README.md
+include pyproject.toml
+recursive-include src/iac_code *.yml *.yaml *.json *.md *.mo *.po
+
+prune tests
+prune htmlcov
+prune .ruff_cache
+prune .pytest_cache
+exclude .pre-commit-config.yaml
+exclude Makefile
+exclude babel.cfg
