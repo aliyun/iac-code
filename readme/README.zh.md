@@ -4,6 +4,8 @@
 
 AI 驱动的基础设施即代码（IaC）助手，通过自然语言交互生成和管理阿里云基础设施资源编排模板（ROS / Terraform）。
 
+> **文档**：[https://aliyun.github.io/iac-code/](https://aliyun.github.io/iac-code/zh-Hans/)
+
 ## 安装
 
 ```bash
