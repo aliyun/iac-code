@@ -8,6 +8,8 @@ from collections.abc import AsyncGenerator
 from loguru import logger
 
 from iac_code.config import _KEY_NAME_TO_CRED_SLOT as _KEY_TO_PROVIDER
+from iac_code.config import _MODEL_PREFIX_TO_PROVIDER
+from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
 from iac_code.providers.stream_watchdog import StreamWatchdog
@@ -39,6 +41,11 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
 )
 
+
+class ProviderNotConfiguredError(ValueError):
+    """Raised when the LLM provider cannot be determined or has no API key."""
+
+
 MODEL_FALLBACK_MAP = {
     "claude-opus-4-7": "claude-haiku-4-5-20251001",
     "claude-opus-4-6": "claude-haiku-4-5-20251001",
@@ -52,21 +59,36 @@ MODEL_FALLBACK_MAP = {
 
 
 def _detect_provider_name(model: str) -> str:
-    """Detect provider from saved settings.yml (set by /auth or /model).
+    """Detect provider from saved settings, falling back to model-name heuristics.
 
-    The active provider is always determined by the saved config,
-    never by matching model names — different providers can share model names.
+    Priority:
+    1. Saved config in settings.yml (set by /auth or /model).
+    2. Model-name prefix matching for mainstream models.
     """
     from iac_code.config import get_active_provider_key
 
     key_name = get_active_provider_key() or ""
     if key_name in _KEY_TO_PROVIDER:
         return _KEY_TO_PROVIDER[key_name]
-    raise ValueError(f"Cannot determine provider for model: {model}. Run /auth to configure.")
+
+    model_lower = model.lower()
+    for prefix, provider in _MODEL_PREFIX_TO_PROVIDER:
+        if model_lower.startswith(prefix):
+            return provider
+
+    raise ProviderNotConfiguredError(
+        _("Cannot determine provider for model: {model}. Run /auth to configure.").format(model=model)
+    )
 
 
 def create_provider(model: str, credentials: dict[str, str]) -> Provider:
     provider_name = _detect_provider_name(model)
+    if not credentials.get(provider_name):
+        raise ProviderNotConfiguredError(
+            _("No API key configured for provider '{provider}' (model: {model}). Run /auth to configure.").format(
+                provider=provider_name, model=model
+            )
+        )
     if provider_name == "anthropic":
         from iac_code.config import get_provider_config
         from iac_code.providers.anthropic_provider import AnthropicProvider

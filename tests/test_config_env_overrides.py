@@ -351,7 +351,7 @@ class TestLoadCredentials:
             assert creds["openai"] == "env_only_for_openai"
             assert creds["anthropic"] == "ak"
 
-    def test_api_key_env_without_active_provider_is_ignored(self, monkeypatch, tmp_path):
+    def test_api_key_env_without_active_provider_is_ignored_when_no_model(self, monkeypatch, tmp_path):
         from unittest.mock import patch
 
         for n in ("IAC_CODE_PROVIDER",):
@@ -364,6 +364,31 @@ class TestLoadCredentials:
             creds = load_credentials()
             assert creds["openai"] == "ok"
             assert "env_orphan" not in creds.values()
+
+    def test_api_key_env_routed_via_model_prefix_when_no_provider(self, monkeypatch, tmp_path):
+        from unittest.mock import patch
+
+        for n in ("IAC_CODE_PROVIDER",):
+            monkeypatch.delenv(n, raising=False)
+        self._write(tmp_path, settings="", creds="")
+        monkeypatch.setenv("IAC_CODE_API_KEY", "sk-from-env")
+        with patch("iac_code.config.Path.home", return_value=tmp_path):
+            from iac_code.config import load_credentials
+
+            creds = load_credentials(model="claude-sonnet-4-6")
+            assert creds["anthropic"] == "sk-from-env"
+
+    def test_api_key_env_model_prefix_does_not_override_explicit_provider(self, monkeypatch, tmp_path):
+        from unittest.mock import patch
+
+        self._write(tmp_path, settings="activeProvider: openai\n", creds="")
+        monkeypatch.setenv("IAC_CODE_API_KEY", "sk-from-env")
+        with patch("iac_code.config.Path.home", return_value=tmp_path):
+            from iac_code.config import load_credentials
+
+            creds = load_credentials(model="claude-sonnet-4-6")
+            assert creds["openai"] == "sk-from-env"
+            assert creds["anthropic"] == ""
 
 
 class TestDashScopeTokenPlanProviderEnv:

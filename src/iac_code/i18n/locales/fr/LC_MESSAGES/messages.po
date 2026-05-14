@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-14 12:41+0800\n"
+"POT-Creation-Date: 2026-05-14 15:54+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: fr\n"
@@ -111,6 +111,26 @@ msgstr "Plan"
 msgid "Agent"
 msgstr "Agent"
 
+#: src/iac_code/cli/headless.py:54
+#, python-brace-format
+msgid ""
+"\n"
+"  {error}\n"
+"\n"
+"  Fix: run  iac-code  then type /auth\n"
+"   or: set  IAC_CODE_API_KEY=<your-key>\n"
+"  Docs: https://aliyun.github.io/iac-"
+"code/docs/configuration/authentication\n"
+msgstr ""
+"\n"
+"  {error}\n"
+"\n"
+"  Correction : exécutez iac-code puis tapez /auth\n"
+"  ou définissez la variable d’environnement : IAC_CODE_API_KEY=<votre-"
+"clé>\n"
+"  Documentation : https://aliyun.github.io/iac-"
+"code/fr/docs/configuration/authentication\n"
+
 #: src/iac_code/cli/main.py:22 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
 msgstr "Outil d’orchestration d’infrastructure assisté par IA"
@@ -131,7 +151,7 @@ msgstr "Format de sortie : text, json, stream-json"
 msgid "Maximum agent turns in headless mode"
 msgstr "Nombre maximal de tours d’agent en mode headless"
 
-#: src/iac_code/cli/main.py:37 src/iac_code/cli/main.py:232
+#: src/iac_code/cli/main.py:37 src/iac_code/cli/main.py:236
 msgid "Enable debug logging"
 msgstr "Activer la journalisation debug"
 
@@ -163,19 +183,19 @@ msgstr ""
 msgid "Error: --resume and --continue cannot be used together."
 msgstr "Erreur : --resume et --continue ne peuvent pas être utilisés ensemble."
 
-#: src/iac_code/cli/main.py:227
+#: src/iac_code/cli/main.py:231
 msgid "Run iac-code as an ACP server."
 msgstr "Exécuter iac-code comme serveur ACP."
 
-#: src/iac_code/cli/main.py:229
+#: src/iac_code/cli/main.py:233
 msgid "Transport type: stdio or http"
 msgstr "Type de transport : stdio ou http"
 
-#: src/iac_code/cli/main.py:230
+#: src/iac_code/cli/main.py:234
 msgid "HTTP server port"
 msgstr "Port du serveur HTTP"
 
-#: src/iac_code/cli/main.py:231
+#: src/iac_code/cli/main.py:235
 msgid "HTTP server host"
 msgstr "Hôte du serveur HTTP"
 
@@ -540,6 +560,22 @@ msgstr "(dynamique)"
 #: src/iac_code/i18n/__init__.py:60
 msgid "Aborted!"
 msgstr "Interrompu !"
+
+#: src/iac_code/providers/manager.py:80
+#, python-brace-format
+msgid "Cannot determine provider for model: {model}. Run /auth to configure."
+msgstr ""
+"Impossible de déterminer le fournisseur pour le modèle : {model}. "
+"Exécutez /auth pour configurer."
+
+#: src/iac_code/providers/manager.py:88
+#, python-brace-format
+msgid ""
+"No API key configured for provider '{provider}' (model: {model}). Run "
+"/auth to configure."
+msgstr ""
+"Aucune clé API configurée pour le fournisseur '{provider}' (modèle : "
+"{model}). Exécutez /auth pour configurer."
 
 #: src/iac_code/providers/openai_provider.py:263
 #, python-brace-format
@@ -1146,12 +1182,12 @@ msgstr "Erreur de commande : {error}"
 msgid "Command has no handler: {name}"
 msgstr "Aucun gestionnaire pour la commande : {name}"
 
-#: src/iac_code/ui/repl.py:635
+#: src/iac_code/ui/repl.py:634
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Session introuvable : {session_id}"
 
-#: src/iac_code/ui/repl.py:654
+#: src/iac_code/ui/repl.py:653
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1162,15 +1198,15 @@ msgstr ""
 "Pour la reprendre, exécutez :\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:693
+#: src/iac_code/ui/repl.py:692
 msgid "This conversation is from a different directory."
 msgstr "Cette conversation provient d’un autre répertoire."
 
-#: src/iac_code/ui/repl.py:695
+#: src/iac_code/ui/repl.py:694
 msgid "To resume, run:"
 msgstr "Pour reprendre, exécutez :"
 
-#: src/iac_code/ui/repl.py:700
+#: src/iac_code/ui/repl.py:699
 msgid "(Command copied to clipboard)"
 msgstr "(Commande copiée dans le presse-papiers)"
 

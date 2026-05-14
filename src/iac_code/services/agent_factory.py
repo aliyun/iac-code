@@ -52,7 +52,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     cwd = options.cwd or os.getcwd()
     session_id = options.session_id or str(uuid.uuid4())[:8]
 
-    credentials = load_credentials()
+    credentials = load_credentials(model=options.model)
 
     provider_manager = ProviderManager(model=options.model, credentials=credentials)
 

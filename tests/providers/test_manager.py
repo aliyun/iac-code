@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from iac_code.providers.base import Message, NonStreamingResponse
-from iac_code.providers.manager import ProviderManager, create_provider
+from iac_code.providers.manager import ProviderManager, _detect_provider_name, create_provider
 from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent, Usage
 
 
@@ -90,24 +90,24 @@ class TestProviderManager:
 
     def test_deferred_init_when_no_active_provider(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
-        m = ProviderManager(model="claude-sonnet-4-6", credentials={})
+        m = ProviderManager(model="custom-model", credentials={})
         assert m._provider is None
 
     def test_ensure_provider_raises_when_still_unconfigured(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
-        m = ProviderManager(model="claude-sonnet-4-6", credentials={})
+        m = ProviderManager(model="custom-model", credentials={})
         with pytest.raises(ValueError, match="Cannot determine provider"):
             m._ensure_provider()
 
     def test_ensure_provider_lazy_success(self, monkeypatch):
-        # First call: no provider configured
+        # First call: no provider configured, model name not auto-mappable
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
-        m = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        m = ProviderManager(model="custom-model", credentials={"anthropic": "k"})
         assert m._provider is None
         # Second call: user configured provider via /auth
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         provider = m._ensure_provider()
-        assert provider.get_model_name() == "claude-sonnet-4-6"
+        assert provider.get_model_name() == "custom-model"
 
     def test_unknown_model_no_fallback(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
@@ -133,7 +133,7 @@ class TestProviderManager:
     def test_reconfigure_recovers_from_unconfigured(self, monkeypatch):
         # Start with no active provider — manager defers provider init.
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
-        m = ProviderManager(model="claude-sonnet-4-6", credentials={})
+        m = ProviderManager(model="custom-model", credentials={})
         assert m._provider is None
 
         # User runs /auth — reconfigure should now build the provider.
@@ -297,3 +297,42 @@ class TestProviderManagerCompleteRetry:
         # ValueError has no status_code and isn't ConnectionError/TimeoutError/OSError,
         # so it should NOT be retried.
         assert mock_provider.complete.call_count == 1
+
+
+class TestModelPrefixAutoMapping:
+    """_detect_provider_name falls back to model-name prefix heuristics."""
+
+    @pytest.mark.parametrize(
+        "model, expected_provider",
+        [
+            ("claude-sonnet-4-6", "anthropic"),
+            ("claude-opus-4-7", "anthropic"),
+            ("claude-haiku-4-5-20251001", "anthropic"),
+            ("gpt-4o", "openai"),
+            ("gpt-5.5", "openai"),
+            ("o1-preview", "openai"),
+            ("o3-mini", "openai"),
+            ("qwen3.6-plus", "dashscope"),
+            ("qwen-max", "dashscope"),
+            ("deepseek-v4-pro", "deepseek"),
+            ("deepseek-chat", "deepseek"),
+        ],
+    )
+    def test_auto_maps_mainstream_models(self, monkeypatch, model, expected_provider):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
+        assert _detect_provider_name(model) == expected_provider
+
+    def test_saved_config_takes_precedence_over_prefix(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai")
+        assert _detect_provider_name("claude-sonnet-4-6") == "openai"
+
+    def test_unknown_model_still_raises(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
+        with pytest.raises(ValueError, match="Cannot determine provider"):
+            _detect_provider_name("totally-unknown-model")
+
+    def test_auto_mapped_model_without_api_key_raises(self, monkeypatch):
+        """Model prefix resolves the provider, but empty credential raises ValueError."""
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
+        with pytest.raises(ValueError, match="No API key configured for provider 'anthropic'"):
+            create_provider("claude-sonnet-4-6", credentials={"anthropic": ""})
