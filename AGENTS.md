@@ -49,6 +49,7 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
 
 ## i18n and Bundled Skills
 
+- Do not use f-string with `_()` (e.g. `f"hello {_('world')}"`); Python 3.10's tokenizer treats the entire f-string as a single token so Babel cannot extract nested `_()` calls — use `str.format` instead (e.g. `_('hello {}').format(name)`).
 - After modifying user-facing translatable strings, check whether `make translate` needs to be run.
 - Markdown files and scripts under `src/iac_code/skills/bundled/iac_aliyun/` are bundled skill resources; when modifying them, maintain consistency between templates, parameter descriptions, and conversion scripts.
 - Do not commit generated translations, build artifacts, or coverage outputs unless the current task explicitly requires it.

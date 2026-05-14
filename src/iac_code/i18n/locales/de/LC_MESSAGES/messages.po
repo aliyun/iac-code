@@ -1,4 +1,4 @@
-# Chinese translations for iac-code.
+# German translations for iac-code.
 # Copyright (C) 2026
 # This file is distributed under the same license as the iac-code package.
 #
@@ -7,11 +7,11 @@ msgstr ""
 "Project-Id-Version: iac-code 0.1.1\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-05-14 12:41+0800\n"
-"PO-Revision-Date: 2026-04-02 00:00+0000\n"
+"PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
-"Language: zh\n"
-"Language-Team: Chinese\n"
-"Plural-Forms: nplurals=1; plural=0;\n"
+"Language: de\n"
+"Language-Team: German\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -22,210 +22,218 @@ msgstr ""
 msgid ""
 "Command '/{cmd_name}' is not supported over ACP. Supported commands: "
 "{supported}"
-msgstr "命令 '/{cmd_name}' 不支持通过 ACP 使用。支持的命令：{supported}"
+msgstr ""
+"Der Befehl '/{cmd_name}' wird über ACP nicht unterstützt. Unterstützte "
+"Befehle: {supported}"
 
 #: src/iac_code/acp/slash_registry.py:56
 #, python-brace-format
 msgid "Command '/{cmd_name}' handler not implemented."
-msgstr "命令 '/{cmd_name}' 的处理器尚未实现。"
+msgstr "Der Handler für den Befehl '/{cmd_name}' ist nicht implementiert."
 
 #: src/iac_code/acp/slash_registry.py:68
 #, python-brace-format
 msgid "Compaction failed: {error}"
-msgstr "压缩失败：{error}"
+msgstr "Komprimierung fehlgeschlagen: {error}"
 
 #: src/iac_code/acp/slash_registry.py:71 src/iac_code/commands/compact.py:24
 msgid "Nothing to compact: conversation is empty."
-msgstr "无内容可压缩：对话为空。"
+msgstr "Nichts zu komprimieren: Die Konversation ist leer."
 
 #: src/iac_code/acp/slash_registry.py:74 src/iac_code/commands/compact.py:27
 #, python-brace-format
 msgid ""
 "Conversation too short to compact: all messages are within the recent "
 "{turns}-turn preservation window."
-msgstr "对话过短，无需压缩：所有消息都在最近 {turns} 轮保留窗口内。"
+msgstr ""
+"Konversation zu kurz zum Komprimieren: Alle Nachrichten liegen im "
+"Erhaltungsfenster der letzten {turns} Runden."
 
 #: src/iac_code/acp/slash_registry.py:78 src/iac_code/commands/compact.py:30
 msgid "Compaction failed. See logs for details."
-msgstr "压缩失败，详情请查看日志。"
+msgstr "Komprimierung fehlgeschlagen. Details finden Sie in den Protokollen."
 
 #: src/iac_code/acp/slash_registry.py:83
 #, python-brace-format
 msgid ""
 "Context compacted: {original} → {compacted} tokens ({percent} reduction)."
 " Context usage: {usage}"
-msgstr "上下文已压缩：{original} → {compacted} tokens（减少 {percent}）。上下文用量：{usage}"
+msgstr ""
+"Kontext komprimiert: {original} → {compacted} Tokens ({percent} "
+"Reduzierung). Kontextnutzung: {usage}"
 
 #: src/iac_code/acp/slash_registry.py:97
 #, python-brace-format
 msgid "Clear failed: {error}"
-msgstr "清除失败：{error}"
+msgstr "Löschen fehlgeschlagen: {error}"
 
 #: src/iac_code/acp/slash_registry.py:98
 msgid "Conversation history cleared."
-msgstr "对话历史已清除。"
+msgstr "Konversationsverlauf gelöscht."
 
 #: src/iac_code/acp/slash_registry.py:114 src/iac_code/commands/debug.py:34
 #, python-brace-format
 msgid "Debug logging is on. Log file: {path}"
-msgstr "调试日志已启用。日志文件：{path}"
+msgstr "Debug-Protokollierung ist aktiv. Protokolldatei: {path}"
 
 #: src/iac_code/acp/slash_registry.py:115 src/iac_code/commands/debug.py:35
 msgid "Debug logging is off."
-msgstr "调试日志已关闭。"
+msgstr "Debug-Protokollierung ist inaktiv."
 
 #: src/iac_code/acp/slash_registry.py:119 src/iac_code/commands/debug.py:39
 #, python-brace-format
 msgid "Debug logging enabled. Log file: {path}"
-msgstr "调试日志已启用。日志文件：{path}"
+msgstr "Debug-Protokollierung aktiviert. Protokolldatei: {path}"
 
 #: src/iac_code/acp/slash_registry.py:123 src/iac_code/commands/debug.py:43
 msgid "Debug logging disabled."
-msgstr "调试日志已关闭。"
+msgstr "Debug-Protokollierung deaktiviert."
 
 #: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:45
 msgid "Usage: /debug [on|off]"
-msgstr "用法：/debug [on|off]"
+msgstr "Verwendung: /debug [on|off]"
 
 #: src/iac_code/agent/agent_tool.py:250
 #, python-brace-format
 msgid "Done ({tool_count} tool uses · {token_display} tokens)"
-msgstr "完成（{tool_count} 次工具调用 · {token_display} tokens）"
+msgstr "Fertig ({tool_count} Tool-Aufrufe · {token_display} Tokens)"
 
 #: src/iac_code/agent/agent_tool.py:260
 msgid "Explore"
-msgstr "探索"
+msgstr "Erkunden"
 
 #: src/iac_code/agent/agent_tool.py:261
 msgid "Plan"
-msgstr "规划"
+msgstr "Plan"
 
 #: src/iac_code/agent/agent_tool.py:262 src/iac_code/agent/agent_tool.py:263
 #: src/iac_code/agent/agent_tool.py:264
 msgid "Agent"
-msgstr "智能体"
+msgstr "Agent"
 
 #: src/iac_code/cli/main.py:22 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
-msgstr "AI 驱动的基础设施编排工具"
+msgstr "KI-gestütztes Tool zur Orchestrierung von Infrastruktur"
 
 #: src/iac_code/cli/main.py:33
 msgid "LLM model to use"
-msgstr "使用的 LLM 模型"
+msgstr "Zu verwendendes LLM-Modell"
 
 #: src/iac_code/cli/main.py:34
 msgid "Non-interactive mode: run a single prompt and exit"
-msgstr "非交互模式：运行单个提示并退出"
+msgstr "Nicht-interaktiver Modus: Einen Prompt ausführen und beenden"
 
 #: src/iac_code/cli/main.py:35
 msgid "Output format: text, json, stream-json"
-msgstr "输出格式：text、json、stream-json"
+msgstr "Ausgabeformat: text, json, stream-json"
 
 #: src/iac_code/cli/main.py:36
 msgid "Maximum agent turns in headless mode"
-msgstr "无头模式下最大智能体轮次"
+msgstr "Maximale Agent-Runden im Headless-Modus"
 
 #: src/iac_code/cli/main.py:37 src/iac_code/cli/main.py:232
 msgid "Enable debug logging"
-msgstr "启用调试日志"
+msgstr "Debug-Protokollierung aktivieren"
 
 #: src/iac_code/cli/main.py:38
 msgid "Show version and exit"
-msgstr "显示版本号并退出"
+msgstr "Version anzeigen und beenden"
 
 #: src/iac_code/cli/main.py:39
 msgid "Resume a session by ID"
-msgstr "通过 ID 恢复会话"
+msgstr "Eine Sitzung anhand der ID fortsetzen"
 
 #: src/iac_code/cli/main.py:40
 msgid "Resume the most recent session"
-msgstr "恢复最近一次会话"
+msgstr "Die zuletzt genutzte Sitzung fortsetzen"
 
 #: src/iac_code/cli/main.py:47 src/iac_code/i18n/__init__.py:54
 msgid "Install completion for the current shell."
-msgstr "为当前 shell 安装自动补全。"
+msgstr "Vervollständigung für die aktuelle Shell installieren."
 
 #: src/iac_code/cli/main.py:55 src/iac_code/i18n/__init__.py:55
 msgid ""
 "Show completion for the current shell, to copy it or customize the "
 "installation."
-msgstr "显示当前 shell 的自动补全脚本，可复制或自定义安装。"
+msgstr ""
+"Vervollständigung für die aktuelle Shell anzeigen, zum Kopieren oder "
+"Anpassen der Installation."
 
 #: src/iac_code/cli/main.py:69
 msgid "Error: --resume and --continue cannot be used together."
-msgstr "错误：--resume 和 --continue 不能同时使用。"
+msgstr "Fehler: --resume und --continue können nicht gemeinsam verwendet werden."
 
 #: src/iac_code/cli/main.py:227
 msgid "Run iac-code as an ACP server."
-msgstr "将 iac-code 作为 ACP 服务器运行。"
+msgstr "iac-code als ACP-Server ausführen."
 
 #: src/iac_code/cli/main.py:229
 msgid "Transport type: stdio or http"
-msgstr "传输类型：stdio 或 http"
+msgstr "Transporttyp: stdio oder http"
 
 #: src/iac_code/cli/main.py:230
 msgid "HTTP server port"
-msgstr "HTTP 服务器端口"
+msgstr "HTTP-Server-Port"
 
 #: src/iac_code/cli/main.py:231
 msgid "HTTP server host"
-msgstr "HTTP 服务器主机"
+msgstr "HTTP-Server-Host"
 
 #: src/iac_code/commands/__init__.py:22
 msgid "Show available commands"
-msgstr "显示可用命令"
+msgstr "Verfügbare Befehle anzeigen"
 
 #: src/iac_code/commands/__init__.py:30
 msgid "Clear conversation history"
-msgstr "清除对话历史"
+msgstr "Konversationsverlauf löschen"
 
 #: src/iac_code/commands/__init__.py:37
 msgid "Show or switch model"
-msgstr "显示或切换模型"
+msgstr "Modell anzeigen oder wechseln"
 
 #: src/iac_code/commands/__init__.py:45
 msgid "Show or switch thinking effort"
-msgstr "显示或切换思考强度"
+msgstr "Thinking-Effort anzeigen oder wechseln"
 
 #: src/iac_code/commands/__init__.py:53
 msgid "Compact conversation context"
-msgstr "压缩对话上下文"
+msgstr "Konversationskontext komprimieren"
 
 #: src/iac_code/commands/__init__.py:55
 msgid "Compacting conversation"
-msgstr "正在压缩对话"
+msgstr "Konversation wird komprimiert"
 
 #: src/iac_code/commands/__init__.py:61
 msgid "Exit the application"
-msgstr "退出应用程序"
+msgstr "Anwendung beenden"
 
 #: src/iac_code/commands/__init__.py:69
 msgid "Authenticate with LLM provider"
-msgstr "配置 LLM 提供商认证"
+msgstr "Beim LLM-Anbieter authentifizieren"
 
 #: src/iac_code/commands/__init__.py:77
 msgid "Toggle debug logging"
-msgstr "切换调试日志开关"
+msgstr "Debug-Protokollierung umschalten"
 
 #: src/iac_code/commands/__init__.py:85
 msgid "Resume a previous session"
-msgstr "恢复之前的会话"
+msgstr "Eine frühere Sitzung fortsetzen"
 
 #: src/iac_code/commands/__init__.py:87
 msgid "[conversation id or search term]"
-msgstr "[会话 ID 或搜索词]"
+msgstr "[Konversations-ID oder Suchbegriff]"
 
 #: src/iac_code/commands/auth.py:304 src/iac_code/commands/auth.py:817
 #: src/iac_code/ui/core/prompt_input.py:373
 msgid "Navigate"
-msgstr "导航"
+msgstr "Navigieren"
 
 #: src/iac_code/commands/auth.py:304 src/iac_code/commands/auth.py:426
 #: src/iac_code/commands/auth.py:460 src/iac_code/commands/auth.py:467
 #: src/iac_code/commands/auth.py:491 src/iac_code/commands/auth.py:817
 #: src/iac_code/commands/auth.py:1007 src/iac_code/ui/core/prompt_input.py:373
 msgid "Confirm"
-msgstr "确认"
+msgstr "Bestätigen"
 
 #: src/iac_code/commands/auth.py:304 src/iac_code/commands/auth.py:424
 #: src/iac_code/commands/auth.py:426 src/iac_code/commands/auth.py:460
@@ -233,150 +241,150 @@ msgstr "确认"
 #: src/iac_code/commands/auth.py:817 src/iac_code/commands/auth.py:902
 #: src/iac_code/commands/auth.py:1007
 msgid "Back"
-msgstr "返回"
+msgstr "Zurück"
 
 #: src/iac_code/commands/auth.py:424
 msgid "Keep"
-msgstr "保留"
+msgstr "Behalten"
 
 #: src/iac_code/commands/auth.py:424
 msgid "Re-enter"
-msgstr "重新输入"
+msgstr "Erneut eingeben"
 
 #: src/iac_code/commands/auth.py:566 src/iac_code/commands/auth.py:667
 msgid " (current)"
-msgstr " (当前)"
+msgstr " (aktuell)"
 
 #: src/iac_code/commands/auth.py:569
 msgid "Custom model..."
-msgstr "自定义模型..."
+msgstr "Benutzerdefiniertes Modell …"
 
 #: src/iac_code/commands/auth.py:572
 #, python-brace-format
 msgid "Select model for {provider}"
-msgstr "为 {provider} 选择模型"
+msgstr "Modell für {provider} auswählen"
 
 #: src/iac_code/commands/auth.py:574
 msgid "Select model"
-msgstr "选择模型"
+msgstr "Modell auswählen"
 
 #: src/iac_code/commands/auth.py:582
 msgid "Enter custom model name: "
-msgstr "输入自定义模型名称："
+msgstr "Benutzerdefinierten Modellnamen eingeben: "
 
 #: src/iac_code/commands/auth.py:608
 msgid "Error: console not available"
-msgstr "错误：控制台不可用"
+msgstr "Fehler: Konsole nicht verfügbar"
 
 #: src/iac_code/commands/auth.py:635
 msgid "Configure LLM Provider"
-msgstr "配置 LLM 提供商"
+msgstr "LLM-Anbieter konfigurieren"
 
 #: src/iac_code/commands/auth.py:636
 msgid "Configure IaC Cloud Service"
-msgstr "配置 IaC 云服务"
+msgstr "IaC-Cloud-Dienst konfigurieren"
 
 #: src/iac_code/commands/auth.py:638
 msgid "Select configuration type"
-msgstr "选择配置类型"
+msgstr "Konfigurationstyp auswählen"
 
 #: src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:694
 #: src/iac_code/commands/auth.py:709 src/iac_code/commands/auth.py:770
 #: src/iac_code/commands/auth.py:943 src/iac_code/commands/auth.py:984
 msgid "Auth cancelled"
-msgstr "认证已取消"
+msgstr "Authentifizierung abgebrochen"
 
 #: src/iac_code/commands/auth.py:676
 msgid "Select provider"
-msgstr "选择提供商"
+msgstr "Anbieter auswählen"
 
 #: src/iac_code/commands/auth.py:687
 #, python-brace-format
 msgid "Configure {provider}"
-msgstr "配置 {provider}"
+msgstr "{provider} konfigurieren"
 
 #: src/iac_code/commands/auth.py:702
 #, python-brace-format
 msgid "Enter API key for {provider}"
-msgstr "为 {provider} 输入 API 密钥"
+msgstr "API-Key für {provider} eingeben"
 
 #: src/iac_code/commands/auth.py:742
 #, python-brace-format
 msgid "{status}: {provider} / {model}"
-msgstr "{status}：{provider} / {model}"
+msgstr "{status}: {provider} / {model}"
 
 #: src/iac_code/commands/auth.py:743
 msgid "Configured"
-msgstr "已配置"
+msgstr "Konfiguriert"
 
 #: src/iac_code/commands/auth.py:752
 msgid "Alibaba Cloud"
-msgstr "阿里云"
+msgstr "Alibaba Cloud"
 
 #: src/iac_code/commands/auth.py:761
 msgid "Select Cloud Provider"
-msgstr "选择云服务商"
+msgstr "Cloud-Anbieter auswählen"
 
 #: src/iac_code/commands/auth.py:777
 msgid "Credential"
-msgstr "凭证"
+msgstr "Anmeldedaten"
 
 #: src/iac_code/commands/auth.py:778 src/iac_code/commands/auth.py:875
 #: src/iac_code/commands/auth.py:980 src/iac_code/ui/renderer.py:417
 msgid "Region"
-msgstr "地域"
+msgstr "Region"
 
 #: src/iac_code/commands/auth.py:780
 msgid "Configure Alibaba Cloud"
-msgstr "配置阿里云"
+msgstr "Alibaba Cloud konfigurieren"
 
 #: src/iac_code/commands/auth.py:863
 msgid "Current configuration"
-msgstr "当前配置"
+msgstr "Aktuelle Konfiguration"
 
 #: src/iac_code/commands/auth.py:865
 msgid "Mode"
-msgstr "模式"
+msgstr "Modus"
 
 #: src/iac_code/commands/auth.py:872
 msgid "(not set)"
-msgstr "（未设置）"
+msgstr "(nicht gesetzt)"
 
 #: src/iac_code/commands/auth.py:889
 msgid "Configure Alibaba Cloud credentials"
-msgstr "配置阿里云凭证"
+msgstr "Alibaba Cloud-Anmeldedaten konfigurieren"
 
 #: src/iac_code/commands/auth.py:902
 msgid "Reconfigure credential"
-msgstr "重新配置凭证"
+msgstr "Anmeldedaten neu konfigurieren"
 
 #: src/iac_code/commands/auth.py:915
 msgid "Select credential type"
-msgstr "选择凭证类型"
+msgstr "Anmeldedatentyp auswählen"
 
 #: src/iac_code/commands/auth.py:965
 msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
-msgstr "已配置：阿里云凭证已保存到 ~/.iac-code"
+msgstr "Konfiguriert: Alibaba Cloud-Anmeldedaten unter ~/.iac-code gespeichert"
 
 #: src/iac_code/commands/auth.py:972
 msgid "Configure Alibaba Cloud region"
-msgstr "配置阿里云地域"
+msgstr "Alibaba Cloud-Region konfigurieren"
 
 #: src/iac_code/commands/auth.py:998
 msgid "Configured: Alibaba Cloud region saved to ~/.iac-code"
-msgstr "已配置：阿里云地域已保存到 ~/.iac-code"
+msgstr "Konfiguriert: Alibaba Cloud-Region unter ~/.iac-code gespeichert"
 
 #: src/iac_code/commands/compact.py:12
 msgid "Compact command requires a context."
-msgstr "压缩命令需要上下文。"
+msgstr "Der Befehl compact erfordert einen Kontext."
 
 #: src/iac_code/commands/compact.py:16
 msgid "No active REPL."
-msgstr "没有活动的 REPL。"
+msgstr "Kein aktives REPL."
 
 #: src/iac_code/commands/compact.py:20
 msgid "No active agent loop."
-msgstr "没有活动的智能体循环。"
+msgstr "Keine aktive Agent-Schleife."
 
 #: src/iac_code/commands/compact.py:35
 #, python-brace-format
@@ -384,150 +392,150 @@ msgid ""
 "Context compacted: {original} → {compacted} tokens ({percent_display} "
 "reduction). Context usage: {usage_display}"
 msgstr ""
-"上下文已压缩：{original} → {compacted} tokens（减少 "
-"{percent_display}）。上下文用量：{usage_display}"
+"Kontext komprimiert: {original} → {compacted} Tokens (Reduzierung "
+"{percent_display}). Kontextnutzung: {usage_display}"
 
 #: src/iac_code/commands/debug.py:21
 msgid "Debug command requires a context."
-msgstr "调试命令需要上下文。"
+msgstr "Der Befehl debug erfordert einen Kontext."
 
 #: src/iac_code/commands/debug.py:26
 msgid "No active session."
-msgstr "没有活动的会话。"
+msgstr "Keine aktive Sitzung."
 
 #: src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py:82
 #: src/iac_code/commands/model.py:86
 msgid "No configured providers. Run /auth first."
-msgstr "没有已配置的提供商。请先运行 /auth。"
+msgstr "Keine konfigurierten Anbieter. Führen Sie zuerst /auth aus."
 
 #: src/iac_code/commands/effort.py:58
 msgid "No model selected. Run /model first."
-msgstr "没有选择模型。请先运行 /model。"
+msgstr "Kein Modell ausgewählt. Führen Sie zuerst /model aus."
 
 #: src/iac_code/commands/effort.py:66
 #, python-brace-format
 msgid "Model {model} does not support effort."
-msgstr "模型 {model} 不支持调整思考强度。"
+msgstr "Modell {model} unterstützt keinen Thinking-Effort."
 
 #: src/iac_code/commands/effort.py:80
 #, python-brace-format
 msgid "Invalid effort. Allowed: {labels}"
-msgstr "非法的思考强度。允许的值：{labels}"
+msgstr "Ungültiger Thinking-Effort. Zulässig: {labels}"
 
 #: src/iac_code/commands/effort.py:85
 #, python-brace-format
 msgid "Current effort: {effort}"
-msgstr "当前思考强度：{effort}"
+msgstr "Aktueller Thinking-Effort: {effort}"
 
 #: src/iac_code/commands/effort.py:94
 #, python-brace-format
 msgid "Select effort for {model}"
-msgstr "为 {model} 选择思考强度"
+msgstr "Thinking-Effort für {model} auswählen"
 
 #: src/iac_code/commands/effort.py:103 src/iac_code/commands/effort.py:107
 #, python-brace-format
 msgid "Kept effort as {effort}"
-msgstr "已保持思考强度为 {effort}"
+msgstr "Thinking-Effort beibehalten: {effort}"
 
 #: src/iac_code/commands/effort.py:116
 #, python-brace-format
 msgid "Effort switched to: {effort}"
-msgstr "思考强度已切换为：{effort}"
+msgstr "Thinking-Effort gewechselt auf: {effort}"
 
 #: src/iac_code/commands/help.py:29
 msgid "Commands:"
-msgstr "命令："
+msgstr "Befehle:"
 
 #: src/iac_code/commands/help.py:36
 msgid "Shortcuts:"
-msgstr "快捷键："
+msgstr "Tastenkürzel:"
 
 #: src/iac_code/commands/help.py:39
 msgid "Send message"
-msgstr "发送消息"
+msgstr "Nachricht senden"
 
 #: src/iac_code/commands/help.py:40
 msgid "New line"
-msgstr "换行"
+msgstr "Neue Zeile"
 
 #: src/iac_code/commands/help.py:41
 msgid "Show command suggestions"
-msgstr "显示命令建议"
+msgstr "Befehlsvorschläge anzeigen"
 
 #: src/iac_code/commands/help.py:42
 msgid "Exit"
-msgstr "退出"
+msgstr "Beenden"
 
 #: src/iac_code/commands/model.py:75 src/iac_code/commands/model.py:130
 #, python-brace-format
 msgid "Model switched to: {model}"
-msgstr "模型已切换为：{model}"
+msgstr "Modell gewechselt auf: {model}"
 
 #: src/iac_code/commands/model.py:79
 #, python-brace-format
 msgid "Current model: {model}"
-msgstr "当前模型：{model}"
+msgstr "Aktuelles Modell: {model}"
 
 #: src/iac_code/commands/model.py:105
 #, python-brace-format
 msgid "Kept model as {model}"
-msgstr "保持模型为 {model}"
+msgstr "Modell beibehalten: {model}"
 
 #: src/iac_code/commands/resume.py:21
 msgid "Resume is only available in interactive mode."
-msgstr "/resume 仅在交互模式下可用。"
+msgstr "/resume ist nur im interaktiven Modus verfügbar."
 
 #: src/iac_code/commands/resume.py:27
 msgid "Resume is unavailable: session index not initialised."
-msgstr "无法恢复：会话索引未初始化。"
+msgstr "Fortsetzen nicht möglich: Sitzungsindex nicht initialisiert."
 
 #: src/iac_code/commands/resume.py:32
 #, python-brace-format
 msgid "Session not found: {arg}"
-msgstr "未找到会话：{arg}"
+msgstr "Sitzung nicht gefunden: {arg}"
 
 #: src/iac_code/commands/resume.py:47
 msgid "Resume cancelled"
-msgstr "已取消恢复"
+msgstr "Fortsetzen abgebrochen"
 
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py:50
 msgid "Options"
-msgstr "选项"
+msgstr "Optionen"
 
 #: src/iac_code/i18n/__init__.py:51
 msgid "Commands"
-msgstr "命令"
+msgstr "Befehle"
 
 #: src/iac_code/i18n/__init__.py:52
 msgid "Arguments"
-msgstr "参数"
+msgstr "Argumente"
 
 #: src/iac_code/i18n/__init__.py:53
 msgid "Show this message and exit."
-msgstr "显示此帮助信息并退出。"
+msgstr "Diese Meldung anzeigen und beenden."
 
 #: src/iac_code/i18n/__init__.py:56
 #, python-brace-format
 msgid "default: {default}"
-msgstr "默认值: {default}"
+msgstr "Standard: {default}"
 
 #: src/iac_code/i18n/__init__.py:57
 msgid "required"
-msgstr "必填"
+msgstr "erforderlich"
 
 #: src/iac_code/i18n/__init__.py:58
 #, python-brace-format
 msgid "env var: {var}"
-msgstr "环境变量: {var}"
+msgstr "Umgebungsvariable: {var}"
 
 #: src/iac_code/i18n/__init__.py:59
 msgid "(dynamic)"
-msgstr "(动态)"
+msgstr "(dynamisch)"
 
 #: src/iac_code/i18n/__init__.py:60
 msgid "Aborted!"
-msgstr "已中止！"
+msgstr "Abgebrochen!"
 
 #: src/iac_code/providers/openai_provider.py:263
 #, python-brace-format
@@ -536,8 +544,9 @@ msgid ""
 "(current: {base_url}). Many OpenAI-compatible endpoints require a /v1 "
 "suffix (e.g. {base_url}/v1)."
 msgstr ""
-"API 未返回数据。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
-"后缀（如 {base_url}/v1）。"
+"Die API hat keine Daten zurückgegeben. Prüfen Sie, ob Ihre API Base URL "
+"korrekt ist (aktuell: {base_url}). Viele OpenAI-kompatible Endpunkte "
+"erfordern ein /v1-Suffix (z. B. {base_url}/v1)."
 
 #: src/iac_code/providers/openai_provider.py:307
 #, python-brace-format
@@ -546,28 +555,31 @@ msgid ""
 "correct (current: {base_url}). Many OpenAI-compatible endpoints require a"
 " /v1 suffix (e.g. {base_url}/v1)."
 msgstr ""
-"API 返回了无效响应。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
-"后缀（如 {base_url}/v1）。"
+"Die API hat eine ungültige Antwort zurückgegeben. Prüfen Sie, ob Ihre API"
+" Base URL korrekt ist (aktuell: {base_url}). Viele OpenAI-kompatible "
+"Endpunkte erfordern ein /v1-Suffix (z. B. {base_url}/v1)."
 
 #: src/iac_code/skills/skill_tool.py:130
 #, python-brace-format
 msgid "Skill '{name}' loaded (inline)."
-msgstr "技能 '{name}' 已加载（内联）。"
+msgstr "Skill '{name}' geladen (inline)."
 
 #: src/iac_code/skills/skill_tool.py:214
 msgid "Skill"
-msgstr "技能"
+msgstr "Skill"
 
 #: src/iac_code/skills/bundled/simplify.py:25
 msgid ""
 "Review changed code for reuse, quality, and efficiency, then fix issues "
 "found."
-msgstr "审查变更的代码的可复用性、质量和效率，然后修复发现的问题。"
+msgstr ""
+"Geänderten Code auf Wiederverwendbarkeit, Qualität und Effizienz prüfen "
+"und gefundene Probleme beheben."
 
 #: src/iac_code/tools/bash.py:107
 #, python-brace-format
 msgid "{count} more lines"
-msgstr "还有 {count} 行"
+msgstr "{count} weitere Zeilen"
 
 #: src/iac_code/tools/bash.py:115
 msgid "Bash"
@@ -576,407 +588,409 @@ msgstr "Bash"
 #: src/iac_code/tools/bash.py:121
 #, python-brace-format
 msgid "Running {cmd}"
-msgstr "正在运行 {cmd}"
+msgstr "{cmd} wird ausgeführt"
 
 #: src/iac_code/tools/bash.py:122
 msgid "Running command..."
-msgstr "正在运行命令..."
+msgstr "Befehl wird ausgeführt …"
 
 #: src/iac_code/tools/edit_file.py:112
 msgid "Create"
-msgstr "创建"
+msgstr "Erstellen"
 
 #: src/iac_code/tools/edit_file.py:113
 msgid "Update"
-msgstr "更新"
+msgstr "Aktualisieren"
 
 #: src/iac_code/tools/edit_file.py:117
 #, python-brace-format
 msgid "Editing {path}"
-msgstr "正在编辑 {path}"
+msgstr "{path} wird bearbeitet"
 
 #: src/iac_code/tools/edit_file.py:118
 msgid "Editing file..."
-msgstr "正在编辑文件..."
+msgstr "Datei wird bearbeitet …"
 
 #: src/iac_code/tools/glob.py:85 src/iac_code/tools/grep.py:236
 msgid "Found 0 files"
-msgstr "找到 0 个文件"
+msgstr "0 Dateien gefunden"
 
 #: src/iac_code/tools/glob.py:88 src/iac_code/tools/grep.py:239
 #, python-brace-format
 msgid "Found {count} files"
-msgstr "找到 {count} 个文件"
+msgstr "{count} Dateien gefunden"
 
 #: src/iac_code/tools/glob.py:94 src/iac_code/tools/grep.py:245
 msgid "Search"
-msgstr "搜索"
+msgstr "Suche"
 
 #: src/iac_code/tools/glob.py:99
 #, python-brace-format
 msgid "Searching {pattern}"
-msgstr "正在搜索 {pattern}"
+msgstr "{pattern} wird durchsucht"
 
 #: src/iac_code/tools/glob.py:100
 msgid "Searching files..."
-msgstr "正在搜索文件..."
+msgstr "Dateien werden durchsucht …"
 
 #: src/iac_code/tools/grep.py:250
 #, python-brace-format
 msgid "Searching for {pattern}"
-msgstr "正在搜索 {pattern}"
+msgstr "Suche nach {pattern}"
 
 #: src/iac_code/tools/grep.py:251
 msgid "Searching content..."
-msgstr "正在搜索内容..."
+msgstr "Inhalt wird durchsucht …"
 
 #: src/iac_code/tools/list_files.py:81
 #, python-brace-format
 msgid "Found {count} items"
-msgstr "找到 {count} 个项目"
+msgstr "{count} Einträge gefunden"
 
 #: src/iac_code/tools/list_files.py:87
 msgid "List"
-msgstr "列表"
+msgstr "Liste"
 
 #: src/iac_code/tools/list_files.py:91
 #, python-brace-format
 msgid "Listing {path}"
-msgstr "正在列出 {path}"
+msgstr "{path} wird aufgelistet"
 
 #: src/iac_code/tools/list_files.py:92
 msgid "Listing files..."
-msgstr "正在列出文件..."
+msgstr "Dateien werden aufgelistet …"
 
 #: src/iac_code/tools/read_file.py:116
 #, python-brace-format
 msgid "Read {total} lines"
-msgstr "读取了 {total} 行"
+msgstr "{total} Zeilen gelesen"
 
 #: src/iac_code/tools/read_file.py:119
 msgid "Read"
-msgstr "读取"
+msgstr "Lesen"
 
 #: src/iac_code/tools/read_file.py:123
 #, python-brace-format
 msgid "Reading {path}"
-msgstr "正在读取 {path}"
+msgstr "{path} wird gelesen"
 
 #: src/iac_code/tools/read_file.py:124
 msgid "Reading file..."
-msgstr "正在读取文件..."
+msgstr "Datei wird gelesen …"
 
 #: src/iac_code/tools/web_fetch.py:94
 msgid "URL cannot be empty."
-msgstr "URL 不能为空。"
+msgstr "Die URL darf nicht leer sein."
 
 #: src/iac_code/tools/web_fetch.py:100
 #, python-brace-format
 msgid "Invalid URL: missing scheme (e.g. http:// or https://). Got: {url}"
-msgstr "无效 URL：缺少协议（如 http:// 或 https://）。当前：{url}"
+msgstr "Ungültige URL: Schema fehlt (z. B. http:// oder https://). Erhalten: {url}"
 
 #: src/iac_code/tools/web_fetch.py:103
 #, python-brace-format
 msgid "Invalid URL: missing host/netloc. Got: {url}"
-msgstr "无效 URL：缺少主机地址。当前：{url}"
+msgstr "Ungültige URL: Host fehlt. Erhalten: {url}"
 
 #: src/iac_code/tools/web_fetch.py:129
 #, python-brace-format
 msgid "HTTP error {status}: {url}"
-msgstr "HTTP 错误 {status}：{url}"
+msgstr "HTTP-Fehler {status}: {url}"
 
 #: src/iac_code/tools/web_fetch.py:131
 #, python-brace-format
 msgid "Failed to fetch {url}: {error}"
-msgstr "获取 {url} 失败：{error}"
+msgstr "Abruf von {url} fehlgeschlagen: {error}"
 
 #: src/iac_code/tools/web_fetch.py:133
 #, python-brace-format
 msgid "Unexpected error fetching {url}: {error}"
-msgstr "获取 {url} 时发生意外错误：{error}"
+msgstr "Unerwarteter Fehler beim Abruf von {url}: {error}"
 
 #: src/iac_code/tools/web_fetch.py:147
 #, python-brace-format
 msgid "Fetched {chars} chars, {lines} lines"
-msgstr "获取了 {chars} 个字符，{lines} 行"
+msgstr "{chars} Zeichen, {lines} Zeilen abgerufen"
 
 #: src/iac_code/tools/web_fetch.py:159
 msgid "Fetch"
-msgstr "获取"
+msgstr "Abruf"
 
 #: src/iac_code/tools/web_fetch.py:165
 #, python-brace-format
 msgid "Fetching {url}"
-msgstr "正在获取 {url}"
+msgstr "{url} wird abgerufen"
 
 #: src/iac_code/tools/web_fetch.py:166
 msgid "Fetching web page..."
-msgstr "正在获取网页..."
+msgstr "Webseite wird abgerufen …"
 
 #: src/iac_code/tools/write_file.py:63
 #, python-brace-format
 msgid "Successfully wrote {lines} lines to {path}"
-msgstr "成功写入 {lines} 行到 {path}"
+msgstr "{lines} Zeilen erfolgreich nach {path} geschrieben"
 
 #: src/iac_code/tools/write_file.py:77
 msgid "Write"
-msgstr "写入"
+msgstr "Schreiben"
 
 #: src/iac_code/tools/write_file.py:81
 #, python-brace-format
 msgid "Writing {path}"
-msgstr "正在写入 {path}"
+msgstr "{path} wird geschrieben"
 
 #: src/iac_code/tools/write_file.py:82
 msgid "Writing file..."
-msgstr "正在写入文件..."
+msgstr "Datei wird geschrieben …"
 
 #: src/iac_code/tools/cloud/base_api.py:92
 msgid "CloudAPI"
-msgstr "云API"
+msgstr "CloudAPI"
 
 #: src/iac_code/tools/cloud/base_api.py:116
 #, python-brace-format
 msgid "Calling {action}..."
-msgstr "正在调用 {action}..."
+msgstr "{action} wird aufgerufen …"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py:373
 #: src/iac_code/tools/cloud/base_api.py:123
 msgid "Call succeeded"
-msgstr "调用成功"
+msgstr "Aufruf erfolgreich"
 
 #: src/iac_code/tools/cloud/base_api.py:144
 #, python-brace-format
 msgid "Received response ({count} lines)"
-msgstr "收到响应（{count} 行）"
+msgstr "Antwort empfangen ({count} Zeilen)"
 
 #: src/iac_code/tools/cloud/base_stack.py:133
 msgid "CloudStack"
-msgstr "云资源栈"
+msgstr "CloudStack"
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py:117
 #: src/iac_code/tools/cloud/base_stack.py:150
 #, python-brace-format
 msgid "Running {action}..."
-msgstr "正在运行 {action}..."
+msgstr "{action} wird ausgeführt …"
 
 #: src/iac_code/tools/cloud/types.py:8
 msgid "CREATE_IN_PROGRESS"
-msgstr "创建中"
+msgstr "ERSTELLUNG LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:9
 msgid "CREATE_FAILED"
-msgstr "创建失败"
+msgstr "ERSTELLUNG FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:10
 msgid "CREATE_COMPLETE"
-msgstr "创建完成"
+msgstr "ERSTELLUNG ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:11
 msgid "UPDATE_IN_PROGRESS"
-msgstr "更新中"
+msgstr "AKTUALISIERUNG LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:12
 msgid "UPDATE_FAILED"
-msgstr "更新失败"
+msgstr "AKTUALISIERUNG FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:13
 msgid "UPDATE_COMPLETE"
-msgstr "更新完成"
+msgstr "AKTUALISIERUNG ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:14
 msgid "DELETE_IN_PROGRESS"
-msgstr "删除中"
+msgstr "LÖSCHUNG LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:15
 msgid "DELETE_FAILED"
-msgstr "删除失败"
+msgstr "LÖSCHUNG FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:16
 msgid "DELETE_COMPLETE"
-msgstr "删除完成"
+msgstr "LÖSCHUNG ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:17
 msgid "CREATE_ROLLBACK_IN_PROGRESS"
-msgstr "创建回滚中"
+msgstr "ERSTELLUNGS-RÜCKNAHME LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:18
 msgid "CREATE_ROLLBACK_FAILED"
-msgstr "创建回滚失败"
+msgstr "ERSTELLUNGS-RÜCKNAHME FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:19
 msgid "CREATE_ROLLBACK_COMPLETE"
-msgstr "创建回滚完成"
+msgstr "ERSTELLUNGS-RÜCKNAHME ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:20
 msgid "ROLLBACK_IN_PROGRESS"
-msgstr "回滚中"
+msgstr "RÜCKNAHME LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:21
 msgid "ROLLBACK_FAILED"
-msgstr "回滚失败"
+msgstr "RÜCKNAHME FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:22
 msgid "ROLLBACK_COMPLETE"
-msgstr "回滚完成"
+msgstr "RÜCKNAHME ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:23
 msgid "CHECK_IN_PROGRESS"
-msgstr "检查中"
+msgstr "PRÜFUNG LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:24
 msgid "CHECK_FAILED"
-msgstr "检查失败"
+msgstr "PRÜFUNG FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:25
 msgid "CHECK_COMPLETE"
-msgstr "检查完成"
+msgstr "PRÜFUNG ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:26
 msgid "REVIEW_IN_PROGRESS"
-msgstr "审查中"
+msgstr "ÜBERPRÜFUNG LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:27
 msgid "IMPORT_CREATE_IN_PROGRESS"
-msgstr "导入创建中"
+msgstr "IMPORT-ERSTELLUNG LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:28
 msgid "IMPORT_CREATE_FAILED"
-msgstr "导入创建失败"
+msgstr "IMPORT-ERSTELLUNG FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:29
 msgid "IMPORT_CREATE_COMPLETE"
-msgstr "导入创建完成"
+msgstr "IMPORT-ERSTELLUNG ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:30
 msgid "IMPORT_CREATE_ROLLBACK_IN_PROGRESS"
-msgstr "导入创建回滚中"
+msgstr "IMPORT-ERSTELLUNGS-RÜCKNAHME LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:31
 msgid "IMPORT_CREATE_ROLLBACK_FAILED"
-msgstr "导入创建回滚失败"
+msgstr "IMPORT-ERSTELLUNGS-RÜCKNAHME FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:32
 msgid "IMPORT_CREATE_ROLLBACK_COMPLETE"
-msgstr "导入创建回滚完成"
+msgstr "IMPORT-ERSTELLUNGS-RÜCKNAHME ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:33
 msgid "IMPORT_UPDATE_IN_PROGRESS"
-msgstr "导入更新中"
+msgstr "IMPORT-AKTUALISIERUNG LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:34
 msgid "IMPORT_UPDATE_FAILED"
-msgstr "导入更新失败"
+msgstr "IMPORT-AKTUALISIERUNG FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:35
 msgid "IMPORT_UPDATE_COMPLETE"
-msgstr "导入更新完成"
+msgstr "IMPORT-AKTUALISIERUNG ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:36
 msgid "IMPORT_UPDATE_ROLLBACK_IN_PROGRESS"
-msgstr "导入更新回滚中"
+msgstr "IMPORT-AKTUALISIERUNGS-RÜCKNAHME LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:37
 msgid "IMPORT_UPDATE_ROLLBACK_FAILED"
-msgstr "导入更新回滚失败"
+msgstr "IMPORT-AKTUALISIERUNGS-RÜCKNAHME FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/types.py:38
 msgid "IMPORT_UPDATE_ROLLBACK_COMPLETE"
-msgstr "导入更新回滚完成"
+msgstr "IMPORT-AKTUALISIERUNGS-RÜCKNAHME ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:40
 msgid "INIT_COMPLETE"
-msgstr "初始化完成"
+msgstr "INITIALISIERUNG ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:41
 msgid "IMPORT_IN_PROGRESS"
-msgstr "导入中"
+msgstr "IMPORT LÄUFT"
 
 #: src/iac_code/tools/cloud/types.py:42
 msgid "IMPORT_COMPLETE"
-msgstr "导入完成"
+msgstr "IMPORT ABGESCHLOSSEN"
 
 #: src/iac_code/tools/cloud/types.py:43
 msgid "IMPORT_FAILED"
-msgstr "导入失败"
+msgstr "IMPORT FEHLGESCHLAGEN"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py:165
 msgid "Aliyun API"
-msgstr "阿里云 API"
+msgstr "Aliyun API"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py:372
 #, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
-msgstr "调用成功（RequestId: {request_id}）"
+msgstr "Aufruf erfolgreich (RequestId: {request_id})"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:57
 msgid "DocSearch"
-msgstr "文档搜索"
+msgstr "DocSearch"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:70
 #, python-brace-format
 msgid "Searching docs for {keywords}..."
-msgstr "正在搜索 {keywords} 的文档..."
+msgstr "Dokumentation wird durchsucht für {keywords} …"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:71
 msgid "Searching docs..."
-msgstr "正在搜索文档..."
+msgstr "Dokumentation wird durchsucht …"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:76
 msgid "keywords cannot be empty."
-msgstr "关键词不能为空。"
+msgstr "Schlüsselwörter dürfen nicht leer sein."
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:96
 #, python-brace-format
 msgid "HTTP error {status} when searching docs."
-msgstr "搜索文档时发生 HTTP 错误 {status}。"
+msgstr "HTTP-Fehler {status} bei der Dokumentationssuche."
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:98
 #, python-brace-format
 msgid "Failed to search docs: {error}"
-msgstr "搜索文档失败：{error}"
+msgstr "Dokumentationssuche fehlgeschlagen: {error}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:103
 msgid "Failed to parse search response as JSON."
-msgstr "无法将搜索响应解析为 JSON。"
+msgstr "Suchantwort konnte nicht als JSON gelesen werden."
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:106
 msgid "Search API returned failure."
-msgstr "搜索 API 返回失败。"
+msgstr "Die Such-API meldete einen Fehler."
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:125
 msgid "No documents found"
-msgstr "未找到文档"
+msgstr "Keine Dokumente gefunden"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:126
 #, python-brace-format
 msgid "No documents found for keywords: {keywords}"
-msgstr "未找到关键词为 {keywords} 的文档"
+msgstr "Keine Dokumente für Schlüsselwörter: {keywords}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:141
 #, python-brace-format
 msgid "Found {count} documents (total {total})"
-msgstr "找到 {count} 篇文档（共 {total} 篇）"
+msgstr "{count} Dokumente gefunden (gesamt {total})"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py:143
 msgid "Use web_fetch tool to read full document content if needed."
-msgstr "如需要，请使用 web_fetch 工具读取完整文档内容。"
+msgstr ""
+"Verwenden Sie bei Bedarf das Tool web_fetch für den vollständigen "
+"Dokumentinhalt."
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack.py:139
 msgid "ROS Stack"
-msgstr "ROS 资源栈"
+msgstr "ROS Stack"
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py:100
 msgid "CloudStackInstances"
-msgstr "云资源栈实例"
+msgstr "CloudStackInstances"
 
 #: src/iac_code/ui/banner.py:38
 msgid "DashScope"
-msgstr "阿里云百炼"
+msgstr "DashScope"
 
 #: src/iac_code/ui/banner.py:39
 msgid "DashScope Token Plan"
-msgstr "阿里云百炼 Token Plan"
+msgstr "DashScope Token Plan"
 
 #: src/iac_code/ui/banner.py:40
 msgid "OpenAI"
@@ -992,146 +1006,146 @@ msgstr "DeepSeek"
 
 #: src/iac_code/ui/banner.py:43
 msgid "OpenAPI Compatible"
-msgstr "OpenAPI 兼容"
+msgstr "OpenAPI-kompatibel"
 
 #: src/iac_code/ui/banner.py:67
 msgid "Your AI-powered Infrastructure as Code assistant"
-msgstr "您的 AI 驱动的基础设施即代码助手"
+msgstr "Ihr KI-gestützter Infrastructure-as-Code-Assistent"
 
 #: src/iac_code/ui/banner.py:91
 msgid "Welcome back"
-msgstr "欢迎回来"
+msgstr "Willkommen zurück"
 
 #: src/iac_code/ui/banner.py:97
 msgid "Session"
-msgstr "会话"
+msgstr "Sitzung"
 
 #: src/iac_code/ui/banner.py:107
 msgid "Debug mode"
-msgstr "调试模式"
+msgstr "Debug-Modus"
 
 #: src/iac_code/ui/banner.py:108
 msgid "Log file"
-msgstr "日志文件"
+msgstr "Protokolldatei"
 
 #: src/iac_code/ui/renderer.py:350 src/iac_code/ui/renderer.py:620
 #: src/iac_code/ui/renderer.py:1335
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
-msgstr "思考完成（耗时 {seconds:.1f}s）"
+msgstr "Nachgedacht für {seconds:.1f}s"
 
 #: src/iac_code/ui/renderer.py:366 src/iac_code/ui/renderer.py:652
 #: src/iac_code/ui/renderer.py:1356
 msgid "(ctrl+o to expand)"
-msgstr "(ctrl+o 展开)"
+msgstr "(ctrl+o zum Aufklappen)"
 
 #: src/iac_code/ui/renderer.py:393
 msgid "Resource"
-msgstr "资源"
+msgstr "Ressource"
 
 #: src/iac_code/ui/renderer.py:394
 msgid "Type"
-msgstr "类型"
+msgstr "Typ"
 
 #: src/iac_code/ui/renderer.py:395 src/iac_code/ui/renderer.py:418
 msgid "Status"
-msgstr "状态"
+msgstr "Status"
 
 #: src/iac_code/ui/renderer.py:416
 msgid "Account ID"
-msgstr "账号 ID"
+msgstr "Konto-ID"
 
 #: src/iac_code/ui/renderer.py:494
 #, python-brace-format
 msgid "Done ({child_count} tool uses{token_info}{elapsed})"
-msgstr "完成（{child_count} 次工具调用{token_info}{elapsed}）"
+msgstr "Fertig ({child_count} Tool-Aufrufe{token_info}{elapsed})"
 
 #: src/iac_code/ui/renderer.py:524
 #, python-brace-format
 msgid "+ {count} more tool uses (ctrl+o to expand)"
-msgstr "+ {count} 个工具调用 (ctrl+o 展开)"
+msgstr "+ {count} weitere Tool-Aufrufe (ctrl+o zum Aufklappen)"
 
 #: src/iac_code/ui/renderer.py:1122
 #, python-brace-format
 msgid "Context auto-compacted: {original} → {compacted} tokens"
-msgstr "上下文自动压缩：{original} → {compacted} tokens"
+msgstr "Kontext automatisch komprimiert: {original} → {compacted} Tokens"
 
 #: src/iac_code/ui/renderer.py:1199
 msgid "Operation cancelled."
-msgstr "操作已取消。"
+msgstr "Vorgang abgebrochen."
 
 #: src/iac_code/ui/renderer.py:1204
 msgid "No API key configured."
-msgstr "尚未配置 API 密钥。"
+msgstr "Kein API-Key konfiguriert."
 
 #: src/iac_code/ui/renderer.py:1204
 msgid "Please run /auth to set up your LLM provider and API key."
-msgstr "请运行 /auth 设置您的 LLM 提供商和 API 密钥。"
+msgstr "Führen Sie /auth aus, um LLM-Anbieter und API-Key einzurichten."
 
 #: src/iac_code/ui/renderer.py:1208
 #, python-brace-format
 msgid "Error: {error}"
-msgstr "错误：{error}"
+msgstr "Fehler: {error}"
 
 #: src/iac_code/ui/renderer.py:1276
 msgid "Allow this action?"
-msgstr "是否允许执行此操作？"
+msgstr "Diese Aktion zulassen?"
 
 #: src/iac_code/ui/renderer.py:1279
 msgid "Yes, allow once"
-msgstr "是，仅本次允许"
+msgstr "Ja, einmal zulassen"
 
 #: src/iac_code/ui/renderer.py:1280
 msgid "Yes, allow always for this tool"
-msgstr "是，始终允许此工具"
+msgstr "Ja, für dieses Tool immer zulassen"
 
 #: src/iac_code/ui/renderer.py:1281
 msgid "No, reject once"
-msgstr "否，仅本次拒绝"
+msgstr "Nein, einmal ablehnen"
 
 #: src/iac_code/ui/renderer.py:1281
 msgid "default"
-msgstr "默认"
+msgstr "Standard"
 
 #: src/iac_code/ui/renderer.py:1282
 msgid "No, always reject this tool"
-msgstr "否，始终拒绝此工具"
+msgstr "Nein, dieses Tool immer ablehnen"
 
 #: src/iac_code/ui/repl.py:311
 msgid "Press Ctrl+C again to exit."
-msgstr "再次按 Ctrl+C 退出。"
+msgstr "Drücken Sie erneut Ctrl+C zum Beenden."
 
 #: src/iac_code/ui/repl.py:327
 msgid "Interrupted."
-msgstr "已中断。"
+msgstr "Unterbrochen."
 
 #: src/iac_code/ui/repl.py:364
 msgid "Goodbye!"
-msgstr "再见！"
+msgstr "Auf Wiedersehen!"
 
 #: src/iac_code/ui/repl.py:365
 msgid "Resume this session with:"
-msgstr "恢复此会话请运行："
+msgstr "Diese Sitzung fortsetzen mit:"
 
 #: src/iac_code/ui/repl.py:447
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
-msgstr "未知命令：/{name}。输入 /help 查看可用命令。"
+msgstr "Unbekannter Befehl: /{name}. Geben Sie /help für verfügbare Befehle ein."
 
 #: src/iac_code/ui/repl.py:471 src/iac_code/ui/repl.py:503
 #, python-brace-format
 msgid "Command error: {error}"
-msgstr "命令错误：{error}"
+msgstr "Befehlsfehler: {error}"
 
 #: src/iac_code/ui/repl.py:478
 #, python-brace-format
 msgid "Command has no handler: {name}"
-msgstr "命令没有处理器：{name}"
+msgstr "Kein Handler für Befehl: {name}"
 
 #: src/iac_code/ui/repl.py:635
 #, python-brace-format
 msgid "Session not found: {session_id}"
-msgstr "会话不存在：{session_id}"
+msgstr "Sitzung nicht gefunden: {session_id}"
 
 #: src/iac_code/ui/repl.py:654
 #, python-brace-format
@@ -1140,216 +1154,216 @@ msgid ""
 "To resume, run:\n"
 "  {cmd}"
 msgstr ""
-"该会话属于另一个目录。\n"
-"请运行以下命令恢复：\n"
+"Diese Sitzung gehört zu einem anderen Verzeichnis.\n"
+"Zum Fortsetzen ausführen:\n"
 "  {cmd}"
 
 #: src/iac_code/ui/repl.py:693
 msgid "This conversation is from a different directory."
-msgstr "该会话来自另一个目录。"
+msgstr "Diese Konversation stammt aus einem anderen Verzeichnis."
 
 #: src/iac_code/ui/repl.py:695
 msgid "To resume, run:"
-msgstr "请运行以下命令恢复："
+msgstr "Zum Fortsetzen ausführen:"
 
 #: src/iac_code/ui/repl.py:700
 msgid "(Command copied to clipboard)"
-msgstr "（命令已复制到剪贴板）"
+msgstr "(Befehl in die Zwischenablage kopiert)"
 
 #: src/iac_code/ui/spinner.py:53
 msgid "Thinking"
-msgstr "思考中"
+msgstr "Denken"
 
 #: src/iac_code/ui/spinner.py:54
 msgid "Processing"
-msgstr "处理中"
+msgstr "Verarbeitung"
 
 #: src/iac_code/ui/spinner.py:55
 msgid "Working"
-msgstr "工作中"
+msgstr "In Arbeit"
 
 #: src/iac_code/ui/spinner.py:64
 msgid "Thought"
-msgstr "已思考"
+msgstr "Gedacht"
 
 #: src/iac_code/ui/spinner.py:65
 msgid "Processed"
-msgstr "已处理"
+msgstr "Verarbeitet"
 
 #: src/iac_code/ui/spinner.py:66
 msgid "Worked"
-msgstr "已完成"
+msgstr "Erledigt"
 
 #: src/iac_code/ui/transcript_view.py:158
 msgid "Prompt:"
-msgstr "提示词："
+msgstr "Prompt:"
 
 #: src/iac_code/ui/transcript_view.py:186
 msgid "Showing transcript · ctrl+o to toggle"
-msgstr "显示完整记录 · 按 ctrl+o 切换"
+msgstr "Vollständiges Protokoll · ctrl+o zum Umschalten"
 
 #: src/iac_code/ui/components/fuzzy_picker.py:120
 msgid "No matches found"
-msgstr "未找到匹配项"
+msgstr "Keine Treffer"
 
 #: src/iac_code/ui/core/prompt_input.py:373
 msgid "Fill"
-msgstr "填充"
+msgstr "Ausfüllen"
 
 #: src/iac_code/ui/core/prompt_input.py:373
 msgid "Dismiss"
-msgstr "关闭"
+msgstr "Schließen"
 
 #: src/iac_code/ui/dialogs/global_search.py:54
 msgid "No matching content"
-msgstr "没有匹配的内容"
+msgstr "Kein passender Inhalt"
 
 #: src/iac_code/ui/dialogs/global_search.py:60
 msgid "Search in Files"
-msgstr "在文件中搜索"
+msgstr "In Dateien suchen"
 
 #: src/iac_code/ui/dialogs/global_search.py:61
 msgid "Type to search content..."
-msgstr "输入以搜索内容..."
+msgstr "Tippen, um Inhalt zu suchen …"
 
 #: src/iac_code/ui/dialogs/global_search.py:62
 msgid "Enter search query"
-msgstr "输入搜索查询"
+msgstr "Suchanfrage eingeben"
 
 #: src/iac_code/ui/dialogs/history_search.py:55
 msgid "Search Conversation History"
-msgstr "搜索对话历史"
+msgstr "Konversationsverlauf durchsuchen"
 
 #: src/iac_code/ui/dialogs/history_search.py:56
 msgid "Type to search..."
-msgstr "输入以搜索..."
+msgstr "Tippen, um zu suchen …"
 
 #: src/iac_code/ui/dialogs/history_search.py:57
 msgid "No conversation history"
-msgstr "没有对话历史"
+msgstr "Kein Konversationsverlauf"
 
 #: src/iac_code/ui/dialogs/history_search.py:98
 msgid "Message Preview"
-msgstr "消息预览"
+msgstr "Nachrichtenvorschau"
 
 #: src/iac_code/ui/dialogs/quick_open.py:58
 msgid "Open File"
-msgstr "打开文件"
+msgstr "Datei öffnen"
 
 #: src/iac_code/ui/dialogs/quick_open.py:59
 msgid "Type to search files..."
-msgstr "输入以搜索文件..."
+msgstr "Tippen, um Dateien zu suchen …"
 
 #: src/iac_code/ui/dialogs/quick_open.py:60
 msgid "No matching files"
-msgstr "没有匹配的文件"
+msgstr "Keine passenden Dateien"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:114
 msgid "Search..."
-msgstr "搜索…"
+msgstr "Suchen …"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:359
 msgid "Resume Session"
-msgstr "恢复会话"
+msgstr "Sitzung fortsetzen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:369
 msgid "No sessions found"
-msgstr "未找到会话"
+msgstr "Keine Sitzungen gefunden"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:427
 msgid "show current dir"
-msgstr "显示当前目录"
+msgstr "aktuelles Verzeichnis anzeigen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:429
 msgid "show all projects"
-msgstr "显示所有项目"
+msgstr "alle Projekte anzeigen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:432
 msgid "show all branches"
-msgstr "显示所有分支"
+msgstr "alle Branches anzeigen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:434
 msgid "only show current branch"
-msgstr "仅显示当前分支"
+msgstr "nur aktuellen Branch anzeigen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:435
 msgid "preview"
-msgstr "预览"
+msgstr "Vorschau"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:436
 msgid "Type to search"
-msgstr "输入以搜索"
+msgstr "Tippen, um zu suchen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:437
 msgid "cancel"
-msgstr "取消"
+msgstr "abbrechen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:552
 #, python-brace-format
 msgid "{n} more line{s}"
-msgstr "还有 {n} 行"
+msgstr "{n} weitere Zeile{s}"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:566
 #, python-brace-format
 msgid "{n} message{s}"
-msgstr "{n} 条消息"
+msgstr "{n} Nachricht{s}"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:580
 msgid "resume"
-msgstr "恢复"
+msgstr "fortsetzen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:584
 msgid "back"
-msgstr "返回"
+msgstr "zurück"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:589
 msgid "scroll"
-msgstr "滚动"
+msgstr "scrollen"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:608
 msgid "(empty session)"
-msgstr "（空会话）"
+msgstr "(leere Sitzung)"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:728
 msgid "just now"
-msgstr "刚刚"
+msgstr "gerade eben"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:731
 #, python-brace-format
 msgid "{n} minute{s} ago"
-msgstr "{n} 分钟前"
+msgstr "vor {n} Minute{s}"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:734
 #, python-brace-format
 msgid "{n} hour{s} ago"
-msgstr "{n} 小时前"
+msgstr "vor {n} Stunde{s}"
 
 #: src/iac_code/ui/dialogs/resume_picker.py:736
 #, python-brace-format
 msgid "{n} day{s} ago"
-msgstr "{n} 天前"
+msgstr "vor {n} Tag{s}"
 
 #~ msgid "toggle preview"
-#~ msgstr "切换预览"
+#~ msgstr "Vorschau umschalten"
 
 #~ msgid "Preview"
-#~ msgstr "预览"
+#~ msgstr "Vorschau"
 
 #~ msgid "{n} more line{s}"
-#~ msgstr "还有 {n} 行"
+#~ msgstr "{n} weitere Zeile{s}"
 
 #~ msgid "back"
-#~ msgstr "返回"
+#~ msgstr "zurück"
 
 #~ msgid "scroll"
-#~ msgstr "滚动"
+#~ msgstr "scrollen"
 
 #~ msgid "(empty)"
-#~ msgstr "（空）"
+#~ msgstr "(leer)"
 
 #~ msgid "back to list"
-#~ msgstr "返回列表"
+#~ msgstr "zurück zur Liste"
 
 #~ msgid "Choose [1-4]: "
-#~ msgstr "请选择 [1-4]: "
+#~ msgstr "Wählen Sie [1-4]: "
 

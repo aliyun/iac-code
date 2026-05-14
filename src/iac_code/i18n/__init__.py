@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 # Supported languages
-SUPPORTED_LANGUAGES = ["en", "zh"]
+SUPPORTED_LANGUAGES = ["en", "zh", "es", "fr", "de", "ja", "pt"]
 
 # Default language (English is the source language, no .po file needed)
 DEFAULT_LANGUAGE = "en"
