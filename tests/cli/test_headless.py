@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 
 from iac_code.cli.headless import EXIT_ERROR, EXIT_MAX_TURNS, EXIT_OK, HeadlessRunner
 from iac_code.cli.output_formats import OutputFormat
+from iac_code.providers.manager import ProviderNotConfiguredError
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -222,6 +223,14 @@ class TestCLIFlags:
             runner_cli.invoke(app, ["-p", "-"], input="hello from stdin")
 
             mock_instance.run.assert_called_once_with("hello from stdin")
+
+    def test_invalid_provider_env_prints_error_not_traceback(self, monkeypatch):
+        from iac_code.cli.main import app
+
+        monkeypatch.setenv("IAC_CODE_PROVIDER", "NotAProvider")
+        result = runner_cli.invoke(app, [])
+        assert result.exit_code != 0
+        assert "Invalid IAC_CODE_PROVIDER" in result.output
 
 
 @pytest.mark.asyncio
@@ -465,3 +474,56 @@ def test_create_agent_loop_handles_credential_load_failure_and_skill_conflict(mo
     warning.assert_called_once()
     assert fake_command_registry.registered == []
     assert any(getattr(tool, "kind", "") == "skill" for tool in fake_registry.registered)
+
+
+@pytest.mark.asyncio
+async def test_provider_not_configured_prints_friendly_error():
+    """ValueError from _ensure_provider prints a friendly message, not a traceback."""
+    buf = io.StringIO()
+    err_buf = io.StringIO()
+    runner = _make_runner(OutputFormat.TEXT, buf)
+
+    async def _raise_on_stream(prompt):
+        raise ProviderNotConfiguredError("Cannot determine provider for model: custom-model. Run /auth to configure.")
+        yield  # make it an async generator
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = _raise_on_stream
+        mock_create.return_value = mock_loop
+
+        with patch("sys.stderr", err_buf):
+            exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_ERROR
+    err_output = err_buf.getvalue()
+    assert "Cannot determine provider for model: custom-model" in err_output
+    assert "IAC_CODE_API_KEY" in err_output
+    assert "/auth" in err_output
+
+
+@pytest.mark.asyncio
+async def test_no_api_key_prints_friendly_error():
+    """ValueError about missing API key also shows the friendly message."""
+    buf = io.StringIO()
+    err_buf = io.StringIO()
+    runner = _make_runner(OutputFormat.TEXT, buf)
+
+    async def _raise_on_stream(prompt):
+        raise ProviderNotConfiguredError(
+            "No API key configured for provider 'anthropic' (model: claude-sonnet-4-6). Run /auth to configure."
+        )
+        yield  # make it an async generator
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = _raise_on_stream
+        mock_create.return_value = mock_loop
+
+        with patch("sys.stderr", err_buf):
+            exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_ERROR
+    err_output = err_buf.getvalue()
+    assert "No API key configured for provider" in err_output
+    assert "/auth" in err_output

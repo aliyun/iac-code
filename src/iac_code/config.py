@@ -87,6 +87,19 @@ _LEGACY_KEY_NAME_ALIASES: dict[str, str] = {
     "bailian": "dashscope",
 }
 
+# Model-name prefix → provider key_name.  Used by _detect_provider_name (in
+# providers/manager.py) and load_credentials to infer the provider from the
+# model string when no explicit provider is configured.
+_MODEL_PREFIX_TO_PROVIDER: tuple[tuple[str, str], ...] = (
+    ("claude-", "anthropic"),
+    ("gpt-", "openai"),
+    ("o1-", "openai"),
+    ("o3-", "openai"),
+    ("o4-", "openai"),
+    ("qwen", "dashscope"),
+    ("deepseek-", "deepseek"),
+)
+
 # Module-level flag — warn once per process when IAC_CODE_BASE_URL is set
 # but the active provider is not OpenAPICompatible. Reset by tests.
 _warned_base_url_ignored: bool = False
@@ -265,17 +278,28 @@ def load_active_provider_config() -> dict[str, Any] | None:
     return cfg
 
 
-def load_credentials() -> dict[str, str]:
+def _infer_provider_key_from_model(model: str) -> str | None:
+    """Return the provider key_name inferred from a model name prefix, or None."""
+    model_lower = model.lower()
+    for prefix, provider in _MODEL_PREFIX_TO_PROVIDER:
+        if model_lower.startswith(prefix):
+            return provider
+    return None
+
+
+def load_credentials(model: str | None = None) -> dict[str, str]:
     """Load API credentials from ``.credentials.yml`` with env override applied.
 
-    Returns a dict with five fixed slots: ``anthropic``, ``openai``,
-    ``dashscope``, ``deepseek``, ``openapi_compatible``. The ``dashscope``
-    slot also accepts the legacy ``bailian`` key in the YAML file (file's
-    ``dashscope`` value takes precedence when both are present).
+    Returns a dict with six fixed slots: ``anthropic``, ``openai``,
+    ``dashscope``, ``dashscope_token_plan``, ``deepseek``,
+    ``openapi_compatible``. The ``dashscope`` slot also accepts the legacy
+    ``bailian`` key in the YAML file (file's ``dashscope`` value takes
+    precedence when both are present).
 
-    When ``IAC_CODE_API_KEY`` is set and an active provider is determined
-    (via env or settings.yml), the env value overrides the active provider's
-    slot. With no active provider, the env value is ignored.
+    When ``IAC_CODE_API_KEY`` is set, the target slot is determined by:
+    1. ``IAC_CODE_PROVIDER`` env var (explicit)
+    2. ``activeProvider`` in settings.yml
+    3. Model-name prefix heuristic (requires *model* argument)
     """
     try:
         raw = _load_yaml(get_credentials_path())
@@ -296,6 +320,8 @@ def load_credentials() -> dict[str, str]:
     env = _get_env_overrides()
     if env["api_key"]:
         active_key = env["provider_key"] or get_active_provider_key()
+        if active_key is None and model:
+            active_key = _infer_provider_key_from_model(model)
         if active_key:
             slot = _KEY_NAME_TO_CRED_SLOT.get(active_key)
             if slot:

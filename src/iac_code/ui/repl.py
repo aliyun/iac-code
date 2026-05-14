@@ -604,10 +604,9 @@ class InlineREPL:
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _load_credentials() -> dict[str, str]:
+    def _load_credentials(self) -> dict[str, str]:
         """Load API credentials (delegates to config.load_credentials with env overlay)."""
-        return load_credentials()
+        return load_credentials(model=self._current_model)
 
     def _resolve_session_id(self, resume: str | bool | None) -> str:
         """Resolve session ID for resume or create new.

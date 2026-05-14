@@ -45,6 +45,9 @@ class TextWriter:
             self._stream.write(event.text)
             self._stream.flush()
             self._has_output = True
+        elif isinstance(event, ErrorEvent):
+            sys.stderr.write(f"Error: {event.error}\n")
+            sys.stderr.flush()
 
     def finalize(self) -> None:
         if self._has_output:

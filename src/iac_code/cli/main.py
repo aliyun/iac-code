@@ -71,7 +71,11 @@ def main(
 
     # Priority: CLI parameter > saved config > default
     if not model:
-        model = load_saved_model() or DEFAULT_MODEL
+        try:
+            model = load_saved_model() or DEFAULT_MODEL
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1)
 
     if prompt:
         # Read from stdin if prompt is "-"
