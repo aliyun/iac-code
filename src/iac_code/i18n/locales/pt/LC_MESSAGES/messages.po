@@ -4,9 +4,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.1.1\n"
+"Project-Id-Version: iac-code 0.1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-15 11:19+0800\n"
+"POT-Creation-Date: 2026-05-15 17:58+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: pt\n"
@@ -130,47 +130,47 @@ msgstr ""
 "  Documentação: https://aliyun.github.io/iac-"
 "code/pt/docs/configuration/authentication\n"
 
-#: src/iac_code/cli/main.py:22 src/iac_code/commands/help.py:26
+#: src/iac_code/cli/main.py:23 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
 msgstr "Ferramenta de orquestração de infraestrutura com IA"
 
-#: src/iac_code/cli/main.py:33
+#: src/iac_code/cli/main.py:34
 msgid "LLM model to use"
 msgstr "Modelo LLM a utilizar"
 
-#: src/iac_code/cli/main.py:34
+#: src/iac_code/cli/main.py:35
 msgid "Non-interactive mode: run a single prompt and exit"
 msgstr "Modo não interativo: executa um único prompt e encerra"
 
-#: src/iac_code/cli/main.py:35
+#: src/iac_code/cli/main.py:36
 msgid "Output format: text, json, stream-json"
 msgstr "Formato de saída: text, json, stream-json"
 
-#: src/iac_code/cli/main.py:36
+#: src/iac_code/cli/main.py:37
 msgid "Maximum agent turns in headless mode"
 msgstr "Número máximo de passos do agent em modo headless"
 
-#: src/iac_code/cli/main.py:37 src/iac_code/cli/main.py:236
+#: src/iac_code/cli/main.py:38 src/iac_code/cli/main.py:241
 msgid "Enable debug logging"
 msgstr "Ativar debug"
 
-#: src/iac_code/cli/main.py:38
+#: src/iac_code/cli/main.py:39
 msgid "Show version and exit"
 msgstr "Mostrar versão e sair"
 
-#: src/iac_code/cli/main.py:39
+#: src/iac_code/cli/main.py:40
 msgid "Resume a session by ID"
 msgstr "Retomar uma sessão pelo ID"
 
-#: src/iac_code/cli/main.py:40
+#: src/iac_code/cli/main.py:41
 msgid "Resume the most recent session"
 msgstr "Retomar a sessão mais recente"
 
-#: src/iac_code/cli/main.py:47 src/iac_code/i18n/__init__.py:54
+#: src/iac_code/cli/main.py:48 src/iac_code/i18n/__init__.py:54
 msgid "Install completion for the current shell."
 msgstr "Instalar completion para o shell atual."
 
-#: src/iac_code/cli/main.py:55 src/iac_code/i18n/__init__.py:55
+#: src/iac_code/cli/main.py:56 src/iac_code/i18n/__init__.py:55
 msgid ""
 "Show completion for the current shell, to copy it or customize the "
 "installation."
@@ -178,23 +178,23 @@ msgstr ""
 "Exibir o completion do shell atual, para copiar ou personalizar a "
 "instalação."
 
-#: src/iac_code/cli/main.py:69
+#: src/iac_code/cli/main.py:70
 msgid "Error: --resume and --continue cannot be used together."
 msgstr "Erro: --resume e --continue não podem ser usados juntos."
 
-#: src/iac_code/cli/main.py:231
+#: src/iac_code/cli/main.py:236
 msgid "Run iac-code as an ACP server."
 msgstr "Executar o iac-code como servidor ACP."
 
-#: src/iac_code/cli/main.py:233
+#: src/iac_code/cli/main.py:238
 msgid "Transport type: stdio or http"
 msgstr "Tipo de transporte: stdio ou http"
 
-#: src/iac_code/cli/main.py:234
+#: src/iac_code/cli/main.py:239
 msgid "HTTP server port"
 msgstr "Porta do servidor HTTP"
 
-#: src/iac_code/cli/main.py:235
+#: src/iac_code/cli/main.py:240
 msgid "HTTP server host"
 msgstr "Host do servidor HTTP"
 
@@ -242,103 +242,161 @@ msgstr "Retomar uma sessão anterior"
 msgid "[conversation id or search term]"
 msgstr "[ID da conversa ou termo de busca]"
 
-#: src/iac_code/commands/auth.py:304 src/iac_code/commands/auth.py:817
+#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:817
 #: src/iac_code/ui/core/prompt_input.py:373
 msgid "Navigate"
 msgstr "Navegar"
 
-#: src/iac_code/commands/auth.py:304 src/iac_code/commands/auth.py:426
-#: src/iac_code/commands/auth.py:460 src/iac_code/commands/auth.py:467
-#: src/iac_code/commands/auth.py:491 src/iac_code/commands/auth.py:817
+#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:367
+#: src/iac_code/commands/auth.py:401 src/iac_code/commands/auth.py:408
+#: src/iac_code/commands/auth.py:432 src/iac_code/commands/auth.py:817
 #: src/iac_code/commands/auth.py:1007 src/iac_code/ui/core/prompt_input.py:373
 msgid "Confirm"
 msgstr "Confirmar"
 
-#: src/iac_code/commands/auth.py:304 src/iac_code/commands/auth.py:424
-#: src/iac_code/commands/auth.py:426 src/iac_code/commands/auth.py:460
-#: src/iac_code/commands/auth.py:467 src/iac_code/commands/auth.py:491
+#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:365
+#: src/iac_code/commands/auth.py:367 src/iac_code/commands/auth.py:401
+#: src/iac_code/commands/auth.py:408 src/iac_code/commands/auth.py:432
 #: src/iac_code/commands/auth.py:817 src/iac_code/commands/auth.py:902
 #: src/iac_code/commands/auth.py:1007
 msgid "Back"
 msgstr "Voltar"
 
-#: src/iac_code/commands/auth.py:424
+#: src/iac_code/commands/auth.py:365
 msgid "Keep"
 msgstr "Manter"
 
-#: src/iac_code/commands/auth.py:424
+#: src/iac_code/commands/auth.py:365
 msgid "Re-enter"
 msgstr "Digitar novamente"
 
-#: src/iac_code/commands/auth.py:566 src/iac_code/commands/auth.py:667
+#: src/iac_code/commands/auth.py:507 src/iac_code/commands/auth.py:631
+#: src/iac_code/commands/auth.py:651
 msgid " (current)"
 msgstr " (atual)"
 
-#: src/iac_code/commands/auth.py:569
+#: src/iac_code/commands/auth.py:510
 msgid "Custom model..."
 msgstr "Modelo personalizado..."
 
-#: src/iac_code/commands/auth.py:572
+#: src/iac_code/commands/auth.py:513
 #, python-brace-format
 msgid "Select model for {provider}"
 msgstr "Selecionar modelo para {provider}"
 
-#: src/iac_code/commands/auth.py:574
+#: src/iac_code/commands/auth.py:515
 msgid "Select model"
 msgstr "Selecionar modelo"
 
-#: src/iac_code/commands/auth.py:582
+#: src/iac_code/commands/auth.py:523
 msgid "Enter custom model name: "
 msgstr "Informe o nome do modelo personalizado: "
 
-#: src/iac_code/commands/auth.py:608
+#: src/iac_code/commands/auth.py:549
 msgid "Error: console not available"
 msgstr "Erro: console indisponível"
 
-#: src/iac_code/commands/auth.py:635
+#: src/iac_code/commands/auth.py:576
 msgid "Configure LLM Provider"
 msgstr "Configurar provedor LLM"
 
-#: src/iac_code/commands/auth.py:636
+#: src/iac_code/commands/auth.py:577
 msgid "Configure IaC Cloud Service"
 msgstr "Configurar serviço de nuvem IaC"
 
-#: src/iac_code/commands/auth.py:638
+#: src/iac_code/commands/auth.py:579
 msgid "Select configuration type"
 msgstr "Selecionar tipo de configuração"
 
-#: src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:694
-#: src/iac_code/commands/auth.py:709 src/iac_code/commands/auth.py:770
+#: src/iac_code/commands/auth.py:581 src/iac_code/commands/auth.py:676
+#: src/iac_code/commands/auth.py:692 src/iac_code/commands/auth.py:770
 #: src/iac_code/commands/auth.py:943 src/iac_code/commands/auth.py:984
 msgid "Auth cancelled"
 msgstr "Autenticação cancelada"
 
-#: src/iac_code/commands/auth.py:676
+#: src/iac_code/commands/auth.py:635
 msgid "Select provider"
 msgstr "Selecionar provedor"
 
-#: src/iac_code/commands/auth.py:687
+#: src/iac_code/commands/auth.py:656 src/iac_code/commands/auth.py:745
+#, python-brace-format
+msgid "Select provider — {group}"
+msgstr "Selecionar provedor — {group}"
+
+#: src/iac_code/commands/auth.py:669
 #, python-brace-format
 msgid "Configure {provider}"
 msgstr "Configurar {provider}"
 
-#: src/iac_code/commands/auth.py:702
+#: src/iac_code/commands/auth.py:685
 #, python-brace-format
 msgid "Enter API key for {provider}"
 msgstr "Informe a API key para {provider}"
 
-#: src/iac_code/commands/auth.py:742
+#: src/iac_code/commands/auth.py:723
 #, python-brace-format
 msgid "{status}: {provider} / {model}"
 msgstr "{status}: {provider} / {model}"
 
-#: src/iac_code/commands/auth.py:743
+#: src/iac_code/commands/auth.py:724
 msgid "Configured"
 msgstr "Configurado"
 
-#: src/iac_code/commands/auth.py:752
+#: src/iac_code/commands/auth.py:731 src/iac_code/commands/auth.py:752
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
+
+#: src/iac_code/commands/auth.py:732 src/iac_code/providers/registry.py:417
+msgid "ZhiPu AI"
+msgstr "ZhiPu AI"
+
+#: src/iac_code/commands/auth.py:733
+msgid "Kimi"
+msgstr "Kimi"
+
+#: src/iac_code/commands/auth.py:734
+msgid "MiniMax"
+msgstr "MiniMax"
+
+#: src/iac_code/commands/auth.py:735 src/iac_code/providers/registry.py:419
+msgid "Volcengine"
+msgstr "Volcengine"
+
+#: src/iac_code/commands/auth.py:736
+msgid "SiliconFlow"
+msgstr "SiliconFlow"
+
+#: src/iac_code/commands/auth.py:737 src/iac_code/providers/registry.py:410
+msgid "DeepSeek"
+msgstr "DeepSeek"
+
+#: src/iac_code/commands/auth.py:738 src/iac_code/providers/registry.py:408
+msgid "OpenAI"
+msgstr "OpenAI"
+
+#: src/iac_code/commands/auth.py:739 src/iac_code/providers/registry.py:409
+msgid "Anthropic"
+msgstr "Anthropic"
+
+#: src/iac_code/commands/auth.py:740 src/iac_code/providers/registry.py:412
+msgid "Google Gemini"
+msgstr "Google Gemini"
+
+#: src/iac_code/commands/auth.py:741 src/iac_code/providers/registry.py:425
+msgid "Azure OpenAI"
+msgstr "Azure OpenAI"
+
+#: src/iac_code/commands/auth.py:742 src/iac_code/providers/registry.py:424
+msgid "OpenRouter"
+msgstr "OpenRouter"
+
+#: src/iac_code/commands/auth.py:743
+msgid "Local"
+msgstr "Local"
+
+#: src/iac_code/commands/auth.py:744
+msgid "Compatible"
+msgstr "Compatível"
 
 #: src/iac_code/commands/auth.py:761
 msgid "Select Cloud Provider"
@@ -556,14 +614,19 @@ msgstr "(dinâmico)"
 msgid "Aborted!"
 msgstr "Abortado!"
 
-#: src/iac_code/providers/manager.py:80
+#: src/iac_code/providers/manager.py:78
 #, python-brace-format
 msgid "Cannot determine provider for model: {model}. Run /auth to configure."
 msgstr ""
 "Não é possível determinar o provedor para o modelo: {model}. Execute "
 "/auth para configurar."
 
-#: src/iac_code/providers/manager.py:88
+#: src/iac_code/providers/manager.py:95
+#, python-brace-format
+msgid "Unknown provider key: '{key}'. Run /auth to configure."
+msgstr "Chave de provedor desconhecida: '{key}'. Execute /auth para configurar."
+
+#: src/iac_code/providers/manager.py:100
 #, python-brace-format
 msgid ""
 "No API key configured for provider '{provider}' (model: {model}). Run "
@@ -572,7 +635,7 @@ msgstr ""
 "Nenhuma chave API configurada para o provedor '{provider}' (modelo: "
 "{model}). Execute /auth para configurar."
 
-#: src/iac_code/providers/openai_provider.py:286
+#: src/iac_code/providers/openai_provider.py:289
 #, python-brace-format
 msgid ""
 "API returned no data. Please check that your API Base URL is correct "
@@ -583,7 +646,7 @@ msgstr ""
 "(atual: {base_url}). Muitos endpoints compatíveis com OpenAI exigem o "
 "sufixo /v1 (por exemplo, {base_url}/v1)."
 
-#: src/iac_code/providers/openai_provider.py:327
+#: src/iac_code/providers/openai_provider.py:330
 #, python-brace-format
 msgid ""
 "API returned an invalid response. Please check that your API Base URL is "
@@ -593,6 +656,97 @@ msgstr ""
 "A API retornou uma resposta inválida. Verifique se a API Base URL está "
 "correta (atual: {base_url}). Muitos endpoints compatíveis com OpenAI "
 "exigem o sufixo /v1 (por exemplo, {base_url}/v1)."
+
+#: src/iac_code/providers/registry.py:406
+msgid "Alibaba Cloud Bailian"
+msgstr "Alibaba Cloud Bailian"
+
+#: src/iac_code/providers/registry.py:407
+msgid "Alibaba Cloud Bailian Token Plan"
+msgstr "Alibaba Cloud Bailian Token Plan"
+
+#: src/iac_code/providers/registry.py:411
+msgid "OpenAPI Compatible"
+msgstr "Compatível com OpenAPI"
+
+#: src/iac_code/providers/registry.py:413
+msgid "Kimi (China)"
+msgstr "Kimi (China)"
+
+#: src/iac_code/providers/registry.py:414
+msgid "Kimi (International)"
+msgstr "Kimi (Internacional)"
+
+#: src/iac_code/providers/registry.py:415
+msgid "MiniMax (China)"
+msgstr "MiniMax (China)"
+
+#: src/iac_code/providers/registry.py:416
+msgid "MiniMax (International)"
+msgstr "MiniMax (Internacional)"
+
+#: src/iac_code/providers/registry.py:418
+msgid "ZhiPu AI (International)"
+msgstr "ZhiPu AI (Internacional)"
+
+#: src/iac_code/providers/registry.py:420
+msgid "SiliconFlow (China)"
+msgstr "SiliconFlow (China)"
+
+#: src/iac_code/providers/registry.py:421
+msgid "SiliconFlow (International)"
+msgstr "SiliconFlow (Internacional)"
+
+#: src/iac_code/providers/registry.py:422
+msgid "Ollama (Local)"
+msgstr "Ollama (Local)"
+
+#: src/iac_code/providers/registry.py:423
+msgid "LM Studio (Local)"
+msgstr "LM Studio (Local)"
+
+#: src/iac_code/providers/registry.py:426
+msgid "ModelScope"
+msgstr "ModelScope"
+
+#: src/iac_code/providers/registry.py:427
+msgid "Alibaba Cloud CodingPlan"
+msgstr "Alibaba Cloud CodingPlan"
+
+#: src/iac_code/providers/registry.py:428
+msgid "Alibaba Cloud CodingPlan (International)"
+msgstr "Alibaba Cloud CodingPlan (Internacional)"
+
+#: src/iac_code/providers/registry.py:429
+msgid "ZhiPu AI CodingPlan"
+msgstr "ZhiPu AI CodingPlan"
+
+#: src/iac_code/providers/registry.py:430
+msgid "ZhiPu AI CodingPlan (International)"
+msgstr "ZhiPu AI CodingPlan (Internacional)"
+
+#: src/iac_code/providers/registry.py:431
+msgid "Volcengine CodingPlan"
+msgstr "Volcengine CodingPlan"
+
+#: src/iac_code/providers/registry.py:432
+msgid "Anthropic Compatible"
+msgstr "Compatível com Anthropic"
+
+#: src/iac_code/services/qwenpaw_source.py:208
+#, python-brace-format
+msgid ""
+"[QwenPaw mode] Unknown provider '{provider_id}'. iac-code does not "
+"support this provider.\n"
+"Supported QwenPaw provider IDs: {supported_ids}\n"
+"To fix: switch to a supported provider in QwenPaw, or disable QwenPaw "
+"mode (remove 'llm_source: qwenpaw' from settings.yml)."
+msgstr ""
+"[Modo QwenPaw] Provider desconhecido '{provider_id}'. iac-code não "
+"suporta este provider.\n"
+"IDs de providers QwenPaw suportados: {supported_ids}\n"
+"Solução: mude para um provider suportado no QwenPaw, ou desative o modo "
+"QwenPaw (remova 'llm_source: qwenpaw' do settings.yml)."
 
 #: src/iac_code/skills/skill_tool.py:130
 #, python-brace-format
@@ -1017,47 +1171,23 @@ msgstr "ROS Stack"
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
 
-#: src/iac_code/ui/banner.py:38
-msgid "DashScope"
-msgstr "DashScope"
-
-#: src/iac_code/ui/banner.py:39
-msgid "DashScope Token Plan"
-msgstr "DashScope Token Plan"
-
-#: src/iac_code/ui/banner.py:40
-msgid "OpenAI"
-msgstr "OpenAI"
-
-#: src/iac_code/ui/banner.py:41
-msgid "Anthropic"
-msgstr "Anthropic"
-
-#: src/iac_code/ui/banner.py:42
-msgid "DeepSeek"
-msgstr "DeepSeek"
-
-#: src/iac_code/ui/banner.py:43
-msgid "OpenAPI Compatible"
-msgstr "Compatível com OpenAPI"
-
-#: src/iac_code/ui/banner.py:67
+#: src/iac_code/ui/banner.py:64
 msgid "Your AI-powered Infrastructure as Code assistant"
 msgstr "Seu assistente de Infrastructure as Code com IA"
 
-#: src/iac_code/ui/banner.py:91
+#: src/iac_code/ui/banner.py:88
 msgid "Welcome back"
 msgstr "Bem-vindo de volta"
 
-#: src/iac_code/ui/banner.py:97
+#: src/iac_code/ui/banner.py:94
 msgid "Session"
 msgstr "Sessão"
 
-#: src/iac_code/ui/banner.py:107
+#: src/iac_code/ui/banner.py:104
 msgid "Debug mode"
 msgstr "Modo debug"
 
-#: src/iac_code/ui/banner.py:108
+#: src/iac_code/ui/banner.py:105
 msgid "Log file"
 msgstr "Arquivo de log"
 
@@ -1144,43 +1274,43 @@ msgstr "padrão"
 msgid "No, always reject this tool"
 msgstr "Não, sempre rejeitar esta ferramenta"
 
-#: src/iac_code/ui/repl.py:311
+#: src/iac_code/ui/repl.py:319
 msgid "Press Ctrl+C again to exit."
 msgstr "Pressione Ctrl+C novamente para sair."
 
-#: src/iac_code/ui/repl.py:327
+#: src/iac_code/ui/repl.py:335
 msgid "Interrupted."
 msgstr "Interrompido."
 
-#: src/iac_code/ui/repl.py:364
+#: src/iac_code/ui/repl.py:372
 msgid "Goodbye!"
 msgstr "Até logo!"
 
-#: src/iac_code/ui/repl.py:365
+#: src/iac_code/ui/repl.py:373
 msgid "Resume this session with:"
 msgstr "Para retomar esta sessão, execute:"
 
-#: src/iac_code/ui/repl.py:447
+#: src/iac_code/ui/repl.py:455
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "Comando desconhecido: /{name}. Digite /help para ver os comandos."
 
-#: src/iac_code/ui/repl.py:471 src/iac_code/ui/repl.py:503
+#: src/iac_code/ui/repl.py:479 src/iac_code/ui/repl.py:511
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Erro de comando: {error}"
 
-#: src/iac_code/ui/repl.py:478
+#: src/iac_code/ui/repl.py:486
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "Comando sem tratador: {name}"
 
-#: src/iac_code/ui/repl.py:634
+#: src/iac_code/ui/repl.py:689
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Sessão não encontrada: {session_id}"
 
-#: src/iac_code/ui/repl.py:653
+#: src/iac_code/ui/repl.py:708
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1191,15 +1321,15 @@ msgstr ""
 "Para retomar, execute:\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:692
+#: src/iac_code/ui/repl.py:747
 msgid "This conversation is from a different directory."
 msgstr "Esta conversa é de outro diretório."
 
-#: src/iac_code/ui/repl.py:694
+#: src/iac_code/ui/repl.py:749
 msgid "To resume, run:"
 msgstr "Para retomar, execute:"
 
-#: src/iac_code/ui/repl.py:699
+#: src/iac_code/ui/repl.py:754
 msgid "(Command copied to clipboard)"
 msgstr "(Comando copiado para a área de transferência)"
 
@@ -1375,4 +1505,7 @@ msgstr "há {n} hora{s}"
 #, python-brace-format
 msgid "{n} day{s} ago"
 msgstr "há {n} dia{s}"
+
+#~ msgid "DashScope Token Plan"
+#~ msgstr "DashScope Token Plan"
 

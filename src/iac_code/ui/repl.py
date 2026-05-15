@@ -97,7 +97,15 @@ class InlineREPL:
 
         # Backend: Provider + Session + Tasks + Memory
         self._credentials = self._load_credentials()
-        self._provider_manager = ProviderManager(model=model, credentials=self._credentials)
+        self._provider_key_override: str | None = None
+        self._base_url_override: str | None = None
+        self._apply_qwenpaw_config(model)
+        self._provider_manager = ProviderManager(
+            model=self._current_model,
+            credentials=self._credentials,
+            provider_key_override=self._provider_key_override,
+            base_url_override=self._base_url_override,
+        )
         self._session_storage = SessionStorage()
         self.session_index = SessionIndex()
         self._session_id = self._resolve_session_id(resume_session_id)
@@ -589,8 +597,32 @@ class InlineREPL:
 
         self._current_model = new_model
         self._current_provider_config = load_active_provider_config()
+        self._provider_key_override = None
+        self._base_url_override = None
         self._credentials = self._load_credentials()
-        self._provider_manager.reconfigure(new_model, self._credentials)
+        from iac_code.config import _get_env_overrides, get_llm_source
+
+        env = _get_env_overrides()
+        if not env["api_key"] and get_llm_source() == "qwenpaw":
+            from iac_code.services.qwenpaw_source import QwenPawError, load_from_qwenpaw
+
+            try:
+                qwenpaw_config = load_from_qwenpaw()
+            except QwenPawError as exc:
+                Console(stderr=True).print(str(exc), style="bold red")
+                raise SystemExit(1)
+            if qwenpaw_config:
+                self._current_model = qwenpaw_config.model
+                self.store.set_state(model=qwenpaw_config.model)
+                self._credentials = {qwenpaw_config.provider_key: qwenpaw_config.api_key or ""}
+                self._provider_key_override = qwenpaw_config.provider_key
+                self._base_url_override = qwenpaw_config.base_url
+        self._provider_manager.reconfigure(
+            self._current_model,
+            self._credentials,
+            provider_key_override=self._provider_key_override,
+            base_url_override=self._base_url_override,
+        )
         memory_content = ""
         if hasattr(self, "_memory_manager") and self._memory_manager:
             memory_content = self._memory_manager.get_prompt_content()
@@ -603,6 +635,29 @@ class InlineREPL:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _apply_qwenpaw_config(self, model: str) -> None:
+        """Apply QwenPaw config if active and env vars don't override."""
+        from iac_code.config import _get_env_overrides, get_llm_source
+
+        env = _get_env_overrides()
+        if env["api_key"]:
+            return
+        if get_llm_source() != "qwenpaw":
+            return
+        from iac_code.services.qwenpaw_source import QwenPawError, load_from_qwenpaw
+
+        try:
+            qwenpaw_config = load_from_qwenpaw()
+        except QwenPawError as exc:
+            Console(stderr=True).print(str(exc), style="bold red")
+            raise SystemExit(1)
+        if qwenpaw_config:
+            self._current_model = qwenpaw_config.model
+            self.store = AppStateStore(initial_state=AppState(model=qwenpaw_config.model))
+            self._credentials = {qwenpaw_config.provider_key: qwenpaw_config.api_key or ""}
+            self._provider_key_override = qwenpaw_config.provider_key
+            self._base_url_override = qwenpaw_config.base_url
 
     def _load_credentials(self) -> dict[str, str]:
         """Load API credentials (delegates to config.load_credentials with env overlay)."""

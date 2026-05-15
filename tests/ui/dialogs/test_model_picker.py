@@ -140,7 +140,7 @@ class TestModelPickerCreate:
         picker = make_picker(configured_providers=["dashscope"])
         items = picker._build_items()
         headers = [it["header"] for it in items if "header" in it]
-        assert any("阿里云百炼" in h for h in headers)
+        assert any("Alibaba Cloud Bailian" in h for h in headers)
 
     def test_items_carry_provider_key(self):
         picker = make_picker(configured_providers=["dashscope", "openai"])
@@ -416,7 +416,7 @@ class TestModelPickerRender:
         console = Console(file=buf, highlight=False, markup=False)
         console.print(picker.render())
         output = buf.getvalue()
-        assert "阿里云百炼" in output
+        assert "Alibaba Cloud Bailian" in output
 
     def test_render_focused_model_has_indicator(self):
         from io import StringIO

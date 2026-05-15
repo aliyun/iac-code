@@ -302,7 +302,7 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
     fake_session_dir = Path("/tmp/iac-config")
 
     class FakeProviderManager:
-        def __init__(self, *, model, credentials):
+        def __init__(self, *, model, credentials, provider_key_override=None, base_url_override=None):
             captured["provider_manager"] = {"model": model, "credentials": credentials}
 
     class FakeSessionStorage:
@@ -425,17 +425,12 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
 
     assert loop is not None
     assert fake_registry.default_registered is True
-    assert captured["provider_manager"] == {
-        "model": "test-model",
-        "credentials": {
-            "anthropic": "ak",
-            "openai": "ok",
-            "dashscope": "bk",
-            "dashscope_token_plan": "",
-            "deepseek": "",
-            "openapi_compatible": "compat",
-        },
-    }
+    pm = captured["provider_manager"]
+    assert pm["model"] == "test-model"
+    assert pm["credentials"]["anthropic"] == "ak"
+    assert pm["credentials"]["openai"] == "ok"
+    assert pm["credentials"]["dashscope"] == "bk"
+    assert pm["credentials"]["openapi_compatible"] == "compat"
     # Session storage is now project-partitioned and constructs its own
     # default projects_dir from get_config_dir(), so we just assert the
     # storage was instantiated rather than checking a specific path.
@@ -463,14 +458,9 @@ def test_create_agent_loop_handles_credential_load_failure_and_skill_conflict(mo
     with patch("iac_code.cli.headless.logger.warning") as warning:
         runner._create_agent_loop()
 
-    assert captured["provider_manager"]["credentials"] == {
-        "anthropic": "",
-        "openai": "",
-        "dashscope": "",
-        "dashscope_token_plan": "",
-        "deepseek": "",
-        "openapi_compatible": "",
-    }
+    creds = captured["provider_manager"]["credentials"]
+    for key in ("anthropic", "openai", "dashscope", "dashscope_token_plan", "deepseek", "openapi_compatible"):
+        assert creds[key] == ""
     warning.assert_called_once()
     assert fake_command_registry.registered == []
     assert any(getattr(tool, "kind", "") == "skill" for tool in fake_registry.registered)

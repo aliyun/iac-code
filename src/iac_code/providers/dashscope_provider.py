@@ -45,16 +45,15 @@ class DashScopeProvider(OpenAIProvider):
         effort: str | None = None,
         base_url: str = DASHSCOPE_BASE_URL,
         provider_key: str = "dashscope",
+        **kwargs,
     ) -> None:
         super().__init__(
             model=model,
             api_key=api_key,
             base_url=base_url,
             effort=effort,
+            provider_key=provider_key,
         )
-        # Instance attribute shadows the class attribute so per-variant
-        # thinking-registry lookups resolve to the right MODEL_THINKING bucket.
-        self._PROVIDER_KEY = provider_key
 
     # -- Explicit context cache ------------------------------------------------
 

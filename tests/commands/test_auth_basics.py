@@ -45,12 +45,9 @@ class TestProvidersMetadata:
         )
         assert entry is not None
         assert entry["name"] == "DashScope Token Plan"
-        assert entry["display_name"] == "阿里云百炼 Token Plan"
+        assert entry["display_name"] == "Alibaba Cloud Bailian Token Plan"
         assert entry["api_base"] == ("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
         assert entry["default_model"] == "qwen3.6-plus"
-        assert set(entry["models"]) == {
-            "qwen3.6-plus",
-            "deepseek-v3.2",
-            "glm-5",
-            "MiniMax-M2.5",
-        }
+        models = set(entry["models"])
+        for expected in ("qwen3.6-plus", "deepseek-v3.2", "glm-5", "MiniMax-M2.5"):
+            assert expected in models

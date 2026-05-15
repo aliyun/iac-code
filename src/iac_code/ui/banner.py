@@ -26,23 +26,20 @@ ACCENT = "bright_cyan"
 
 
 def _get_provider_display() -> str:
-    """Get the active provider display name from settings, translated."""
+    """Get the active provider display name from settings."""
     try:
         from iac_code.config import get_active_provider_key, get_provider_config
+        from iac_code.i18n import _
+        from iac_code.providers.registry import PROVIDER_REGISTRY
 
         key = get_active_provider_key()
         if not key:
             return ""
+        desc = PROVIDER_REGISTRY.get(key)
+        if desc:
+            return _(desc.display_name)
         name = get_provider_config(key).get("name", "")
-        provider_display_names = {
-            "DashScope": _("DashScope"),
-            "DashScope Token Plan": _("DashScope Token Plan"),
-            "OpenAI": _("OpenAI"),
-            "Anthropic": _("Anthropic"),
-            "DeepSeek": _("DeepSeek"),
-            "OpenAPI Compatible": _("OpenAPI Compatible"),
-        }
-        return provider_display_names.get(name, name)
+        return name
     except Exception:
         return ""
 
