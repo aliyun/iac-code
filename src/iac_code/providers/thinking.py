@@ -53,6 +53,7 @@ class ThinkingFamily(Enum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"  # reasoning_effort + extra_body.thinking.type=enabled
     DASHSCOPE = "dashscope"  # extra_body.enable_thinking [+ thinking_budget]
+    GEMINI = "gemini"
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,12 @@ _OPENAI_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.XHIGH,
 )
 
+_GEMINI_EFFORTS: tuple[EffortLevel, ...] = (
+    EffortLevel.LOW,
+    EffortLevel.MEDIUM,
+    EffortLevel.HIGH,
+)
+
 _ANTHROPIC_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.LOW,
     EffortLevel.MEDIUM,
@@ -115,6 +122,8 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "gpt-5.4-mini": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, EffortLevel.HIGH),
         "gpt-5.3-codex": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, EffortLevel.HIGH),
         "gpt-5.2": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, EffortLevel.HIGH),
+        "o3": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, EffortLevel.HIGH),
+        "o4-mini": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, EffortLevel.HIGH),
     },
     "deepseek": {
         "deepseek-v4-pro": ThinkingSpec(ThinkingFamily.OPENAI, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
@@ -137,12 +146,33 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
     },
+    "gemini": {
+        "gemini-3.1-pro-preview": ThinkingSpec(ThinkingFamily.GEMINI, _GEMINI_EFFORTS, EffortLevel.MEDIUM),
+        "gemini-3-flash-preview": ThinkingSpec(ThinkingFamily.GEMINI, _GEMINI_EFFORTS, EffortLevel.MEDIUM),
+        "gemini-2.5-pro": ThinkingSpec(ThinkingFamily.GEMINI, _GEMINI_EFFORTS, EffortLevel.MEDIUM),
+        "gemini-2.5-flash": ThinkingSpec(ThinkingFamily.GEMINI, _GEMINI_EFFORTS, EffortLevel.MEDIUM),
+    },
+}
+
+
+_THINKING_FALLBACK: dict[str, str] = {
+    "aliyun_codingplan": "dashscope",
+    "aliyun_codingplan_intl": "dashscope",
+    "zhipu_cn_codingplan": "zhipu_cn",
+    "zhipu_intl_codingplan": "zhipu_intl",
+    "volcengine_cn_codingplan": "volcengine_cn",
 }
 
 
 def get_thinking_spec(provider_key: str, model: str) -> ThinkingSpec:
     """Return spec for (provider_key, model). Unknown combos → ``NONE`` spec."""
-    return MODEL_THINKING.get(provider_key, {}).get(model, _NONE_SPEC)
+    spec = MODEL_THINKING.get(provider_key, {}).get(model)
+    if spec is not None:
+        return spec
+    fallback_key = _THINKING_FALLBACK.get(provider_key)
+    if fallback_key:
+        return MODEL_THINKING.get(fallback_key, {}).get(model, _NONE_SPEC)
+    return _NONE_SPEC
 
 
 def normalize_effort(effort: str | None) -> str | None:

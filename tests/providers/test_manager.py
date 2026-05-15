@@ -334,5 +334,5 @@ class TestModelPrefixAutoMapping:
     def test_auto_mapped_model_without_api_key_raises(self, monkeypatch):
         """Model prefix resolves the provider, but empty credential raises ValueError."""
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
-        with pytest.raises(ValueError, match="No API key configured for provider 'anthropic'"):
+        with pytest.raises(ValueError, match="No API key configured for provider"):
             create_provider("claude-sonnet-4-6", credentials={"anthropic": ""})

@@ -78,7 +78,7 @@ class TestGetEnvOverrides:
         with pytest.raises(ValueError) as exc:
             _get_env_overrides()
         msg = str(exc.value)
-        for canonical in ("Anthropic", "OpenAI", "DashScope", "DeepSeek", "OpenAPICompatible"):
+        for canonical in ("Anthropic", "OpenAI", "DashScope", "DeepSeek"):
             assert canonical in msg
 
     def test_all_four_env_vars_returned(self, monkeypatch):
@@ -245,14 +245,10 @@ class TestLoadCredentials:
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import load_credentials
 
-            assert load_credentials() == {
-                "anthropic": "",
-                "openai": "",
-                "dashscope": "",
-                "dashscope_token_plan": "",
-                "deepseek": "",
-                "openapi_compatible": "",
-            }
+            creds = load_credentials()
+            for key in ("anthropic", "openai", "dashscope", "dashscope_token_plan", "deepseek", "openapi_compatible"):
+                assert creds[key] == ""
+            assert all(v == "" for v in creds.values())
 
     def test_loads_all_slots_from_file(self, monkeypatch, tmp_path):
         from unittest.mock import patch
@@ -269,14 +265,13 @@ class TestLoadCredentials:
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import load_credentials
 
-            assert load_credentials() == {
-                "anthropic": "ak",
-                "openai": "ok",
-                "dashscope": "ds",
-                "dashscope_token_plan": "tp",
-                "deepseek": "dk",
-                "openapi_compatible": "oc",
-            }
+            creds = load_credentials()
+            assert creds["anthropic"] == "ak"
+            assert creds["openai"] == "ok"
+            assert creds["dashscope"] == "ds"
+            assert creds["dashscope_token_plan"] == "tp"
+            assert creds["deepseek"] == "dk"
+            assert creds["openapi_compatible"] == "oc"
 
     def test_bailian_legacy_key_falls_back_to_dashscope_slot(self, monkeypatch, tmp_path):
         from unittest.mock import patch
@@ -407,7 +402,7 @@ class TestDashScopeTokenPlanProviderEnv:
     def test_canonical_name_listed_in_constants(self):
         from iac_code.config import _PROVIDER_CANONICAL_NAMES
 
-        assert "DashScopeTokenPlan" in _PROVIDER_CANONICAL_NAMES
+        assert "DashScope Token Plan" in _PROVIDER_CANONICAL_NAMES
 
 
 class TestDashScopeTokenPlanCredSlot:

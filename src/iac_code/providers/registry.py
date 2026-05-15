@@ -1,0 +1,433 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from iac_code.i18n import _
+
+
+@dataclass(frozen=True)
+class ModelEntry:
+    id: str
+    is_default: bool = False
+
+
+@dataclass(frozen=True)
+class ProviderDescriptor:
+    key: str
+    name: str
+    display_name: str
+    provider_class: str
+    base_url: str | None
+    models: list[ModelEntry] = field(default_factory=list)
+    require_api_key: bool = True
+    is_local: bool = False
+    qwenpaw_provider_ids: list[str] = field(default_factory=list)
+    qwenpaw_chat_model: str = "OpenAIChatModel"
+
+    @property
+    def default_model(self) -> str:
+        for m in self.models:
+            if m.is_default:
+                return m.id
+        return self.models[0].id if self.models else ""
+
+    @property
+    def model_ids(self) -> list[str]:
+        return [m.id for m in self.models]
+
+
+PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
+    "dashscope": ProviderDescriptor(
+        key="dashscope",
+        name="DashScope",
+        display_name="Alibaba Cloud Bailian",
+        provider_class="iac_code.providers.dashscope_provider.DashScopeProvider",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        models=[
+            ModelEntry("qwen3.6-plus", is_default=True),
+            ModelEntry("qwen3.6-max-preview"),
+            ModelEntry("qwen3-max"),
+            ModelEntry("qwen3.5-plus"),
+            ModelEntry("qwen3.5-flash"),
+            ModelEntry("qwq-plus"),
+            ModelEntry("qwen3-coder-plus"),
+            ModelEntry("kimi-k2.6"),
+            ModelEntry("deepseek-v4-pro"),
+            ModelEntry("deepseek-v4-flash"),
+            ModelEntry("glm-5.1"),
+        ],
+        qwenpaw_provider_ids=["dashscope"],
+    ),
+    "dashscope_token_plan": ProviderDescriptor(
+        key="dashscope_token_plan",
+        name="DashScope Token Plan",
+        display_name="Alibaba Cloud Bailian Token Plan",
+        provider_class="iac_code.providers.dashscope_provider.DashScopeProvider",
+        base_url="https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        models=[
+            ModelEntry("qwen3.6-plus", is_default=True),
+            ModelEntry("deepseek-v3.2"),
+            ModelEntry("glm-5"),
+            ModelEntry("MiniMax-M2.5"),
+            ModelEntry("kimi-k2.5"),
+        ],
+        qwenpaw_provider_ids=["aliyun-tokenplan"],
+    ),
+    "openai": ProviderDescriptor(
+        key="openai",
+        name="OpenAI",
+        display_name="OpenAI",
+        provider_class="iac_code.providers.openai_provider.OpenAIProvider",
+        base_url=None,
+        models=[
+            ModelEntry("gpt-5.5", is_default=True),
+            ModelEntry("gpt-5.4"),
+            ModelEntry("gpt-5.4-mini"),
+            ModelEntry("gpt-5.3-codex"),
+            ModelEntry("gpt-5.2"),
+            ModelEntry("o3"),
+            ModelEntry("o4-mini"),
+        ],
+        qwenpaw_provider_ids=["openai"],
+    ),
+    "anthropic": ProviderDescriptor(
+        key="anthropic",
+        name="Anthropic",
+        display_name="Anthropic",
+        provider_class="iac_code.providers.anthropic_provider.AnthropicProvider",
+        base_url=None,
+        models=[
+            ModelEntry("claude-opus-4-7", is_default=True),
+            ModelEntry("claude-opus-4-6"),
+            ModelEntry("claude-sonnet-4-6"),
+            ModelEntry("claude-sonnet-4-6-1m"),
+            ModelEntry("claude-haiku-4-5-20251001"),
+        ],
+        qwenpaw_provider_ids=["anthropic"],
+        qwenpaw_chat_model="AnthropicChatModel",
+    ),
+    "deepseek": ProviderDescriptor(
+        key="deepseek",
+        name="DeepSeek",
+        display_name="DeepSeek",
+        provider_class="iac_code.providers.deepseek_provider.DeepSeekProvider",
+        base_url="https://api.deepseek.com/v1",
+        models=[
+            ModelEntry("deepseek-v4-pro", is_default=True),
+            ModelEntry("deepseek-v4-flash"),
+        ],
+        qwenpaw_provider_ids=["deepseek"],
+    ),
+    "openapi_compatible": ProviderDescriptor(
+        key="openapi_compatible",
+        name="OpenAPI Compatible",
+        display_name="OpenAPI Compatible",
+        provider_class="iac_code.providers.openai_provider.OpenAIProvider",
+        base_url=None,
+        models=[],
+    ),
+    "anthropic_compatible": ProviderDescriptor(
+        key="anthropic_compatible",
+        name="Anthropic Compatible",
+        display_name="Anthropic Compatible",
+        provider_class="iac_code.providers.anthropic_provider.AnthropicProvider",
+        base_url=None,
+        models=[],
+        qwenpaw_chat_model="AnthropicChatModel",
+    ),
+    "gemini": ProviderDescriptor(
+        key="gemini",
+        name="Gemini",
+        display_name="Google Gemini",
+        provider_class="iac_code.providers.gemini_provider.GeminiProvider",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        models=[
+            ModelEntry("gemini-3.1-pro-preview", is_default=True),
+            ModelEntry("gemini-3-flash-preview"),
+            ModelEntry("gemini-3.1-flash-lite-preview"),
+            ModelEntry("gemini-2.5-pro"),
+            ModelEntry("gemini-2.5-flash"),
+            ModelEntry("gemini-2.5-flash-lite"),
+            ModelEntry("gemini-2.0-flash"),
+        ],
+        qwenpaw_provider_ids=["gemini"],
+        qwenpaw_chat_model="GeminiChatModel",
+    ),
+    "kimi_cn": ProviderDescriptor(
+        key="kimi_cn",
+        name="Kimi CN",
+        display_name="Kimi (China)",
+        provider_class="iac_code.providers.kimi_provider.KimiProvider",
+        base_url="https://api.moonshot.cn/v1",
+        models=[
+            ModelEntry("kimi-k2.6", is_default=True),
+            ModelEntry("kimi-k2.5"),
+        ],
+        qwenpaw_provider_ids=["kimi-cn"],
+    ),
+    "kimi_intl": ProviderDescriptor(
+        key="kimi_intl",
+        name="Kimi Intl",
+        display_name="Kimi (International)",
+        provider_class="iac_code.providers.kimi_provider.KimiProvider",
+        base_url="https://api.moonshot.ai/v1",
+        models=[
+            ModelEntry("kimi-k2.6", is_default=True),
+            ModelEntry("kimi-k2.5"),
+        ],
+        qwenpaw_provider_ids=["kimi-intl"],
+    ),
+    "minimax_cn": ProviderDescriptor(
+        key="minimax_cn",
+        name="MiniMax CN",
+        display_name="MiniMax (China)",
+        provider_class="iac_code.providers.minimax_provider.MiniMaxProvider",
+        base_url="https://api.minimaxi.com/anthropic",
+        models=[
+            ModelEntry("MiniMax-M2.7", is_default=True),
+            ModelEntry("MiniMax-M2.7-highspeed"),
+            ModelEntry("MiniMax-M2.5"),
+            ModelEntry("MiniMax-M2.5-highspeed"),
+        ],
+        qwenpaw_provider_ids=["minimax-cn"],
+        qwenpaw_chat_model="AnthropicChatModel",
+    ),
+    "minimax_intl": ProviderDescriptor(
+        key="minimax_intl",
+        name="MiniMax Intl",
+        display_name="MiniMax (International)",
+        provider_class="iac_code.providers.minimax_provider.MiniMaxProvider",
+        base_url="https://api.minimax.io/anthropic",
+        models=[
+            ModelEntry("MiniMax-M2.7", is_default=True),
+            ModelEntry("MiniMax-M2.7-highspeed"),
+            ModelEntry("MiniMax-M2.5"),
+            ModelEntry("MiniMax-M2.5-highspeed"),
+        ],
+        qwenpaw_provider_ids=["minimax"],
+        qwenpaw_chat_model="AnthropicChatModel",
+    ),
+    "zhipu_cn": ProviderDescriptor(
+        key="zhipu_cn",
+        name="ZhiPu CN",
+        display_name="ZhiPu AI",
+        provider_class="iac_code.providers.zhipu_provider.ZhiPuProvider",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        models=[
+            ModelEntry("glm-5.1", is_default=True),
+            ModelEntry("glm-5"),
+            ModelEntry("glm-5-turbo"),
+        ],
+        qwenpaw_provider_ids=["zhipu-cn"],
+    ),
+    "zhipu_intl": ProviderDescriptor(
+        key="zhipu_intl",
+        name="ZhiPu Intl",
+        display_name="ZhiPu AI (International)",
+        provider_class="iac_code.providers.zhipu_provider.ZhiPuProvider",
+        base_url="https://api.z.ai/api/paas/v4",
+        models=[
+            ModelEntry("glm-5.1", is_default=True),
+            ModelEntry("glm-5"),
+            ModelEntry("glm-5-turbo"),
+        ],
+        qwenpaw_provider_ids=["zhipu-intl"],
+    ),
+    "volcengine_cn": ProviderDescriptor(
+        key="volcengine_cn",
+        name="Volcengine CN",
+        display_name="Volcengine",
+        provider_class="iac_code.providers.volcengine_provider.VolcengineProvider",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        models=[
+            ModelEntry("doubao-seed-2-0-code-preview-260215", is_default=True),
+            ModelEntry("doubao-seed-2-0-pro-260215"),
+            ModelEntry("doubao-seed-2-0-lite-260428"),
+        ],
+        qwenpaw_provider_ids=["volcengine-cn"],
+    ),
+    "siliconflow_cn": ProviderDescriptor(
+        key="siliconflow_cn",
+        name="SiliconFlow CN",
+        display_name="SiliconFlow (China)",
+        provider_class="iac_code.providers.siliconflow_provider.SiliconFlowProvider",
+        base_url="https://api.siliconflow.cn/v1",
+        models=[],
+        qwenpaw_provider_ids=["siliconflow-cn"],
+    ),
+    "siliconflow_intl": ProviderDescriptor(
+        key="siliconflow_intl",
+        name="SiliconFlow Intl",
+        display_name="SiliconFlow (International)",
+        provider_class="iac_code.providers.siliconflow_provider.SiliconFlowProvider",
+        base_url="https://api.siliconflow.com/v1",
+        models=[],
+        qwenpaw_provider_ids=["siliconflow-intl"],
+    ),
+    "ollama": ProviderDescriptor(
+        key="ollama",
+        name="Ollama",
+        display_name="Ollama (Local)",
+        provider_class="iac_code.providers.ollama_provider.OllamaProvider",
+        base_url="http://localhost:11434/v1",
+        models=[],
+        require_api_key=False,
+        is_local=True,
+        qwenpaw_provider_ids=["ollama"],
+    ),
+    "lmstudio": ProviderDescriptor(
+        key="lmstudio",
+        name="LM Studio",
+        display_name="LM Studio (Local)",
+        provider_class="iac_code.providers.lmstudio_provider.LMStudioProvider",
+        base_url="http://localhost:1234/v1",
+        models=[],
+        require_api_key=False,
+        is_local=True,
+        qwenpaw_provider_ids=["lmstudio"],
+    ),
+    "openrouter": ProviderDescriptor(
+        key="openrouter",
+        name="OpenRouter",
+        display_name="OpenRouter",
+        provider_class="iac_code.providers.openrouter_provider.OpenRouterProvider",
+        base_url="https://openrouter.ai/api/v1",
+        models=[],
+        qwenpaw_provider_ids=["openrouter"],
+    ),
+    "azure_openai": ProviderDescriptor(
+        key="azure_openai",
+        name="Azure OpenAI",
+        display_name="Azure OpenAI",
+        provider_class="iac_code.providers.azure_openai_provider.AzureOpenAIProvider",
+        base_url=None,
+        models=[
+            ModelEntry("gpt-5", is_default=True),
+            ModelEntry("gpt-5-mini"),
+            ModelEntry("gpt-4.1"),
+            ModelEntry("gpt-4o"),
+        ],
+        qwenpaw_provider_ids=["azure-openai"],
+    ),
+    "modelscope": ProviderDescriptor(
+        key="modelscope",
+        name="ModelScope",
+        display_name="ModelScope",
+        provider_class="iac_code.providers.modelscope_provider.ModelScopeProvider",
+        base_url="https://api-inference.modelscope.cn/v1",
+        models=[
+            ModelEntry("Qwen/Qwen3.5-122B-A10B", is_default=True),
+        ],
+        qwenpaw_provider_ids=["modelscope"],
+    ),
+    "aliyun_codingplan": ProviderDescriptor(
+        key="aliyun_codingplan",
+        name="Aliyun CodingPlan",
+        display_name="Alibaba Cloud CodingPlan",
+        provider_class="iac_code.providers.dashscope_provider.DashScopeProvider",
+        base_url="https://coding.dashscope.aliyuncs.com/v1",
+        models=[
+            ModelEntry("qwen3.6-plus", is_default=True),
+            ModelEntry("qwen3.5-plus"),
+            ModelEntry("glm-5"),
+            ModelEntry("glm-4.7"),
+            ModelEntry("MiniMax-M2.5"),
+            ModelEntry("kimi-k2.5"),
+            ModelEntry("qwen3-coder-plus"),
+            ModelEntry("qwen3-coder-next"),
+        ],
+        qwenpaw_provider_ids=["aliyun-codingplan"],
+    ),
+    "aliyun_codingplan_intl": ProviderDescriptor(
+        key="aliyun_codingplan_intl",
+        name="Aliyun CodingPlan Intl",
+        display_name="Alibaba Cloud CodingPlan (International)",
+        provider_class="iac_code.providers.dashscope_provider.DashScopeProvider",
+        base_url="https://coding-intl.dashscope.aliyuncs.com/v1",
+        models=[
+            ModelEntry("qwen3.6-plus", is_default=True),
+            ModelEntry("qwen3.5-plus"),
+            ModelEntry("glm-5"),
+            ModelEntry("glm-4.7"),
+            ModelEntry("MiniMax-M2.5"),
+            ModelEntry("kimi-k2.5"),
+            ModelEntry("qwen3-coder-plus"),
+            ModelEntry("qwen3-coder-next"),
+        ],
+        qwenpaw_provider_ids=["aliyun-codingplan-intl"],
+    ),
+    "zhipu_cn_codingplan": ProviderDescriptor(
+        key="zhipu_cn_codingplan",
+        name="ZhiPu CN CodingPlan",
+        display_name="ZhiPu AI CodingPlan",
+        provider_class="iac_code.providers.zhipu_provider.ZhiPuProvider",
+        base_url="https://open.bigmodel.cn/api/coding/paas/v4",
+        models=[
+            ModelEntry("glm-5.1", is_default=True),
+            ModelEntry("glm-5"),
+        ],
+        qwenpaw_provider_ids=["zhipu-cn-codingplan"],
+    ),
+    "zhipu_intl_codingplan": ProviderDescriptor(
+        key="zhipu_intl_codingplan",
+        name="ZhiPu Intl CodingPlan",
+        display_name="ZhiPu AI CodingPlan (International)",
+        provider_class="iac_code.providers.zhipu_provider.ZhiPuProvider",
+        base_url="https://api.z.ai/api/coding/paas/v4",
+        models=[
+            ModelEntry("glm-5.1", is_default=True),
+            ModelEntry("glm-5"),
+        ],
+        qwenpaw_provider_ids=["zhipu-intl-codingplan"],
+    ),
+    "volcengine_cn_codingplan": ProviderDescriptor(
+        key="volcengine_cn_codingplan",
+        name="Volcengine CodingPlan",
+        display_name="Volcengine CodingPlan",
+        provider_class="iac_code.providers.volcengine_provider.VolcengineProvider",
+        base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
+        models=[
+            ModelEntry("doubao-seed-2-0-code-preview-260215", is_default=True),
+            ModelEntry("doubao-seed-2-0-pro-260215"),
+            ModelEntry("doubao-seed-2-0-lite-260428"),
+            ModelEntry("glm-5.1"),
+            ModelEntry("minimax-m2.7"),
+            ModelEntry("kimi-k2.6"),
+            ModelEntry("kimi-k2.5"),
+        ],
+        qwenpaw_provider_ids=["volcengine-cn-codingplan"],
+    ),
+}
+
+
+# Extraction markers for pybabel — these calls let the tool discover
+# all display_name strings so they appear in messages.pot.
+_DISPLAY_NAME_MARKERS = [
+    _("Alibaba Cloud Bailian"),
+    _("Alibaba Cloud Bailian Token Plan"),
+    _("OpenAI"),
+    _("Anthropic"),
+    _("DeepSeek"),
+    _("OpenAPI Compatible"),
+    _("Google Gemini"),
+    _("Kimi (China)"),
+    _("Kimi (International)"),
+    _("MiniMax (China)"),
+    _("MiniMax (International)"),
+    _("ZhiPu AI"),
+    _("ZhiPu AI (International)"),
+    _("Volcengine"),
+    _("SiliconFlow (China)"),
+    _("SiliconFlow (International)"),
+    _("Ollama (Local)"),
+    _("LM Studio (Local)"),
+    _("OpenRouter"),
+    _("Azure OpenAI"),
+    _("ModelScope"),
+    _("Alibaba Cloud CodingPlan"),
+    _("Alibaba Cloud CodingPlan (International)"),
+    _("ZhiPu AI CodingPlan"),
+    _("ZhiPu AI CodingPlan (International)"),
+    _("Volcengine CodingPlan"),
+    _("Anthropic Compatible"),
+]

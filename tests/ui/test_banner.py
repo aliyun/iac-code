@@ -129,22 +129,12 @@ class TestGetProviderDisplay:
             result = self._call()
         assert result == ""
 
-    def test_dashscope_token_plan_display_map_translates(self):
-        # Patch gettext to a known marker so we can prove the dict lookup
-        # actually hit the new entry — fallback to raw passthrough would
-        # not invoke _() and the marker would be absent.
-        with (
-            patch("iac_code.config.get_active_provider_key", return_value="k"),
-            patch(
-                "iac_code.config.get_provider_config",
-                return_value={"name": "DashScope Token Plan"},
-            ),
-            patch("iac_code.ui.banner._", side_effect=lambda s: f"<T:{s}>"),
-        ):
+    def test_dashscope_token_plan_display_from_registry(self):
+        with patch("iac_code.config.get_active_provider_key", return_value="dashscope_token_plan"):
             from iac_code.ui import banner
 
             result = banner._get_provider_display()
-        assert result == "<T:DashScope Token Plan>"
+        assert result == "Alibaba Cloud Bailian Token Plan"
 
 
 # ---------------------------------------------------------------------------

@@ -50,6 +50,7 @@ class LLMProvider(TypedDict):
     api_base: str | None
     models: list[str]
     default_model: str
+    require_api_key: bool
 
 
 def _classify_base_url(url: str | None) -> str:
@@ -66,87 +67,27 @@ def _classify_base_url(url: str | None) -> str:
     return "other"
 
 
-# Provider definitions
-PROVIDERS: list[LLMProvider] = [
-    {
-        "name": "DashScope",
-        "display_name": "阿里云百炼",
-        "key_name": "dashscope",
-        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": [
-            "qwen3.6-max-preview",
-            "qwen3.6-plus",
-            "qwen3.5-plus",
-            "qwen3.5-flash",
-            "qwq-plus",
-            "kimi-k2.6",
-            "deepseek-v4-pro",
-            "deepseek-v4-flash",
-            "glm-5.1",
-        ],
-        "default_model": "qwen3.6-plus",
-    },
-    {
-        "name": "DashScope Token Plan",
-        "display_name": "阿里云百炼 Token Plan",
-        "key_name": "dashscope_token_plan",
-        "api_base": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-        "models": [
-            "qwen3.6-plus",
-            "deepseek-v3.2",
-            "glm-5",
-            "MiniMax-M2.5",
-        ],
-        "default_model": "qwen3.6-plus",
-    },
-    {
-        "name": "OpenAI",
-        "display_name": "OpenAI",
-        "key_name": "openai",
-        "api_base": None,
-        "models": [
-            "gpt-5.5",
-            "gpt-5.4",
-            "gpt-5.4-mini",
-            "gpt-5.3-codex",
-            "gpt-5.2",
-        ],
-        "default_model": "gpt-5.5",
-    },
-    {
-        "name": "Anthropic",
-        "display_name": "Anthropic",
-        "key_name": "anthropic",
-        "api_base": None,
-        "models": [
-            "claude-opus-4-7",
-            "claude-opus-4-6",
-            "claude-sonnet-4-6",
-            "claude-sonnet-4-6-1m",
-            "claude-haiku-4-5-20251001",
-        ],
-        "default_model": "claude-opus-4-7",
-    },
-    {
-        "name": "DeepSeek",
-        "display_name": "DeepSeek",
-        "key_name": "deepseek",
-        "api_base": "https://api.deepseek.com/v1",
-        "models": [
-            "deepseek-v4-pro",
-            "deepseek-v4-flash",
-        ],
-        "default_model": "deepseek-v4-pro",
-    },
-    {
-        "name": "OpenAPI Compatible",
-        "display_name": "OpenAPI 兼容",
-        "key_name": "openapi_compatible",
-        "api_base": None,
-        "models": [],
-        "default_model": "",
-    },
-]
+def _build_providers_from_registry() -> list[LLMProvider]:
+    """Build PROVIDERS list from the central registry."""
+    from iac_code.providers.registry import PROVIDER_REGISTRY
+
+    result: list[LLMProvider] = []
+    for desc in PROVIDER_REGISTRY.values():
+        result.append(
+            LLMProvider(
+                name=desc.name,
+                display_name=_(desc.display_name),
+                key_name=desc.key,
+                api_base=desc.base_url,
+                models=desc.model_ids,
+                default_model=desc.default_model,
+                require_api_key=desc.require_api_key,
+            )
+        )
+    return result
+
+
+PROVIDERS: list[LLMProvider] = _build_providers_from_registry()
 
 # ── ANSI helpers ──────────────────────────────────────────────────────
 _C_SEL = "\033[96m"  # bright cyan (selected)
@@ -655,33 +596,74 @@ def _get_active_key_name() -> str:
 
 
 def _llm_auth_flow(console, store) -> str | None | _BackSentinel:
-    """LLM provider auth flow."""
+    """LLM provider auth flow with two-step vendor group selection."""
     active_key_name = _get_active_key_name()
 
+    provider_groups: list[tuple[str, list[str]]] = [
+        (
+            "Alibaba Cloud",
+            ["dashscope", "dashscope_token_plan", "aliyun_codingplan", "aliyun_codingplan_intl", "modelscope"],
+        ),
+        ("ZhiPu AI", ["zhipu_cn", "zhipu_intl", "zhipu_cn_codingplan", "zhipu_intl_codingplan"]),
+        ("Kimi", ["kimi_cn", "kimi_intl"]),
+        ("MiniMax", ["minimax_cn", "minimax_intl"]),
+        ("Volcengine", ["volcengine_cn", "volcengine_cn_codingplan"]),
+        ("SiliconFlow", ["siliconflow_cn", "siliconflow_intl"]),
+        ("DeepSeek", ["deepseek"]),
+        ("OpenAI", ["openai"]),
+        ("Anthropic", ["anthropic"]),
+        ("Google Gemini", ["gemini"]),
+        ("Azure OpenAI", ["azure_openai"]),
+        ("OpenRouter", ["openrouter"]),
+        ("Local", ["ollama", "lmstudio"]),
+        ("Compatible", ["openapi_compatible", "anthropic_compatible"]),
+    ]
+
+    provider_map: dict[str, LLMProvider] = {str(p["key_name"]): p for p in PROVIDERS}
+
     while True:
-        # Step 1: Select provider
-        provider_options = []
-        for p in PROVIDERS:
-            label = str(p["display_name"])
-            if str(p["key_name"]) == active_key_name:
+        # Step 1: Select vendor group
+        group_options: list[str] = []
+        group_default_idx = 0
+        for i, (group_name, keys) in enumerate(provider_groups):
+            label = _(group_name)
+            if active_key_name in keys:
                 label += _(" (current)")
-            provider_options.append(label)
+                group_default_idx = i
+            group_options.append(label)
 
-        default_idx = 0
-        for i, p in enumerate(PROVIDERS):
-            if str(p["key_name"]) == active_key_name:
-                default_idx = i
-                break
-
-        idx = _select(_("Select provider"), provider_options, default_index=default_idx)
-        if idx is None:
+        group_idx = _select(_("Select provider"), group_options, default_index=group_default_idx)
+        if group_idx is None:
             return _BACK
 
-        provider = PROVIDERS[idx]
+        group_name, group_keys = provider_groups[group_idx]
+        group_providers = [provider_map[k] for k in group_keys if k in provider_map]
 
-        # Step 2 (OpenAPI Compatible only): API Base URL
+        # Step 2: Select provider within group (skip if only one)
+        if len(group_providers) == 1:
+            provider = group_providers[0]
+        else:
+            sub_options: list[str] = []
+            sub_default_idx = 0
+            for i, p in enumerate(group_providers):
+                label = str(p["display_name"])
+                if str(p["key_name"]) == active_key_name:
+                    label += _(" (current)")
+                    sub_default_idx = i
+                sub_options.append(label)
+
+            sub_idx = _select(
+                _("Select provider — {group}").format(group=_(group_name)),
+                sub_options,
+                default_index=sub_default_idx,
+            )
+            if sub_idx is None:
+                continue
+            provider = group_providers[sub_idx]
+
+        # Step 3 (Compatible providers): API Base URL
         user_api_base = None
-        if provider["key_name"] == "openapi_compatible":
+        if provider["key_name"] in ("openapi_compatible", "anthropic_compatible"):
             existing_api_base = _load_existing_api_base(str(provider["key_name"]))
             api_base_result = _input_text_with_default(
                 _("Configure {provider}").format(provider=provider["display_name"]),
@@ -696,24 +678,24 @@ def _llm_auth_flow(console, store) -> str | None | _BackSentinel:
             if not user_api_base:
                 continue
 
-        # Step 3: API key
-        existing_key = _load_existing_key(str(provider["key_name"]))
-        api_key = _input_masked(
-            _("Enter API key for {provider}").format(provider=provider["display_name"]),
-            "API key: ",
-            existing=existing_key,
-        )
-        if api_key is _BACK:
-            continue
-        if api_key is None or not str(api_key).strip():
-            return _("Auth cancelled")
+        # Step 4: API key (skip for local providers that don't require one)
+        if provider.get("require_api_key", True):
+            existing_key = _load_existing_key(str(provider["key_name"]))
+            api_key = _input_masked(
+                _("Enter API key for {provider}").format(provider=provider["display_name"]),
+                "API key: ",
+                existing=existing_key,
+            )
+            if api_key is _BACK:
+                continue
+            if api_key is None or not str(api_key).strip():
+                return _("Auth cancelled")
 
-        api_key = str(api_key).strip()
-        if api_key != existing_key:
-            save_llm_key(str(provider["key_name"]), api_key)
+            api_key = str(api_key).strip()
+            if api_key != existing_key:
+                save_llm_key(str(provider["key_name"]), api_key)
 
-        # Step 4: Select model — recall this provider's own last-used model,
-        # so switching providers never leaks another provider's custom model.
+        # Step 5: Select model
         current_model = _load_existing_model(str(provider["key_name"])) or ""
         selected = select_model_interactive(
             list(provider["models"]),
@@ -726,7 +708,6 @@ def _llm_auth_flow(console, store) -> str | None | _BackSentinel:
         selected_model = str(selected)
         save_active_provider_config(provider, selected_model, api_base=user_api_base)
 
-        # Log telemetry event
         log_event(
             Events.AUTH_CONFIGURED,
             {
@@ -744,6 +725,25 @@ def _llm_auth_flow(console, store) -> str | None | _BackSentinel:
             provider=provider["display_name"],
             model=selected_model,
         )
+
+
+_GROUP_NAME_MARKERS = [
+    _("Alibaba Cloud"),
+    _("ZhiPu AI"),
+    _("Kimi"),
+    _("MiniMax"),
+    _("Volcengine"),
+    _("SiliconFlow"),
+    _("DeepSeek"),
+    _("OpenAI"),
+    _("Anthropic"),
+    _("Google Gemini"),
+    _("Azure OpenAI"),
+    _("OpenRouter"),
+    _("Local"),
+    _("Compatible"),
+    _("Select provider — {group}"),
+]
 
 
 def _cloud_provider_display(name: str) -> str:

@@ -54,7 +54,40 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
 
     credentials = load_credentials(model=options.model)
 
-    provider_manager = ProviderManager(model=options.model, credentials=credentials)
+    provider_key_override = None
+    base_url_override = None
+
+    from iac_code.config import _get_env_overrides, get_llm_source
+
+    env = _get_env_overrides()
+    model = options.model
+
+    if env["api_key"]:
+        pass  # env overrides handled by load_credentials
+    elif get_llm_source() == "qwenpaw":
+        from iac_code.services.qwenpaw_source import QwenPawError, load_from_qwenpaw
+
+        try:
+            qwenpaw_config = load_from_qwenpaw()
+        except QwenPawError as exc:
+            import sys
+
+            from rich.console import Console
+
+            Console(stderr=True).print(str(exc), style="bold red")
+            sys.exit(1)
+        if qwenpaw_config:
+            model = qwenpaw_config.model
+            credentials = {qwenpaw_config.provider_key: qwenpaw_config.api_key or ""}
+            provider_key_override = qwenpaw_config.provider_key
+            base_url_override = qwenpaw_config.base_url
+
+    provider_manager = ProviderManager(
+        model=model,
+        credentials=credentials,
+        provider_key_override=provider_key_override,
+        base_url_override=base_url_override,
+    )
 
     tool_registry = ToolRegistry()
     tool_registry.register_default_tools()

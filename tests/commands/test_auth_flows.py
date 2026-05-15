@@ -128,48 +128,75 @@ class TestAuthFlow:
 
 
 class TestLlmAuthFlow:
-    def test_escape_at_provider_select_returns_back(self, monkeypatch):
-        # _select for provider picker → None (Esc) → returns _BACK sentinel
+    def test_escape_at_group_select_returns_back(self, monkeypatch):
         monkeypatch.setattr("iac_code.commands.auth._select", lambda title, options, default_index=0: None)
-        console = MagicMock()
-        store = MagicMock()
-        result = _llm_auth_flow(console, store)
+        result = _llm_auth_flow(MagicMock(), MagicMock())
         assert result is _BACK
 
-    def test_back_at_api_key_input_loops_to_provider_select(self, monkeypatch):
-        # _select → provider index 0, _input_masked → _BACK (loops back to provider),
-        # then _select → None on second call so test terminates.
+    def test_back_at_sub_provider_returns_to_group(self, monkeypatch):
         call_count = {"select": 0}
 
         def select_side_effect(title, options, default_index=0):
             call_count["select"] += 1
             if call_count["select"] == 1:
-                return 0  # select first provider
+                return 0  # Alibaba Cloud group (multiple items)
+            if call_count["select"] == 2:
+                return None  # Esc at sub-provider → back to group
+            return None  # Esc at group → _BACK
+
+        monkeypatch.setattr("iac_code.commands.auth._select", select_side_effect)
+        result = _llm_auth_flow(MagicMock(), MagicMock())
+        assert result is _BACK
+        assert call_count["select"] == 3
+
+    def test_back_at_api_key_input_loops_to_group_select(self, monkeypatch):
+        call_count = {"select": 0}
+
+        def select_side_effect(title, options, default_index=0):
+            call_count["select"] += 1
+            if call_count["select"] <= 2:
+                return 0  # group + sub-provider
             return None  # Esc → _BACK
 
         monkeypatch.setattr("iac_code.commands.auth._select", select_side_effect)
-        # _load_existing_key returns None so no masking needed
         monkeypatch.setattr("iac_code.commands.auth._load_existing_key", lambda key_name: None)
         monkeypatch.setattr("iac_code.commands.auth._input_masked", lambda *a, **kw: _BACK)
-        console = MagicMock()
-        store = MagicMock()
-        result = _llm_auth_flow(console, store)
-        # Should have looped, then returned _BACK from second _select=None
+        result = _llm_auth_flow(MagicMock(), MagicMock())
         assert result is _BACK
+        assert call_count["select"] == 3
 
     def test_cancel_at_api_key_input_returns_cancelled(self, monkeypatch):
-        # _select → index 0, _input_masked → None (Ctrl+C) → "Auth cancelled"
+        # _select always returns 0 → Alibaba Cloud group → DashScope provider
         monkeypatch.setattr("iac_code.commands.auth._select", lambda title, options, default_index=0: 0)
         monkeypatch.setattr("iac_code.commands.auth._load_existing_key", lambda key_name: None)
         monkeypatch.setattr("iac_code.commands.auth._input_masked", lambda *a, **kw: None)
-        console = MagicMock()
-        store = MagicMock()
-        result = _llm_auth_flow(console, store)
+        result = _llm_auth_flow(MagicMock(), MagicMock())
         assert isinstance(result, str)
-        assert result  # "Auth cancelled" or similar translated string
+        assert result
+
+    def test_single_item_group_skips_sub_selection(self, monkeypatch):
+        """Groups with one provider (e.g. DeepSeek) skip the sub-provider step."""
+        call_count = {"select": 0}
+
+        def select_side_effect(title, options, default_index=0):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                for i, opt in enumerate(options):
+                    if "DeepSeek" in opt:
+                        return i
+                return 6
+            return None
+
+        monkeypatch.setattr("iac_code.commands.auth._select", select_side_effect)
+        monkeypatch.setattr("iac_code.commands.auth._load_existing_key", lambda key_name: None)
+        monkeypatch.setattr("iac_code.commands.auth._input_masked", lambda *a, **kw: _BACK)
+        result = _llm_auth_flow(MagicMock(), MagicMock())
+        # _input_masked returns _BACK → loops; second _select returns None → _BACK
+        assert result is _BACK
+        assert call_count["select"] == 2  # group + group again (no sub-provider step)
 
     def test_successful_config_saves_and_returns_string(self, monkeypatch):
-        # Full happy path through _llm_auth_flow (non-openapi_compatible provider)
+        # _select always returns 0 → Alibaba Cloud → DashScope (first sub-provider)
         monkeypatch.setattr("iac_code.commands.auth._select", lambda title, options, default_index=0: 0)
         monkeypatch.setattr("iac_code.commands.auth._load_existing_key", lambda key_name: None)
         monkeypatch.setattr("iac_code.commands.auth._input_masked", lambda *a, **kw: "test-api-key")
@@ -182,16 +209,31 @@ class TestLlmAuthFlow:
             "iac_code.commands.auth.save_active_provider_config",
             lambda provider, model, effort=None, api_base=None: None,
         )
-        console = MagicMock()
         store = MagicMock()
-        result = _llm_auth_flow(console, store)
+        result = _llm_auth_flow(MagicMock(), store)
         assert isinstance(result, str)
         assert "qwen3.6-plus" in result
         store.set_state.assert_called_once_with(model="qwen3.6-plus")
 
     def test_openapi_compatible_uses_api_base_and_existing_key(self, monkeypatch):
         monkeypatch.setattr("iac_code.commands.auth._get_active_key_name", lambda: "openapi_compatible")
-        monkeypatch.setattr("iac_code.commands.auth._select", lambda title, options, default_index=0: 5)
+        calls = {"select": 0}
+
+        def select_side_effect(title, options, default_index=0):
+            calls["select"] += 1
+            if calls["select"] == 1:
+                for i, opt in enumerate(options):
+                    if "Compatible" in opt:
+                        return i
+                return default_index
+            if calls["select"] == 2:
+                for i, opt in enumerate(options):
+                    if "OpenAPI" in opt:
+                        return i
+                return 0
+            return 0
+
+        monkeypatch.setattr("iac_code.commands.auth._select", select_side_effect)
         monkeypatch.setattr("iac_code.commands.auth._load_existing_api_base", lambda key_name: "https://old.example/v1")
         monkeypatch.setattr(
             "iac_code.commands.auth._input_text_with_default", lambda *a, **kw: "https://new.example/v1"
@@ -227,13 +269,21 @@ class TestLlmAuthFlow:
         }
         store.set_state.assert_called_once_with(model="custom-model")
 
-    def test_openapi_compatible_empty_api_base_restarts_provider_selection(self, monkeypatch):
+    def test_openapi_compatible_empty_api_base_restarts_group_selection(self, monkeypatch):
         calls = {"select": 0}
 
         def select_side_effect(title, options, default_index=0):
             calls["select"] += 1
             if calls["select"] == 1:
-                return 5
+                for i, opt in enumerate(options):
+                    if "Compatible" in opt:
+                        return i
+                return len(options) - 1
+            if calls["select"] == 2:
+                for i, opt in enumerate(options):
+                    if "OpenAPI" in opt:
+                        return i
+                return 0
             return None
 
         monkeypatch.setattr("iac_code.commands.auth._select", select_side_effect)
@@ -242,7 +292,7 @@ class TestLlmAuthFlow:
         result = _llm_auth_flow(MagicMock(), MagicMock())
 
         assert result is _BACK
-        assert calls["select"] == 2
+        assert calls["select"] == 3
 
 
 class TestCloudAuthFlow:

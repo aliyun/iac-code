@@ -26,11 +26,15 @@ class DeepSeekProvider(OpenAIProvider):
         self,
         model: str,
         api_key: str | None = None,
+        base_url: str | None = None,
         effort: str | None = None,
+        provider_key: str = "deepseek",
+        **kwargs,
     ) -> None:
         super().__init__(
             model=model,
             api_key=api_key,
-            base_url=DEEPSEEK_BASE_URL,
+            base_url=base_url or DEEPSEEK_BASE_URL,
             effort=effort,
+            provider_key=provider_key,
         )

@@ -50,6 +50,7 @@ class AnthropicProvider(Provider):
         max_tokens: int = 8192,
         client: Any = None,
         effort: str | None = None,
+        provider_key: str = "anthropic",
         **kwargs: Any,
     ) -> None:
         self._model = model
@@ -65,6 +66,7 @@ class AnthropicProvider(Provider):
                 client_kwargs["base_url"] = base_url
             client_kwargs.update(kwargs)
             self._client = anthropic.AsyncAnthropic(**client_kwargs)
+        self._PROVIDER_KEY = provider_key
 
     # -- public interface ------------------------------------------------------
 

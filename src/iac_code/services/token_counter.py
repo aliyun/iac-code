@@ -20,6 +20,11 @@ _MODEL_ENCODING_MAP = {
     "qwq": "cl100k_base",
     "o3": "o200k_base",
     "o4": "o200k_base",
+    "gemini": "cl100k_base",
+    "glm": "cl100k_base",
+    "kimi": "cl100k_base",
+    "minimax": "cl100k_base",
+    "doubao": "cl100k_base",
 }
 _DEFAULT_ENCODING = "cl100k_base"
 

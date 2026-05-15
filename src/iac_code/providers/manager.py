@@ -7,8 +7,6 @@ from collections.abc import AsyncGenerator
 
 from loguru import logger
 
-from iac_code.config import _KEY_NAME_TO_CRED_SLOT as _KEY_TO_PROVIDER
-from iac_code.config import _MODEL_PREFIX_TO_PROVIDER
 from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
@@ -65,11 +63,11 @@ def _detect_provider_name(model: str) -> str:
     1. Saved config in settings.yml (set by /auth or /model).
     2. Model-name prefix matching for mainstream models.
     """
-    from iac_code.config import get_active_provider_key
+    from iac_code.config import _KEY_NAME_TO_CRED_SLOT, _MODEL_PREFIX_TO_PROVIDER, get_active_provider_key
 
     key_name = get_active_provider_key() or ""
-    if key_name in _KEY_TO_PROVIDER:
-        return _KEY_TO_PROVIDER[key_name]
+    if key_name in _KEY_NAME_TO_CRED_SLOT:
+        return _KEY_NAME_TO_CRED_SLOT[key_name]
 
     model_lower = model.lower()
     for prefix, provider in _MODEL_PREFIX_TO_PROVIDER:
@@ -81,76 +79,54 @@ def _detect_provider_name(model: str) -> str:
     )
 
 
-def create_provider(model: str, credentials: dict[str, str]) -> Provider:
-    provider_name = _detect_provider_name(model)
-    if not credentials.get(provider_name):
+def create_provider(
+    model: str,
+    credentials: dict[str, str],
+    *,
+    base_url: str | None = None,
+    provider_key_override: str | None = None,
+) -> Provider:
+    from iac_code.providers.registry import PROVIDER_REGISTRY
+
+    provider_key = provider_key_override or _detect_provider_name(model)
+    desc = PROVIDER_REGISTRY.get(provider_key)
+    if desc is None:
+        raise ProviderNotConfiguredError(
+            _("Unknown provider key: '{key}'. Run /auth to configure.").format(key=provider_key)
+        )
+    api_key = credentials.get(provider_key, "")
+    if desc.require_api_key and not api_key:
         raise ProviderNotConfiguredError(
             _("No API key configured for provider '{provider}' (model: {model}). Run /auth to configure.").format(
-                provider=provider_name, model=model
+                provider=desc.display_name, model=model
             )
         )
-    if provider_name == "anthropic":
-        from iac_code.config import get_provider_config
-        from iac_code.providers.anthropic_provider import AnthropicProvider
+    from iac_code.config import get_provider_config
 
-        effort = get_provider_config("anthropic").get("effort")
-        return AnthropicProvider(
-            model=model,
-            api_key=credentials.get("anthropic"),
-            effort=effort if isinstance(effort, str) else None,
-        )
-    elif provider_name == "openai":
-        from iac_code.config import get_provider_config
-        from iac_code.providers.openai_provider import OpenAIProvider
+    provider_cfg = get_provider_config(provider_key)
+    effective_base_url = base_url or desc.base_url
+    if not effective_base_url:
+        saved_base = provider_cfg.get("apiBase")
+        if isinstance(saved_base, str) and saved_base:
+            effective_base_url = saved_base
+    provider_cls = _import_provider_class(desc.provider_class)
+    effort = provider_cfg.get("effort")
+    return provider_cls(
+        model=model,
+        api_key=api_key or None,
+        base_url=effective_base_url,
+        effort=effort if isinstance(effort, str) else None,
+        provider_key=provider_key,
+    )
 
-        effort = get_provider_config("openai").get("effort")
-        return OpenAIProvider(
-            model=model,
-            api_key=credentials.get("openai"),
-            effort=effort if isinstance(effort, str) else None,
-        )
-    elif provider_name == "dashscope":
-        from iac_code.config import get_provider_config
-        from iac_code.providers.dashscope_provider import DashScopeProvider
 
-        effort = get_provider_config("dashscope").get("effort")
-        return DashScopeProvider(
-            model=model,
-            api_key=credentials.get("dashscope"),
-            effort=effort if isinstance(effort, str) else None,
-        )
-    elif provider_name == "dashscope_token_plan":
-        from iac_code.config import get_provider_config
-        from iac_code.providers.dashscope_provider import (
-            DASHSCOPE_TOKEN_PLAN_BASE_URL,
-            DashScopeProvider,
-        )
+def _import_provider_class(dotted_path: str):
+    """Lazily import a provider class from its dotted path."""
+    module_path, class_name = dotted_path.rsplit(".", 1)
+    import importlib
 
-        effort = get_provider_config("dashscope_token_plan").get("effort")
-        return DashScopeProvider(
-            model=model,
-            api_key=credentials.get("dashscope_token_plan"),
-            effort=effort if isinstance(effort, str) else None,
-            base_url=DASHSCOPE_TOKEN_PLAN_BASE_URL,
-            provider_key="dashscope_token_plan",
-        )
-    elif provider_name == "deepseek":
-        from iac_code.config import get_provider_config
-        from iac_code.providers.deepseek_provider import DeepSeekProvider
-
-        effort = get_provider_config("deepseek").get("effort")
-        return DeepSeekProvider(
-            model=model,
-            api_key=credentials.get("deepseek"),
-            effort=effort if isinstance(effort, str) else None,
-        )
-    elif provider_name == "openapi_compatible":
-        from iac_code.config import get_provider_config
-        from iac_code.providers.openai_provider import OpenAIProvider
-
-        api_base = get_provider_config("openapi_compatible").get("apiBase")
-        return OpenAIProvider(model=model, api_key=credentials.get("openapi_compatible"), base_url=api_base)
-    raise ValueError(f"Unknown provider: {provider_name}")
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
 
 
 class ProviderManager:
@@ -167,25 +143,71 @@ class ProviderManager:
         credentials: dict[str, str],
         retry_config: RetryConfig | None = None,
         stream_idle_timeout: float = 90.0,
+        provider_key_override: str | None = None,
+        base_url_override: str | None = None,
     ):
         self._model = model
         self._credentials = credentials
         self._retry_config = retry_config or RetryConfig()
         self._stream_idle_timeout = stream_idle_timeout
+        self._provider_key_override = provider_key_override
+        self._base_url_override = base_url_override
         # Lazy: first startup may have no active provider yet. Defer errors
         # until the user actually tries to send a message, so /auth is reachable.
         self._provider: Provider | None = None
         try:
-            self._provider = create_provider(model, credentials)
+            self._provider = create_provider(
+                model,
+                credentials,
+                base_url=base_url_override,
+                provider_key_override=provider_key_override,
+            )
         except ValueError as e:
             logger.warning(f"Provider not configured yet: {e}")
 
+    def _check_qwenpaw_config_change(self) -> None:
+        """Detect QwenPaw active_model.json changes and reconfigure if needed."""
+        from iac_code.config import _get_env_overrides, get_llm_source
+
+        env = _get_env_overrides()
+        if env["api_key"]:
+            return
+        if get_llm_source() != "qwenpaw":
+            return
+        from iac_code.services.qwenpaw_source import QwenPawError, load_from_qwenpaw
+
+        try:
+            config = load_from_qwenpaw()
+        except QwenPawError as exc:
+            import sys
+
+            from rich.console import Console
+
+            Console(stderr=True).print(str(exc), style="bold red")
+            sys.exit(1)
+        if config is None:
+            return
+        if config.model != self._model or config.provider_key != self._provider_key_override:
+            creds = {config.provider_key: config.api_key or ""} if config.provider_key else {}
+            self.reconfigure(config.model, creds, config.provider_key, config.base_url)
+
     def _ensure_provider(self) -> Provider:
         if self._provider is None:
-            self._provider = create_provider(self._model, self._credentials)
+            self._provider = create_provider(
+                self._model,
+                self._credentials,
+                base_url=self._base_url_override,
+                provider_key_override=self._provider_key_override,
+            )
         return self._provider
 
-    def reconfigure(self, model: str, credentials: dict[str, str]) -> None:
+    def reconfigure(
+        self,
+        model: str,
+        credentials: dict[str, str],
+        provider_key_override: str | None = None,
+        base_url_override: str | None = None,
+    ) -> None:
         """Switch model and credentials in place.
 
         Used by `/auth` and `/model` so every consumer holding this manager
@@ -195,9 +217,16 @@ class ProviderManager:
         """
         self._model = model
         self._credentials = credentials
+        self._provider_key_override = provider_key_override
+        self._base_url_override = base_url_override
         self._provider = None
         try:
-            self._provider = create_provider(model, credentials)
+            self._provider = create_provider(
+                model,
+                credentials,
+                base_url=base_url_override,
+                provider_key_override=provider_key_override,
+            )
         except ValueError as e:
             logger.warning(f"Provider not configured after reconfigure: {e}")
 
@@ -210,6 +239,7 @@ class ProviderManager:
     async def stream(
         self, messages: list[Message], system: str, tools: list[ToolDefinition] | None = None, max_tokens: int = 8192
     ) -> AsyncGenerator[StreamEvent, None]:
+        self._check_qwenpaw_config_change()
         provider = self._ensure_provider()
         provider_name = type(provider).__name__.replace("Provider", "").lower()
         sanitized_model = sanitize_model_name(self._model)
@@ -411,7 +441,12 @@ class ProviderManager:
                         },
                     )
                     self._model = fallback
-                    self._provider = create_provider(fallback, self._credentials)
+                    self._provider = create_provider(
+                        fallback,
+                        self._credentials,
+                        base_url=self._base_url_override,
+                        provider_key_override=self._provider_key_override,
+                    )
                     try:
                         return await self._complete_with_retry(messages, system, tools, max_tokens, is_fallback=True)
                     except Exception:

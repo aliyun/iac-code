@@ -11,6 +11,7 @@ from typer.completion import install_callback, show_callback
 from iac_code import __release_date__, __version__
 from iac_code.config import DEFAULT_MODEL, load_saved_model
 from iac_code.i18n import _, setup_i18n
+from iac_code.services.qwenpaw_source import QwenPawError as _QwenPawError
 from iac_code.utils.log import setup_logging
 
 # Initialize i18n. Thanks to `gettext.bindtextdomain` inside setup_i18n(),
@@ -137,8 +138,12 @@ def main(
         from iac_code.cli.output_formats import OutputFormat
 
         fmt = OutputFormat(output_format)
-        runner = HeadlessRunner(model=model, output_format=fmt, max_turns=max_turns)
-        exit_code = asyncio.run(_run_with_handler(runner.run(prompt)))
+        try:
+            runner = HeadlessRunner(model=model, output_format=fmt, max_turns=max_turns)
+            exit_code = asyncio.run(_run_with_handler(runner.run(prompt)))
+        except _QwenPawError as exc:
+            typer.echo(str(exc), err=True)
+            raise SystemExit(1)
         raise SystemExit(exit_code)
 
     else:
@@ -162,7 +167,7 @@ def main(
 
         try:
             repl = InlineREPL(model=model, resume_session_id=resume_arg)
-        except ValueError as exc:
+        except (ValueError, _QwenPawError) as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(1)
 

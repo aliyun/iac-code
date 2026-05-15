@@ -50,36 +50,38 @@ def _save_yaml(path: Path, data: dict[str, Any]) -> None:
 # Provider name normalization (env-facing PascalCase ↔ internal key_name)
 # ---------------------------------------------------------------------------
 
-# Canonical PascalCase display values for IAC_CODE_PROVIDER.
-# Order is the order shown in error messages.
-_PROVIDER_CANONICAL_NAMES: tuple[str, ...] = (
-    "Anthropic",
-    "OpenAI",
-    "DashScope",
-    "DashScopeTokenPlan",
-    "DeepSeek",
-    "OpenAPICompatible",
-)
 
-# Lowercased canonical name -> internal key_name (matches settings.yml `keyName`).
-_PROVIDER_NAME_TO_KEY: dict[str, str] = {
-    "anthropic": "anthropic",
-    "openai": "openai",
-    "dashscope": "dashscope",
-    "dashscopetokenplan": "dashscope_token_plan",
-    "deepseek": "deepseek",
-    "openapicompatible": "openapi_compatible",
-}
+def _build_provider_name_to_key() -> dict[str, str]:
+    from iac_code.providers.registry import PROVIDER_REGISTRY
 
-# key_name -> credentials.yml slot. After the rename, slots match key_name 1:1.
-_KEY_NAME_TO_CRED_SLOT: dict[str, str] = {
-    "anthropic": "anthropic",
-    "openai": "openai",
-    "dashscope": "dashscope",
-    "dashscope_token_plan": "dashscope_token_plan",
-    "deepseek": "deepseek",
-    "openapi_compatible": "openapi_compatible",
-}
+    mapping: dict[str, str] = {}
+    for desc in PROVIDER_REGISTRY.values():
+        normalized = desc.name.lower().replace(" ", "").replace("-", "").replace("_", "")
+        mapping[normalized] = desc.key
+        key_norm = desc.key.lower().replace("_", "").replace("-", "")
+        mapping[key_norm] = desc.key
+    return mapping
+
+
+_PROVIDER_NAME_TO_KEY: dict[str, str] = _build_provider_name_to_key()
+
+
+def _build_key_name_to_cred_slot() -> dict[str, str]:
+    from iac_code.providers.registry import PROVIDER_REGISTRY
+
+    return {key: key for key in PROVIDER_REGISTRY}
+
+
+_KEY_NAME_TO_CRED_SLOT: dict[str, str] = _build_key_name_to_cred_slot()
+
+
+def _build_canonical_names() -> tuple[str, ...]:
+    from iac_code.providers.registry import PROVIDER_REGISTRY
+
+    return tuple(desc.name for desc in PROVIDER_REGISTRY.values())
+
+
+_PROVIDER_CANONICAL_NAMES: tuple[str, ...] = _build_canonical_names()
 
 # Legacy key_name aliases accepted when reading settings.yml (write path always uses
 # the canonical key on the right). Keep DashScope's old "bailian" name readable.
@@ -98,6 +100,11 @@ _MODEL_PREFIX_TO_PROVIDER: tuple[tuple[str, str], ...] = (
     ("o4-", "openai"),
     ("qwen", "dashscope"),
     ("deepseek-", "deepseek"),
+    ("gemini-", "gemini"),
+    ("glm-", "zhipu_cn"),
+    ("kimi-", "kimi_cn"),
+    ("minimax-", "minimax_cn"),
+    ("doubao-", "volcengine_cn"),
 )
 
 # Module-level flag — warn once per process when IAC_CODE_BASE_URL is set
@@ -142,6 +149,21 @@ def _get_env_overrides() -> dict[str, str | None]:
         "api_base": _read("IAC_CODE_BASE_URL"),
         "api_key": _read("IAC_CODE_API_KEY"),
     }
+
+
+def get_llm_source() -> str:
+    """Return the LLM source: 'qwenpaw', 'local', or 'env'."""
+    env = _get_env_overrides()
+    if env["api_key"]:
+        return "env"
+    try:
+        settings = _load_yaml(get_settings_path())
+    except Exception:
+        return "local"
+    source = settings.get("llm_source")
+    if isinstance(source, str) and source.strip():
+        return source.strip()
+    return "local"
 
 
 # ---------------------------------------------------------------------------
@@ -308,14 +330,13 @@ def load_credentials(model: str | None = None) -> dict[str, str]:
     if not isinstance(raw, dict):
         raw = {}
 
-    creds: dict[str, str] = {
-        "anthropic": str(raw.get("anthropic", "") or ""),
-        "openai": str(raw.get("openai", "") or ""),
-        "dashscope": str(raw.get("dashscope", "") or raw.get("bailian", "") or ""),
-        "dashscope_token_plan": str(raw.get("dashscope_token_plan", "") or ""),
-        "deepseek": str(raw.get("deepseek", "") or ""),
-        "openapi_compatible": str(raw.get("openapi_compatible", "") or ""),
-    }
+    from iac_code.providers.registry import PROVIDER_REGISTRY
+
+    creds: dict[str, str] = {}
+    for key in PROVIDER_REGISTRY:
+        creds[key] = str(raw.get(key, "") or "")
+    if not creds.get("dashscope"):
+        creds["dashscope"] = str(raw.get("bailian", "") or "")
 
     env = _get_env_overrides()
     if env["api_key"]:
