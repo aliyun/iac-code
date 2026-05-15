@@ -75,6 +75,7 @@ class ToolUseEndEvent:
     """Tool call input is complete."""
 
     tool_use_id: str
+    name: str
     input: dict[str, Any]
     type: Literal["tool_use_end"] = "tool_use_end"
 

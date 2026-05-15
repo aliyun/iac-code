@@ -284,7 +284,7 @@ class ProviderManager:
                     yield TextDeltaEvent(text=response.text)
                 for tu in response.tool_uses:
                     yield ToolUseStartEvent(tool_use_id=tu["id"], name=tu["name"])
-                    yield ToolUseEndEvent(tool_use_id=tu["id"], input=tu["input"])
+                    yield ToolUseEndEvent(tool_use_id=tu["id"], name=tu["name"], input=tu["input"])
                 yield MessageEndEvent(stop_reason=response.stop_reason, usage=response.usage)
 
     @staticmethod

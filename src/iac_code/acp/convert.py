@@ -213,11 +213,12 @@ class ACPEventConverter:
                 if title:
                     update.title = title
                 return [update]
-            case ToolUseEndEvent(tool_use_id=tool_use_id, input=input):
+            case ToolUseEndEvent(tool_use_id=tool_use_id, name=name, input=input):
                 return [
                     acp.schema.ToolCallProgress(
                         session_update="tool_call_update",
                         tool_call_id=self.acp_tool_call_id(tool_use_id),
+                        title=name,
                         status="in_progress",
                         content=[_text_tool_content(str(input))],
                     )

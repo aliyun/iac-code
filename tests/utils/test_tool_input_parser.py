@@ -11,6 +11,7 @@ class TestParseToolInputEvents:
         assert len(events) == 1
         assert isinstance(events[0], ToolUseEndEvent)
         assert events[0].tool_use_id == "toolu_1"
+        assert events[0].name == "read_file"
         assert events[0].input == {"path": "a.txt"}
 
     def test_concatenated_json_recovers_additional_tool_calls(self):
@@ -19,10 +20,12 @@ class TestParseToolInputEvents:
         assert len(events) == 3
         assert isinstance(events[0], ToolUseEndEvent)
         assert events[0].tool_use_id == "toolu_1"
+        assert events[0].name == "read_file"
         assert events[0].input == {"path": "a.txt"}
         assert isinstance(events[1], ToolUseStartEvent)
         assert events[1].name == "read_file"
         assert isinstance(events[2], ToolUseEndEvent)
+        assert events[2].name == "read_file"
         assert events[2].input == {"path": "b.txt"}
         assert events[2].tool_use_id == events[1].tool_use_id
 
@@ -31,6 +34,7 @@ class TestParseToolInputEvents:
 
         assert len(events) == 1
         assert isinstance(events[0], ToolUseEndEvent)
+        assert events[0].name == "read_file"
         assert events[0].input == {}
 
     def test_empty_json_yields_empty_input_end_event(self):
@@ -38,4 +42,5 @@ class TestParseToolInputEvents:
 
         assert len(events) == 1
         assert isinstance(events[0], ToolUseEndEvent)
+        assert events[0].name == "read_file"
         assert events[0].input == {}
