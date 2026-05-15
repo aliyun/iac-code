@@ -31,7 +31,7 @@ def parse_tool_input_events(
     """
     parsed = safe_parse_json(raw_json)
     if isinstance(parsed, dict):
-        yield ToolUseEndEvent(tool_use_id=tool_use_id, input=parsed)
+        yield ToolUseEndEvent(tool_use_id=tool_use_id, name=tool_name, input=parsed)
         return
 
     # Single parse failed on non-empty input — try concatenated JSON recovery
@@ -44,12 +44,12 @@ def parse_tool_input_events(
                 tool_use_id,
             )
             # First part uses the original tool_use_id
-            yield ToolUseEndEvent(tool_use_id=tool_use_id, input=parts[0])
+            yield ToolUseEndEvent(tool_use_id=tool_use_id, name=tool_name, input=parts[0])
             # Additional parts become new synthetic tool calls
             for part in parts[1:]:
                 new_id = f"toolu_{uuid.uuid4().hex[:24]}"
                 yield ToolUseStartEvent(tool_use_id=new_id, name=tool_name)
-                yield ToolUseEndEvent(tool_use_id=new_id, input=part)
+                yield ToolUseEndEvent(tool_use_id=new_id, name=tool_name, input=part)
             return
 
         logger.warning(
@@ -59,4 +59,4 @@ def parse_tool_input_events(
             raw_json[:200],
         )
 
-    yield ToolUseEndEvent(tool_use_id=tool_use_id, input={})
+    yield ToolUseEndEvent(tool_use_id=tool_use_id, name=tool_name, input={})

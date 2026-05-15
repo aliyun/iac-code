@@ -56,7 +56,7 @@ class TestRunSubAgent:
         async def fake_stream(_prompt):
             yield TextDeltaEvent(text="hello ")
             yield ToolUseStartEvent(tool_use_id="t1", name="read_file")
-            yield ToolUseEndEvent(tool_use_id="t1", input={"path": "a.txt"})
+            yield ToolUseEndEvent(tool_use_id="t1", name="read_file", input={"path": "a.txt"})
             yield ToolResultEvent(tool_use_id="t1", tool_name="read_file", result="ok")
             yield TextDeltaEvent(text="world")
 

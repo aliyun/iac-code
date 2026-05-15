@@ -58,7 +58,7 @@ class FakeProviderManager:
         yield MessageStartEvent(message_id="m1")
         yield TextDeltaEvent(text="I will write.")
         yield ToolUseStartEvent(tool_use_id="tool1", name="write_test")
-        yield ToolUseEndEvent(tool_use_id="tool1", input={"value": "ok"})
+        yield ToolUseEndEvent(tool_use_id="tool1", name="write_test", input={"value": "ok"})
         yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
 
 

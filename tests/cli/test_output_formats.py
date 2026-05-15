@@ -42,7 +42,7 @@ class TestTextWriter:
         writer = TextWriter(stream)
         writer.handle(MessageStartEvent(message_id="msg_1"))
         writer.handle(ToolUseStartEvent(tool_use_id="tu_1", name="some_tool"))
-        writer.handle(ToolUseEndEvent(tool_use_id="tu_1", input={"key": "val"}))
+        writer.handle(ToolUseEndEvent(tool_use_id="tu_1", name="some_tool", input={"key": "val"}))
         writer.handle(ToolResultEvent(tool_use_id="tu_1", tool_name="some_tool", result="ok"))
         writer.finalize()
         assert stream.getvalue() == ""
@@ -73,7 +73,7 @@ class TestJsonWriter:
         writer.handle(TextDeltaEvent(text="hello "))
         writer.handle(TextDeltaEvent(text="world"))
         writer.handle(ToolUseStartEvent(tool_use_id="tu_1", name="bash"))
-        writer.handle(ToolUseEndEvent(tool_use_id="tu_1", input={"cmd": "ls"}))
+        writer.handle(ToolUseEndEvent(tool_use_id="tu_1", name="bash", input={"cmd": "ls"}))
         writer.handle(ToolResultEvent(tool_use_id="tu_1", tool_name="bash", result="file.txt"))
         writer.handle(MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=10, output_tokens=20)))
         writer.finalize()

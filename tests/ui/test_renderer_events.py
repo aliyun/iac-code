@@ -42,7 +42,7 @@ class TestRendererStreamEvents:
             yield MessageStartEvent(message_id="m1")
             yield ToolUseStartEvent(tool_use_id="t1", name="read_file")
             yield ToolInputDeltaEvent(tool_use_id="t1", partial_json='{"path": "foo.py"}')
-            yield ToolUseEndEvent(tool_use_id="t1", input={"path": "foo.py"})
+            yield ToolUseEndEvent(tool_use_id="t1", name="read_file", input={"path": "foo.py"})
             yield ToolResultEvent(tool_use_id="t1", tool_name="read_file", result="content")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 

@@ -117,7 +117,7 @@ def test_tool_call_full_lifecycle_events() -> None:
     assert input_updates[0].status == "pending"
 
     # 3. ToolUseEnd → in_progress
-    end_updates = converter.event_to_updates(ToolUseEndEvent(tool_use_id="t1", input={"path": "x"}))
+    end_updates = converter.event_to_updates(ToolUseEndEvent(tool_use_id="t1", name="read_file", input={"path": "x"}))
     assert len(end_updates) == 1
     assert end_updates[0].status == "in_progress"
 
@@ -470,7 +470,7 @@ def test_tool_call_complete_lifecycle() -> None:
     assert i[0].status == "pending"
 
     # 3. use end
-    u = converter.event_to_updates(ToolUseEndEvent(tool_use_id="t1", input={"path": "x"}))
+    u = converter.event_to_updates(ToolUseEndEvent(tool_use_id="t1", name="read_file", input={"path": "x"}))
     assert u[0].session_update == "tool_call_update"
     assert u[0].status == "in_progress"
 

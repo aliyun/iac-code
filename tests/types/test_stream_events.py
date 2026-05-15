@@ -37,7 +37,7 @@ class TestStreamEventTypes:
         assert event.type == "tool_input_delta"
 
     def test_tool_use_end(self):
-        event = ToolUseEndEvent(tool_use_id="t1", input={"file_path": "a.py"})
+        event = ToolUseEndEvent(tool_use_id="t1", name="read_file", input={"file_path": "a.py"})
         assert event.type == "tool_use_end"
 
     def test_message_end_with_usage(self):
@@ -83,7 +83,7 @@ class TestStreamEventTypes:
             ThinkingDeltaEvent(text="hmm"),
             ToolUseStartEvent(tool_use_id="t1", name="bash"),
             ToolInputDeltaEvent(tool_use_id="t1", partial_json="{}"),
-            ToolUseEndEvent(tool_use_id="t1", input={}),
+            ToolUseEndEvent(tool_use_id="t1", name="bash", input={}),
             MessageEndEvent(stop_reason="end_turn", usage=Usage()),
             TombstoneEvent(message_id="m1"),
             ErrorEvent(error="err", is_retryable=False),

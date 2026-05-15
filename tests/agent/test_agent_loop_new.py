@@ -136,7 +136,7 @@ class TestAgentLoopStreaming:
                 yield MessageStartEvent(message_id="m1")
                 yield TextDeltaEvent(text="Before tool")
                 yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
-                yield ToolUseEndEvent(tool_use_id="toolu_1", input={"path": "a.txt"})
+                yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
                 yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
                 return
 
