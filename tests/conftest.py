@@ -9,6 +9,12 @@ os.environ["LANGUAGE"] = "en"
 os.environ["LC_ALL"] = "en_US.UTF-8"
 os.environ["LANG"] = "en_US.UTF-8"
 
+# Disable Rich/Click ANSI color output so substring assertions on help text
+# (e.g. "--config" in result.stdout) work in CI where a TTY-like environment
+# may otherwise insert escape sequences mid-token.
+os.environ["NO_COLOR"] = "1"
+os.environ["TERM"] = "dumb"
+
 # Re-initialize i18n with English locale
 from iac_code.i18n import setup_i18n  # noqa: E402
 

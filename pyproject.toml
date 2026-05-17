@@ -61,6 +61,7 @@ dev = [
     "pytest-cov>=5.0",
     "setuptools>=68.0",
     "wheel",
+    "tomli>=2.0; python_version<\"3.11\"",
 ]
 
 [build-system]

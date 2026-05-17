@@ -1,6 +1,10 @@
+import sys
 from pathlib import Path
 
-import tomllib
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 def test_a2a_sdk_server_contract_imports() -> None:

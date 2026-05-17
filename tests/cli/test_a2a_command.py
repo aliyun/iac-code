@@ -1,3 +1,4 @@
+import re
 from types import SimpleNamespace
 
 from typer.testing import CliRunner
@@ -7,21 +8,28 @@ from iac_code.a2a.transport import A2AAuthConfig
 from iac_code.cli.main import app
 from iac_code.config import DEFAULT_MODEL
 
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", text)
+
 
 def test_a2a_help_shows_common_server_options_only() -> None:
     result = CliRunner().invoke(app, ["a2a", "--help"])
 
     assert result.exit_code == 0
-    assert "--config" in result.stdout
-    assert "--host" in result.stdout
-    assert "--port" in result.stdout
-    assert "--transport" in result.stdout
-    assert "--debug" in result.stdout
-    assert "--socket-path" not in result.stdout
-    assert "--token" not in result.stdout
-    assert "--persistence-dir" not in result.stdout
-    assert "--push-redis-url" not in result.stdout
-    assert "--auto-approve-permissions" not in result.stdout
+    stdout = _strip_ansi(result.stdout)
+    assert "--config" in stdout
+    assert "--host" in stdout
+    assert "--port" in stdout
+    assert "--transport" in stdout
+    assert "--debug" in stdout
+    assert "--socket-path" not in stdout
+    assert "--token" not in stdout
+    assert "--persistence-dir" not in stdout
+    assert "--push-redis-url" not in stdout
+    assert "--auto-approve-permissions" not in stdout
 
 
 def test_a2a_command_rejects_removed_advanced_flags() -> None:
@@ -35,12 +43,13 @@ def test_a2a_client_help_groups_client_commands() -> None:
     result = CliRunner().invoke(app, ["a2a-client", "--help"])
 
     assert result.exit_code == 0
-    assert "call" in result.stdout
-    assert "discover" in result.stdout
-    assert "task-get" in result.stdout
-    assert "push-config-create" in result.stdout
-    assert "extended-card" in result.stdout
-    assert "route-preview" not in result.stdout
+    stdout = _strip_ansi(result.stdout)
+    assert "call" in stdout
+    assert "discover" in stdout
+    assert "task-get" in stdout
+    assert "push-config-create" in stdout
+    assert "extended-card" in stdout
+    assert "route-preview" in stdout
 
 
 def test_removed_top_level_a2a_client_command_is_rejected() -> None:
@@ -892,7 +901,8 @@ def test_a2a_route_preview_resolves_and_saves_routes(tmp_path) -> None:
     result = CliRunner().invoke(
         app,
         [
-            "a2a-route-preview",
+            "a2a-client",
+            "route-preview",
             "--route",
             "template=http://template.example/rpc;skills=iac_generation;tags=ros,template",
             "--route",
