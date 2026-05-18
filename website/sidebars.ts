@@ -48,6 +48,18 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'A2A Protocol',
+      items: [
+        'a2a/overview',
+        'a2a/getting-started',
+        'a2a/command-reference',
+        'a2a/protocol-reference',
+        'a2a/http-transport',
+        'a2a/examples',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Automation',
       items: [
         'automation/non-interactive-mode',

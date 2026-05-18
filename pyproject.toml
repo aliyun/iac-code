@@ -32,6 +32,22 @@ http = [
     "starlette>=0.39.0",
     "uvicorn[standard]>=0.30.0",
 ]
+a2a = [
+    "a2a-sdk[http-server,signing]>=1.0.2,<2",
+    "cryptography>=42.0",
+    "starlette>=0.39.0",
+    "uvicorn[standard]>=0.30.0",
+]
+a2a-signing = [
+    "a2a-sdk[signing]>=1.0.2,<2",
+]
+a2a-grpc = [
+    "grpcio>=1.60.0",
+    "grpcio-status>=1.60.0",
+]
+a2a-redis = [
+    "redis>=5.0.0",
+]
 
 [dependency-groups]
 dev = [
@@ -45,6 +61,7 @@ dev = [
     "pytest-cov>=5.0",
     "setuptools>=68.0",
     "wheel",
+    "tomli>=2.0; python_version<\"3.11\"",
 ]
 
 [build-system]

@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-18 10:11+0800\n"
+"POT-Creation-Date: 2026-05-18 12:25+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -128,85 +128,352 @@ msgstr ""
 "  文档：https://aliyun.github.io/iac-code/zh-"
 "Hans/docs/configuration/authentication\n"
 
-#: src/iac_code/cli/main.py:23 src/iac_code/commands/help.py:26
+#: src/iac_code/cli/main.py:32 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
 msgstr "AI 驱动的基础设施编排工具"
 
-#: src/iac_code/cli/main.py:34
+#: src/iac_code/cli/main.py:40
+msgid "Use iac-code as an A2A client."
+msgstr "将 iac-code 作为 A2A 客户端使用。"
+
+#: src/iac_code/cli/main.py:49
+msgid "YAML config file containing A2A client options"
+msgstr "包含 A2A 客户端选项的 YAML 配置文件"
+
+#: src/iac_code/cli/main.py:56 src/iac_code/cli/main.py:1271
+#: src/iac_code/cli/main.py:1632 src/iac_code/cli/main.py:1671
+msgid ""
+"A2A client dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
+msgstr "缺少 A2A 客户端依赖。请使用以下命令安装：pip install 'iac-code[a2a]'"
+
+#: src/iac_code/cli/main.py:70
 msgid "LLM model to use"
 msgstr "使用的 LLM 模型"
 
-#: src/iac_code/cli/main.py:35
+#: src/iac_code/cli/main.py:71
 msgid "Non-interactive mode: run a single prompt and exit"
 msgstr "非交互模式：运行单个提示并退出"
 
-#: src/iac_code/cli/main.py:36
+#: src/iac_code/cli/main.py:72
 msgid "Output format: text, json, stream-json"
 msgstr "输出格式：text、json、stream-json"
 
-#: src/iac_code/cli/main.py:37
+#: src/iac_code/cli/main.py:73
 msgid "Maximum agent turns in headless mode"
 msgstr "无头模式下最大智能体轮次"
 
-#: src/iac_code/cli/main.py:38 src/iac_code/cli/main.py:275
+#: src/iac_code/cli/main.py:74 src/iac_code/cli/main.py:311
+#: src/iac_code/cli/main.py:460
 msgid "Enable debug logging"
 msgstr "启用调试日志"
 
-#: src/iac_code/cli/main.py:39
+#: src/iac_code/cli/main.py:75
 msgid "Show version and exit"
 msgstr "显示版本号并退出"
 
-#: src/iac_code/cli/main.py:40
+#: src/iac_code/cli/main.py:76
 msgid "Resume a session by ID"
 msgstr "通过 ID 恢复会话"
 
-#: src/iac_code/cli/main.py:41
+#: src/iac_code/cli/main.py:77
 msgid "Resume the most recent session"
 msgstr "恢复最近一次会话"
 
-#: src/iac_code/cli/main.py:48 src/iac_code/i18n/__init__.py:54
+#: src/iac_code/cli/main.py:84 src/iac_code/i18n/__init__.py:54
 msgid "Install completion for the current shell."
 msgstr "为当前 shell 安装自动补全。"
 
-#: src/iac_code/cli/main.py:56 src/iac_code/i18n/__init__.py:55
+#: src/iac_code/cli/main.py:92 src/iac_code/i18n/__init__.py:55
 msgid ""
 "Show completion for the current shell, to copy it or customize the "
 "installation."
 msgstr "显示当前 shell 的自动补全脚本，可复制或自定义安装。"
 
-#: src/iac_code/cli/main.py:61
+#: src/iac_code/cli/main.py:97
 msgid ""
 "Comma-separated tool permission patterns to allow, e.g. 'bash(git "
 "*),write_file'"
 msgstr "允许的工具权限模式（逗号分隔），例如 'bash(git *),write_file'"
 
-#: src/iac_code/cli/main.py:66
+#: src/iac_code/cli/main.py:102
 msgid "Comma-separated tool permission patterns to deny"
 msgstr "拒绝的工具权限模式（逗号分隔）"
 
-#: src/iac_code/cli/main.py:71
+#: src/iac_code/cli/main.py:107
 msgid "Permission mode: default, accept_edits, bypass_permissions, dont_ask"
 msgstr "权限模式：default, accept_edits, bypass_permissions, dont_ask"
 
-#: src/iac_code/cli/main.py:85
+#: src/iac_code/cli/main.py:121
 msgid "Error: --resume and --continue cannot be used together."
 msgstr "错误：--resume 和 --continue 不能同时使用。"
 
-#: src/iac_code/cli/main.py:270
+#: src/iac_code/cli/main.py:306
 msgid "Run iac-code as an ACP server."
 msgstr "将 iac-code 作为 ACP 服务器运行。"
 
-#: src/iac_code/cli/main.py:272
+#: src/iac_code/cli/main.py:308
 msgid "Transport type: stdio or http"
 msgstr "传输类型：stdio 或 http"
 
-#: src/iac_code/cli/main.py:273
+#: src/iac_code/cli/main.py:309
 msgid "HTTP server port"
 msgstr "HTTP 服务器端口"
 
-#: src/iac_code/cli/main.py:274
+#: src/iac_code/cli/main.py:310 src/iac_code/cli/main.py:450
 msgid "HTTP server host"
 msgstr "HTTP 服务器主机"
+
+#: src/iac_code/cli/main.py:446
+msgid "Run iac-code as an A2A 1.0 server."
+msgstr "将 iac-code 作为 A2A 1.0 服务器运行。"
+
+#: src/iac_code/cli/main.py:449
+msgid "YAML config file for A2A server options"
+msgstr "用于 A2A 服务器选项的 YAML 配置文件"
+
+#: src/iac_code/cli/main.py:453
+msgid ""
+"HTTP server port. 41242 is the iac-code default inspired by Gemini CLI, "
+"not a registered A2A port."
+msgstr "HTTP 服务器端口。41242 是受 Gemini CLI 启发的 iac-code 默认值，并非已注册的 A2A 端口。"
+
+#: src/iac_code/cli/main.py:458
+msgid ""
+"A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or "
+"redis-streams"
+msgstr "A2A 传输方式：http、stdio、unix、websocket、grpc、grpc-jsonrpc 或 redis-streams"
+
+#: src/iac_code/cli/main.py:505
+msgid ""
+"A2A server dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
+msgstr "缺少 A2A 服务器依赖。请使用以下命令安装：pip install 'iac-code[a2a]'"
+
+#: src/iac_code/cli/main.py:554
+msgid "Send a prompt to an A2A JSON-RPC endpoint."
+msgstr "向 A2A JSON-RPC 端点发送提示。"
+
+#: src/iac_code/cli/main.py:557 src/iac_code/cli/main.py:721
+#: src/iac_code/cli/main.py:774 src/iac_code/cli/main.py:834
+#: src/iac_code/cli/main.py:884 src/iac_code/cli/main.py:933
+#: src/iac_code/cli/main.py:1012 src/iac_code/cli/main.py:1069
+#: src/iac_code/cli/main.py:1125 src/iac_code/cli/main.py:1182
+msgid "A2A JSON-RPC endpoint URL"
+msgstr "A2A JSON-RPC 端点 URL"
+
+#: src/iac_code/cli/main.py:558 src/iac_code/cli/main.py:1227
+msgid "Route spec: name=url;skills=skill1,skill2;tags=tag1,tag2"
+msgstr "路由规范：name=url;skills=skill1,skill2;tags=tag1,tag2"
+
+#: src/iac_code/cli/main.py:559
+msgid "Named A2A route to call"
+msgstr "要调用的命名 A2A 路由"
+
+#: src/iac_code/cli/main.py:560
+msgid "Prompt to send"
+msgstr "要发送的提示"
+
+#: src/iac_code/cli/main.py:561
+msgid "Working directory metadata to send with the request"
+msgstr "随请求一起发送的工作目录元数据"
+
+#: src/iac_code/cli/main.py:562
+msgid "A2A context ID to continue"
+msgstr "要继续的 A2A 上下文 ID"
+
+#: src/iac_code/cli/main.py:563 src/iac_code/cli/main.py:652
+#: src/iac_code/cli/main.py:724 src/iac_code/cli/main.py:781
+#: src/iac_code/cli/main.py:836 src/iac_code/cli/main.py:886
+#: src/iac_code/cli/main.py:940 src/iac_code/cli/main.py:1015
+#: src/iac_code/cli/main.py:1073 src/iac_code/cli/main.py:1128
+#: src/iac_code/cli/main.py:1183
+msgid "Bearer token for A2A HTTP requests"
+msgstr "用于 A2A HTTP 请求的 Bearer 令牌"
+
+#: src/iac_code/cli/main.py:564 src/iac_code/cli/main.py:653
+#: src/iac_code/cli/main.py:725 src/iac_code/cli/main.py:782
+#: src/iac_code/cli/main.py:837 src/iac_code/cli/main.py:887
+#: src/iac_code/cli/main.py:941 src/iac_code/cli/main.py:1016
+#: src/iac_code/cli/main.py:1074 src/iac_code/cli/main.py:1129
+#: src/iac_code/cli/main.py:1184
+msgid "Basic auth username for A2A HTTP requests"
+msgstr "用于 A2A HTTP 请求的基本认证用户名"
+
+#: src/iac_code/cli/main.py:565 src/iac_code/cli/main.py:654
+#: src/iac_code/cli/main.py:726 src/iac_code/cli/main.py:783
+#: src/iac_code/cli/main.py:838 src/iac_code/cli/main.py:888
+#: src/iac_code/cli/main.py:942 src/iac_code/cli/main.py:1017
+#: src/iac_code/cli/main.py:1075 src/iac_code/cli/main.py:1130
+#: src/iac_code/cli/main.py:1185
+msgid "Basic auth password for A2A HTTP requests"
+msgstr "用于 A2A HTTP 请求的基本认证密码"
+
+#: src/iac_code/cli/main.py:566 src/iac_code/cli/main.py:655
+#: src/iac_code/cli/main.py:727 src/iac_code/cli/main.py:784
+#: src/iac_code/cli/main.py:839 src/iac_code/cli/main.py:889
+#: src/iac_code/cli/main.py:943 src/iac_code/cli/main.py:1018
+#: src/iac_code/cli/main.py:1076 src/iac_code/cli/main.py:1131
+#: src/iac_code/cli/main.py:1186
+msgid "API key for A2A HTTP requests"
+msgstr "用于 A2A HTTP 请求的 API 密钥"
+
+#: src/iac_code/cli/main.py:567 src/iac_code/cli/main.py:656
+#: src/iac_code/cli/main.py:728 src/iac_code/cli/main.py:785
+#: src/iac_code/cli/main.py:840 src/iac_code/cli/main.py:890
+#: src/iac_code/cli/main.py:944 src/iac_code/cli/main.py:1019
+#: src/iac_code/cli/main.py:1077 src/iac_code/cli/main.py:1132
+#: src/iac_code/cli/main.py:1187
+msgid "HTTP header name for A2A API key"
+msgstr "A2A API 密钥使用的 HTTP 请求头名称"
+
+#: src/iac_code/cli/main.py:572 src/iac_code/cli/main.py:661
+msgid "Secret used to verify the A2A Agent Card"
+msgstr "用于验证 A2A Agent Card 的密钥"
+
+#: src/iac_code/cli/main.py:577 src/iac_code/cli/main.py:666
+msgid "Remote JWKS URL used to verify the A2A Agent Card"
+msgstr "用于验证 A2A Agent Card 的远程 JWKS URL"
+
+#: src/iac_code/cli/main.py:583 src/iac_code/cli/main.py:672
+msgid "Require a valid A2A Agent Card signature"
+msgstr "要求 A2A Agent Card 提供有效签名"
+
+#: src/iac_code/cli/main.py:585
+msgid "A2A call timeout in seconds"
+msgstr "A2A 调用超时时间（秒）"
+
+#: src/iac_code/cli/main.py:586
+msgid "Use A2A streaming message delivery"
+msgstr "使用 A2A 流式消息传递"
+
+#: src/iac_code/cli/main.py:648
+msgid "Discover an A2A Agent Card."
+msgstr "发现 A2A Agent Card。"
+
+#: src/iac_code/cli/main.py:651
+msgid "A2A agent base URL"
+msgstr "A2A 代理基础 URL"
+
+#: src/iac_code/cli/main.py:718
+msgid "Get an A2A task."
+msgstr "获取 A2A 任务。"
+
+#: src/iac_code/cli/main.py:722 src/iac_code/cli/main.py:835
+#: src/iac_code/cli/main.py:885 src/iac_code/cli/main.py:934
+#: src/iac_code/cli/main.py:1013 src/iac_code/cli/main.py:1070
+#: src/iac_code/cli/main.py:1126
+msgid "A2A task ID"
+msgstr "A2A 任务 ID"
+
+#: src/iac_code/cli/main.py:723
+msgid "Maximum task history items to return"
+msgstr "最多返回的任务历史条目数"
+
+#: src/iac_code/cli/main.py:771
+msgid "List A2A tasks."
+msgstr "列出 A2A 任务。"
+
+#: src/iac_code/cli/main.py:775
+msgid "Filter by A2A context ID"
+msgstr "按 A2A 上下文 ID 过滤"
+
+#: src/iac_code/cli/main.py:776
+msgid "Filter by A2A task state"
+msgstr "按 A2A 任务状态过滤"
+
+#: src/iac_code/cli/main.py:777
+msgid "Maximum tasks to return"
+msgstr "最多返回的任务数"
+
+#: src/iac_code/cli/main.py:778 src/iac_code/cli/main.py:1072
+msgid "Pagination token"
+msgstr "分页令牌"
+
+#: src/iac_code/cli/main.py:779
+msgid "Include task artifacts"
+msgstr "包含任务工件"
+
+#: src/iac_code/cli/main.py:780
+msgid "Output format: table or json"
+msgstr "输出格式：table 或 json"
+
+#: src/iac_code/cli/main.py:831
+msgid "Cancel an A2A task."
+msgstr "取消 A2A 任务。"
+
+#: src/iac_code/cli/main.py:881
+msgid "Subscribe to an A2A task event stream."
+msgstr "订阅 A2A 任务事件流。"
+
+#: src/iac_code/cli/main.py:930
+msgid "Create an A2A task push notification config."
+msgstr "创建 A2A 任务推送通知配置。"
+
+#: src/iac_code/cli/main.py:935 src/iac_code/cli/main.py:1014
+#: src/iac_code/cli/main.py:1127
+msgid "Push config ID"
+msgstr "推送配置 ID"
+
+#: src/iac_code/cli/main.py:936
+msgid "Push callback URL"
+msgstr "推送回调 URL"
+
+#: src/iac_code/cli/main.py:937
+msgid "Notification verification token"
+msgstr "通知验证令牌"
+
+#: src/iac_code/cli/main.py:938
+msgid "Callback authentication scheme"
+msgstr "回调认证方案"
+
+#: src/iac_code/cli/main.py:939
+msgid "Callback authentication credentials"
+msgstr "回调认证凭据"
+
+#: src/iac_code/cli/main.py:1009
+msgid "Get an A2A task push notification config."
+msgstr "获取 A2A 任务推送通知配置。"
+
+#: src/iac_code/cli/main.py:1066
+msgid "List A2A task push notification configs."
+msgstr "列出 A2A 任务推送通知配置。"
+
+#: src/iac_code/cli/main.py:1071
+msgid "Maximum configs to return"
+msgstr "最多返回的配置数"
+
+#: src/iac_code/cli/main.py:1122
+msgid "Delete an A2A task push notification config."
+msgstr "删除 A2A 任务推送通知配置。"
+
+#: src/iac_code/cli/main.py:1179
+msgid "Get an authenticated extended A2A Agent Card."
+msgstr "获取经过身份验证的扩展 A2A Agent Card。"
+
+#: src/iac_code/cli/main.py:1222
+msgid "Preview A2A route resolution."
+msgstr "预览 A2A 路由解析。"
+
+#: src/iac_code/cli/main.py:1229
+msgid "Route name to resolve"
+msgstr "要解析的路由名称"
+
+#: src/iac_code/cli/main.py:1230
+msgid "Skill ID to resolve"
+msgstr "要解析的技能 ID"
+
+#: src/iac_code/cli/main.py:1231
+msgid "Prompt text used for tag/name route matching"
+msgstr "用于标签/名称路由匹配的提示文本"
+
+#: src/iac_code/cli/main.py:1236
+msgid "Directory for persisted A2A routes"
+msgstr "持久化 A2A 路由的目录"
+
+#: src/iac_code/cli/main.py:1238
+msgid "Save the provided routes as a route snapshot"
+msgstr "将提供的路由保存为路由快照"
 
 #: src/iac_code/commands/__init__.py:22
 msgid "Show available commands"

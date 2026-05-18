@@ -15,10 +15,10 @@ install: ## Install dependencies and pre-commit hooks
 	uv run pre-commit install
 
 test: ## Run tests
-	uv run pytest tests/ -v -n auto
+	uv run --all-extras pytest tests/ -v -n auto
 
 coverage: ## Run tests with coverage report (terminal + HTML)
-	uv run pytest tests/ -n auto --cov --cov-report=term-missing --cov-report=html
+	uv run --all-extras pytest tests/ -n auto --cov --cov-report=term-missing --cov-report=html
 	@echo "HTML report: htmlcov/index.html"
 
 lint: ## Run linters

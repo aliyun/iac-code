@@ -1,0 +1,1196 @@
+import asyncio
+import json
+from base64 import b64encode
+from pathlib import Path
+
+import pytest
+from a2a.server.context import ServerCallContext
+from a2a.types import (
+    Message,
+    Part,
+    Role,
+    SendMessageConfiguration,
+    SendMessageRequest,
+    SubscribeToTaskRequest,
+    Task,
+)
+from a2a.utils.errors import TaskNotFoundError
+from starlette.testclient import TestClient
+
+from iac_code.a2a.app import (
+    A2AAuthMiddleware,
+    _serve_async_transport,
+    _supported_interfaces,
+    create_app,
+    resolve_api_key,
+    resolve_basic_credentials,
+    resolve_token,
+)
+from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.transports.dispatcher import create_runtime_components
+from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
+
+from .fakes import FakeAgentLoop, FakeRuntime
+
+
+def test_resolve_token_prefers_cli_value(monkeypatch) -> None:
+    monkeypatch.setenv("IACCODE_A2A_HTTP_TOKEN", "env-token")
+    assert resolve_token("cli-token") == "cli-token"
+
+
+def test_resolve_token_uses_environment(monkeypatch) -> None:
+    monkeypatch.setenv("IACCODE_A2A_HTTP_TOKEN", "env-token")
+    assert resolve_token(None) == "env-token"
+
+
+def test_resolve_basic_credentials_uses_cli_values(monkeypatch) -> None:
+    monkeypatch.setenv("IACCODE_A2A_BASIC_USERNAME", "env-user")
+    monkeypatch.setenv("IACCODE_A2A_BASIC_PASSWORD", "env-pass")
+
+    assert resolve_basic_credentials("cli-user", "cli-pass") == ("cli-user", "cli-pass")
+
+
+def test_resolve_basic_credentials_uses_environment(monkeypatch) -> None:
+    monkeypatch.setenv("IACCODE_A2A_BASIC_USERNAME", "env-user")
+    monkeypatch.setenv("IACCODE_A2A_BASIC_PASSWORD", "env-pass")
+
+    assert resolve_basic_credentials(None, None) == ("env-user", "env-pass")
+
+
+def test_resolve_basic_credentials_requires_pair(monkeypatch) -> None:
+    monkeypatch.setenv("IACCODE_A2A_BASIC_USERNAME", "env-user")
+    monkeypatch.delenv("IACCODE_A2A_BASIC_PASSWORD", raising=False)
+
+    assert resolve_basic_credentials(None, None) is None
+
+
+def test_resolve_api_key_prefers_cli_value(monkeypatch) -> None:
+    monkeypatch.setenv("IACCODE_A2A_API_KEY", "env-key")
+
+    assert resolve_api_key("cli-key") == "cli-key"
+
+
+def test_resolve_api_key_uses_environment(monkeypatch) -> None:
+    monkeypatch.setenv("IACCODE_A2A_API_KEY", "env-key")
+
+    assert resolve_api_key(None) == "env-key"
+
+
+def test_health_route() -> None:
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+
+
+def test_agent_card_route() -> None:
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    response = client.get("/.well-known/agent-card.json")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "iac-code"
+    assert data["url"] == "http://127.0.0.1:41242/"
+    assert data["preferredTransport"] == "JSONRPC"
+    assert data["protocolVersion"] == "1.0"
+    assert data["supportedInterfaces"][0]["protocolVersion"] == "1.0"
+
+
+def test_agent_card_route_sets_cache_headers_and_supports_revalidation() -> None:
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    response = client.get("/.well-known/agent-card.json")
+    etag = response.headers["etag"]
+
+    assert response.headers["cache-control"] == "public, max-age=60"
+    assert etag.startswith('"sha256-')
+    assert response.headers["last-modified"]
+
+    revalidated = client.get("/.well-known/agent-card.json", headers={"If-None-Match": etag})
+
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+    assert revalidated.headers["etag"] == etag
+
+
+@pytest.mark.parametrize(
+    ("app_kwargs", "headers", "expected_status"),
+    [
+        ({"token": "secret"}, {"Authorization": "Bearer wrong"}, 401),
+        (
+            {"token": None, "basic_username": "iac", "basic_password": "secret"},
+            {"Authorization": f"Basic {b64encode(b'iac:secret').decode()}"},
+            200,
+        ),
+        (
+            {"token": None, "basic_username": "iac", "basic_password": "secret"},
+            {"Authorization": f"Basic {b64encode(b'iac:wrong').decode()}"},
+            401,
+        ),
+        ({"token": None, "api_key": "secret-key"}, {"X-API-Key": "secret-key"}, 200),
+        ({"token": None, "api_key": "secret-key"}, {"X-API-Key": "wrong"}, 401),
+    ],
+)
+def test_agent_card_auth_schemes(app_kwargs, headers, expected_status) -> None:
+    app = create_app(host="127.0.0.1", port=41242, model="qwen3.6-plus", **app_kwargs)
+    client = TestClient(app)
+
+    response = client.get("/.well-known/agent-card.json", headers=headers)
+
+    assert response.status_code == expected_status
+
+
+def test_basic_auth_rejects_empty_decoded_username_or_password() -> None:
+    middleware = A2AAuthMiddleware(
+        app=None,
+        token=None,
+        basic_username="",
+        basic_password="secret",
+        api_key=None,
+        api_key_header="X-API-Key",
+    )
+    empty_username = b64encode(b":secret").decode()
+
+    assert middleware._valid_basic_auth(f"Basic {empty_username}") is False
+
+
+def test_api_key_auth_with_custom_header() -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        api_key="secret-key",
+        api_key_header="X-Custom-Key",
+    )
+    client = TestClient(app)
+
+    accepted = client.get("/.well-known/agent-card.json", headers={"X-Custom-Key": "secret-key"})
+    assert accepted.status_code == 200
+
+    rejected_default = client.get("/.well-known/agent-card.json", headers={"X-API-Key": "secret-key"})
+    assert rejected_default.status_code == 401
+
+    rejected_wrong = client.get("/.well-known/agent-card.json", headers={"X-Custom-Key": "wrong"})
+    assert rejected_wrong.status_code == 401
+
+
+def test_supported_interfaces_preserves_explicit_zero_grpc_port() -> None:
+    interfaces = _supported_interfaces(
+        transport="grpc",
+        host="127.0.0.1",
+        port=41242,
+        socket_path=None,
+        ws_path="/a2a",
+        grpc_host=None,
+        grpc_port=0,
+        redis_url=None,
+        request_stream="requests",
+        response_stream="responses",
+        consumer_group="iac-code",
+    )
+
+    assert interfaces == [{"url": "grpc://127.0.0.1:0", "protocolBinding": "grpc", "protocolVersion": "1.0"}]
+
+
+def test_supported_interfaces_advertises_grpc_jsonrpc_compatibility_binding() -> None:
+    interfaces = _supported_interfaces(
+        transport="grpc-jsonrpc",
+        host="127.0.0.1",
+        port=41242,
+        socket_path=None,
+        ws_path="/a2a",
+        grpc_host=None,
+        grpc_port=0,
+        redis_url=None,
+        request_stream="requests",
+        response_stream="responses",
+        consumer_group="iac-code",
+    )
+
+    assert interfaces == [
+        {"url": "grpc-jsonrpc://127.0.0.1:0", "protocolBinding": "grpc-jsonrpc", "protocolVersion": "1.0"}
+    ]
+
+
+def test_supported_interfaces_advertises_jsonrpc_and_rest_for_http_transport() -> None:
+    interfaces = _supported_interfaces(
+        transport="http",
+        host="127.0.0.1",
+        port=41242,
+        socket_path=None,
+        ws_path="/a2a",
+        grpc_host=None,
+        grpc_port=None,
+        redis_url=None,
+        request_stream="requests",
+        response_stream="responses",
+        consumer_group="iac-code",
+    )
+
+    assert interfaces == [
+        {"url": "http://127.0.0.1:41242/", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
+        {"url": "http://127.0.0.1:41242", "protocolBinding": "HTTP+JSON", "protocolVersion": "1.0"},
+    ]
+
+
+def test_auth_allows_any_configured_scheme() -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token="bearer-secret",
+        model="qwen3.6-plus",
+        api_key="api-secret",
+    )
+    client = TestClient(app)
+
+    response = client.get("/.well-known/agent-card.json", headers={"X-API-Key": "api-secret"})
+
+    assert response.status_code == 200
+
+
+def test_send_message_through_sdk_route(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="hello from route")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "hello"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        },
+    )
+
+    data = response.json()
+    assert "error" not in data
+    assert data["result"]["task"]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    assert loop.prompts == ["hello"]
+
+
+@pytest.mark.parametrize("version_header", ["0.3", "0.3.0", "1.0", None])
+def test_send_message_through_v03_route(monkeypatch, tmp_path, version_header: str | None) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="hello from v03 route")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    headers = {"A2A-Version": version_header} if version_header else {}
+    response = client.post(
+        "/",
+        headers=headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "hello v03"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        },
+    )
+
+    data = response.json()
+    assert "error" not in data
+    assert data["result"]["status"]["state"] == "input-required"
+    assert loop.prompts == ["hello v03"]
+
+
+def test_streaming_v03_method_with_v10_header_returns_sse(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="hello from mixed streaming route")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "message/stream",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": "hello mixed"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text"]},
+            },
+        },
+    ) as response:
+        body = response.read().decode()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "hello from mixed streaming route" in body
+    assert loop.prompts == ["hello mixed"]
+
+
+def test_follow_up_message_through_sdk_route_updates_existing_task(monkeypatch, tmp_path) -> None:
+    class EchoAgentLoop:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def run_streaming(self, prompt: str):
+            self.prompts.append(prompt)
+            yield TextDeltaEvent(text=f"turn-{len(self.prompts)}:{prompt}")
+
+    loop = EchoAgentLoop()
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    with TestClient(app) as client:
+        first = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hello"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        )
+        first_data = first.json()
+        task = first_data["result"]["task"]
+
+        second = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "2",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-2",
+                        "taskId": task["id"],
+                        "contextId": task["contextId"],
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "follow up"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        )
+
+        second_data = second.json()
+    assert "error" not in second_data
+    assert loop.prompts == ["hello", "follow up"]
+    assert "turn-2:follow up" in json.dumps(second_data)
+
+
+def test_get_task_applies_history_length_without_mutating_stored_history(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="history chunk")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    with TestClient(app) as client:
+        sent = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hello"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ).json()
+        task_id = sent["result"]["task"]["id"]
+
+        trimmed = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "2",
+                "method": "GetTask",
+                "params": {"id": task_id, "historyLength": 0},
+            },
+        ).json()
+        full = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "3",
+                "method": "GetTask",
+                "params": {"id": task_id},
+            },
+        ).json()
+
+    assert "history" not in trimmed["result"]
+    assert full["result"]["history"]
+
+
+def test_send_message_applies_history_length_to_returned_task(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="history chunk")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "hello"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"], "historyLength": 0},
+            },
+        },
+    )
+
+    assert "history" not in response.json()["result"]["task"]
+
+
+def test_send_message_accepts_data_part_as_json_prompt(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"data": {"template": "value"}, "mediaType": "application/json"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        },
+    )
+
+    data = response.json()
+    assert "error" not in data
+    assert loop.prompts == ['{"template":"value"}']
+
+
+def test_send_message_accepts_file_url_part_from_workspace(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "template.yaml"
+    source.write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+    loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"url": source.as_uri(), "mediaType": "text/plain"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        },
+    )
+
+    assert "error" not in response.json()
+    assert loop.prompts == ["ROSTemplateFormatVersion: '2015-09-01'\n"]
+
+
+def test_send_message_stores_standard_artifact_update_in_task(monkeypatch, tmp_path) -> None:
+    result = {"artifact": {"filename": "result.txt", "mediaType": "text/plain", "content": "hello artifact"}}
+    loop = FakeAgentLoop(
+        [
+            TextDeltaEvent(text="done"),
+            ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+        ]
+    )
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        artifact_dir=tmp_path / "artifacts",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "hello"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        },
+    )
+
+    task = response.json()["result"]["task"]
+    assert task["artifacts"][0]["name"] == "result.txt"
+    assert task["artifacts"][0]["parts"][0]["url"].startswith("file://")
+    assert task["artifacts"][0]["parts"][0]["mediaType"] == "text/plain"
+
+
+def test_send_message_stores_binary_artifact_update_in_task(monkeypatch, tmp_path) -> None:
+    result = {
+        "artifact": {
+            "filename": "diagram.png",
+            "mediaType": "image/png",
+            "bytes": "iVBORw0KGgppbWFnZQ==",
+        }
+    }
+    loop = FakeAgentLoop(
+        [
+            TextDeltaEvent(text="done"),
+            ToolResultEvent(tool_use_id="tool-1", tool_name="draw", result=result, is_error=False),
+        ]
+    )
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        artifact_dir=tmp_path / "artifacts",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "hello"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain", "image/png"]},
+            },
+        },
+    )
+
+    task = response.json()["result"]["task"]
+    assert task["artifacts"][0]["name"] == "diagram.png"
+    assert task["artifacts"][0]["parts"][0]["mediaType"] == "image/png"
+    artifact_path = Path(task["artifacts"][0]["parts"][0]["url"].removeprefix("file://"))
+    assert artifact_path.read_bytes() == b"\x89PNG\r\n\x1a\nimage"
+
+
+def test_required_a2a_extension_must_be_requested(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="unused")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        agent_extensions=[
+            {"uri": "urn:iac-code:test-required", "description": "test required extension", "required": True}
+        ],
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "hello"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        },
+    )
+
+    data = response.json()
+    assert "result" not in data
+    assert data["error"]["message"] == "Required A2A extensions were not requested: urn:iac-code:test-required"
+    assert loop.prompts == []
+
+
+def test_requested_required_a2a_extension_allows_message(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        agent_extensions=[
+            {"uri": "urn:iac-code:test-required", "description": "test required extension", "required": True}
+        ],
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/",
+        headers={"A2A-Version": "1.0", "A2A-Extensions": "urn:iac-code:test-required"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "1",
+            "method": "SendMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "hello"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        },
+    )
+
+    data = response.json()
+    assert "error" not in data
+    assert loop.prompts == ["hello"]
+
+
+def test_push_notification_config_methods_round_trip(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="done")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "state",
+        push_notifications=True,
+    )
+    with TestClient(app) as client:
+        card = client.get("/.well-known/agent-card.json").json()
+        sent = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hello"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ).json()
+        task_id = sent["result"]["task"]["id"]
+        created = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "2",
+                "method": "CreateTaskPushNotificationConfig",
+                "params": {
+                    "taskId": task_id,
+                    "id": "cfg-1",
+                    "url": "https://callback.example/a2a",
+                    "token": "token-1",
+                    "authentication": {"scheme": "bearer", "credentials": "secret"},
+                },
+            },
+        ).json()
+        listed = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "3",
+                "method": "ListTaskPushNotificationConfigs",
+                "params": {"taskId": task_id, "pageSize": 1},
+            },
+        ).json()
+        fetched = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "4",
+                "method": "GetTaskPushNotificationConfig",
+                "params": {"taskId": task_id, "id": "cfg-1"},
+            },
+        ).json()
+        deleted = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "5",
+                "method": "DeleteTaskPushNotificationConfig",
+                "params": {"taskId": task_id, "id": "cfg-1"},
+            },
+        ).json()
+
+    assert card["capabilities"]["pushNotifications"] is True
+    assert created["result"]["id"] == "cfg-1"
+    assert created["result"]["authentication"]["scheme"] == "bearer"
+    assert listed["result"]["configs"][0]["id"] == "cfg-1"
+    assert fetched["result"]["url"] == "https://callback.example/a2a"
+    assert deleted["result"] is None
+
+
+def test_push_notification_config_rejects_private_callback_url(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="done")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "state",
+        push_notifications=True,
+    )
+    with TestClient(app) as client:
+        sent = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hello"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ).json()
+        task_id = sent["result"]["task"]["id"]
+        rejected = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "2",
+                "method": "CreateTaskPushNotificationConfig",
+                "params": {"taskId": task_id, "id": "cfg-1", "url": "http://127.0.0.1:9999/a2a"},
+            },
+        ).json()
+
+    assert "result" not in rejected
+    assert "private" in rejected["error"]["message"]
+
+
+def test_get_extended_agent_card_returns_private_card() -> None:
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    client = TestClient(app)
+
+    public_card = client.get("/.well-known/agent-card.json").json()
+    extended = client.post(
+        "/",
+        headers={"A2A-Version": "1.0"},
+        json={"jsonrpc": "2.0", "id": "1", "method": "GetExtendedAgentCard", "params": {}},
+    ).json()
+
+    assert public_card["capabilities"]["extendedAgentCard"] is True
+    assert extended["result"]["skills"][-1]["id"] == "iac_code_runtime_details"
+
+
+def test_cancel_non_running_task_returns_standard_jsonrpc_error(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="done")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    with TestClient(app) as client:
+        sent = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "hello"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ).json()
+        task_id = sent["result"]["task"]["id"]
+
+        canceled = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={"jsonrpc": "2.0", "id": "2", "method": "CancelTask", "params": {"id": task_id}},
+        ).json()
+
+    assert "result" not in canceled
+    assert canceled["error"]["message"] == "Task cannot be canceled"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_to_inactive_task_returns_error_without_hanging(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="done")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    call_context = ServerCallContext()
+
+    result = await components.handler.on_message_send(
+        SendMessageRequest(
+            message=Message(
+                message_id="msg-1",
+                role=Role.ROLE_USER,
+                parts=[Part(text="hello")],
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"]),
+        ),
+        call_context,
+    )
+    assert isinstance(result, Task)
+
+    stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), call_context)
+    with pytest.raises(TaskNotFoundError, match="not active"):
+        await asyncio.wait_for(anext(stream), timeout=0.1)
+    await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeypatch, tmp_path) -> None:
+    release = asyncio.Event()
+    prompts: list[str] = []
+
+    class ControlledLoop:
+        async def run_streaming(self, prompt: str):
+            prompts.append(prompt)
+            yield TextDeltaEvent(text="first")
+            await release.wait()
+            yield TextDeltaEvent(text="second")
+
+    runtime = FakeRuntime(agent_loop=ControlledLoop(), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    call_context = ServerCallContext()
+
+    result = await components.handler.on_message_send(
+        SendMessageRequest(
+            message=Message(
+                message_id="msg-1",
+                role=Role.ROLE_USER,
+                parts=[Part(text="hello")],
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"], return_immediately=True),
+        ),
+        call_context,
+    )
+    assert isinstance(result, Task)
+
+    stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), call_context)
+    first_event = await asyncio.wait_for(anext(stream), timeout=1)
+    release.set()
+    remaining_events = []
+
+    async def collect_remaining_events() -> None:
+        async for event in stream:
+            remaining_events.append(event)
+
+    await asyncio.wait_for(collect_remaining_events(), timeout=1)
+
+    assert isinstance(first_event, Task)
+    assert first_event.id == result.id
+    assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in remaining_events])
+    assert prompts == ["hello"]
+    await components.aclose()
+
+
+def test_create_app_wires_stateful_server_primitives(monkeypatch, tmp_path) -> None:
+    calls: dict[str, object] = {}
+
+    class SpyTaskStore:
+        def __init__(self, **kwargs) -> None:
+            calls["task_store_kwargs"] = kwargs
+
+        async def start_cleanup_loop(self) -> None:
+            calls["cleanup_started"] = True
+
+        async def stop_cleanup_loop(self) -> None:
+            calls["cleanup_stopped"] = True
+
+    class SpyExecutor:
+        def __init__(self, **kwargs) -> None:
+            calls["executor_kwargs"] = kwargs
+
+    class SpyPushConfigStore:
+        def __init__(self, **kwargs) -> None:
+            calls["push_store_kwargs"] = kwargs
+
+        async def resolve_headers_for_dispatch(self, task_id: str, config_id: str) -> dict[str, str]:
+            return {}
+
+    class SpyPushSender:
+        def __init__(self, **kwargs) -> None:
+            calls["push_sender_kwargs"] = kwargs
+
+    class SpyPushQueue:
+        def __init__(self, root, **kwargs) -> None:
+            calls["push_queue_root"] = root
+            calls["push_queue_kwargs"] = kwargs
+
+    class SpyPushWorker:
+        def __init__(self, **kwargs) -> None:
+            calls["push_worker_kwargs"] = kwargs
+            self.started = asyncio.Event()
+
+        async def serve_forever(self) -> None:
+            calls["push_worker_started"] = True
+            self.started.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self) -> None:
+            calls["push_worker_closed"] = True
+
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.A2ATaskStore", SpyTaskStore)
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.IacCodeA2AExecutor", SpyExecutor)
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.A2APushConfigStore", SpyPushConfigStore)
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.A2APushSender", SpyPushSender)
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.LocalFileA2APushQueue", SpyPushQueue)
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.A2APushDeliveryWorker", SpyPushWorker)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "state",
+        artifact_dir=tmp_path / "artifacts",
+        signing_secret="s" * 32,
+        signing_key_id="local-key",
+        push_notifications=True,
+    )
+    with TestClient(app) as client:
+        response = client.get("/.well-known/agent-card.json")
+
+    assert response.status_code == 200
+    card = response.json()
+    assert card["capabilities"]["pushNotifications"] is True
+    assert card["signatures"][0]["protected"]
+    persistence = calls["task_store_kwargs"]["persistence"]
+    assert isinstance(persistence, A2APersistenceStore)
+    assert persistence.root == tmp_path / "state"
+    assert calls["push_store_kwargs"]["persistence"] is persistence
+    assert calls["push_store_kwargs"]["secret_keyring"] is calls["push_queue_kwargs"]["secret_keyring"]
+    assert calls["push_queue_root"] == persistence.root / "push_queue"
+    assert calls["push_sender_kwargs"]["config_store"] is not None
+    assert calls["push_sender_kwargs"]["queue"] is not None
+    assert calls["push_worker_kwargs"]["queue"] is not None
+    assert calls["push_worker_started"] is True
+    assert calls["push_worker_closed"] is True
+    executor_kwargs = calls["executor_kwargs"]
+    assert executor_kwargs["task_store"] is not None
+    assert executor_kwargs["artifact_store"].root == tmp_path / "artifacts"
+
+
+@pytest.mark.asyncio
+async def test_runtime_components_close_owned_redis_push_queue(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    class FakeRedisQueue:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+            captured["queue_closed"] = True
+
+    class FakeRedisModule:
+        @staticmethod
+        def from_url(url):
+            captured["redis_url"] = url
+            return object()
+
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.RedisStreamsA2APushQueue", FakeRedisQueue)
+    monkeypatch.setattr("iac_code.a2a.transports.dispatcher.require_redis_asyncio", lambda: FakeRedisModule)
+
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=tmp_path,
+        push_notifications=True,
+        push_queue="redis-streams",
+        push_redis_url="redis://localhost:6379/0",
+        push_stream="custom:push",
+        push_retry_key="custom:push:retry",
+        push_dead_stream="custom:push:dead",
+        push_consumer_group="custom-workers",
+        push_consumer_name="worker-a",
+        push_lease_timeout_ms=120000,
+    )
+
+    assert captured["redis_url"] == "redis://localhost:6379/0"
+    assert captured["stream"] == "custom:push"
+    assert captured["retry_key"] == "custom:push:retry"
+    assert captured["dead_stream"] == "custom:push:dead"
+    assert captured["consumer_group"] == "custom-workers"
+    assert captured["consumer_name"] == "worker-a"
+    assert captured["lease_timeout_ms"] == 120000
+    assert captured["secret_keyring"] is not None
+    assert components.push_worker is not None
+    assert components.push_queue is not None
+
+    await components.aclose()
+
+    assert captured["queue_closed"] is True
+
+
+@pytest.mark.asyncio
+async def test_async_transport_runner_starts_push_worker() -> None:
+    calls: dict[str, bool] = {}
+
+    class SpyTaskStore:
+        async def start_cleanup_loop(self) -> None:
+            calls["cleanup_started"] = True
+
+    class SpyPushWorker:
+        async def serve_forever(self) -> None:
+            calls["push_started"] = True
+            await asyncio.Event().wait()
+
+        async def aclose(self) -> None:
+            calls["push_closed"] = True
+
+    class SpyComponents:
+        task_store = SpyTaskStore()
+        push_worker = SpyPushWorker()
+
+        async def aclose(self) -> None:
+            await self.push_worker.aclose()
+            calls["components_closed"] = True
+
+    class SpyServer:
+        async def serve(self) -> None:
+            calls["server_served"] = True
+
+        async def aclose(self) -> None:
+            calls["server_closed"] = True
+
+    await _serve_async_transport(SpyServer(), components=SpyComponents())
+
+    assert calls == {
+        "cleanup_started": True,
+        "push_started": True,
+        "server_served": True,
+        "server_closed": True,
+        "push_closed": True,
+        "components_closed": True,
+    }
