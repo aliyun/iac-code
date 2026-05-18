@@ -90,7 +90,7 @@ class ContextManager:
         self._system_prompt = system_prompt
         self._system_prompt_tokens = self._token_counter.count_text(system_prompt)
 
-    def add_user_message(self, content: str) -> Message:
+    def add_user_message(self, content: str | list[ContentBlock]) -> Message:
         msg = self._conversation.add_user_message(content)
         msg.token_count = self._token_counter.count_message(msg.to_api_format())
         return msg

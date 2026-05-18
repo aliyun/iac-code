@@ -34,20 +34,46 @@ def _run_cleanup(base_dir: str, delay_seconds: float) -> None:
         logger.opt(exception=True).debug("Background cleanup failed")
 
 
+def _run_image_cleanup(current_session_id: str, delay_seconds: float) -> None:
+    time.sleep(delay_seconds)
+    try:
+        from iac_code.utils.image.store import cleanup_old_image_caches
+
+        cleanup_old_image_caches(current_session_id=current_session_id)
+        logger.debug("Background cleanup: purged old session image caches")
+    except Exception:
+        logger.opt(exception=True).debug("Background image cache cleanup failed")
+
+
 def start_background_housekeeping(
     base_dir: str | None = None,
     delay_seconds: float = DELAY_SECONDS,
-) -> threading.Thread:
-    """Start a daemon thread that cleans up old tool result files after a delay.
+    session_id: str | None = None,
+) -> tuple[threading.Thread, ...]:
+    """Start daemon thread(s) for delayed cleanup.
 
-    Returns the thread so callers can join() in tests.
+    Always returns a tuple of started threads so callers (and tests) can
+    iterate uniformly. Currently:
+        - tool-result cleanup thread (always)
+        - image-cache cleanup thread (only when ``session_id`` is provided)
     """
     target_dir = base_dir or _get_default_base_dir()
-    thread = threading.Thread(
+    threads: list[threading.Thread] = []
+    tool_thread = threading.Thread(
         target=_run_cleanup,
         args=(target_dir, delay_seconds),
         daemon=True,
         name="iac-code-housekeeping",
     )
-    thread.start()
-    return thread
+    tool_thread.start()
+    threads.append(tool_thread)
+    if session_id is not None:
+        image_thread = threading.Thread(
+            target=_run_image_cleanup,
+            args=(session_id, delay_seconds),
+            daemon=True,
+            name="iac-code-image-housekeeping",
+        )
+        image_thread.start()
+        threads.append(image_thread)
+    return tuple(threads)

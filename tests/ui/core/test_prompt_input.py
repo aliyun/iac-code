@@ -528,3 +528,59 @@ class TestPromptInputLoop:
 
         assert result == "ab"
         assert action_calls == ["ran"]
+
+
+# ---------------------------------------------------------------------------
+# OSC 8 hyperlink tests for [Image #N]
+# ---------------------------------------------------------------------------
+
+
+class TestImageRefOSC8Hyperlink:
+    """Tests for OSC 8 hyperlink rendering on [Image #N] references."""
+
+    def test_image_ref_renders_osc8_hyperlink(self):
+        """[Image #N] should be wrapped in OSC 8 hyperlink when image_store has path."""
+        from unittest.mock import MagicMock
+
+        store = MagicMock()
+        store.get_path.return_value = "/tmp/test-image.png"
+
+        pi = make_input(image_store=store)
+        pi._pasted_contents[1] = MagicMock()
+
+        line = "Look at [Image #1] here"
+        result = pi._highlight_image_refs(line)
+
+        # Verify OSC 8 hyperlink
+        assert "\033]8;;file:///tmp/test-image.png\033\\" in result
+        assert "[Image #1]" in result
+        assert "\033]8;;\033\\" in result  # closing sequence
+
+    def test_image_ref_fallback_without_store(self):
+        """[Image #N] should only have color when image_store is None."""
+        from unittest.mock import MagicMock
+
+        pi = make_input(image_store=None)
+        pi._pasted_contents[1] = MagicMock()
+
+        line = "[Image #1]"
+        result = pi._highlight_image_refs(line)
+
+        assert "\033[36m" in result  # cyan
+        assert "\033]8;;" not in result  # no OSC 8
+
+    def test_image_ref_fallback_without_path(self):
+        """[Image #N] should only have color when store has no path for that ID."""
+        from unittest.mock import MagicMock
+
+        store = MagicMock()
+        store.get_path.return_value = None  # No path cached
+
+        pi = make_input(image_store=store)
+        pi._pasted_contents[1] = MagicMock()
+
+        line = "[Image #1]"
+        result = pi._highlight_image_refs(line)
+
+        assert "\033[36m" in result
+        assert "\033]8;;" not in result

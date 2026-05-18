@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-18 16:59+0800\n"
+"POT-Creation-Date: 2026-05-18 18:09+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: ja\n"
@@ -89,7 +89,7 @@ msgstr "デバッグログを無効にしました。"
 msgid "Usage: /debug [on|off]"
 msgstr "使用方法：/debug [on|off]"
 
-#: src/iac_code/agent/agent_loop.py:389 src/iac_code/agent/agent_loop.py:404
+#: src/iac_code/agent/agent_loop.py:399 src/iac_code/agent/agent_loop.py:414
 msgid "Permission denied."
 msgstr "権限が拒否されました。"
 
@@ -524,14 +524,14 @@ msgid "[conversation id or search term]"
 msgstr "[会話 ID または検索語]"
 
 #: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:836
-#: src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/ui/core/prompt_input.py:505
 msgid "Navigate"
 msgstr "移動"
 
 #: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:368
 #: src/iac_code/commands/auth.py:402 src/iac_code/commands/auth.py:409
 #: src/iac_code/commands/auth.py:433 src/iac_code/commands/auth.py:836
-#: src/iac_code/commands/auth.py:1026 src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/commands/auth.py:1026 src/iac_code/ui/core/prompt_input.py:505
 msgid "Confirm"
 msgstr "確認"
 
@@ -641,7 +641,7 @@ msgstr "設定済み"
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:751 src/iac_code/providers/registry.py:422
+#: src/iac_code/commands/auth.py:751 src/iac_code/providers/registry.py:423
 msgid "ZhiPu AI"
 msgstr "ZhiPu AI"
 
@@ -653,7 +653,7 @@ msgstr "Kimi"
 msgid "MiniMax"
 msgstr "MiniMax"
 
-#: src/iac_code/commands/auth.py:754 src/iac_code/providers/registry.py:424
+#: src/iac_code/commands/auth.py:754 src/iac_code/providers/registry.py:425
 msgid "Volcengine"
 msgstr "Volcengine"
 
@@ -661,27 +661,27 @@ msgstr "Volcengine"
 msgid "SiliconFlow"
 msgstr "SiliconFlow"
 
-#: src/iac_code/commands/auth.py:756 src/iac_code/providers/registry.py:415
+#: src/iac_code/commands/auth.py:756 src/iac_code/providers/registry.py:416
 msgid "DeepSeek"
 msgstr "DeepSeek"
 
-#: src/iac_code/commands/auth.py:757 src/iac_code/providers/registry.py:413
+#: src/iac_code/commands/auth.py:757 src/iac_code/providers/registry.py:414
 msgid "OpenAI"
 msgstr "OpenAI"
 
-#: src/iac_code/commands/auth.py:758 src/iac_code/providers/registry.py:414
+#: src/iac_code/commands/auth.py:758 src/iac_code/providers/registry.py:415
 msgid "Anthropic"
 msgstr "Anthropic"
 
-#: src/iac_code/commands/auth.py:759 src/iac_code/providers/registry.py:417
+#: src/iac_code/commands/auth.py:759 src/iac_code/providers/registry.py:418
 msgid "Google Gemini"
 msgstr "Google Gemini"
 
-#: src/iac_code/commands/auth.py:760 src/iac_code/providers/registry.py:430
+#: src/iac_code/commands/auth.py:760 src/iac_code/providers/registry.py:431
 msgid "Azure OpenAI"
 msgstr "Azure OpenAI"
 
-#: src/iac_code/commands/auth.py:761 src/iac_code/providers/registry.py:429
+#: src/iac_code/commands/auth.py:761 src/iac_code/providers/registry.py:430
 msgid "OpenRouter"
 msgstr "OpenRouter"
 
@@ -933,7 +933,7 @@ msgid ""
 "/auth to configure."
 msgstr "プロバイダー '{provider}' の API キーが設定されていません（モデル: {model}）。/auth を実行して設定してください。"
 
-#: src/iac_code/providers/openai_provider.py:289
+#: src/iac_code/providers/openai_provider.py:307
 #, python-brace-format
 msgid ""
 "API returned no data. Please check that your API Base URL is correct "
@@ -943,7 +943,7 @@ msgstr ""
 "API からデータが返りませんでした。API Base URL が正しいか確認してください（現在：{base_url}）。 多くの OpenAI "
 "互換エンドポイントでは /v1 接尾辞が必要です（例：{base_url}/v1）。"
 
-#: src/iac_code/providers/openai_provider.py:330
+#: src/iac_code/providers/openai_provider.py:348
 #, python-brace-format
 msgid ""
 "API returned an invalid response. Please check that your API Base URL is "
@@ -953,79 +953,79 @@ msgstr ""
 "API から無効な応答が返りました。API Base URL が正しいか確認してください（現在：{base_url}）。 多くの OpenAI "
 "互換エンドポイントでは /v1 接尾辞が必要です（例：{base_url}/v1）。"
 
-#: src/iac_code/providers/registry.py:411
+#: src/iac_code/providers/registry.py:412
 msgid "Alibaba Cloud Bailian"
 msgstr "Alibaba Cloud 百錬"
 
-#: src/iac_code/providers/registry.py:412
+#: src/iac_code/providers/registry.py:413
 msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "Alibaba Cloud 百錬 Token Plan"
 
-#: src/iac_code/providers/registry.py:416
+#: src/iac_code/providers/registry.py:417
 msgid "OpenAPI Compatible"
 msgstr "OpenAPI 互換"
 
-#: src/iac_code/providers/registry.py:418
+#: src/iac_code/providers/registry.py:419
 msgid "Kimi (China)"
 msgstr "Kimi（中国版）"
 
-#: src/iac_code/providers/registry.py:419
+#: src/iac_code/providers/registry.py:420
 msgid "Kimi (International)"
 msgstr "Kimi（国際版）"
 
-#: src/iac_code/providers/registry.py:420
+#: src/iac_code/providers/registry.py:421
 msgid "MiniMax (China)"
 msgstr "MiniMax（中国版）"
 
-#: src/iac_code/providers/registry.py:421
+#: src/iac_code/providers/registry.py:422
 msgid "MiniMax (International)"
 msgstr "MiniMax（国際版）"
 
-#: src/iac_code/providers/registry.py:423
+#: src/iac_code/providers/registry.py:424
 msgid "ZhiPu AI (International)"
 msgstr "ZhiPu AI（国際版）"
 
-#: src/iac_code/providers/registry.py:425
+#: src/iac_code/providers/registry.py:426
 msgid "SiliconFlow (China)"
 msgstr "SiliconFlow（中国版）"
 
-#: src/iac_code/providers/registry.py:426
+#: src/iac_code/providers/registry.py:427
 msgid "SiliconFlow (International)"
 msgstr "SiliconFlow（国際版）"
 
-#: src/iac_code/providers/registry.py:427
+#: src/iac_code/providers/registry.py:428
 msgid "Ollama (Local)"
 msgstr "Ollama（ローカル）"
 
-#: src/iac_code/providers/registry.py:428
+#: src/iac_code/providers/registry.py:429
 msgid "LM Studio (Local)"
 msgstr "LM Studio（ローカル）"
 
-#: src/iac_code/providers/registry.py:431
+#: src/iac_code/providers/registry.py:432
 msgid "ModelScope"
 msgstr "ModelScope"
 
-#: src/iac_code/providers/registry.py:432
+#: src/iac_code/providers/registry.py:433
 msgid "Alibaba Cloud CodingPlan"
 msgstr "Alibaba Cloud CodingPlan"
 
-#: src/iac_code/providers/registry.py:433
+#: src/iac_code/providers/registry.py:434
 msgid "Alibaba Cloud CodingPlan (International)"
 msgstr "Alibaba Cloud CodingPlan（国際版）"
 
-#: src/iac_code/providers/registry.py:434
+#: src/iac_code/providers/registry.py:435
 msgid "ZhiPu AI CodingPlan"
 msgstr "ZhiPu AI CodingPlan"
 
-#: src/iac_code/providers/registry.py:435
+#: src/iac_code/providers/registry.py:436
 msgid "ZhiPu AI CodingPlan (International)"
 msgstr "ZhiPu AI CodingPlan（国際版）"
 
-#: src/iac_code/providers/registry.py:436
+#: src/iac_code/providers/registry.py:437
 msgid "Volcengine CodingPlan"
 msgstr "Volcengine CodingPlan"
 
-#: src/iac_code/providers/registry.py:437
+#: src/iac_code/providers/registry.py:438
 msgid "Anthropic Compatible"
 msgstr "Anthropic 互換"
 
@@ -1668,45 +1668,49 @@ msgstr "いいえ、常に \"{rule}\" を拒否（このセッション）"
 msgid "No, always reject this tool"
 msgstr "いいえ、このツールは常に拒否"
 
-#: src/iac_code/ui/repl.py:342
+#: src/iac_code/ui/repl.py:353
 msgid "Press Ctrl+C again to exit."
 msgstr "終了するには Ctrl+C をもう一度押してください。"
 
-#: src/iac_code/ui/repl.py:358
+#: src/iac_code/ui/repl.py:373
 msgid "Interrupted."
 msgstr "中断しました。"
 
-#: src/iac_code/ui/repl.py:395
+#: src/iac_code/ui/repl.py:410
 msgid "Goodbye!"
 msgstr "さようなら。"
 
-#: src/iac_code/ui/repl.py:396
+#: src/iac_code/ui/repl.py:411
 msgid "Resume this session with:"
 msgstr "このセッションを再開するには次を実行してください："
 
-#: src/iac_code/ui/repl.py:478
+#: src/iac_code/ui/repl.py:444
+msgid "No image in clipboard."
+msgstr "クリップボードに画像がありません。"
+
+#: src/iac_code/ui/repl.py:584
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available "
 "commands.不明なコマンドです：/{name}。利用可能なコマンドは /help を入力してください。"
 
-#: src/iac_code/ui/repl.py:502 src/iac_code/ui/repl.py:534
+#: src/iac_code/ui/repl.py:608 src/iac_code/ui/repl.py:640
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "コマンドエラー：{error}"
 
-#: src/iac_code/ui/repl.py:509
+#: src/iac_code/ui/repl.py:615
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "ハンドラーがないコマンドです：{name}"
 
-#: src/iac_code/ui/repl.py:712
+#: src/iac_code/ui/repl.py:835
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "セッションが見つかりません：{session_id}"
 
-#: src/iac_code/ui/repl.py:731
+#: src/iac_code/ui/repl.py:854
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1717,17 +1721,35 @@ msgstr ""
 "再開するには次を実行してください：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:770
+#: src/iac_code/ui/repl.py:893
 msgid "This conversation is from a different directory."
 msgstr "この会話は別のディレクトリ由来です。"
 
-#: src/iac_code/ui/repl.py:772
+#: src/iac_code/ui/repl.py:895
 msgid "To resume, run:"
 msgstr "再開するには次を実行してください："
 
-#: src/iac_code/ui/repl.py:777
+#: src/iac_code/ui/repl.py:900
 msgid "(Command copied to clipboard)"
 msgstr "（コマンドをクリップボードにコピーしました）"
+
+#: src/iac_code/ui/repl.py:1057
+#, python-brace-format
+msgid ""
+"Current model {model} does not support image input. Use /model to switch "
+"to a vision-capable model."
+msgstr "現在のモデル {model} は画像入力をサポートしていません。/model を使用してビジョン対応モデルに切り替えてください。"
+
+#: src/iac_code/ui/repl.py:1066
+#, python-brace-format
+msgid "Image error: {err}"
+msgstr "画像エラー：{err}"
+
+#: src/iac_code/ui/repl.py:1083
+msgid ""
+"Failed to persist image to cache; it will only exist in memory for this "
+"turn."
+msgstr "画像をキャッシュに保存できませんでした。このターンの間、メモリ上にのみ存在します。"
 
 #: src/iac_code/ui/spinner.py:53
 msgid "Thinking"
@@ -1765,11 +1787,15 @@ msgstr "トランスクリプトを表示中 · ctrl+o で切り替え"
 msgid "No matches found"
 msgstr "一致する項目がありません"
 
-#: src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/ui/core/prompt_input.py:331
+msgid "Image in clipboard · ctrl+v to paste"
+msgstr "クリップボードに画像 · ctrl+v で貼り付け"
+
+#: src/iac_code/ui/core/prompt_input.py:505
 msgid "Fill"
 msgstr "入力"
 
-#: src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/ui/core/prompt_input.py:505
 msgid "Dismiss"
 msgstr "閉じる"
 

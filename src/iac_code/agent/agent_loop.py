@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from iac_code.agent.message import TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+from iac_code.agent.message import ContentBlock, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 from iac_code.i18n import _
 from iac_code.services.context_manager import ContextManager
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
@@ -151,12 +151,14 @@ class AgentLoop:
                                 input=block.get("input"),
                                 content=block.get("content"),
                                 is_error=block.get("is_error", False),
+                                media_type=block.get("media_type"),
+                                data=block.get("data"),
                             )
                         )
                 provider_messages.append(ProviderMessage(role=role, content=blocks))
         return provider_messages
 
-    async def run(self, user_input: str) -> str:
+    async def run(self, user_input: str | list[ContentBlock]) -> str:
         """Non-streaming execution. Returns final text."""
         final_text = ""
         async for event in self.run_streaming(user_input):
@@ -164,7 +166,7 @@ class AgentLoop:
                 final_text += event.text
         return final_text
 
-    async def run_streaming(self, user_input: str) -> AsyncGenerator[StreamEvent, None]:
+    async def run_streaming(self, user_input: str | list[ContentBlock]) -> AsyncGenerator[StreamEvent, None]:
         """Streaming execution yielding fine-grained StreamEvents.
 
         Flow:
@@ -201,7 +203,15 @@ class AgentLoop:
                 serialize_user_input,
             )
 
-            entry_attrs[GenAiAttr.INPUT_MESSAGES] = serialize_user_input(user_input)
+            # serialize_user_input expects str; for structured input (list[ContentBlock]),
+            # extract text-only segments so telemetry stays readable without leaking image bytes.
+            if isinstance(user_input, str):
+                input_text_for_telemetry = user_input
+            else:
+                input_text_for_telemetry = " ".join(
+                    getattr(b, "text", "") for b in user_input if getattr(b, "type", None) == "text"
+                )
+            entry_attrs[GenAiAttr.INPUT_MESSAGES] = serialize_user_input(input_text_for_telemetry)
             entry_attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(self.system_prompt)
 
         with start_span(Spans.ENTRY, entry_attrs) as entry_span:
@@ -248,7 +258,7 @@ class AgentLoop:
                         serialize_output_messages("".join(final_text_chunks), final_stop_reason),
                     )
 
-    async def _run_streaming_inner(self, user_input: str) -> AsyncGenerator[StreamEvent, None]:
+    async def _run_streaming_inner(self, user_input: str | list[ContentBlock]) -> AsyncGenerator[StreamEvent, None]:
         """Inner streaming loop (called from run_streaming inside the ENTRY span)."""
         from iac_code.services.telemetry import start_span
         from iac_code.services.telemetry.names import GenAiAttr, GenAiOperationName, GenAiSpanKind, Spans
@@ -423,7 +433,7 @@ class AgentLoop:
                         ]
                         self.context_manager.add_tool_results(denied_blocks)
                         if self._session_storage:
-                            from iac_code.agent.message import ContentBlock, Message
+                            from iac_code.agent.message import Message
 
                             denied_content: list[ContentBlock] = list(denied_blocks)
                             self._session_storage.append(
@@ -509,7 +519,7 @@ class AgentLoop:
 
                 self.context_manager.add_tool_results(tool_result_blocks)
                 if self._session_storage:
-                    from iac_code.agent.message import ContentBlock, Message
+                    from iac_code.agent.message import Message
 
                     result_content: list[ContentBlock] = list(tool_result_blocks)
                     self._session_storage.append(

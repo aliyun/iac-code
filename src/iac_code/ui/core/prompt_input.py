@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 import unicodedata
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
+
+from loguru import logger
 
 from iac_code.ui.core.key_event import KeyEvent
 
@@ -28,6 +32,15 @@ if TYPE_CHECKING:
     from iac_code.ui.core.input_history import InputHistory
     from iac_code.ui.keybindings.manager import KeybindingManager
     from iac_code.ui.suggestions.aggregator import SuggestionAggregator
+    from iac_code.utils.image.pasted_content import PastedContent
+    from iac_code.utils.image.store import ImageStore
+
+
+@dataclass
+class PromptInputResult:
+    text: str
+    pasted_contents: dict[int, "PastedContent"] = field(default_factory=dict)
+
 
 # ANSI escape helpers
 _COLOR_SELECTED = "\033[96m"  # bright_cyan — matches logo accent color
@@ -53,15 +66,27 @@ class PromptInput:
         suggestion_aggregator: "SuggestionAggregator | None" = None,
         history: "InputHistory | None" = None,
         console=None,
+        paste_handler: "Callable[[str], bool] | None" = None,
+        image_store: "ImageStore | None" = None,
     ) -> None:
         self._km = keybinding_manager
         self._aggregator = suggestion_aggregator
         self._history = history
         self._console = console
+        # Optional bracketed-paste hook: called with the pasted text. Returning
+        # True signals the handler attached the content out-of-band (e.g. as an
+        # image placeholder) and the buffer must NOT also receive the text.
+        # Returning False keeps default behaviour: insert the text verbatim.
+        self._paste_handler = paste_handler
+        self._image_store = image_store
 
         # Buffer and cursor
         self._buffer: list[str] = []
         self._cursor: int = 0
+
+        # Pasted contents (e.g. images) tracked alongside the text buffer
+        self._pasted_contents: dict[int, "PastedContent"] = {}
+        self._next_paste_id: int = 1
 
         # Control flags
         self._submitted: bool = False
@@ -69,6 +94,7 @@ class PromptInput:
         self._esc_pressed: bool = False
         self._text_changed: bool = False  # set when buffer content changes
         self._pending_action: "Callable[[], None] | None" = None
+        self._clipboard_has_image: bool = False  # True when clipboard contains an image
 
         # Rendering state
         self._prompt: str = ""
@@ -87,6 +113,32 @@ class PromptInput:
         """Return current buffer contents as a string."""
         return "".join(self._buffer)
 
+    def attach_image(self, pc: "PastedContent") -> None:
+        """Insert ``[Image #N]`` at the cursor and track the paste.
+
+        Idempotent: re-attaching the same id is a no-op.
+        """
+        if pc.id in self._pasted_contents:
+            return
+        self._pasted_contents[pc.id] = pc
+        placeholder = f"[Image #{pc.id}]"
+        self._insert(placeholder)
+        if pc.id >= self._next_paste_id:
+            self._next_paste_id = pc.id + 1
+
+    def next_paste_id(self) -> int:
+        """Return a fresh, monotonically increasing paste id."""
+        pid = self._next_paste_id
+        self._next_paste_id += 1
+        return pid
+
+    def make_result(self) -> "PromptInputResult":
+        """Build a snapshot of the current text + tracked pasted contents."""
+        return PromptInputResult(
+            text=self._get_text(),
+            pasted_contents=dict(self._pasted_contents),
+        )
+
     # ------------------------------------------------------------------
     # Key handling
     # ------------------------------------------------------------------
@@ -96,9 +148,38 @@ class PromptInput:
         key = key_event.key
         ctrl = key_event.ctrl
 
-        # 0. Bracket paste → insert all content (including newlines) into buffer
+        # Diagnostics for the image-paste path. Logged at INFO so the user
+        # can correlate keystrokes with downstream pipeline events.
         if key == "paste":
-            self._insert(key_event.char)
+            logger.info("prompt_input: bracketed paste event ({} chars)", len(key_event.char))
+        elif ctrl and key == "v":
+            logger.info("prompt_input: Ctrl+V keystroke received")
+
+        # 0. Bracket paste → optionally route through paste_handler first, then
+        # insert. The handler can attach images discovered in the system
+        # clipboard and signal "consumed" to suppress the text insert.
+        if key == "paste":
+            consumed = False
+            if self._paste_handler is not None:
+                try:
+                    consumed = self._paste_handler(key_event.char)
+                except Exception:
+                    # Handler errors must never deadlock the input loop —
+                    # fall through to plain-text insert.
+                    consumed = False
+            if not consumed:
+                self._insert(key_event.char)
+            return
+
+        # 0b. Focus events — probe clipboard for image on focus-in
+        if key == "focus_in":
+            self._check_clipboard_for_image()
+            return
+
+        if key == "focus_out":
+            if self._clipboard_has_image:
+                self._clipboard_has_image = False
+                self._render()
             return
 
         # 1. Esc+Enter → insert newline
@@ -224,11 +305,30 @@ class PromptInput:
         # 10. Printable character insertion
         char = key_event.char
         if char and char.isprintable():
+            # Clear clipboard indicator on visible character input
+            if self._clipboard_has_image:
+                self._clipboard_has_image = False
             self._insert(char)
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _check_clipboard_for_image(self) -> None:
+        """Synchronously probe the system clipboard for an image on focus-in."""
+        from iac_code.utils.image.clipboard import has_image_in_clipboard
+
+        result = has_image_in_clipboard()
+        if result != self._clipboard_has_image:
+            self._clipboard_has_image = result
+            self._render()
+
+    @staticmethod
+    def _clipboard_hint_text() -> str:
+        """Return the clipboard image hint text."""
+        from iac_code.i18n import _
+
+        return _("Image in clipboard \u00b7 ctrl+v to paste")
 
     def _insert(self, text: str) -> None:
         """Insert *text* at the current cursor position."""
@@ -267,6 +367,27 @@ class PromptInput:
     # Inline rendering
     # ------------------------------------------------------------------
 
+    _IMAGE_REF_RE = re.compile(r"\[Image #(\d+)\]")
+
+    def _highlight_image_refs(self, line: str) -> str:
+        """Return the line with [Image #N] tracked refs wrapped in cyan and OSC 8 hyperlink."""
+
+        def repl(m: "re.Match[str]") -> str:
+            ref_id = int(m.group(1))
+            if ref_id in self._pasted_contents:
+                # Try to build OSC 8 hyperlink if image_store available
+                if self._image_store is not None:
+                    image_path = self._image_store.get_path(ref_id)
+                    if image_path:
+                        file_url = f"file://{image_path}"
+                        # OSC 8 format: \033]8;;URL\033\\text\033]8;;\033\\
+                        return f"\033]8;;{file_url}\033\\{_COLOR_CYAN}{m.group(0)}{_COLOR_RESET}\033]8;;\033\\"
+                # Fallback: color only, no hyperlink
+                return f"{_COLOR_CYAN}{m.group(0)}{_COLOR_RESET}"
+            return m.group(0)
+
+        return self._IMAGE_REF_RE.sub(repl, line)
+
     def _render(self) -> None:
         """Re-render the input line, ghost text, and suggestion overlay."""
         out = sys.stdout
@@ -290,11 +411,22 @@ class PromptInput:
 
         # Render prompt + first line
         out.write(f"{_COLOR_BOLD}{_COLOR_CYAN}{self._prompt}{_COLOR_RESET}")
-        out.write(lines[0])
+        out.write(self._highlight_image_refs(lines[0]))
+
+        # Right-aligned clipboard image indicator (first line only, single-line input)
+        if self._clipboard_has_image and not content_extra_lines:
+            hint_text = self._clipboard_hint_text()
+            hint_width = _display_width(hint_text)
+            first_line_width = _display_width(self._prompt) + _display_width(lines[0])
+            gap = 2
+            available = cols - first_line_width - gap
+            if available >= hint_width:
+                hint_col = cols - hint_width
+                out.write(f"\033[s\033[{hint_col + 1}G\033[2m{hint_text}\033[0m\033[u")
 
         # Render continuation lines
         for i in range(1, len(lines)):
-            out.write(f"\n\r{lines[i]}")
+            out.write(f"\n\r{self._highlight_image_refs(lines[i])}")
 
         # Ghost text (only for single-line input)
         ghost = ""
@@ -432,11 +564,14 @@ class PromptInput:
         # Reset state
         self._buffer = []
         self._cursor = 0
+        self._pasted_contents = {}
+        self._next_paste_id = 1
         self._submitted = False
         self._cancelled = False
         self._esc_pressed = False
         self._text_changed = False
         self._pending_action = None
+        self._clipboard_has_image = False
         self._prompt = prompt
         self._prev_suggestion_lines = 0
         self._prev_content_extra_lines = 0
@@ -491,13 +626,14 @@ class PromptInput:
             first_content = f"{prompt}{lines[0]}"
             pad = max(0, term_width - _display_width(first_content))
             sys.stdout.write(
-                f"\r{_bg}{_COLOR_BOLD}{_COLOR_CYAN}{prompt}{_COLOR_RESET}{_bg}{lines[0]}{' ' * pad}{_COLOR_RESET}"
+                f"\r{_bg}{_COLOR_BOLD}{_COLOR_CYAN}{prompt}{_COLOR_RESET}"
+                f"{_bg}{self._highlight_image_refs(lines[0])}{' ' * pad}{_COLOR_RESET}"
             )
 
             # Render continuation lines
             for i in range(1, len(lines)):
                 pad = max(0, term_width - _display_width(lines[i]))
-                sys.stdout.write(f"\n\r{_bg}{lines[i]}{' ' * pad}{_COLOR_RESET}")
+                sys.stdout.write(f"\n\r{_bg}{self._highlight_image_refs(lines[i])}{' ' * pad}{_COLOR_RESET}")
 
         sys.stdout.write("\n")
         sys.stdout.flush()

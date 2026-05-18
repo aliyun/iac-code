@@ -10,6 +10,8 @@ import time
 import tty
 from typing import Optional
 
+from loguru import logger
+
 from iac_code.ui.core.key_event import KeyEvent
 
 _CURSOR_REPORT_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
@@ -73,6 +75,8 @@ _ESCAPE_SEQUENCES: dict[str, str] = {
     "[3~": "delete",
     "[5~": "pageup",
     "[6~": "pagedown",
+    "[I": "focus_in",
+    "[O": "focus_out",
     "OP": "f1",
     "OQ": "f2",
     "OR": "f3",
@@ -98,6 +102,8 @@ class RawInputCapture:
             tty.setraw(self._fd)
             # Enable bracket paste mode so we can distinguish pasted text from typed input
             os.write(self._fd, b"\033[?2004h")
+            # Enable focus reporting so we can detect terminal focus changes
+            os.write(self._fd, b"\033[?1004h")
         except OSError:
             # File descriptor may be invalid after interruption (e.g. double Ctrl+C)
             self._old_settings = None
@@ -106,6 +112,8 @@ class RawInputCapture:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         try:
+            # Disable focus reporting
+            os.write(self._fd, b"\033[?1004l")
             # Disable bracket paste mode
             os.write(self._fd, b"\033[?2004l")
         except OSError:
@@ -154,7 +162,16 @@ class RawInputCapture:
             # Bracket paste start: ESC [200~ — check raw bytes before decoding
             # to avoid splitting multi-byte UTF-8 characters
             if rest.startswith(b"[200~"):
+                logger.info(
+                    "raw_input: PASTE_START detected; tail bytes after marker: {!r}",
+                    rest[5:][:64],
+                )
                 pasted = self._read_bracketed_paste(rest[5:])
+                logger.info(
+                    "raw_input: bracketed paste complete — {} chars, repr={!r}",
+                    len(pasted),
+                    pasted[:80],
+                )
                 return KeyEvent(key="paste", char=pasted)
 
             seq = rest.decode("utf-8", errors="replace")

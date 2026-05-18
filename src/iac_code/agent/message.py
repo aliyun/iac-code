@@ -44,8 +44,14 @@ class ThinkingBlock(BaseModel):
     thinking: str
 
 
+class ImageBlock(BaseModel):
+    type: Literal["image"] = "image"
+    media_type: str  # 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+    data: str  # base64
+
+
 # Union type for all content blocks
-ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock
+ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | ImageBlock
 
 
 class Message(BaseModel):
@@ -110,6 +116,8 @@ class Message(BaseModel):
                 )
             elif isinstance(block, ThinkingBlock):
                 content_list.append({"type": "thinking", "thinking": block.thinking})
+            elif isinstance(block, ImageBlock):
+                content_list.append({"type": "image", "media_type": block.media_type, "data": block.data})
         return {"role": self.role, "content": content_list}
 
 
@@ -118,7 +126,7 @@ class Conversation(BaseModel):
 
     messages: list[Message] = Field(default_factory=list)
 
-    def add_user_message(self, content: str) -> Message:
+    def add_user_message(self, content: str | list[ContentBlock]) -> Message:
         """Add a user message to the conversation."""
         msg = Message(role="user", content=content)
         self.messages.append(msg)

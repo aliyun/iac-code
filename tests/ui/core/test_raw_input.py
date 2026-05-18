@@ -200,7 +200,13 @@ class TestRawInputCaptureRuntime:
         with RawInputCapture(fd=7) as capture:
             assert capture._old_settings == ["old"]
 
-        assert writes == [("setraw", 7), (7, b"\033[?2004h"), (7, b"\033[?2004l")]
+        assert writes == [
+            ("setraw", 7),
+            (7, b"\033[?2004h"),
+            (7, b"\033[?1004h"),
+            (7, b"\033[?1004l"),
+            (7, b"\033[?2004l"),
+        ]
         assert tcsetattr_calls == [(7, termios.TCSADRAIN, ["old"])]
 
     def test_exit_ignores_disable_bracket_paste_error(self, monkeypatch):

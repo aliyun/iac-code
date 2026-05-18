@@ -133,6 +133,24 @@ class OpenAIProvider(Provider):
                 ]
             messages.append(msg)
 
+        # User message with text and/or image blocks. tool_result blocks are
+        # handled by the role="tool" branch below; if the user message contains
+        # only tool_result blocks, user_parts stays empty and nothing is emitted.
+        if role == "user":
+            user_parts: list[dict[str, Any]] = []
+            for b in blocks:
+                if b.type == "text":
+                    user_parts.append({"type": "text", "text": b.text or ""})
+                elif b.type == "image":
+                    user_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{b.media_type or 'image/png'};base64,{b.data or ''}"},
+                        }
+                    )
+            if user_parts:
+                messages.append({"role": "user", "content": user_parts})
+
         # Tool result messages (role="tool")
         for b in tool_results:
             messages.append(

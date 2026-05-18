@@ -91,7 +91,7 @@ def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -
         Text(),
         Text(f"  {model_display}", style="dim") if model_display else Text(),
         Text(f"  {cwd_display}", style="dim"),
-        Text("  {}: {}".format(_("Session"), session_id), style="dim") if session_id else Text(),
+        Text(f"  {_('Session')}: {session_id}", style="dim") if session_id else Text(),
     ]
 
     from iac_code.utils.log import is_debug_enabled

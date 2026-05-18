@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-18 16:59+0800\n"
+"POT-Creation-Date: 2026-05-18 18:09+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -87,7 +87,7 @@ msgstr "调试日志已关闭。"
 msgid "Usage: /debug [on|off]"
 msgstr "用法：/debug [on|off]"
 
-#: src/iac_code/agent/agent_loop.py:389 src/iac_code/agent/agent_loop.py:404
+#: src/iac_code/agent/agent_loop.py:399 src/iac_code/agent/agent_loop.py:414
 msgid "Permission denied."
 msgstr "权限被拒绝。"
 
@@ -520,14 +520,14 @@ msgid "[conversation id or search term]"
 msgstr "[会话 ID 或搜索词]"
 
 #: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:836
-#: src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/ui/core/prompt_input.py:505
 msgid "Navigate"
 msgstr "导航"
 
 #: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:368
 #: src/iac_code/commands/auth.py:402 src/iac_code/commands/auth.py:409
 #: src/iac_code/commands/auth.py:433 src/iac_code/commands/auth.py:836
-#: src/iac_code/commands/auth.py:1026 src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/commands/auth.py:1026 src/iac_code/ui/core/prompt_input.py:505
 msgid "Confirm"
 msgstr "确认"
 
@@ -635,7 +635,7 @@ msgstr "已配置"
 msgid "Alibaba Cloud"
 msgstr "阿里云"
 
-#: src/iac_code/commands/auth.py:751 src/iac_code/providers/registry.py:422
+#: src/iac_code/commands/auth.py:751 src/iac_code/providers/registry.py:423
 msgid "ZhiPu AI"
 msgstr "智谱 AI"
 
@@ -647,7 +647,7 @@ msgstr "Kimi"
 msgid "MiniMax"
 msgstr "MiniMax"
 
-#: src/iac_code/commands/auth.py:754 src/iac_code/providers/registry.py:424
+#: src/iac_code/commands/auth.py:754 src/iac_code/providers/registry.py:425
 msgid "Volcengine"
 msgstr "火山引擎"
 
@@ -655,27 +655,27 @@ msgstr "火山引擎"
 msgid "SiliconFlow"
 msgstr "硅基流动"
 
-#: src/iac_code/commands/auth.py:756 src/iac_code/providers/registry.py:415
+#: src/iac_code/commands/auth.py:756 src/iac_code/providers/registry.py:416
 msgid "DeepSeek"
 msgstr "DeepSeek"
 
-#: src/iac_code/commands/auth.py:757 src/iac_code/providers/registry.py:413
+#: src/iac_code/commands/auth.py:757 src/iac_code/providers/registry.py:414
 msgid "OpenAI"
 msgstr "OpenAI"
 
-#: src/iac_code/commands/auth.py:758 src/iac_code/providers/registry.py:414
+#: src/iac_code/commands/auth.py:758 src/iac_code/providers/registry.py:415
 msgid "Anthropic"
 msgstr "Anthropic"
 
-#: src/iac_code/commands/auth.py:759 src/iac_code/providers/registry.py:417
+#: src/iac_code/commands/auth.py:759 src/iac_code/providers/registry.py:418
 msgid "Google Gemini"
 msgstr "Google Gemini"
 
-#: src/iac_code/commands/auth.py:760 src/iac_code/providers/registry.py:430
+#: src/iac_code/commands/auth.py:760 src/iac_code/providers/registry.py:431
 msgid "Azure OpenAI"
 msgstr "Azure OpenAI"
 
-#: src/iac_code/commands/auth.py:761 src/iac_code/providers/registry.py:429
+#: src/iac_code/commands/auth.py:761 src/iac_code/providers/registry.py:430
 msgid "OpenRouter"
 msgstr "OpenRouter"
 
@@ -923,7 +923,7 @@ msgid ""
 "/auth to configure."
 msgstr "提供商 '{provider}' 未配置 API 密钥（模型: {model}）。请运行 /auth 进行配置。"
 
-#: src/iac_code/providers/openai_provider.py:289
+#: src/iac_code/providers/openai_provider.py:307
 #, python-brace-format
 msgid ""
 "API returned no data. Please check that your API Base URL is correct "
@@ -933,7 +933,7 @@ msgstr ""
 "API 未返回数据。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
 "后缀（如 {base_url}/v1）。"
 
-#: src/iac_code/providers/openai_provider.py:330
+#: src/iac_code/providers/openai_provider.py:348
 #, python-brace-format
 msgid ""
 "API returned an invalid response. Please check that your API Base URL is "
@@ -943,79 +943,79 @@ msgstr ""
 "API 返回了无效响应。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
 "后缀（如 {base_url}/v1）。"
 
-#: src/iac_code/providers/registry.py:411
+#: src/iac_code/providers/registry.py:412
 msgid "Alibaba Cloud Bailian"
 msgstr "阿里云百炼"
 
-#: src/iac_code/providers/registry.py:412
+#: src/iac_code/providers/registry.py:413
 msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "阿里云百炼 Token Plan"
 
-#: src/iac_code/providers/registry.py:416
+#: src/iac_code/providers/registry.py:417
 msgid "OpenAPI Compatible"
 msgstr "OpenAPI 兼容"
 
-#: src/iac_code/providers/registry.py:418
+#: src/iac_code/providers/registry.py:419
 msgid "Kimi (China)"
 msgstr "Kimi（中国版）"
 
-#: src/iac_code/providers/registry.py:419
+#: src/iac_code/providers/registry.py:420
 msgid "Kimi (International)"
 msgstr "Kimi（国际版）"
 
-#: src/iac_code/providers/registry.py:420
+#: src/iac_code/providers/registry.py:421
 msgid "MiniMax (China)"
 msgstr "MiniMax（中国版）"
 
-#: src/iac_code/providers/registry.py:421
+#: src/iac_code/providers/registry.py:422
 msgid "MiniMax (International)"
 msgstr "MiniMax（国际版）"
 
-#: src/iac_code/providers/registry.py:423
+#: src/iac_code/providers/registry.py:424
 msgid "ZhiPu AI (International)"
 msgstr "智谱 AI（国际版）"
 
-#: src/iac_code/providers/registry.py:425
+#: src/iac_code/providers/registry.py:426
 msgid "SiliconFlow (China)"
 msgstr "硅基流动（中国版）"
 
-#: src/iac_code/providers/registry.py:426
+#: src/iac_code/providers/registry.py:427
 msgid "SiliconFlow (International)"
 msgstr "硅基流动（国际版）"
 
-#: src/iac_code/providers/registry.py:427
+#: src/iac_code/providers/registry.py:428
 msgid "Ollama (Local)"
 msgstr "Ollama（本地）"
 
-#: src/iac_code/providers/registry.py:428
+#: src/iac_code/providers/registry.py:429
 msgid "LM Studio (Local)"
 msgstr "LM Studio（本地）"
 
-#: src/iac_code/providers/registry.py:431
+#: src/iac_code/providers/registry.py:432
 msgid "ModelScope"
 msgstr "魔搭"
 
-#: src/iac_code/providers/registry.py:432
+#: src/iac_code/providers/registry.py:433
 msgid "Alibaba Cloud CodingPlan"
 msgstr "阿里云编程计划"
 
-#: src/iac_code/providers/registry.py:433
+#: src/iac_code/providers/registry.py:434
 msgid "Alibaba Cloud CodingPlan (International)"
 msgstr "阿里云编程计划（国际版）"
 
-#: src/iac_code/providers/registry.py:434
+#: src/iac_code/providers/registry.py:435
 msgid "ZhiPu AI CodingPlan"
 msgstr "智谱 AI 编程计划"
 
-#: src/iac_code/providers/registry.py:435
+#: src/iac_code/providers/registry.py:436
 msgid "ZhiPu AI CodingPlan (International)"
 msgstr "智谱 AI 编程计划（国际版）"
 
-#: src/iac_code/providers/registry.py:436
+#: src/iac_code/providers/registry.py:437
 msgid "Volcengine CodingPlan"
 msgstr "火山引擎编程计划"
 
-#: src/iac_code/providers/registry.py:437
+#: src/iac_code/providers/registry.py:438
 msgid "Anthropic Compatible"
 msgstr "Anthropic 兼容"
 
@@ -1655,43 +1655,47 @@ msgstr "否，始终拒绝 \"{rule}\"（本次会话）"
 msgid "No, always reject this tool"
 msgstr "否，始终拒绝此工具"
 
-#: src/iac_code/ui/repl.py:342
+#: src/iac_code/ui/repl.py:353
 msgid "Press Ctrl+C again to exit."
 msgstr "再次按 Ctrl+C 退出。"
 
-#: src/iac_code/ui/repl.py:358
+#: src/iac_code/ui/repl.py:373
 msgid "Interrupted."
 msgstr "已中断。"
 
-#: src/iac_code/ui/repl.py:395
+#: src/iac_code/ui/repl.py:410
 msgid "Goodbye!"
 msgstr "再见！"
 
-#: src/iac_code/ui/repl.py:396
+#: src/iac_code/ui/repl.py:411
 msgid "Resume this session with:"
 msgstr "恢复此会话请运行："
 
-#: src/iac_code/ui/repl.py:478
+#: src/iac_code/ui/repl.py:444
+msgid "No image in clipboard."
+msgstr "剪贴板中没有图像。"
+
+#: src/iac_code/ui/repl.py:584
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "未知命令：/{name}。输入 /help 查看可用命令。"
 
-#: src/iac_code/ui/repl.py:502 src/iac_code/ui/repl.py:534
+#: src/iac_code/ui/repl.py:608 src/iac_code/ui/repl.py:640
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "命令错误：{error}"
 
-#: src/iac_code/ui/repl.py:509
+#: src/iac_code/ui/repl.py:615
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
-#: src/iac_code/ui/repl.py:712
+#: src/iac_code/ui/repl.py:835
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "会话不存在：{session_id}"
 
-#: src/iac_code/ui/repl.py:731
+#: src/iac_code/ui/repl.py:854
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1702,17 +1706,35 @@ msgstr ""
 "请运行以下命令恢复：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:770
+#: src/iac_code/ui/repl.py:893
 msgid "This conversation is from a different directory."
 msgstr "该会话来自另一个目录。"
 
-#: src/iac_code/ui/repl.py:772
+#: src/iac_code/ui/repl.py:895
 msgid "To resume, run:"
 msgstr "请运行以下命令恢复："
 
-#: src/iac_code/ui/repl.py:777
+#: src/iac_code/ui/repl.py:900
 msgid "(Command copied to clipboard)"
 msgstr "（命令已复制到剪贴板）"
+
+#: src/iac_code/ui/repl.py:1057
+#, python-brace-format
+msgid ""
+"Current model {model} does not support image input. Use /model to switch "
+"to a vision-capable model."
+msgstr "当前模型 {model} 不支持图像输入。请使用 /model 切换到支持视觉的模型。"
+
+#: src/iac_code/ui/repl.py:1066
+#, python-brace-format
+msgid "Image error: {err}"
+msgstr "图像错误：{err}"
+
+#: src/iac_code/ui/repl.py:1083
+msgid ""
+"Failed to persist image to cache; it will only exist in memory for this "
+"turn."
+msgstr "无法将图像持久化到缓存；本轮对话期间它仅存在于内存中。"
 
 #: src/iac_code/ui/spinner.py:53
 msgid "Thinking"
@@ -1750,11 +1772,15 @@ msgstr "显示完整记录 · 按 ctrl+o 切换"
 msgid "No matches found"
 msgstr "未找到匹配项"
 
-#: src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/ui/core/prompt_input.py:331
+msgid "Image in clipboard · ctrl+v to paste"
+msgstr "剪贴板中有图像 · 按 ctrl+v 粘贴"
+
+#: src/iac_code/ui/core/prompt_input.py:505
 msgid "Fill"
 msgstr "填充"
 
-#: src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/ui/core/prompt_input.py:505
 msgid "Dismiss"
 msgstr "关闭"
 

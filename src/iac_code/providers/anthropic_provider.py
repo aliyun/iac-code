@@ -270,6 +270,15 @@ class AnthropicProvider(Provider):
             return d
         elif block.type == "thinking":
             return {"type": "thinking", "thinking": block.text or ""}
+        elif block.type == "image":
+            return {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": block.media_type or "image/png",
+                    "data": block.data or "",
+                },
+            }
         else:
             return {"type": block.type}
 

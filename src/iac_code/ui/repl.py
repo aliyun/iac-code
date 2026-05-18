@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import sys
 import time
@@ -40,7 +41,7 @@ from iac_code.tasks.task_state import TaskManager
 from iac_code.tools.base import ToolRegistry
 from iac_code.ui.banner import render_welcome_banner
 from iac_code.ui.core.input_history import InputHistory
-from iac_code.ui.core.prompt_input import PromptInput
+from iac_code.ui.core.prompt_input import PromptInput, PromptInputResult
 from iac_code.ui.keybindings.manager import KeyBinding, KeybindingManager
 from iac_code.ui.renderer import Renderer
 from iac_code.ui.suggestions.aggregator import SuggestionAggregator
@@ -49,6 +50,8 @@ from iac_code.ui.suggestions.directory_provider import DirectoryProvider
 from iac_code.ui.suggestions.file_provider import FileProvider
 from iac_code.ui.suggestions.shell_history_provider import ShellHistoryProvider
 from iac_code.utils.background_housekeeping import start_background_housekeeping
+from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipboard, try_read_image_from_path
+from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
 
 termios: ModuleType | None
 try:
@@ -116,6 +119,9 @@ class InlineREPL:
         self._session_storage = SessionStorage()
         self.session_index = SessionIndex()
         self._session_id = self._resolve_session_id(resume_session_id)
+        from iac_code.utils.image.store import ImageStore
+
+        self._image_store = ImageStore(session_id=self._session_id)
         self._resume_messages = self._load_resume_messages(resume_session_id)
         self._task_manager = TaskManager()
         self._notification_queue = NotificationQueue()
@@ -237,12 +243,17 @@ class InlineREPL:
             ]
         )
 
-        # PromptInput
+        # PromptInput. ``paste_handler`` covers the macOS Cmd+V case: macOS
+        # terminals never forward Cmd+V bytes to the app, but they DO send a
+        # bracketed-paste sequence. The handler probes the system clipboard
+        # for an image on every bracketed paste and attaches it inline.
         self._prompt_input = PromptInput(
             keybinding_manager=self._keybinding_manager,
             suggestion_aggregator=self._suggestion_aggregator,
             history=self._history,
             console=self.console,
+            paste_handler=self._on_bracketed_paste,
+            image_store=self._image_store,
         )
 
         self.store.subscribe(self._on_state_change)
@@ -266,7 +277,7 @@ class InlineREPL:
         if self._resume_messages:
             self.renderer.replay_history(self._resume_messages)
             self.console.print()  # blank line before first new user turn
-        start_background_housekeeping()
+        start_background_housekeeping(session_id=self._session_id)
         self._register_global_keybindings()
 
         # Clear IEXTEN for the whole session so macOS/BSD can't latch Ctrl+O
@@ -351,7 +362,11 @@ class InlineREPL:
                         await self._handle_command(user_input)
                         self._clear_cancel_state()
                         continue
-                    await self._handle_chat(user_input)
+                    # Capture structured result (text + pasted images) before next get_input resets state.
+                    chat_input: PromptInputResult | str
+                    result = self._prompt_input.make_result()
+                    chat_input = result if result.pasted_contents else user_input
+                    await self._handle_chat(chat_input)
                     self._clear_cancel_state()
                 except (KeyboardInterrupt, asyncio.CancelledError):
                     self._clear_cancel_state()
@@ -414,6 +429,97 @@ class InlineREPL:
         km.register(KeyBinding("ctrl+p", "open_quick_open", "global", self._open_quick_open))
         km.register(KeyBinding("ctrl+f", "open_global_search", "global", self._open_global_search))
         km.register(KeyBinding("ctrl+o", "expand_last_turn", "global", self._expand_last_turn))
+        km.register(KeyBinding("ctrl+v", "paste_image", "global", self._handle_ctrl_v_image))
+
+    def _handle_ctrl_v_image(self) -> bool:
+        """Wrapper around :func:`handle_image_paste` that surfaces the
+        no-image case to the user. Ctrl+V is an explicit "paste image"
+        intent — silent return is the bug we're fixing."""
+        logger.info("repl: Ctrl+V pressed — invoking image paste pipeline")
+        if handle_image_paste(self):
+            logger.info("repl: Ctrl+V handled (image attached or warned)")
+            self._prompt_input._clipboard_has_image = False
+            return True
+        logger.info("repl: Ctrl+V — no image found in clipboard, surfacing system message")
+        msg = _("No image in clipboard.")
+        self._prompt_input.schedule_action(lambda: self.renderer.print_system_message(msg, style="dim"))
+        return True
+
+    def _on_bracketed_paste(self, text: str) -> bool:
+        """Bracketed-paste hook. Probes the clipboard for an image on every
+        paste; if one is found, attaches it as ``[Image #N]``. Returns True
+        when the bracketed-paste text should NOT also be inserted into the
+        buffer (would be redundant — empty string, or just the image's file
+        path / file:// URL). Otherwise returns False so PromptInput inserts
+        the text normally — preserves accompanying captions like "what is
+        this screenshot?"."""
+        # Some terminals interleave focus events (CSI I / CSI O) around the
+        # paste boundary — Cmd+V briefly steals focus to the menu bar and back
+        # on macOS. The focus bytes can land *inside* our paste content and
+        # would otherwise be inserted into the buffer as garbage characters.
+        # Strip them early so the rest of this method sees the clean payload.
+        sanitized = _strip_orphan_focus_events(text)
+        if sanitized != text:
+            logger.info(
+                "repl: bracketed paste — stripped {} byte(s) of orphan focus events",
+                len(text) - len(sanitized),
+            )
+        text = sanitized
+
+        preview = text[:80].replace("\n", "\\n")
+        logger.info(
+            "repl: bracketed paste received — text_len={} preview={!r}",
+            len(text),
+            preview,
+        )
+        # Prefer try_read_image_from_path: if the pasted text IS an image
+        # path, use the file metadata (source_path, filename) rather than
+        # whatever the clipboard happens to also carry.
+        img = try_read_image_from_path(text) if text else None
+        if img is not None:
+            logger.info("repl: bracketed paste — image resolved from text path: {}", img.source_path)
+        elif _is_existing_non_image_file(text):
+            # The pasted text is a path to an existing non-image file (e.g. a
+            # .txt copied from Finder). macOS places a TIFF icon/preview on the
+            # clipboard alongside the file path — skip clipboard image detection
+            # to avoid attaching the file icon as "[Image #N]".
+            logger.info(
+                "repl: bracketed paste — text is an existing non-image file path, skipping clipboard image detection"
+            )
+            img = None
+        else:
+            img = get_image_from_clipboard()
+            if img is not None:
+                logger.info("repl: bracketed paste — image read from system clipboard ({} bytes)", len(img.data))
+        if img is None:
+            # No image. If text is empty / pure noise (was just focus events),
+            # suppress the insert so the buffer stays clean. Otherwise return
+            # False so PromptInput inserts the text as normal.
+            if not text:
+                logger.info("repl: bracketed paste — empty payload, no image, nothing to do")
+                return True
+            logger.info("repl: bracketed paste — no image; falling through to plain text insert")
+            return False
+
+        _attach_clipboard_image(self, img)
+
+        stripped = text.strip()
+        if not stripped:
+            logger.info("repl: bracketed paste — text empty, suppressing insert")
+            return True
+        if "\n" in stripped:
+            logger.info("repl: bracketed paste — multi-line text, keeping caption alongside image")
+            return False
+        # Strip surrounding quotes (terminal drag-and-drop / shell-quoted paths)
+        unquoted = stripped.strip("'\"")
+        if unquoted.startswith("file://"):
+            logger.info("repl: bracketed paste — text is file:// URL, suppressing insert")
+            return True
+        if IMAGE_EXTENSION_REGEX.search(unquoted):
+            logger.info("repl: bracketed paste — text is an image path, suppressing insert")
+            return True
+        logger.info("repl: bracketed paste — image attached and text inserted as caption")
+        return False
 
     # ------------------------------------------------------------------
     # Dialog launchers
@@ -557,12 +663,29 @@ class InlineREPL:
         finally:
             self.store.set_state(is_busy=False)
 
-    async def _handle_chat(self, user_input: str) -> None:
+    async def _handle_chat(self, user_input: PromptInputResult | str) -> None:
         """Send the user message to the agent loop and stream output."""
+        from iac_code.agent.message import ContentBlock, ImageBlock
+        from iac_code.utils.image.processor import process_user_input
+
+        if isinstance(user_input, PromptInputResult):
+            blocks = process_user_input(user_input.text, pasted_contents=user_input.pasted_contents)
+            # Only switch to a structured payload if we actually have an image block;
+            # otherwise the plain string keeps telemetry / session storage simpler.
+            payload: str | list[ContentBlock]
+            if any(isinstance(b, ImageBlock) for b in blocks):
+                payload = blocks
+            else:
+                payload = user_input.text
+            record_text = user_input.text
+        else:
+            payload = user_input
+            record_text = user_input
+
         self.store.set_state(is_busy=True)
-        self.renderer.record_user_turn(user_input)
+        self.renderer.record_user_turn(record_text)
         try:
-            events = self._agent_loop.run_streaming(user_input)
+            events = self._agent_loop.run_streaming(payload)
             elapsed = await self.renderer.run_streaming_output(
                 events,
                 permission_handler=self.renderer.prompt_permission,
@@ -854,3 +977,132 @@ class InlineREPL:
 
     def _status_text(self) -> str:
         return self.store.get_state().model
+
+
+# CSI I / CSI O are focus-in / focus-out events. Some terminals (notably on
+# macOS) emit one or both around a paste because Cmd+V briefly steals focus
+# to the menu bar. When this lands inside our bracketed-paste content it
+# corrupts otherwise-empty payloads. Strip every occurrence regardless of
+# position; mid-paste focus events should never reach the prompt buffer.
+_FOCUS_EVENT_RE = re.compile(r"\x1b\[[IO]")
+
+
+def _strip_orphan_focus_events(text: str) -> str:
+    """Remove CSI focus-in/focus-out sequences from a paste payload."""
+    return _FOCUS_EVENT_RE.sub("", text)
+
+
+def _is_existing_non_image_file(text: str) -> bool:
+    """Return True if *text* looks like a path to an existing non-image file.
+
+    Handles shell-quoted paths and backslash-escaped spaces that macOS Finder
+    places on the clipboard when copying files.
+    """
+    from pathlib import Path
+
+    if not text or not text.strip():
+        return False
+    candidate = text.strip().strip("'\"").replace("\\ ", " ")
+    # Must look like a filesystem path (absolute or relative that exists)
+    if not candidate:
+        return False
+    # Skip if it matches a known image extension — let try_read_image_from_path handle those
+    if IMAGE_EXTENSION_REGEX.search(candidate):
+        return False
+    p = Path(candidate)
+    try:
+        return p.exists() and p.is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def _attach_clipboard_image(repl: "InlineREPL", img: ClipboardImage) -> bool:
+    """Run multimodal-capability gate, resize, persist to cache, and attach
+    the image as an ``[Image #N]`` placeholder in the prompt buffer.
+
+    Always returns True — either the image was attached, or a user-visible
+    warning was scheduled (capability mismatch, resize failure). Callers
+    should treat True as "event handled, do not fall through".
+    """
+    from iac_code.services.capabilities.multimodal import is_model_multimodal
+    from iac_code.utils.image.pasted_content import PastedContent
+    from iac_code.utils.image.resizer import (
+        ImageResizeError,
+        maybe_resize_and_downsample,
+    )
+
+    # Pass real provider context so the OpenAI-compatible auto-detect can fire
+    # for unknown models on a custom endpoint.
+    provider_key: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    cfg = getattr(repl, "_current_provider_config", None)
+    if isinstance(cfg, dict):
+        provider_key = cfg.get("keyName")
+        base_url = cfg.get("apiBase")
+    creds = getattr(repl, "_credentials", None)
+    if isinstance(creds, dict) and provider_key:
+        api_key = creds.get(provider_key)
+
+    if not is_model_multimodal(
+        repl._current_model,
+        provider_key=provider_key,
+        base_url=base_url,
+        api_key=api_key,
+    ):
+        logger.warning(
+            "repl: model {} does not support multimodal input — refusing to attach image", repl._current_model
+        )
+        msg = _(
+            "Current model {model} does not support image input. Use /model to switch to a vision-capable model."
+        ).format(model=repl._current_model)
+        repl._prompt_input.schedule_action(lambda: repl.renderer.print_system_message(msg, style="yellow"))
+        return True
+
+    try:
+        resized = maybe_resize_and_downsample(img.data)
+    except ImageResizeError as exc:
+        logger.warning("repl: image resize/encode failed: {}", exc)
+        msg = _("Image error: {err}").format(err=exc)
+        repl._prompt_input.schedule_action(lambda: repl.renderer.print_system_message(msg, style="red"))
+        return True
+
+    import base64
+
+    pid = repl._prompt_input.next_paste_id()
+    pc = PastedContent(
+        id=pid,
+        type="image",
+        content=base64.b64encode(resized.data).decode(),
+        media_type=resized.media_type,
+        source_path=img.source_path,
+    )
+    stored_path = repl._image_store.store(pc)
+    if stored_path is None:
+        logger.warning("repl: image store persistence failed — keeping in-memory only")
+        msg = _("Failed to persist image to cache; it will only exist in memory for this turn.")
+        repl._prompt_input.schedule_action(lambda: repl.renderer.print_system_message(msg, style="yellow"))
+    logger.info(
+        "repl: image attached as [Image #{}] (media_type={}, {} bytes raw → {} bytes encoded)",
+        pid,
+        resized.media_type,
+        len(img.data),
+        len(resized.data),
+    )
+    repl._prompt_input.attach_image(pc)
+    return True
+
+
+def handle_image_paste(repl: "InlineREPL") -> bool:
+    """Handle Ctrl+V image paste. Returns True if the keybinding was consumed.
+
+    Legacy entry point. The lazy import of ``get_image_from_clipboard`` is
+    preserved so existing tests that patch
+    ``iac_code.utils.image.clipboard.get_image_from_clipboard`` keep working.
+    """
+    from iac_code.utils.image.clipboard import get_image_from_clipboard as _get
+
+    img = _get()
+    if img is None:
+        return False  # let bracket paste handle text
+    return _attach_clipboard_image(repl, img)

@@ -28,6 +28,7 @@ dependencies = [
     "opentelemetry-distro>=0.48b0",
     "opentelemetry-exporter-otlp>=1.27.0",
     "agent-client-protocol>=0.9.0",
+    "pillow==11.0.0",
     "cryptography>=42.0",
     "keyring>=25.0",
     "tree-sitter>=0.23",
@@ -104,6 +105,10 @@ iac-code = "iac_code.cli.main:app"
 
 [tool.uv]
 index-url = "https://mirrors.aliyun.com/pypi/simple/"
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
 
 [tool.coverage.run]
 source_pkgs = ["iac_code"]

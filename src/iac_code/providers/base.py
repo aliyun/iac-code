@@ -23,13 +23,15 @@ class ToolDefinition:
 class ContentBlock:
     """A block of content within a message."""
 
-    type: str  # "text", "tool_use", "tool_result", "thinking"
+    type: str  # "text", "tool_use", "tool_result", "thinking", "image"
     text: str | None = None
     tool_use_id: str | None = None
     name: str | None = None
     input: dict[str, Any] | None = None
     content: str | None = None
     is_error: bool = False
+    media_type: str | None = None
+    data: str | None = None
 
 
 @dataclass
