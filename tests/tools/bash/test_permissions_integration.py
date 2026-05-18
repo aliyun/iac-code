@@ -373,3 +373,49 @@ class TestSuggestionGeneration:
         ctx = _ctx(cwd="/project")
         r = await bash_tool_has_permission("cd /project && mkdir foo", ctx)
         assert r.suggestions
+
+
+class TestCompoundComplexSuggestions:
+    """Verify compound commands with complex sub-commands generate correct suggestions."""
+
+    @pytest.mark.asyncio
+    async def test_eval_and_mkdir_generates_mkdir_suggestion_only(self):
+        """eval ls && mkdir -p xxx: suggestion should be mkdir:*, not eval:*."""
+        ctx = _ctx(cwd="/project")
+        r = await bash_tool_has_permission("eval ls && mkdir -p xxx", ctx)
+        assert r.behavior == "ask"
+        assert r.suggestions
+        rule_contents = [s.rule_content for s in r.suggestions]
+        assert "mkdir:*" in rule_contents
+        assert "eval:*" not in rule_contents
+
+    @pytest.mark.asyncio
+    async def test_compound_all_allowed_still_allows(self):
+        """ls && cat foo: both readonly allowed."""
+        ctx = _ctx()
+        r = await bash_tool_has_permission("ls && cat foo", ctx)
+        assert r.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_compound_one_allowed_one_not(self):
+        """ls && mkdir foo: ls allowed, mkdir not → ask."""
+        ctx = _ctx(cwd="/project")
+        r = await bash_tool_has_permission("ls && mkdir foo", ctx)
+        assert r.behavior in ("ask", "passthrough")
+
+    @pytest.mark.asyncio
+    async def test_eval_with_allow_rule_and_mkdir_without(self):
+        """eval:* allowed, mkdir not → ask for mkdir."""
+        ctx = _ctx(allow={"session": ["bash(eval:*)"]}, cwd="/project")
+        r = await bash_tool_has_permission("eval ls && mkdir -p xxx", ctx)
+        assert r.behavior in ("ask", "passthrough")
+
+    @pytest.mark.asyncio
+    async def test_echo_with_subst_generates_echo_suggestion(self):
+        """echo $(whoami): echo is not dangerous, should generate echo:* suggestion."""
+        ctx = _ctx()
+        r = await bash_tool_has_permission("echo $(whoami)", ctx)
+        assert r.behavior == "ask"
+        assert r.suggestions
+        rule_contents = [s.rule_content for s in r.suggestions]
+        assert "echo:*" in rule_contents

@@ -152,6 +152,8 @@ _OPTION_ALLOW_ONCE = "allow_once"
 _OPTION_ALLOW_ALWAYS = "allow_always"
 _OPTION_REJECT_ONCE = "reject_once"
 _OPTION_REJECT_ALWAYS = "reject_always"
+_PREFIX_ALLOW_RULE = "allow_rule:"
+_PREFIX_DENY_RULE = "deny_rule:"
 
 
 class ACPSession:
@@ -373,6 +375,30 @@ class ACPSession:
             logger.info("Session %s cancel requested", self.id)
             self._current_task.cancel()
 
+    def _get_permission_context(self):
+        """Read the agent_loop's mutable permission context."""
+        return getattr(self.agent_loop, "_permission_context", None)
+
+    def _set_permission_context(self, perm_ctx) -> None:
+        """Write back the updated permission context to agent_loop."""
+        if hasattr(self.agent_loop, "_permission_context"):
+            self.agent_loop._permission_context = perm_ctx
+
+    def _apply_rule(self, tool_name: str, rules_str: str, behavior: str) -> None:
+        """Apply rule-level permission to the session's permission_context."""
+        from iac_code.services.permissions.storage import apply_session_rule
+        from iac_code.types.permissions import PermissionRuleValue
+
+        perm_ctx = self._get_permission_context()
+        if perm_ctx is None:
+            return
+        for rule_content in rules_str.split(","):
+            rule_content = rule_content.strip()
+            if rule_content:
+                rule_value = PermissionRuleValue(tool_name=tool_name, rule_content=rule_content)
+                perm_ctx = apply_session_rule(perm_ctx, behavior, rule_value)
+        self._set_permission_context(perm_ctx)
+
     async def _request_permission(self, event: PermissionRequestEvent) -> bool:
         tool_name = event.tool_name
 
@@ -385,59 +411,113 @@ class ACPSession:
             logger.debug("Permission auto-denied for tool %s (cached)", tool_name)
             return False
 
-        response = await self._conn.request_permission(
-            [
+        # Extract suggestions from permission_result for rule-level options.
+        suggestions = []
+        if (
+            event.permission_result is not None
+            and hasattr(event.permission_result, "suggestions")
+            and event.permission_result.suggestions
+        ):
+            suggestions = event.permission_result.suggestions
+
+        # Build dynamic option list aligned with local REPL behavior.
+        options: list[acp.schema.PermissionOption] = [
+            acp.schema.PermissionOption(
+                option_id=_OPTION_ALLOW_ONCE,
+                name="Allow once",
+                kind="allow_once",
+            ),
+        ]
+
+        if suggestions:
+            rules_display = ",".join(s.rule_content for s in suggestions)
+            options.append(
                 acp.schema.PermissionOption(
-                    option_id=_OPTION_ALLOW_ONCE,
-                    name="Allow once",
-                    kind="allow_once",
-                ),
+                    option_id=_PREFIX_ALLOW_RULE + rules_display,
+                    name='Always allow "{}" (this session)'.format(rules_display),
+                    kind="allow_always",
+                )
+            )
+        else:
+            options.append(
                 acp.schema.PermissionOption(
                     option_id=_OPTION_ALLOW_ALWAYS,
-                    name="Always allow",
+                    name="Always allow this tool",
                     kind="allow_always",
-                ),
+                )
+            )
+
+        options.append(
+            acp.schema.PermissionOption(
+                option_id=_OPTION_REJECT_ONCE,
+                name="Reject once",
+                kind="reject_once",
+            )
+        )
+
+        if suggestions:
+            rules_display = ",".join(s.rule_content for s in suggestions)
+            options.append(
                 acp.schema.PermissionOption(
-                    option_id=_OPTION_REJECT_ONCE,
-                    name="Reject once",
-                    kind="reject_once",
-                ),
-                acp.schema.PermissionOption(
-                    option_id=_OPTION_REJECT_ALWAYS,
-                    name="Always reject",
+                    option_id=_PREFIX_DENY_RULE + rules_display,
+                    name='Always deny "{}" (this session)'.format(rules_display),
                     kind="reject_always",
-                ),
-            ],
+                )
+            )
+
+        options.append(
+            acp.schema.PermissionOption(
+                option_id=_OPTION_REJECT_ALWAYS,
+                name="Always reject this tool",
+                kind="reject_always",
+            ),
+        )
+
+        # Build content with command details and suggested rule.
+        content_text = "Approve tool call: {}\nInput: {}".format(tool_name, event.tool_input)
+        if suggestions:
+            content_text += "\nSuggested rule: {}".format(",".join(s.rule_content for s in suggestions))
+
+        response = await self._conn.request_permission(
+            options,
             self.id,
             acp.schema.ToolCallUpdate(
-                tool_call_id=f"permission/{event.tool_use_id}",
+                tool_call_id="permission/{}".format(event.tool_use_id),
                 title=event.tool_name,
                 content=[
                     acp.schema.ContentToolCallContent(
                         type="content",
                         content=acp.schema.TextContentBlock(
                             type="text",
-                            text=f"Approve tool call {event.tool_name} with input: {event.tool_input}",
+                            text=content_text,
                         ),
                     )
                 ],
             ),
         )
 
-        # Interpret the outcome and update the permission cache
+        # Interpret the outcome and update permission state.
         if isinstance(response.outcome, acp.schema.AllowedOutcome):
             option_id = response.outcome.option_id
             if option_id == _OPTION_ALLOW_ALWAYS:
                 self._cache_permission(tool_name, "always_allow")
+            elif option_id and option_id.startswith(_PREFIX_ALLOW_RULE):
+                rules_str = option_id[len(_PREFIX_ALLOW_RULE) :]
+                self._apply_rule(tool_name, rules_str, "allow")
             return True
 
-        # DeniedOutcome — the ACP SDK DeniedOutcome has no option_id field,
-        # so clients that want to signal "reject_always" should set
-        # _meta={"option_id": "reject_always"} on the *response* envelope.
+        # DeniedOutcome — parse option_id from meta or direct field.
         if isinstance(response.outcome, acp.schema.DeniedOutcome):
-            resp_meta = getattr(response, "field_meta", None) or {}
-            if resp_meta.get("option_id") == _OPTION_REJECT_ALWAYS:
+            option_id = getattr(response.outcome, "option_id", None)
+            if option_id is None:
+                resp_meta = getattr(response, "field_meta", None) or {}
+                option_id = resp_meta.get("option_id")
+
+            if option_id == _OPTION_REJECT_ALWAYS:
                 self._cache_permission(tool_name, "always_deny")
+            elif option_id and option_id.startswith(_PREFIX_DENY_RULE):
+                rules_str = option_id[len(_PREFIX_DENY_RULE) :]
+                self._apply_rule(tool_name, rules_str, "deny")
 
         return False
 

@@ -23,6 +23,7 @@ class SimpleCommand:
     text: str
     argv: list[str] = field(default_factory=list)
     redirects: list[str] = field(default_factory=list)
+    is_complex: bool = False
 
 
 @dataclass
@@ -40,10 +41,10 @@ def parse_command(command: str) -> ParseResult:
     if root.has_error or _tree_contains_error(root):
         return ParseResult(kind="parse_error", reason=_("parse error"))
 
-    if _scan_too_complex(root, source):
+    commands = _extract_simple_commands(root, source)
+    if not commands and _scan_too_complex(root, source):
         return ParseResult(kind="too_complex", reason=_("unsupported shell construct"))
 
-    commands = _extract_simple_commands(root, source)
     return ParseResult(kind="simple", commands=commands)
 
 
@@ -117,15 +118,44 @@ def _command_invoked_name(command_node: Node, source: bytes) -> str | None:
     return None
 
 
-def _scan_too_complex(node: Node, source: bytes) -> bool:
+def _has_complex_descendant(node: Node, source: bytes) -> bool:
+    """Recursively check if any descendant is a complex construct."""
     if node.type in _TOO_COMPLEX_TYPES:
         return True
     if node.type == "expansion" and "`" in _node_text(node, source):
         return True
+    for child in node.children:
+        if _has_complex_descendant(child, source):
+            return True
+    return False
+
+
+def _node_is_complex(node: Node, source: bytes) -> bool:
+    """Check if a single command node is complex (dangerous builtin or complex construct in children)."""
     if node.type == "command":
         name = _command_invoked_name(node, source)
         if name is not None and name in DANGEROUS_BUILTINS:
             return True
+    for child in node.children:
+        if child.type in _TOO_COMPLEX_TYPES:
+            return True
+        if child.type == "expansion" and "`" in _node_text(child, source):
+            return True
+        if _has_complex_descendant(child, source):
+            return True
+    return False
+
+
+def _scan_too_complex(node: Node, source: bytes) -> bool:
+    """Check if the ENTIRE top-level AST is irreducibly complex (no extractable commands)."""
+    if node.type in _TOO_COMPLEX_TYPES:
+        return True
+    if node.type == "expansion" and "`" in _node_text(node, source):
+        return True
+    if node.type in {"program", "list", "pipeline", "compound_statement"}:
+        return False
+    if node.type in {"command", "declaration_command", "redirected_statement"}:
+        return False
     for child in node.children:
         if _scan_too_complex(child, source):
             return True
@@ -138,9 +168,10 @@ def _build_simple_command(
     *,
     redirects: list[str],
     text_override: str | None = None,
+    is_complex: bool = False,
 ) -> SimpleCommand:
     text = text_override if text_override is not None else _node_text(node, source)
-    return SimpleCommand(text=text, argv=_command_argv(node, source), redirects=list(redirects))
+    return SimpleCommand(text=text, argv=_command_argv(node, source), redirects=list(redirects), is_complex=is_complex)
 
 
 def _extract_redirected_statement(node: Node, source: bytes) -> list[SimpleCommand]:
@@ -154,13 +185,18 @@ def _extract_redirected_statement(node: Node, source: bytes) -> list[SimpleComma
     if body is None:
         return []
     if body.type == "command":
-        return [_build_simple_command(body, source, redirects=redirects, text_override=_node_text(node, source))]
-    # Body is a compound (list, pipeline, etc.) — recurse to collect subcommands
-    # and attach the redirects to the last subcommand (matching bash semantics).
+        complex_flag = _node_is_complex(body, source)
+        return [
+            _build_simple_command(
+                body, source, redirects=redirects, text_override=_node_text(node, source), is_complex=complex_flag
+            )
+        ]
     inner = _collect_commands(body, source)
     if inner and redirects:
         last = inner[-1]
-        inner[-1] = SimpleCommand(text=last.text, argv=list(last.argv), redirects=list(last.redirects) + redirects)
+        inner[-1] = SimpleCommand(
+            text=last.text, argv=list(last.argv), redirects=list(last.redirects) + redirects, is_complex=last.is_complex
+        )
     return inner
 
 
@@ -178,7 +214,8 @@ def _collect_commands(node: Node, source: bytes) -> list[SimpleCommand]:
     if kind == "redirected_statement":
         return _extract_redirected_statement(node, source)
     if kind == "command":
-        return [_build_simple_command(node, source, redirects=[])]
+        complex_flag = _node_is_complex(node, source)
+        return [_build_simple_command(node, source, redirects=[], is_complex=complex_flag)]
     if kind == "declaration_command":
         return [SimpleCommand(text=_node_text(node, source), argv=_declaration_argv(node, source))]
 

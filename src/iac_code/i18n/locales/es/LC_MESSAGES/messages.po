@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-18 12:25+0800\n"
+"POT-Creation-Date: 2026-05-18 16:59+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: es\n"
@@ -544,212 +544,222 @@ msgstr "Reanudar una sesión anterior"
 msgid "[conversation id or search term]"
 msgstr "[id de conversación o término de búsqueda]"
 
-#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:817
+#: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:836
 #: src/iac_code/ui/core/prompt_input.py:373
 msgid "Navigate"
 msgstr "Navegar"
 
-#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:367
-#: src/iac_code/commands/auth.py:401 src/iac_code/commands/auth.py:408
-#: src/iac_code/commands/auth.py:432 src/iac_code/commands/auth.py:817
-#: src/iac_code/commands/auth.py:1007 src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:368
+#: src/iac_code/commands/auth.py:402 src/iac_code/commands/auth.py:409
+#: src/iac_code/commands/auth.py:433 src/iac_code/commands/auth.py:836
+#: src/iac_code/commands/auth.py:1026 src/iac_code/ui/core/prompt_input.py:373
 msgid "Confirm"
 msgstr "Confirmar"
 
-#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:365
-#: src/iac_code/commands/auth.py:367 src/iac_code/commands/auth.py:401
-#: src/iac_code/commands/auth.py:408 src/iac_code/commands/auth.py:432
-#: src/iac_code/commands/auth.py:817 src/iac_code/commands/auth.py:902
-#: src/iac_code/commands/auth.py:1007
+#: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:366
+#: src/iac_code/commands/auth.py:368 src/iac_code/commands/auth.py:402
+#: src/iac_code/commands/auth.py:409 src/iac_code/commands/auth.py:433
+#: src/iac_code/commands/auth.py:836 src/iac_code/commands/auth.py:921
+#: src/iac_code/commands/auth.py:1026
 msgid "Back"
 msgstr "Atrás"
 
-#: src/iac_code/commands/auth.py:365
+#: src/iac_code/commands/auth.py:366
 msgid "Keep"
 msgstr "Conservar"
 
-#: src/iac_code/commands/auth.py:365
+#: src/iac_code/commands/auth.py:366
 msgid "Re-enter"
 msgstr "Volver a introducir"
 
-#: src/iac_code/commands/auth.py:507 src/iac_code/commands/auth.py:631
-#: src/iac_code/commands/auth.py:651
+#: src/iac_code/commands/auth.py:508 src/iac_code/commands/auth.py:650
+#: src/iac_code/commands/auth.py:670
 msgid " (current)"
 msgstr " (actual)"
 
-#: src/iac_code/commands/auth.py:510
+#: src/iac_code/commands/auth.py:511
 msgid "Custom model..."
 msgstr "Modelo personalizado..."
 
-#: src/iac_code/commands/auth.py:513
+#: src/iac_code/commands/auth.py:514
 #, python-brace-format
 msgid "Select model for {provider}"
 msgstr "Seleccionar modelo para {provider}"
 
-#: src/iac_code/commands/auth.py:515
+#: src/iac_code/commands/auth.py:516
 msgid "Select model"
 msgstr "Seleccionar modelo"
 
-#: src/iac_code/commands/auth.py:523
+#: src/iac_code/commands/auth.py:524
 msgid "Enter custom model name: "
 msgstr "Introduzca el nombre del modelo personalizado: "
 
-#: src/iac_code/commands/auth.py:549
+#: src/iac_code/commands/auth.py:550
 msgid "Error: console not available"
 msgstr "Error: la consola no está disponible"
 
 #: src/iac_code/commands/auth.py:576
-msgid "Configure LLM Provider"
-msgstr "Configurar proveedor LLM"
+#, python-brace-format
+msgid ""
+"LLM provider is locked by '{source}'. To change, modify llm_source in "
+"settings.yml."
+msgstr ""
+"El proveedor LLM está bloqueado por '{source}'. Para cambiar, modifique "
+"llm_source en settings.yml."
 
-#: src/iac_code/commands/auth.py:577
-msgid "Configure IaC Cloud Service"
-msgstr "Configurar servicio cloud IaC"
+#: src/iac_code/commands/auth.py:580 src/iac_code/commands/auth.py:780
+msgid "Select Cloud Provider"
+msgstr "Seleccionar proveedor de cloud"
 
-#: src/iac_code/commands/auth.py:579
-msgid "Select configuration type"
-msgstr "Seleccionar tipo de configuración"
-
-#: src/iac_code/commands/auth.py:581 src/iac_code/commands/auth.py:676
-#: src/iac_code/commands/auth.py:692 src/iac_code/commands/auth.py:770
-#: src/iac_code/commands/auth.py:943 src/iac_code/commands/auth.py:984
+#: src/iac_code/commands/auth.py:582 src/iac_code/commands/auth.py:589
+#: src/iac_code/commands/auth.py:600 src/iac_code/commands/auth.py:695
+#: src/iac_code/commands/auth.py:711 src/iac_code/commands/auth.py:789
+#: src/iac_code/commands/auth.py:962 src/iac_code/commands/auth.py:1003
 msgid "Auth cancelled"
 msgstr "Autenticación cancelada"
 
-#: src/iac_code/commands/auth.py:635
+#: src/iac_code/commands/auth.py:595
+msgid "Configure LLM Provider"
+msgstr "Configurar proveedor LLM"
+
+#: src/iac_code/commands/auth.py:596
+msgid "Configure IaC Cloud Service"
+msgstr "Configurar servicio cloud IaC"
+
+#: src/iac_code/commands/auth.py:598
+msgid "Select configuration type"
+msgstr "Seleccionar tipo de configuración"
+
+#: src/iac_code/commands/auth.py:654
 msgid "Select provider"
 msgstr "Seleccionar proveedor"
 
-#: src/iac_code/commands/auth.py:656 src/iac_code/commands/auth.py:745
+#: src/iac_code/commands/auth.py:675 src/iac_code/commands/auth.py:764
 #, python-brace-format
 msgid "Select provider — {group}"
 msgstr "Seleccionar proveedor — {group}"
 
-#: src/iac_code/commands/auth.py:669
+#: src/iac_code/commands/auth.py:688
 #, python-brace-format
 msgid "Configure {provider}"
 msgstr "Configurar {provider}"
 
-#: src/iac_code/commands/auth.py:685
+#: src/iac_code/commands/auth.py:704
 #, python-brace-format
 msgid "Enter API key for {provider}"
 msgstr "Introduzca la API key para {provider}"
 
-#: src/iac_code/commands/auth.py:723
+#: src/iac_code/commands/auth.py:742
 #, python-brace-format
 msgid "{status}: {provider} / {model}"
 msgstr "{status}: {provider} / {model}"
 
-#: src/iac_code/commands/auth.py:724
+#: src/iac_code/commands/auth.py:743
 msgid "Configured"
 msgstr "Configurado"
 
-#: src/iac_code/commands/auth.py:731 src/iac_code/commands/auth.py:752
+#: src/iac_code/commands/auth.py:750 src/iac_code/commands/auth.py:771
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:732 src/iac_code/providers/registry.py:417
+#: src/iac_code/commands/auth.py:751 src/iac_code/providers/registry.py:422
 msgid "ZhiPu AI"
 msgstr "ZhiPu AI"
 
-#: src/iac_code/commands/auth.py:733
+#: src/iac_code/commands/auth.py:752
 msgid "Kimi"
 msgstr "Kimi"
 
-#: src/iac_code/commands/auth.py:734
+#: src/iac_code/commands/auth.py:753
 msgid "MiniMax"
 msgstr "MiniMax"
 
-#: src/iac_code/commands/auth.py:735 src/iac_code/providers/registry.py:419
+#: src/iac_code/commands/auth.py:754 src/iac_code/providers/registry.py:424
 msgid "Volcengine"
 msgstr "Volcengine"
 
-#: src/iac_code/commands/auth.py:736
+#: src/iac_code/commands/auth.py:755
 msgid "SiliconFlow"
 msgstr "SiliconFlow"
 
-#: src/iac_code/commands/auth.py:737 src/iac_code/providers/registry.py:410
+#: src/iac_code/commands/auth.py:756 src/iac_code/providers/registry.py:415
 msgid "DeepSeek"
 msgstr "DeepSeek"
 
-#: src/iac_code/commands/auth.py:738 src/iac_code/providers/registry.py:408
+#: src/iac_code/commands/auth.py:757 src/iac_code/providers/registry.py:413
 msgid "OpenAI"
 msgstr "OpenAI"
 
-#: src/iac_code/commands/auth.py:739 src/iac_code/providers/registry.py:409
+#: src/iac_code/commands/auth.py:758 src/iac_code/providers/registry.py:414
 msgid "Anthropic"
 msgstr "Anthropic"
 
-#: src/iac_code/commands/auth.py:740 src/iac_code/providers/registry.py:412
+#: src/iac_code/commands/auth.py:759 src/iac_code/providers/registry.py:417
 msgid "Google Gemini"
 msgstr "Google Gemini"
 
-#: src/iac_code/commands/auth.py:741 src/iac_code/providers/registry.py:425
+#: src/iac_code/commands/auth.py:760 src/iac_code/providers/registry.py:430
 msgid "Azure OpenAI"
 msgstr "Azure OpenAI"
 
-#: src/iac_code/commands/auth.py:742 src/iac_code/providers/registry.py:424
+#: src/iac_code/commands/auth.py:761 src/iac_code/providers/registry.py:429
 msgid "OpenRouter"
 msgstr "OpenRouter"
 
-#: src/iac_code/commands/auth.py:743
+#: src/iac_code/commands/auth.py:762
 msgid "Local"
 msgstr "Local"
 
-#: src/iac_code/commands/auth.py:744
+#: src/iac_code/commands/auth.py:763
 msgid "Compatible"
 msgstr "Compatible"
 
-#: src/iac_code/commands/auth.py:761
-msgid "Select Cloud Provider"
-msgstr "Seleccionar proveedor de cloud"
-
-#: src/iac_code/commands/auth.py:777
+#: src/iac_code/commands/auth.py:796
 msgid "Credential"
 msgstr "Credencial"
 
-#: src/iac_code/commands/auth.py:778 src/iac_code/commands/auth.py:875
-#: src/iac_code/commands/auth.py:980 src/iac_code/ui/renderer.py:418
+#: src/iac_code/commands/auth.py:797 src/iac_code/commands/auth.py:894
+#: src/iac_code/commands/auth.py:999 src/iac_code/ui/renderer.py:418
 msgid "Region"
 msgstr "Región"
 
-#: src/iac_code/commands/auth.py:780
+#: src/iac_code/commands/auth.py:799
 msgid "Configure Alibaba Cloud"
 msgstr "Configurar Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:863
+#: src/iac_code/commands/auth.py:882
 msgid "Current configuration"
 msgstr "Configuración actual"
 
-#: src/iac_code/commands/auth.py:865
+#: src/iac_code/commands/auth.py:884
 msgid "Mode"
 msgstr "Modo"
 
-#: src/iac_code/commands/auth.py:872
+#: src/iac_code/commands/auth.py:891
 msgid "(not set)"
 msgstr "(sin definir)"
 
-#: src/iac_code/commands/auth.py:889
+#: src/iac_code/commands/auth.py:908
 msgid "Configure Alibaba Cloud credentials"
 msgstr "Configurar credenciales de Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:902
+#: src/iac_code/commands/auth.py:921
 msgid "Reconfigure credential"
 msgstr "Reconfigurar la credencial"
 
-#: src/iac_code/commands/auth.py:915
+#: src/iac_code/commands/auth.py:934
 msgid "Select credential type"
 msgstr "Seleccionar tipo de credencial"
 
-#: src/iac_code/commands/auth.py:965
+#: src/iac_code/commands/auth.py:984
 msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
 msgstr "Configurado: credenciales de Alibaba Cloud guardadas en ~/.iac-code"
 
-#: src/iac_code/commands/auth.py:972
+#: src/iac_code/commands/auth.py:991
 msgid "Configure Alibaba Cloud region"
 msgstr "Configurar la región de Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:998
+#: src/iac_code/commands/auth.py:1017
 msgid "Configured: Alibaba Cloud region saved to ~/.iac-code"
 msgstr "Configurado: región de Alibaba Cloud guardada en ~/.iac-code"
 
@@ -782,8 +792,8 @@ msgstr "El comando debug requiere un contexto."
 msgid "No active session."
 msgstr "No hay ninguna sesión activa."
 
-#: src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py:82
-#: src/iac_code/commands/model.py:86
+#: src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py:88
+#: src/iac_code/commands/model.py:92
 msgid "No configured providers. Run /auth first."
 msgstr "No hay proveedores configurados. Ejecute /auth primero."
 
@@ -845,17 +855,26 @@ msgstr "Mostrar sugerencias de comandos"
 msgid "Exit"
 msgstr "Salir"
 
-#: src/iac_code/commands/model.py:75 src/iac_code/commands/model.py:130
+#: src/iac_code/commands/model.py:49
+#, python-brace-format
+msgid ""
+"Model selection is locked by '{source}'. To change, modify llm_source in "
+"settings.yml."
+msgstr ""
+"La selección de modelo está bloqueada por '{source}'. Para cambiar, "
+"modifique llm_source en settings.yml."
+
+#: src/iac_code/commands/model.py:81 src/iac_code/commands/model.py:136
 #, python-brace-format
 msgid "Model switched to: {model}"
 msgstr "Modelo cambiado a: {model}"
 
-#: src/iac_code/commands/model.py:79
+#: src/iac_code/commands/model.py:85
 #, python-brace-format
 msgid "Current model: {model}"
 msgstr "Modelo actual: {model}"
 
-#: src/iac_code/commands/model.py:105
+#: src/iac_code/commands/model.py:111
 #, python-brace-format
 msgid "Kept model as {model}"
 msgstr "Se mantiene el modelo como {model}"
@@ -963,79 +982,79 @@ msgstr ""
 " correcta (actual: {base_url}). Muchos endpoints compatibles con OpenAI "
 "requieren el sufijo /v1 (p. ej., {base_url}/v1)."
 
-#: src/iac_code/providers/registry.py:406
+#: src/iac_code/providers/registry.py:411
 msgid "Alibaba Cloud Bailian"
 msgstr "Alibaba Cloud Bailian"
 
-#: src/iac_code/providers/registry.py:407
+#: src/iac_code/providers/registry.py:412
 msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "Alibaba Cloud Bailian Token Plan"
 
-#: src/iac_code/providers/registry.py:411
+#: src/iac_code/providers/registry.py:416
 msgid "OpenAPI Compatible"
 msgstr "Compatible con OpenAPI"
 
-#: src/iac_code/providers/registry.py:413
+#: src/iac_code/providers/registry.py:418
 msgid "Kimi (China)"
 msgstr "Kimi (China)"
 
-#: src/iac_code/providers/registry.py:414
+#: src/iac_code/providers/registry.py:419
 msgid "Kimi (International)"
 msgstr "Kimi (Internacional)"
 
-#: src/iac_code/providers/registry.py:415
+#: src/iac_code/providers/registry.py:420
 msgid "MiniMax (China)"
 msgstr "MiniMax (China)"
 
-#: src/iac_code/providers/registry.py:416
+#: src/iac_code/providers/registry.py:421
 msgid "MiniMax (International)"
 msgstr "MiniMax (Internacional)"
 
-#: src/iac_code/providers/registry.py:418
+#: src/iac_code/providers/registry.py:423
 msgid "ZhiPu AI (International)"
 msgstr "ZhiPu AI (Internacional)"
 
-#: src/iac_code/providers/registry.py:420
+#: src/iac_code/providers/registry.py:425
 msgid "SiliconFlow (China)"
 msgstr "SiliconFlow (China)"
 
-#: src/iac_code/providers/registry.py:421
+#: src/iac_code/providers/registry.py:426
 msgid "SiliconFlow (International)"
 msgstr "SiliconFlow (Internacional)"
 
-#: src/iac_code/providers/registry.py:422
+#: src/iac_code/providers/registry.py:427
 msgid "Ollama (Local)"
 msgstr "Ollama (Local)"
 
-#: src/iac_code/providers/registry.py:423
+#: src/iac_code/providers/registry.py:428
 msgid "LM Studio (Local)"
 msgstr "LM Studio (Local)"
 
-#: src/iac_code/providers/registry.py:426
+#: src/iac_code/providers/registry.py:431
 msgid "ModelScope"
 msgstr "ModelScope"
 
-#: src/iac_code/providers/registry.py:427
+#: src/iac_code/providers/registry.py:432
 msgid "Alibaba Cloud CodingPlan"
 msgstr "Alibaba Cloud CodingPlan"
 
-#: src/iac_code/providers/registry.py:428
+#: src/iac_code/providers/registry.py:433
 msgid "Alibaba Cloud CodingPlan (International)"
 msgstr "Alibaba Cloud CodingPlan (Internacional)"
 
-#: src/iac_code/providers/registry.py:429
+#: src/iac_code/providers/registry.py:434
 msgid "ZhiPu AI CodingPlan"
 msgstr "ZhiPu AI CodingPlan"
 
-#: src/iac_code/providers/registry.py:430
+#: src/iac_code/providers/registry.py:435
 msgid "ZhiPu AI CodingPlan (International)"
 msgstr "ZhiPu AI CodingPlan (Internacional)"
 
-#: src/iac_code/providers/registry.py:431
+#: src/iac_code/providers/registry.py:436
 msgid "Volcengine CodingPlan"
 msgstr "Volcengine CodingPlan"
 
-#: src/iac_code/providers/registry.py:432
+#: src/iac_code/providers/registry.py:437
 msgid "Anthropic Compatible"
 msgstr "Compatible con Anthropic"
 
@@ -1055,7 +1074,7 @@ msgstr ""
 " QwenPaw (elimine 'llm_source: qwenpaw' de settings.yml)."
 
 #: src/iac_code/services/permissions/pipeline.py:54
-#: src/iac_code/tools/base.py:185 src/iac_code/tools/bash/bash_tool.py:154
+#: src/iac_code/tools/base.py:190 src/iac_code/tools/bash/bash_tool.py:158
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "¿Permitir {}?"
@@ -1257,11 +1276,11 @@ msgstr "Ejecutando {cmd}"
 msgid "Running command..."
 msgstr "Ejecutando comando..."
 
-#: src/iac_code/tools/bash/command_parser.py:41
+#: src/iac_code/tools/bash/command_parser.py:42
 msgid "parse error"
 msgstr "Error de análisis"
 
-#: src/iac_code/tools/bash/command_parser.py:44
+#: src/iac_code/tools/bash/command_parser.py:46
 msgid "unsupported shell construct"
 msgstr "Construcción de shell no soportada"
 
@@ -1270,53 +1289,57 @@ msgstr "Construcción de shell no soportada"
 msgid "path outside allowed directories: {}"
 msgstr "Ruta fuera de los directorios permitidos: {}"
 
-#: src/iac_code/tools/bash/permissions.py:101
+#: src/iac_code/tools/bash/permissions.py:135
 #, python-brace-format
 msgid "matched deny rule(s): {}"
 msgstr "Regla(s) de denegación coincidente(s): {}"
 
-#: src/iac_code/tools/bash/permissions.py:108
+#: src/iac_code/tools/bash/permissions.py:142
 #, python-brace-format
 msgid "matched ask rule(s): {}"
 msgstr "Regla(s) de consulta coincidente(s): {}"
 
-#: src/iac_code/tools/bash/permissions.py:120
-#: src/iac_code/tools/bash/permissions.py:178
+#: src/iac_code/tools/bash/permissions.py:154
+#: src/iac_code/tools/bash/permissions.py:220
 #, python-brace-format
 msgid "matched allow rule(s): {}"
 msgstr "Regla(s) de permiso coincidente(s): {}"
 
-#: src/iac_code/tools/bash/permissions.py:129
+#: src/iac_code/tools/bash/permissions.py:162
+msgid "complex command requires confirmation"
+msgstr "El comando complejo requiere confirmación"
+
+#: src/iac_code/tools/bash/permissions.py:171
 msgid "sed in-place edit requires confirmation"
 msgstr "La edición sed in situ requiere confirmación"
 
-#: src/iac_code/tools/bash/permissions.py:152
+#: src/iac_code/tools/bash/permissions.py:194
 msgid "command failed basic safety checks"
 msgstr "El comando no pasó las comprobaciones básicas de seguridad"
 
-#: src/iac_code/tools/bash/permissions.py:168
+#: src/iac_code/tools/bash/permissions.py:210
 #, python-brace-format
 msgid "matched deny rule(s) on full command: {}"
 msgstr "Regla(s) de denegación del comando completo: {}"
 
-#: src/iac_code/tools/bash/permissions.py:185
+#: src/iac_code/tools/bash/permissions.py:227
 msgid "command too complex to analyze"
 msgstr "Comando demasiado complejo para analizar"
 
-#: src/iac_code/tools/bash/permissions.py:187
+#: src/iac_code/tools/bash/permissions.py:229
 msgid "could not parse command"
 msgstr "No se pudo analizar el comando"
 
-#: src/iac_code/tools/bash/permissions.py:203
+#: src/iac_code/tools/bash/permissions.py:245
 #, python-brace-format
 msgid "too many subcommands (>{})"
 msgstr "Demasiados subcomandos (>{})"
 
-#: src/iac_code/tools/bash/permissions.py:215
+#: src/iac_code/tools/bash/permissions.py:258
 msgid "multiple cd commands in compound command"
 msgstr "Múltiples comandos cd en comando compuesto"
 
-#: src/iac_code/tools/bash/permissions.py:227
+#: src/iac_code/tools/bash/permissions.py:271
 msgid "cd combined with git in compound command"
 msgstr "cd combinado con git en comando compuesto"
 
@@ -1588,13 +1611,13 @@ msgid "Log file"
 msgstr "Archivo de registro"
 
 #: src/iac_code/ui/renderer.py:351 src/iac_code/ui/renderer.py:621
-#: src/iac_code/ui/renderer.py:1380
+#: src/iac_code/ui/renderer.py:1402
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "Razonamiento durante {seconds:.1f} s"
 
 #: src/iac_code/ui/renderer.py:367 src/iac_code/ui/renderer.py:653
-#: src/iac_code/ui/renderer.py:1401
+#: src/iac_code/ui/renderer.py:1423
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o para expandir)"
 
@@ -1654,24 +1677,29 @@ msgstr "¿Permitir esta acción?"
 msgid "Yes, allow once"
 msgstr "Sí, permitir una vez"
 
-#: src/iac_code/ui/renderer.py:1304
+#: src/iac_code/ui/renderer.py:1306
 #, python-brace-format
 msgid "Yes, always allow \"{rule}\" (this session)"
 msgstr "Sí, permitir siempre \"{rule}\" (esta sesión)"
 
-#: src/iac_code/ui/renderer.py:1309
+#: src/iac_code/ui/renderer.py:1311
 msgid "Yes, allow always for this tool"
 msgstr "Sí, permitir siempre esta herramienta"
 
-#: src/iac_code/ui/renderer.py:1313
+#: src/iac_code/ui/renderer.py:1314
 msgid "No, reject once"
 msgstr "No, rechazar una vez"
 
-#: src/iac_code/ui/renderer.py:1313
+#: src/iac_code/ui/renderer.py:1314
 msgid "default"
 msgstr "predeterminado"
 
-#: src/iac_code/ui/renderer.py:1314
+#: src/iac_code/ui/renderer.py:1321
+#, python-brace-format
+msgid "No, always deny \"{rule}\" (this session)"
+msgstr "No, siempre denegar \"{rule}\" (esta sesión)"
+
+#: src/iac_code/ui/renderer.py:1326
 msgid "No, always reject this tool"
 msgstr "No, rechazar siempre esta herramienta"
 

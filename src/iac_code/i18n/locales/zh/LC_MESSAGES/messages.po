@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-18 12:25+0800\n"
+"POT-Creation-Date: 2026-05-18 16:59+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -519,212 +519,220 @@ msgstr "恢复之前的会话"
 msgid "[conversation id or search term]"
 msgstr "[会话 ID 或搜索词]"
 
-#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:817
+#: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:836
 #: src/iac_code/ui/core/prompt_input.py:373
 msgid "Navigate"
 msgstr "导航"
 
-#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:367
-#: src/iac_code/commands/auth.py:401 src/iac_code/commands/auth.py:408
-#: src/iac_code/commands/auth.py:432 src/iac_code/commands/auth.py:817
-#: src/iac_code/commands/auth.py:1007 src/iac_code/ui/core/prompt_input.py:373
+#: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:368
+#: src/iac_code/commands/auth.py:402 src/iac_code/commands/auth.py:409
+#: src/iac_code/commands/auth.py:433 src/iac_code/commands/auth.py:836
+#: src/iac_code/commands/auth.py:1026 src/iac_code/ui/core/prompt_input.py:373
 msgid "Confirm"
 msgstr "确认"
 
-#: src/iac_code/commands/auth.py:245 src/iac_code/commands/auth.py:365
-#: src/iac_code/commands/auth.py:367 src/iac_code/commands/auth.py:401
-#: src/iac_code/commands/auth.py:408 src/iac_code/commands/auth.py:432
-#: src/iac_code/commands/auth.py:817 src/iac_code/commands/auth.py:902
-#: src/iac_code/commands/auth.py:1007
+#: src/iac_code/commands/auth.py:246 src/iac_code/commands/auth.py:366
+#: src/iac_code/commands/auth.py:368 src/iac_code/commands/auth.py:402
+#: src/iac_code/commands/auth.py:409 src/iac_code/commands/auth.py:433
+#: src/iac_code/commands/auth.py:836 src/iac_code/commands/auth.py:921
+#: src/iac_code/commands/auth.py:1026
 msgid "Back"
 msgstr "返回"
 
-#: src/iac_code/commands/auth.py:365
+#: src/iac_code/commands/auth.py:366
 msgid "Keep"
 msgstr "保留"
 
-#: src/iac_code/commands/auth.py:365
+#: src/iac_code/commands/auth.py:366
 msgid "Re-enter"
 msgstr "重新输入"
 
-#: src/iac_code/commands/auth.py:507 src/iac_code/commands/auth.py:631
-#: src/iac_code/commands/auth.py:651
+#: src/iac_code/commands/auth.py:508 src/iac_code/commands/auth.py:650
+#: src/iac_code/commands/auth.py:670
 msgid " (current)"
 msgstr " (当前)"
 
-#: src/iac_code/commands/auth.py:510
+#: src/iac_code/commands/auth.py:511
 msgid "Custom model..."
 msgstr "自定义模型..."
 
-#: src/iac_code/commands/auth.py:513
+#: src/iac_code/commands/auth.py:514
 #, python-brace-format
 msgid "Select model for {provider}"
 msgstr "为 {provider} 选择模型"
 
-#: src/iac_code/commands/auth.py:515
+#: src/iac_code/commands/auth.py:516
 msgid "Select model"
 msgstr "选择模型"
 
-#: src/iac_code/commands/auth.py:523
+#: src/iac_code/commands/auth.py:524
 msgid "Enter custom model name: "
 msgstr "输入自定义模型名称："
 
-#: src/iac_code/commands/auth.py:549
+#: src/iac_code/commands/auth.py:550
 msgid "Error: console not available"
 msgstr "错误：控制台不可用"
 
 #: src/iac_code/commands/auth.py:576
-msgid "Configure LLM Provider"
-msgstr "配置 LLM 提供商"
+#, python-brace-format
+msgid ""
+"LLM provider is locked by '{source}'. To change, modify llm_source in "
+"settings.yml."
+msgstr "LLM 提供商已被 '{source}' 锁定。如需修改，请调整 settings.yml 中的 llm_source 配置。"
 
-#: src/iac_code/commands/auth.py:577
-msgid "Configure IaC Cloud Service"
-msgstr "配置 IaC 云服务"
+#: src/iac_code/commands/auth.py:580 src/iac_code/commands/auth.py:780
+msgid "Select Cloud Provider"
+msgstr "选择云服务商"
 
-#: src/iac_code/commands/auth.py:579
-msgid "Select configuration type"
-msgstr "选择配置类型"
-
-#: src/iac_code/commands/auth.py:581 src/iac_code/commands/auth.py:676
-#: src/iac_code/commands/auth.py:692 src/iac_code/commands/auth.py:770
-#: src/iac_code/commands/auth.py:943 src/iac_code/commands/auth.py:984
+#: src/iac_code/commands/auth.py:582 src/iac_code/commands/auth.py:589
+#: src/iac_code/commands/auth.py:600 src/iac_code/commands/auth.py:695
+#: src/iac_code/commands/auth.py:711 src/iac_code/commands/auth.py:789
+#: src/iac_code/commands/auth.py:962 src/iac_code/commands/auth.py:1003
 msgid "Auth cancelled"
 msgstr "认证已取消"
 
-#: src/iac_code/commands/auth.py:635
+#: src/iac_code/commands/auth.py:595
+msgid "Configure LLM Provider"
+msgstr "配置 LLM 提供商"
+
+#: src/iac_code/commands/auth.py:596
+msgid "Configure IaC Cloud Service"
+msgstr "配置 IaC 云服务"
+
+#: src/iac_code/commands/auth.py:598
+msgid "Select configuration type"
+msgstr "选择配置类型"
+
+#: src/iac_code/commands/auth.py:654
 msgid "Select provider"
 msgstr "选择提供商"
 
-#: src/iac_code/commands/auth.py:656 src/iac_code/commands/auth.py:745
+#: src/iac_code/commands/auth.py:675 src/iac_code/commands/auth.py:764
 #, python-brace-format
 msgid "Select provider — {group}"
 msgstr "选择提供商 — {group}"
 
-#: src/iac_code/commands/auth.py:669
+#: src/iac_code/commands/auth.py:688
 #, python-brace-format
 msgid "Configure {provider}"
 msgstr "配置 {provider}"
 
-#: src/iac_code/commands/auth.py:685
+#: src/iac_code/commands/auth.py:704
 #, python-brace-format
 msgid "Enter API key for {provider}"
 msgstr "为 {provider} 输入 API 密钥"
 
-#: src/iac_code/commands/auth.py:723
+#: src/iac_code/commands/auth.py:742
 #, python-brace-format
 msgid "{status}: {provider} / {model}"
 msgstr "{status}：{provider} / {model}"
 
-#: src/iac_code/commands/auth.py:724
+#: src/iac_code/commands/auth.py:743
 msgid "Configured"
 msgstr "已配置"
 
-#: src/iac_code/commands/auth.py:731 src/iac_code/commands/auth.py:752
+#: src/iac_code/commands/auth.py:750 src/iac_code/commands/auth.py:771
 msgid "Alibaba Cloud"
 msgstr "阿里云"
 
-#: src/iac_code/commands/auth.py:732 src/iac_code/providers/registry.py:417
+#: src/iac_code/commands/auth.py:751 src/iac_code/providers/registry.py:422
 msgid "ZhiPu AI"
 msgstr "智谱 AI"
 
-#: src/iac_code/commands/auth.py:733
+#: src/iac_code/commands/auth.py:752
 msgid "Kimi"
 msgstr "Kimi"
 
-#: src/iac_code/commands/auth.py:734
+#: src/iac_code/commands/auth.py:753
 msgid "MiniMax"
 msgstr "MiniMax"
 
-#: src/iac_code/commands/auth.py:735 src/iac_code/providers/registry.py:419
+#: src/iac_code/commands/auth.py:754 src/iac_code/providers/registry.py:424
 msgid "Volcengine"
 msgstr "火山引擎"
 
-#: src/iac_code/commands/auth.py:736
+#: src/iac_code/commands/auth.py:755
 msgid "SiliconFlow"
 msgstr "硅基流动"
 
-#: src/iac_code/commands/auth.py:737 src/iac_code/providers/registry.py:410
+#: src/iac_code/commands/auth.py:756 src/iac_code/providers/registry.py:415
 msgid "DeepSeek"
 msgstr "DeepSeek"
 
-#: src/iac_code/commands/auth.py:738 src/iac_code/providers/registry.py:408
+#: src/iac_code/commands/auth.py:757 src/iac_code/providers/registry.py:413
 msgid "OpenAI"
 msgstr "OpenAI"
 
-#: src/iac_code/commands/auth.py:739 src/iac_code/providers/registry.py:409
+#: src/iac_code/commands/auth.py:758 src/iac_code/providers/registry.py:414
 msgid "Anthropic"
 msgstr "Anthropic"
 
-#: src/iac_code/commands/auth.py:740 src/iac_code/providers/registry.py:412
+#: src/iac_code/commands/auth.py:759 src/iac_code/providers/registry.py:417
 msgid "Google Gemini"
 msgstr "Google Gemini"
 
-#: src/iac_code/commands/auth.py:741 src/iac_code/providers/registry.py:425
+#: src/iac_code/commands/auth.py:760 src/iac_code/providers/registry.py:430
 msgid "Azure OpenAI"
 msgstr "Azure OpenAI"
 
-#: src/iac_code/commands/auth.py:742 src/iac_code/providers/registry.py:424
+#: src/iac_code/commands/auth.py:761 src/iac_code/providers/registry.py:429
 msgid "OpenRouter"
 msgstr "OpenRouter"
 
-#: src/iac_code/commands/auth.py:743
+#: src/iac_code/commands/auth.py:762
 msgid "Local"
 msgstr "本地模型"
 
-#: src/iac_code/commands/auth.py:744
+#: src/iac_code/commands/auth.py:763
 msgid "Compatible"
 msgstr "兼容模式"
 
-#: src/iac_code/commands/auth.py:761
-msgid "Select Cloud Provider"
-msgstr "选择云服务商"
-
-#: src/iac_code/commands/auth.py:777
+#: src/iac_code/commands/auth.py:796
 msgid "Credential"
 msgstr "凭证"
 
-#: src/iac_code/commands/auth.py:778 src/iac_code/commands/auth.py:875
-#: src/iac_code/commands/auth.py:980 src/iac_code/ui/renderer.py:418
+#: src/iac_code/commands/auth.py:797 src/iac_code/commands/auth.py:894
+#: src/iac_code/commands/auth.py:999 src/iac_code/ui/renderer.py:418
 msgid "Region"
 msgstr "地域"
 
-#: src/iac_code/commands/auth.py:780
+#: src/iac_code/commands/auth.py:799
 msgid "Configure Alibaba Cloud"
 msgstr "配置阿里云"
 
-#: src/iac_code/commands/auth.py:863
+#: src/iac_code/commands/auth.py:882
 msgid "Current configuration"
 msgstr "当前配置"
 
-#: src/iac_code/commands/auth.py:865
+#: src/iac_code/commands/auth.py:884
 msgid "Mode"
 msgstr "模式"
 
-#: src/iac_code/commands/auth.py:872
+#: src/iac_code/commands/auth.py:891
 msgid "(not set)"
 msgstr "（未设置）"
 
-#: src/iac_code/commands/auth.py:889
+#: src/iac_code/commands/auth.py:908
 msgid "Configure Alibaba Cloud credentials"
 msgstr "配置阿里云凭证"
 
-#: src/iac_code/commands/auth.py:902
+#: src/iac_code/commands/auth.py:921
 msgid "Reconfigure credential"
 msgstr "重新配置凭证"
 
-#: src/iac_code/commands/auth.py:915
+#: src/iac_code/commands/auth.py:934
 msgid "Select credential type"
 msgstr "选择凭证类型"
 
-#: src/iac_code/commands/auth.py:965
+#: src/iac_code/commands/auth.py:984
 msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
 msgstr "已配置：阿里云凭证已保存到 ~/.iac-code"
 
-#: src/iac_code/commands/auth.py:972
+#: src/iac_code/commands/auth.py:991
 msgid "Configure Alibaba Cloud region"
 msgstr "配置阿里云地域"
 
-#: src/iac_code/commands/auth.py:998
+#: src/iac_code/commands/auth.py:1017
 msgid "Configured: Alibaba Cloud region saved to ~/.iac-code"
 msgstr "已配置：阿里云地域已保存到 ~/.iac-code"
 
@@ -757,8 +765,8 @@ msgstr "调试命令需要上下文。"
 msgid "No active session."
 msgstr "没有活动的会话。"
 
-#: src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py:82
-#: src/iac_code/commands/model.py:86
+#: src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py:88
+#: src/iac_code/commands/model.py:92
 msgid "No configured providers. Run /auth first."
 msgstr "没有已配置的提供商。请先运行 /auth。"
 
@@ -820,17 +828,24 @@ msgstr "显示命令建议"
 msgid "Exit"
 msgstr "退出"
 
-#: src/iac_code/commands/model.py:75 src/iac_code/commands/model.py:130
+#: src/iac_code/commands/model.py:49
+#, python-brace-format
+msgid ""
+"Model selection is locked by '{source}'. To change, modify llm_source in "
+"settings.yml."
+msgstr "模型选择已被 '{source}' 锁定。如需修改，请调整 settings.yml 中的 llm_source 配置。"
+
+#: src/iac_code/commands/model.py:81 src/iac_code/commands/model.py:136
 #, python-brace-format
 msgid "Model switched to: {model}"
 msgstr "模型已切换为：{model}"
 
-#: src/iac_code/commands/model.py:79
+#: src/iac_code/commands/model.py:85
 #, python-brace-format
 msgid "Current model: {model}"
 msgstr "当前模型：{model}"
 
-#: src/iac_code/commands/model.py:105
+#: src/iac_code/commands/model.py:111
 #, python-brace-format
 msgid "Kept model as {model}"
 msgstr "保持模型为 {model}"
@@ -928,79 +943,79 @@ msgstr ""
 "API 返回了无效响应。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
 "后缀（如 {base_url}/v1）。"
 
-#: src/iac_code/providers/registry.py:406
+#: src/iac_code/providers/registry.py:411
 msgid "Alibaba Cloud Bailian"
 msgstr "阿里云百炼"
 
-#: src/iac_code/providers/registry.py:407
+#: src/iac_code/providers/registry.py:412
 msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "阿里云百炼 Token Plan"
 
-#: src/iac_code/providers/registry.py:411
+#: src/iac_code/providers/registry.py:416
 msgid "OpenAPI Compatible"
 msgstr "OpenAPI 兼容"
 
-#: src/iac_code/providers/registry.py:413
+#: src/iac_code/providers/registry.py:418
 msgid "Kimi (China)"
 msgstr "Kimi（中国版）"
 
-#: src/iac_code/providers/registry.py:414
+#: src/iac_code/providers/registry.py:419
 msgid "Kimi (International)"
 msgstr "Kimi（国际版）"
 
-#: src/iac_code/providers/registry.py:415
+#: src/iac_code/providers/registry.py:420
 msgid "MiniMax (China)"
 msgstr "MiniMax（中国版）"
 
-#: src/iac_code/providers/registry.py:416
+#: src/iac_code/providers/registry.py:421
 msgid "MiniMax (International)"
 msgstr "MiniMax（国际版）"
 
-#: src/iac_code/providers/registry.py:418
+#: src/iac_code/providers/registry.py:423
 msgid "ZhiPu AI (International)"
 msgstr "智谱 AI（国际版）"
 
-#: src/iac_code/providers/registry.py:420
+#: src/iac_code/providers/registry.py:425
 msgid "SiliconFlow (China)"
 msgstr "硅基流动（中国版）"
 
-#: src/iac_code/providers/registry.py:421
+#: src/iac_code/providers/registry.py:426
 msgid "SiliconFlow (International)"
 msgstr "硅基流动（国际版）"
 
-#: src/iac_code/providers/registry.py:422
+#: src/iac_code/providers/registry.py:427
 msgid "Ollama (Local)"
 msgstr "Ollama（本地）"
 
-#: src/iac_code/providers/registry.py:423
+#: src/iac_code/providers/registry.py:428
 msgid "LM Studio (Local)"
 msgstr "LM Studio（本地）"
 
-#: src/iac_code/providers/registry.py:426
+#: src/iac_code/providers/registry.py:431
 msgid "ModelScope"
 msgstr "魔搭"
 
-#: src/iac_code/providers/registry.py:427
+#: src/iac_code/providers/registry.py:432
 msgid "Alibaba Cloud CodingPlan"
 msgstr "阿里云编程计划"
 
-#: src/iac_code/providers/registry.py:428
+#: src/iac_code/providers/registry.py:433
 msgid "Alibaba Cloud CodingPlan (International)"
 msgstr "阿里云编程计划（国际版）"
 
-#: src/iac_code/providers/registry.py:429
+#: src/iac_code/providers/registry.py:434
 msgid "ZhiPu AI CodingPlan"
 msgstr "智谱 AI 编程计划"
 
-#: src/iac_code/providers/registry.py:430
+#: src/iac_code/providers/registry.py:435
 msgid "ZhiPu AI CodingPlan (International)"
 msgstr "智谱 AI 编程计划（国际版）"
 
-#: src/iac_code/providers/registry.py:431
+#: src/iac_code/providers/registry.py:436
 msgid "Volcengine CodingPlan"
 msgstr "火山引擎编程计划"
 
-#: src/iac_code/providers/registry.py:432
+#: src/iac_code/providers/registry.py:437
 msgid "Anthropic Compatible"
 msgstr "Anthropic 兼容"
 
@@ -1019,7 +1034,7 @@ msgstr ""
 "'llm_source: qwenpaw'）。"
 
 #: src/iac_code/services/permissions/pipeline.py:54
-#: src/iac_code/tools/base.py:185 src/iac_code/tools/bash/bash_tool.py:154
+#: src/iac_code/tools/base.py:190 src/iac_code/tools/bash/bash_tool.py:158
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "允许 {}？"
@@ -1216,11 +1231,11 @@ msgstr "正在运行 {cmd}"
 msgid "Running command..."
 msgstr "正在运行命令..."
 
-#: src/iac_code/tools/bash/command_parser.py:41
+#: src/iac_code/tools/bash/command_parser.py:42
 msgid "parse error"
 msgstr "解析错误"
 
-#: src/iac_code/tools/bash/command_parser.py:44
+#: src/iac_code/tools/bash/command_parser.py:46
 msgid "unsupported shell construct"
 msgstr "不支持的 Shell 语法结构"
 
@@ -1229,53 +1244,57 @@ msgstr "不支持的 Shell 语法结构"
 msgid "path outside allowed directories: {}"
 msgstr "路径不在允许的目录范围内：{}"
 
-#: src/iac_code/tools/bash/permissions.py:101
+#: src/iac_code/tools/bash/permissions.py:135
 #, python-brace-format
 msgid "matched deny rule(s): {}"
 msgstr "匹配到拒绝规则：{}"
 
-#: src/iac_code/tools/bash/permissions.py:108
+#: src/iac_code/tools/bash/permissions.py:142
 #, python-brace-format
 msgid "matched ask rule(s): {}"
 msgstr "匹配到询问规则：{}"
 
-#: src/iac_code/tools/bash/permissions.py:120
-#: src/iac_code/tools/bash/permissions.py:178
+#: src/iac_code/tools/bash/permissions.py:154
+#: src/iac_code/tools/bash/permissions.py:220
 #, python-brace-format
 msgid "matched allow rule(s): {}"
 msgstr "匹配到允许规则：{}"
 
-#: src/iac_code/tools/bash/permissions.py:129
+#: src/iac_code/tools/bash/permissions.py:162
+msgid "complex command requires confirmation"
+msgstr "复杂命令需要确认"
+
+#: src/iac_code/tools/bash/permissions.py:171
 msgid "sed in-place edit requires confirmation"
 msgstr "sed 原地编辑需要确认"
 
-#: src/iac_code/tools/bash/permissions.py:152
+#: src/iac_code/tools/bash/permissions.py:194
 msgid "command failed basic safety checks"
 msgstr "命令未通过基本安全检查"
 
-#: src/iac_code/tools/bash/permissions.py:168
+#: src/iac_code/tools/bash/permissions.py:210
 #, python-brace-format
 msgid "matched deny rule(s) on full command: {}"
 msgstr "完整命令匹配到拒绝规则：{}"
 
-#: src/iac_code/tools/bash/permissions.py:185
+#: src/iac_code/tools/bash/permissions.py:227
 msgid "command too complex to analyze"
 msgstr "命令过于复杂，无法分析"
 
-#: src/iac_code/tools/bash/permissions.py:187
+#: src/iac_code/tools/bash/permissions.py:229
 msgid "could not parse command"
 msgstr "无法解析命令"
 
-#: src/iac_code/tools/bash/permissions.py:203
+#: src/iac_code/tools/bash/permissions.py:245
 #, python-brace-format
 msgid "too many subcommands (>{})"
 msgstr "子命令过多（>{}）"
 
-#: src/iac_code/tools/bash/permissions.py:215
+#: src/iac_code/tools/bash/permissions.py:258
 msgid "multiple cd commands in compound command"
 msgstr "复合命令中包含多个 cd 命令"
 
-#: src/iac_code/tools/bash/permissions.py:227
+#: src/iac_code/tools/bash/permissions.py:271
 msgid "cd combined with git in compound command"
 msgstr "复合命令中 cd 与 git 组合使用"
 
@@ -1544,13 +1563,13 @@ msgid "Log file"
 msgstr "日志文件"
 
 #: src/iac_code/ui/renderer.py:351 src/iac_code/ui/renderer.py:621
-#: src/iac_code/ui/renderer.py:1380
+#: src/iac_code/ui/renderer.py:1402
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "思考完成（耗时 {seconds:.1f}s）"
 
 #: src/iac_code/ui/renderer.py:367 src/iac_code/ui/renderer.py:653
-#: src/iac_code/ui/renderer.py:1401
+#: src/iac_code/ui/renderer.py:1423
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o 展开)"
 
@@ -1610,24 +1629,29 @@ msgstr "是否允许执行此操作？"
 msgid "Yes, allow once"
 msgstr "是，仅本次允许"
 
-#: src/iac_code/ui/renderer.py:1304
+#: src/iac_code/ui/renderer.py:1306
 #, python-brace-format
 msgid "Yes, always allow \"{rule}\" (this session)"
 msgstr "是，本次会话始终允许 \"{rule}\""
 
-#: src/iac_code/ui/renderer.py:1309
+#: src/iac_code/ui/renderer.py:1311
 msgid "Yes, allow always for this tool"
 msgstr "是，始终允许此工具"
 
-#: src/iac_code/ui/renderer.py:1313
+#: src/iac_code/ui/renderer.py:1314
 msgid "No, reject once"
 msgstr "否，仅本次拒绝"
 
-#: src/iac_code/ui/renderer.py:1313
+#: src/iac_code/ui/renderer.py:1314
 msgid "default"
 msgstr "默认"
 
-#: src/iac_code/ui/renderer.py:1314
+#: src/iac_code/ui/renderer.py:1321
+#, python-brace-format
+msgid "No, always deny \"{rule}\" (this session)"
+msgstr "否，始终拒绝 \"{rule}\"（本次会话）"
+
+#: src/iac_code/ui/renderer.py:1326
 msgid "No, always reject this tool"
 msgstr "否，始终拒绝此工具"
 
