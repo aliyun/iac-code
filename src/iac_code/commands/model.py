@@ -14,7 +14,7 @@ from iac_code.commands.auth import (
     save_active_provider_config,
     select_model_interactive,
 )
-from iac_code.config import _load_yaml, get_active_provider_key, get_settings_path
+from iac_code.config import _load_yaml, get_active_provider_key, get_llm_source, get_settings_path
 from iac_code.i18n import _
 from iac_code.services.telemetry import log_event
 from iac_code.services.telemetry.names import Events
@@ -44,6 +44,12 @@ def _get_active_provider_models() -> list[str]:
 
 async def model_command(context: "CommandContext | None" = None, args: list[str] | None = None, **kwargs) -> str | None:
     """Switch or display current model."""
+    llm_source = get_llm_source()
+    if llm_source != "local":
+        return _("Model selection is locked by '{source}'. To change, modify llm_source in settings.yml.").format(
+            source=llm_source
+        )
+
     store = context.store if context else kwargs.get("store")
     args = args or []
 

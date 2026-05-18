@@ -1,5 +1,5 @@
 [project]
-name = "iac-code"
+name = "iac_code"
 dynamic = ["version"]
 description = "Your AI-powered Infrastructure as Code assistant"
 readme = "README.md"

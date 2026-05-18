@@ -370,3 +370,48 @@ class TestCloudAuthFlow:
 
         assert "Configured" in result
         assert saved["credential"].region_id == "cn-hangzhou"
+
+
+class TestAuthLlmSourceLock:
+    def test_auth_flow_locked_shows_cloud_select_with_lock_notice(self, monkeypatch):
+        """When llm_source is 'qwenpaw', _auth_flow shows lock notice in _select title."""
+        titles_seen = []
+
+        def fake_select(title, options, default_index=0):
+            titles_seen.append(title)
+            return 0  # select first cloud provider (aliyun)
+
+        monkeypatch.setattr("iac_code.commands.auth.get_llm_source", lambda: "qwenpaw")
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr("iac_code.commands.auth._aliyun_auth_flow", lambda: "cloud done")
+        result = _auth_flow(MagicMock(), MagicMock())
+        assert result == "cloud done"
+        assert any("qwenpaw" in t for t in titles_seen)
+
+    def test_auth_flow_locked_env_shows_lock_notice(self, monkeypatch):
+        """When llm_source is 'env', lock notice mentions 'env'."""
+        titles_seen = []
+
+        def fake_select(title, options, default_index=0):
+            titles_seen.append(title)
+            return 0
+
+        monkeypatch.setattr("iac_code.commands.auth.get_llm_source", lambda: "env")
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr("iac_code.commands.auth._aliyun_auth_flow", lambda: "cloud done")
+        _auth_flow(MagicMock(), MagicMock())
+        assert any("env" in t for t in titles_seen)
+
+    def test_auth_flow_locked_escape_returns_cancelled(self, monkeypatch):
+        """When locked and user presses Esc, return cancelled."""
+        monkeypatch.setattr("iac_code.commands.auth.get_llm_source", lambda: "qwenpaw")
+        monkeypatch.setattr("iac_code.commands.auth._select", lambda title, options, default_index=0: None)
+        result = _auth_flow(MagicMock(), MagicMock())
+        assert "cancel" in result.lower()
+
+    def test_auth_flow_normal_when_local(self, monkeypatch):
+        """When llm_source is 'local', _auth_flow shows category selection as usual."""
+        monkeypatch.setattr("iac_code.commands.auth.get_llm_source", lambda: "local")
+        monkeypatch.setattr("iac_code.commands.auth._select", lambda title, options, default_index=0: None)
+        result = _auth_flow(MagicMock(), MagicMock())
+        assert "cancel" in result.lower()

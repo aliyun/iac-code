@@ -30,7 +30,33 @@ def _collect_all_rules(rules_by_source: dict[str, list[str]]) -> list[str]:
     return out
 
 
-def _generate_suggestions(command: str) -> list[PermissionRuleValue]:
+def _generate_suggestions(
+    commands: list[SimpleCommand], sub_results: list[PermissionResult] | None = None
+) -> list[PermissionRuleValue]:
+    """Generate suggestions from sub-commands, skipping dangerous builtins and already-allowed ones."""
+    from iac_code.tools.bash.command_parser import DANGEROUS_BUILTINS
+
+    seen: set[str] = set()
+    result: list[PermissionRuleValue] = []
+    for i, cmd in enumerate(commands):
+        if not cmd.argv:
+            continue
+        if sub_results and i < len(sub_results) and sub_results[i].behavior == "allow":
+            continue
+        base = os.path.basename(cmd.argv[0])
+        if not base:
+            continue
+        if base in DANGEROUS_BUILTINS:
+            continue
+        rule = "{}:*".format(base)
+        if rule not in seen:
+            seen.add(rule)
+            result.append(PermissionRuleValue(tool_name="bash", rule_content=rule))
+    return result
+
+
+def _generate_suggestions_from_text(command: str) -> list[PermissionRuleValue]:
+    """Fallback: generate suggestions from raw command text."""
     normalized = normalize_command(command.strip())
     first = normalized.split(None, 1)[0] if normalized else ""
     if not first:
@@ -51,10 +77,18 @@ def _merge_results(results: list[PermissionResult]) -> PermissionResult:
     )
 
 
-def _with_suggestions_if_needed(result: PermissionResult, command: str) -> PermissionResult:
+def _with_suggestions_if_needed(
+    result: PermissionResult,
+    command: str,
+    commands: list[SimpleCommand] | None = None,
+    sub_results: list[PermissionResult] | None = None,
+) -> PermissionResult:
     if result.suggestions:
         return result
-    sug = _generate_suggestions(command)
+    if commands:
+        sug = _generate_suggestions(commands, sub_results=sub_results)
+    else:
+        sug = _generate_suggestions_from_text(command)
     if not sug:
         return result
     return PermissionResult(
@@ -122,6 +156,14 @@ def bash_tool_check_permission(
             behavior="allow",
             message=detail,
             reason=PermissionDecisionReason(type="rule", detail=detail),
+        )
+
+    if cmd.is_complex:
+        detail = _("complex command requires confirmation")
+        return PermissionResult(
+            behavior="ask",
+            message=detail,
+            reason=PermissionDecisionReason(type="complex_command", detail=detail),
         )
 
     base = cmd.argv[0] if cmd.argv else ""
@@ -208,6 +250,7 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
                 reason=PermissionDecisionReason(type="compound_limit", detail=detail),
             ),
             command,
+            commands=subcommands,
         )
 
     cd_bases = [c for c in subcommands if _command_base(c) == "cd"]
@@ -220,6 +263,7 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
                 reason=PermissionDecisionReason(type="compound_cd", detail=detail),
             ),
             command,
+            commands=subcommands,
         )
 
     has_git = any(_command_base(c) == "git" for c in subcommands)
@@ -232,9 +276,10 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
                 reason=PermissionDecisionReason(type="compound_cd_git", detail=detail),
             ),
             command,
+            commands=subcommands,
         )
 
     compound_has_cd = bool(cd_bases)
     sub_results = [bash_tool_check_permission(sc, context, compound_has_cd=compound_has_cd) for sc in subcommands]
     merged = _merge_results(sub_results)
-    return _with_suggestions_if_needed(merged, command)
+    return _with_suggestions_if_needed(merged, command, commands=subcommands, sub_results=sub_results)

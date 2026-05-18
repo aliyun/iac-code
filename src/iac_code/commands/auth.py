@@ -18,6 +18,7 @@ from iac_code.config import (
     _save_yaml,
     get_active_provider_key,
     get_credentials_path,
+    get_llm_source,
     get_provider_config,
     get_settings_path,
 )
@@ -570,6 +571,24 @@ async def auth_command(context: "CommandContext | None" = None, **kwargs) -> str
 
 def _auth_flow(console, store) -> str | None:
     """Auth flow running inside alternate screen."""
+    llm_source = get_llm_source()
+    if llm_source != "local":
+        lock_notice = _("LLM provider is locked by '{source}'. To change, modify llm_source in settings.yml.").format(
+            source=llm_source
+        )
+        options = [_cloud_provider_display(p["name"]) for p in CLOUD_PROVIDERS]
+        idx = _select("{}\n\n{}".format(lock_notice, _("Select Cloud Provider")), options)
+        if idx is None:
+            return _("Auth cancelled")
+        provider = CLOUD_PROVIDERS[idx]
+        if provider["name"] == "aliyun":
+            result = _aliyun_auth_flow()
+        else:
+            result = _BACK
+        if isinstance(result, _BackSentinel):
+            return _("Auth cancelled")
+        return result
+
     while True:
         # Step 0: Select category
         categories = [

@@ -131,6 +131,10 @@ class BashTool(Tool):
             return input.get("command", "")[:80]
         return None
 
+    @property
+    def supports_blanket_allow(self) -> bool:
+        return False
+
     def is_read_only(self, input: dict | None = None) -> bool:
         return False
 

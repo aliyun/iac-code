@@ -70,3 +70,27 @@ class TestBashToolCheckPermission:
         cmd = SimpleCommand(text="docker build .", argv=["docker", "build", "."])
         r = bash_tool_check_permission(cmd, _ctx())
         assert r.behavior == "passthrough"
+
+
+class TestIsComplexPermission:
+    def test_complex_command_defaults_to_ask(self):
+        cmd = SimpleCommand(text="eval ls", argv=["eval", "ls"], is_complex=True)
+        r = bash_tool_check_permission(cmd, _ctx())
+        assert r.behavior == "ask"
+
+    def test_complex_command_allow_rule_still_works(self):
+        ctx = _ctx(allow={"session": ["bash(eval:*)"]})
+        cmd = SimpleCommand(text="eval ls", argv=["eval", "ls"], is_complex=True)
+        r = bash_tool_check_permission(cmd, ctx)
+        assert r.behavior == "allow"
+
+    def test_complex_command_deny_rule_still_works(self):
+        ctx = _ctx(deny={"session": ["bash(eval:*)"]})
+        cmd = SimpleCommand(text="eval ls", argv=["eval", "ls"], is_complex=True)
+        r = bash_tool_check_permission(cmd, ctx)
+        assert r.behavior == "deny"
+
+    def test_non_complex_command_not_affected(self):
+        cmd = SimpleCommand(text="docker build .", argv=["docker", "build", "."], is_complex=False)
+        r = bash_tool_check_permission(cmd, _ctx())
+        assert r.behavior == "passthrough"

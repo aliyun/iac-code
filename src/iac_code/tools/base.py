@@ -158,6 +158,11 @@ class Tool(ABC):
 
     # --- Permission methods ---
     @property
+    def supports_blanket_allow(self) -> bool:
+        """Whether this tool supports blanket 'always allow this tool' permission."""
+        return True
+
+    @property
     def timeout(self) -> float | None:
         """Per-tool timeout in seconds. None means use the global default."""
         return None

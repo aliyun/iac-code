@@ -11,6 +11,43 @@ from iac_code.commands.model import (
 )
 
 
+@pytest.mark.asyncio
+class TestModelLocked:
+    async def test_model_locked_when_qwenpaw(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "qwenpaw")
+        store = MagicMock()
+        context = MagicMock(store=store)
+        result = await model_command(context=context)
+        assert "locked" in result.lower()
+        assert "qwenpaw" in result
+
+    async def test_model_locked_when_env(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "env")
+        store = MagicMock()
+        context = MagicMock(store=store)
+        result = await model_command(context=context)
+        assert "locked" in result.lower()
+        assert "env" in result
+
+    async def test_model_locked_with_args(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "qwenpaw")
+        store = MagicMock()
+        context = MagicMock(store=store)
+        result = await model_command(context=context, args=["gpt-4"])
+        assert "locked" in result.lower()
+        assert "qwenpaw" in result
+
+    async def test_model_not_locked_when_local(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
+        monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
+        monkeypatch.setattr("iac_code.commands.model.save_active_provider_config", lambda p, m: None)
+        store = MagicMock()
+        context = MagicMock(store=store)
+        result = await model_command(context=context, args=["claude-opus-4-6"])
+        assert "claude-opus-4-6" in result
+        assert "locked" not in result.lower()
+
+
 @pytest.fixture
 def fake_provider():
     return {
@@ -54,6 +91,7 @@ class TestGetActiveProviderModels:
 class TestModelCommand:
     async def test_explicit_args_switches_model(self, monkeypatch):
         calls = []
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
         monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr(
             "iac_code.commands.model.save_active_provider_config",
@@ -69,6 +107,7 @@ class TestModelCommand:
         store.set_state.assert_called_with(model="claude-opus-4-6")
 
     async def test_no_context_no_console_returns_current(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
         monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
         store = MagicMock()
         store.get_state.return_value = MagicMock(model="claude-sonnet-4-6")
@@ -76,6 +115,7 @@ class TestModelCommand:
         assert "claude-sonnet-4-6" in result
 
     async def test_no_configured_providers(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
         monkeypatch.setattr("iac_code.commands.model.get_configured_providers", lambda: [])
         monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: None)
         store = MagicMock()
@@ -89,6 +129,7 @@ class TestModelCommand:
     async def test_interactive_back_keeps_model(self, monkeypatch):
         from iac_code.commands.auth import _BACK
 
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
         monkeypatch.setattr("iac_code.commands.model.get_configured_providers", lambda: ["anthropic"])
         monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr(
@@ -105,6 +146,7 @@ class TestModelCommand:
         assert "kept" in result.lower() or "claude-sonnet-4-6" in result
 
     async def test_interactive_selects_new_model(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
         monkeypatch.setattr("iac_code.commands.model.get_configured_providers", lambda: ["anthropic"])
         monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr(

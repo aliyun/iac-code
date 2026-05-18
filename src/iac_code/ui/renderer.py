@@ -1292,28 +1292,38 @@ class Renderer:
             TextOption(label=_("Yes, allow once"), value="allow_once"),
         ]
 
-        has_suggestion = (
-            event.permission_result is not None
+        suggestions = (
+            event.permission_result.suggestions
+            if event.permission_result is not None
             and hasattr(event.permission_result, "suggestions")
             and event.permission_result.suggestions
+            else []
         )
-        if has_suggestion:
-            sug = event.permission_result.suggestions[0]
+        if suggestions:
+            rules_display = ", ".join(s.rule_content for s in suggestions)
             options.append(
                 TextOption(
-                    label=_('Yes, always allow "{rule}" (this session)').format(rule=sug.rule_content),
+                    label=_('Yes, always allow "{rule}" (this session)').format(rule=rules_display),
                     value="always_allow_rule",
                 )
             )
-        else:
+        elif tool and tool.supports_blanket_allow:
             options.append(TextOption(label=_("Yes, allow always for this tool"), value="always_allow"))
 
-        options.extend(
-            [
-                TextOption(label=_("No, reject once"), value="reject_once", description="({})".format(_("default"))),
-                TextOption(label=_("No, always reject this tool"), value="always_deny"),
-            ]
+        options.append(
+            TextOption(label=_("No, reject once"), value="reject_once", description="({})".format(_("default")))
         )
+
+        if suggestions:
+            rules_display = ", ".join(s.rule_content for s in suggestions)
+            options.append(
+                TextOption(
+                    label=_('No, always deny "{rule}" (this session)').format(rule=rules_display),
+                    value="always_deny_rule",
+                )
+            )
+
+        options.append(TextOption(label=_("No, always reject this tool"), value="always_deny"))
 
         select = Select(
             options=options,
@@ -1334,17 +1344,29 @@ class Renderer:
             record_permission(cache, tool_name, "always_allow")
             return True
         if result == "always_allow_rule":
-            if has_suggestion and self._app_state_store is not None:
+            if suggestions and self._app_state_store is not None:
                 perm_ctx = self._app_state_store.get_state().permission_context
                 if perm_ctx is not None:
                     import dataclasses
 
                     from iac_code.services.permissions.storage import apply_session_rule
 
-                    sug = event.permission_result.suggestions[0]
-                    new_ctx = apply_session_rule(perm_ctx, "allow", sug)
-                    self._app_state_store.set_state(lambda s: dataclasses.replace(s, permission_context=new_ctx))
+                    for sug in suggestions:
+                        perm_ctx = apply_session_rule(perm_ctx, "allow", sug)
+                    self._app_state_store.set_state(lambda s: dataclasses.replace(s, permission_context=perm_ctx))
             return True
+        if result == "always_deny_rule":
+            if suggestions and self._app_state_store is not None:
+                perm_ctx = self._app_state_store.get_state().permission_context
+                if perm_ctx is not None:
+                    import dataclasses
+
+                    from iac_code.services.permissions.storage import apply_session_rule
+
+                    for sug in suggestions:
+                        perm_ctx = apply_session_rule(perm_ctx, "deny", sug)
+                    self._app_state_store.set_state(lambda s: dataclasses.replace(s, permission_context=perm_ctx))
+            return False
         if result == "always_deny":
             record_permission(cache, tool_name, "always_deny")
             return False
