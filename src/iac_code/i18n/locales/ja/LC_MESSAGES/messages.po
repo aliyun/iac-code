@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.1.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-18 10:57+0800\n"
+"POT-Creation-Date: 2026-05-18 12:25+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: ja\n"
@@ -135,20 +135,19 @@ msgid "AI-powered infrastructure orchestration tool"
 msgstr "AI 駆動のインフラストラクチャ・オーケストレーションツール"
 
 #: src/iac_code/cli/main.py:40
-#, fuzzy
 msgid "Use iac-code as an A2A client."
-msgstr "iac-code を ACP サーバーとして実行します。"
+msgstr "iac-code を A2A クライアントとして使用します。"
 
 #: src/iac_code/cli/main.py:49
 msgid "YAML config file containing A2A client options"
-msgstr ""
+msgstr "A2A クライアントオプションを含む YAML 設定ファイル"
 
 #: src/iac_code/cli/main.py:56 src/iac_code/cli/main.py:1271
 #: src/iac_code/cli/main.py:1632 src/iac_code/cli/main.py:1671
 msgid ""
 "A2A client dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
-msgstr ""
+msgstr "A2A クライアントの依存関係が不足しています。次のコマンドでインストールしてください: pip install 'iac-code[a2a]'"
 
 #: src/iac_code/cli/main.py:70
 msgid "LLM model to use"
@@ -228,35 +227,36 @@ msgid "HTTP server host"
 msgstr "HTTP サーバーのホスト"
 
 #: src/iac_code/cli/main.py:446
-#, fuzzy
 msgid "Run iac-code as an A2A 1.0 server."
-msgstr "iac-code を ACP サーバーとして実行します。"
+msgstr "iac-code を A2A 1.0 サーバーとして実行します。"
 
 #: src/iac_code/cli/main.py:449
 msgid "YAML config file for A2A server options"
-msgstr ""
+msgstr "A2A サーバーオプション用の YAML 設定ファイル"
 
 #: src/iac_code/cli/main.py:453
 msgid ""
 "HTTP server port. 41242 is the iac-code default inspired by Gemini CLI, "
 "not a registered A2A port."
 msgstr ""
+"HTTP サーバーポート。41242 は Gemini CLI に触発された iac-code のデフォルトで、登録済みの A2A "
+"ポートではありません。"
 
 #: src/iac_code/cli/main.py:458
 msgid ""
 "A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or "
 "redis-streams"
-msgstr ""
+msgstr "A2A トランスポート: http、stdio、unix、websocket、grpc、grpc-jsonrpc、または redis-streams"
 
 #: src/iac_code/cli/main.py:505
 msgid ""
 "A2A server dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
-msgstr ""
+msgstr "A2A サーバーの依存関係が不足しています。次のコマンドでインストールしてください: pip install 'iac-code[a2a]'"
 
 #: src/iac_code/cli/main.py:554
 msgid "Send a prompt to an A2A JSON-RPC endpoint."
-msgstr ""
+msgstr "A2A JSON-RPC エンドポイントにプロンプトを送信します。"
 
 #: src/iac_code/cli/main.py:557 src/iac_code/cli/main.py:721
 #: src/iac_code/cli/main.py:774 src/iac_code/cli/main.py:834
@@ -264,27 +264,27 @@ msgstr ""
 #: src/iac_code/cli/main.py:1012 src/iac_code/cli/main.py:1069
 #: src/iac_code/cli/main.py:1125 src/iac_code/cli/main.py:1182
 msgid "A2A JSON-RPC endpoint URL"
-msgstr ""
+msgstr "A2A JSON-RPC エンドポイント URL"
 
 #: src/iac_code/cli/main.py:558 src/iac_code/cli/main.py:1227
 msgid "Route spec: name=url;skills=skill1,skill2;tags=tag1,tag2"
-msgstr ""
+msgstr "ルート仕様: name=url;skills=skill1,skill2;tags=tag1,tag2"
 
 #: src/iac_code/cli/main.py:559
 msgid "Named A2A route to call"
-msgstr ""
+msgstr "呼び出す名前付き A2A ルート"
 
 #: src/iac_code/cli/main.py:560
 msgid "Prompt to send"
-msgstr ""
+msgstr "送信するプロンプト"
 
 #: src/iac_code/cli/main.py:561
 msgid "Working directory metadata to send with the request"
-msgstr ""
+msgstr "リクエストと共に送信する作業ディレクトリのメタデータ"
 
 #: src/iac_code/cli/main.py:562
 msgid "A2A context ID to continue"
-msgstr ""
+msgstr "継続する A2A コンテキスト ID"
 
 #: src/iac_code/cli/main.py:563 src/iac_code/cli/main.py:652
 #: src/iac_code/cli/main.py:724 src/iac_code/cli/main.py:781
@@ -293,7 +293,7 @@ msgstr ""
 #: src/iac_code/cli/main.py:1073 src/iac_code/cli/main.py:1128
 #: src/iac_code/cli/main.py:1183
 msgid "Bearer token for A2A HTTP requests"
-msgstr ""
+msgstr "A2A HTTP リクエスト用の Bearer トークン"
 
 #: src/iac_code/cli/main.py:564 src/iac_code/cli/main.py:653
 #: src/iac_code/cli/main.py:725 src/iac_code/cli/main.py:782
@@ -302,7 +302,7 @@ msgstr ""
 #: src/iac_code/cli/main.py:1074 src/iac_code/cli/main.py:1129
 #: src/iac_code/cli/main.py:1184
 msgid "Basic auth username for A2A HTTP requests"
-msgstr ""
+msgstr "A2A HTTP リクエスト用の Basic 認証ユーザー名"
 
 #: src/iac_code/cli/main.py:565 src/iac_code/cli/main.py:654
 #: src/iac_code/cli/main.py:726 src/iac_code/cli/main.py:783
@@ -311,7 +311,7 @@ msgstr ""
 #: src/iac_code/cli/main.py:1075 src/iac_code/cli/main.py:1130
 #: src/iac_code/cli/main.py:1185
 msgid "Basic auth password for A2A HTTP requests"
-msgstr ""
+msgstr "A2A HTTP リクエスト用の Basic 認証パスワード"
 
 #: src/iac_code/cli/main.py:566 src/iac_code/cli/main.py:655
 #: src/iac_code/cli/main.py:727 src/iac_code/cli/main.py:784
@@ -320,7 +320,7 @@ msgstr ""
 #: src/iac_code/cli/main.py:1076 src/iac_code/cli/main.py:1131
 #: src/iac_code/cli/main.py:1186
 msgid "API key for A2A HTTP requests"
-msgstr ""
+msgstr "A2A HTTP リクエスト用の API キー"
 
 #: src/iac_code/cli/main.py:567 src/iac_code/cli/main.py:656
 #: src/iac_code/cli/main.py:728 src/iac_code/cli/main.py:785
@@ -329,156 +329,155 @@ msgstr ""
 #: src/iac_code/cli/main.py:1077 src/iac_code/cli/main.py:1132
 #: src/iac_code/cli/main.py:1187
 msgid "HTTP header name for A2A API key"
-msgstr ""
+msgstr "A2A API キー用の HTTP ヘッダー名"
 
 #: src/iac_code/cli/main.py:572 src/iac_code/cli/main.py:661
 msgid "Secret used to verify the A2A Agent Card"
-msgstr ""
+msgstr "A2A Agent Card の検証に使用するシークレット"
 
 #: src/iac_code/cli/main.py:577 src/iac_code/cli/main.py:666
 msgid "Remote JWKS URL used to verify the A2A Agent Card"
-msgstr ""
+msgstr "A2A Agent Card の検証に使用するリモート JWKS URL"
 
 #: src/iac_code/cli/main.py:583 src/iac_code/cli/main.py:672
 msgid "Require a valid A2A Agent Card signature"
-msgstr ""
+msgstr "有効な A2A Agent Card 署名を要求します"
 
 #: src/iac_code/cli/main.py:585
 msgid "A2A call timeout in seconds"
-msgstr ""
+msgstr "A2A 呼び出しのタイムアウト（秒）"
 
 #: src/iac_code/cli/main.py:586
 msgid "Use A2A streaming message delivery"
-msgstr ""
+msgstr "A2A ストリーミングメッセージ配信を使用します"
 
 #: src/iac_code/cli/main.py:648
 msgid "Discover an A2A Agent Card."
-msgstr ""
+msgstr "A2A Agent Card を検出します。"
 
 #: src/iac_code/cli/main.py:651
 msgid "A2A agent base URL"
-msgstr ""
+msgstr "A2A エージェントのベース URL"
 
 #: src/iac_code/cli/main.py:718
 msgid "Get an A2A task."
-msgstr ""
+msgstr "A2A タスクを取得します。"
 
 #: src/iac_code/cli/main.py:722 src/iac_code/cli/main.py:835
 #: src/iac_code/cli/main.py:885 src/iac_code/cli/main.py:934
 #: src/iac_code/cli/main.py:1013 src/iac_code/cli/main.py:1070
 #: src/iac_code/cli/main.py:1126
 msgid "A2A task ID"
-msgstr ""
+msgstr "A2A タスク ID"
 
 #: src/iac_code/cli/main.py:723
 msgid "Maximum task history items to return"
-msgstr ""
+msgstr "返却するタスク履歴項目の最大数"
 
 #: src/iac_code/cli/main.py:771
 msgid "List A2A tasks."
-msgstr ""
+msgstr "A2A タスクを一覧表示します。"
 
 #: src/iac_code/cli/main.py:775
 msgid "Filter by A2A context ID"
-msgstr ""
+msgstr "A2A コンテキスト ID でフィルタリングします"
 
 #: src/iac_code/cli/main.py:776
 msgid "Filter by A2A task state"
-msgstr ""
+msgstr "A2A タスク状態でフィルタリングします"
 
 #: src/iac_code/cli/main.py:777
 msgid "Maximum tasks to return"
-msgstr ""
+msgstr "返却するタスクの最大数"
 
 #: src/iac_code/cli/main.py:778 src/iac_code/cli/main.py:1072
 msgid "Pagination token"
-msgstr ""
+msgstr "ページネーショントークン"
 
 #: src/iac_code/cli/main.py:779
 msgid "Include task artifacts"
-msgstr ""
+msgstr "タスクアーティファクトを含めます"
 
 #: src/iac_code/cli/main.py:780
-#, fuzzy
 msgid "Output format: table or json"
-msgstr "出力形式：text、json、stream-json"
+msgstr "出力形式: table または json"
 
 #: src/iac_code/cli/main.py:831
 msgid "Cancel an A2A task."
-msgstr ""
+msgstr "A2A タスクをキャンセルします。"
 
 #: src/iac_code/cli/main.py:881
 msgid "Subscribe to an A2A task event stream."
-msgstr ""
+msgstr "A2A タスクのイベントストリームを購読します。"
 
 #: src/iac_code/cli/main.py:930
 msgid "Create an A2A task push notification config."
-msgstr ""
+msgstr "A2A タスクプッシュ通知設定を作成します。"
 
 #: src/iac_code/cli/main.py:935 src/iac_code/cli/main.py:1014
 #: src/iac_code/cli/main.py:1127
 msgid "Push config ID"
-msgstr ""
+msgstr "プッシュ設定 ID"
 
 #: src/iac_code/cli/main.py:936
 msgid "Push callback URL"
-msgstr ""
+msgstr "プッシュコールバック URL"
 
 #: src/iac_code/cli/main.py:937
 msgid "Notification verification token"
-msgstr ""
+msgstr "通知検証トークン"
 
 #: src/iac_code/cli/main.py:938
 msgid "Callback authentication scheme"
-msgstr ""
+msgstr "コールバック認証方式"
 
 #: src/iac_code/cli/main.py:939
 msgid "Callback authentication credentials"
-msgstr ""
+msgstr "コールバック認証資格情報"
 
 #: src/iac_code/cli/main.py:1009
 msgid "Get an A2A task push notification config."
-msgstr ""
+msgstr "A2A タスクプッシュ通知設定を取得します。"
 
 #: src/iac_code/cli/main.py:1066
 msgid "List A2A task push notification configs."
-msgstr ""
+msgstr "A2A タスクプッシュ通知設定を一覧表示します。"
 
 #: src/iac_code/cli/main.py:1071
 msgid "Maximum configs to return"
-msgstr ""
+msgstr "返却する設定の最大数"
 
 #: src/iac_code/cli/main.py:1122
 msgid "Delete an A2A task push notification config."
-msgstr ""
+msgstr "A2A タスクプッシュ通知設定を削除します。"
 
 #: src/iac_code/cli/main.py:1179
 msgid "Get an authenticated extended A2A Agent Card."
-msgstr ""
+msgstr "認証済みの拡張 A2A Agent Card を取得します。"
 
 #: src/iac_code/cli/main.py:1222
 msgid "Preview A2A route resolution."
-msgstr ""
+msgstr "A2A ルート解決をプレビューします。"
 
 #: src/iac_code/cli/main.py:1229
 msgid "Route name to resolve"
-msgstr ""
+msgstr "解決するルート名"
 
 #: src/iac_code/cli/main.py:1230
 msgid "Skill ID to resolve"
-msgstr ""
+msgstr "解決するスキル ID"
 
 #: src/iac_code/cli/main.py:1231
 msgid "Prompt text used for tag/name route matching"
-msgstr ""
+msgstr "タグ/名前ルートのマッチングに使用するプロンプトテキスト"
 
 #: src/iac_code/cli/main.py:1236
 msgid "Directory for persisted A2A routes"
-msgstr ""
+msgstr "永続化された A2A ルート用のディレクトリ"
 
 #: src/iac_code/cli/main.py:1238
 msgid "Save the provided routes as a route snapshot"
-msgstr ""
+msgstr "指定されたルートをルートスナップショットとして保存します"
 
 #: src/iac_code/commands/__init__.py:22
 msgid "Show available commands"
