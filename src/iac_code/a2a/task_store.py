@@ -160,7 +160,16 @@ class A2ATaskStore(TaskStore):
                 self._mirror_context(record)
                 return record
 
-            session_id = str(uuid.uuid4())
+            session_id: str | None = None
+            if self._persistence is not None:
+                snapshot = self._persistence.load_context(context_id)
+                if snapshot is not None:
+                    if snapshot.cwd != cwd:
+                        raise ValueError("A2A context belongs to a different workspace")
+                    session_id = snapshot.session_id
+
+            if session_id is None:
+                session_id = str(uuid.uuid4())
             record = A2AContextRecord(
                 context_id=context_id,
                 session_id=session_id,

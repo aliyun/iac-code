@@ -15,6 +15,7 @@ class AgentFactoryOptions:
     cli_allowed_tools: list[str] | None = None
     cli_disallowed_tools: list[str] | None = None
     cli_permission_mode: str | None = None
+    resume_messages: list | None = None
 
 
 @dataclass
@@ -162,6 +163,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         tool_registry=tool_registry,
         session_storage=session_storage,
         session_id=session_id,
+        resume_messages=options.resume_messages,
         max_turns=options.max_turns,
         cwd=cwd,
         permission_context=permission_context,

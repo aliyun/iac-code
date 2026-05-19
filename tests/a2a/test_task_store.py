@@ -269,6 +269,38 @@ async def test_task_store_mirrors_task_and_context_to_persistence(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_get_or_create_context_restores_persisted_session_id(tmp_path) -> None:
+    from iac_code.a2a.persistence import A2APersistenceStore
+
+    persistence = A2APersistenceStore(tmp_path)
+    store_one = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    original = await store_one.get_or_create_context(
+        context_id="ctx-1", cwd="/tmp", runtime_factory=lambda sid: f"rt-{sid}"
+    )
+
+    store_two = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    restored = await store_two.get_or_create_context(
+        context_id="ctx-1", cwd="/tmp", runtime_factory=lambda sid: f"rt-{sid}"
+    )
+
+    assert restored.session_id == original.session_id
+    assert restored.runtime == f"rt-{original.session_id}"
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_context_persisted_cwd_mismatch_raises(tmp_path) -> None:
+    from iac_code.a2a.persistence import A2APersistenceStore
+
+    persistence = A2APersistenceStore(tmp_path)
+    store_one = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await store_one.get_or_create_context(context_id="ctx-1", cwd="/tmp/one", runtime_factory=lambda sid: object())
+
+    store_two = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    with pytest.raises(ValueError, match="different workspace"):
+        await store_two.get_or_create_context(context_id="ctx-1", cwd="/tmp/two", runtime_factory=lambda sid: object())
+
+
+@pytest.mark.asyncio
 async def test_task_store_persistence_failure_does_not_abort_task_creation() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=FailingPersistence())
 

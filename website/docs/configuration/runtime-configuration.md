@@ -13,11 +13,13 @@ Configuration precedence:
 CLI arguments > environment variables > configuration files
 ```
 
-The runtime directory is:
+The runtime directory defaults to:
 
 ```text
 ~/.iac-code/
 ```
+
+You can relocate it by setting the `IAC_CODE_CONFIG_DIR` environment variable (supports `~` and `$VAR` expansion). When set, every persisted artifact — credentials, settings, history, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — follows the new location.
 
 Common files:
 

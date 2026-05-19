@@ -75,7 +75,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
             ModelEntry("glm-5"),
             ModelEntry("MiniMax-M2.5"),
             ModelEntry("kimi-k2.5", support_multimodal=True),
-            ModelEntry("kimi-k2.6", support_multimodal=True)
+            ModelEntry("kimi-k2.6", support_multimodal=True),
         ],
         qwenpaw_provider_ids=["aliyun-tokenplan"],
     ),

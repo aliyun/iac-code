@@ -51,6 +51,7 @@ Consulte [Credenciais da Alibaba Cloud](./alibaba-cloud-credentials.md) para mai
 
 | Variavel | Descricao |
 |---|---|
+| `IAC_CODE_CONFIG_DIR` | Substitui o diretorio de configuracao em tempo de execucao (padrao `~/.iac-code/`); suporta expansao de `~` e `$VAR`. Todos os artefatos persistidos (credenciais, configuracoes, historico, projects, image-cache, skills, telemetry, etc.) seguem este diretorio |
 | `IAC_CODE_ENV` | Rotulo do ambiente de implantacao (padrao: `production`) |
 | `IAC_CODE_TENANT_ID` | Identificador de tenant para telemetria; prefixado automaticamente com `iac_tenant_` se ainda nao estiver |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint padrao do OpenTelemetry; quando definido, habilita a exportacao OTLP |

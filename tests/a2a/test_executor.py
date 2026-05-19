@@ -226,11 +226,31 @@ async def test_executor_logs_and_swallows_push_failures(
 
 
 @pytest.mark.asyncio
-async def test_executor_rejects_invalid_workspace(tmp_path: Path) -> None:
+async def test_executor_creates_missing_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    runtime = FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    missing = tmp_path / "missing"
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
     queue = FakeEventQueue()
-    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path / "missing")}})
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(missing)}})
+
+    await executor.execute(context, queue)
+
+    assert missing.is_dir()
+    final_state = dump(queue.events[-1])["status"]["state"]
+    assert final_state != "TASK_STATE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_workspace_path_pointing_at_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "not-a-dir"
+    file_path.write_text("blocker")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(file_path)}})
 
     await executor.execute(context, queue)
 
@@ -434,6 +454,61 @@ async def test_independent_contexts_execute_concurrently(monkeypatch: pytest.Mon
     )
 
     assert sorted(prompts) == ["one", "two"]
+
+
+@pytest.mark.asyncio
+async def test_executor_resumes_messages_after_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from iac_code.a2a.persistence import A2APersistenceStore
+    from iac_code.agent.message import Message
+    from iac_code.services.session_storage import SessionStorage
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+
+    seen_resume: list[object | None] = []
+
+    def fake_factory(options):
+        seen_resume.append(options.resume_messages)
+        return FakeRuntime(
+            agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
+            session_id=options.session_id,
+        )
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_factory)
+
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+
+    store_one = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor_one = IacCodeA2AExecutor(task_store=store_one, model="qwen3.6-plus")
+    ctx_one = FakeRequestContext(
+        task_id="task-1",
+        context_id="ctx-shared",
+        text="hi-1",
+        metadata={"iac_code": {"cwd": str(cwd)}},
+    )
+    await executor_one.execute(ctx_one, FakeEventQueue())
+    session_id = store_one._contexts["ctx-shared"].session_id
+
+    SessionStorage().append(str(cwd), session_id, Message(role="user", content="prior turn"))
+
+    store_two = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor_two = IacCodeA2AExecutor(task_store=store_two, model="qwen3.6-plus")
+    ctx_two = FakeRequestContext(
+        task_id="task-2",
+        context_id="ctx-shared",
+        text="hi-2",
+        metadata={"iac_code": {"cwd": str(cwd)}},
+    )
+    await executor_two.execute(ctx_two, FakeEventQueue())
+
+    assert store_two._contexts["ctx-shared"].session_id == session_id
+    assert seen_resume[0] is None
+    assert seen_resume[1] is not None
+    assert any(getattr(m, "content", "") == "prior turn" for m in seen_resume[1])
 
 
 @pytest.mark.asyncio

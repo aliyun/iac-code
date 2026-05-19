@@ -13,11 +13,13 @@ Precedencia de configuración:
 Argumentos CLI > variables de entorno > archivos de configuración
 ```
 
-El directorio de tiempo de ejecución es:
+El directorio de tiempo de ejecución por defecto es:
 
 ```text
 ~/.iac-code/
 ```
+
+Puede reubicarlo estableciendo la variable de entorno `IAC_CODE_CONFIG_DIR` (admite expansión de `~` y `$VAR`). Cuando se establece, todos los artefactos persistidos — credenciales, ajustes, historial, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — siguen la nueva ubicación.
 
 Archivos comunes:
 

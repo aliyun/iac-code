@@ -25,6 +25,7 @@ from iac_code.a2a.types import (
     TASK_STATE_WORKING,
 )
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+from iac_code.services.session_storage import SessionStorage
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -117,7 +118,19 @@ class IacCodeA2AExecutor(AgentExecutor):
             return
 
         def runtime_factory(session_id: str) -> Any:
-            return create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd))
+            session_storage = SessionStorage()
+            resume_messages = None
+            if session_storage.exists(cwd, session_id):
+                loaded = session_storage.load(cwd, session_id)
+                resume_messages = SessionStorage.repair_interrupted(loaded) if loaded else None
+            return create_agent_runtime(
+                AgentFactoryOptions(
+                    model=self._model,
+                    session_id=session_id,
+                    cwd=cwd,
+                    resume_messages=resume_messages,
+                )
+            )
 
         try:
             ctx = await self._task_store.get_or_create_context(
@@ -296,11 +309,16 @@ class IacCodeA2AExecutor(AgentExecutor):
                 raw_cwd = raw_iac_meta.get("cwd")
                 if isinstance(raw_cwd, str):
                     cwd = raw_cwd
-        if not isinstance(cwd, str) or not Path(cwd).is_absolute() or not Path(cwd).is_dir():
+        if not isinstance(cwd, str) or not Path(cwd).is_absolute():
             raise ValueError("Invalid A2A workspace metadata.")
         resolved_cwd = Path(cwd).resolve()
         if not any(_is_relative_to(resolved_cwd, root) for root in _allowed_cwd_roots()):
             raise ValueError("Invalid A2A workspace metadata.")
+        if resolved_cwd.exists():
+            if not resolved_cwd.is_dir():
+                raise ValueError("Invalid A2A workspace metadata.")
+        else:
+            resolved_cwd.mkdir(parents=True, exist_ok=True)
         return str(resolved_cwd)
 
     def _prompt_from_context(self, context: RequestContext, *, cwd: str) -> str:

@@ -13,11 +13,13 @@ Precedência de configuração:
 Argumentos CLI > variáveis de ambiente > arquivos de configuração
 ```
 
-O diretório de tempo de execução é:
+O diretório de tempo de execução padrão é:
 
 ```text
 ~/.iac-code/
 ```
+
+Você pode realocá-lo definindo a variável de ambiente `IAC_CODE_CONFIG_DIR` (suporta expansão de `~` e `$VAR`). Quando definida, todos os artefatos persistidos — credenciais, configurações, histórico, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — seguem o novo local.
 
 Arquivos comuns:
 
