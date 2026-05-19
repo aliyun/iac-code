@@ -37,6 +37,10 @@ def _isolate_iac_home(tmp_path_factory, monkeypatch):
 
     A separate tmp dir (not the test's own ``tmp_path``) is used so tests that
     treat ``tmp_path`` as "outside $HOME" still behave correctly.
+
+    Also unset IAC_CODE_CONFIG_DIR so a developer's local override cannot
+    leak into tests that rely on the ``Path.home() / ".iac-code"`` fallback.
     """
     fake_home = tmp_path_factory.mktemp("iac_home")
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.delenv("IAC_CODE_CONFIG_DIR", raising=False)

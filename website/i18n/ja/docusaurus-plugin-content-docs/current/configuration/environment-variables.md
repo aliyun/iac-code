@@ -51,6 +51,7 @@ CLI 引数 > 環境変数 > 設定ファイル
 
 | 変数 | 説明 |
 |---|---|
+| `IAC_CODE_CONFIG_DIR` | ランタイム設定ディレクトリを上書き（デフォルト `~/.iac-code/`）。`~` と `$VAR` の展開をサポート。永続化されるすべての成果物（認証情報、設定、履歴、projects、image-cache、skills、telemetry など）はこのディレクトリに従います |
 | `IAC_CODE_ENV` | デプロイ環境ラベル（デフォルト：`production`） |
 | `IAC_CODE_TENANT_ID` | テレメトリ用テナント識別子。`iac_tenant_` プレフィックスが付いていない場合は自動的に付加されます |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 標準 OpenTelemetry エンドポイント。設定すると OTLP エクスポートが有効になります |

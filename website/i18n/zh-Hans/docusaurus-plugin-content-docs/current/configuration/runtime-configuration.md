@@ -13,11 +13,13 @@ IaC Code 会从 CLI 参数、环境变量以及运行时配置目录中的文件
 CLI 参数 > 环境变量 > 配置文件
 ```
 
-运行时目录为：
+运行时目录默认为：
 
 ```text
 ~/.iac-code/
 ```
+
+可通过设置 `IAC_CODE_CONFIG_DIR` 环境变量更改该目录（支持 `~` 和 `$VAR` 展开）。设置后，所有持久化产物——凭证、设置、历史、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/`——都会跟随到新位置。
 
 常见文件：
 

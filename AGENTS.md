@@ -43,7 +43,7 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
 
 ## Configuration and Credentials
 
-- The runtime configuration directory is `~/.iac-code/`, containing `.credentials.yml`, `.cloud-credentials.yml`, `settings.yml`, and input history.
+- The runtime configuration directory defaults to `~/.iac-code/`, containing `.credentials.yml`, `.cloud-credentials.yml`, `settings.yml`, `.multimodal-cache.yml`, and input history. Override by setting `IAC_CODE_CONFIG_DIR` (supports `~` and `$VAR` expansion); all subdirectories (`projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/`) follow.
 - Do not commit, print, or hard-code real API keys, AccessKeys, Secrets, tokens, cookies, or user configuration file contents.
 - Alibaba Cloud credential-related tests must use fake values and avoid triggering real cloud APIs.
 

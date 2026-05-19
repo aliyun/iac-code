@@ -51,6 +51,7 @@ See [Alibaba Cloud Credentials](./alibaba-cloud-credentials.md) for more details
 
 | Variable | Description |
 |---|---|
+| `IAC_CODE_CONFIG_DIR` | Override the runtime configuration directory (default `~/.iac-code/`); supports `~` and `$VAR` expansion. All persisted artifacts (credentials, settings, history, projects, image cache, skills, telemetry, etc.) follow it |
 | `IAC_CODE_ENV` | Deployment environment label (default: `production`) |
 | `IAC_CODE_TENANT_ID` | Tenant identifier for telemetry; auto-prefixed with `iac_tenant_` if not already |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Standard OpenTelemetry endpoint; when set, enables OTLP export |

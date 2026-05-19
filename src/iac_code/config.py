@@ -1,11 +1,14 @@
 """Configuration paths for iac-code.
 
 Provides unified configuration directory and file paths under
-``~/.iac-code/``.
+``~/.iac-code/`` by default. Can be relocated by setting the
+``IAC_CODE_CONFIG_DIR`` environment variable (``~`` and ``$VAR``
+expansion supported); when set, every persisted artifact follows.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,7 @@ DEFAULT_MODEL = "qwen3.6-plus"
 
 # Configuration directory
 _CONFIG_DIR_NAME = ".iac-code"
+_CONFIG_DIR_ENV_VAR = "IAC_CODE_CONFIG_DIR"
 
 # Configuration files
 _CREDENTIALS_FILE = ".credentials.yml"
@@ -125,7 +129,6 @@ def _get_env_overrides() -> dict[str, str | None]:
     to None. Invalid ``IAC_CODE_PROVIDER`` raises ``ValueError`` listing canonical
     names.
     """
-    import os
 
     def _read(name: str) -> str | None:
         raw = os.environ.get(name, "")
@@ -171,12 +174,28 @@ def get_llm_source() -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_config_dir() -> Path:
-    """Get iac-code config directory (~/.iac-code/).
+def _resolve_config_dir() -> Path:
+    """Resolve the config directory path without creating it.
 
-    Creates the directory if it doesn't exist.
+    Honors ``IAC_CODE_CONFIG_DIR`` (with ``~`` and ``$VAR`` expansion).
+    Empty / whitespace-only values are treated as unset.
     """
-    config_dir = Path.home() / _CONFIG_DIR_NAME
+    raw = os.environ.get(_CONFIG_DIR_ENV_VAR, "").strip()
+    if raw:
+        expanded = os.path.expandvars(os.path.expanduser(raw))
+        return Path(expanded).resolve()
+    return Path.home() / _CONFIG_DIR_NAME
+
+
+def get_config_dir() -> Path:
+    """Get iac-code config directory.
+
+    Defaults to ``~/.iac-code/``. Can be overridden by the
+    ``IAC_CODE_CONFIG_DIR`` environment variable. The directory is
+    created if it does not exist; this is read on every call (no
+    caching).
+    """
+    config_dir = _resolve_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 

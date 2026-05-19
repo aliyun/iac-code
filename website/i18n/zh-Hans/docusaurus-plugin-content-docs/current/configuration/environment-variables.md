@@ -51,6 +51,7 @@ CLI 参数 > 环境变量 > 配置文件
 
 | 变量 | 说明 |
 |---|---|
+| `IAC_CODE_CONFIG_DIR` | 覆盖运行时配置目录（默认 `~/.iac-code/`）；支持 `~` 和 `$VAR` 展开。所有持久化产物（凭证、设置、历史、projects、image-cache、skills、telemetry 等）均会跟随该目录 |
 | `IAC_CODE_ENV` | 部署环境标签（默认：`production`） |
 | `IAC_CODE_TENANT_ID` | 遥测租户标识；如未以 `iac_tenant_` 开头则自动添加前缀 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 标准 OpenTelemetry 端点；设置后启用 OTLP 导出 |
