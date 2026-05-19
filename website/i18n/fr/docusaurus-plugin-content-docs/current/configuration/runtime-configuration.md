@@ -13,11 +13,13 @@ Priorité de configuration :
 Arguments CLI > variables d'environnement > fichiers de configuration
 ```
 
-Le répertoire d'exécution est :
+Le répertoire d'exécution par défaut est :
 
 ```text
 ~/.iac-code/
 ```
+
+Vous pouvez le déplacer en définissant la variable d'environnement `IAC_CODE_CONFIG_DIR` (prend en charge l'expansion de `~` et `$VAR`). Une fois définie, tous les artefacts persistés — identifiants, paramètres, historique, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — suivent le nouvel emplacement.
 
 Fichiers courants :
 

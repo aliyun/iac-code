@@ -13,11 +13,13 @@ Konfigurationspriorität:
 CLI-Argumente > Umgebungsvariablen > Konfigurationsdateien
 ```
 
-Das Laufzeitverzeichnis ist:
+Das Laufzeitverzeichnis ist standardmäßig:
 
 ```text
 ~/.iac-code/
 ```
+
+Sie können es verlegen, indem Sie die Umgebungsvariable `IAC_CODE_CONFIG_DIR` setzen (unterstützt `~`- und `$VAR`-Erweiterung). Sobald gesetzt, folgen alle persistierten Artefakte — Anmeldedaten, Einstellungen, Verlauf, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — dem neuen Speicherort.
 
 Häufige Dateien:
 

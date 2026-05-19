@@ -198,3 +198,25 @@ class TestDynamicSkillTracker:
         skill = self._make_skill("src-skill", ["src/**/*.py"])
         tracker.on_file_accessed("src/core/main.py", [skill])
         assert len(tracker.get_activated_skills()) == 1
+
+
+class TestUserGlobalSkillsRespectConfigDirEnv:
+    def test_user_global_skills_dir_respects_env(self, monkeypatch, tmp_path):
+        """User-global skills are loaded from IAC_CODE_CONFIG_DIR/skills."""
+        target = tmp_path / "alt-config"
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(target))
+
+        skills_dir = target / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "alpha.md").write_text("---\ndescription: Alpha\n---\n")
+
+        project_cwd = tmp_path / "proj"
+        project_cwd.mkdir()
+
+        from iac_code.skills.discovery import discover_all_skills
+        from iac_code.types.skill_source import SkillSource
+
+        skills = discover_all_skills(str(project_cwd))
+        alpha = next((s for s in skills if s.name == "alpha"), None)
+        assert alpha is not None
+        assert alpha.source == SkillSource.USER

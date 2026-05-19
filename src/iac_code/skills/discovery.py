@@ -6,6 +6,7 @@ import fnmatch
 from pathlib import Path
 
 from iac_code.commands.registry import PromptCommand
+from iac_code.config import get_config_dir
 from iac_code.skills.loader import load_skill_from_path
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.types.skill_source import SkillSource
@@ -16,7 +17,8 @@ def discover_all_skills(cwd: str) -> list[SkillDefinition]:
 
     Load order (later entries override earlier with same name):
     1. Bundled skills
-    2. User global skills (~/.iac-code/skills/)
+    2. User global skills (``<config-dir>/skills/``; defaults to
+       ``~/.iac-code/skills/``, follows ``IAC_CODE_CONFIG_DIR``)
     3. Project local skills — skills/ (lower priority)
     4. Project local skills — .iac-code/skills/ (higher priority, overrides same name)
     """
@@ -29,7 +31,7 @@ def discover_all_skills(cwd: str) -> list[SkillDefinition]:
         skills[skill.name] = skill
 
     # 2. User global skills
-    user_skills_dir = Path.home() / ".iac-code" / "skills"
+    user_skills_dir = get_config_dir() / "skills"
     for skill in _scan_skills_dir(user_skills_dir):
         skill.source = SkillSource.USER
         skills[skill.name] = skill
