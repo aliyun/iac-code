@@ -65,6 +65,7 @@ const sidebars: SidebarsConfig = {
         'automation/non-interactive-mode',
       ],
     },
+    'contact',
   ],
 };
 
