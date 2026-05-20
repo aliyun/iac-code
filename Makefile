@@ -14,11 +14,31 @@ install: ## Install dependencies and pre-commit hooks
 	git config --global --unset-all core.hooksPath 2>/dev/null || true
 	uv run pre-commit install
 
-test: ## Run tests
-	uv run --all-extras pytest tests/ -v -n auto
+PYTHON_VERSIONS := 3.10 3.11 3.12 3.13 3.14
 
-coverage: ## Run tests with coverage report (terminal + HTML)
+test: ## Run tests (PY=all for all versions, PY=3.x for specific version)
+ifeq ($(PY),all)
+	@for ver in $(PYTHON_VERSIONS); do \
+		echo "=== Python $$ver ==="; \
+		uv run --python $$ver --all-extras pytest tests/ -v -n auto || exit 1; \
+	done
+else ifdef PY
+	uv run --python $(PY) --all-extras pytest tests/ -v -n auto
+else
+	uv run --all-extras pytest tests/ -v -n auto
+endif
+
+coverage: ## Run tests with coverage (PY=all for all versions, PY=3.x for specific version)
+ifeq ($(PY),all)
+	@for ver in $(PYTHON_VERSIONS); do \
+		echo "=== Python $$ver ==="; \
+		uv run --python $$ver --all-extras pytest tests/ -n auto --cov --cov-report=term-missing --cov-report=html || exit 1; \
+	done
+else ifdef PY
+	uv run --python $(PY) --all-extras pytest tests/ -n auto --cov --cov-report=term-missing --cov-report=html
+else
 	uv run --all-extras pytest tests/ -n auto --cov --cov-report=term-missing --cov-report=html
+endif
 	@echo "HTML report: htmlcov/index.html"
 
 lint: ## Run linters

@@ -375,7 +375,8 @@ class TestAuthentication:
 class TestMemoryTransport:
     """E13-E16: _MemoryTransport write, is_closing, close, get_extra_info."""
 
-    def test_write_feeds_data_to_reader(self):
+    @pytest.mark.asyncio
+    async def test_write_feeds_data_to_reader(self):
         """E13: write() feeds bytes into the reader."""
         reader = asyncio.StreamReader()
         transport = _MemoryTransport(reader)
@@ -383,7 +384,8 @@ class TestMemoryTransport:
         # The data should be buffered in the reader
         assert reader._buffer == b"hello"  # noqa: SLF001
 
-    def test_write_ignored_when_closing(self):
+    @pytest.mark.asyncio
+    async def test_write_ignored_when_closing(self):
         """E14: write() is a no-op after close()."""
         reader = asyncio.StreamReader()
         transport = _MemoryTransport(reader)
@@ -392,7 +394,8 @@ class TestMemoryTransport:
         # Buffer should be empty (only EOF fed)
         assert b"should-be-ignored" not in reader._buffer  # noqa: SLF001
 
-    def test_is_closing_reflects_state(self):
+    @pytest.mark.asyncio
+    async def test_is_closing_reflects_state(self):
         """E15: is_closing() returns False initially, True after close()."""
         reader = asyncio.StreamReader()
         transport = _MemoryTransport(reader)
@@ -400,7 +403,8 @@ class TestMemoryTransport:
         transport.close()
         assert transport.is_closing() is True
 
-    def test_get_extra_info_returns_default(self):
+    @pytest.mark.asyncio
+    async def test_get_extra_info_returns_default(self):
         """E16: get_extra_info() always returns the provided default."""
         reader = asyncio.StreamReader()
         transport = _MemoryTransport(reader)
