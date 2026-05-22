@@ -1,7 +1,17 @@
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from iac_code.utils.image import clipboard
+
+
+@pytest.fixture(autouse=True)
+def _clear_clipboard_cache():
+    """Ensure clipboard detection cache doesn't leak between tests."""
+    clipboard.invalidate_clipboard_cache()
+    yield
+    clipboard.invalidate_clipboard_cache()
 
 
 def test_macos_has_image_via_osascript(monkeypatch):

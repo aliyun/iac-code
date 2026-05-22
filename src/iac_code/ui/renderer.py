@@ -174,6 +174,7 @@ class Renderer:
         # the main event loop discards the stale Live/refresh_task and
         # rebuilds them before rendering the next event.
         self._stream_invalidated = False
+        self._last_streaming_errors: list[str] = []
         # Optional AppStateStore so permission prompts can consult/update the
         # shared LRU cache at AppState.always_allow_rules. None in pure-unit
         # contexts where no session state is wired up.
@@ -682,6 +683,7 @@ class Renderer:
         permission_handler: Callable[[PermissionRequestEvent], Awaitable[bool]],
     ) -> float:
         """Consume the event stream and render everything."""
+        self._last_streaming_errors = []
         self.console.print()  # blank line between user input and agent response
         live: Live | None = None
         spinner: ShimmerSpinner | None = None
@@ -1166,6 +1168,7 @@ class Renderer:
 
                 # ── Error ──────────────────────────────────────
                 elif isinstance(event, ErrorEvent):
+                    self._last_streaming_errors.append(event.error)
                     self.console.print(Text(event.error, style="bold red"))
 
                 # ── Message end ─────────────────────────────────
@@ -1213,12 +1216,15 @@ class Renderer:
         except Exception as e:
             error_msg = str(e)
             if "No key found" in error_msg or "api_key" in error_msg.lower() or "API key" in error_msg.lower():
-                self.print_system_message(
-                    _("No API key configured.") + "\n" + _("Please run /auth to set up your LLM provider and API key."),
-                    style="yellow",
+                msg = (
+                    _("No API key configured.") + "\n" + _("Please run /auth to set up your LLM provider and API key.")
                 )
+                self._last_streaming_errors.append(msg)
+                self.print_system_message(msg, style="yellow")
             else:
-                self.print_system_message(_("Error: {error}").format(error=error_msg), style="red")
+                msg = _("Error: {error}").format(error=error_msg)
+                self._last_streaming_errors.append(msg)
+                self.print_system_message(msg, style="red")
         finally:
             task_spinner = None
             # Restore terminal settings first, before awaiting tasks, so that

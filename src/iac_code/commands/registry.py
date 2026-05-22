@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 
 from iac_code.types.skill_source import SkillSource
 
@@ -42,6 +42,12 @@ class LocalCommand(Command):
     progress_label: str | None = None
     """When set, the REPL shows a spinner with this label while the handler runs.
     Use for commands that perform slow async work (e.g. an LLM call)."""
+    history_mode: Literal["persist", "session", "none"] = "persist"
+    """Controls how the command is recorded in input history.
+    - "persist": saved to disk (default, for normal commands).
+    - "session": kept in memory for the current session only.
+    - "none": never recorded in history.
+    """
 
 
 @dataclass

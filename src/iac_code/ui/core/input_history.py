@@ -19,6 +19,7 @@ class InputHistory:
     def __init__(self, history_file: str) -> None:
         self._file = history_file
         self._entries: list[str] = []
+        self._session_only: set[int] = set()
         self._nav_index: int = -1
         self._saved_input: str = ""
         self._load()
@@ -38,29 +39,52 @@ class InputHistory:
                     self._entries.append(entry)
 
     def _save(self) -> None:
-        """Persist all entries to the history file."""
+        """Persist only non-session-only entries to the history file."""
         with open(self._file, "w", encoding="utf-8") as f:
-            for entry in self._entries:
-                f.write(entry + "\n")
+            for i, entry in enumerate(self._entries):
+                if i not in self._session_only:
+                    f.write(entry + "\n")
 
     # ------------------------------------------------------------------
     # Mutation
     # ------------------------------------------------------------------
 
-    def append(self, entry: str) -> None:
+    def append(self, entry: str, *, persist: bool = True) -> None:
         """Append an entry, skipping empty strings and consecutive duplicates.
 
-        The new entry is persisted to disk immediately.
-        Navigation state is reset.
+        Args:
+            entry: The text to add.
+            persist: If True (default), save to disk immediately.
+                     If False, the entry is kept in memory only for this session.
+
+        Navigation state is always reset regardless of dedup or persist.
         """
+        self._nav_index = -1
+        self._saved_input = ""
         if not entry:
             return
         if self._entries and self._entries[-1] == entry:
             return
         self._entries.append(entry)
+        if not persist:
+            self._session_only.add(len(self._entries) - 1)
+        else:
+            self._save()
+
+    def reset_navigation(self) -> None:
+        """Reset navigation state without modifying entries."""
         self._nav_index = -1
         self._saved_input = ""
-        self._save()
+
+    @property
+    def is_navigating(self) -> bool:
+        """True when the user is actively navigating history."""
+        return self._nav_index != -1
+
+    @property
+    def saved_input(self) -> str:
+        """The input text saved when navigation started."""
+        return self._saved_input
 
     # ------------------------------------------------------------------
     # Search

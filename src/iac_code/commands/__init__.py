@@ -22,6 +22,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Show available commands"),
             handler=help_command,
             aliases=["?"],
+            history_mode="session",
         )
     )
     registry.register(
@@ -29,6 +30,7 @@ def create_default_registry() -> CommandRegistry:
             name="clear",
             description=_("Clear conversation history"),
             handler=clear_command,
+            history_mode="session",
         )
     )
     registry.register(
@@ -37,6 +39,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Show or switch model"),
             handler=model_command,
             arg_names=["model_name"],
+            history_mode="session",
         )
     )
     registry.register(
@@ -45,6 +48,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Show or switch thinking effort"),
             handler=effort_command,
             arg_names=["level"],
+            history_mode="session",
         )
     )
     registry.register(
@@ -53,6 +57,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Compact conversation context"),
             handler=compact_command,
             progress_label=_("Compacting conversation"),
+            history_mode="session",
         )
     )
     registry.register(
@@ -61,6 +66,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Exit the application"),
             handler=exit_command,
             aliases=["quit", "q"],
+            history_mode="none",
         )
     )
     registry.register(
@@ -69,6 +75,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Authenticate with LLM provider"),
             handler=auth_command,
             aliases=["login"],
+            history_mode="session",
         )
     )
     registry.register(
@@ -77,6 +84,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Toggle debug logging"),
             handler=debug_command,
             arg_hint="[on|off]",
+            history_mode="session",
         )
     )
     registry.register(
@@ -85,6 +93,7 @@ def create_default_registry() -> CommandRegistry:
             description=_("Resume a previous session"),
             handler=resume_command,
             arg_hint=_("[conversation id or search term]"),
+            history_mode="session",
         )
     )
     return registry

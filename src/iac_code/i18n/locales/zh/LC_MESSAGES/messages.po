@@ -4,9 +4,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.2.1\n"
+"Project-Id-Version: iac-code 0.2.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 09:26+0800\n"
+"POT-Creation-Date: 2026-05-22 14:28+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -479,55 +479,55 @@ msgstr "将提供的路由保存为路由快照"
 msgid "Show available commands"
 msgstr "显示可用命令"
 
-#: src/iac_code/commands/__init__.py:30
+#: src/iac_code/commands/__init__.py:31
 msgid "Clear conversation history"
 msgstr "清除对话历史"
 
-#: src/iac_code/commands/__init__.py:37
+#: src/iac_code/commands/__init__.py:39
 msgid "Show or switch model"
 msgstr "显示或切换模型"
 
-#: src/iac_code/commands/__init__.py:45
+#: src/iac_code/commands/__init__.py:48
 msgid "Show or switch thinking effort"
 msgstr "显示或切换思考强度"
 
-#: src/iac_code/commands/__init__.py:53
+#: src/iac_code/commands/__init__.py:57
 msgid "Compact conversation context"
 msgstr "压缩对话上下文"
 
-#: src/iac_code/commands/__init__.py:55
+#: src/iac_code/commands/__init__.py:59
 msgid "Compacting conversation"
 msgstr "正在压缩对话"
 
-#: src/iac_code/commands/__init__.py:61
+#: src/iac_code/commands/__init__.py:66
 msgid "Exit the application"
 msgstr "退出应用程序"
 
-#: src/iac_code/commands/__init__.py:69
+#: src/iac_code/commands/__init__.py:75
 msgid "Authenticate with LLM provider"
 msgstr "配置 LLM 提供商认证"
 
-#: src/iac_code/commands/__init__.py:77
+#: src/iac_code/commands/__init__.py:84
 msgid "Toggle debug logging"
 msgstr "切换调试日志开关"
 
-#: src/iac_code/commands/__init__.py:85
+#: src/iac_code/commands/__init__.py:93
 msgid "Resume a previous session"
 msgstr "恢复之前的会话"
 
-#: src/iac_code/commands/__init__.py:87
+#: src/iac_code/commands/__init__.py:95
 msgid "[conversation id or search term]"
 msgstr "[会话 ID 或搜索词]"
 
 #: src/iac_code/commands/auth.py:249 src/iac_code/commands/auth.py:883
-#: src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/ui/core/prompt_input.py:510
 msgid "Navigate"
 msgstr "导航"
 
 #: src/iac_code/commands/auth.py:249 src/iac_code/commands/auth.py:371
 #: src/iac_code/commands/auth.py:405 src/iac_code/commands/auth.py:412
 #: src/iac_code/commands/auth.py:436 src/iac_code/commands/auth.py:883
-#: src/iac_code/commands/auth.py:1073 src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/commands/auth.py:1073 src/iac_code/ui/core/prompt_input.py:510
 msgid "Confirm"
 msgstr "确认"
 
@@ -696,7 +696,7 @@ msgid "Credential"
 msgstr "凭证"
 
 #: src/iac_code/commands/auth.py:844 src/iac_code/commands/auth.py:941
-#: src/iac_code/commands/auth.py:1046 src/iac_code/ui/renderer.py:418
+#: src/iac_code/commands/auth.py:1046 src/iac_code/ui/renderer.py:419
 msgid "Region"
 msgstr "地域"
 
@@ -1566,140 +1566,140 @@ msgstr "调试模式"
 msgid "Log file"
 msgstr "日志文件"
 
-#: src/iac_code/ui/renderer.py:351 src/iac_code/ui/renderer.py:621
-#: src/iac_code/ui/renderer.py:1402
+#: src/iac_code/ui/renderer.py:352 src/iac_code/ui/renderer.py:622
+#: src/iac_code/ui/renderer.py:1408
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "思考完成（耗时 {seconds:.1f}s）"
 
-#: src/iac_code/ui/renderer.py:367 src/iac_code/ui/renderer.py:653
-#: src/iac_code/ui/renderer.py:1423
+#: src/iac_code/ui/renderer.py:368 src/iac_code/ui/renderer.py:654
+#: src/iac_code/ui/renderer.py:1429
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o 展开)"
 
-#: src/iac_code/ui/renderer.py:394
+#: src/iac_code/ui/renderer.py:395
 msgid "Resource"
 msgstr "资源"
 
-#: src/iac_code/ui/renderer.py:395
+#: src/iac_code/ui/renderer.py:396
 msgid "Type"
 msgstr "类型"
 
-#: src/iac_code/ui/renderer.py:396 src/iac_code/ui/renderer.py:419
+#: src/iac_code/ui/renderer.py:397 src/iac_code/ui/renderer.py:420
 msgid "Status"
 msgstr "状态"
 
-#: src/iac_code/ui/renderer.py:417
+#: src/iac_code/ui/renderer.py:418
 msgid "Account ID"
 msgstr "账号 ID"
 
-#: src/iac_code/ui/renderer.py:495
+#: src/iac_code/ui/renderer.py:496
 #, python-brace-format
 msgid "Done ({child_count} tool uses{token_info}{elapsed})"
 msgstr "完成（{child_count} 次工具调用{token_info}{elapsed}）"
 
-#: src/iac_code/ui/renderer.py:525
+#: src/iac_code/ui/renderer.py:526
 #, python-brace-format
 msgid "+ {count} more tool uses (ctrl+o to expand)"
 msgstr "+ {count} 个工具调用 (ctrl+o 展开)"
 
-#: src/iac_code/ui/renderer.py:1128
+#: src/iac_code/ui/renderer.py:1130
 #, python-brace-format
 msgid "Context auto-compacted: {original} → {compacted} tokens"
 msgstr "上下文自动压缩：{original} → {compacted} tokens"
 
-#: src/iac_code/ui/renderer.py:1212
+#: src/iac_code/ui/renderer.py:1215
 msgid "Operation cancelled."
 msgstr "操作已取消。"
 
-#: src/iac_code/ui/renderer.py:1217
+#: src/iac_code/ui/renderer.py:1220
 msgid "No API key configured."
 msgstr "尚未配置 API 密钥。"
 
-#: src/iac_code/ui/renderer.py:1217
+#: src/iac_code/ui/renderer.py:1220
 msgid "Please run /auth to set up your LLM provider and API key."
 msgstr "请运行 /auth 设置您的 LLM 提供商和 API 密钥。"
 
-#: src/iac_code/ui/renderer.py:1221
+#: src/iac_code/ui/renderer.py:1225
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "错误：{error}"
 
-#: src/iac_code/ui/renderer.py:1289
+#: src/iac_code/ui/renderer.py:1295
 msgid "Allow this action?"
 msgstr "是否允许执行此操作？"
 
-#: src/iac_code/ui/renderer.py:1292
+#: src/iac_code/ui/renderer.py:1298
 msgid "Yes, allow once"
 msgstr "是，仅本次允许"
 
-#: src/iac_code/ui/renderer.py:1306
+#: src/iac_code/ui/renderer.py:1312
 #, python-brace-format
 msgid "Yes, always allow \"{rule}\" (this session)"
-msgstr "是，本次会话始终允许 \"{rule}\""
+msgstr "是，始终允许 \"{rule}\"（本次会话）"
 
-#: src/iac_code/ui/renderer.py:1311
+#: src/iac_code/ui/renderer.py:1317
 msgid "Yes, allow always for this tool"
 msgstr "是，始终允许此工具"
 
-#: src/iac_code/ui/renderer.py:1314
+#: src/iac_code/ui/renderer.py:1320
 msgid "No, reject once"
 msgstr "否，仅本次拒绝"
 
-#: src/iac_code/ui/renderer.py:1314
+#: src/iac_code/ui/renderer.py:1320
 msgid "default"
 msgstr "默认"
 
-#: src/iac_code/ui/renderer.py:1321
+#: src/iac_code/ui/renderer.py:1327
 #, python-brace-format
 msgid "No, always deny \"{rule}\" (this session)"
 msgstr "否，始终拒绝 \"{rule}\"（本次会话）"
 
-#: src/iac_code/ui/renderer.py:1326
+#: src/iac_code/ui/renderer.py:1332
 msgid "No, always reject this tool"
 msgstr "否，始终拒绝此工具"
 
-#: src/iac_code/ui/repl.py:354
+#: src/iac_code/ui/repl.py:355
 msgid "Press Ctrl+C again to exit."
 msgstr "再次按 Ctrl+C 退出。"
 
-#: src/iac_code/ui/repl.py:374
+#: src/iac_code/ui/repl.py:376
 msgid "Interrupted."
 msgstr "已中断。"
 
-#: src/iac_code/ui/repl.py:411
+#: src/iac_code/ui/repl.py:413
 msgid "Goodbye!"
 msgstr "再见！"
 
-#: src/iac_code/ui/repl.py:412
+#: src/iac_code/ui/repl.py:414
 msgid "Resume this session with:"
 msgstr "恢复此会话请运行："
 
-#: src/iac_code/ui/repl.py:445
+#: src/iac_code/ui/repl.py:447
 msgid "No image in clipboard."
 msgstr "剪贴板中没有图像。"
 
-#: src/iac_code/ui/repl.py:584
+#: src/iac_code/ui/repl.py:592
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "未知命令：/{name}。输入 /help 查看可用命令。"
 
-#: src/iac_code/ui/repl.py:609 src/iac_code/ui/repl.py:654
+#: src/iac_code/ui/repl.py:617 src/iac_code/ui/repl.py:662
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "命令错误：{error}"
 
-#: src/iac_code/ui/repl.py:616
+#: src/iac_code/ui/repl.py:624
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
-#: src/iac_code/ui/repl.py:889
+#: src/iac_code/ui/repl.py:929
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "会话不存在：{session_id}"
 
-#: src/iac_code/ui/repl.py:908
+#: src/iac_code/ui/repl.py:948
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1710,31 +1710,31 @@ msgstr ""
 "请运行以下命令恢复：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:947
+#: src/iac_code/ui/repl.py:987
 msgid "This conversation is from a different directory."
 msgstr "该会话来自另一个目录。"
 
-#: src/iac_code/ui/repl.py:949
+#: src/iac_code/ui/repl.py:989
 msgid "To resume, run:"
 msgstr "请运行以下命令恢复："
 
-#: src/iac_code/ui/repl.py:954
+#: src/iac_code/ui/repl.py:994
 msgid "(Command copied to clipboard)"
 msgstr "（命令已复制到剪贴板）"
 
-#: src/iac_code/ui/repl.py:1111
+#: src/iac_code/ui/repl.py:1151
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
 "to a vision-capable model."
 msgstr "当前模型 {model} 不支持图像输入。请使用 /model 切换到支持视觉的模型。"
 
-#: src/iac_code/ui/repl.py:1120
+#: src/iac_code/ui/repl.py:1160
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "图像错误：{err}"
 
-#: src/iac_code/ui/repl.py:1137
+#: src/iac_code/ui/repl.py:1177
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -1776,15 +1776,15 @@ msgstr "显示完整记录 · 按 ctrl+o 切换"
 msgid "No matches found"
 msgstr "未找到匹配项"
 
-#: src/iac_code/ui/core/prompt_input.py:331
+#: src/iac_code/ui/core/prompt_input.py:336
 msgid "Image in clipboard · ctrl+v to paste"
 msgstr "剪贴板中有图像 · 按 ctrl+v 粘贴"
 
-#: src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/ui/core/prompt_input.py:510
 msgid "Fill"
 msgstr "填充"
 
-#: src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/ui/core/prompt_input.py:510
 msgid "Dismiss"
 msgstr "关闭"
 

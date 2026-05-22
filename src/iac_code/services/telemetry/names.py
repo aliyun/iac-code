@@ -114,7 +114,7 @@ class ArmsResourceAttr:
 
 
 ARMS_FEATURE_GENAI_APP = "genai_app"
-FRAMEWORK_IAC_CODE = "iac-code"
+FRAMEWORK_IAC_CODE = "iac-code-cli"
 
 
 # =====================================================================

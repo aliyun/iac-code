@@ -22,6 +22,13 @@ from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX, detect_ima
 _SUBPROCESS_TIMEOUT = 2.0
 _SWIFT_SUBPROCESS_TIMEOUT = 10.0  # Swift first launch can be slow
 
+# Cache for has_image_in_clipboard() — avoids re-running expensive Swift
+# subprocess on rapid successive pastes. Invalidated after a short TTL or
+# when a new focus-in triggers a fresh check.
+_CLIPBOARD_CACHE_TTL = 2.0  # seconds
+_clipboard_cache_time: float = 0.0
+_clipboard_cache_value: bool = False
+
 # AppleScript that walks PNG → TIFF → JPEG and returns the matched short name
 # (or empty string). Single subprocess call covers all three formats so the
 # common screenshot path stays as fast as before while Preview/Browser-style
@@ -165,7 +172,31 @@ def _darwin_read_image_via_uti(tmp_path: str) -> str | None:
     return r.stdout.strip().decode("ascii", errors="replace")
 
 
+def invalidate_clipboard_cache() -> None:
+    """Clear the cached clipboard-image probe result.
+
+    Call this when the clipboard state may have changed (e.g. on focus-in).
+    """
+    global _clipboard_cache_time
+    _clipboard_cache_time = 0.0
+
+
 def has_image_in_clipboard() -> bool:
+    global _clipboard_cache_time, _clipboard_cache_value
+    import time as _time
+
+    now = _time.monotonic()
+    if (now - _clipboard_cache_time) < _CLIPBOARD_CACHE_TTL:
+        logger.debug("clipboard.has_image_in_clipboard: returning cached result={}", _clipboard_cache_value)
+        return _clipboard_cache_value
+
+    result = _has_image_in_clipboard_uncached()
+    _clipboard_cache_time = now
+    _clipboard_cache_value = result
+    return result
+
+
+def _has_image_in_clipboard_uncached() -> bool:
     if sys.platform == "darwin":
         r = _run(["osascript", "-e", _DARWIN_PROBE_SCRIPT])
         if r is None:

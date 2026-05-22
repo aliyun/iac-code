@@ -147,3 +147,55 @@ class TestInputHistory:
         h.append("")
         results = h.search("")
         assert results == []
+
+    def test_append_resets_nav_index_on_duplicate(self, tmp_path):
+        """Regression: appending a duplicate must reset navigation state."""
+        history_file = str(tmp_path / "history.txt")
+        h = InputHistory(history_file)
+        h.append("first")
+        h.append("second")
+        # Navigate back
+        h.navigate(-1)  # nav_index = 1 (points to "second")
+        assert h._nav_index == 1
+        # Submit "second" again (duplicate of last entry)
+        h.append("second")
+        # nav_index must be reset even though entry was a duplicate
+        assert h._nav_index == -1
+
+    def test_append_persist_false_not_saved_to_disk(self, tmp_path):
+        """Session-only entries are in memory but not on disk."""
+        history_file = str(tmp_path / "history.txt")
+        h = InputHistory(history_file)
+        h.append("persisted")
+        h.append("/auth", persist=False)
+        # In memory: both visible
+        results = h.search("/auth")
+        assert "/auth" in results
+        # On disk: only "persisted" survives reload
+        h2 = InputHistory(history_file)
+        results2 = h2.search("/auth")
+        assert "/auth" not in results2
+        results3 = h2.search("persisted")
+        assert "persisted" in results3
+
+    def test_reset_navigation(self, tmp_path):
+        history_file = str(tmp_path / "history.txt")
+        h = InputHistory(history_file)
+        h.append("entry")
+        h.navigate(-1)
+        assert h._nav_index != -1
+        h.reset_navigation()
+        assert h._nav_index == -1
+        assert h._saved_input == ""
+
+    def test_navigate_after_session_only_append(self, tmp_path):
+        """Session-only entries are navigable in the current session."""
+        history_file = str(tmp_path / "history.txt")
+        h = InputHistory(history_file)
+        h.append("first")
+        h.append("/auth login", persist=False)
+        # Navigate back should show session-only entry first
+        result = h.navigate(-1)
+        assert result == "/auth login"
+        result2 = h.navigate(-1)
+        assert result2 == "first"

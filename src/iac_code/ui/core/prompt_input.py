@@ -233,7 +233,9 @@ class PromptInput:
             return
 
         # 7. Up/Down with active suggestions → move selection
-        if self._aggregator and self._aggregator.suggestions:
+        #    But if the user is actively navigating history, prioritize history.
+        _in_history_nav = self._history and self._history.is_navigating
+        if self._aggregator and self._aggregator.suggestions and not _in_history_nav:
             if key == "up" or (ctrl and key == "p"):
                 self._aggregator.move_selection(-1)
                 return
@@ -241,7 +243,7 @@ class PromptInput:
                 self._aggregator.move_selection(1)
                 return
 
-        # 8. Up/Down with history (no active suggestions)
+        # 8. Up/Down with history
         if self._history:
             if key == "up":
                 entry = self._history.navigate(-1, self._get_text())
@@ -249,9 +251,11 @@ class PromptInput:
                     self._set_text(entry)
                 return
             if key == "down":
+                if not self._history.is_navigating:
+                    return
                 entry = self._history.navigate(1)
                 if entry is None:
-                    self._set_text("")
+                    self._set_text(self._history.saved_input)
                 else:
                     self._set_text(entry)
                 return
@@ -316,8 +320,9 @@ class PromptInput:
 
     def _check_clipboard_for_image(self) -> None:
         """Synchronously probe the system clipboard for an image on focus-in."""
-        from iac_code.utils.image.clipboard import has_image_in_clipboard
+        from iac_code.utils.image.clipboard import has_image_in_clipboard, invalidate_clipboard_cache
 
+        invalidate_clipboard_cache()
         result = has_image_in_clipboard()
         if result != self._clipboard_has_image:
             self._clipboard_has_image = result
@@ -332,9 +337,9 @@ class PromptInput:
 
     def _insert(self, text: str) -> None:
         """Insert *text* at the current cursor position."""
-        for ch in text:
-            self._buffer.insert(self._cursor, ch)
-            self._cursor += 1
+        chars = list(text)
+        self._buffer[self._cursor : self._cursor] = chars
+        self._cursor += len(chars)
         self._text_changed = True
 
     def _set_text(self, text: str) -> None:

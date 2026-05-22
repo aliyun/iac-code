@@ -55,15 +55,15 @@ class TelemetryClient:
     # have your release pipeline inject them). The code itself is
     # backend-agnostic — it just speaks OTLP/HTTP.
     _DEFAULT_TRACES_ENDPOINT_FALLBACK = (
-        "https://proj-xtrace-64f8c93632b0d2a93035551d6b73bcf-cn-beijing"
+        "https://proj-xtrace-376253ca1b7e89bdb77df391878f64-cn-beijing"
         ".cn-beijing.log.aliyuncs.com/apm/trace/opentelemetry/v1/traces"
     )
     _DEFAULT_METRICS_ENDPOINT_FALLBACK = ""  # ARMS metrics OTLP endpoint TBD
     _DEFAULT_LOGS_ENDPOINT_FALLBACK = ""  # ARMS logs OTLP endpoint TBD
     _DEFAULT_HEADERS_FALLBACK = (
-        "x-arms-license-key=h9y3c809kq@6f8319efc69b73a,"
-        "x-arms-project=proj-xtrace-64f8c93632b0d2a93035551d6b73bcf-cn-beijing,"
-        "x-cms-workspace=iac-code"
+        "x-arms-license-key=dqlxgky1hg@5f3b9e3371b5487,"
+        "x-arms-project=proj-xtrace-376253ca1b7e89bdb77df391878f64-cn-beijing,"
+        "x-cms-workspace=iac-code-cli"
     )
 
     def __init__(

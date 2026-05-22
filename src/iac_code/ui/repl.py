@@ -126,6 +126,7 @@ class InlineREPL:
         self._task_manager = TaskManager()
         self._notification_queue = NotificationQueue()
         self._command_log: list[tuple[str, str, int, bool]] = []
+        self._streaming_error_log: list[tuple[str, int]] = []
 
         memory_dir = str(get_config_dir() / "memory")
         self._memory_manager = MemoryManager(memory_dir=memory_dir)
@@ -357,12 +358,13 @@ class InlineREPL:
                     user_input = user_input.strip()
                     if not user_input:
                         continue
-                    self._history.append(user_input)
 
                     if self.command_registry.is_command(user_input):
+                        self._record_command_history(user_input)
                         await self._handle_command(user_input)
                         self._clear_cancel_state()
                         continue
+                    self._history.append(user_input)
                     # Capture structured result (text + pasted images) before next get_input resets state.
                     chat_input: PromptInputResult | str
                     result = self._prompt_input.make_result()
@@ -487,6 +489,12 @@ class InlineREPL:
             logger.info(
                 "repl: bracketed paste — text is an existing non-image file path, skipping clipboard image detection"
             )
+            img = None
+        elif not self._prompt_input._clipboard_has_image:
+            # Fast path: focus-in detection already confirmed no image in
+            # clipboard. Skip the expensive clipboard probe (osascript + swift
+            # subprocess on macOS) to avoid multi-second lag on every paste.
+            logger.info("repl: bracketed paste — focus-in detected no clipboard image, skipping probe")
             img = None
         else:
             img = get_image_from_clipboard()
@@ -662,15 +670,19 @@ class InlineREPL:
         state = self.store.get_state()
         self.console.print(render_welcome_banner(state.model, state.cwd, session_id=self._session_id))
         messages = self._agent_loop.context_manager.get_messages()
-        if not messages and not self._command_log:
+        if not messages and not self._command_log and not self._streaming_error_log:
             return
         # Build ordered list of (position, commands) for interleaving
         cmd_at: dict[int, list[tuple[str, str, bool]]] = {}
         for cmd_input, cmd_result, at, is_error in self._command_log:
             cmd_at.setdefault(at, []).append((cmd_input, cmd_result, is_error))
-        # Find split points where commands need to be inserted
-        split_points = sorted(cmd_at.keys())
-        # Replay messages in segments, inserting commands between segments
+        # Build ordered list of (position, errors) for interleaving
+        err_at: dict[int, list[str]] = {}
+        for err_text, at in self._streaming_error_log:
+            err_at.setdefault(at, []).append(err_text)
+        # Find split points where commands/errors need to be inserted
+        split_points = sorted(set(cmd_at.keys()) | set(err_at.keys()))
+        # Replay messages in segments, inserting commands/errors between segments
         prev = 0
         has_output = False
         for point in split_points:
@@ -679,7 +691,12 @@ class InlineREPL:
                     self.console.print()
                 self.renderer.replay_history(messages[prev : min(point, len(messages))])
                 has_output = True
-            for cmd_input, cmd_result, is_error in cmd_at[point]:
+            # Replay streaming errors at this position
+            for err_text in err_at.get(point, []):
+                self.renderer.print_system_message(err_text, style="bold red")
+                has_output = True
+            # Replay commands at this position
+            for cmd_input, cmd_result, is_error in cmd_at.get(point, []):
                 if has_output:
                     self.console.print()
                 self.renderer.print_user_message(cmd_input)
@@ -689,7 +706,7 @@ class InlineREPL:
                     self.renderer.print_command_result(cmd_input, cmd_result)
                 has_output = True
             prev = max(prev, point)
-        # Replay remaining messages after last command
+        # Replay remaining messages after last command/error
         if prev < len(messages):
             if has_output:
                 self.console.print()
@@ -714,6 +731,10 @@ class InlineREPL:
             )
             if elapsed >= 1.0:
                 self._agent_loop.stamp_last_turn_elapsed(elapsed)
+            if self.renderer._last_streaming_errors:
+                msg_count = len(self._agent_loop.context_manager.get_messages())
+                for err in self.renderer._last_streaming_errors:
+                    self._streaming_error_log.append((err, msg_count))
         finally:
             self.store.set_state(is_busy=False)
 
@@ -746,6 +767,10 @@ class InlineREPL:
             )
             if elapsed >= 1.0:
                 self._agent_loop.stamp_last_turn_elapsed(elapsed)
+            if self.renderer._last_streaming_errors:
+                msg_count = len(self._agent_loop.context_manager.get_messages())
+                for err in self.renderer._last_streaming_errors:
+                    self._streaming_error_log.append((err, msg_count))
         finally:
             self.store.set_state(is_busy=False)
 
@@ -835,6 +860,21 @@ class InlineREPL:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _record_command_history(self, user_input: str) -> None:
+        """Record a slash command to history respecting its history_mode."""
+        name, _ = self.command_registry.parse(user_input)
+        cmd = self.command_registry.get(name)
+        if cmd is None or not isinstance(cmd, LocalCommand):
+            self._history.append(user_input)
+            return
+        if cmd.history_mode == "none":
+            self._history.reset_navigation()
+            return
+        if cmd.history_mode == "session":
+            self._history.append(user_input, persist=False)
+            return
+        self._history.append(user_input)
 
     def _apply_qwenpaw_config(self, model: str) -> None:
         """Apply QwenPaw config if active and env vars don't override."""

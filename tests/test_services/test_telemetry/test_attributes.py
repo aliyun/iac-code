@@ -62,7 +62,7 @@ def test_resource_deployment_environment_overridable(builder, monkeypatch):
 
 
 def test_resource_contains_acs_cms_workspace(builder):
-    assert builder.build_resource()["acs.cms.workspace"] == "iac-code"
+    assert builder.build_resource()["acs.cms.workspace"] == "iac-code-cli"
 
 
 def test_resource_contains_acs_arms_service_feature(builder):

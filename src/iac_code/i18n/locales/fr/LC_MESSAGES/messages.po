@@ -4,9 +4,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.2.1\n"
+"Project-Id-Version: iac-code 0.2.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 09:26+0800\n"
+"POT-Creation-Date: 2026-05-22 14:28+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: fr\n"
@@ -500,55 +500,55 @@ msgstr "Enregistre les routes fournies sous forme d'instantané de routes"
 msgid "Show available commands"
 msgstr "Afficher les commandes disponibles"
 
-#: src/iac_code/commands/__init__.py:30
+#: src/iac_code/commands/__init__.py:31
 msgid "Clear conversation history"
 msgstr "Effacer l’historique de conversation"
 
-#: src/iac_code/commands/__init__.py:37
+#: src/iac_code/commands/__init__.py:39
 msgid "Show or switch model"
 msgstr "Afficher ou changer de modèle"
 
-#: src/iac_code/commands/__init__.py:45
+#: src/iac_code/commands/__init__.py:48
 msgid "Show or switch thinking effort"
 msgstr "Afficher ou modifier l’effort de raisonnement"
 
-#: src/iac_code/commands/__init__.py:53
+#: src/iac_code/commands/__init__.py:57
 msgid "Compact conversation context"
 msgstr "Compacter le contexte de conversation"
 
-#: src/iac_code/commands/__init__.py:55
+#: src/iac_code/commands/__init__.py:59
 msgid "Compacting conversation"
 msgstr "Compactage de la conversation"
 
-#: src/iac_code/commands/__init__.py:61
+#: src/iac_code/commands/__init__.py:66
 msgid "Exit the application"
 msgstr "Quitter l’application"
 
-#: src/iac_code/commands/__init__.py:69
+#: src/iac_code/commands/__init__.py:75
 msgid "Authenticate with LLM provider"
 msgstr "S’authentifier auprès du fournisseur LLM"
 
-#: src/iac_code/commands/__init__.py:77
+#: src/iac_code/commands/__init__.py:84
 msgid "Toggle debug logging"
 msgstr "Activer ou désactiver la journalisation debug"
 
-#: src/iac_code/commands/__init__.py:85
+#: src/iac_code/commands/__init__.py:93
 msgid "Resume a previous session"
 msgstr "Reprendre une session précédente"
 
-#: src/iac_code/commands/__init__.py:87
+#: src/iac_code/commands/__init__.py:95
 msgid "[conversation id or search term]"
 msgstr "[identifiant de conversation ou terme de recherche]"
 
 #: src/iac_code/commands/auth.py:249 src/iac_code/commands/auth.py:883
-#: src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/ui/core/prompt_input.py:510
 msgid "Navigate"
 msgstr "Naviguer"
 
 #: src/iac_code/commands/auth.py:249 src/iac_code/commands/auth.py:371
 #: src/iac_code/commands/auth.py:405 src/iac_code/commands/auth.py:412
 #: src/iac_code/commands/auth.py:436 src/iac_code/commands/auth.py:883
-#: src/iac_code/commands/auth.py:1073 src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/commands/auth.py:1073 src/iac_code/ui/core/prompt_input.py:510
 msgid "Confirm"
 msgstr "Confirmer"
 
@@ -717,7 +717,7 @@ msgid "Credential"
 msgstr "Identifiants"
 
 #: src/iac_code/commands/auth.py:844 src/iac_code/commands/auth.py:941
-#: src/iac_code/commands/auth.py:1046 src/iac_code/ui/renderer.py:418
+#: src/iac_code/commands/auth.py:1046 src/iac_code/ui/renderer.py:419
 msgid "Region"
 msgstr "Région"
 
@@ -1612,144 +1612,144 @@ msgstr "Mode debug"
 msgid "Log file"
 msgstr "Fichier journal"
 
-#: src/iac_code/ui/renderer.py:351 src/iac_code/ui/renderer.py:621
-#: src/iac_code/ui/renderer.py:1402
+#: src/iac_code/ui/renderer.py:352 src/iac_code/ui/renderer.py:622
+#: src/iac_code/ui/renderer.py:1408
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "Réflexion pendant {seconds:.1f}s"
 
-#: src/iac_code/ui/renderer.py:367 src/iac_code/ui/renderer.py:653
-#: src/iac_code/ui/renderer.py:1423
+#: src/iac_code/ui/renderer.py:368 src/iac_code/ui/renderer.py:654
+#: src/iac_code/ui/renderer.py:1429
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o pour développer)"
 
-#: src/iac_code/ui/renderer.py:394
+#: src/iac_code/ui/renderer.py:395
 msgid "Resource"
 msgstr "Ressource"
 
-#: src/iac_code/ui/renderer.py:395
+#: src/iac_code/ui/renderer.py:396
 msgid "Type"
 msgstr "Type"
 
-#: src/iac_code/ui/renderer.py:396 src/iac_code/ui/renderer.py:419
+#: src/iac_code/ui/renderer.py:397 src/iac_code/ui/renderer.py:420
 msgid "Status"
 msgstr "État"
 
-#: src/iac_code/ui/renderer.py:417
+#: src/iac_code/ui/renderer.py:418
 msgid "Account ID"
 msgstr "Identifiant de compte"
 
-#: src/iac_code/ui/renderer.py:495
+#: src/iac_code/ui/renderer.py:496
 #, python-brace-format
 msgid "Done ({child_count} tool uses{token_info}{elapsed})"
 msgstr "Terminé ({child_count} utilisations d’outil{token_info}{elapsed})"
 
-#: src/iac_code/ui/renderer.py:525
+#: src/iac_code/ui/renderer.py:526
 #, python-brace-format
 msgid "+ {count} more tool uses (ctrl+o to expand)"
 msgstr ""
 "+ {count} more tool uses (ctrl+o to expand)+ {count} utilisations d’outil"
 " supplémentaires (ctrl+o pour développer)"
 
-#: src/iac_code/ui/renderer.py:1128
+#: src/iac_code/ui/renderer.py:1130
 #, python-brace-format
 msgid "Context auto-compacted: {original} → {compacted} tokens"
 msgstr "Contexte compacté automatiquement : {original} → {compacted} tokens"
 
-#: src/iac_code/ui/renderer.py:1212
+#: src/iac_code/ui/renderer.py:1215
 msgid "Operation cancelled."
 msgstr "Opération annulée."
 
-#: src/iac_code/ui/renderer.py:1217
+#: src/iac_code/ui/renderer.py:1220
 msgid "No API key configured."
 msgstr "Aucune clé API configurée."
 
-#: src/iac_code/ui/renderer.py:1217
+#: src/iac_code/ui/renderer.py:1220
 msgid "Please run /auth to set up your LLM provider and API key."
 msgstr "Exécutez /auth pour configurer votre fournisseur LLM et votre clé API."
 
-#: src/iac_code/ui/renderer.py:1221
+#: src/iac_code/ui/renderer.py:1225
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "Erreur : {error}"
 
-#: src/iac_code/ui/renderer.py:1289
+#: src/iac_code/ui/renderer.py:1295
 msgid "Allow this action?"
 msgstr "Autoriser cette action ?"
 
-#: src/iac_code/ui/renderer.py:1292
+#: src/iac_code/ui/renderer.py:1298
 msgid "Yes, allow once"
 msgstr "Oui, autoriser une fois"
 
-#: src/iac_code/ui/renderer.py:1306
+#: src/iac_code/ui/renderer.py:1312
 #, python-brace-format
 msgid "Yes, always allow \"{rule}\" (this session)"
 msgstr "Oui, toujours autoriser \"{rule}\" (cette session)"
 
-#: src/iac_code/ui/renderer.py:1311
+#: src/iac_code/ui/renderer.py:1317
 msgid "Yes, allow always for this tool"
 msgstr "Oui, toujours autoriser pour cet outil"
 
-#: src/iac_code/ui/renderer.py:1314
+#: src/iac_code/ui/renderer.py:1320
 msgid "No, reject once"
 msgstr "Non, refuser une fois"
 
-#: src/iac_code/ui/renderer.py:1314
+#: src/iac_code/ui/renderer.py:1320
 msgid "default"
 msgstr "par défaut"
 
-#: src/iac_code/ui/renderer.py:1321
+#: src/iac_code/ui/renderer.py:1327
 #, python-brace-format
 msgid "No, always deny \"{rule}\" (this session)"
 msgstr "Non, toujours refuser \"{rule}\" (cette session)"
 
-#: src/iac_code/ui/renderer.py:1326
+#: src/iac_code/ui/renderer.py:1332
 msgid "No, always reject this tool"
 msgstr "Non, toujours refuser cet outil"
 
-#: src/iac_code/ui/repl.py:354
+#: src/iac_code/ui/repl.py:355
 msgid "Press Ctrl+C again to exit."
 msgstr "Appuyez de nouveau sur Ctrl+C pour quitter."
 
-#: src/iac_code/ui/repl.py:374
+#: src/iac_code/ui/repl.py:376
 msgid "Interrupted."
 msgstr "Interrompu."
 
-#: src/iac_code/ui/repl.py:411
+#: src/iac_code/ui/repl.py:413
 msgid "Goodbye!"
 msgstr "Au revoir !"
 
-#: src/iac_code/ui/repl.py:412
+#: src/iac_code/ui/repl.py:414
 msgid "Resume this session with:"
 msgstr "Pour reprendre cette session :"
 
-#: src/iac_code/ui/repl.py:445
+#: src/iac_code/ui/repl.py:447
 msgid "No image in clipboard."
 msgstr "Aucune image dans le presse-papiers."
 
-#: src/iac_code/ui/repl.py:584
+#: src/iac_code/ui/repl.py:592
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available commands.Commande "
 "inconnue : /{name}. Saisissez /help pour la liste des commandes."
 
-#: src/iac_code/ui/repl.py:609 src/iac_code/ui/repl.py:654
+#: src/iac_code/ui/repl.py:617 src/iac_code/ui/repl.py:662
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Erreur de commande : {error}"
 
-#: src/iac_code/ui/repl.py:616
+#: src/iac_code/ui/repl.py:624
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "Aucun gestionnaire pour la commande : {name}"
 
-#: src/iac_code/ui/repl.py:889
+#: src/iac_code/ui/repl.py:929
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Session introuvable : {session_id}"
 
-#: src/iac_code/ui/repl.py:908
+#: src/iac_code/ui/repl.py:948
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1760,19 +1760,19 @@ msgstr ""
 "Pour la reprendre, exécutez :\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:947
+#: src/iac_code/ui/repl.py:987
 msgid "This conversation is from a different directory."
 msgstr "Cette conversation provient d’un autre répertoire."
 
-#: src/iac_code/ui/repl.py:949
+#: src/iac_code/ui/repl.py:989
 msgid "To resume, run:"
 msgstr "Pour reprendre, exécutez :"
 
-#: src/iac_code/ui/repl.py:954
+#: src/iac_code/ui/repl.py:994
 msgid "(Command copied to clipboard)"
 msgstr "(Commande copiée dans le presse-papiers)"
 
-#: src/iac_code/ui/repl.py:1111
+#: src/iac_code/ui/repl.py:1151
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
@@ -1781,12 +1781,12 @@ msgstr ""
 "Le modèle actuel {model} ne prend pas en charge l’entrée d’image. "
 "Utilisez /model pour passer à un modèle compatible vision."
 
-#: src/iac_code/ui/repl.py:1120
+#: src/iac_code/ui/repl.py:1160
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "Erreur d’image : {err}"
 
-#: src/iac_code/ui/repl.py:1137
+#: src/iac_code/ui/repl.py:1177
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -1830,15 +1830,15 @@ msgstr "Affichage de la transcription · ctrl+o pour basculer"
 msgid "No matches found"
 msgstr "Aucune correspondance"
 
-#: src/iac_code/ui/core/prompt_input.py:331
+#: src/iac_code/ui/core/prompt_input.py:336
 msgid "Image in clipboard · ctrl+v to paste"
 msgstr "Image dans le presse-papiers · ctrl+v pour coller"
 
-#: src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/ui/core/prompt_input.py:510
 msgid "Fill"
 msgstr "Remplir"
 
-#: src/iac_code/ui/core/prompt_input.py:505
+#: src/iac_code/ui/core/prompt_input.py:510
 msgid "Dismiss"
 msgstr "Fermer"
 
