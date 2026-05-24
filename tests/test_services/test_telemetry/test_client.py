@@ -93,10 +93,50 @@ def test_shutdown_never_raises(tmp_path, monkeypatch):
     client.shutdown()  # must not raise
 
 
+def test_flush_force_flushes_without_closing_providers(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client = TelemetryClient()
+    client.bootstrap()
+    fake_meter = MagicMock()
+    fake_logger = MagicMock()
+    fake_tracer = MagicMock()
+    client._meter_provider = fake_meter
+    client._logger_provider = fake_logger
+    client._tracer_provider = fake_tracer
+
+    client.flush()
+
+    fake_meter.force_flush.assert_called_once()
+    fake_logger.force_flush.assert_called_once()
+    fake_tracer.force_flush.assert_called_once()
+    # Critical: providers stay open so subsequent tasks can still emit.
+    fake_meter.shutdown.assert_not_called()
+    fake_logger.shutdown.assert_not_called()
+    fake_tracer.shutdown.assert_not_called()
+
+    # Repeated flush must remain safe.
+    client.flush()
+    assert fake_meter.force_flush.call_count == 2
+
+
+def test_flush_swallows_force_flush_errors(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    client = TelemetryClient()
+    client.bootstrap()
+    bad = MagicMock()
+    bad.force_flush.side_effect = RuntimeError("boom")
+    client._meter_provider = bad
+    client._logger_provider = None
+    client._tracer_provider = None
+
+    client.flush()  # must not raise
+
+
 def test_facade_delegates_to_singleton(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     from iac_code.services.telemetry import (
         add_metric,
+        flush_telemetry,
         log_event,
         set_client,
     )
@@ -106,7 +146,9 @@ def test_facade_delegates_to_singleton(tmp_path, monkeypatch):
     try:
         log_event(Events.SESSION_STARTED, {"k": 1})
         add_metric(Metrics.SESSION_COUNT, 1, {"os.type": "linux"})
+        flush_telemetry()
         mock_client.log_event.assert_called_once_with(Events.SESSION_STARTED, {"k": 1})
         mock_client.add_metric.assert_called_once_with(Metrics.SESSION_COUNT, 1, {"os.type": "linux"})
+        mock_client.flush.assert_called_once_with()
     finally:
         set_client(None)

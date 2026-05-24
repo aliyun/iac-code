@@ -2,7 +2,7 @@ import pytest
 from a2a.types import TaskArtifactUpdateEvent
 from google.protobuf.json_format import MessageToDict
 
-from iac_code.a2a.events import _METADATA_MAX_CHARS, _truncate, publish_stream_event
+from iac_code.a2a.events import _ERROR_TEXT_MAX_CHARS, _METADATA_MAX_CHARS, _truncate, publish_stream_event
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -148,7 +148,7 @@ def test_truncate_limits_nested_depth() -> None:
 
 
 @pytest.mark.asyncio
-async def test_error_event_uses_error_field() -> None:
+async def test_error_event_passes_through_error_field() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(
@@ -160,7 +160,7 @@ async def test_error_event_uses_error_field() -> None:
 
     dumped = dump(queue.events[0])
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
-    assert dumped["status"]["message"]["parts"][0]["text"] == "An internal error occurred."
+    assert dumped["status"]["message"]["parts"][0]["text"] == "boom with /secret/path"
 
 
 @pytest.mark.asyncio
@@ -347,3 +347,37 @@ async def test_message_end_publishes_usage_metadata() -> None:
 
     dumped = dump(queue.events[0])
     assert dumped["metadata"]["iac_code"]["usage"]["totalTokens"] == 5
+
+
+@pytest.mark.asyncio
+async def test_error_event_truncates_overlong_payload() -> None:
+    queue = FakeEventQueue()
+    long_error = "X" * (_ERROR_TEXT_MAX_CHARS + 500)
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ErrorEvent(error=long_error, is_retryable=False),
+    )
+
+    dumped = dump(queue.events[0])
+    text = dumped["status"]["message"]["parts"][0]["text"]
+    assert len(text) <= _ERROR_TEXT_MAX_CHARS
+    assert text == "X" * _ERROR_TEXT_MAX_CHARS
+
+
+@pytest.mark.asyncio
+async def test_retryable_error_event_still_says_retry() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ErrorEvent(error="should not leak", is_retryable=True),
+    )
+
+    dumped = dump(queue.events[0])
+    assert dumped["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    assert dumped["status"]["message"]["parts"][0]["text"] == "A temporary error occurred. Please retry."

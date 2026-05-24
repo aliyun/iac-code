@@ -311,14 +311,91 @@ def acp(
     debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
 ) -> None:
     """Run iac-code as an ACP server."""
-    if transport == "http":
-        from iac_code.acp import acp_main_http
+    import atexit
+    import signal as _signal_mod
+    import time
 
-        acp_main_http(host=host, port=port, debug=debug)
-    else:
-        from iac_code.acp import acp_main
+    from iac_code.services.telemetry import add_metric, bootstrap_telemetry, graceful_shutdown, log_event
+    from iac_code.services.telemetry.names import Events, Metrics
 
-        acp_main(debug=debug)
+    telemetry_session_id = f"acp-server-{uuid.uuid4()}"
+    bootstrap_telemetry(session_id=telemetry_session_id)
+    log_event(
+        Events.SESSION_STARTED,
+        {
+            "mode": "acp-server",
+            "transport": transport,
+        },
+    )
+    add_metric(Metrics.SESSION_COUNT, 1, {})
+
+    started = time.monotonic()
+    exit_reason = "normal"
+    _finalized = [False]
+
+    def _finalize_telemetry(reason_override: str | None = None) -> None:
+        if _finalized[0]:
+            return
+        _finalized[0] = True
+        final_reason = reason_override or exit_reason
+        try:
+            log_event(
+                Events.SESSION_EXITED,
+                {
+                    "mode": "acp-server",
+                    "reason": final_reason,
+                    "duration_s": int(time.monotonic() - started),
+                },
+            )
+        finally:
+            graceful_shutdown()
+
+    atexit.register(_finalize_telemetry, "atexit")
+
+    def _telemetry_excepthook(exc_type, exc_value, traceback_obj):
+        try:
+            log_event(
+                Events.EXCEPTION_UNCAUGHT,
+                {
+                    "error_name": exc_type.__name__,
+                    "location": "acp",
+                },
+            )
+            _finalize_telemetry(f"exception:{exc_type.__name__}")
+        finally:
+            sys.__excepthook__(exc_type, exc_value, traceback_obj)
+
+    sys.excepthook = _telemetry_excepthook
+
+    _prev_sigterm = _signal_mod.getsignal(_signal_mod.SIGTERM)
+    _prev_sigint = _signal_mod.getsignal(_signal_mod.SIGINT)
+
+    def _telemetry_signal_handler(signum, frame):
+        _finalize_telemetry(f"signal:{signum}")
+        prev = _prev_sigterm if signum == _signal_mod.SIGTERM else _prev_sigint
+        if callable(prev):
+            prev(signum, frame)  # ty: ignore[call-top-callable]
+            return
+        _signal_mod.signal(signum, _signal_mod.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    _signal_mod.signal(_signal_mod.SIGTERM, _telemetry_signal_handler)
+    _signal_mod.signal(_signal_mod.SIGINT, _telemetry_signal_handler)
+
+    try:
+        if transport == "http":
+            from iac_code.acp import acp_main_http
+
+            acp_main_http(host=host, port=port, debug=debug)
+        else:
+            from iac_code.acp import acp_main
+
+            acp_main(debug=debug)
+    except Exception:
+        exit_reason = "error"
+        raise
+    finally:
+        _finalize_telemetry()
 
 
 def _load_a2a_config(path: str) -> dict[str, Any]:
@@ -506,6 +583,86 @@ def a2a(
             err=True,
         )
         raise typer.Exit(1) from exc
+
+    import atexit
+    import signal as _signal_mod
+    import time
+
+    from iac_code.services.telemetry import add_metric, bootstrap_telemetry, graceful_shutdown, log_event
+    from iac_code.services.telemetry.names import Events, Metrics
+
+    telemetry_session_id = f"a2a-server-{uuid.uuid4()}"
+    bootstrap_telemetry(session_id=telemetry_session_id)
+    log_event(
+        Events.SESSION_STARTED,
+        {
+            "mode": "a2a-server",
+            "transport": transport,
+        },
+    )
+    add_metric(Metrics.SESSION_COUNT, 1, {})
+
+    started = time.monotonic()
+    exit_reason = "normal"
+    _finalized = [False]
+
+    def _finalize_telemetry(reason_override: str | None = None) -> None:
+        if _finalized[0]:
+            return
+        _finalized[0] = True
+        final_reason = reason_override or exit_reason
+        try:
+            log_event(
+                Events.SESSION_EXITED,
+                {
+                    "mode": "a2a-server",
+                    "reason": final_reason,
+                    "duration_s": int(time.monotonic() - started),
+                },
+            )
+        finally:
+            graceful_shutdown()
+
+    # atexit fires on normal interpreter exit, including after uvicorn returns
+    # from a graceful shutdown — covers the path where the finally below also
+    # ran (idempotent via the flag).
+    atexit.register(_finalize_telemetry, "atexit")
+
+    def _telemetry_excepthook(exc_type, exc_value, traceback_obj):
+        try:
+            log_event(
+                Events.EXCEPTION_UNCAUGHT,
+                {
+                    "error_name": exc_type.__name__,
+                    "location": "a2a",
+                },
+            )
+            _finalize_telemetry(f"exception:{exc_type.__name__}")
+        finally:
+            sys.__excepthook__(exc_type, exc_value, traceback_obj)
+
+    sys.excepthook = _telemetry_excepthook
+
+    # Install our own SIGTERM/SIGINT handlers BEFORE uvicorn does its own. In
+    # the common path uvicorn replaces these and triggers graceful shutdown
+    # itself, after which the finally below runs. These handlers only fire if
+    # a signal arrives before uvicorn installs its own (or if uvicorn never
+    # got a chance to) — the ARMS sandbox SIGTERM-then-SIGKILL pattern.
+    _prev_sigterm = _signal_mod.getsignal(_signal_mod.SIGTERM)
+    _prev_sigint = _signal_mod.getsignal(_signal_mod.SIGINT)
+
+    def _telemetry_signal_handler(signum, frame):
+        _finalize_telemetry(f"signal:{signum}")
+        prev = _prev_sigterm if signum == _signal_mod.SIGTERM else _prev_sigint
+        if callable(prev):
+            prev(signum, frame)  # ty: ignore[call-top-callable]
+            return
+        _signal_mod.signal(signum, _signal_mod.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    _signal_mod.signal(_signal_mod.SIGTERM, _telemetry_signal_handler)
+    _signal_mod.signal(_signal_mod.SIGINT, _telemetry_signal_handler)
+
     try:
         if transport == "unix" and not socket_path:
             raise RuntimeError("socket-path is required in --config for --transport unix.")
@@ -547,8 +704,11 @@ def a2a(
             auto_approve_permissions=auto_approve_permissions,
         )
     except RuntimeError as exc:
+        exit_reason = "error"
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
+    finally:
+        _finalize_telemetry()
 
 
 @a2a_client_app.command(name="call", help=_("Send a prompt to an A2A JSON-RPC endpoint."))

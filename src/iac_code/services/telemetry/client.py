@@ -171,6 +171,22 @@ class TelemetryClient:
         # Retry previously failed batches
         self._retry_failed_batches()
 
+    def flush(self, timeout_ms: int = _FLUSH_TIMEOUT_MS) -> None:
+        """Force-flush providers without closing them; never raise.
+
+        Use this between units of work (e.g. per-task in a2a/acp servers) to
+        push pending batches before the runtime can be killed. Unlike
+        ``shutdown()``, the providers stay usable for subsequent work.
+        """
+        for provider, label in (
+            (self._meter_provider, "MeterProvider"),
+            (self._logger_provider, "LoggerProvider"),
+            (self._tracer_provider, "TracerProvider"),
+        ):
+            if provider is None:
+                continue
+            self._safe_force_flush(provider, label, timeout_ms)
+
     def shutdown(self) -> None:
         """Force-flush providers with bounded timeout; never raise."""
         for provider, label in (
@@ -315,13 +331,18 @@ class TelemetryClient:
                 log.warning("Failed to retry batch %s: %s", path, e)
 
     @staticmethod
-    def _safe_flush(provider: object, label: str) -> None:
+    def _safe_force_flush(provider: object, label: str, timeout_ms: int) -> None:
         flush = getattr(provider, "force_flush", None)
-        if flush is not None:
-            try:
-                flush(_FLUSH_TIMEOUT_MS)
-            except Exception as e:
-                log.warning("Flush %s failed: %s", label, e)
+        if flush is None:
+            return
+        try:
+            flush(timeout_ms)
+        except Exception as e:
+            log.warning("Flush %s failed: %s", label, e)
+
+    @classmethod
+    def _safe_flush(cls, provider: object, label: str) -> None:
+        cls._safe_force_flush(provider, label, _FLUSH_TIMEOUT_MS)
         shutdown = getattr(provider, "shutdown", None)
         if shutdown is not None:
             try:

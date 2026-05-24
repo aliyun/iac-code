@@ -574,7 +574,7 @@ async def test_retryable_setup_error_returns_input_required(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_unexpected_error_is_sanitized(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_unexpected_error_surfaces_type_and_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class ExplodingLoop:
         async def run_streaming(self, prompt: str):
             raise RuntimeError("internal path /secret/config.yml leaked")
@@ -592,4 +592,102 @@ async def test_unexpected_error_is_sanitized(monkeypatch: pytest.MonkeyPatch, tm
 
     dumped = dump(queue.events[-1])
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
-    assert dumped["status"]["message"]["parts"][0]["text"] == "An internal error occurred."
+    text = dumped["status"]["message"]["parts"][0]["text"]
+    assert text.startswith("RuntimeError:")
+    assert "internal path /secret/config.yml leaked" in text
+
+
+@pytest.mark.asyncio
+async def test_auth_error_still_uses_friendly_hint(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class AuthFailingLoop:
+        async def run_streaming(self, prompt: str):
+            raise ValueError("please configure your provider via /auth")
+            yield TextDeltaEvent(text="never")
+
+    runtime = FakeRuntime(agent_loop=AuthFailingLoop(), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
+
+    await executor.execute(context, queue)
+
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    assert (
+        dumped["status"]["message"]["parts"][0]["text"]
+        == "Authentication required. Please configure your API credentials."
+    )
+
+
+@pytest.mark.asyncio
+async def test_executor_flushes_telemetry_after_task(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    flush_calls: list[int] = []
+
+    def fake_flush() -> None:
+        flush_calls.append(1)
+
+    monkeypatch.setattr("iac_code.services.telemetry.flush_telemetry", fake_flush)
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-flush")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert flush_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_executor_flushes_telemetry_even_on_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    flush_calls: list[int] = []
+
+    def fake_flush() -> None:
+        flush_calls.append(1)
+
+    monkeypatch.setattr("iac_code.services.telemetry.flush_telemetry", fake_flush)
+
+    class ExplodingLoop:
+        async def run_streaming(self, prompt):  # noqa: ARG002
+            raise RuntimeError("boom")
+            yield  # pragma: no cover - generator marker
+
+    runtime = FakeRuntime(agent_loop=ExplodingLoop(), session_id="session-flush-fail")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert flush_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_executor_swallows_flush_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def boom() -> None:
+        raise RuntimeError("flush exporter network down")
+
+    monkeypatch.setattr("iac_code.services.telemetry.flush_telemetry", boom)
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-flush-error")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    # Flush failure must not break task completion.
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )

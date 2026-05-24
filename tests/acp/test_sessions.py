@@ -580,3 +580,43 @@ async def test_concurrent_resume_same_session_no_race(monkeypatch: pytest.Monkey
     for r in results:
         assert isinstance(r, acp.schema.ResumeSessionResponse)
     assert "race-session" in server.sessions
+
+
+@pytest.mark.asyncio
+async def test_acp_prompt_flushes_telemetry_after_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    flush_calls: list[int] = []
+
+    def fake_flush() -> None:
+        flush_calls.append(1)
+
+    monkeypatch.setattr("iac_code.services.telemetry.flush_telemetry", fake_flush)
+
+    conn = _RecordingFakeConn()
+    session = ACPSession("s-flush", _RecordingFakeLoop(), conn)
+
+    await session.prompt([acp.schema.TextContentBlock(type="text", text="hello")])
+
+    assert flush_calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_acp_prompt_flushes_telemetry_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    flush_calls: list[int] = []
+
+    def fake_flush() -> None:
+        flush_calls.append(1)
+
+    monkeypatch.setattr("iac_code.services.telemetry.flush_telemetry", fake_flush)
+
+    class _ExplodingLoop:
+        async def run_streaming(self, prompt):  # noqa: ARG002
+            raise RuntimeError("boom")
+            if False:  # pragma: no cover
+                yield  # marks this as an async generator
+
+    session = ACPSession("s-flush-fail", _ExplodingLoop(), _RecordingFakeConn())
+
+    with pytest.raises(acp.RequestError):
+        await session.prompt([acp.schema.TextContentBlock(type="text", text="hello")])
+
+    assert flush_calls == [1]

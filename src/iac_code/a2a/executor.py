@@ -29,6 +29,16 @@ from iac_code.services.session_storage import SessionStorage
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
+_ERROR_TEXT_MAX_CHARS = 1000
+
+
+def _format_exception(exc: BaseException) -> str:
+    message = str(exc)
+    if not message:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {message[:_ERROR_TEXT_MAX_CHARS]}"
+
+
 A2APermissionResolver: TypeAlias = Callable[[Any], "bool | Awaitable[bool]"]
 
 
@@ -274,6 +284,17 @@ class IacCodeA2AExecutor(AgentExecutor):
                 ctx.touch()
                 task.touch()
                 self._task_store.mirror_context(ctx)
+                # Force-flush telemetry between tasks. The a2a server may run in
+                # an ephemeral sandbox that's destroyed immediately after the
+                # response is delivered, before the natural batch interval or
+                # process-exit graceful_shutdown can run. Synchronous flush is
+                # offloaded to a worker thread so the event loop is not blocked.
+                from iac_code.services.telemetry import flush_telemetry
+
+                try:
+                    await asyncio.to_thread(flush_telemetry)
+                except Exception:
+                    logger.debug("flush_telemetry after task failed", exc_info=True)
         finally:
             lock.release()
 
@@ -338,7 +359,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         if status == 401:
             return "Authentication required. Please configure your API credentials."
         logger.exception("Unhandled A2A executor error")
-        return "An internal error occurred."
+        return _format_exception(exc)
 
     async def _publish_status(
         self,

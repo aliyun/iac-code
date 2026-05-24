@@ -31,6 +31,7 @@ from iac_code.types.stream_events import (
 )
 
 _METADATA_MAX_CHARS = 4000
+_ERROR_TEXT_MAX_CHARS = 1000
 _METADATA_MAX_DEPTH = 32
 logger = logging.getLogger(__name__)
 A2APermissionResolver: TypeAlias = Callable[[PermissionRequestEvent], "bool | Awaitable[bool]"]
@@ -298,18 +299,19 @@ async def publish_stream_event(
         return None
 
     if isinstance(event, ErrorEvent):
+        if event.is_retryable:
+            text = "A temporary error occurred. Please retry."
+            state = TaskState.TASK_STATE_INPUT_REQUIRED
+        else:
+            raw = event.error or "Unknown error"
+            text = raw[:_ERROR_TEXT_MAX_CHARS]
+            state = TaskState.TASK_STATE_FAILED
         await _enqueue_status(
             event_queue,
             task_id=task_id,
             context_id=context_id,
-            state=TaskState.TASK_STATE_INPUT_REQUIRED if event.is_retryable else TaskState.TASK_STATE_FAILED,
-            message=_agent_text_message(
-                task_id=task_id,
-                context_id=context_id,
-                text="A temporary error occurred. Please retry."
-                if event.is_retryable
-                else "An internal error occurred.",
-            ),
+            state=state,
+            message=_agent_text_message(task_id=task_id, context_id=context_id, text=text),
         )
         return None
 

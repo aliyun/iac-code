@@ -12,6 +12,7 @@ __all__ = [
     "start_span",
     "bootstrap_telemetry",
     "graceful_shutdown",
+    "flush_telemetry",
     "get_client",
     "set_client",
     "get_session_id",
@@ -56,6 +57,16 @@ def bootstrap_telemetry(session_id: str | None = None) -> None:
 
 def graceful_shutdown() -> None:
     get_client().shutdown()
+
+
+def flush_telemetry() -> None:
+    """Force-flush pending telemetry without closing providers.
+
+    Safe to call repeatedly between units of work (e.g. per-task in a2a/acp
+    servers). Synchronous and bounded by the client's flush timeout — async
+    callers should wrap with ``asyncio.to_thread`` to avoid blocking the loop.
+    """
+    get_client().flush()
 
 
 def get_session_id() -> str:

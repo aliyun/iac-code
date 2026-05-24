@@ -961,3 +961,83 @@ def test_a2a_command_reports_import_error(monkeypatch) -> None:
     assert result.exit_code == 1
     combined_output = (result.stdout or "") + (result.stderr or "") + (result.output or "")
     assert "a2a" in combined_output
+
+
+def test_a2a_command_bootstraps_telemetry_around_run_server(monkeypatch) -> None:
+    boot_calls: list[str | None] = []
+    events: list[tuple[str, dict]] = []
+    metrics: list[tuple[str, int | float, dict]] = []
+    shutdown_calls: list[int] = []
+    server_kwargs: dict = {}
+
+    def fake_bootstrap(session_id=None):
+        boot_calls.append(session_id)
+
+    def fake_log_event(name, payload=None):
+        events.append((name, dict(payload or {})))
+
+    def fake_add_metric(name, value, attributes=None):
+        metrics.append((name, value, dict(attributes or {})))
+
+    def fake_shutdown():
+        shutdown_calls.append(1)
+        # The finally block must still see telemetry bootstrapped when shutdown runs.
+        assert boot_calls, "graceful_shutdown called before bootstrap_telemetry"
+
+    def fake_run_server(**kwargs):
+        server_kwargs.update(kwargs)
+        # By the time run_server executes, telemetry must already be bootstrapped
+        # and the SESSION_STARTED event must already be recorded — otherwise per-
+        # call spans/events inside the agent loop would be dropped.
+        assert len(boot_calls) == 1
+        assert any(name == "iac.session.started" for name, _ in events)
+
+    monkeypatch.setattr("iac_code.services.telemetry.bootstrap_telemetry", fake_bootstrap)
+    monkeypatch.setattr("iac_code.services.telemetry.log_event", fake_log_event)
+    monkeypatch.setattr("iac_code.services.telemetry.add_metric", fake_add_metric)
+    monkeypatch.setattr("iac_code.services.telemetry.graceful_shutdown", fake_shutdown)
+    monkeypatch.setattr("iac_code.cli.main.load_saved_model", lambda: "qwen3.6-plus")
+    monkeypatch.setattr("iac_code.a2a.app.run_server", fake_run_server)
+
+    result = CliRunner().invoke(app, ["a2a", "--transport", "http"])
+
+    assert result.exit_code == 0
+    assert len(boot_calls) == 1
+    assert boot_calls[0] is not None
+    assert boot_calls[0].startswith("a2a-server-")
+
+    started = [payload for name, payload in events if name == "iac.session.started"]
+    assert started == [{"mode": "a2a-server", "transport": "http"}]
+
+    exited = [payload for name, payload in events if name == "iac.session.exited"]
+    assert len(exited) == 1
+    assert exited[0]["mode"] == "a2a-server"
+    assert exited[0]["reason"] == "normal"
+    assert isinstance(exited[0]["duration_s"], int)
+
+    assert ("iac.session.count", 1, {}) in metrics
+    assert server_kwargs["transport"] == "http"
+    assert shutdown_calls == [1]
+
+
+def test_a2a_command_flushes_telemetry_when_validation_fails(monkeypatch) -> None:
+    events: list[tuple[str, dict]] = []
+    shutdown_calls: list[int] = []
+
+    monkeypatch.setattr("iac_code.services.telemetry.bootstrap_telemetry", lambda session_id=None: None)
+    monkeypatch.setattr(
+        "iac_code.services.telemetry.log_event",
+        lambda name, payload=None: events.append((name, dict(payload or {}))),
+    )
+    monkeypatch.setattr("iac_code.services.telemetry.add_metric", lambda *args, **kwargs: None)
+    monkeypatch.setattr("iac_code.services.telemetry.graceful_shutdown", lambda: shutdown_calls.append(1))
+    monkeypatch.setattr("iac_code.cli.main.load_saved_model", lambda: "qwen3.6-plus")
+
+    # --transport unix without --config socket-path triggers the validation RuntimeError.
+    result = CliRunner().invoke(app, ["a2a", "--transport", "unix"])
+
+    assert result.exit_code == 1
+    exited = [payload for name, payload in events if name == "iac.session.exited"]
+    assert len(exited) == 1
+    assert exited[0]["reason"] == "error"
+    assert shutdown_calls == [1]

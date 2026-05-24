@@ -351,6 +351,17 @@ class ACPSession:
             duration_ms = (time.monotonic() - prompt_start) * 1000
             if self._metrics is not None:
                 self._metrics.record_prompt(duration_ms)
+            # Force-flush telemetry between prompts. The acp server may run in
+            # an ephemeral sandbox that's destroyed immediately after the
+            # response is delivered, before the natural batch interval or
+            # process-exit graceful_shutdown can run. Synchronous flush is
+            # offloaded to a worker thread so the event loop is not blocked.
+            from iac_code.services.telemetry import flush_telemetry
+
+            try:
+                await asyncio.to_thread(flush_telemetry)
+            except Exception:
+                logger.debug("flush_telemetry after prompt failed", exc_info=True)
 
         self.touch()
 

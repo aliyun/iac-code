@@ -302,7 +302,7 @@ class ProviderManager:
                     response = await self._complete_with_retry(messages, system, tools, max_tokens)
                 except Exception as e:
                     self._emit_failure_telemetry(provider_name, sanitized_model, started, e)
-                    yield ErrorEvent(error=str(e), is_retryable=False)
+                    yield ErrorEvent(error=f"{type(e).__name__}: {str(e)[:1000]}", is_retryable=False)
                     return
                 span.set_attribute(GenAiAttr.RESPONSE_ID, response.message_id)
                 self._set_llm_response_span_attrs_from_response(span, response, self._model)
@@ -419,9 +419,9 @@ class ProviderManager:
             except Exception as e:
                 status = getattr(e, "status_code", None) or getattr(e, "status", None)
                 if status and status in {408, 409, 429, 500, 502, 503, 529}:
-                    raise RetryableError(str(e), status_code=status) from e
+                    raise RetryableError(f"{type(e).__name__}: {e}", status_code=status) from e
                 if isinstance(e, (ConnectionError, TimeoutError, OSError)):
-                    raise RetryableError(str(e)) from e
+                    raise RetryableError(f"{type(e).__name__}: {e}") from e
                 raise
 
         try:

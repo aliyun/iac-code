@@ -222,7 +222,33 @@ class TestProviderManagerStreaming:
         assert "tombstone" in types
         assert "error" in types
         err = next(e for e in events if e.type == "error")
+        assert err.error.startswith("ValueError:")
         assert "irrecoverable" in err.error
+
+    async def test_fallback_error_event_preserves_original_exception_type_via_retry_wrapper(self):
+        class RateLimitError(Exception):
+            status_code = 429
+
+        mock_provider = AsyncMock()
+
+        async def failing_stream(*a, **kw):
+            yield MessageStartEvent(message_id="m1")
+            raise ConnectionError("stream died")
+
+        mock_provider.stream = failing_stream
+        mock_provider.get_model_name.return_value = "test"
+        mock_provider.complete = AsyncMock(side_effect=RateLimitError("slow down"))
+
+        mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        mgr._provider = mock_provider
+        mgr._retry_config.max_retries = 0
+
+        events = [e async for e in mgr.stream(messages=[Message.user("hi")], system="sys")]
+        err = next(e for e in events if e.type == "error")
+        # RetryableError wraps RateLimitError; both names should appear in the diagnostic
+        assert "RetryableError" in err.error
+        assert "RateLimitError" in err.error
+        assert "slow down" in err.error
 
 
 @pytest.mark.asyncio
