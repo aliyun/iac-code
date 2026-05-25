@@ -457,6 +457,64 @@ async def test_independent_contexts_execute_concurrently(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_executor_overrides_telemetry_session_id_per_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Per-context conversation session_id must surface in telemetry while
+    run_streaming is executing, instead of the process-level bootstrap id."""
+    from iac_code.services.telemetry import bootstrap_telemetry, get_session_id, set_client
+    from iac_code.services.telemetry.identity import SESSION_ID_PREFIX
+
+    monkeypatch.setenv("DISABLE_TELEMETRY", "1")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    set_client(None)
+    bootstrap_telemetry(session_id="a2a-server-process")
+    try:
+        process_level = get_session_id()
+        assert process_level == f"{SESSION_ID_PREFIX}a2a-server-process"
+
+        observed: dict[str, str] = {}
+
+        class ObservingLoop:
+            def __init__(self, label: str) -> None:
+                self._label = label
+
+            async def run_streaming(self, prompt: str):
+                observed[self._label] = get_session_id()
+                yield TextDeltaEvent(text="ok")
+
+        def factory(options):
+            return FakeRuntime(
+                agent_loop=ObservingLoop(label=options.session_id),
+                session_id=options.session_id,
+            )
+
+        monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
+
+        store = A2ATaskStore(metrics=NoOpA2AMetrics())
+        executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+        await executor.execute(
+            FakeRequestContext(task_id="task-1", context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+            FakeEventQueue(),
+        )
+        await executor.execute(
+            FakeRequestContext(task_id="task-2", context_id="ctx-2", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+            FakeEventQueue(),
+        )
+
+        session_one = store._contexts["ctx-1"].session_id
+        session_two = store._contexts["ctx-2"].session_id
+        assert session_one != session_two
+        assert observed[session_one] == f"{SESSION_ID_PREFIX}{session_one}"
+        assert observed[session_two] == f"{SESSION_ID_PREFIX}{session_two}"
+        # And the per-context override does not leak back to the parent scope.
+        assert get_session_id() == process_level
+    finally:
+        set_client(None)
+
+
+@pytest.mark.asyncio
 async def test_executor_resumes_messages_after_restart(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from iac_code.a2a.persistence import A2APersistenceStore
     from iac_code.agent.message import Message

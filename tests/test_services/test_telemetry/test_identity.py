@@ -117,3 +117,55 @@ def test_session_id_generated_when_not_injected(settings_path):
     session_id = Identity(settings_path).get_session_id()
     assert session_id.startswith(SESSION_ID_PREFIX)
     assert len(session_id) > len(SESSION_ID_PREFIX)
+
+
+def test_context_override_takes_precedence_over_process_session_id(settings_path):
+    from iac_code.services.telemetry.identity import use_session_id
+
+    identity = Identity(settings_path, session_id="process-level")
+    with use_session_id("per-context-call"):
+        assert identity.get_session_id() == f"{SESSION_ID_PREFIX}per-context-call"
+    # After the context manager exits, the process-level id is back.
+    assert identity.get_session_id() == f"{SESSION_ID_PREFIX}process-level"
+
+
+def test_context_override_prefix_idempotent(settings_path):
+    from iac_code.services.telemetry.identity import use_session_id
+
+    identity = Identity(settings_path, session_id="process-level")
+    already_prefixed = f"{SESSION_ID_PREFIX}explicit"
+    with use_session_id(already_prefixed):
+        # Caller may pass a value that already contains the prefix; we don't double it.
+        assert identity.get_session_id() == already_prefixed
+
+
+def test_context_override_isolated_between_async_tasks(settings_path):
+    import asyncio
+
+    from iac_code.services.telemetry.identity import use_session_id
+
+    identity = Identity(settings_path, session_id="process-level")
+
+    async def under_override(sid: str, started: asyncio.Event, release: asyncio.Event) -> str:
+        with use_session_id(sid):
+            started.set()
+            await release.wait()
+            return identity.get_session_id()
+
+    async def main() -> tuple[str, str, str]:
+        started_a = asyncio.Event()
+        started_b = asyncio.Event()
+        release = asyncio.Event()
+        task_a = asyncio.create_task(under_override("ctx-a", started_a, release))
+        task_b = asyncio.create_task(under_override("ctx-b", started_b, release))
+        await started_a.wait()
+        await started_b.wait()
+        # Outside any override, the parent task still sees the process-level id.
+        outside = identity.get_session_id()
+        release.set()
+        return outside, await task_a, await task_b
+
+    outside, a, b = asyncio.run(main())
+    assert outside == f"{SESSION_ID_PREFIX}process-level"
+    assert a == f"{SESSION_ID_PREFIX}ctx-a"
+    assert b == f"{SESSION_ID_PREFIX}ctx-b"

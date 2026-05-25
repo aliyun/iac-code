@@ -26,6 +26,7 @@ from iac_code.a2a.types import (
 )
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.telemetry import use_session_id
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -218,18 +219,19 @@ class IacCodeA2AExecutor(AgentExecutor):
                     context_id=context_id,
                     state=TaskState.TASK_STATE_WORKING,
                 )
-                async for event in runtime.agent_loop.run_streaming(prompt):
-                    text_chunk = await publish_stream_event(
-                        event_queue,
-                        task_id=task_id,
-                        context_id=context_id,
-                        event=event,
-                        artifact_store=self._artifact_store,
-                        permission_resolver=self._permission_resolver,
-                        auto_approve_permissions=self._auto_approve_permissions,
-                    )
-                    if text_chunk:
-                        task.output_text.append(text_chunk)
+                with use_session_id(ctx.session_id):
+                    async for event in runtime.agent_loop.run_streaming(prompt):
+                        text_chunk = await publish_stream_event(
+                            event_queue,
+                            task_id=task_id,
+                            context_id=context_id,
+                            event=event,
+                            artifact_store=self._artifact_store,
+                            permission_resolver=self._permission_resolver,
+                            auto_approve_permissions=self._auto_approve_permissions,
+                        )
+                        if text_chunk:
+                            task.output_text.append(text_chunk)
                 task.state = TASK_STATE_INPUT_REQUIRED
                 await self._publish_status(
                     event_queue,

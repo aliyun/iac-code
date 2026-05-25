@@ -7,8 +7,11 @@ tenant.id  = iac_tenant_<user-defined>, from IAC_CODE_TENANT_ID
 
 from __future__ import annotations
 
+import contextvars
 import os
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from iac_code.config import _load_yaml, _save_yaml
@@ -19,6 +22,27 @@ TENANT_ID_PREFIX = "iac_tenant_"
 
 _USER_ID_KEY = "userID"
 _TENANT_ENV_VAR = "IAC_CODE_TENANT_ID"
+
+# Per-async-context override for session id. Set via use_session_id; when
+# present, Identity.get_session_id returns this instead of the process-level
+# value. Enables a2a/acp servers to report per-conversation session ids in
+# telemetry without rebuilding the OTel providers.
+_session_id_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "iac_code_telemetry_session_id_override", default=None
+)
+
+
+@contextmanager
+def use_session_id(session_id: str) -> Iterator[None]:
+    """Override the telemetry session id for the current async context."""
+    if not session_id:
+        raise ValueError("session_id must be a non-empty string")
+    value = session_id if session_id.startswith(SESSION_ID_PREFIX) else f"{SESSION_ID_PREFIX}{session_id}"
+    token = _session_id_override.set(value)
+    try:
+        yield
+    finally:
+        _session_id_override.reset(token)
 
 
 class Identity:
@@ -51,7 +75,14 @@ class Identity:
         return new_id
 
     def get_session_id(self) -> str:
-        """Return per-instance session.id; generate on first call."""
+        """Return per-instance session.id; generate on first call.
+
+        Honors an active ``use_session_id`` override so a2a/acp servers can
+        report per-context session ids without mutating process state.
+        """
+        override = _session_id_override.get()
+        if override is not None:
+            return override
         if self._session_id is None:
             self._session_id = f"{SESSION_ID_PREFIX}{uuid.uuid4()}"
         return self._session_id
