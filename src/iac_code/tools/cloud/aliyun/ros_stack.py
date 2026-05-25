@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from alibabacloud_ros20190910 import models as ros_models
 
 from iac_code.i18n import _
@@ -51,12 +50,17 @@ SUPPORTED_ACTIONS = [
 
 
 def _parse_template(template_body: str) -> dict | None:
-    """Try YAML first (covers JSON too). Return None if unparseable."""
-    try:
-        data = yaml.safe_load(template_body)
-    except Exception:
+    """Try YAML first (with ROS tag support), then JSON. Return None if unparseable."""
+    from iac_code.tools.cloud.aliyun.ros_yaml import ros_yaml_load
+
+    if template_body.lstrip().startswith("{"):
         try:
             data = json.loads(template_body)
+        except Exception:
+            return None
+    else:
+        try:
+            data = ros_yaml_load(template_body)
         except Exception:
             return None
     return data if isinstance(data, dict) else None
@@ -169,6 +173,12 @@ class RosStack(BaseCloudStack):
         # TemplateBody must be a JSON string; models may pass a dict
         if isinstance(params.get("TemplateBody"), dict):
             params["TemplateBody"] = json.dumps(params["TemplateBody"], ensure_ascii=False)
+
+        from iac_code.tools.cloud.aliyun.api_hooks import run_hooks
+
+        hook_result = run_hooks("ros", action, params)
+        if hook_result is not None:
+            raise ValueError(hook_result.content)
 
         if action == "CreateStack":
             return await self._handle_create_stack(client, params, region)

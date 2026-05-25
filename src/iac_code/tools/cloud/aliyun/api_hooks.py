@@ -15,11 +15,16 @@ _hooks: dict[tuple[str, str], list[HookFn]] = {}
 _loaded = False
 
 
-def before_call(product: str, action: str):
-    """Decorator to register a pre-call hook for (product, action)."""
+def before_call(product: str, action: str | list[str]):
+    """Decorator to register a pre-call hook for (product, action).
+
+    action can be a single string or a list of strings.
+    """
 
     def decorator(fn: HookFn) -> HookFn:
-        _hooks.setdefault((product, action), []).append(fn)
+        actions = action if isinstance(action, list) else [action]
+        for a in actions:
+            _hooks.setdefault((product, a), []).append(fn)
         return fn
 
     return decorator

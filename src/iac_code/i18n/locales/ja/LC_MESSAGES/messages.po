@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.2.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-22 14:28+0800\n"
+"POT-Creation-Date: 2026-05-25 14:30+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: ja\n"
@@ -1551,13 +1551,81 @@ msgstr "{count} 件のドキュメントが見つかりました（合計 {total
 msgid "Use web_fetch tool to read full document content if needed."
 msgstr "必要に応じて web_fetch ツールで全文を取得してください。"
 
-#: src/iac_code/tools/cloud/aliyun/ros_stack.py:139
+#: src/iac_code/tools/cloud/aliyun/ros_stack.py:143
 msgid "ROS Stack"
 msgstr "ROS スタック"
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py:100
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:48
+#, python-brace-format
+msgid "Template YAML syntax error: {}"
+msgstr "テンプレートの YAML 構文エラー: {}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:60
+#, python-brace-format
+msgid ""
+"Template YAML syntax error (line {line}, column {col}): {problem}\n"
+"Context:\n"
+"{context}"
+msgstr ""
+"テンプレートの YAML 構文エラー（{line} 行目、{col} 列目）: {problem}\n"
+"コンテキスト:\n"
+"{context}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:66
+#, python-brace-format
+msgid "Template JSON syntax error (line {line}, column {col}): {msg}"
+msgstr "テンプレートの JSON 構文エラー（{line} 行目、{col} 列目）: {msg}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:85
+#, python-brace-format
+msgid ""
+"Template {fmt} parse result is not an object (dict), please check the "
+"template format"
+msgstr "テンプレートの {fmt} 解析結果がオブジェクト（dict）ではありません。テンプレートの形式を確認してください"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:104
+msgid ""
+"Template is missing ROSTemplateFormatVersion (ROS templates must include "
+"this field, e.g. '2015-09-01')"
+msgstr ""
+"テンプレートに ROSTemplateFormatVersion がありません（ROS テンプレートにはこのフィールドが必須です。例: "
+"'2015-09-01'）"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:110
+msgid "Template is missing Resources (ROS templates must include Resources)"
+msgstr "テンプレートに Resources がありません（ROS テンプレートには Resources が必須です）"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:112
+#, python-brace-format
+msgid "Resources must be an object (dict), current type is {}"
+msgstr "Resources はオブジェクト（dict）でなければなりません。現在の型は {} です"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:117
+#, python-brace-format
+msgid ""
+"Resource '{name}' definition must be an object (dict), current type is "
+"{type}"
+msgstr "リソース '{name}' の定義はオブジェクト（dict）でなければなりません。現在の型は {type} です"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:123
+#, python-brace-format
+msgid "Resource '{name}' is missing the Type field"
+msgstr "リソース '{name}' に Type フィールドがありません"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:129
+#, python-brace-format
+msgid "Resource '{name}' has incorrect type '{wrong}', should be '{correct}'"
+msgstr "リソース '{name}' の型 '{wrong}' が正しくありません。'{correct}' に変更してください"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:151
+msgid ""
+"Template structure validation found the following issues, please fix and "
+"retry:"
+msgstr "テンプレート構造の検証で以下の問題が見つかりました。修正して再試行してください:"
 
 #: src/iac_code/ui/banner.py:71
 msgid "Your AI-powered Infrastructure as Code assistant"

@@ -69,11 +69,12 @@ user_invocable: false
 
 1. 分析需求，确定资源列表
 2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
-3. 生成模板（库存相关属性按「参数化规则」定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
+3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践（RunCommand、嵌套栈、条件部署、常用函数等），未阅读不得生成模板
+4. 生成模板（库存相关属性按「参数化规则」定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
    - **Terraform**：生成 `.tf` 等文件后，必须先用 `tf2ros.py` 打包为 ROS Terraform 类型模板（用法见 [references/terraform-template.md](references/terraform-template.md) 的「与 ROS 集成」节），后续步骤校验/部署的都是这份打包后的 `.yml`
-4. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
-5. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
-6. 校验通过 → 展示模板 → 询问是否部署（**ROS 与 Terraform 一致**，禁止用 `terraform init/apply` 等本地 CLI 步骤替代部署确认）
+5. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
+6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
+7. 校验通过 → 展示模板 → 询问是否部署（**ROS 与 Terraform 一致**，禁止用 `terraform init/apply` 等本地 CLI 步骤替代部署确认）
 
 > **TemplateURL 支持本地文件路径**：aliyun_api（product=ros）和 ros_stack 中，TemplateURL 可传本地文件路径（如 `/tmp/template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
 
@@ -101,21 +102,19 @@ user_invocable: false
 ### 有模板的询价
 
 1. 如果没有查询可用性，按照「可用性查询」进行
-2. 调用 aliyun_api(product="ros", action="GetTemplateEstimateCost", params={...}) 询价。**模板参数必须按 `Parameters.<N>.ParameterKey` / `Parameters.<N>.ParameterValue` 平铺**（下标从 1 起），不要把参数名作为顶层 key 传入。**ROS 原生模板和 Terraform 类型模板调用同一 API，传参格式完全一致**——`ParameterKey` 即模板中的 Parameters 名（ROS）或 variable 名（Terraform，通常蛇形命名，如 `zone_id`）。示例（参数平铺通用规则见「aliyun_api 参数约定」）：
+2. 调用 aliyun_api(product="ros", action="GetTemplateEstimateCost", params={...}) 询价。**ROS API 的 Parameters 直接传字典格式**，工具会自动展开为 API 所需的平铺格式。**ROS 原生模板和 Terraform 类型模板调用同一 API，传参格式完全一致**——字典的 key 即模板中的 Parameters 名（ROS）或 variable 名（Terraform，通常蛇形命名，如 `zone_id`）。示例：
    ```python
    aliyun_api(
        product="ros",
        action="GetTemplateEstimateCost",
        params={
            "TemplateURL": "/tmp/ros-ecs-nginx-template.yml",
-           "Parameters.1.ParameterKey": "zone_id",
-           "Parameters.1.ParameterValue": "cn-hangzhou-k",
-           "Parameters.2.ParameterKey": "instance_type",
-           "Parameters.2.ParameterValue": "ecs.g7.large",
-           "Parameters.3.ParameterKey": "image_id",
-           "Parameters.3.ParameterValue": "centos_stream_9_x64_20G_alibase_20260414.vhd",
-           "Parameters.4.ParameterKey": "system_disk_category",
-           "Parameters.4.ParameterValue": "cloud_essd",
+           "Parameters": {
+               "zone_id": "cn-hangzhou-k",
+               "instance_type": "ecs.g7.large",
+               "image_id": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+               "system_disk_category": "cloud_essd",
+           },
        },
        region_id="cn-hangzhou",
    )
@@ -180,6 +179,8 @@ user_invocable: false
 - `array[object]` → `<Name>.<N>.<SubKey>`
 - 嵌套列表按同样规则继续展开
 - `object` → `<Name>.<SubKey>`
+
+**例外：ROS API 的 Parameters 参数**支持直接传字典格式 `{"参数名": "参数值"}`，工具会自动展开为 `Parameters.<N>.ParameterKey / Parameters.<N>.ParameterValue` 平铺格式。其他 RPC 参数仍需按上述规则手动平铺。
 
 ## 错误处理
 

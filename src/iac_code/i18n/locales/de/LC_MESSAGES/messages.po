@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.2.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-22 14:28+0800\n"
+"POT-Creation-Date: 2026-05-25 14:30+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: de\n"
@@ -1584,13 +1584,87 @@ msgstr ""
 "tool to read full document content if needed.Verwenden Sie bei Bedarf das"
 " Tool web_fetch für den vollständigen Dokumentinhalt."
 
-#: src/iac_code/tools/cloud/aliyun/ros_stack.py:139
+#: src/iac_code/tools/cloud/aliyun/ros_stack.py:143
 msgid "ROS Stack"
 msgstr "ROS Stack"
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py:100
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:48
+#, python-brace-format
+msgid "Template YAML syntax error: {}"
+msgstr "YAML-Syntaxfehler in der Vorlage: {}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:60
+#, python-brace-format
+msgid ""
+"Template YAML syntax error (line {line}, column {col}): {problem}\n"
+"Context:\n"
+"{context}"
+msgstr ""
+"YAML-Syntaxfehler in der Vorlage (Zeile {line}, Spalte {col}): {problem}\n"
+"Kontext:\n"
+"{context}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:66
+#, python-brace-format
+msgid "Template JSON syntax error (line {line}, column {col}): {msg}"
+msgstr "JSON-Syntaxfehler in der Vorlage (Zeile {line}, Spalte {col}): {msg}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:85
+#, python-brace-format
+msgid ""
+"Template {fmt} parse result is not an object (dict), please check the "
+"template format"
+msgstr ""
+"Das {fmt}-Parseergebnis der Vorlage ist kein Objekt (dict), bitte "
+"überprüfen Sie das Vorlagenformat"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:104
+msgid ""
+"Template is missing ROSTemplateFormatVersion (ROS templates must include "
+"this field, e.g. '2015-09-01')"
+msgstr ""
+"In der Vorlage fehlt ROSTemplateFormatVersion (ROS-Vorlagen müssen dieses"
+" Feld enthalten, z.B. '2015-09-01')"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:110
+msgid "Template is missing Resources (ROS templates must include Resources)"
+msgstr "In der Vorlage fehlt Resources (ROS-Vorlagen müssen Resources enthalten)"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:112
+#, python-brace-format
+msgid "Resources must be an object (dict), current type is {}"
+msgstr "Resources muss ein Objekt (dict) sein, aktueller Typ ist {}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:117
+#, python-brace-format
+msgid ""
+"Resource '{name}' definition must be an object (dict), current type is "
+"{type}"
+msgstr ""
+"Die Definition der Ressource '{name}' muss ein Objekt (dict) sein, "
+"aktueller Typ ist {type}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:123
+#, python-brace-format
+msgid "Resource '{name}' is missing the Type field"
+msgstr "Bei Ressource '{name}' fehlt das Feld Type"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:129
+#, python-brace-format
+msgid "Resource '{name}' has incorrect type '{wrong}', should be '{correct}'"
+msgstr "Ressource '{name}' hat den falschen Typ '{wrong}', sollte '{correct}' sein"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:151
+msgid ""
+"Template structure validation found the following issues, please fix and "
+"retry:"
+msgstr ""
+"Die Strukturvalidierung der Vorlage hat folgende Probleme gefunden, bitte"
+" beheben und erneut versuchen:"
 
 #: src/iac_code/ui/banner.py:71
 msgid "Your AI-powered Infrastructure as Code assistant"

@@ -103,7 +103,10 @@ class TestRosStackExecute:
         queue: asyncio.Queue = asyncio.Queue()
         ctx = ToolContext(event_queue=queue)
 
-        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+        with (
+            patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
+            patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+        ):
             mock_factory.create.return_value = mock_client
             result = await tool.execute(
                 tool_input={
@@ -143,6 +146,8 @@ class TestRosStackExtra:
         s = RosStack()
         # Short-circuit client construction
         monkeypatch.setattr(s, "_get_client", lambda region: _FakeRosClient())
+        # Bypass pre-call hooks in unit tests
+        monkeypatch.setattr("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", lambda *a, **kw: None)
         return s
 
     @pytest.mark.asyncio
