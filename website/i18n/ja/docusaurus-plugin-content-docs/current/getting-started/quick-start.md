@@ -34,9 +34,3 @@ iac-code --prompt "Create an OSS Bucket"
 ```bash
 echo "Create a VPC and two ECS instances" | iac-code --prompt -
 ```
-
-## デモ
-
-<p align="center">
-  <img src="/website/static/img/demo_en.gif" alt="iac-code demo" width="100%" />
-</p>

@@ -15,6 +15,10 @@
 
 > **Documentation**: [https://aliyun.github.io/iac-code/](https://aliyun.github.io/iac-code/)
 
+<p align="center">
+  <img src="website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+</p>
+
 ## Installation
 
 ```bash
@@ -46,12 +50,6 @@ Reading from stdin is also supported:
 ```bash
 echo "Create an OSS Bucket" | iac-code --prompt -
 ```
-
-## Demo
-
-<p align="center">
-  <img src="website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
-</p>
 
 ## Contact Us
 

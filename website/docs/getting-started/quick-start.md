@@ -34,9 +34,3 @@ You can also read the prompt from standard input:
 ```bash
 echo "Create a VPC and two ECS instances" | iac-code --prompt -
 ```
-
-## Demo
-
-<p align="center">
-  <img src="/website/static/img/demo_en.gif" alt="iac-code demo" width="100%" />
-</p>

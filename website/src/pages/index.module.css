@@ -28,10 +28,10 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 520px);
-  gap: 56px;
+  grid-template-columns: minmax(0, 1fr) minmax(400px, 860px);
+  gap: 40px;
   align-items: center;
-  max-width: 1180px;
+  max-width: 1440px;
   min-height: 620px;
   margin: 0 auto;
   padding: 104px 24px 72px;
@@ -96,48 +96,10 @@
   backdrop-filter: blur(16px);
 }
 
-.terminalHeader {
-  display: flex;
-  gap: 8px;
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-}
-
-.terminalHeader span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #64748b;
-}
-
-.terminalHeader span:nth-child(2) {
-  background: #f59e0b;
-}
-
-.terminalHeader span:nth-child(3) {
-  background: #5eead4;
-}
-
-.terminalBody {
-  background: transparent;
-  min-height: 230px;
-  margin: 0;
-  padding: 24px;
-  color: #e2e8f0;
-  white-space: pre-wrap;
-}
-
-.terminalBody code {
-  background: transparent;
-  color: inherit;
-}
-
-.prompt {
-  color: #5eead4;
-}
-
-.output {
-  color: #cbd5e1;
+.productGif {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .main {
