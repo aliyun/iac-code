@@ -3,6 +3,8 @@ import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import styles from './index.module.css';
+import demoEnGif from '@site/static/img/demo_en.gif';
+import demoZhGif from '@site/static/img/demo_zh.gif';
 
 type Locale = 'en' | 'zh-Hans' | 'ja' | 'fr' | 'de' | 'es' | 'pt';
 
@@ -194,6 +196,7 @@ function useHomeCopy() {
 
 function HomepageHeader() {
   const t = useHomeCopy();
+  const {i18n} = useDocusaurusContext();
 
   return (
     <header className={styles.hero}>
@@ -213,19 +216,11 @@ function HomepageHeader() {
           </div>
         </div>
         <div className={styles.productVisual} aria-label="iac-code terminal preview">
-          <div className={styles.terminalHeader}>
-            <span />
-            <span />
-            <span />
-          </div>
-          <pre className={styles.terminalBody}>
-            <code>
-              <span className={styles.prompt}>$ </span>
-              {t.terminalCommand}
-              {'\n\n'}
-              <span className={styles.output}>{t.terminalOutput}</span>
-            </code>
-          </pre>
+          <img
+            src={i18n.currentLocale === 'zh-Hans' ? demoZhGif : demoEnGif}
+            alt="iac-code demo"
+            className={styles.productGif}
+          />
         </div>
       </div>
     </header>

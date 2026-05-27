@@ -14,6 +14,9 @@
 </p>
 
 > **ドキュメント**：[https://aliyun.github.io/iac-code/](https://aliyun.github.io/iac-code/ja/)
+<p align="center">
+  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+</p>
 
 ## インストール
 
@@ -46,12 +49,6 @@ stdin からの読み取りもサポートされています：
 ```bash
 echo "OSS バケットを作成" | iac-code --prompt -
 ```
-
-## デモ
-
-<p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
-</p>
 
 ## お問い合わせ
 

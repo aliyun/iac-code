@@ -14,6 +14,9 @@
 </p>
 
 > **Documentación**: [https://aliyun.github.io/iac-code/](https://aliyun.github.io/iac-code/es/)
+<p align="center">
+  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+</p>
 
 ## Instalación
 
@@ -46,12 +49,6 @@ También se admite la lectura desde stdin:
 ```bash
 echo "Crear un bucket OSS" | iac-code --prompt -
 ```
-
-## Demo
-
-<p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
-</p>
 
 ## Contáctenos
 

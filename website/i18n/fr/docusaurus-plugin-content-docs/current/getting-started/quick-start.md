@@ -34,9 +34,3 @@ Vous pouvez également lire la requête depuis l'entrée standard :
 ```bash
 echo "Create a VPC and two ECS instances" | iac-code --prompt -
 ```
-
-## Démo
-
-<p align="center">
-  <img src="/website/static/img/demo_en.gif" alt="iac-code demo" width="100%" />
-</p>
