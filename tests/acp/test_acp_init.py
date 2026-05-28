@@ -54,7 +54,7 @@ class TestAcpMain:
         signal_handlers: dict = {}
 
         async def slow_agent(*args, **kwargs):
-            await asyncio.sleep(100)
+            await asyncio.sleep(5)
 
         def capture_signal_handler(sig, handler):
             signal_handlers[sig] = handler

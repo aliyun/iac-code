@@ -7,6 +7,7 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.utils.platform import normalize_user_path
 
 
 class ReadFileTool(Tool):
@@ -48,7 +49,7 @@ class ReadFileTool(Tool):
             tool_input["path"] = tool_input.pop("file_path")
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        path = tool_input["path"]
+        path = normalize_user_path(tool_input["path"])
         start_line = tool_input.get("start_line")
         end_line = tool_input.get("end_line")
 

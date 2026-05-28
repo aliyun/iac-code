@@ -194,6 +194,28 @@ class TestEditFileTool:
         assert file_path.read_text() == "REPLACED\nworld hello\nhello world\n"
 
     @pytest.mark.asyncio
+    async def test_windows_posix_path_conversion(self, tmp_path, edit_file_tool, monkeypatch):
+        target = tmp_path / "edit.txt"
+        target.write_text("foo bar", encoding="utf-8")
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "iac_code.tools.edit_file.normalize_user_path",
+            MagicMock(side_effect=lambda raw: raw),
+        )
+        from iac_code.tools.base import ToolContext
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await edit_file_tool.execute(
+            tool_input={"path": str(target), "old_string": "foo", "new_string": "baz"},
+            context=context,
+        )
+        assert result.is_error is False
+        from iac_code.tools.edit_file import normalize_user_path
+
+        normalize_user_path.assert_called_once_with(str(target))
+
+    @pytest.mark.asyncio
     async def test_read_error_returned(self, tmp_path, edit_file_tool, monkeypatch):
         file_path = tmp_path / "x.txt"
         file_path.write_text("abc")

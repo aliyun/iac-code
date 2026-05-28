@@ -65,7 +65,7 @@ async def test_active_session_with_running_task_is_not_cleaned() -> None:
     # Simulate idle timeout
     session.last_active = time.monotonic() - SESSION_IDLE_TIMEOUT - 1
     # Simulate an active task
-    session._current_task = asyncio.ensure_future(asyncio.sleep(1000))
+    session._current_task = asyncio.ensure_future(asyncio.sleep(5))
 
     now = time.monotonic()
     expired = [

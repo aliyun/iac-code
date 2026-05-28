@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import sys
 from io import StringIO
 from types import SimpleNamespace
+
+import pytest
 
 from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.core.prompt_input import PromptInput
@@ -47,6 +50,9 @@ def _stub_render(inp: PromptInput, monkeypatch) -> StringIO:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Unix RawInputCapture has _parse_escape_sequence; Windows uses different impl"
+)
 class TestFocusEventParsing:
     """Verify raw_input parses CSI I / CSI O as focus_in / focus_out."""
 

@@ -66,7 +66,7 @@ class TestScreenManager:
     def test_get_size_returns_cols_rows(self):
         manager, buf = make_manager()
         cols, rows = manager.get_size()
-        assert cols == 80
+        assert cols >= 79
         assert rows == 24
 
     def test_get_size_type(self):

@@ -8,6 +8,7 @@ from iac_code.config import get_llm_source
 @pytest.fixture(autouse=True)
 def iac_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     (tmp_path / ".iac-code").mkdir()
     return tmp_path
 

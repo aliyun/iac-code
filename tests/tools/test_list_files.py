@@ -166,6 +166,26 @@ class TestListFilesTool:
         zebra_pos = result.content.find("zebra.txt")
         assert alpha_pos < middle_pos < zebra_pos
 
+    @pytest.mark.asyncio
+    async def test_windows_posix_path_conversion(self, tmp_path, list_files_tool, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "iac_code.tools.list_files.normalize_user_path",
+            MagicMock(side_effect=lambda raw: raw),
+        )
+        from iac_code.tools.base import ToolContext
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await list_files_tool.execute(
+            tool_input={"path": str(tmp_path)},
+            context=context,
+        )
+        assert result.is_error is False
+        from iac_code.tools.list_files import normalize_user_path
+
+        normalize_user_path.assert_called_once_with(str(tmp_path))
+
 
 class TestListFilesExtras:
     @pytest.fixture

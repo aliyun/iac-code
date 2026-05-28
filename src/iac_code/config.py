@@ -39,7 +39,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        data = yaml.safe_load(path.read_text())
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -48,7 +48,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def _save_yaml(path: Path, data: dict[str, Any]) -> None:
     """Write *data* to a YAML file, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True))
+    path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

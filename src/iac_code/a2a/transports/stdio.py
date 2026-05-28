@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -102,7 +103,13 @@ def _error_response(request_id: str | int | None, message: str) -> dict[str, Any
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": message}}
 
 
-async def open_stdio_streams() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+async def open_stdio_streams() -> tuple[asyncio.StreamReader, Any]:
+    if sys.platform == "win32":
+        return await _open_stdio_streams_windows()
+    return await _open_stdio_streams_unix()
+
+
+async def _open_stdio_streams_unix() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
     reader = asyncio.StreamReader()
     read_protocol = asyncio.StreamReaderProtocol(reader)
     loop = asyncio.get_running_loop()
@@ -113,3 +120,57 @@ async def open_stdio_streams() -> tuple[asyncio.StreamReader, asyncio.StreamWrit
     )
     writer = asyncio.StreamWriter(write_transport, write_protocol, reader, loop)
     return reader, writer
+
+
+async def _open_stdio_streams_windows() -> tuple[asyncio.StreamReader, "_SyncStdoutWriter"]:
+    """Windows ProactorEventLoop doesn't support connect_read_pipe on stdin.
+    Use a daemon thread to read sys.stdin.buffer and feed an asyncio.StreamReader.
+    Write side is a synchronous wrapper — Windows stdout writes are blocking
+    and thread-safe so no event-loop integration is needed."""
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+
+    def _stdin_thread() -> None:
+        while True:
+            try:
+                chunk = sys.stdin.buffer.read(4096)
+            except (OSError, ValueError):
+                try:
+                    loop.call_soon_threadsafe(reader.feed_eof)
+                except RuntimeError:
+                    pass
+                return
+            try:
+                if not chunk:
+                    loop.call_soon_threadsafe(reader.feed_eof)
+                    return
+                loop.call_soon_threadsafe(reader.feed_data, chunk)
+            except RuntimeError:
+                return
+
+    threading.Thread(target=_stdin_thread, daemon=True, name="stdio-stdin-reader").start()
+    writer = _SyncStdoutWriter(sys.stdout.buffer)
+    return reader, writer
+
+
+class _SyncStdoutWriter:
+    """Minimal StreamWriter-compatible wrapper for Windows stdout."""
+
+    def __init__(self, buffer: Any) -> None:
+        self._buffer = buffer
+        self._closed = False
+
+    def write(self, data: bytes) -> None:
+        if self._closed:
+            return
+        self._buffer.write(data)
+        self._buffer.flush()
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self._closed = True
+
+    async def wait_closed(self) -> None:
+        return None

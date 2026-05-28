@@ -29,9 +29,11 @@ def acp_main(*, debug: bool = False) -> None:
             logger.info("Received shutdown signal, initiating graceful shutdown...")
             shutdown_event.set()
 
+        from iac_code.utils.signals import install_signal_handler
+
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, _signal_handler)
+            install_signal_handler(loop, sig, _signal_handler)
 
         agent_task = asyncio.create_task(acp.run_agent(server, use_unstable_protocol=True))
         shutdown_task = asyncio.create_task(shutdown_event.wait())

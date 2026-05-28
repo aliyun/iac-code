@@ -29,6 +29,8 @@ from iac_code.i18n import _
 from iac_code.services.telemetry import log_event
 from iac_code.services.telemetry.names import Events
 
+_IS_WIN32 = sys.platform == "win32"
+
 
 def _display_width(s: str) -> int:
     """Terminal display width (CJK chars = 2 columns)."""
@@ -232,20 +234,151 @@ def _render_options(options: list[str], selected: int, hints: str) -> None:
     _flush()
 
 
+def _get_msvcrt():
+    """Lazy import of msvcrt to support type checking on non-Windows platforms."""
+    import msvcrt
+
+    return msvcrt
+
+
+def _drain_msvcrt_bytes() -> list[int]:
+    """Block for the first byte, then drain any further bytes already in the
+    msvcrt input buffer. This batches paste content (which arrives byte-by-byte)
+    so multi-byte UTF-8 sequences and back-to-back keystrokes can be parsed
+    together — mirroring the Unix `os.read(fd, 4096)` batch read.
+    """
+    msvcrt = _get_msvcrt()
+    buf: list[int] = [msvcrt.getch()[0]]
+    while msvcrt.kbhit():
+        buf.append(msvcrt.getch()[0])
+    return buf
+
+
+# Extended key codes after a 0x00 / 0xE0 prefix. Only keys meaningful to auth
+# input flows are mapped to events; the rest are intentionally consumed
+# silently for parity with the Unix CSI parser (which also discards arrow/
+# function keys it doesn't care about). Adding cursor movement etc. is
+# deferred to a later phase.
+_AUTH_EXT_KEY_MAP: dict[int, tuple] = {
+    0x48: ("up",),
+    0x50: ("down",),
+    0x53: ("backspace",),  # Delete key — treated as backspace for masked input
+}
+
+
+def _read_input_events_win() -> list[tuple]:
+    """Windows replacement for _read_input_events using msvcrt.
+
+    Reads all currently-available bytes (drains kbhit) so paste content arrives
+    as a single batch. Handles UTF-8 multi-byte chars and CRLF line endings.
+    Note: msvcrt.getch() does NOT deliver Ctrl+C; the CRT raises KeyboardInterrupt
+    instead — call sites convert that to a cancel event.
+    """
+    raw_bytes = _drain_msvcrt_bytes()
+
+    events: list[tuple] = []
+    i = 0
+    while i < len(raw_bytes):
+        b = raw_bytes[i]
+        i += 1
+
+        # Extended key prefix (arrows, function keys, etc.)
+        if b in (0x00, 0xE0):
+            if i >= len(raw_bytes):
+                # Assumption: the Windows console CRT delivers extended-key
+                # pairs (prefix + scancode) atomically, so kbhit() returns
+                # True for the second byte while we're draining. If a prefix
+                # ever arrived alone, dropping it here would cause the next
+                # call to mis-parse the scancode as a printable char
+                # (e.g. 0x48 → 'H'). Phase 2 task: switch to PeekConsoleInput
+                # / Console Input Records so this race is structurally
+                # impossible.
+                break
+            ext = raw_bytes[i]
+            i += 1
+            mapped = _AUTH_EXT_KEY_MAP.get(ext)
+            if mapped is not None:
+                events.append(mapped)
+            # Unmapped extended keys silently consumed (Phase 1 scope)
+            continue
+
+        if b == 13:  # CR — Enter
+            events.append(("enter",))
+            break
+        if b == 10:  # LF — Enter (or trailing half of CRLF; harmless if first)
+            events.append(("enter",))
+            break
+        if b == 27:
+            events.append(("back",))
+            break
+        if b == 3:
+            # Defensive: msvcrt.getch() normally never returns byte 3 (Ctrl+C
+            # is intercepted by the CRT and raised as KeyboardInterrupt).
+            # Kept for parity with Unix and to handle any Console host that
+            # routes the byte through (e.g. ENABLE_PROCESSED_INPUT off).
+            events.append(("cancel",))
+            break
+        if b in (8, 127):
+            events.append(("backspace",))
+        elif b >= 0x80:
+            # UTF-8 multi-byte character
+            remaining = 1 if b < 0xE0 else (2 if b < 0xF0 else 3)
+            end = i + remaining
+            if end <= len(raw_bytes):
+                try:
+                    ch = bytes(raw_bytes[i - 1 : end]).decode("utf-8")
+                    events.append(("char", ch))
+                except UnicodeDecodeError:
+                    pass
+                i = end
+            else:
+                break  # incomplete UTF-8 at buffer end
+        elif 32 <= b <= 126:
+            events.append(("char", chr(b)))
+
+    return events
+
+
+def _select_read_key_win() -> tuple[str | None, str | None]:
+    """Read a key for _select/_select_with_info on Windows.
+
+    Only navigation/confirm/cancel keys are mapped — other extended keys
+    return (None, None) and the caller's loop skips them. Ctrl+C is delivered
+    as KeyboardInterrupt by msvcrt (caught at the call site), not as byte 3.
+    """
+    msvcrt = _get_msvcrt()
+
+    c = msvcrt.getch()
+    b = c[0]
+
+    if b in (0x00, 0xE0):
+        ext = msvcrt.getch()[0]
+        if ext == 0x48:
+            return ("up", None)
+        elif ext == 0x50:
+            return ("down", None)
+        # Other extended keys (left/right/home/end/pageup/pagedown) are
+        # intentionally ignored in selectors that only need up/down navigation.
+        return (None, None)
+
+    if b in (13, 10):
+        return ("enter", None)
+    if b == 27:
+        return ("cancel", None)
+    if b == 3:
+        # Defensive — see _read_input_events_win for the same note.
+        return ("cancel", None)
+    return (None, None)
+
+
 def _select(title: str, options: list[str], default_index: int = 0) -> int | None:
     """Full-screen selector. Returns index or None (Esc/Ctrl+C)."""
-    import select as select_mod
-    import termios
-    import tty
-
     selected = default_index
     total = len(options)
     if total == 0:
         return None
     selected = max(0, min(selected, total - 1))
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
     hints = "↑↓ {}  Enter {}  Esc {}".format(_("Navigate"), _("Confirm"), _("Back"))
 
     def draw():
@@ -255,35 +388,61 @@ def _select(title: str, options: list[str], default_index: int = 0) -> int | Non
 
     draw()
 
-    def _nb(timeout=0.05):
-        r, _, _ = select_mod.select([fd], [], [], timeout)
-        return os.read(fd, 1).decode("utf-8", errors="ignore") if r else None
-
-    tty.setraw(fd)
-    try:
-        while True:
-            ch = os.read(fd, 1).decode("utf-8", errors="ignore")
-            if ch in ("\r", "\n"):
-                return selected
-            if ch == "\x1b":
-                c2 = _nb()
-                if c2 == "[":
-                    c3 = _nb()
-                    if c3 == "A":
-                        selected = (selected - 1) % total
-                    elif c3 == "B":
-                        selected = (selected + 1) % total
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
-                    draw()
-                    tty.setraw(fd)
-                else:
+    if _IS_WIN32:
+        try:
+            while True:
+                action, _val = _select_read_key_win()
+                if action == "enter":
+                    return selected
+                elif action == "cancel":
                     return None
-            elif ch == "\x03":
-                return None
-    except Exception:
-        return None
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                elif action == "up":
+                    selected = (selected - 1) % total
+                    draw()
+                elif action == "down":
+                    selected = (selected + 1) % total
+                    draw()
+        except (Exception, KeyboardInterrupt):
+            # KeyboardInterrupt is how Ctrl+C arrives on Windows (msvcrt does
+            # not deliver byte 3); treat as cancel.
+            return None
+    else:
+        import select as select_mod
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+
+        def _nb(timeout=0.05):
+            r, _, _ = select_mod.select([fd], [], [], timeout)
+            return os.read(fd, 1).decode("utf-8", errors="ignore") if r else None
+
+        tty.setraw(fd)
+        try:
+            while True:
+                ch = os.read(fd, 1).decode("utf-8", errors="ignore")
+                if ch in ("\r", "\n"):
+                    return selected
+                if ch == "\x1b":
+                    c2 = _nb()
+                    if c2 == "[":
+                        c3 = _nb()
+                        if c3 == "A":
+                            selected = (selected - 1) % total
+                        elif c3 == "B":
+                            selected = (selected + 1) % total
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                        draw()
+                        tty.setraw(fd)
+                    else:
+                        return None
+                elif ch == "\x03":
+                    return None
+        except Exception:
+            return None
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 def _read_input_events(fd: int) -> list[tuple]:
@@ -292,6 +451,9 @@ def _read_input_events(fd: int) -> list[tuple]:
     Handles batch reads (paste) and bracketed paste escape sequences.
     Returns list of events: ('char', ch), ('backspace',), ('enter',), ('back',), ('cancel',).
     """
+    if _IS_WIN32:
+        return _read_input_events_win()
+
     import select as select_mod
 
     data = os.read(fd, 4096)
@@ -358,9 +520,6 @@ def _input_masked(title: str, prompt: str, existing: str | None = None) -> str |
 
     Returns str (key), None (Ctrl+C), or _BACK (Esc).
     """
-    import termios
-    import tty
-
     has_mask = existing is not None
     mask = "*" * len(existing) if existing else ""
     chars: list[str] = []
@@ -382,45 +541,85 @@ def _input_masked(title: str, prompt: str, existing: str | None = None) -> str |
 
     draw()
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    tty.setraw(fd)
-    try:
-        while True:
-            events = _read_input_events(fd)
-            need_redraw = False
-            done = False
+    if _IS_WIN32:
+        try:
+            while True:
+                events = _read_input_events_win()
+                need_redraw = False
+                done = False
 
-            for event in events:
-                if event[0] == "enter":
-                    done = True
+                for event in events:
+                    if event[0] == "enter":
+                        done = True
+                        break
+                    elif event[0] == "back":
+                        return _BACK
+                    elif event[0] == "cancel":
+                        return None
+                    elif event[0] == "backspace":
+                        if has_mask and not chars:
+                            has_mask = False
+                            hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
+                        elif chars:
+                            chars.pop()
+                        need_redraw = True
+                    elif event[0] == "char":
+                        if has_mask:
+                            has_mask = False
+                            hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
+                        chars.append(event[1])
+                        need_redraw = True
+
+                if done:
                     break
-                elif event[0] == "back":
-                    return _BACK
-                elif event[0] == "cancel":
-                    return None
-                elif event[0] == "backspace":
-                    if has_mask and not chars:
-                        has_mask = False
-                        hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
-                    elif chars:
-                        chars.pop()
-                    need_redraw = True
-                elif event[0] == "char":
-                    if has_mask:
-                        has_mask = False
-                        hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
-                    chars.append(event[1])
-                    need_redraw = True
+                if need_redraw:
+                    draw()
+        except (Exception, KeyboardInterrupt):
+            # Ctrl+C on Windows arrives as KeyboardInterrupt — treat as cancel.
+            return None
+    else:
+        import termios
+        import tty
 
-            if done:
-                break
-            if need_redraw:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-                draw()
-                tty.setraw(fd)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        try:
+            while True:
+                events = _read_input_events(fd)
+                need_redraw = False
+                done = False
+
+                for event in events:
+                    if event[0] == "enter":
+                        done = True
+                        break
+                    elif event[0] == "back":
+                        return _BACK
+                    elif event[0] == "cancel":
+                        return None
+                    elif event[0] == "backspace":
+                        if has_mask and not chars:
+                            has_mask = False
+                            hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
+                        elif chars:
+                            chars.pop()
+                        need_redraw = True
+                    elif event[0] == "char":
+                        if has_mask:
+                            has_mask = False
+                            hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
+                        chars.append(event[1])
+                        need_redraw = True
+
+                if done:
+                    break
+                if need_redraw:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                    draw()
+                    tty.setraw(fd)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     if not chars and existing:
         return existing
@@ -429,9 +628,6 @@ def _input_masked(title: str, prompt: str, existing: str | None = None) -> str |
 
 def _input_text(title: str, prompt: str) -> str | None | _BackSentinel:
     """Full-screen text input. Returns str, None (Ctrl+C), or _BACK (Esc)."""
-    import termios
-    import tty
-
     chars: list[str] = []
     hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
 
@@ -447,39 +643,73 @@ def _input_text(title: str, prompt: str) -> str | None | _BackSentinel:
 
     draw()
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    tty.setraw(fd)
-    try:
-        while True:
-            events = _read_input_events(fd)
-            need_redraw = False
-            done = False
+    if _IS_WIN32:
+        try:
+            while True:
+                events = _read_input_events_win()
+                need_redraw = False
+                done = False
 
-            for event in events:
-                if event[0] == "enter":
-                    done = True
+                for event in events:
+                    if event[0] == "enter":
+                        done = True
+                        break
+                    elif event[0] == "back":
+                        return _BACK
+                    elif event[0] == "cancel":
+                        return None
+                    elif event[0] == "backspace":
+                        if chars:
+                            chars.pop()
+                        need_redraw = True
+                    elif event[0] == "char":
+                        chars.append(event[1])
+                        need_redraw = True
+
+                if done:
                     break
-                elif event[0] == "back":
-                    return _BACK
-                elif event[0] == "cancel":
-                    return None
-                elif event[0] == "backspace":
-                    if chars:
-                        chars.pop()
-                    need_redraw = True
-                elif event[0] == "char":
-                    chars.append(event[1])
-                    need_redraw = True
+                if need_redraw:
+                    draw()
+        except (Exception, KeyboardInterrupt):
+            # Ctrl+C on Windows arrives as KeyboardInterrupt — treat as cancel.
+            return None
+    else:
+        import termios
+        import tty
 
-            if done:
-                break
-            if need_redraw:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-                draw()
-                tty.setraw(fd)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        try:
+            while True:
+                events = _read_input_events(fd)
+                need_redraw = False
+                done = False
+
+                for event in events:
+                    if event[0] == "enter":
+                        done = True
+                        break
+                    elif event[0] == "back":
+                        return _BACK
+                    elif event[0] == "cancel":
+                        return None
+                    elif event[0] == "backspace":
+                        if chars:
+                            chars.pop()
+                        need_redraw = True
+                    elif event[0] == "char":
+                        chars.append(event[1])
+                        need_redraw = True
+
+                if done:
+                    break
+                if need_redraw:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                    draw()
+                    tty.setraw(fd)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     return "".join(chars) if chars else None
 
@@ -868,18 +1098,12 @@ def _select_with_info(
     info_renderer: a callable that writes info lines to stdout (no clear/title).
     Returns index or None (Esc/Ctrl+C).
     """
-    import select as select_mod
-    import termios
-    import tty
-
     selected = default_index
     total = len(options)
     if total == 0:
         return None
     selected = max(0, min(selected, total - 1))
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
     hints = "↑↓ {}  Enter {}  Esc {}".format(_("Navigate"), _("Confirm"), _("Back"))
 
     def draw():
@@ -891,35 +1115,60 @@ def _select_with_info(
 
     draw()
 
-    def _nb(timeout=0.05):
-        r, _, _ = select_mod.select([fd], [], [], timeout)
-        return os.read(fd, 1).decode("utf-8", errors="ignore") if r else None
-
-    tty.setraw(fd)
-    try:
-        while True:
-            ch = os.read(fd, 1).decode("utf-8", errors="ignore")
-            if ch in ("\r", "\n"):
-                return selected
-            if ch == "\x1b":
-                c2 = _nb()
-                if c2 == "[":
-                    c3 = _nb()
-                    if c3 == "A":
-                        selected = (selected - 1) % total
-                    elif c3 == "B":
-                        selected = (selected + 1) % total
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
-                    draw()
-                    tty.setraw(fd)
-                else:
+    if _IS_WIN32:
+        try:
+            while True:
+                action, _val = _select_read_key_win()
+                if action == "enter":
+                    return selected
+                elif action == "cancel":
                     return None
-            elif ch == "\x03":
-                return None
-    except Exception:
-        return None
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                elif action == "up":
+                    selected = (selected - 1) % total
+                    draw()
+                elif action == "down":
+                    selected = (selected + 1) % total
+                    draw()
+        except (Exception, KeyboardInterrupt):
+            # Ctrl+C on Windows arrives as KeyboardInterrupt — treat as cancel.
+            return None
+    else:
+        import select as select_mod
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+
+        def _nb(timeout=0.05):
+            r, _, _ = select_mod.select([fd], [], [], timeout)
+            return os.read(fd, 1).decode("utf-8", errors="ignore") if r else None
+
+        tty.setraw(fd)
+        try:
+            while True:
+                ch = os.read(fd, 1).decode("utf-8", errors="ignore")
+                if ch in ("\r", "\n"):
+                    return selected
+                if ch == "\x1b":
+                    c2 = _nb()
+                    if c2 == "[":
+                        c3 = _nb()
+                        if c3 == "A":
+                            selected = (selected - 1) % total
+                        elif c3 == "B":
+                            selected = (selected + 1) % total
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                        draw()
+                        tty.setraw(fd)
+                    else:
+                        return None
+                elif ch == "\x03":
+                    return None
+        except Exception:
+            return None
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
 def _render_credential_info(credential: AliyunCredential, source: str) -> None:
@@ -1066,9 +1315,6 @@ def _aliyun_region_flow() -> str | None | _BackSentinel:
 
 def _input_text_with_default(title: str, label: str, default: str) -> str | None | _BackSentinel:
     """Full-screen text input with a default value shown. Returns str, None (Ctrl+C), or _BACK (Esc)."""
-    import termios
-    import tty
-
     chars: list[str] = list(default)
     hints = "Enter {}  Esc {}".format(_("Confirm"), _("Back"))
 
@@ -1084,38 +1330,72 @@ def _input_text_with_default(title: str, label: str, default: str) -> str | None
 
     draw()
 
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    tty.setraw(fd)
-    try:
-        while True:
-            events = _read_input_events(fd)
-            need_redraw = False
-            done = False
+    if _IS_WIN32:
+        try:
+            while True:
+                events = _read_input_events_win()
+                need_redraw = False
+                done = False
 
-            for event in events:
-                if event[0] == "enter":
-                    done = True
+                for event in events:
+                    if event[0] == "enter":
+                        done = True
+                        break
+                    elif event[0] == "back":
+                        return _BACK
+                    elif event[0] == "cancel":
+                        return None
+                    elif event[0] == "backspace":
+                        if chars:
+                            chars.pop()
+                        need_redraw = True
+                    elif event[0] == "char":
+                        chars.append(event[1])
+                        need_redraw = True
+
+                if done:
                     break
-                elif event[0] == "back":
-                    return _BACK
-                elif event[0] == "cancel":
-                    return None
-                elif event[0] == "backspace":
-                    if chars:
-                        chars.pop()
-                    need_redraw = True
-                elif event[0] == "char":
-                    chars.append(event[1])
-                    need_redraw = True
+                if need_redraw:
+                    draw()
+        except (Exception, KeyboardInterrupt):
+            # Ctrl+C on Windows arrives as KeyboardInterrupt — treat as cancel.
+            return None
+    else:
+        import termios
+        import tty
 
-            if done:
-                break
-            if need_redraw:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-                draw()
-                tty.setraw(fd)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        try:
+            while True:
+                events = _read_input_events(fd)
+                need_redraw = False
+                done = False
+
+                for event in events:
+                    if event[0] == "enter":
+                        done = True
+                        break
+                    elif event[0] == "back":
+                        return _BACK
+                    elif event[0] == "cancel":
+                        return None
+                    elif event[0] == "backspace":
+                        if chars:
+                            chars.pop()
+                        need_redraw = True
+                    elif event[0] == "char":
+                        chars.append(event[1])
+                        need_redraw = True
+
+                if done:
+                    break
+                if need_redraw:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                    draw()
+                    tty.setraw(fd)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
     return "".join(chars) if chars else None

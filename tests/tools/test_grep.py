@@ -89,6 +89,26 @@ class TestGrepExecute:
         assert result.is_error is True
         assert "not found" in result.content.lower()
 
+    async def test_windows_posix_path_conversion(self, tmp_path, tool, monkeypatch):
+        (tmp_path / "a.txt").write_text("hello world", encoding="utf-8")
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "iac_code.tools.grep.normalize_user_path",
+            MagicMock(side_effect=lambda raw: raw),
+        )
+        from iac_code.tools.base import ToolContext
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await tool.execute(
+            tool_input={"pattern": "hello", "path": str(tmp_path)},
+            context=context,
+        )
+        assert result.is_error is False
+        from iac_code.tools.grep import normalize_user_path
+
+        normalize_user_path.assert_called_once_with(str(tmp_path))
+
 
 class TestGrepRendering:
     def test_render_tool_use_empty(self, tool):

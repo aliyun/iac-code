@@ -25,7 +25,7 @@ class HttpA2AClient:
     async def stream(self, url: str, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         async with self._http_client.stream("POST", url, json=payload, headers=self._headers()) as response:
             response.raise_for_status()
-            lines = cast(AsyncIterator[str | bytes], response.iter_lines())
+            lines = cast(AsyncIterator[str | bytes], response.aiter_lines())
             async for raw_line in lines:
                 line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
                 if line.startswith("data:"):

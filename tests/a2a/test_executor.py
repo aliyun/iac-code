@@ -154,7 +154,7 @@ async def test_executor_persists_working_state_for_interrupted_restoration(
     class SlowLoop:
         async def run_streaming(self, prompt: str):
             started.set()
-            await asyncio.sleep(60)
+            await asyncio.sleep(5)
             yield TextDeltaEvent(text="never")
 
     runtime = FakeRuntime(agent_loop=SlowLoop(), session_id="session-1")
@@ -166,7 +166,7 @@ async def test_executor_persists_working_state_for_interrupted_restoration(
     context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
     queue = FakeEventQueue()
     running = asyncio.create_task(executor.execute(context, queue))
-    await started.wait()
+    await asyncio.wait_for(started.wait(), timeout=5.0)
 
     task_snapshot = persistence.load_task("task-1")
     context_snapshot = persistence.load_context("ctx-1")
@@ -322,7 +322,7 @@ async def test_cancel_bypasses_context_lock(monkeypatch: pytest.MonkeyPatch, tmp
     class SlowLoop:
         async def run_streaming(self, prompt: str):
             started.set()
-            await asyncio.sleep(60)
+            await asyncio.sleep(5)
             yield TextDeltaEvent(text="never")
 
     runtime = FakeRuntime(agent_loop=SlowLoop(), session_id="session-1")
@@ -333,7 +333,7 @@ async def test_cancel_bypasses_context_lock(monkeypatch: pytest.MonkeyPatch, tmp
     context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
     queue = FakeEventQueue()
     running = asyncio.create_task(executor.execute(context, queue))
-    await started.wait()
+    await asyncio.wait_for(started.wait(), timeout=5.0)
 
     await executor.cancel(context, queue)
     await running
@@ -348,7 +348,7 @@ async def test_same_context_concurrent_message_is_rejected(monkeypatch: pytest.M
     class SlowLoop:
         async def run_streaming(self, prompt: str):
             started.set()
-            await asyncio.sleep(60)
+            await asyncio.sleep(5)
             yield TextDeltaEvent(text="never")
 
     runtime = FakeRuntime(agent_loop=SlowLoop(), session_id="session-1")
@@ -361,7 +361,7 @@ async def test_same_context_concurrent_message_is_rejected(monkeypatch: pytest.M
     first_queue = FakeEventQueue()
     second_queue = FakeEventQueue()
     running = asyncio.create_task(executor.execute(first, first_queue))
-    await started.wait()
+    await asyncio.wait_for(started.wait(), timeout=5.0)
 
     await executor.execute(second, second_queue)
     await executor.cancel(first, first_queue)

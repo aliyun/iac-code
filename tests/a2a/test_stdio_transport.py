@@ -88,3 +88,127 @@ async def test_stdio_client_sends_request_and_reads_response() -> None:
     response_writer.write(encode_frame({"jsonrpc": "2.0", "id": request["id"], "result": {"pong": True}}))
 
     assert await pending == {"jsonrpc": "2.0", "id": "1", "result": {"pong": True}}
+
+
+class TestOpenStdioStreamsWindows:
+    """Windows path uses a daemon thread + sync writer wrapper."""
+
+    @pytest.mark.asyncio
+    async def test_sync_writer_writes_and_flushes(self, monkeypatch):
+        """_SyncStdoutWriter writes bytes to the underlying buffer and flushes."""
+        from io import BytesIO
+
+        from iac_code.a2a.transports.stdio import _SyncStdoutWriter
+
+        class FlushTracker(BytesIO):
+            def __init__(self):
+                super().__init__()
+                self.flush_count = 0
+
+            def flush(self):
+                self.flush_count += 1
+                super().flush()
+
+        buffer = FlushTracker()
+        writer = _SyncStdoutWriter(buffer)
+        writer.write(b'{"hello":"world"}\n')
+        await writer.drain()
+        assert buffer.getvalue() == b'{"hello":"world"}\n'
+        assert buffer.flush_count == 1
+
+        writer.close()
+        await writer.wait_closed()
+        writer.write(b"ignored")
+        assert buffer.getvalue() == b'{"hello":"world"}\n'
+
+    @pytest.mark.asyncio
+    async def test_windows_branch_uses_thread_reader(self, monkeypatch):
+        """When sys.platform == 'win32', open_stdio_streams reads stdin via
+        a daemon thread and returns a _SyncStdoutWriter for stdout."""
+        from io import BytesIO
+
+        import iac_code.a2a.transports.stdio as stdio_mod
+
+        fake_stdin = BytesIO(b'{"hello":"world"}\n')
+        fake_stdout = BytesIO()
+
+        class FakeSys:
+            platform = "win32"
+
+            class Stdin:
+                buffer = fake_stdin
+
+            stdin = Stdin
+
+            class Stdout:
+                buffer = fake_stdout
+
+            stdout = Stdout
+
+        monkeypatch.setattr(stdio_mod, "sys", FakeSys)
+
+        reader, writer = await stdio_mod.open_stdio_streams()
+
+        line = await asyncio.wait_for(reader.readline(), timeout=2.0)
+        assert line == b'{"hello":"world"}\n'
+
+        from iac_code.a2a.transports.stdio import _SyncStdoutWriter
+
+        assert isinstance(writer, _SyncStdoutWriter)
+
+        writer.write(b"out\n")
+        await writer.drain()
+        assert fake_stdout.getvalue() == b"out\n"
+
+    @pytest.mark.asyncio
+    async def test_stdin_thread_handles_closed_loop(self, monkeypatch):
+        """When the event loop is closed before stdin EOF, the daemon thread
+        must exit silently instead of propagating RuntimeError."""
+        import threading
+        from io import BytesIO
+
+        import iac_code.a2a.transports.stdio as stdio_mod
+
+        class BlockingStdin(BytesIO):
+            def __init__(self):
+                super().__init__()
+                self._event = threading.Event()
+
+            def read(self, n=-1):
+                self._event.wait()
+                return b""
+
+            def unblock(self):
+                self._event.set()
+
+        fake_stdin = BlockingStdin()
+        fake_stdout = BytesIO()
+
+        class FakeSys:
+            platform = "win32"
+
+            class Stdin:
+                buffer = fake_stdin
+
+            stdin = Stdin
+
+            class Stdout:
+                buffer = fake_stdout
+
+            stdout = Stdout
+
+        monkeypatch.setattr(stdio_mod, "sys", FakeSys)
+
+        threads_before = set(threading.enumerate())
+        reader, writer = await stdio_mod.open_stdio_streams()
+        stdin_thread = (set(threading.enumerate()) - threads_before).pop()
+
+        loop = asyncio.get_running_loop()
+        original_cstp = loop.call_soon_threadsafe
+        try:
+            loop.call_soon_threadsafe = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("Event loop is closed"))
+            fake_stdin.unblock()
+            stdin_thread.join(timeout=2.0)
+            assert not stdin_thread.is_alive(), "stdin thread should have exited cleanly"
+        finally:
+            loop.call_soon_threadsafe = original_cstp

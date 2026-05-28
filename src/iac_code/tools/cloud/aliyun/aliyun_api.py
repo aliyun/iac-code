@@ -42,7 +42,7 @@ _ENDPOINTS_FILE = Path(__file__).parent / "endpoints.yml"
 
 
 def _load_endpoints() -> dict[str, Any]:
-    data = yaml.safe_load(_ENDPOINTS_FILE.read_text()) or {}
+    data = yaml.safe_load(_ENDPOINTS_FILE.read_text(encoding="utf-8")) or {}
     # Convert region lists to sets for O(1) lookup
     for config in data.values():
         for key in ("regional", "central"):
@@ -395,7 +395,7 @@ class AliyunApi(BaseCloudApi):
         if product == "ros":
             template_url = params.get("TemplateURL", "")
             if template_url and not template_url.startswith(("http://", "https://", "oss://")):
-                params["TemplateBody"] = Path(template_url).read_text()
+                params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
                 del params["TemplateURL"]
 
         # Pre-call hooks (e.g. resource type validation)

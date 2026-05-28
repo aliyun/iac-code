@@ -3,6 +3,7 @@
 import base64
 import io
 
+import pytest
 from PIL import Image
 
 from iac_code.agent.message import ImageBlock, TextBlock
@@ -23,9 +24,9 @@ def test_processor_emits_blocks_for_chat_path():
     assert any(isinstance(b, TextBlock) for b in blocks)
 
 
-def test_handle_chat_with_blocks_calls_run_streaming(monkeypatch):
+@pytest.mark.asyncio
+async def test_handle_chat_with_blocks_calls_run_streaming(monkeypatch):
     """Smoke test: PromptInputResult with images flows through _handle_chat → blocks → agent loop."""
-    import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
     from iac_code.ui.core.prompt_input import PromptInputResult
@@ -42,7 +43,7 @@ def test_handle_chat_with_blocks_calls_run_streaming(monkeypatch):
 
     pc = {1: PastedContent(id=1, type="image", content=_b64_png(), media_type="image/png")}
     result = PromptInputResult(text="see [Image #1]", pasted_contents=pc)
-    asyncio.run(repl._handle_chat(result))
+    await repl._handle_chat(result)
 
     # The agent loop should have been called with a list[ContentBlock] containing both block types
     args, _kwargs = fake_loop.run_streaming.call_args
@@ -52,9 +53,9 @@ def test_handle_chat_with_blocks_calls_run_streaming(monkeypatch):
     assert any(isinstance(b, TextBlock) for b in payload)
 
 
-def test_handle_chat_with_string_passes_through(monkeypatch):
+@pytest.mark.asyncio
+async def test_handle_chat_with_string_passes_through(monkeypatch):
     """Backward-compat: plain string user input still works."""
-    import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
     from iac_code.ui.repl import InlineREPL
@@ -68,7 +69,7 @@ def test_handle_chat_with_string_passes_through(monkeypatch):
     fake_loop.stamp_last_turn_elapsed = MagicMock()
     repl._agent_loop = fake_loop
 
-    asyncio.run(repl._handle_chat("plain text"))
+    await repl._handle_chat("plain text")
     args, _kwargs = fake_loop.run_streaming.call_args
     payload = args[0]
     assert payload == "plain text"

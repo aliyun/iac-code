@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import shlex
+import sys
 
 from iac_code.skills.skill_definition import SkillContext, SkillDefinition
 
@@ -131,16 +132,41 @@ async def execute_shell_commands(content: str, *, cwd: str = "") -> str:
 
 async def _run_shell(cmd: str, *, cwd: str = "", timeout: float = 30.0) -> str:
     """Run a shell command and return its stdout."""
+    proc = None
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd or None,
-        )
+        if sys.platform == "win32":
+            from iac_code.utils.platform import PlatformInfo
+
+            platform_info = PlatformInfo.detect()
+            proc = await asyncio.create_subprocess_exec(
+                platform_info.shell_path,
+                "-c",
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd or None,
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd or None,
+                start_new_session=True,
+            )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         return stdout.decode("utf-8", errors="replace")
-    except (asyncio.TimeoutError, OSError) as e:
+    except asyncio.TimeoutError as e:
+        if proc is not None:
+            from iac_code.utils.platform import kill_process_tree
+
+            await kill_process_tree(proc)
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=5)
+            except (asyncio.TimeoutError, OSError):
+                pass
+        return f"[shell error: {e}]"
+    except OSError as e:
         return f"[shell error: {e}]"
 
 

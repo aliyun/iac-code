@@ -44,6 +44,7 @@ class TestResolveConfigDirExpansion:
     def test_tilde_expansion(self, monkeypatch, tmp_path):
         # Pretend $HOME is tmp_path so ~/work/iac resolves into our sandbox.
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.setenv("IAC_CODE_CONFIG_DIR", "~/work/iac")
         from iac_code.config import get_config_dir
 

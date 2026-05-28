@@ -15,6 +15,7 @@ import httpx
 import yaml
 
 from iac_code.config import get_config_dir
+from iac_code.utils.file_security import safe_replace
 
 
 def _cache_path() -> Path:
@@ -32,7 +33,7 @@ class AutoDetectCache:
         if not path.exists():
             return
         try:
-            raw = yaml.safe_load(path.read_text()) or {}
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except Exception:
             return
         if isinstance(raw, dict):
@@ -63,7 +64,7 @@ class AutoDetectCache:
         try:
             with os.fdopen(fd, "w") as f:
                 yaml.dump(self._data, f, default_flow_style=False)
-            os.replace(tmp_name, path)
+            safe_replace(tmp_name, str(path))
         except Exception:
             try:
                 os.unlink(tmp_name)

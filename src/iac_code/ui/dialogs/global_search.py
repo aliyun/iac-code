@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from typing import Callable
@@ -118,12 +119,14 @@ class GlobalSearch:
         """Parse ``filepath:linenum:matched_line`` output into PickerItems."""
         items: list[PickerItem] = []
         seen: set[str] = set()
+        # Use regex to handle Windows paths containing ':' (e.g. C:\path\file.py:3:text)
+        line_pattern = re.compile(r"^(.+?):(\d+):(.*)$")
 
         for line in output.splitlines():
-            parts = line.split(":", 2)
-            if len(parts) < 3:
+            m = line_pattern.match(line)
+            if not m:
                 continue
-            file_path, lineno_str, matched_text = parts[0], parts[1], parts[2]
+            file_path, lineno_str, matched_text = m.group(1), m.group(2), m.group(3)
             if not lineno_str.isdigit():
                 continue
 

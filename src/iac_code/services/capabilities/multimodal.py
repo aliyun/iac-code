@@ -51,7 +51,7 @@ def _load_settings_overrides() -> dict[str, MultiModalSpec]:
     if not path.exists():
         return {}
     try:
-        data = yaml.safe_load(path.read_text()) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
     section = data.get("multiModal") if isinstance(data, dict) else None

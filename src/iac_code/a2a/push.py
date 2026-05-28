@@ -4,7 +4,6 @@ import asyncio
 import base64
 import hashlib
 import json
-import os
 import uuid
 from dataclasses import asdict, dataclass
 from ipaddress import ip_address
@@ -26,6 +25,7 @@ from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.push_queue import A2APushJob, A2APushQueue, LocalFileA2APushQueue
 from iac_code.a2a.push_secrets import A2APushSecretKeyring
 from iac_code.a2a.types import validate_protocol_id
+from iac_code.utils.file_security import restrict_file_permissions, safe_replace
 
 
 class InvalidPushNotificationConfigError(ValueError):
@@ -74,7 +74,7 @@ class A2APushConfigStore(PushNotificationConfigStore):
         self._root = Path(persistence.root) / "push_configs"
         self._secret_keyring = secret_keyring or A2APushSecretKeyring(Path(persistence.root) / "push_keys.json")
         self._root.mkdir(parents=True, exist_ok=True)
-        _chmod_private(self._root, directory=True)
+        restrict_file_permissions(self._root, directory=True)
 
     async def set_info(
         self,
@@ -95,7 +95,7 @@ class A2APushConfigStore(PushNotificationConfigStore):
 
         path = self._config_path(_owner(context), task_id, config.id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        _chmod_private(path.parent, directory=True)
+        restrict_file_permissions(path.parent, directory=True)
         data = self._config_to_storage(config)
         _write_json_atomic(path, data)
 
@@ -304,19 +304,12 @@ def _owner(context: ServerCallContext) -> str:
     return resolve_user_scope(context)
 
 
-def _chmod_private(path: Path, *, directory: bool) -> None:
-    try:
-        os.chmod(path, 0o700 if directory else 0o600)
-    except OSError:
-        return
-
-
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp_path.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-        _chmod_private(tmp_path, directory=False)
-        os.replace(tmp_path, path)
-        _chmod_private(path, directory=False)
+        restrict_file_permissions(tmp_path, directory=False)
+        safe_replace(str(tmp_path), str(path))
+        restrict_file_permissions(path, directory=False)
     finally:
         tmp_path.unlink(missing_ok=True)

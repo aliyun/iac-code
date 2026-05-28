@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 from loguru import logger
@@ -15,6 +16,23 @@ _startup_handler_id: int | None = None
 _runtime_debug_handler_ids: list[int] = []
 _debug_enabled: bool = False
 _current_log_file: Path | None = None
+
+
+def _link_latest(log_dir: Path, log_file: Path) -> None:
+    """Create a latest.log symlink, falling back to copy on Windows without privileges.
+
+    Note: the copy fallback produces a point-in-time snapshot, not a live link —
+    subsequent writes go only to the session log file.
+    """
+    latest = log_dir / "latest.log"
+    latest.unlink(missing_ok=True)
+    try:
+        latest.symlink_to(log_file.name)
+    except OSError:
+        try:
+            shutil.copy2(log_file, latest)
+        except OSError:
+            pass
 
 
 class _StdlibToLoguruHandler(logging.Handler):
@@ -62,9 +80,7 @@ def setup_logging(
     _debug_enabled = debug
     _current_log_file = log_file
 
-    latest = log_dir / "latest.log"
-    latest.unlink(missing_ok=True)
-    latest.symlink_to(log_file.name)
+    _link_latest(log_dir, log_file)
 
     _install_stdlib_bridge()
 
@@ -104,9 +120,7 @@ def enable_debug_at_runtime(session_id: str) -> Path:
     _runtime_debug_handler_ids.append(handler_id)
     _debug_enabled = True
 
-    latest = log_dir / "latest.log"
-    latest.unlink(missing_ok=True)
-    latest.symlink_to(log_file.name)
+    _link_latest(log_dir, log_file)
 
     return log_file
 

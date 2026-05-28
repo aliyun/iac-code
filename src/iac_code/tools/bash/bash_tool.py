@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import TYPE_CHECKING, Any
 
 from iac_code.i18n import _
+from iac_code.utils.platform import PlatformInfo, kill_process_tree
 
 if TYPE_CHECKING:
     from iac_code.types.permissions import PermissionResult
@@ -48,18 +50,33 @@ class BashTool(Tool):
         timeout = tool_input.get("timeout", 120)
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=context.cwd,
-            )
+            if sys.platform == "win32":
+                info = PlatformInfo.detect()
+                process = await asyncio.create_subprocess_exec(
+                    info.shell_path,
+                    "-c",
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=context.cwd,
+                )
+            else:
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=context.cwd,
+                    start_new_session=True,
+                )
 
             try:
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
             except asyncio.TimeoutError:
-                process.kill()
-                await process.communicate()
+                await kill_process_tree(process)
+                try:
+                    await asyncio.wait_for(process.communicate(), timeout=5)
+                except (asyncio.TimeoutError, OSError):
+                    pass
                 return ToolResult.error(
                     _("Command timed out after {timeout} seconds: {command}").format(timeout=timeout, command=command)
                 )

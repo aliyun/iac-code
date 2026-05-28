@@ -154,6 +154,28 @@ class TestReadFileTool:
         assert "Line 2" in result.content
         assert "Line 3" not in result.content
 
+    @pytest.mark.asyncio
+    async def test_windows_posix_path_conversion(self, tmp_path, read_file_tool, monkeypatch):
+        target = tmp_path / "msys_path.txt"
+        target.write_text("hello", encoding="utf-8")
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "iac_code.tools.read_file.normalize_user_path",
+            MagicMock(side_effect=lambda raw: raw),
+        )
+        from iac_code.tools.base import ToolContext
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await read_file_tool.execute(
+            tool_input={"path": str(target)},
+            context=context,
+        )
+        assert result.is_error is False
+        from iac_code.tools.read_file import normalize_user_path
+
+        normalize_user_path.assert_called_once_with(str(target))
+
 
 class TestReadFileErrors:
     @pytest.mark.asyncio

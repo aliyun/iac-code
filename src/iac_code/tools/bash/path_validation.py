@@ -8,12 +8,27 @@ from typing import TYPE_CHECKING, Literal
 
 from iac_code.i18n import _
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult
+from iac_code.utils.platform import normalize_user_path
 
 if TYPE_CHECKING:
     from iac_code.tools.bash.command_parser import SimpleCommand
 
 _PATH_COMMANDS = frozenset({"cp", "mv", "rm", "mkdir", "rmdir", "ln", "install"})
 _REDIRECT_TARGET = re.compile(r"^(?:>>|>)\s*(.+)$")
+_POSIX_PSEUDO_DEVICES = frozenset(
+    {
+        "/dev/null",
+        "/dev/zero",
+        "/dev/random",
+        "/dev/urandom",
+        "/dev/stdin",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/fd/0",
+        "/dev/fd/1",
+        "/dev/fd/2",
+    }
+)
 
 
 def validate_path(resolved_path: str, cwd: str, additional_directories: list[str]) -> Literal["allow", "deny"]:
@@ -29,9 +44,10 @@ def validate_path(resolved_path: str, cwd: str, additional_directories: list[str
 
 
 def _resolve_candidate(path: str, cwd: str) -> str:
+    path = normalize_user_path(path)
     if os.path.isabs(path):
-        return path
-    return os.path.join(cwd, path)
+        return os.path.normpath(path)
+    return os.path.normpath(os.path.join(cwd, path))
 
 
 def _strip_outer_quotes(token: str) -> str:
@@ -81,11 +97,14 @@ def _argv_paths(argv: list[str]) -> list[str]:
 
 def check_path_constraints(cmd: SimpleCommand, cwd: str, additional_directories: list[str]) -> PermissionResult:
     """Validate paths in redirects and command arguments. Returns passthrough if no paths to check."""
+    redirect_paths = set(_redirect_paths(cmd.redirects))
     candidates = list(dict.fromkeys(_redirect_paths(cmd.redirects) + _argv_paths(cmd.argv)))
     if not candidates:
         return PermissionResult(behavior="passthrough")
 
     for rel_or_abs in candidates:
+        if rel_or_abs in _POSIX_PSEUDO_DEVICES and rel_or_abs in redirect_paths:
+            continue
         resolved = _resolve_candidate(rel_or_abs, cwd)
         decision = validate_path(resolved, cwd, additional_directories)
         if decision == "deny":

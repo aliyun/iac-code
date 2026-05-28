@@ -3,21 +3,36 @@
 from __future__ import annotations
 
 import os
+import sys
 
 from iac_code.ui.suggestions.types import CompletionToken, SuggestionItem, SuggestionProvider
 
 
 def _detect_history_path() -> str | None:
     """Detect the shell history file path from the SHELL environment variable."""
+
     shell = os.environ.get("SHELL", "")
     home = os.path.expanduser("~")
+
+    if sys.platform == "win32" and not shell:
+        userprofile = os.environ.get("USERPROFILE", home)
+        bash_hist = os.path.join(userprofile, ".bash_history")
+        if os.path.exists(bash_hist):
+            return bash_hist
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            ps_hist = os.path.join(
+                appdata, "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt"
+            )
+            if os.path.exists(ps_hist):
+                return ps_hist
+        return None
 
     if "zsh" in shell:
         candidate = os.path.join(home, ".zsh_history")
     elif "bash" in shell:
         candidate = os.path.join(home, ".bash_history")
     else:
-        # Fallback: try zsh first, then bash
         zsh = os.path.join(home, ".zsh_history")
         bash = os.path.join(home, ".bash_history")
         if os.path.exists(zsh):

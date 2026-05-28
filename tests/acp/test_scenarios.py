@@ -103,7 +103,7 @@ class SlowFakeLoop:
 
     async def run_streaming(self, prompt: str):
         yield TextDeltaEvent(text="started")
-        await asyncio.sleep(100)
+        await asyncio.sleep(5)
         yield MessageEndEvent(stop_reason="stop", usage=Usage())
 
 

@@ -50,7 +50,7 @@ def load_settings_permissions(path: Path, source: str) -> dict[str, Any]:
     if not path.exists():
         return _empty_permissions_dict()
     try:
-        raw = yaml.safe_load(path.read_text())
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("Failed to parse permissions from {}: {}", path, exc)
         raw = {}

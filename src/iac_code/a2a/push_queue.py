@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from iac_code.a2a.push_secrets import A2APushSecretKeyring
+from iac_code.utils.file_security import restrict_file_permissions
 
 _REDACTED_HEADERS = {"authorization", "x-a2a-notification-token", "x-api-key", "api-key"}
 _ENCRYPTED_JOB_FIELD = "iacCodeEncryptedPushJob"
@@ -127,7 +128,7 @@ class LocalFileA2APushQueue:
         self.dead_dir = self.root / "dead"
         for path in (self.pending_dir, self.inflight_dir, self.dead_dir):
             path.mkdir(parents=True, exist_ok=True)
-            self._chmod_private(path, directory=True)
+            restrict_file_permissions(path, directory=True)
 
     async def enqueue(self, job: A2APushJob) -> None:
         self._write(self.pending_dir / f"{job.job_id}.json", job)
@@ -163,7 +164,7 @@ class LocalFileA2APushQueue:
 
     def _write(self, path: Path, job: A2APushJob) -> None:
         path.write_text(_serialize_push_job(job, secret_keyring=self._secret_keyring), encoding="utf-8")
-        self._chmod_private(path, directory=False)
+        restrict_file_permissions(path, directory=False)
 
     def _read(self, path: Path) -> A2APushJob:
         return _deserialize_push_job(path.read_text(encoding="utf-8"), secret_keyring=self._secret_keyring)
@@ -179,12 +180,6 @@ class LocalFileA2APushQueue:
                 target,
                 job.with_attempt(attempt=job.attempt, next_attempt_at=now, last_error="Delivery lease expired."),
             )
-
-    def _chmod_private(self, path: Path, *, directory: bool) -> None:
-        try:
-            os.chmod(path, 0o700 if directory else 0o600)
-        except OSError:
-            return
 
 
 class RedisStreamsA2APushQueue:

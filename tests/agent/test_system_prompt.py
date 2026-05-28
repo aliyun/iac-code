@@ -1,3 +1,4 @@
+import tempfile
 from unittest.mock import patch
 
 from iac_code.agent.system_prompt import (
@@ -7,6 +8,8 @@ from iac_code.agent.system_prompt import (
     build_system_prompt,
     split_by_dynamic_boundary,
 )
+
+_TMP = tempfile.gettempdir()
 
 
 class TestSystemPromptBuilder:
@@ -75,31 +78,31 @@ class TestSystemPromptBuilder:
 
 class TestBuildSystemPrompt:
     def test_contains_identity_section(self):
-        prompt = build_system_prompt(cwd="/tmp")
+        prompt = build_system_prompt(cwd=_TMP)
         assert "AI" in prompt or "assistant" in prompt
 
     def test_contains_environment_section(self):
-        prompt = build_system_prompt(cwd="/tmp/test")
-        assert "/tmp/test" in prompt
+        prompt = build_system_prompt(cwd=_TMP)
+        assert _TMP in prompt
 
     def test_contains_tools_section(self):
-        prompt = build_system_prompt(cwd="/tmp")
+        prompt = build_system_prompt(cwd=_TMP)
         assert "ReadFile" in prompt or "read_file" in prompt.lower()
 
     def test_contains_dynamic_boundary(self):
-        prompt = build_system_prompt(cwd="/tmp")
+        prompt = build_system_prompt(cwd=_TMP)
         assert DYNAMIC_BOUNDARY in prompt
 
     def test_contains_output_style(self):
-        prompt = build_system_prompt(cwd="/tmp")
+        prompt = build_system_prompt(cwd=_TMP)
         assert "concise" in prompt.lower() or "brief" in prompt.lower()
 
     def test_memory_section_included_when_content(self):
-        prompt = build_system_prompt(cwd="/tmp", memory_content="Remember: user prefers Python")
+        prompt = build_system_prompt(cwd=_TMP, memory_content="Remember: user prefers Python")
         assert "user prefers Python" in prompt
 
     def test_memory_section_absent_when_empty(self):
-        prompt = build_system_prompt(cwd="/tmp", memory_content="")
+        prompt = build_system_prompt(cwd=_TMP, memory_content="")
         # When no memory content, no Memory section header should appear
         # The output_style section will still be in dynamic zone, so DYNAMIC_BOUNDARY exists
         lines = prompt.split("\n")

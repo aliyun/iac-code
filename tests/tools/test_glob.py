@@ -75,6 +75,26 @@ class TestGlobBasics:
         assert result.is_error is True
         assert "glob went wrong" in result.content or "glob" in result.content.lower()
 
+    @pytest.mark.asyncio
+    async def test_windows_posix_path_conversion(self, tmp_path, tool, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "iac_code.tools.glob.normalize_user_path",
+            MagicMock(side_effect=lambda raw: raw),
+        )
+        from iac_code.tools.base import ToolContext
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await tool.execute(
+            tool_input={"pattern": "*.txt", "path": str(tmp_path)},
+            context=context,
+        )
+        assert result.is_error is False
+        from iac_code.tools.glob import normalize_user_path
+
+        normalize_user_path.assert_called_once_with(str(tmp_path))
+
 
 class TestGlobRendering:
     def test_render_tool_use_empty(self, tool):
