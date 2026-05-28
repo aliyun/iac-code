@@ -33,6 +33,9 @@ persistence-dir: ~/.iac-code/a2a
 artifact-dir: ~/.iac-code/a2a/artifacts
 signing-secret: local-card-signing-secret
 push-notifications: true
+thinking-exposure:
+  - tool-trace
+  - raw-thinking
 ```
 
 Execute com:
@@ -42,6 +45,8 @@ iac-code a2a --config a2a-server.yml
 ```
 
 `push-notifications: true` habilita os métodos de configuração de notificações push de tarefas A2A e a entrega de estados terminais. Use `push-queue: redis-streams` com `push-redis-url` quando vários workers precisarem coordenar a entrega push.
+
+`thinking-exposure` controla quais sinais de runtime que não fazem parte da resposta são expostos via `metadata.iac_code` durante streaming. O padrão é `tool-trace`; adicione `raw-thinking` apenas para clientes confiáveis que podem ver conteúdo de raciocínio do provider.
 
 O servidor expõe:
 

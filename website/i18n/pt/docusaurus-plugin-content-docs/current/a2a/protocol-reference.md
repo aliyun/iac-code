@@ -366,6 +366,8 @@ Detalhes de ferramentas e uso são entregues por `metadata.iac_code`:
 | `iac_code.tool.input` | Entrada completa da ferramenta, truncada para 4000 caracteres por campo |
 | `iac_code.tool.result` | Resultado da ferramenta, truncado para 4000 caracteres por campo |
 | `iac_code.permission.autoApproved` | `false` quando uma solicitação de permissão de ferramenta foi rejeitada pelo modo servidor A2A |
+| `iac_code.thinking.type` | `raw_thinking` quando `raw-thinking` está habilitado em `thinking-exposure` |
+| `iac_code.thinking.text` | Chunk bruto de raciocínio do provider, truncado para 4000 caracteres, emitido apenas em configurações confiáveis que habilitam `raw-thinking` |
 | `iac_code.usage.inputTokens` | Contagem de tokens de entrada do turno |
 | `iac_code.usage.outputTokens` | Contagem de tokens de saída do turno |
 | `iac_code.usage.totalTokens` | Contagem total de tokens do turno |
@@ -381,6 +383,14 @@ urn:iac-code:a2a:artifact-metadata:v1
 ```
 
 Esta extensão identifica o namespace `metadata.iac_code` usado para progresso de ferramentas, decisões de permissão, uso de tokens e metadados de artefatos locais. Se o servidor estiver configurado com qualquer extensão obrigatória, os clientes devem incluir seu URI no cabeçalho `A2A-Extensions`. Extensões obrigatórias ausentes retornam o `ExtensionSupportRequiredError` A2A padrão.
+
+Quando `thinking-exposure` habilita um ou mais tipos de sinal, o Agent Card também anuncia:
+
+```text
+urn:iac-code:a2a:thinking-exposure:v1
+```
+
+Os params da extensão incluem `enabledTypes`, como `["tool_trace", "raw_thinking"]`. Esta é uma extensão de metadados do iac-code, não um tipo de evento de streaming central do A2A.
 
 ## Tratamento de erros
 

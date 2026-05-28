@@ -366,6 +366,8 @@ iac-code は A2A コンテキストを内部エージェントランタイムに
 | `iac_code.tool.input` | 完了したツール入力。フィールドごとに 4000 文字へ切り詰め |
 | `iac_code.tool.result` | ツール結果。フィールドごとに 4000 文字へ切り詰め |
 | `iac_code.permission.autoApproved` | A2A サーバーモードによってツール権限リクエストが拒否された場合は `false` |
+| `iac_code.thinking.type` | `thinking-exposure` で `raw-thinking` が有効な場合は `raw_thinking` |
+| `iac_code.thinking.text` | 生の provider 推論チャンク。4000 文字に切り詰められ、信頼済み設定で `raw-thinking` が有効な場合のみ出力 |
 | `iac_code.usage.inputTokens` | ターンの入力トークン数 |
 | `iac_code.usage.outputTokens` | ターンの出力トークン数 |
 | `iac_code.usage.totalTokens` | ターンの合計トークン数 |
@@ -381,6 +383,14 @@ urn:iac-code:a2a:artifact-metadata:v1
 ```
 
 この拡張は、ツール進行状況、権限判断、トークン使用量、ローカルアーティファクトメタデータに使用される `metadata.iac_code` 名前空間を識別します。サーバーが必須拡張を設定している場合、クライアントはその URI を `A2A-Extensions` ヘッダーに含める必要があります。必須拡張がない場合、標準 A2A `ExtensionSupportRequiredError` が返されます。
+
+`thinking-exposure` が 1 つ以上の信号タイプを有効にしている場合、Agent Card は次も広告します。
+
+```text
+urn:iac-code:a2a:thinking-exposure:v1
+```
+
+拡張 params には `enabledTypes` が含まれます。例：`["tool_trace", "raw_thinking"]`。これは iac-code メタデータ拡張であり、A2A コアのストリーミングイベントタイプではありません。
 
 ## エラー処理
 

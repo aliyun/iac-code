@@ -93,6 +93,7 @@ Par défaut, le serveur se lie à `127.0.0.1:41242` et sert JSON-RPC via HTTP. L
 | `--host` | `127.0.0.1` | Hôte du serveur HTTP |
 | `--port` | `41242` | Port du serveur HTTP |
 | `--transport` | `http` | Transport serveur : `http`, `stdio`, `unix`, `websocket`, `grpc`, `grpc-jsonrpc` ou `redis-streams` |
+| `--thinking-exposure` | `tool-trace` | Expose un type de signal de thinking A2A ; répétez pour en fournir plusieurs. Valeurs : `raw-thinking`, `tool-trace` |
 | `--debug`, `-d` | `false` | Activer la journalisation de débogage |
 
 Exemple :
@@ -236,6 +237,20 @@ Options du transport Redis Streams :
 | `request-stream` | `iac-code:a2a:requests` | Nom du stream de requêtes |
 | `response-stream` | `iac-code:a2a:responses` | Nom du stream de réponses |
 | `consumer-group` | `iac-code` | Groupe de consommateurs du stream de requêtes |
+
+### Exposition du thinking
+
+| Clé de configuration | Défaut | Description |
+|--------|---------|-------------|
+| `thinking-exposure` | `tool-trace` | Types de signaux d'exécution hors réponse exposés via A2A `metadata.iac_code`. Utilisez une liste YAML, une chaîne séparée par des virgules ou des flags `--thinking-exposure` répétés. Les valeurs prises en charge sont `tool-trace` et `raw-thinking`. |
+
+`tool-trace` préserve les métadonnées existantes de progression d'outil, d'autorisation et de résultat. `raw-thinking` émet les chunks de raisonnement du provider sous forme de mises à jour `metadata.iac_code.thinking` avec `type: raw_thinking` et `text`. iac-code ne produit actuellement pas d'événements séparés thought-summary ou progress-summary ; ces valeurs ne sont donc pas des types d'exposition valides.
+
+```yaml
+thinking-exposure:
+  - tool-trace
+  - raw-thinking
+```
 
 ### Comportement des autorisations
 

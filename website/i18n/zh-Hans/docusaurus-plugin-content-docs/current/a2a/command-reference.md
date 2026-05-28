@@ -93,6 +93,7 @@ iac-code a2a
 | `--host` | `127.0.0.1` | HTTP server host |
 | `--port` | `41242` | HTTP server port |
 | `--transport` | `http` | Server transport：`http`、`stdio`、`unix`、`websocket`、`grpc`、`grpc-jsonrpc` 或 `redis-streams` |
+| `--thinking-exposure` | `tool-trace` | 暴露一种 A2A thinking 信号类型；可重复指定多个。取值：`raw-thinking`、`tool-trace` |
 | `--debug`, `-d` | `false` | 启用 debug logging |
 
 示例：
@@ -236,6 +237,20 @@ Redis Streams 传输选项：
 | `request-stream` | `iac-code:a2a:requests` | Request stream 名称 |
 | `response-stream` | `iac-code:a2a:responses` | Response stream 名称 |
 | `consumer-group` | `iac-code` | Request stream consumer group |
+
+### Thinking 暴露
+
+| 配置键 | 默认值 | 描述 |
+|--------|---------|-------------|
+| `thinking-exposure` | `tool-trace` | 通过 A2A `metadata.iac_code` 暴露的非回答运行时信号类型。可使用 YAML 列表、逗号分隔字符串，或重复的 `--thinking-exposure` flag。支持值为 `tool-trace` 和 `raw-thinking`。 |
+
+`tool-trace` 保留现有的工具进度、权限和结果元数据。`raw-thinking` 会将 provider 推理 chunk 作为 `metadata.iac_code.thinking` 更新发出，包含 `type: raw_thinking` 和 `text`。iac-code 目前不会生成独立的 thought-summary 或 progress-summary 事件，因此这些不是有效的暴露类型。
+
+```yaml
+thinking-exposure:
+  - tool-trace
+  - raw-thinking
+```
 
 ### 权限行为
 
