@@ -288,7 +288,7 @@ def run_server(
     push_lease_timeout_ms: int = 300_000,
     auto_approve_permissions: bool = False,
 ) -> None:
-    from iac_code.a2a.transports.base import normalize_transport_name
+    from iac_code.a2a.transports.base import normalize_transport_name, validate_transport_for_platform
 
     normalized_transport = normalize_transport_name(transport)
     if persistence_dir is None:
@@ -304,6 +304,8 @@ def run_server(
         raise RuntimeError("--redis-url is required for --transport redis-streams.")
     if push_queue == "redis-streams" and not push_redis_url:
         raise RuntimeError("--push-redis-url is required for --push-queue redis-streams.")
+
+    validate_transport_for_platform(normalized_transport)
 
     supported_interfaces = _supported_interfaces(
         transport=normalized_transport,

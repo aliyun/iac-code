@@ -627,7 +627,21 @@ class PromptInput:
         while not self._submitted and not self._cancelled:
             with RawInputCapture() as cap:
                 while not self._submitted and not self._cancelled and self._pending_action is None:
-                    event = cap.read_key()
+                    try:
+                        event = cap.read_key()
+                    except KeyboardInterrupt:
+                        # On Windows, msvcrt raises KeyboardInterrupt for
+                        # Ctrl+C instead of returning a key event. Preserve the
+                        # normal Ctrl+C behavior: clear non-empty input first,
+                        # otherwise cancel this prompt.
+                        if self._buffer:
+                            self._buffer.clear()
+                            self._cursor = 0
+                            self._text_changed = True
+                            self._render()
+                            continue
+                        self._cancelled = True
+                        break
                     if event is None:
                         continue
                     self._handle_key(event)

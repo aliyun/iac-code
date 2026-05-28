@@ -61,6 +61,7 @@ def test_create_agent_runtime_all_fields_populated(tmp_path, monkeypatch) -> Non
 def test_create_agent_runtime_custom_cwd(tmp_path, monkeypatch) -> None:
     """Custom cwd is passed through to the runtime."""
     monkeypatch.chdir(tmp_path)
+    (tmp_path / "subdir").mkdir()
     custom_cwd = str(tmp_path / "subdir")
 
     runtime = create_agent_runtime(AgentFactoryOptions(model="qwen3.6-plus", session_id="cwd-test", cwd=custom_cwd))

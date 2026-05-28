@@ -132,7 +132,8 @@ class DynamicSkillTracker:
 
     @staticmethod
     def _matches_any_pattern(file_path: str, patterns: list[str]) -> bool:
+        normalized_path = file_path.replace("\\", "/")
         for pattern in patterns:
-            if fnmatch.fnmatch(file_path, pattern):
+            if fnmatch.fnmatch(normalized_path, pattern.replace("\\", "/")):
                 return True
         return False

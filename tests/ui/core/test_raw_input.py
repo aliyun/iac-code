@@ -1,10 +1,15 @@
-"""Tests for RawInputCapture static conversion methods."""
+"""Tests for RawInputCapture static conversion methods (Unix only)."""
 
-import termios
+import sys
 
 import pytest
 
-from iac_code.ui.core.raw_input import RawInputCapture
+if sys.platform == "win32":
+    pytest.skip("Unix-only tests (termios)", allow_module_level=True)
+
+import termios  # noqa: E402
+
+from iac_code.ui.core.raw_input import RawInputCapture  # noqa: E402
 
 
 class TestByteToKeyEvent:

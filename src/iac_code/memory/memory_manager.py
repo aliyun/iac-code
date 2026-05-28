@@ -25,7 +25,7 @@ class MemoryManager:
         if memory_type not in MEMORY_TYPES:
             raise ValueError(f"Invalid memory type: {memory_type}")
         file_content = f"---\nname: {name}\ndescription: {description}\ntype: {memory_type}\n---\n\n{content}\n"
-        with open(self._memory_path(name), "w", encoding="utf-8") as f:
+        with open(self._memory_path(name), "w", encoding="utf-8", newline="\n") as f:
             f.write(file_content)
         self._update_index()
 
@@ -71,7 +71,7 @@ class MemoryManager:
                 mem = self.load(filename[:-3])
                 if mem:
                     entries.append(f"- [{filename[:-3]}]({filename}) — {mem.get('description', '')}")
-        with open(self._index_path(), "w", encoding="utf-8") as f:
+        with open(self._index_path(), "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(entries[:MAX_INDEX_LINES]) + "\n")
 
     @staticmethod

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from typing import TYPE_CHECKING
 
 from iac_code.i18n import _
@@ -24,27 +25,49 @@ SENSITIVE_PATHS = [
     ".ssh/",
     ".ssh",
     ".env",
+    ".aliyun/",
+    ".aliyun",
+    ".alibabacloud/",
+    ".alibabacloud",
+    ".aws/credentials",
 ]
+
+if sys.platform == "win32":
+    SENSITIVE_PATHS.extend(
+        [
+            "AppData/Roaming/Microsoft/Windows/PowerShell",
+            "AppData/Local/Microsoft/Credentials",
+            "ntuser.dat",
+        ]
+    )
 
 _WRITE_COMMANDS = frozenset({"rm", "mv", "cp", "mkdir", "rmdir", "touch", "chmod", "chown", "ln"})
 _REDIRECT_TARGET = re.compile(r"^(?:>>|>)\s*(.+)$")
 
 
-def _sensitive_segments() -> frozenset[str]:
-    names: set[str] = set()
+def _build_sensitive_lookups() -> tuple[frozenset[str], tuple[str, ...]]:
+    single: set[str] = set()
+    multi: list[str] = []
     for entry in SENSITIVE_PATHS:
         cleaned = entry.rstrip("/")
-        if cleaned:
-            names.add(cleaned)
-    return frozenset(names)
+        if not cleaned:
+            continue
+        if "/" in cleaned:
+            multi.append(cleaned)
+        else:
+            single.add(cleaned)
+    return frozenset(single), tuple(multi)
 
 
-_SENSITIVE_SEGMENTS = _sensitive_segments()
+_SENSITIVE_SINGLE, _SENSITIVE_MULTI = _build_sensitive_lookups()
 
 
 def _path_hits_sensitive(abs_norm: str) -> bool:
-    parts = abs_norm.replace("\\", "/").split("/")
-    return any(part in _SENSITIVE_SEGMENTS for part in parts)
+    normalized = abs_norm.replace("\\", "/")
+    parts = normalized.split("/")
+    if any(part in _SENSITIVE_SINGLE for part in parts):
+        return True
+    return any(sub in normalized for sub in _SENSITIVE_MULTI)
 
 
 def _resolve_for_check(token: str, cwd: str) -> str:

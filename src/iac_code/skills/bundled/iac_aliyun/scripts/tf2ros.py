@@ -44,7 +44,7 @@ def convert(tf_dir: str, output_path: str) -> None:
     for rel in sorted(rel_paths):
         full = tf_path / rel
         try:
-            text = full.read_text()
+            text = full.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             print(f"Warning: skipping non-text file {rel.as_posix()}", file=sys.stderr)
             continue
@@ -62,9 +62,11 @@ def convert(tf_dir: str, output_path: str) -> None:
 
     out = Path(output_path)
     if out.suffix in (".yml", ".yaml"):
-        out.write_text(yaml.dump(template, allow_unicode=True, default_flow_style=False, sort_keys=False))
+        out.write_text(
+            yaml.dump(template, allow_unicode=True, default_flow_style=False, sort_keys=False), encoding="utf-8"
+        )
     else:
-        out.write_text(json.dumps(template, ensure_ascii=False, indent=2))
+        out.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"Template written to {out}")
 

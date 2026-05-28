@@ -128,7 +128,7 @@ class TestWriteFileTool:
         )
 
         assert result.is_error is False
-        assert file_path.read_text() == content
+        assert file_path.read_text(encoding="utf-8") == content
 
     @pytest.mark.asyncio
     async def test_write_relative_path_in_subdirectory(self, tmp_path, write_file_tool):
@@ -143,6 +143,27 @@ class TestWriteFileTool:
         file_path = tmp_path / "subdir" / "file.txt"
         assert file_path.exists()
         assert file_path.read_text() == "Nested file"
+
+    @pytest.mark.asyncio
+    async def test_windows_posix_path_conversion(self, tmp_path, write_file_tool, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            "iac_code.tools.write_file.normalize_user_path",
+            MagicMock(side_effect=lambda raw: raw),
+        )
+        from iac_code.tools.base import ToolContext
+
+        context = ToolContext(cwd=str(tmp_path))
+        target = tmp_path / "out.txt"
+        result = await write_file_tool.execute(
+            tool_input={"path": str(target), "content": "x"},
+            context=context,
+        )
+        assert result.is_error is False
+        from iac_code.tools.write_file import normalize_user_path
+
+        normalize_user_path.assert_called_once_with(str(target))
 
 
 class TestWriteFileExtras:

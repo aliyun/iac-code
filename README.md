@@ -21,6 +21,10 @@
 
 ## Installation
 
+IaC Code requires Python 3.10 or later. It supports macOS, Linux, and Windows.
+
+> **Windows note**: On Windows, [Git for Windows](https://gitforwindows.org/) must be installed to provide the bash shell used by the tool execution environment. If Git Bash is installed but not on PATH, set the `IAC_CODE_GIT_BASH_PATH` environment variable.
+
 ```bash
 pip install iac-code
 ```

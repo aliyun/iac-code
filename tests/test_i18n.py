@@ -5,6 +5,7 @@ all msgid entries from the .pot template file.
 """
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -77,12 +78,14 @@ def _discover_language_dirs() -> list[Path]:
     ]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
 def test_pot_file_exists():
     """Verify that the .pot template file exists."""
     assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
     assert POT_FILE.is_file(), f"POT path exists but is not a file: {POT_FILE}"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
 def test_pot_is_up_to_date():
     """Verify .pot file is in sync with source code _() calls."""
     with tempfile.NamedTemporaryFile(suffix=".pot", delete=False) as tmp:
@@ -94,6 +97,7 @@ def test_pot_is_up_to_date():
             cwd=str(PROJECT_ROOT),
             check=True,
             capture_output=True,
+            timeout=60,
         )
 
         # Parse both .pot files
@@ -270,3 +274,107 @@ def test_translation_completeness():
             error_messages.append(f"Language '{lang}' has incomplete translations:")
             error_messages.extend(errors)
         pytest.fail("\n".join(error_messages))
+
+
+class TestDetectWindowsUILanguage:
+    """_detect_windows_ui_language wraps GetUserDefaultLocaleName via ctypes."""
+
+    def test_returns_two_letter_code_for_zh_cn(self, monkeypatch):
+        import ctypes
+        import types
+        from unittest.mock import MagicMock
+
+        from iac_code.i18n import _detect_windows_ui_language
+
+        def fake_get_user_default_locale_name(buf, size):
+            for i, ch in enumerate("zh-CN"):
+                buf[i] = ch
+            return len("zh-CN") + 1
+
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetUserDefaultLocaleName = fake_get_user_default_locale_name
+        monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=mock_kernel32), raising=False)
+
+        assert _detect_windows_ui_language() == "zh"
+
+    def test_returns_none_when_api_fails(self, monkeypatch):
+        import ctypes
+        import types
+        from unittest.mock import MagicMock
+
+        from iac_code.i18n import _detect_windows_ui_language
+
+        def fake_get_user_default_locale_name(buf, size):
+            return 0
+
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetUserDefaultLocaleName = fake_get_user_default_locale_name
+        monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=mock_kernel32), raising=False)
+
+        assert _detect_windows_ui_language() is None
+
+    def test_returns_none_on_oserror(self, monkeypatch):
+        import ctypes
+        import types
+        from unittest.mock import MagicMock
+
+        from iac_code.i18n import _detect_windows_ui_language
+
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetUserDefaultLocaleName = MagicMock(side_effect=OSError("boom"))
+        monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=mock_kernel32), raising=False)
+
+        assert _detect_windows_ui_language() is None
+
+
+class TestDetectLanguage:
+    """_detect_language env vars + Windows fallback chain."""
+
+    def test_env_var_zh(self, monkeypatch):
+        from iac_code.i18n import _detect_language
+
+        for v in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setenv("LANG", "zh_CN.UTF-8")
+        assert _detect_language() == "zh"
+
+    def test_env_var_unsupported_falls_through(self, monkeypatch):
+        from iac_code.i18n import _detect_language
+
+        for v in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setenv("LANG", "ko_KR.UTF-8")
+        monkeypatch.setattr("iac_code.i18n.sys.platform", "linux")
+        assert _detect_language() == "en"
+
+    def test_windows_path_uses_kernel32(self, monkeypatch):
+        from iac_code.i18n import _detect_language
+
+        for v in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setattr("iac_code.i18n.sys.platform", "win32")
+        monkeypatch.setattr(
+            "iac_code.i18n._detect_windows_ui_language",
+            lambda: "zh",
+        )
+        assert _detect_language() == "zh"
+
+    def test_windows_kernel32_returns_unsupported(self, monkeypatch):
+        from iac_code.i18n import _detect_language
+
+        for v in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setattr("iac_code.i18n.sys.platform", "win32")
+        monkeypatch.setattr(
+            "iac_code.i18n._detect_windows_ui_language",
+            lambda: "ko",
+        )
+        assert _detect_language() == "en"
+
+    def test_all_empty_returns_default(self, monkeypatch):
+        from iac_code.i18n import _detect_language
+
+        for v in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setattr("iac_code.i18n.sys.platform", "linux")
+        assert _detect_language() == "en"

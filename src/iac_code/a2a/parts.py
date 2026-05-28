@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from google.protobuf.json_format import MessageToDict
 
@@ -129,7 +130,7 @@ def _read_file_url_part(url: str, *, cwd: Path) -> str:
         raise ValueError("A2A file URL parts must use local file:// URLs.")
 
     cwd_path = cwd.resolve()
-    path = Path(unquote(parsed.path)).resolve()
+    path = Path(url2pathname(unquote(parsed.path))).resolve()
     if not is_relative_to(path, cwd_path) or not any(is_relative_to(path, root) for root in allowed_cwd_roots()):
         raise ValueError("A2A file URL part is outside the allowed workspace.")
     if not path.is_file():
@@ -199,7 +200,7 @@ def _safe_file_url_path(url: str, *, cwd: Path) -> Path:
         raise ValueError("A2A file URL parts must use local file:// URLs.")
 
     cwd_path = cwd.resolve()
-    path = Path(unquote(parsed.path)).resolve()
+    path = Path(url2pathname(unquote(parsed.path))).resolve()
     if not is_relative_to(path, cwd_path) or not any(is_relative_to(path, root) for root in allowed_cwd_roots()):
         raise ValueError("A2A file URL part is outside the allowed workspace.")
     if not path.is_file():

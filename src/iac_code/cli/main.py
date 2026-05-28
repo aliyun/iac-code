@@ -20,6 +20,7 @@ from iac_code.config import DEFAULT_MODEL, load_saved_model
 from iac_code.i18n import _, setup_i18n
 from iac_code.services.qwenpaw_source import QwenPawError as _QwenPawError
 from iac_code.utils.log import setup_logging
+from iac_code.utils.signals import reraise_default
 
 completion_init()
 
@@ -116,6 +117,23 @@ def main(
         raise typer.Exit()
     if ctx.invoked_subcommand is not None:
         return
+
+    # Enable ANSI/VT escape sequences on Windows consoles.
+    from iac_code.utils.console import enable_virtual_terminal
+
+    enable_virtual_terminal()
+
+    # On Windows, verify Git Bash is available before proceeding.
+    if sys.platform == "win32":
+        from iac_code.utils.platform import GitBashNotFoundError, PlatformInfo
+
+        try:
+            PlatformInfo.detect()
+        except GitBashNotFoundError as e:
+            from rich.console import Console
+
+            Console(stderr=True).print(f"[red]✗[/red] {e}")
+            raise SystemExit(1)
 
     if resume and continue_session:
         typer.echo(_("Error: --resume and --continue cannot be used together."), err=True)
@@ -216,9 +234,12 @@ def main(
             piped = sys.stdin.read().strip()
             if piped:
                 initial_prompt = piped
-            # Replace fd 0 itself with /dev/tty so ALL code (including
+            # Replace fd 0 itself with the real console so ALL code (including
             # low-level termios/os.read on fd 0) sees a real terminal.
-            tty_fd = os.open("/dev/tty", os.O_RDWR)
+            if sys.platform == "win32":
+                tty_fd = os.open("CONIN$", os.O_RDWR)
+            else:
+                tty_fd = os.open("/dev/tty", os.O_RDWR)
             os.dup2(tty_fd, 0)
             os.close(tty_fd)
             sys.stdin = os.fdopen(0, "r", closefd=False)
@@ -376,8 +397,7 @@ def acp(
         if callable(prev):
             prev(signum, frame)  # ty: ignore[call-top-callable]
             return
-        _signal_mod.signal(signum, _signal_mod.SIG_DFL)
-        os.kill(os.getpid(), signum)
+        reraise_default(signum)
 
     _signal_mod.signal(_signal_mod.SIGTERM, _telemetry_signal_handler)
     _signal_mod.signal(_signal_mod.SIGINT, _telemetry_signal_handler)
@@ -657,8 +677,7 @@ def a2a(
         if callable(prev):
             prev(signum, frame)  # ty: ignore[call-top-callable]
             return
-        _signal_mod.signal(signum, _signal_mod.SIG_DFL)
-        os.kill(os.getpid(), signum)
+        reraise_default(signum)
 
     _signal_mod.signal(_signal_mod.SIGTERM, _telemetry_signal_handler)
     _signal_mod.signal(_signal_mod.SIGINT, _telemetry_signal_handler)

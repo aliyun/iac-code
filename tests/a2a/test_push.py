@@ -121,7 +121,7 @@ async def test_push_config_store_preserves_existing_config_when_atomic_replace_f
     def fail_replace(src, dst):
         raise OSError("replace failed")
 
-    monkeypatch.setattr("iac_code.a2a.push.os.replace", fail_replace)
+    monkeypatch.setattr("iac_code.a2a.push.safe_replace", fail_replace)
 
     with pytest.raises(OSError, match="replace failed"):
         await store.set_info(
@@ -142,7 +142,7 @@ def test_push_notifier_preserves_existing_config_when_atomic_replace_fails(monke
     def fail_replace(src, dst):
         raise OSError("replace failed")
 
-    monkeypatch.setattr("iac_code.a2a.push.os.replace", fail_replace)
+    monkeypatch.setattr("iac_code.a2a.push.safe_replace", fail_replace)
 
     with pytest.raises(OSError, match="replace failed"):
         notifier.save_config(A2APushConfig(task_id="task-1", callback_url="https://new.example/a2a"))

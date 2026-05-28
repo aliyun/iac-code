@@ -488,6 +488,61 @@ class TestPromptInputLoop:
         inp = make_input()
         assert inp._input_loop("❯ ") is None
 
+    def test_input_loop_returns_none_on_keyboard_interrupt_with_empty_buffer(self, monkeypatch):
+        import iac_code.ui.core.prompt_input as prompt_mod
+
+        class FakeCapture:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read_key(self):
+                raise KeyboardInterrupt
+
+        out = StringIO()
+        monkeypatch.setattr(prompt_mod, "sys", SimpleNamespace(stdout=out))
+        monkeypatch.setattr(
+            prompt_mod.shutil,
+            "get_terminal_size",
+            lambda *args, **kwargs: os.terminal_size((40, 24)),
+        )
+        monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+        inp = make_input()
+        assert inp._input_loop("❯ ") is None
+
+    def test_input_loop_keyboard_interrupt_clears_non_empty_buffer_first(self, monkeypatch):
+        import iac_code.ui.core.prompt_input as prompt_mod
+
+        events = iter([_key("a"), KeyboardInterrupt(), _key("enter")])
+
+        class FakeCapture:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read_key(self):
+                event = next(events)
+                if isinstance(event, KeyboardInterrupt):
+                    raise event
+                return event
+
+        out = StringIO()
+        monkeypatch.setattr(prompt_mod, "sys", SimpleNamespace(stdout=out))
+        monkeypatch.setattr(
+            prompt_mod.shutil,
+            "get_terminal_size",
+            lambda *args, **kwargs: os.terminal_size((40, 24)),
+        )
+        monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+        inp = make_input()
+        assert inp._input_loop("❯ ") == ""
+
     def test_input_loop_runs_pending_action_outside_raw_mode(self, monkeypatch):
         import iac_code.ui.core.prompt_input as prompt_mod
 

@@ -168,7 +168,7 @@ class RosStack(BaseCloudStack):
         # TemplateURL as local file path → read into TemplateBody
         template_url = params.get("TemplateURL", "")
         if template_url and not template_url.startswith(_URL_SCHEMES):
-            params["TemplateBody"] = Path(template_url).read_text()
+            params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
             del params["TemplateURL"]
         # TemplateBody must be a JSON string; models may pass a dict
         if isinstance(params.get("TemplateBody"), dict):

@@ -7,6 +7,7 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.utils.platform import normalize_user_path
 
 
 class GlobTool(Tool):
@@ -41,7 +42,7 @@ class GlobTool(Tool):
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         pattern = tool_input["pattern"]
-        path = tool_input.get("path", context.cwd)
+        path = normalize_user_path(tool_input.get("path", context.cwd))
 
         search_root = Path(path)
         if not search_root.is_absolute():

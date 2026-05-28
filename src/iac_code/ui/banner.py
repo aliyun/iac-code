@@ -79,7 +79,7 @@ def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -
     # Shorten cwd
     cwd_path = Path(cwd).resolve()
     try:
-        cwd_display = "~/" + str(cwd_path.relative_to(Path.home()))
+        cwd_display = "~/" + cwd_path.relative_to(Path.home()).as_posix()
     except ValueError:
         cwd_display = str(cwd_path)
 

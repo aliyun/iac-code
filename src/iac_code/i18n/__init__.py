@@ -5,6 +5,7 @@ This module provides translation capabilities using Python's standard gettext li
 
 import gettext
 import os
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -67,14 +68,12 @@ def get_current_language() -> str:
 
 
 def _detect_language() -> str:
-    """Detect system language from environment variables.
+    """Detect system language.
 
     Detection priority:
-    1. LANGUAGE
-    2. LC_ALL
-    3. LC_MESSAGES
-    4. LANG
-    5. Default to 'en'
+    1. LANGUAGE / LC_ALL / LC_MESSAGES / LANG environment variables
+    2. Windows: GetUserDefaultLocaleName via kernel32 (returns 'zh-CN', 'en-US', ...)
+    3. Default to 'en'
 
     Returns:
         Two-letter language code (e.g., 'zh', 'en')
@@ -84,13 +83,39 @@ def _detect_language() -> str:
     for var in env_vars:
         value = os.environ.get(var)
         if value:
-            # Extract the language code (first two characters before any underscore or dot)
-            # e.g., 'zh_CN.UTF-8' -> 'zh', 'en_US' -> 'en'
             lang_code = value.split("_")[0].split(".")[0].lower()
             if lang_code in SUPPORTED_LANGUAGES:
                 return lang_code
 
+    if sys.platform == "win32":
+        lang_code = _detect_windows_ui_language()
+        if lang_code and lang_code in SUPPORTED_LANGUAGES:
+            return lang_code
+
     return DEFAULT_LANGUAGE
+
+
+def _detect_windows_ui_language() -> str | None:
+    """Read the user's UI locale via kernel32.GetUserDefaultLocaleName.
+
+    Returns the two-letter language code (e.g. 'zh' for 'zh-CN', 'en' for 'en-US')
+    or None if the call fails.
+    """
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+        kernel32.GetUserDefaultLocaleName.argtypes = [ctypes.c_wchar_p, ctypes.c_int]
+        kernel32.GetUserDefaultLocaleName.restype = ctypes.c_int
+        buf = ctypes.create_unicode_buffer(85)
+        if kernel32.GetUserDefaultLocaleName(buf, 85) == 0:
+            return None
+        loc = buf.value
+        if not loc:
+            return None
+        return loc.split("-")[0].lower()
+    except (OSError, AttributeError, ValueError):
+        return None
 
 
 def setup_i18n() -> None:

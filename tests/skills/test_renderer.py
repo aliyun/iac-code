@@ -1,6 +1,7 @@
 """Tests for skill prompt renderer."""
 
 import asyncio
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -121,29 +122,34 @@ class TestRendererPipeline:
         assert _parse_arguments('"unterminated quote') == ['"unterminated', "quote"]
 
     @pytest.mark.asyncio
-    async def test_run_shell_returns_timeout_marker(self, monkeypatch):
-        class NeverAwaited:
-            def __await__(self):
-                if False:
-                    yield None
-                return (b"", b"")
+    async def test_run_shell_returns_timeout_marker_and_kills_process(self, monkeypatch):
+        async def fake_communicate():
+            return (b"", b"")
 
-        proc = SimpleNamespace(communicate=lambda: NeverAwaited())
+        proc = SimpleNamespace(communicate=fake_communicate, pid=12345)
 
-        monkeypatch.setattr("asyncio.create_subprocess_shell", AsyncMock(return_value=proc))
+        mock_target = "asyncio.create_subprocess_exec" if sys.platform == "win32" else "asyncio.create_subprocess_shell"
+        monkeypatch.setattr(mock_target, AsyncMock(return_value=proc))
 
         async def raise_timeout(awaitable, timeout):
+            if asyncio.iscoroutine(awaitable):
+                awaitable.close()
             raise asyncio.TimeoutError()
 
         monkeypatch.setattr("asyncio.wait_for", raise_timeout)
 
+        kill_mock = AsyncMock()
+        monkeypatch.setattr("iac_code.utils.platform.kill_process_tree", kill_mock)
+
         result = await _run_shell("sleep 5")
 
         assert result.startswith("[shell error:")
+        kill_mock.assert_awaited_once_with(proc)
 
     @pytest.mark.asyncio
     async def test_run_shell_returns_oserror_marker(self, monkeypatch):
-        monkeypatch.setattr("asyncio.create_subprocess_shell", AsyncMock(side_effect=OSError("spawn failed")))
+        mock_target = "asyncio.create_subprocess_exec" if sys.platform == "win32" else "asyncio.create_subprocess_shell"
+        monkeypatch.setattr(mock_target, AsyncMock(side_effect=OSError("spawn failed")))
 
         result = await _run_shell("echo hi")
 

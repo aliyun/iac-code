@@ -68,6 +68,7 @@ dev = [
     "pre-commit>=4.0",
     "pytest-xdist>=3.0",
     "pytest-cov>=5.0",
+    "pytest-timeout>=2.3.1",
     "setuptools>=68.0",
     "wheel",
     "tomli>=2.0; python_version<\"3.11\"",
@@ -110,6 +111,9 @@ index-url = "https://mirrors.aliyun.com/pypi/simple/"
 [[tool.uv.index]]
 url = "https://mirrors.aliyun.com/pypi/simple/"
 default = true
+
+[tool.pytest.ini_options]
+timeout = 30
 
 [tool.coverage.run]
 source_pkgs = ["iac_code"]

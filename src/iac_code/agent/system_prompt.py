@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -133,7 +134,10 @@ def _build_system_section() -> str:
 def _build_environment_section(cwd: str) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     os_info = f"{platform.system()} {platform.release()}"
-    shell = os.environ.get("SHELL", "unknown")
+    if sys.platform == "win32":
+        shell = "git-bash"
+    else:
+        shell = os.environ.get("SHELL", "unknown")
 
     is_git_repo = False
     git_branch = ""

@@ -11,6 +11,7 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.utils.platform import normalize_user_path
 
 
 def _is_rg_available() -> bool:
@@ -172,7 +173,7 @@ class GrepTool(Tool):
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         pattern: str = tool_input["pattern"]
-        path: str = tool_input.get("path", context.cwd)
+        path: str = normalize_user_path(tool_input.get("path", context.cwd))
         glob: str | None = tool_input.get("glob")
         case_insensitive: bool = bool(tool_input.get("case_insensitive", False))
         output_mode: str = tool_input.get("output_mode", "files_with_matches")

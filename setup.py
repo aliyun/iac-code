@@ -1,11 +1,11 @@
 """Custom build hook to inject __release_date__ at build time."""
 
+import platform
 import re
 import subprocess
 import sys
 from datetime import date
 from pathlib import Path
-import platform
 
 from setuptools import setup
 from setuptools.command.build_py import build_py
@@ -57,15 +57,16 @@ def _ensure_babel():
     except Exception as exc:
         attempts.append("ensurepip + pip -> %s" % exc)
 
-    # 3) apt-get install python3-babel (Debian/Ubuntu container with root)
-    try:
-        _run(["apt-get", "update", "-qq"])
-        _run(["apt-get", "install", "-y", "-qq", "python3-babel"])
-        result = _try_import_babel()
-        if result:
-            return result
-    except Exception as exc:
-        attempts.append("apt-get install python3-babel -> %s" % exc)
+    # 3) apt-get install python3-babel (Debian/Ubuntu container with root) — Linux only
+    if sys.platform == "linux":
+        try:
+            _run(["apt-get", "update", "-qq"])
+            _run(["apt-get", "install", "-y", "-qq", "python3-babel"])
+            result = _try_import_babel()
+            if result:
+                return result
+        except Exception as exc:
+            attempts.append("apt-get install python3-babel -> %s" % exc)
 
     # 4) download get-pip.py via urllib, bootstrap pip, then pip install babel
     try:

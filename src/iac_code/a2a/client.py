@@ -302,7 +302,7 @@ class A2AClient:
         message: dict[str, Any] = {
             "messageId": str(uuid.uuid4()),
             "role": "ROLE_USER",
-            "parts": [{"kind": "text", "text": prompt}],
+            "parts": [{"text": prompt}],
             "metadata": {"iac_code": {"cwd": cwd}},
         }
         if context_id:

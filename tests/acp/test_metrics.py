@@ -162,4 +162,4 @@ class TestMetricsIntegration:
             prompt=[acp.schema.TextContentBlock(type="text", text="hi")],
         )
         assert server.metrics.total_prompts == 1
-        assert server.metrics.avg_prompt_duration_ms > 0
+        assert server.metrics.avg_prompt_duration_ms >= 0

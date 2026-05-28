@@ -53,12 +53,14 @@ class TestGlobalSearch:
             on_select=lambda result: None,
             on_cancel=lambda: None,
         )
-        fake_output = f"{tmp_path}/main.py:3:hello world\n{tmp_path}/utils.py:10:hello again\n"
+        main_py = str(tmp_path / "main.py")
+        utils_py = str(tmp_path / "utils.py")
+        fake_output = f"{main_py}:3:hello world\n{utils_py}:10:hello again\n"
         items = gs._parse_results(fake_output)
         assert len(items) == 2
         # Check keys have file:lineno format
-        assert items[0].key == f"{tmp_path}/main.py:3"
-        assert items[1].key == f"{tmp_path}/utils.py:10"
+        assert items[0].key == f"{main_py}:3"
+        assert items[1].key == f"{utils_py}:10"
         # Metadata should be dict with file_path and lineno
         assert items[0].metadata["lineno"] == 3
         assert items[1].metadata["lineno"] == 10
@@ -236,7 +238,8 @@ class TestGlobalSearch:
             on_select=lambda r: None,
             on_cancel=lambda: None,
         )
-        output = f"{tmp_path}/main.py:abc:hello world\n"
+        main_py = str(tmp_path / "main.py")
+        output = f"{main_py}:abc:hello world\n"
         items = gs._parse_results(output)
         assert items == []
 
@@ -247,7 +250,8 @@ class TestGlobalSearch:
             on_select=lambda r: None,
             on_cancel=lambda: None,
         )
-        dup_line = f"{tmp_path}/main.py:3:hello world\n"
+        main_py = str(tmp_path / "main.py")
+        dup_line = f"{main_py}:3:hello world\n"
         output = dup_line + dup_line  # exact duplicate
         items = gs._parse_results(output)
         assert len(items) == 1

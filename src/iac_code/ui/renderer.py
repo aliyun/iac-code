@@ -13,10 +13,15 @@ import asyncio
 import copy
 import os
 import sys
-import termios
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable
+
+if sys.platform != "win32":
+    import termios
+else:
+    termios = None  # type: ignore[assignment]
 
 from rich._loop import loop_first
 from rich.console import Console, ConsoleOptions, Group, RenderResult
@@ -57,6 +62,36 @@ from iac_code.ui.spinner import ShimmerSpinner
 if TYPE_CHECKING:
     from iac_code.state.app_state import AppStateStore
     from iac_code.tools.base import ToolRegistry
+
+
+def _windows_msvcrt_reader_loop(
+    msvcrt_module: Any,
+    loop: asyncio.AbstractEventLoop,
+    queue: asyncio.Queue,
+    cancel_event: threading.Event,
+) -> None:
+    """Daemon-thread body that bridges Windows msvcrt key events into an
+    asyncio queue.
+
+    The loop polls ``kbhit()``/``getch()`` and forwards each byte via
+    ``call_soon_threadsafe``. If the event loop is closed mid-flight (e.g.
+    during shutdown), ``call_soon_threadsafe`` raises ``RuntimeError``;
+    the thread exits cleanly instead of leaking a stack trace to stderr.
+
+    Extracted to module level so it can be unit-tested without spinning up
+    a Renderer instance.
+    """
+    while not cancel_event.is_set():
+        if msvcrt_module.kbhit():
+            c = msvcrt_module.getch()
+            for b in c:
+                try:
+                    loop.call_soon_threadsafe(queue.put_nowait, b)
+                except RuntimeError:
+                    return
+        else:
+            if cancel_event.wait(0.01):
+                break
 
 
 class _DashListItem(ListItem):
@@ -699,10 +734,11 @@ class Renderer:
         # Save terminal settings before any background task modifies them
         # so we can unconditionally restore on exit.
         _saved_termios = None
-        try:
-            _saved_termios = termios.tcgetattr(sys.stdin.fileno())
-        except (termios.error, OSError, ValueError):
-            pass
+        if termios is not None:
+            try:
+                _saved_termios = termios.tcgetattr(sys.stdin.fileno())
+            except (termios.error, OSError, ValueError):
+                pass
 
         def _finalize_thinking() -> None:
             nonlocal thinking_buffer, thinking_start_time
@@ -1547,34 +1583,45 @@ class Renderer:
     ) -> None:
         """Background task: listen for Ctrl+O to toggle verbose mode.
 
-        Uses loop.add_reader for proper asyncio integration and clears
-        IEXTEN to prevent macOS from intercepting Ctrl+O as VDISCARD.
+        Uses loop.add_reader for proper asyncio integration on Unix (clears
+        IEXTEN to prevent macOS from intercepting Ctrl+O as VDISCARD).
+        On Windows, uses a daemon thread with msvcrt for key reading.
         """
         fd = sys.stdin.fileno()
-        try:
-            old_settings = termios.tcgetattr(fd)
-        except termios.error:
-            return  # not a TTY
-
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[int] = asyncio.Queue()
+        cancel_event = threading.Event()
 
-        def _on_readable() -> None:
+        if sys.platform == "win32":
+            import msvcrt
+
+            thread = threading.Thread(
+                target=_windows_msvcrt_reader_loop,
+                args=(msvcrt, loop, queue, cancel_event),
+                daemon=True,
+            )
+            thread.start()
+        else:
             try:
-                data = os.read(fd, 64)
-                for b in data:
-                    queue.put_nowait(b)
+                old_settings = termios.tcgetattr(fd)
+            except termios.error:
+                return  # not a TTY
+
+            def _on_readable() -> None:
+                try:
+                    data = os.read(fd, 64)
+                    for b in data:
+                        queue.put_nowait(b)
+                except OSError:
+                    pass
+
+            try:
+                loop.add_reader(fd, _on_readable)
             except OSError:
-                pass
+                # macOS kqueue cannot register certain fds (e.g. /dev/tty
+                # reopened after piped stdin).  Silently disable key listener.
+                return
 
-        try:
-            loop.add_reader(fd, _on_readable)
-        except OSError:
-            # macOS kqueue cannot register certain fds (e.g. /dev/tty
-            # reopened after piped stdin).  Silently disable key listener.
-            return
-
-        try:
             # cbreak mode + clear IEXTEN so Ctrl+O (VDISCARD) reaches us
             mode = termios.tcgetattr(fd)
             mode[3] = mode[3] & ~(termios.ECHO | termios.ICANON | termios.IEXTEN)
@@ -1582,6 +1629,7 @@ class Renderer:
             mode[6][termios.VTIME] = 0
             termios.tcsetattr(fd, termios.TCSANOW, mode)
 
+        try:
             show_transcript_after = False
             while True:
                 ch = await queue.get()
@@ -1593,14 +1641,16 @@ class Renderer:
         except asyncio.CancelledError:
             return
         finally:
-            try:
-                loop.remove_reader(fd)
-            except Exception:
-                pass
-            try:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            except termios.error:
-                pass
+            cancel_event.set()
+            if sys.platform != "win32":
+                try:
+                    loop.remove_reader(fd)
+                except Exception:
+                    pass
+                try:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                except termios.error:
+                    pass
 
         if show_transcript_after:
             # Stop the Live region so the alt-screen view starts from a

@@ -125,7 +125,7 @@ class AliyunCredentials:
             return None
 
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
 
@@ -191,7 +191,7 @@ class AliyunCredentials:
         data: dict[str, object] = {"current": "default", "profiles": []}
         if path.exists():
             try:
-                loaded = json.loads(path.read_text())
+                loaded = json.loads(path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
                     data = loaded
             except (json.JSONDecodeError, OSError):
@@ -224,7 +224,7 @@ class AliyunCredentials:
         if "current" not in data:
             data["current"] = "default"
 
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     @staticmethod
     def is_configured(config_path: str | None = None) -> bool:

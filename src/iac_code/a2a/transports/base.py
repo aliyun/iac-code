@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from iac_code.a2a.transport import A2ATransportBinding, UnsupportedA2ATransportError
+from iac_code.i18n import _
 
 RUNNABLE_TRANSPORTS = frozenset({"http", "stdio", "unix", "websocket", "grpc", "grpc-jsonrpc", "redis-streams"})
 
@@ -155,3 +157,14 @@ def select_binding(bindings: Sequence[A2ATransportBinding]) -> A2ATransportBindi
             )
     names = ", ".join(binding.protocol_binding for binding in bindings) or "none"
     raise UnsupportedA2ATransportError(f"No runnable A2A transport found. Candidate bindings: {names}")
+
+
+def validate_transport_for_platform(transport: str) -> None:
+    """Raise RuntimeError if the transport is unavailable on the current platform."""
+    if transport == "unix" and sys.platform == "win32":
+        raise RuntimeError(
+            _(
+                "Unix domain socket transport is not supported on Windows. "
+                "Use --transport http or --transport stdio instead."
+            )
+        )

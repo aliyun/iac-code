@@ -1,5 +1,8 @@
 name: Test
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
   push:
@@ -74,3 +77,23 @@ jobs:
 
       - name: Check coverage threshold
         run: uv run coverage report --fail-under=80
+
+  test-windows:
+    name: Test (Windows, Python 3.10)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --no-header

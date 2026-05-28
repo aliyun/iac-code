@@ -661,7 +661,11 @@ def test_send_message_stores_binary_artifact_update_in_task(monkeypatch, tmp_pat
     task = response.json()["result"]["task"]
     assert task["artifacts"][0]["name"] == "diagram.png"
     assert task["artifacts"][0]["parts"][0]["mediaType"] == "image/png"
-    artifact_path = Path(task["artifacts"][0]["parts"][0]["url"].removeprefix("file://"))
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    artifact_url = task["artifacts"][0]["parts"][0]["url"]
+    artifact_path = Path(url2pathname(urlparse(artifact_url).path))
     assert artifact_path.read_bytes() == b"\x89PNG\r\n\x1a\nimage"
 
 

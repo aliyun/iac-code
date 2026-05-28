@@ -9,6 +9,8 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from iac_code.utils.file_security import restrict_file_permissions
+
 
 class A2APushSecretError(ValueError):
     pass
@@ -90,7 +92,7 @@ class A2APushSecretKeyring:
 
     def _write(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        _chmod_private(self._path.parent, directory=True)
+        restrict_file_permissions(self._path.parent, directory=True)
         data = {
             "activeKeyId": self._active_key_id,
             "keys": [
@@ -99,15 +101,8 @@ class A2APushSecretKeyring:
             ],
         }
         self._path.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
-        _chmod_private(self._path, directory=False)
+        restrict_file_permissions(self._path, directory=False)
 
 
 def _new_key_id() -> str:
     return f"push-{int(time.time())}-{uuid.uuid4().hex[:12]}"
-
-
-def _chmod_private(path: Path, *, directory: bool) -> None:
-    try:
-        os.chmod(path, 0o700 if directory else 0o600)
-    except OSError:
-        return

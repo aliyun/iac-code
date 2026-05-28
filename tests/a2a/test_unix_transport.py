@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import sys
 
 import pytest
 
@@ -8,6 +9,8 @@ from iac_code.a2a.transports.unix import UnixA2AClient, UnixA2AServer, validate_
 from iac_code.types.stream_events import TextDeltaEvent
 
 from .fakes import FakeAgentLoop, FakeRuntime
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets not available on Windows")
 
 
 def test_validate_socket_path_requires_existing_parent(tmp_path) -> None:

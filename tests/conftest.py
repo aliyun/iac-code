@@ -43,4 +43,5 @@ def _isolate_iac_home(tmp_path_factory, monkeypatch):
     """
     fake_home = tmp_path_factory.mktemp("iac_home")
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
     monkeypatch.delenv("IAC_CODE_CONFIG_DIR", raising=False)

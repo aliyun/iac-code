@@ -17,6 +17,7 @@ from iac_code.commands.auth import (
 def iac_home(tmp_path, monkeypatch):
     """Redirect ~/.iac-code to tmp_path for each test."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     return tmp_path
 
 

@@ -1,5 +1,7 @@
 """Tests for auth.py UI primitives (_render_*, _read_input_events)."""
 
+import pytest
+
 from iac_code.commands.auth import _read_input_events, _render_options, _render_title
 
 
@@ -19,6 +21,12 @@ class TestRenderHelpers:
 
 class TestReadInputEvents:
     """`_read_input_events(fd)` reads from the given fd and returns a list of tuples."""
+
+    @pytest.fixture(autouse=True)
+    def _force_unix_input_path(self, monkeypatch):
+        import iac_code.commands.auth as auth_mod
+
+        monkeypatch.setattr(auth_mod, "_IS_WIN32", False)
 
     def test_empty_returns_empty_list(self, monkeypatch):
         import iac_code.commands.auth as auth_mod

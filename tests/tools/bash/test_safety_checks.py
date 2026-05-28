@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from iac_code.tools.bash.command_parser import SimpleCommand
-from iac_code.tools.bash.safety_checks import check_command_safety, check_safety
+from iac_code.tools.bash.safety_checks import _path_hits_sensitive, check_command_safety, check_safety
 
 
 class TestCheckSafety:
@@ -17,6 +17,20 @@ class TestCheckSafety:
         cmd = SimpleCommand(text="ls -la", argv=["ls", "-la"])
         r = check_safety(cmd, "/project")
         assert r.behavior == "passthrough"
+
+
+class TestPathHitsSensitive:
+    def test_single_segment_match(self):
+        assert _path_hits_sensitive("/home/user/.git/config")
+
+    def test_multi_component_aws_credentials(self):
+        assert _path_hits_sensitive("/home/user/.aws/credentials")
+
+    def test_multi_component_with_backslash(self):
+        assert _path_hits_sensitive("C:\\Users\\me\\.aws\\credentials")
+
+    def test_no_match(self):
+        assert not _path_hits_sensitive("/home/user/projects/app.py")
 
 
 class TestCheckCommandSafety:

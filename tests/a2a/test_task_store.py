@@ -116,7 +116,7 @@ async def test_cancel_active_task_does_not_need_context_lock() -> None:
     task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
 
     async def sleeper() -> None:
-        await asyncio.sleep(60)
+        await asyncio.sleep(5)
 
     active = asyncio.create_task(sleeper())
     task.active_task = active
@@ -133,7 +133,7 @@ async def test_task_status_access_waits_for_mutation_lock() -> None:
     task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
 
     async def sleeper() -> None:
-        await asyncio.sleep(60)
+        await asyncio.sleep(5)
 
     active = asyncio.create_task(sleeper())
     task.active_task = active
@@ -323,7 +323,7 @@ async def test_cleanup_loop_survives_cleanup_errors(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(store, "cleanup_once", flaky_cleanup_once)
 
     await store.start_cleanup_loop()
-    await asyncio.sleep(0.04)
+    await asyncio.sleep(0.15)
     await store.stop_cleanup_loop()
 
     assert calls >= 2

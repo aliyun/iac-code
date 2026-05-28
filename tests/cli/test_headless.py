@@ -435,7 +435,7 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
     # default projects_dir from get_config_dir(), so we just assert the
     # storage was instantiated rather than checking a specific path.
     assert "projects_dir" in captured
-    assert captured["memory_dir"] == "/tmp/iac-config/memory"
+    assert captured["memory_dir"] == str(Path("/tmp/iac-config/memory"))
     assert any(getattr(tool, "kind", "") == "agent" for tool in fake_registry.registered)
     assert any(getattr(tool, "kind", "") == "skill" for tool in fake_registry.registered)
     assert captured["agent_loop_kwargs"]["max_turns"] == 100

@@ -48,7 +48,7 @@ class FakeHTTPClient:
             def raise_for_status(self) -> None:
                 return None
 
-            async def iter_lines(self):
+            async def aiter_lines(self):
                 yield ""
                 yield 'data: {"result": {"status": {"state": "working"}}}'
                 yield "event: ignored"
