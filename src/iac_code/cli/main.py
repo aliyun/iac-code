@@ -555,6 +555,11 @@ def a2a(
         help=_("A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or redis-streams"),
     ),
     debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
+    thinking_exposure: list[str] | None = typer.Option(
+        None,
+        "--thinking-exposure",
+        help=_("Expose A2A thinking signal types; repeat for multiple. Values: raw-thinking, tool-trace."),
+    ),
 ) -> None:
     """Run iac-code as an A2A 1.0 server."""
     config = _load_a2a_config(config_path) if config_path else {}
@@ -587,6 +592,7 @@ def a2a(
     push_consumer_name = config.get("push_consumer_name", "")
     push_lease_timeout_ms = config.get("push_lease_timeout_ms", 300000)
     auto_approve_permissions = config.get("auto_approve_permissions", False)
+    thinking_exposure = _a2a_config_value(ctx, config, "thinking_exposure", thinking_exposure)
     model = load_saved_model() or DEFAULT_MODEL
     setup_logging(session_id="a2a-server", debug=debug)
     try:
@@ -721,8 +727,9 @@ def a2a(
             response_stream=response_stream,
             consumer_group=consumer_group,
             auto_approve_permissions=auto_approve_permissions,
+            thinking_exposure=thinking_exposure,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         exit_reason = "error"
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

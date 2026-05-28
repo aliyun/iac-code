@@ -15,6 +15,7 @@ from a2a.types import Message, Role, Task, TaskState, TaskStatus, TaskStatusUpda
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.events import make_text_part, publish_stream_event
+from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.parts import allowed_cwd_roots, is_relative_to, parts_to_prompt
 from iac_code.a2a.task_store import A2ATaskStore
@@ -62,6 +63,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         push_notifier: Any | None = None,
         permission_resolver: A2APermissionResolver | None = None,
         auto_approve_permissions: bool = False,
+        thinking_exposure_types: Any = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -70,6 +72,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._push_notifier = push_notifier
         self._permission_resolver = permission_resolver
         self._auto_approve_permissions = auto_approve_permissions
+        self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task_id = context.task_id or "task-" + uuid.uuid4().hex[:12]
@@ -229,6 +232,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                             artifact_store=self._artifact_store,
                             permission_resolver=self._permission_resolver,
                             auto_approve_permissions=self._auto_approve_permissions,
+                            exposure_types=self._thinking_exposure_types,
                         )
                         if text_chunk:
                             task.output_text.append(text_chunk)

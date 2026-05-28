@@ -93,6 +93,7 @@ By default, the server binds to `127.0.0.1:41242` and serves JSON-RPC over HTTP.
 | `--host` | `127.0.0.1` | HTTP server host |
 | `--port` | `41242` | HTTP server port |
 | `--transport` | `http` | Server transport: `http`, `stdio`, `unix`, `websocket`, `grpc`, `grpc-jsonrpc`, or `redis-streams` |
+| `--thinking-exposure` | `tool-trace` | Expose an A2A thinking signal type; repeat for multiple. Values: `raw-thinking`, `tool-trace` |
 | `--debug`, `-d` | `false` | Enable debug logging |
 
 Example:
@@ -236,6 +237,20 @@ Redis Streams transport options:
 | `request-stream` | `iac-code:a2a:requests` | Request stream name |
 | `response-stream` | `iac-code:a2a:responses` | Response stream name |
 | `consumer-group` | `iac-code` | Request stream consumer group |
+
+### Thinking Exposure
+
+| Config key | Default | Description |
+|--------|---------|-------------|
+| `thinking-exposure` | `tool-trace` | Non-answer runtime signal types exposed through A2A `metadata.iac_code`. Use a YAML list, a comma-separated string, or repeated `--thinking-exposure` flags. Supported values are `tool-trace` and `raw-thinking`. |
+
+`tool-trace` preserves the existing tool progress, permission, and result metadata. `raw-thinking` emits provider reasoning chunks as `metadata.iac_code.thinking` updates with `type: raw_thinking` and `text`. iac-code does not currently produce separate thought-summary or progress-summary events, so those are not valid exposure types.
+
+```yaml
+thinking-exposure:
+  - tool-trace
+  - raw-thinking
+```
 
 ### Permission Behavior
 

@@ -1,6 +1,7 @@
 from a2a.server.routes.agent_card_routes import agent_card_to_dict
 
 from iac_code.a2a.agent_card import build_agent_card
+from iac_code.a2a.exposure import A2AExposureType
 
 
 def test_agent_card_declares_a2a_1_jsonrpc_interface() -> None:
@@ -47,6 +48,21 @@ def test_agent_card_advertises_optional_iac_code_extension() -> None:
 
     extension = data["capabilities"]["extensions"][0]
     assert extension["uri"] == "urn:iac-code:a2a:artifact-metadata:v1"
+    assert extension.get("required", False) is False
+
+
+def test_agent_card_advertises_enabled_thinking_exposure_types() -> None:
+    card = build_agent_card(
+        host="127.0.0.1",
+        port=41242,
+        token_enabled=False,
+        thinking_exposure_types=[A2AExposureType.RAW_THINKING, A2AExposureType.TOOL_TRACE],
+    )
+    data = agent_card_to_dict(card)
+
+    extension = data["capabilities"]["extensions"][1]
+    assert extension["uri"] == "urn:iac-code:a2a:thinking-exposure:v1"
+    assert extension["params"]["enabledTypes"] == ["raw_thinking", "tool_trace"]
     assert extension.get("required", False) is False
 
 

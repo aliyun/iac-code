@@ -18,6 +18,7 @@ from a2a.types import (
 )
 from google.protobuf.json_format import ParseDict
 
+from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -170,7 +171,10 @@ async def publish_stream_event(
     artifact_store: Any | None = None,
     permission_resolver: A2APermissionResolver | None = None,
     auto_approve_permissions: bool = False,
+    exposure_types: Any = None,
 ) -> str | None:
+    enabled_exposure_types = normalize_a2a_exposure_types(exposure_types)
+
     if isinstance(event, TextDeltaEvent):
         if not event.text:
             return None
@@ -184,9 +188,20 @@ async def publish_stream_event(
         return event.text
 
     if isinstance(event, ThinkingDeltaEvent):
+        if A2AExposureType.RAW_THINKING not in enabled_exposure_types:
+            return None
+        await _enqueue_status(
+            event_queue,
+            task_id=task_id,
+            context_id=context_id,
+            state=TaskState.TASK_STATE_WORKING,
+            metadata={"iac_code": {"thinking": {"type": "raw_thinking", "text": _truncate(event.text)}}},
+        )
         return None
 
     if isinstance(event, ToolUseStartEvent):
+        if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
+            return None
         await _enqueue_status(
             event_queue,
             task_id=task_id,
@@ -197,6 +212,8 @@ async def publish_stream_event(
         return None
 
     if isinstance(event, ToolInputDeltaEvent):
+        if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
+            return None
         await _enqueue_status(
             event_queue,
             task_id=task_id,
@@ -215,6 +232,8 @@ async def publish_stream_event(
         return None
 
     if isinstance(event, ToolUseEndEvent):
+        if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
+            return None
         await _enqueue_status(
             event_queue,
             task_id=task_id,
@@ -235,6 +254,12 @@ async def publish_stream_event(
 
     if isinstance(event, ToolResultEvent):
         artifact_metadata = _extract_artifact_metadata(event.result, artifact_store)
+        if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
+            if artifact_metadata is not None:
+                await event_queue.enqueue_event(
+                    _artifact_update_event(task_id=task_id, context_id=context_id, metadata=artifact_metadata)
+                )
+            return None
         tool_metadata = {
             "status": "failed" if event.is_error else "completed",
             "toolUseId": event.tool_use_id,
@@ -262,6 +287,8 @@ async def publish_stream_event(
             approved = bool(await decision) if inspect.isawaitable(decision) else bool(decision)
         if event.response_future is not None and not event.response_future.done():
             event.response_future.set_result(approved)
+        if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
+            return None
         await _enqueue_status(
             event_queue,
             task_id=task_id,

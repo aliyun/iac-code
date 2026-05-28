@@ -166,6 +166,7 @@ def create_app(
     supported_interfaces: list[dict[str, str]] | None = None,
     agent_extensions: object | None = None,
     auto_approve_permissions: bool = False,
+    thinking_exposure: object | None = None,
 ) -> Starlette:
     from iac_code.a2a.transports.dispatcher import create_runtime_components
 
@@ -194,6 +195,7 @@ def create_app(
         supported_interfaces=supported_interfaces,
         agent_extensions=agent_extensions,
         auto_approve_permissions=auto_approve_permissions,
+        thinking_exposure=thinking_exposure,
     )
 
     @asynccontextmanager
@@ -287,6 +289,7 @@ def run_server(
     push_consumer_name: str | None = None,
     push_lease_timeout_ms: int = 300_000,
     auto_approve_permissions: bool = False,
+    thinking_exposure: object | None = None,
 ) -> None:
     from iac_code.a2a.transports.base import normalize_transport_name, validate_transport_for_platform
 
@@ -347,6 +350,7 @@ def run_server(
         "push_lease_timeout_ms": push_lease_timeout_ms,
         "supported_interfaces": supported_interfaces,
         "auto_approve_permissions": auto_approve_permissions,
+        "thinking_exposure": thinking_exposure,
     }
 
     if normalized_transport == "stdio":
@@ -444,6 +448,7 @@ def run_server(
             push_lease_timeout_ms=push_lease_timeout_ms,
             supported_interfaces=supported_interfaces,
             auto_approve_permissions=auto_approve_permissions,
+            thinking_exposure=thinking_exposure,
         )
 
     try:
