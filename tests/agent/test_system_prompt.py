@@ -1,13 +1,16 @@
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from iac_code.agent.system_prompt import (
     DYNAMIC_BOUNDARY,
     SystemPromptBuilder,
     _build_cloud_config_section,
+    _build_environment_section,
     build_system_prompt,
     split_by_dynamic_boundary,
 )
+from iac_code.utils.project_paths import _read_git_head
 
 _TMP = tempfile.gettempdir()
 
@@ -165,3 +168,61 @@ class TestBuildCloudConfigSection:
             side_effect=Exception("fail"),
         ):
             assert _build_cloud_config_section() == ""
+
+
+class TestReadGitHead:
+    """Tests for the shared ``_read_git_head`` helper used by system prompt."""
+
+    def test_non_repo_returns_false(self, tmp_path: Path):
+        is_repo, head = _read_git_head(str(tmp_path))
+        assert is_repo is False
+        assert head == ""
+
+    def test_repo_with_branch(self, tmp_path: Path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        is_repo, head = _read_git_head(str(tmp_path))
+        assert is_repo is True
+        assert head == "ref: refs/heads/main"
+
+    def test_detached_head_returns_sha(self, tmp_path: Path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        sha = "abcdef0123456789abcdef0123456789abcdef01"
+        (git_dir / "HEAD").write_text(f"{sha}\n", encoding="utf-8")
+        is_repo, head = _read_git_head(str(tmp_path))
+        assert is_repo is True
+        assert head == sha
+
+
+class TestBuildEnvironmentSectionGit:
+    """Verify ``_build_environment_section`` shows git info without subprocess."""
+
+    def test_shows_branch(self, tmp_path: Path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "HEAD").write_text("ref: refs/heads/my-branch\n", encoding="utf-8")
+        section = _build_environment_section(str(tmp_path))
+        assert "Git repository: True" in section
+        assert "Git branch: my-branch" in section
+
+    def test_detached_head_shows_short_sha(self, tmp_path: Path):
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        (git_dir / "HEAD").write_text("abcdef0123456789abcdef0123456789abcdef01\n", encoding="utf-8")
+        section = _build_environment_section(str(tmp_path))
+        assert "Git repository: True" in section
+        assert "Git branch: abcdef0" in section
+
+    def test_non_repo(self, tmp_path: Path):
+        section = _build_environment_section(str(tmp_path))
+        assert "Git repository: False" in section
+        assert "Git branch" not in section
+
+    def test_no_subprocess_call(self, tmp_path: Path):
+        """Hard guarantee: environment section never invokes subprocess."""
+        with patch("subprocess.run") as mock_run, patch("subprocess.Popen") as mock_popen:
+            _build_environment_section(str(tmp_path))
+            mock_run.assert_not_called()
+            mock_popen.assert_not_called()
