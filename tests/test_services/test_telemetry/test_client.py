@@ -152,3 +152,19 @@ def test_facade_delegates_to_singleton(tmp_path, monkeypatch):
         mock_client.flush.assert_called_once_with()
     finally:
         set_client(None)
+
+
+def test_use_session_id_facade_overrides_get_session_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from iac_code.services.telemetry import bootstrap_telemetry, get_session_id, set_client, use_session_id
+    from iac_code.services.telemetry.identity import SESSION_ID_PREFIX
+
+    set_client(None)
+    try:
+        bootstrap_telemetry(session_id="process-id")
+        assert get_session_id() == f"{SESSION_ID_PREFIX}process-id"
+        with use_session_id("per-context"):
+            assert get_session_id() == f"{SESSION_ID_PREFIX}per-context"
+        assert get_session_id() == f"{SESSION_ID_PREFIX}process-id"
+    finally:
+        set_client(None)

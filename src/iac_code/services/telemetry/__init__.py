@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from iac_code.services.telemetry.client import TelemetryClient
+from iac_code.services.telemetry.identity import use_session_id
 
 __all__ = [
     "log_event",
@@ -17,6 +18,7 @@ __all__ = [
     "set_client",
     "get_session_id",
     "get_user_id",
+    "use_session_id",
 ]
 
 _client: TelemetryClient | None = None

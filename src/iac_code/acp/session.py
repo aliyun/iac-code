@@ -19,6 +19,7 @@ from iac_code.acp.state import TurnState
 from iac_code.acp.tools import ACPTerminalBashTool
 from iac_code.acp.types import ACPContentBlock
 from iac_code.agent.message import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
 from iac_code.types.permissions import PermissionDecision
 from iac_code.types.stream_events import PermissionRequestEvent
@@ -315,15 +316,16 @@ class ACPSession:
                 context_snapshot=self._context_snapshot,
             )
             logger.debug("Prompt started, session_id=%s, turn_id=%s", self.id, turn_id)
-            async for event in self.agent_loop.run_streaming(prompt_text):
-                if isinstance(event, PermissionRequestEvent):
-                    allowed = await self._request_permission(event)
-                    if event.response_future is not None and not event.response_future.done():
-                        event.response_future.set_result(allowed)
-                    continue
+            with use_session_id(self.id):
+                async for event in self.agent_loop.run_streaming(prompt_text):
+                    if isinstance(event, PermissionRequestEvent):
+                        allowed = await self._request_permission(event)
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(allowed)
+                        continue
 
-                for update in converter.event_to_updates(event):
-                    await self._conn.session_update(session_id=self.id, update=update)
+                    for update in converter.event_to_updates(event):
+                        await self._conn.session_update(session_id=self.id, update=update)
 
         prompt_start = time.monotonic()
         self._current_task = asyncio.create_task(_run())

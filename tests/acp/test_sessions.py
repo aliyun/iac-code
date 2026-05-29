@@ -600,6 +600,43 @@ async def test_acp_prompt_flushes_telemetry_after_completion(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
+async def test_acp_prompt_overrides_telemetry_session_id_per_session(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Two ACP sessions in the same process must report distinct session ids
+    in telemetry during their respective run_streaming calls."""
+    from iac_code.services.telemetry import bootstrap_telemetry, get_session_id, set_client
+    from iac_code.services.telemetry.identity import SESSION_ID_PREFIX
+
+    monkeypatch.setenv("DISABLE_TELEMETRY", "1")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    set_client(None)
+    bootstrap_telemetry(session_id="acp-server-process")
+    try:
+        observed: dict[str, str] = {}
+
+        class _ObservingLoop:
+            def __init__(self, label: str) -> None:
+                self._label = label
+
+            async def run_streaming(self, prompt: str):
+                observed[self._label] = get_session_id()
+                yield TextDeltaEvent(text="ok")
+                yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+        conn = _RecordingFakeConn()
+        session_a = ACPSession("session-a", _ObservingLoop("a"), conn)
+        session_b = ACPSession("session-b", _ObservingLoop("b"), conn)
+
+        await session_a.prompt([acp.schema.TextContentBlock(type="text", text="hi-a")])
+        await session_b.prompt([acp.schema.TextContentBlock(type="text", text="hi-b")])
+
+        assert observed["a"] == f"{SESSION_ID_PREFIX}session-a"
+        assert observed["b"] == f"{SESSION_ID_PREFIX}session-b"
+        assert get_session_id() == f"{SESSION_ID_PREFIX}acp-server-process"
+    finally:
+        set_client(None)
+
+
+@pytest.mark.asyncio
 async def test_acp_prompt_flushes_telemetry_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     flush_calls: list[int] = []
 
