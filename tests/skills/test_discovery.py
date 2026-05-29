@@ -1,5 +1,7 @@
 """Tests for skill discovery."""
 
+import subprocess
+
 from iac_code.skills.discovery import (
     DynamicSkillTracker,
     _find_project_skills_dirs,
@@ -25,16 +27,13 @@ class TestScanSkillsDir:
         """Non-existent directory returns empty list."""
         assert _scan_skills_dir(tmp_path / "nonexistent") == []
 
-    def test_single_file_format(self, tmp_path):
-        """Discover single-file skill (skill-name.md)."""
+    def test_ignores_single_file_markdown(self, tmp_path):
+        """Top-level markdown files are documentation, not skills."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
         (skills_dir / "greet.md").write_text("---\ndescription: Greet\n---\nHello!")
 
-        skills = _scan_skills_dir(skills_dir)
-        assert len(skills) == 1
-        assert skills[0].name == "greet"
-        assert skills[0].description == "Greet"
+        assert _scan_skills_dir(skills_dir) == []
 
     def test_directory_format(self, tmp_path):
         """Discover directory-format skill (skill-name/SKILL.md)."""
@@ -65,11 +64,21 @@ class TestScanSkillsDir:
 
         assert _scan_skills_dir(skills_dir) == []
 
-    def test_multiple_skills(self, tmp_path):
-        """Discover multiple skills of different formats."""
+    def test_ignores_readme_markdown(self, tmp_path):
+        """README.md documents a skills directory and is not a single-file skill."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        (skills_dir / "alpha.md").write_text("---\ndescription: Alpha\n---\n")
+        (skills_dir / "README.md").write_text("# Skills\n\nDocumentation.")
+
+        assert _scan_skills_dir(skills_dir) == []
+
+    def test_multiple_skills(self, tmp_path):
+        """Discover multiple directory-format skills."""
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        alpha_dir = skills_dir / "alpha"
+        alpha_dir.mkdir()
+        (alpha_dir / "SKILL.md").write_text("---\ndescription: Alpha\n---\n")
         beta_dir = skills_dir / "beta"
         beta_dir.mkdir()
         (beta_dir / "SKILL.md").write_text("---\ndescription: Beta\n---\n")
@@ -81,6 +90,9 @@ class TestScanSkillsDir:
 
 class TestFindProjectSkillsDirs:
     """Tests for _find_project_skills_dirs."""
+
+    def _init_git_repo(self, path):
+        subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
 
     def test_finds_skills_dir(self, tmp_path):
         """Finds skills/ directory."""
@@ -110,6 +122,38 @@ class TestFindProjectSkillsDirs:
         dot_idx = next(i for i, d in enumerate(result) if str(d) == str(dotdir))
         assert bare_idx < dot_idx  # bare before dotdir = lower priority
 
+    def test_searches_git_root_to_cwd_only(self, tmp_path):
+        """Project skill lookup does not escape the current git repository."""
+        outer_skills = tmp_path / "skills"
+        outer_skills.mkdir()
+        repo = tmp_path / "repo"
+        nested = repo / "app" / "service"
+        nested.mkdir(parents=True)
+        self._init_git_repo(repo)
+
+        root_skills = repo / "skills"
+        root_skills.mkdir()
+        child_skills = repo / "app" / "skills"
+        child_skills.mkdir()
+
+        assert _find_project_skills_dirs(str(nested)) == [root_skills, child_skills]
+
+    def test_nearer_project_skills_have_higher_priority(self, tmp_path):
+        """Returned directories are ordered from lower to higher priority."""
+        repo = tmp_path / "repo"
+        nested = repo / "app" / "service"
+        nested.mkdir(parents=True)
+        self._init_git_repo(repo)
+
+        root_bare = repo / "skills"
+        root_dot = repo / ".iac-code" / "skills"
+        child_bare = repo / "app" / "skills"
+        child_dot = repo / "app" / ".iac-code" / "skills"
+        for path in (root_bare, root_dot, child_bare, child_dot):
+            path.mkdir(parents=True)
+
+        assert _find_project_skills_dirs(str(nested)) == [root_bare, root_dot, child_bare, child_dot]
+
 
 class TestDiscoverAllSkills:
     """Tests for discover_all_skills."""
@@ -125,21 +169,40 @@ class TestDiscoverAllSkills:
         names = {s.name for s in skills}
         assert "simplify" in names
 
-    def test_project_overrides_bundled(self, tmp_path):
-        """Project skill overrides bundled skill with same name."""
+    def test_bundled_overrides_project(self, tmp_path):
+        """Bundled skill wins over project skill with the same name."""
         from iac_code.skills.bundled import _bundled_skills, init_bundled_skills
 
         _bundled_skills.clear()
         init_bundled_skills()
 
         skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
-        (skills_dir / "simplify.md").write_text("---\ndescription: Custom simplify\n---\nCustom body")
+        skill_dir = skills_dir / "simplify"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\ndescription: Custom simplify\n---\nCustom body")
 
         skills = discover_all_skills(str(tmp_path))
         simplify = next(s for s in skills if s.name == "simplify")
-        assert simplify.source == SkillSource.PROJECT
-        assert simplify.description == "Custom simplify"
+        assert simplify.source == SkillSource.BUNDLED
+        assert simplify.description != "Custom simplify"
+
+    def test_nearer_project_skill_overrides_ancestor(self, tmp_path):
+        """A project skill nearer cwd overrides an ancestor project skill."""
+        repo = tmp_path / "repo"
+        nested = repo / "app" / "service"
+        nested.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+
+        root_skill = repo / "skills" / "deploy"
+        root_skill.mkdir(parents=True)
+        (root_skill / "SKILL.md").write_text("---\ndescription: Root deploy\n---\n")
+        child_skill = repo / "app" / "skills" / "deploy"
+        child_skill.mkdir(parents=True)
+        (child_skill / "SKILL.md").write_text("---\ndescription: Child deploy\n---\n")
+
+        skills = discover_all_skills(str(nested))
+        deploy = next(s for s in skills if s.name == "deploy")
+        assert deploy.description == "Child deploy"
 
 
 class TestSkillToCommand:
@@ -207,8 +270,9 @@ class TestUserGlobalSkillsRespectConfigDirEnv:
         monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(target))
 
         skills_dir = target / "skills"
-        skills_dir.mkdir(parents=True)
-        (skills_dir / "alpha.md").write_text("---\ndescription: Alpha\n---\n")
+        skill_dir = skills_dir / "alpha"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\ndescription: Alpha\n---\n")
 
         project_cwd = tmp_path / "proj"
         project_cwd.mkdir()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import subprocess
 from pathlib import Path
 
 from iac_code.commands.registry import PromptCommand
@@ -16,58 +17,100 @@ def discover_all_skills(cwd: str) -> list[SkillDefinition]:
     """Discover all available skills from all sources.
 
     Load order (later entries override earlier with same name):
-    1. Bundled skills
-    2. User global skills (``<config-dir>/skills/``; defaults to
+    1. User global skills (``<config-dir>/skills/``; defaults to
        ``~/.iac-code/skills/``, follows ``IAC_CODE_CONFIG_DIR``)
-    3. Project local skills — skills/ (lower priority)
-    4. Project local skills — .iac-code/skills/ (higher priority, overrides same name)
+    2. Project local skills, from git root toward cwd:
+       ``skills/`` then ``.iac-code/skills/`` at each level
+    3. Bundled skills
     """
     from iac_code.skills.bundled import get_bundled_skills
 
     skills: dict[str, SkillDefinition] = {}
 
-    # 1. Bundled skills
-    for skill in get_bundled_skills():
-        skills[skill.name] = skill
-
-    # 2. User global skills
+    # 1. User global skills
     user_skills_dir = get_config_dir() / "skills"
     for skill in _scan_skills_dir(user_skills_dir):
         skill.source = SkillSource.USER
         skills[skill.name] = skill
 
-    # 3. Project local skills (two locations, .iac-code/skills/ has higher priority)
+    # 2. Project local skills. The directory order is low -> high priority.
     for project_dir in _find_project_skills_dirs(cwd):
         for skill in _scan_skills_dir(project_dir):
             skill.source = SkillSource.PROJECT
             skills[skill.name] = skill
 
+    # 3. Bundled skills have the highest priority and cannot be shadowed by
+    # project-local or user-global skills with the same name.
+    for skill in get_bundled_skills():
+        skills[skill.name] = skill
+
     return list(skills.values())
 
 
 def _find_project_skills_dirs(cwd: str) -> list[Path]:
-    """Find project skills directories, searching up from cwd.
+    """Find project skills directories from project root toward cwd.
 
     Returns directories in priority order (low -> high):
-    - skills/           (root-level, lower priority)
-    - .iac-code/skills/ (config-level, higher priority)
+    - ancestor ``skills/`` before descendant ``skills/``
+    - within the same directory, ``skills/`` before ``.iac-code/skills/``
     """
     result: list[Path] = []
     current = Path(cwd).resolve()
-    while True:
-        # Lower priority: skills/
+    git_root = _find_git_root(current)
+    search_dirs = _project_search_dirs(current, git_root)
+
+    for current in search_dirs:
         bare = current / "skills"
         if bare.is_dir():
             result.append(bare)
-        # Higher priority: .iac-code/skills/
         dotdir = current / ".iac-code" / "skills"
         if dotdir.is_dir():
             result.append(dotdir)
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
     return result
+
+
+def _find_git_root(cwd: Path) -> Path | None:
+    """Return the git worktree root for cwd, or None outside git."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    root = result.stdout.strip()
+    return Path(root).resolve() if root else None
+
+
+def _project_search_dirs(cwd: Path, git_root: Path | None) -> list[Path]:
+    """Return directories to inspect, ordered from low to high priority."""
+    if git_root is None:
+        return [cwd]
+
+    try:
+        cwd.relative_to(git_root)
+    except ValueError:
+        return [cwd]
+
+    dirs: list[Path] = []
+    while True:
+        dirs.append(cwd)
+        if cwd == git_root:
+            break
+        parent = cwd.parent
+        if parent == cwd:
+            break
+        cwd = parent
+    dirs.reverse()
+    return dirs
 
 
 def _scan_skills_dir(skills_dir: Path) -> list[SkillDefinition]:
@@ -92,12 +135,6 @@ def _scan_skills_dir(skills_dir: Path) -> list[SkillDefinition]:
                 if skill:
                     skill.skill_root = str(entry)
                     skills.append(skill)
-        elif entry.suffix == ".md" and entry.name != "SKILL.md":
-            # Single file format: skill-name.md
-            skill = load_skill_from_path(entry, skill_name=entry.stem)
-            if skill:
-                skills.append(skill)
-
     return skills
 
 
