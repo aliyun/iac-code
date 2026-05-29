@@ -42,6 +42,8 @@ jobs:
       - name: Install dependencies
         working-directory: website
         run: npm ci
+        env:
+          npm_config_registry: https://registry.npmjs.org
 
       - name: Build website
         working-directory: website
