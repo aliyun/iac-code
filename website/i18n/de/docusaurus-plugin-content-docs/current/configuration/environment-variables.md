@@ -17,9 +17,9 @@ Umgebungsvariablen sind nuetzlich fuer CI/CD-Pipelines, Container und einmalige 
 
 | Variable | Beschreibung |
 |---|---|
-| `IAC_CODE_PROVIDER` | Name des Modellanbieters (Gross-/Kleinschreibung wird nicht beachtet): `Anthropic`, `OpenAI`, `DashScope`, `DashScopeTokenPlan`, `DeepSeek`, `OpenAPICompatible` |
+| `IAC_CODE_PROVIDER` | Name des Modellanbieters (Gross-/Kleinschreibung wird nicht beachtet). Gueltige Werte: `DashScope`, `DashScope Token Plan`, `OpenAI`, `Anthropic`, `DeepSeek`, `Gemini`, `Azure OpenAI`, `ModelScope`, `Kimi CN`, `Kimi Intl`, `MiniMax CN`, `MiniMax Intl`, `ZhiPu CN`, `ZhiPu Intl`, `Volcengine CN`, `SiliconFlow CN`, `SiliconFlow Intl`, `Aliyun CodingPlan`, `Aliyun CodingPlan Intl`, `ZhiPu CN CodingPlan`, `ZhiPu Intl CodingPlan`, `Volcengine CodingPlan`, `OpenAPI Compatible`, `Anthropic Compatible`, `OpenRouter`, `Ollama`, `LM Studio` |
 | `IAC_CODE_MODEL` | Modellname |
-| `IAC_CODE_BASE_URL` | API-Endpunkt nur fuer `OpenAPICompatible`; wird fuer andere Anbieter ignoriert |
+| `IAC_CODE_BASE_URL` | API-Endpunkt nur fuer `OpenAPI Compatible` und `Anthropic Compatible`; wird fuer andere Anbieter ignoriert |
 | `IAC_CODE_API_KEY` | API-Schluessel des Anbieters; ueberschreibt den Schluessel des aktiven Anbieters in `.credentials.yml` |
 
 Siehe [LLM-Anbieter](./llm-providers.md) fuer Anbieterdetails.
@@ -54,5 +54,7 @@ Siehe [Alibaba Cloud-Anmeldedaten](./alibaba-cloud-credentials.md) fuer weitere 
 | `IAC_CODE_CONFIG_DIR` | Ueberschreibt das Laufzeitkonfigurationsverzeichnis (Standard `~/.iac-code/`); unterstuetzt `~`- und `$VAR`-Erweiterung. Alle persistierten Artefakte (Anmeldedaten, Einstellungen, Verlauf, projects, image-cache, skills, telemetry usw.) folgen diesem Verzeichnis |
 | `IAC_CODE_ENV` | Bezeichnung der Bereitstellungsumgebung (Standard: `production`) |
 | `IAC_CODE_TENANT_ID` | Mandantenkennung fuer Telemetrie; wird automatisch mit `iac_tenant_` vorangestellt, wenn nicht bereits vorhanden |
+| `IAC_CODE_GIT_BASH_PATH` | Pfad zu Git Bash `bash.exe` unter Windows, wenn nicht im PATH |
+| `IAC_CODE_A2A_PUSH_KEYRING` | Umgebungsgesteuerter verschluesselter A2A-Push-Secret-Keyring (JSON-Format) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Standard-OpenTelemetry-Endpunkt; aktiviert den OTLP-Export, wenn gesetzt |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | GenAI-Nachrichten-/Tool-Inhalte auf Spans erfassen: `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` |

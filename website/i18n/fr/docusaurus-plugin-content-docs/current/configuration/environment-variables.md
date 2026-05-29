@@ -17,9 +17,9 @@ Les variables d'environnement sont utiles pour les pipelines CI/CD, les conteneu
 
 | Variable | Description |
 |---|---|
-| `IAC_CODE_PROVIDER` | Nom du fournisseur de modèles (insensible à la casse) : `Anthropic`, `OpenAI`, `DashScope`, `DashScopeTokenPlan`, `DeepSeek`, `OpenAPICompatible` |
+| `IAC_CODE_PROVIDER` | Nom du fournisseur de modèles (insensible à la casse). Valeurs valides : `DashScope`, `DashScope Token Plan`, `OpenAI`, `Anthropic`, `DeepSeek`, `Gemini`, `Azure OpenAI`, `ModelScope`, `Kimi CN`, `Kimi Intl`, `MiniMax CN`, `MiniMax Intl`, `ZhiPu CN`, `ZhiPu Intl`, `Volcengine CN`, `SiliconFlow CN`, `SiliconFlow Intl`, `Aliyun CodingPlan`, `Aliyun CodingPlan Intl`, `ZhiPu CN CodingPlan`, `ZhiPu Intl CodingPlan`, `Volcengine CodingPlan`, `OpenAPI Compatible`, `Anthropic Compatible`, `OpenRouter`, `Ollama`, `LM Studio` |
 | `IAC_CODE_MODEL` | Nom du modèle |
-| `IAC_CODE_BASE_URL` | Point de terminaison API pour `OpenAPICompatible` uniquement ; ignoré pour les autres fournisseurs |
+| `IAC_CODE_BASE_URL` | Point de terminaison API pour `OpenAPI Compatible` et `Anthropic Compatible` uniquement ; ignoré pour les autres fournisseurs |
 | `IAC_CODE_API_KEY` | Clé API du fournisseur ; remplace la clé du fournisseur actif dans `.credentials.yml` |
 
 Consultez [Fournisseurs LLM](./llm-providers.md) pour les détails des fournisseurs.
@@ -54,5 +54,7 @@ Consultez [Identifiants Alibaba Cloud](./alibaba-cloud-credentials.md) pour plus
 | `IAC_CODE_CONFIG_DIR` | Remplace le répertoire de configuration à l'exécution (par défaut `~/.iac-code/`) ; prend en charge l'expansion de `~` et `$VAR`. Tous les artefacts persistés (identifiants, paramètres, historique, projects, image-cache, skills, telemetry, etc.) suivent ce répertoire |
 | `IAC_CODE_ENV` | Label d'environnement de déploiement (par défaut : `production`) |
 | `IAC_CODE_TENANT_ID` | Identifiant de locataire pour la télémétrie ; préfixé automatiquement avec `iac_tenant_` si ce n'est pas déjà le cas |
+| `IAC_CODE_GIT_BASH_PATH` | Chemin vers `bash.exe` de Git Bash sous Windows lorsqu'il n'est pas dans le PATH |
+| `IAC_CODE_A2A_PUSH_KEYRING` | Trousseau de clés secret push A2A chiffré géré par l'environnement (format JSON) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Point de terminaison OpenTelemetry standard ; lorsqu'il est défini, active l'export OTLP |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Capturer le contenu des messages/outils GenAI sur les spans : `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` |

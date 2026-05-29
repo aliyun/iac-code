@@ -17,9 +17,9 @@ As variaveis de ambiente sao uteis para pipelines de CI/CD, containers e substit
 
 | Variavel | Descricao |
 |---|---|
-| `IAC_CODE_PROVIDER` | Nome do provedor de modelo (insensivel a maiusculas e minusculas): `Anthropic`, `OpenAI`, `DashScope`, `DashScopeTokenPlan`, `DeepSeek`, `OpenAPICompatible` |
+| `IAC_CODE_PROVIDER` | Nome do provedor de modelo (insensivel a maiusculas e minusculas). Valores validos: `DashScope`, `DashScope Token Plan`, `OpenAI`, `Anthropic`, `DeepSeek`, `Gemini`, `Azure OpenAI`, `ModelScope`, `Kimi CN`, `Kimi Intl`, `MiniMax CN`, `MiniMax Intl`, `ZhiPu CN`, `ZhiPu Intl`, `Volcengine CN`, `SiliconFlow CN`, `SiliconFlow Intl`, `Aliyun CodingPlan`, `Aliyun CodingPlan Intl`, `ZhiPu CN CodingPlan`, `ZhiPu Intl CodingPlan`, `Volcengine CodingPlan`, `OpenAPI Compatible`, `Anthropic Compatible`, `OpenRouter`, `Ollama`, `LM Studio` |
 | `IAC_CODE_MODEL` | Nome do modelo |
-| `IAC_CODE_BASE_URL` | Endpoint de API apenas para `OpenAPICompatible`; ignorado para outros provedores |
+| `IAC_CODE_BASE_URL` | Endpoint de API para `OpenAPI Compatible` e `Anthropic Compatible` apenas; ignorado para outros provedores |
 | `IAC_CODE_API_KEY` | Chave de API do provedor; substitui a chave do provedor ativo em `.credentials.yml` |
 
 Consulte [Provedores de LLM](./llm-providers.md) para detalhes sobre os provedores.
@@ -54,5 +54,7 @@ Consulte [Credenciais da Alibaba Cloud](./alibaba-cloud-credentials.md) para mai
 | `IAC_CODE_CONFIG_DIR` | Substitui o diretorio de configuracao em tempo de execucao (padrao `~/.iac-code/`); suporta expansao de `~` e `$VAR`. Todos os artefatos persistidos (credenciais, configuracoes, historico, projects, image-cache, skills, telemetry, etc.) seguem este diretorio |
 | `IAC_CODE_ENV` | Rotulo do ambiente de implantacao (padrao: `production`) |
 | `IAC_CODE_TENANT_ID` | Identificador de tenant para telemetria; prefixado automaticamente com `iac_tenant_` se ainda nao estiver |
+| `IAC_CODE_GIT_BASH_PATH` | Caminho para `bash.exe` do Git Bash no Windows quando nao esta no PATH |
+| `IAC_CODE_A2A_PUSH_KEYRING` | Keyring criptografado de push secrets A2A gerenciado pelo ambiente (formato JSON) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint padrao do OpenTelemetry; quando definido, habilita a exportacao OTLP |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Capturar conteudo de mensagens/ferramentas GenAI em spans: `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` |
