@@ -33,7 +33,16 @@ def get_privacy_level() -> PrivacyLevel:
     return PrivacyLevel.DEFAULT
 
 
+def _is_local_build() -> bool:
+    # Empty __release_date__ means unpackaged source (see setup.py); don't ship telemetry from dev runs.
+    from iac_code import __release_date__
+
+    return not __release_date__.strip()
+
+
 def is_telemetry_disabled() -> bool:
+    if _is_local_build():
+        return True
     return get_privacy_level() != PrivacyLevel.DEFAULT
 
 

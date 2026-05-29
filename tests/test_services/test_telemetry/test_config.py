@@ -64,6 +64,24 @@ def test_flag_set_to_falsy_string_treated_as_unset(monkeypatch, val):
     assert is_telemetry_disabled() is False
 
 
+# --- Local-build (empty __release_date__) gate ---
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_local_build_disables_telemetry(monkeypatch, blank):
+    """Empty __release_date__ marks an unpackaged local build; telemetry must be off."""
+    monkeypatch.setattr("iac_code.__release_date__", blank)
+    assert is_telemetry_disabled() is True
+    # Privacy level itself reflects only env vars, not the build stamp.
+    assert get_privacy_level() == PrivacyLevel.DEFAULT
+    assert is_essential_traffic_only() is False
+
+
+def test_released_build_with_no_env_vars_enables_telemetry(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "2026-01-01")
+    assert is_telemetry_disabled() is False
+
+
 # --- Content capture mode ---
 
 
