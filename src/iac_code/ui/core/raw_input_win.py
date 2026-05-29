@@ -76,10 +76,13 @@ class RawInputCapture:
                 if time.monotonic() >= deadline:
                     return None
                 time.sleep(0.01)
-        else:
-            while not msvcrt.kbhit():
-                time.sleep(0.01)
 
+        # No timeout → blocking getwch(). Polling kbhit() at 100Hz here
+        # interferes with Microsoft Pinyin's Shift→English mode and causes
+        # typed characters to stay buffered inside the IME until something
+        # else (e.g. switching back to Chinese + Space) forces a commit.
+        # getwch() blocks until a character is delivered and still raises
+        # KeyboardInterrupt on Ctrl+C, which the caller already handles.
         return self._read_one_key()
 
     def _read_one_key(self) -> KeyEvent:

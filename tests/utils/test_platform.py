@@ -251,3 +251,44 @@ class TestKillProcessTree:
 
         await kill_process_tree(proc)
         proc.kill.assert_not_called()
+
+
+class TestNpmmirrorCmd:
+    """Regression: install args must show progress, not run fully silent."""
+
+    def test_uses_silent_not_verysilent(self):
+        from iac_code.utils.platform import _NPMMIRROR_CMD
+
+        assert "/SILENT /NORESTART" in _NPMMIRROR_CMD
+        assert "/VERYSILENT" not in _NPMMIRROR_CMD
+
+
+class TestGitBashHint:
+    """Hint must reference the new subcommand and must not contain the
+    long PowerShell one-liner that Rich wraps and PowerShell rejects on paste."""
+
+    def test_hint_references_install_git_bash_subcommand(self):
+        from iac_code.utils.platform import _git_bash_hint
+
+        text = _git_bash_hint()
+        assert "iac-code install-git-bash" in text
+
+    def test_hint_does_not_contain_long_powershell_oneliner(self):
+        from iac_code.utils.platform import _git_bash_hint
+
+        text = _git_bash_hint()
+        assert "Invoke-RestMethod" not in text
+        assert "Invoke-WebRequest" not in text
+        assert "Start-Process" not in text
+
+    def test_hint_still_mentions_winget(self):
+        from iac_code.utils.platform import _git_bash_hint
+
+        text = _git_bash_hint()
+        assert "winget install --id Git.Git" in text
+
+    def test_hint_still_mentions_env_var_override(self):
+        from iac_code.utils.platform import _git_bash_hint
+
+        text = _git_bash_hint()
+        assert "IAC_CODE_GIT_BASH_PATH" in text

@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-29 09:47+0800\n"
+"POT-Creation-Date: 2026-05-29 13:27+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -134,6 +134,35 @@ msgstr ""
 "  文档：https://aliyun.github.io/iac-code/zh-"
 "Hans/docs/configuration/authentication\n"
 
+#: src/iac_code/cli/install_git_bash.py:40
+#, python-brace-format
+msgid "Git Bash is already installed at {}"
+msgstr "Git Bash 已存在于 {}"
+
+#: src/iac_code/cli/install_git_bash.py:43
+msgid "Installing Git for Windows via npmmirror..."
+msgstr "正在通过 npmmirror 下载并安装 Git for Windows..."
+
+#: src/iac_code/cli/install_git_bash.py:59
+msgid "powershell.exe was not found on PATH; cannot run installer."
+msgstr "PATH 中未找到 powershell.exe，无法运行安装程序。"
+
+#: src/iac_code/cli/install_git_bash.py:66
+#, python-brace-format
+msgid "Installation failed (PowerShell exited with code {})"
+msgstr "安装失败（PowerShell 退出码 {}）"
+
+#: src/iac_code/cli/install_git_bash.py:77
+msgid ""
+"Installer exited but bash.exe was not found in common locations; UAC may "
+"have been cancelled or the installer used a non-standard path."
+msgstr "安装程序已退出，但常见路径下未找到 bash.exe；可能 UAC 被取消或安装程序使用了非标准路径。"
+
+#: src/iac_code/cli/install_git_bash.py:84
+#, python-brace-format
+msgid "Git for Windows installed at {}"
+msgstr "Git for Windows 已安装于 {}"
+
 #: src/iac_code/cli/main.py:33 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
 msgstr "AI 驱动的基础设施编排工具"
@@ -142,348 +171,352 @@ msgstr "AI 驱动的基础设施编排工具"
 msgid "Use iac-code as an A2A client."
 msgstr "将 iac-code 作为 A2A 客户端使用。"
 
-#: src/iac_code/cli/main.py:50
+#: src/iac_code/cli/main.py:54
+msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
+msgstr "通过 npmmirror 镜像安装 Git for Windows（仅 Windows）。"
+
+#: src/iac_code/cli/main.py:61
 msgid "YAML config file containing A2A client options"
 msgstr "包含 A2A 客户端选项的 YAML 配置文件"
 
-#: src/iac_code/cli/main.py:57 src/iac_code/cli/main.py:1457
-#: src/iac_code/cli/main.py:1818 src/iac_code/cli/main.py:1857
+#: src/iac_code/cli/main.py:68 src/iac_code/cli/main.py:1468
+#: src/iac_code/cli/main.py:1829 src/iac_code/cli/main.py:1868
 msgid ""
 "A2A client dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
 msgstr "缺少 A2A 客户端依赖。请使用以下命令安装：pip install 'iac-code[a2a]'"
 
-#: src/iac_code/cli/main.py:71
+#: src/iac_code/cli/main.py:82
 msgid "LLM model to use"
 msgstr "使用的 LLM 模型"
 
-#: src/iac_code/cli/main.py:72
+#: src/iac_code/cli/main.py:83
 msgid "Non-interactive mode: run a single prompt and exit"
 msgstr "非交互模式：运行单个提示并退出"
 
-#: src/iac_code/cli/main.py:73
+#: src/iac_code/cli/main.py:84
 msgid "Output format: text, json, stream-json"
 msgstr "输出格式：text、json、stream-json"
 
-#: src/iac_code/cli/main.py:74
+#: src/iac_code/cli/main.py:85
 msgid "Maximum agent turns in headless mode"
 msgstr "无头模式下最大智能体轮次"
 
-#: src/iac_code/cli/main.py:75 src/iac_code/cli/main.py:332
-#: src/iac_code/cli/main.py:557
+#: src/iac_code/cli/main.py:86 src/iac_code/cli/main.py:343
+#: src/iac_code/cli/main.py:568
 msgid "Enable debug logging"
 msgstr "启用调试日志"
 
-#: src/iac_code/cli/main.py:76
+#: src/iac_code/cli/main.py:87
 msgid "Show version and exit"
 msgstr "显示版本号并退出"
 
-#: src/iac_code/cli/main.py:77
+#: src/iac_code/cli/main.py:88
 msgid "Resume a session by ID"
 msgstr "通过 ID 恢复会话"
 
-#: src/iac_code/cli/main.py:78
+#: src/iac_code/cli/main.py:89
 msgid "Resume the most recent session"
 msgstr "恢复最近一次会话"
 
-#: src/iac_code/cli/main.py:85 src/iac_code/i18n/__init__.py:55
+#: src/iac_code/cli/main.py:96 src/iac_code/i18n/__init__.py:55
 msgid "Install completion for the current shell."
 msgstr "为当前 shell 安装自动补全。"
 
-#: src/iac_code/cli/main.py:93 src/iac_code/i18n/__init__.py:56
+#: src/iac_code/cli/main.py:104 src/iac_code/i18n/__init__.py:56
 msgid ""
 "Show completion for the current shell, to copy it or customize the "
 "installation."
 msgstr "显示当前 shell 的自动补全脚本，可复制或自定义安装。"
 
-#: src/iac_code/cli/main.py:98
+#: src/iac_code/cli/main.py:109
 msgid ""
 "Comma-separated tool permission patterns to allow, e.g. 'bash(git "
 "*),write_file'"
 msgstr "允许的工具权限模式（逗号分隔），例如 'bash(git *),write_file'"
 
-#: src/iac_code/cli/main.py:103
+#: src/iac_code/cli/main.py:114
 msgid "Comma-separated tool permission patterns to deny"
 msgstr "拒绝的工具权限模式（逗号分隔）"
 
-#: src/iac_code/cli/main.py:108
+#: src/iac_code/cli/main.py:119
 msgid "Permission mode: default, accept_edits, bypass_permissions, dont_ask"
 msgstr "权限模式：default, accept_edits, bypass_permissions, dont_ask"
 
-#: src/iac_code/cli/main.py:139
+#: src/iac_code/cli/main.py:150
 msgid "Error: --resume and --continue cannot be used together."
 msgstr "错误：--resume 和 --continue 不能同时使用。"
 
-#: src/iac_code/cli/main.py:327
+#: src/iac_code/cli/main.py:338
 msgid "Run iac-code as an ACP server."
 msgstr "将 iac-code 作为 ACP 服务器运行。"
 
-#: src/iac_code/cli/main.py:329
+#: src/iac_code/cli/main.py:340
 msgid "Transport type: stdio or http"
 msgstr "传输类型：stdio 或 http"
 
-#: src/iac_code/cli/main.py:330
+#: src/iac_code/cli/main.py:341
 msgid "HTTP server port"
 msgstr "HTTP 服务器端口"
 
-#: src/iac_code/cli/main.py:331 src/iac_code/cli/main.py:547
+#: src/iac_code/cli/main.py:342 src/iac_code/cli/main.py:558
 msgid "HTTP server host"
 msgstr "HTTP 服务器主机"
 
-#: src/iac_code/cli/main.py:543
+#: src/iac_code/cli/main.py:554
 msgid "Run iac-code as an A2A 1.0 server."
 msgstr "将 iac-code 作为 A2A 1.0 服务器运行。"
 
-#: src/iac_code/cli/main.py:546
+#: src/iac_code/cli/main.py:557
 msgid "YAML config file for A2A server options"
 msgstr "用于 A2A 服务器选项的 YAML 配置文件"
 
-#: src/iac_code/cli/main.py:550
+#: src/iac_code/cli/main.py:561
 msgid ""
 "HTTP server port. 41242 is the iac-code default inspired by Gemini CLI, "
 "not a registered A2A port."
 msgstr "HTTP 服务器端口。41242 是受 Gemini CLI 启发的 iac-code 默认值，并非已注册的 A2A 端口。"
 
-#: src/iac_code/cli/main.py:555
+#: src/iac_code/cli/main.py:566
 msgid ""
 "A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or "
 "redis-streams"
 msgstr "A2A 传输方式：http、stdio、unix、websocket、grpc、grpc-jsonrpc 或 redis-streams"
 
-#: src/iac_code/cli/main.py:561
+#: src/iac_code/cli/main.py:572
 msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
 msgstr "暴露 A2A thinking 信号类型；可重复指定多个。取值：raw-thinking、tool-trace。"
 
-#: src/iac_code/cli/main.py:608
+#: src/iac_code/cli/main.py:619
 msgid ""
 "A2A server dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
 msgstr "缺少 A2A 服务器依赖。请使用以下命令安装：pip install 'iac-code[a2a]'"
 
-#: src/iac_code/cli/main.py:740
+#: src/iac_code/cli/main.py:751
 msgid "Send a prompt to an A2A JSON-RPC endpoint."
 msgstr "向 A2A JSON-RPC 端点发送提示。"
 
-#: src/iac_code/cli/main.py:743 src/iac_code/cli/main.py:907
-#: src/iac_code/cli/main.py:960 src/iac_code/cli/main.py:1020
-#: src/iac_code/cli/main.py:1070 src/iac_code/cli/main.py:1119
-#: src/iac_code/cli/main.py:1198 src/iac_code/cli/main.py:1255
-#: src/iac_code/cli/main.py:1311 src/iac_code/cli/main.py:1368
+#: src/iac_code/cli/main.py:754 src/iac_code/cli/main.py:918
+#: src/iac_code/cli/main.py:971 src/iac_code/cli/main.py:1031
+#: src/iac_code/cli/main.py:1081 src/iac_code/cli/main.py:1130
+#: src/iac_code/cli/main.py:1209 src/iac_code/cli/main.py:1266
+#: src/iac_code/cli/main.py:1322 src/iac_code/cli/main.py:1379
 msgid "A2A JSON-RPC endpoint URL"
 msgstr "A2A JSON-RPC 端点 URL"
 
-#: src/iac_code/cli/main.py:744 src/iac_code/cli/main.py:1413
+#: src/iac_code/cli/main.py:755 src/iac_code/cli/main.py:1424
 msgid "Route spec: name=url;skills=skill1,skill2;tags=tag1,tag2"
 msgstr "路由规范：name=url;skills=skill1,skill2;tags=tag1,tag2"
 
-#: src/iac_code/cli/main.py:745
+#: src/iac_code/cli/main.py:756
 msgid "Named A2A route to call"
 msgstr "要调用的命名 A2A 路由"
 
-#: src/iac_code/cli/main.py:746
+#: src/iac_code/cli/main.py:757
 msgid "Prompt to send"
 msgstr "要发送的提示"
 
-#: src/iac_code/cli/main.py:747
+#: src/iac_code/cli/main.py:758
 msgid "Working directory metadata to send with the request"
 msgstr "随请求一起发送的工作目录元数据"
 
-#: src/iac_code/cli/main.py:748
+#: src/iac_code/cli/main.py:759
 msgid "A2A context ID to continue"
 msgstr "要继续的 A2A 上下文 ID"
 
-#: src/iac_code/cli/main.py:749 src/iac_code/cli/main.py:838
-#: src/iac_code/cli/main.py:910 src/iac_code/cli/main.py:967
-#: src/iac_code/cli/main.py:1022 src/iac_code/cli/main.py:1072
-#: src/iac_code/cli/main.py:1126 src/iac_code/cli/main.py:1201
-#: src/iac_code/cli/main.py:1259 src/iac_code/cli/main.py:1314
-#: src/iac_code/cli/main.py:1369
+#: src/iac_code/cli/main.py:760 src/iac_code/cli/main.py:849
+#: src/iac_code/cli/main.py:921 src/iac_code/cli/main.py:978
+#: src/iac_code/cli/main.py:1033 src/iac_code/cli/main.py:1083
+#: src/iac_code/cli/main.py:1137 src/iac_code/cli/main.py:1212
+#: src/iac_code/cli/main.py:1270 src/iac_code/cli/main.py:1325
+#: src/iac_code/cli/main.py:1380
 msgid "Bearer token for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的 Bearer 令牌"
 
-#: src/iac_code/cli/main.py:750 src/iac_code/cli/main.py:839
-#: src/iac_code/cli/main.py:911 src/iac_code/cli/main.py:968
-#: src/iac_code/cli/main.py:1023 src/iac_code/cli/main.py:1073
-#: src/iac_code/cli/main.py:1127 src/iac_code/cli/main.py:1202
-#: src/iac_code/cli/main.py:1260 src/iac_code/cli/main.py:1315
-#: src/iac_code/cli/main.py:1370
+#: src/iac_code/cli/main.py:761 src/iac_code/cli/main.py:850
+#: src/iac_code/cli/main.py:922 src/iac_code/cli/main.py:979
+#: src/iac_code/cli/main.py:1034 src/iac_code/cli/main.py:1084
+#: src/iac_code/cli/main.py:1138 src/iac_code/cli/main.py:1213
+#: src/iac_code/cli/main.py:1271 src/iac_code/cli/main.py:1326
+#: src/iac_code/cli/main.py:1381
 msgid "Basic auth username for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的基本认证用户名"
 
-#: src/iac_code/cli/main.py:751 src/iac_code/cli/main.py:840
-#: src/iac_code/cli/main.py:912 src/iac_code/cli/main.py:969
-#: src/iac_code/cli/main.py:1024 src/iac_code/cli/main.py:1074
-#: src/iac_code/cli/main.py:1128 src/iac_code/cli/main.py:1203
-#: src/iac_code/cli/main.py:1261 src/iac_code/cli/main.py:1316
-#: src/iac_code/cli/main.py:1371
+#: src/iac_code/cli/main.py:762 src/iac_code/cli/main.py:851
+#: src/iac_code/cli/main.py:923 src/iac_code/cli/main.py:980
+#: src/iac_code/cli/main.py:1035 src/iac_code/cli/main.py:1085
+#: src/iac_code/cli/main.py:1139 src/iac_code/cli/main.py:1214
+#: src/iac_code/cli/main.py:1272 src/iac_code/cli/main.py:1327
+#: src/iac_code/cli/main.py:1382
 msgid "Basic auth password for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的基本认证密码"
 
-#: src/iac_code/cli/main.py:752 src/iac_code/cli/main.py:841
-#: src/iac_code/cli/main.py:913 src/iac_code/cli/main.py:970
-#: src/iac_code/cli/main.py:1025 src/iac_code/cli/main.py:1075
-#: src/iac_code/cli/main.py:1129 src/iac_code/cli/main.py:1204
-#: src/iac_code/cli/main.py:1262 src/iac_code/cli/main.py:1317
-#: src/iac_code/cli/main.py:1372
+#: src/iac_code/cli/main.py:763 src/iac_code/cli/main.py:852
+#: src/iac_code/cli/main.py:924 src/iac_code/cli/main.py:981
+#: src/iac_code/cli/main.py:1036 src/iac_code/cli/main.py:1086
+#: src/iac_code/cli/main.py:1140 src/iac_code/cli/main.py:1215
+#: src/iac_code/cli/main.py:1273 src/iac_code/cli/main.py:1328
+#: src/iac_code/cli/main.py:1383
 msgid "API key for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的 API 密钥"
 
-#: src/iac_code/cli/main.py:753 src/iac_code/cli/main.py:842
-#: src/iac_code/cli/main.py:914 src/iac_code/cli/main.py:971
-#: src/iac_code/cli/main.py:1026 src/iac_code/cli/main.py:1076
-#: src/iac_code/cli/main.py:1130 src/iac_code/cli/main.py:1205
-#: src/iac_code/cli/main.py:1263 src/iac_code/cli/main.py:1318
-#: src/iac_code/cli/main.py:1373
+#: src/iac_code/cli/main.py:764 src/iac_code/cli/main.py:853
+#: src/iac_code/cli/main.py:925 src/iac_code/cli/main.py:982
+#: src/iac_code/cli/main.py:1037 src/iac_code/cli/main.py:1087
+#: src/iac_code/cli/main.py:1141 src/iac_code/cli/main.py:1216
+#: src/iac_code/cli/main.py:1274 src/iac_code/cli/main.py:1329
+#: src/iac_code/cli/main.py:1384
 msgid "HTTP header name for A2A API key"
 msgstr "A2A API 密钥使用的 HTTP 请求头名称"
 
-#: src/iac_code/cli/main.py:758 src/iac_code/cli/main.py:847
+#: src/iac_code/cli/main.py:769 src/iac_code/cli/main.py:858
 msgid "Secret used to verify the A2A Agent Card"
 msgstr "用于验证 A2A Agent Card 的密钥"
 
-#: src/iac_code/cli/main.py:763 src/iac_code/cli/main.py:852
+#: src/iac_code/cli/main.py:774 src/iac_code/cli/main.py:863
 msgid "Remote JWKS URL used to verify the A2A Agent Card"
 msgstr "用于验证 A2A Agent Card 的远程 JWKS URL"
 
-#: src/iac_code/cli/main.py:769 src/iac_code/cli/main.py:858
+#: src/iac_code/cli/main.py:780 src/iac_code/cli/main.py:869
 msgid "Require a valid A2A Agent Card signature"
 msgstr "要求 A2A Agent Card 提供有效签名"
 
-#: src/iac_code/cli/main.py:771
+#: src/iac_code/cli/main.py:782
 msgid "A2A call timeout in seconds"
 msgstr "A2A 调用超时时间（秒）"
 
-#: src/iac_code/cli/main.py:772
+#: src/iac_code/cli/main.py:783
 msgid "Use A2A streaming message delivery"
 msgstr "使用 A2A 流式消息传递"
 
-#: src/iac_code/cli/main.py:834
+#: src/iac_code/cli/main.py:845
 msgid "Discover an A2A Agent Card."
 msgstr "发现 A2A Agent Card。"
 
-#: src/iac_code/cli/main.py:837
+#: src/iac_code/cli/main.py:848
 msgid "A2A agent base URL"
 msgstr "A2A 代理基础 URL"
 
-#: src/iac_code/cli/main.py:904
+#: src/iac_code/cli/main.py:915
 msgid "Get an A2A task."
 msgstr "获取 A2A 任务。"
 
-#: src/iac_code/cli/main.py:908 src/iac_code/cli/main.py:1021
-#: src/iac_code/cli/main.py:1071 src/iac_code/cli/main.py:1120
-#: src/iac_code/cli/main.py:1199 src/iac_code/cli/main.py:1256
-#: src/iac_code/cli/main.py:1312
+#: src/iac_code/cli/main.py:919 src/iac_code/cli/main.py:1032
+#: src/iac_code/cli/main.py:1082 src/iac_code/cli/main.py:1131
+#: src/iac_code/cli/main.py:1210 src/iac_code/cli/main.py:1267
+#: src/iac_code/cli/main.py:1323
 msgid "A2A task ID"
 msgstr "A2A 任务 ID"
 
-#: src/iac_code/cli/main.py:909
+#: src/iac_code/cli/main.py:920
 msgid "Maximum task history items to return"
 msgstr "最多返回的任务历史条目数"
 
-#: src/iac_code/cli/main.py:957
+#: src/iac_code/cli/main.py:968
 msgid "List A2A tasks."
 msgstr "列出 A2A 任务。"
 
-#: src/iac_code/cli/main.py:961
+#: src/iac_code/cli/main.py:972
 msgid "Filter by A2A context ID"
 msgstr "按 A2A 上下文 ID 过滤"
 
-#: src/iac_code/cli/main.py:962
+#: src/iac_code/cli/main.py:973
 msgid "Filter by A2A task state"
 msgstr "按 A2A 任务状态过滤"
 
-#: src/iac_code/cli/main.py:963
+#: src/iac_code/cli/main.py:974
 msgid "Maximum tasks to return"
 msgstr "最多返回的任务数"
 
-#: src/iac_code/cli/main.py:964 src/iac_code/cli/main.py:1258
+#: src/iac_code/cli/main.py:975 src/iac_code/cli/main.py:1269
 msgid "Pagination token"
 msgstr "分页令牌"
 
-#: src/iac_code/cli/main.py:965
+#: src/iac_code/cli/main.py:976
 msgid "Include task artifacts"
 msgstr "包含任务工件"
 
-#: src/iac_code/cli/main.py:966
+#: src/iac_code/cli/main.py:977
 msgid "Output format: table or json"
 msgstr "输出格式：table 或 json"
 
-#: src/iac_code/cli/main.py:1017
+#: src/iac_code/cli/main.py:1028
 msgid "Cancel an A2A task."
 msgstr "取消 A2A 任务。"
 
-#: src/iac_code/cli/main.py:1067
+#: src/iac_code/cli/main.py:1078
 msgid "Subscribe to an A2A task event stream."
 msgstr "订阅 A2A 任务事件流。"
 
-#: src/iac_code/cli/main.py:1116
+#: src/iac_code/cli/main.py:1127
 msgid "Create an A2A task push notification config."
 msgstr "创建 A2A 任务推送通知配置。"
 
-#: src/iac_code/cli/main.py:1121 src/iac_code/cli/main.py:1200
-#: src/iac_code/cli/main.py:1313
+#: src/iac_code/cli/main.py:1132 src/iac_code/cli/main.py:1211
+#: src/iac_code/cli/main.py:1324
 msgid "Push config ID"
 msgstr "推送配置 ID"
 
-#: src/iac_code/cli/main.py:1122
+#: src/iac_code/cli/main.py:1133
 msgid "Push callback URL"
 msgstr "推送回调 URL"
 
-#: src/iac_code/cli/main.py:1123
+#: src/iac_code/cli/main.py:1134
 msgid "Notification verification token"
 msgstr "通知验证令牌"
 
-#: src/iac_code/cli/main.py:1124
+#: src/iac_code/cli/main.py:1135
 msgid "Callback authentication scheme"
 msgstr "回调认证方案"
 
-#: src/iac_code/cli/main.py:1125
+#: src/iac_code/cli/main.py:1136
 msgid "Callback authentication credentials"
 msgstr "回调认证凭据"
 
-#: src/iac_code/cli/main.py:1195
+#: src/iac_code/cli/main.py:1206
 msgid "Get an A2A task push notification config."
 msgstr "获取 A2A 任务推送通知配置。"
 
-#: src/iac_code/cli/main.py:1252
+#: src/iac_code/cli/main.py:1263
 msgid "List A2A task push notification configs."
 msgstr "列出 A2A 任务推送通知配置。"
 
-#: src/iac_code/cli/main.py:1257
+#: src/iac_code/cli/main.py:1268
 msgid "Maximum configs to return"
 msgstr "最多返回的配置数"
 
-#: src/iac_code/cli/main.py:1308
+#: src/iac_code/cli/main.py:1319
 msgid "Delete an A2A task push notification config."
 msgstr "删除 A2A 任务推送通知配置。"
 
-#: src/iac_code/cli/main.py:1365
+#: src/iac_code/cli/main.py:1376
 msgid "Get an authenticated extended A2A Agent Card."
 msgstr "获取经过身份验证的扩展 A2A Agent Card。"
 
-#: src/iac_code/cli/main.py:1408
+#: src/iac_code/cli/main.py:1419
 msgid "Preview A2A route resolution."
 msgstr "预览 A2A 路由解析。"
 
-#: src/iac_code/cli/main.py:1415
+#: src/iac_code/cli/main.py:1426
 msgid "Route name to resolve"
 msgstr "要解析的路由名称"
 
-#: src/iac_code/cli/main.py:1416
+#: src/iac_code/cli/main.py:1427
 msgid "Skill ID to resolve"
 msgstr "要解析的技能 ID"
 
-#: src/iac_code/cli/main.py:1417
+#: src/iac_code/cli/main.py:1428
 msgid "Prompt text used for tag/name route matching"
 msgstr "用于标签/名称路由匹配的提示文本"
 
-#: src/iac_code/cli/main.py:1422
+#: src/iac_code/cli/main.py:1433
 msgid "Directory for persisted A2A routes"
 msgstr "持久化 A2A 路由的目录"
 
-#: src/iac_code/cli/main.py:1424
+#: src/iac_code/cli/main.py:1435
 msgid "Save the provided routes as a route snapshot"
 msgstr "将提供的路由保存为路由快照"
 
@@ -2008,16 +2041,18 @@ msgid ""
 msgstr "如果已安装但不在 PATH 中，请设置 IAC_CODE_GIT_BASH_PATH 环境变量。"
 
 #: src/iac_code/utils/platform.py:44
-msgid "To install, open PowerShell and run:"
-msgstr "安装方法：打开 PowerShell 并运行："
+msgid "To install:"
+msgstr "安装方法："
 
 #: src/iac_code/utils/platform.py:47
 msgid "  Option 1 - winget (requires access to github.com):"
 msgstr "  方式 1 - winget（需要能访问 github.com）："
 
 #: src/iac_code/utils/platform.py:52
-msgid "  Option 2 - npmmirror (China-friendly mirror):"
-msgstr "  方式 2 - npmmirror（国内镜像）："
+msgid ""
+"  Option 2 - if you cannot reach github.com, run this to install via "
+"npmmirror:"
+msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 npmmirror 安装："
 
 #~ msgid "toggle preview"
 #~ msgstr "切换预览"
@@ -2048,3 +2083,10 @@ msgstr "  方式 2 - npmmirror（国内镜像）："
 
 #~ msgid "Provider switched: {status}"
 #~ msgstr "Provider 已切换: {status}"
+
+#~ msgid "To install, open PowerShell and run:"
+#~ msgstr "安装方法：打开 PowerShell 并运行："
+
+#~ msgid "  Option 2 - npmmirror (China-friendly mirror):"
+#~ msgstr "  方式 2 - npmmirror（国内镜像）："
+

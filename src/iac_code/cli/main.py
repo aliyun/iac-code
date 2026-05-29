@@ -43,6 +43,17 @@ a2a_client_app = typer.Typer(
 )
 app.add_typer(a2a_client_app, name="a2a-client")
 
+# `install-git-bash` is a Windows-only helper that installs Git for Windows
+# via the npmmirror mirror. We register it conditionally so it does not
+# show up in --help on non-Windows platforms (where it could not work).
+if sys.platform == "win32":
+    from iac_code.cli.install_git_bash import install_git_bash as _install_git_bash
+
+    app.command(
+        name="install-git-bash",
+        help=_("Install Git for Windows via the npmmirror mirror (Windows only)."),
+    )(_install_git_bash)
+
 
 @a2a_client_app.callback()
 def a2a_client(
@@ -132,7 +143,7 @@ def main(
         except GitBashNotFoundError as e:
             from rich.console import Console
 
-            Console(stderr=True).print(f"[red]✗[/red] {e}")
+            Console(stderr=True).print(f"[red]✗[/red] {e}", soft_wrap=True)
             raise SystemExit(1)
 
     if resume and continue_session:

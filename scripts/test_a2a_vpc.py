@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Windows 兼容性验证脚本 — A2A 模式
-=================================
+Windows Compatibility Verification Script — A2A Mode
+=====================================================
 
-启动 A2A HTTP 服务端，然后通过 ``iac-code a2a-client call`` 发送
-"创建VPC" prompt，验证整个 server ↔ client 流程。
+Starts the A2A HTTP server, then sends a "create VPC" prompt via
+``iac-code a2a-client call`` to verify the full server <-> client flow.
 
-用法:
+Usage:
     python scripts/test_a2a_vpc.py
 
-前提:
-    - 已安装 iac-code[a2a] (pip install -e ".[a2a]" 或 pip install iac-code[a2a])
-    - 已配置好 LLM 凭证
+Prerequisites:
+    - iac-code[a2a] installed (pip install -e ".[a2a]" or pip install iac-code[a2a])
+    - LLM credentials configured
 """
 
 import json
@@ -29,13 +29,13 @@ FAIL = "[FAIL]"
 INFO = "[INFO]"
 
 A2A_HOST = "127.0.0.1"
-A2A_PORT = 41299  # 用非默认端口避免冲突
+A2A_PORT = 41299  # Use non-default port to avoid conflicts
 A2A_URL = f"http://{A2A_HOST}:{A2A_PORT}"
 TIMEOUT_SECONDS = 300
 
 
 def wait_for_server(url: str, timeout: float = 30) -> bool:
-    """等待 A2A HTTP 服务就绪。"""
+    """Wait for the A2A HTTP service to become ready."""
     card_url = f"{url}/.well-known/agent-card.json"
     health_url = f"{url}/health"
     deadline = time.time() + timeout
@@ -60,24 +60,24 @@ def wait_for_server(url: str, timeout: float = 30) -> bool:
             last_error = str(e)
         time.sleep(1)
 
-    print(f"{INFO} agent.json 最后错误: {last_error}")
-    # 尝试 /health 端点作为对比诊断
+    print(f"{INFO} agent.json last error: {last_error}")
+    # Try /health endpoint for comparison diagnostics
     try:
         req = urllib.request.Request(health_url, method="GET")
         with urllib.request.urlopen(req, timeout=5) as resp:
-            print(f"{INFO} /health 返回: HTTP {resp.status}")
+            print(f"{INFO} /health returned: HTTP {resp.status}")
     except Exception as e:
-        print(f"{INFO} /health 也失败: {e}")
+        print(f"{INFO} /health also failed: {e}")
     return False
 
 
 def _stream_stderr(proc: subprocess.Popen) -> None:
-    """后台线程实时打印服务端 stderr 日志。"""
+    """Background thread to print server stderr logs in real-time."""
     assert proc.stderr
     for line in proc.stderr:
         line = line.rstrip()
         if line:
-            print(f"{INFO} [A2A服务] {line}")
+            print(f"{INFO} [A2A Server] {line}")
 
 
 def start_a2a_server(config_path: str) -> subprocess.Popen:
@@ -88,7 +88,7 @@ def start_a2a_server(config_path: str) -> subprocess.Popen:
         "--host", A2A_HOST,
         "--port", str(A2A_PORT),
     ]
-    print(f"{INFO} 启动 A2A 服务: {' '.join(cmd)}")
+    print(f"{INFO} Starting A2A server: {' '.join(cmd)}")
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     proc = subprocess.Popen(
@@ -118,7 +118,7 @@ def run_a2a_client_call(prompt: str, *, stream: bool = False, cwd: str = ".") ->
 
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
-    print(f"{INFO} 运行客户端: a2a-client call {'--stream ' if stream else ''}--prompt \"{prompt[:30]}...\"")
+    print(f"{INFO} Running client: a2a-client call {'--stream ' if stream else ''}--prompt \"{prompt[:30]}...\"")
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -138,7 +138,7 @@ def run_a2a_client_discover() -> subprocess.CompletedProcess:
     ]
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
-    print(f"{INFO} 运行客户端: a2a-client discover")
+    print(f"{INFO} Running client: a2a-client discover")
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -151,96 +151,96 @@ def run_a2a_client_discover() -> subprocess.CompletedProcess:
 
 
 def test_discover(checks: dict[str, bool]) -> bool:
-    print(f"\n{INFO} 步骤 1: Agent Card 发现")
+    print(f"\n{INFO} Step 1: Agent Card Discovery")
     result = run_a2a_client_discover()
 
     if result.returncode != 0:
-        print(f"{FAIL} discover 退出码非零: {result.returncode}")
+        print(f"{FAIL} discover exited with non-zero code: {result.returncode}")
         if result.stderr:
             print(f"{INFO} stderr:\n{result.stderr[:3000]}")
-        checks["discover 成功"] = False
+        checks["discover succeeded"] = False
         return False
 
     stdout = result.stdout.strip()
     try:
         card = json.loads(stdout)
     except json.JSONDecodeError:
-        print(f"{FAIL} discover 输出非 JSON: {stdout[:200]}")
-        checks["discover 成功"] = False
+        print(f"{FAIL} discover output is not JSON: {stdout[:200]}")
+        checks["discover succeeded"] = False
         return False
 
-    checks["discover 成功"] = True
+    checks["discover succeeded"] = True
     name = card.get("name", "")
     print(f"{INFO} Agent name: {name}")
-    checks["Agent Card name 为 iac-code"] = name == "iac-code"
+    checks["Agent Card name is iac-code"] = name == "iac-code"
     return True
 
 
 def test_call_sync(checks: dict[str, bool]) -> bool:
-    print(f"\n{INFO} 步骤 2: 同步 call (创建VPC)")
+    print(f"\n{INFO} Step 2: Synchronous call (create VPC)")
     prompt = "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12，只输出JSON模板"
     result = run_a2a_client_call(prompt)
 
     if result.returncode != 0:
-        print(f"{FAIL} call 退出码非零: {result.returncode}")
+        print(f"{FAIL} call exited with non-zero code: {result.returncode}")
         if result.stderr:
             print(f"{INFO} stderr:\n{result.stderr[:3000]}")
-        checks["同步 call 成功"] = False
+        checks["sync call succeeded"] = False
         return False
 
     stdout = result.stdout.strip()
     if not stdout:
-        print(f"{FAIL} call 输出为空")
-        checks["同步 call 成功"] = False
+        print(f"{FAIL} call output is empty")
+        checks["sync call succeeded"] = False
         return False
 
-    checks["同步 call 成功"] = True
-    print(f"{INFO} 输出长度: {len(stdout)} 字符")
-    print(f"{INFO} 输出前200字符: {stdout[:200]}")
-    checks["输出包含VPC相关内容"] = any(
-        kw in stdout.upper() for kw in ["VPC", "TEMPLATE", "模板", "CIDR", "ROSTEMPLATE"]
+    checks["sync call succeeded"] = True
+    print(f"{INFO} Output length: {len(stdout)} chars")
+    print(f"{INFO} First 200 chars: {stdout[:200]}")
+    checks["output contains VPC-related content"] = any(
+        kw in stdout.upper() for kw in ["VPC", "TEMPLATE", "CIDR", "ROSTEMPLATE"]
     )
     return True
 
 
 def test_call_stream(checks: dict[str, bool]) -> bool:
-    print(f"\n{INFO} 步骤 3: 流式 call --stream (创建VPC)")
+    print(f"\n{INFO} Step 3: Streaming call --stream (create VPC)")
     prompt = "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12，只输出JSON模板"
     result = run_a2a_client_call(prompt, stream=True)
 
     if result.returncode != 0:
-        print(f"{FAIL} stream call 退出码非零: {result.returncode}")
+        print(f"{FAIL} stream call exited with non-zero code: {result.returncode}")
         if result.stderr:
             print(f"{INFO} stderr:\n{result.stderr[:3000]}")
-        checks["流式 call 成功"] = False
+        checks["stream call succeeded"] = False
         return False
 
     stdout = result.stdout.strip()
     if not stdout:
-        print(f"{FAIL} stream call 输出为空")
-        checks["流式 call 成功"] = False
+        print(f"{FAIL} stream call output is empty")
+        checks["stream call succeeded"] = False
         return False
 
-    checks["流式 call 成功"] = True
+    checks["stream call succeeded"] = True
     lines = stdout.split("\n")
-    print(f"{INFO} 收到 {len(lines)} 行流式输出")
-    print(f"{INFO} 前3行:")
+    print(f"{INFO} Received {len(lines)} lines of streaming output")
+    print(f"{INFO} First 3 lines:")
     for line in lines[:3]:
         print(f"  {line[:120]}")
 
     combined = stdout.upper()
-    checks["流式输出包含VPC相关内容"] = any(
-        kw in combined for kw in ["VPC", "TEMPLATE", "模板", "CIDR"]
+    checks["stream output contains VPC-related content"] = any(
+        kw in combined for kw in ["VPC", "TEMPLATE", "CIDR"]
     )
     return True
 
 
 def main():
     print("=" * 60)
-    print("  iac-code A2A 模式 Windows 兼容性测试")
+    print("  iac-code A2A Mode Windows Compatibility Test")
     print("=" * 60)
 
-    # 创建 A2A 配置文件 (启用 auto-approve 避免权限阻塞)
+    # Create A2A config file (enable auto-approve to avoid permission blocking)
     config_content = "auto-approve-permissions: true\n"
     config_fd, config_path = tempfile.mkstemp(suffix=".yml", prefix="a2a_test_")
     os.write(config_fd, config_content.encode("utf-8"))
@@ -250,57 +250,57 @@ def main():
     checks: dict[str, bool] = {}
 
     try:
-        # 启动 A2A 服务
+        # Start A2A server
         server_proc = start_a2a_server(config_path)
         time.sleep(2)
 
         if server_proc.poll() is not None:
-            print(f"{FAIL} A2A 服务启动后立即退出，退出码: {server_proc.returncode}")
+            print(f"{FAIL} A2A server exited immediately after start, exit code: {server_proc.returncode}")
             stderr = server_proc.stderr.read() if server_proc.stderr else ""
             if stderr:
                 print(f"{INFO} stderr: {stderr[:500]}")
-            checks["A2A 服务启动"] = False
+            checks["A2A server started"] = False
         else:
-            print(f"{INFO} A2A 服务 PID: {server_proc.pid}")
-            print(f"{INFO} 等待服务就绪...")
+            print(f"{INFO} A2A server PID: {server_proc.pid}")
+            print(f"{INFO} Waiting for server to become ready...")
 
             if not wait_for_server(A2A_URL, timeout=30):
-                print(f"{FAIL} A2A 服务未在 30s 内就绪")
-                checks["A2A 服务启动"] = True
-                checks["A2A 服务就绪"] = False
+                print(f"{FAIL} A2A server not ready within 30s")
+                checks["A2A server started"] = True
+                checks["A2A server ready"] = False
             else:
-                checks["A2A 服务启动"] = True
-                checks["A2A 服务就绪"] = True
-                print(f"{PASS} A2A 服务已就绪 ({A2A_URL})")
+                checks["A2A server started"] = True
+                checks["A2A server ready"] = True
+                print(f"{PASS} A2A server is ready ({A2A_URL})")
 
                 test_discover(checks)
                 test_call_sync(checks)
                 test_call_stream(checks)
 
     except Exception as e:
-        print(f"{FAIL} 异常: {e}")
-        checks["测试执行"] = False
+        print(f"{FAIL} Exception: {e}")
+        checks["test execution"] = False
         import traceback
         traceback.print_exc()
     finally:
-        # 停止 A2A 服务
+        # Stop A2A server
         if server_proc:
-            print(f"\n{INFO} 停止 A2A 服务...")
+            print(f"\n{INFO} Stopping A2A server...")
             server_proc.terminate()
             try:
                 server_proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 server_proc.kill()
 
-        # 清理配置文件
+        # Clean up config file
         try:
             os.unlink(config_path)
         except OSError:
             pass
 
-    # 汇总
+    # Summary
     print(f"\n{'=' * 60}")
-    print("  测试结果汇总")
+    print("  Test Results Summary")
     print("=" * 60)
     all_pass = bool(checks)
     for desc, ok in checks.items():
@@ -310,9 +310,9 @@ def main():
 
     print()
     if all_pass:
-        print(f"{PASS} 所有 A2A 测试通过!")
+        print(f"{PASS} All A2A tests passed!")
     else:
-        print(f"{FAIL} 部分测试失败，请检查上方输出")
+        print(f"{FAIL} Some tests failed, check output above")
 
     sys.exit(0 if all_pass else 1)
 

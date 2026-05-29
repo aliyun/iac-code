@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-29 09:47+0800\n"
+"POT-Creation-Date: 2026-05-29 13:35+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: fr\n"
@@ -143,6 +143,40 @@ msgstr ""
 "  Documentation : https://aliyun.github.io/iac-"
 "code/fr/docs/configuration/authentication\n"
 
+#: src/iac_code/cli/install_git_bash.py:40
+#, python-brace-format
+msgid "Git Bash is already installed at {}"
+msgstr "Git Bash est déjà installé dans {}"
+
+#: src/iac_code/cli/install_git_bash.py:43
+msgid "Installing Git for Windows via npmmirror..."
+msgstr "Installation de Git for Windows via npmmirror..."
+
+#: src/iac_code/cli/install_git_bash.py:59
+msgid "powershell.exe was not found on PATH; cannot run installer."
+msgstr ""
+"powershell.exe est introuvable dans PATH ; impossible d'exécuter "
+"l'installateur."
+
+#: src/iac_code/cli/install_git_bash.py:66
+#, python-brace-format
+msgid "Installation failed (PowerShell exited with code {})"
+msgstr "L'installation a échoué (PowerShell est sorti avec le code {})"
+
+#: src/iac_code/cli/install_git_bash.py:77
+msgid ""
+"Installer exited but bash.exe was not found in common locations; UAC may "
+"have been cancelled or the installer used a non-standard path."
+msgstr ""
+"L'installateur s'est terminé mais bash.exe est introuvable dans les "
+"emplacements habituels ; UAC a peut-être été annulé ou l'installateur a "
+"utilisé un chemin non standard."
+
+#: src/iac_code/cli/install_git_bash.py:84
+#, python-brace-format
+msgid "Git for Windows installed at {}"
+msgstr "Git for Windows installé dans {}"
+
 #: src/iac_code/cli/main.py:33 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
 msgstr "Outil d’orchestration d’infrastructure assisté par IA"
@@ -151,12 +185,16 @@ msgstr "Outil d’orchestration d’infrastructure assisté par IA"
 msgid "Use iac-code as an A2A client."
 msgstr "Utilise iac-code comme client A2A."
 
-#: src/iac_code/cli/main.py:50
+#: src/iac_code/cli/main.py:54
+msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
+msgstr "Installer Git for Windows via le miroir npmmirror (Windows uniquement)."
+
+#: src/iac_code/cli/main.py:61
 msgid "YAML config file containing A2A client options"
 msgstr "Fichier de configuration YAML contenant les options client A2A"
 
-#: src/iac_code/cli/main.py:57 src/iac_code/cli/main.py:1457
-#: src/iac_code/cli/main.py:1818 src/iac_code/cli/main.py:1857
+#: src/iac_code/cli/main.py:68 src/iac_code/cli/main.py:1468
+#: src/iac_code/cli/main.py:1829 src/iac_code/cli/main.py:1868
 msgid ""
 "A2A client dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
@@ -164,44 +202,44 @@ msgstr ""
 "Les dépendances du client A2A sont manquantes. Installez-les avec : pip "
 "install 'iac-code[a2a]'"
 
-#: src/iac_code/cli/main.py:71
+#: src/iac_code/cli/main.py:82
 msgid "LLM model to use"
 msgstr "Modèle LLM à utiliser"
 
-#: src/iac_code/cli/main.py:72
+#: src/iac_code/cli/main.py:83
 msgid "Non-interactive mode: run a single prompt and exit"
 msgstr "Mode non interactif : exécuter un seul prompt puis quitter"
 
-#: src/iac_code/cli/main.py:73
+#: src/iac_code/cli/main.py:84
 msgid "Output format: text, json, stream-json"
 msgstr "Format de sortie : text, json, stream-json"
 
-#: src/iac_code/cli/main.py:74
+#: src/iac_code/cli/main.py:85
 msgid "Maximum agent turns in headless mode"
 msgstr "Nombre maximal de tours d’agent en mode headless"
 
-#: src/iac_code/cli/main.py:75 src/iac_code/cli/main.py:332
-#: src/iac_code/cli/main.py:557
+#: src/iac_code/cli/main.py:86 src/iac_code/cli/main.py:343
+#: src/iac_code/cli/main.py:568
 msgid "Enable debug logging"
 msgstr "Activer la journalisation debug"
 
-#: src/iac_code/cli/main.py:76
+#: src/iac_code/cli/main.py:87
 msgid "Show version and exit"
 msgstr "Afficher la version et quitter"
 
-#: src/iac_code/cli/main.py:77
+#: src/iac_code/cli/main.py:88
 msgid "Resume a session by ID"
 msgstr "Reprendre une session par identifiant"
 
-#: src/iac_code/cli/main.py:78
+#: src/iac_code/cli/main.py:89
 msgid "Resume the most recent session"
 msgstr "Reprendre la session la plus récente"
 
-#: src/iac_code/cli/main.py:85 src/iac_code/i18n/__init__.py:55
+#: src/iac_code/cli/main.py:96 src/iac_code/i18n/__init__.py:55
 msgid "Install completion for the current shell."
 msgstr "Installer la complétion pour le shell actuel."
 
-#: src/iac_code/cli/main.py:93 src/iac_code/i18n/__init__.py:56
+#: src/iac_code/cli/main.py:104 src/iac_code/i18n/__init__.py:56
 msgid ""
 "Show completion for the current shell, to copy it or customize the "
 "installation."
@@ -209,7 +247,7 @@ msgstr ""
 "Afficher la complétion pour le shell actuel afin de la copier ou de "
 "personnaliser l’installation."
 
-#: src/iac_code/cli/main.py:98
+#: src/iac_code/cli/main.py:109
 msgid ""
 "Comma-separated tool permission patterns to allow, e.g. 'bash(git "
 "*),write_file'"
@@ -217,45 +255,45 @@ msgstr ""
 "Modèles de permissions d'outils à autoriser (séparés par des virgules), "
 "ex. 'bash(git *),write_file'*),write_file'"
 
-#: src/iac_code/cli/main.py:103
+#: src/iac_code/cli/main.py:114
 msgid "Comma-separated tool permission patterns to deny"
 msgstr "Modèles de permissions d'outils à refuser (séparés par des virgules)"
 
-#: src/iac_code/cli/main.py:108
+#: src/iac_code/cli/main.py:119
 msgid "Permission mode: default, accept_edits, bypass_permissions, dont_ask"
 msgstr ""
 "Permission mode: default, accept_edits, bypass_permissions, dont_askMode "
 "de permissions : default, accept_edits, bypass_permissions, dont_ask"
 
-#: src/iac_code/cli/main.py:139
+#: src/iac_code/cli/main.py:150
 msgid "Error: --resume and --continue cannot be used together."
 msgstr "Erreur : --resume et --continue ne peuvent pas être utilisés ensemble."
 
-#: src/iac_code/cli/main.py:327
+#: src/iac_code/cli/main.py:338
 msgid "Run iac-code as an ACP server."
 msgstr "Exécuter iac-code comme serveur ACP."
 
-#: src/iac_code/cli/main.py:329
+#: src/iac_code/cli/main.py:340
 msgid "Transport type: stdio or http"
 msgstr "Type de transport : stdio ou http"
 
-#: src/iac_code/cli/main.py:330
+#: src/iac_code/cli/main.py:341
 msgid "HTTP server port"
 msgstr "Port du serveur HTTP"
 
-#: src/iac_code/cli/main.py:331 src/iac_code/cli/main.py:547
+#: src/iac_code/cli/main.py:342 src/iac_code/cli/main.py:558
 msgid "HTTP server host"
 msgstr "Hôte du serveur HTTP"
 
-#: src/iac_code/cli/main.py:543
+#: src/iac_code/cli/main.py:554
 msgid "Run iac-code as an A2A 1.0 server."
 msgstr "Exécute iac-code en tant que serveur A2A 1.0."
 
-#: src/iac_code/cli/main.py:546
+#: src/iac_code/cli/main.py:557
 msgid "YAML config file for A2A server options"
 msgstr "Fichier de configuration YAML pour les options du serveur A2A"
 
-#: src/iac_code/cli/main.py:550
+#: src/iac_code/cli/main.py:561
 msgid ""
 "HTTP server port. 41242 is the iac-code default inspired by Gemini CLI, "
 "not a registered A2A port."
@@ -263,7 +301,7 @@ msgstr ""
 "Port du serveur HTTP. 41242 est la valeur par défaut d'iac-code inspirée "
 "de Gemini CLI, pas un port A2A enregistré."
 
-#: src/iac_code/cli/main.py:555
+#: src/iac_code/cli/main.py:566
 msgid ""
 "A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or "
 "redis-streams"
@@ -271,7 +309,7 @@ msgstr ""
 "Transport A2A : http, stdio, unix, websocket, grpc, grpc-jsonrpc ou "
 "redis-streams"
 
-#: src/iac_code/cli/main.py:561
+#: src/iac_code/cli/main.py:572
 msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
@@ -279,7 +317,7 @@ msgstr ""
 "Expose les types de signal de thinking A2A ; répétez pour en fournir "
 "plusieurs. Valeurs : raw-thinking, tool-trace."
 
-#: src/iac_code/cli/main.py:608
+#: src/iac_code/cli/main.py:619
 msgid ""
 "A2A server dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
@@ -287,228 +325,228 @@ msgstr ""
 "Les dépendances du serveur A2A sont manquantes. Installez-les avec : pip "
 "install 'iac-code[a2a]'"
 
-#: src/iac_code/cli/main.py:740
+#: src/iac_code/cli/main.py:751
 msgid "Send a prompt to an A2A JSON-RPC endpoint."
 msgstr "Envoie un prompt à un point de terminaison JSON-RPC A2A."
 
-#: src/iac_code/cli/main.py:743 src/iac_code/cli/main.py:907
-#: src/iac_code/cli/main.py:960 src/iac_code/cli/main.py:1020
-#: src/iac_code/cli/main.py:1070 src/iac_code/cli/main.py:1119
-#: src/iac_code/cli/main.py:1198 src/iac_code/cli/main.py:1255
-#: src/iac_code/cli/main.py:1311 src/iac_code/cli/main.py:1368
+#: src/iac_code/cli/main.py:754 src/iac_code/cli/main.py:918
+#: src/iac_code/cli/main.py:971 src/iac_code/cli/main.py:1031
+#: src/iac_code/cli/main.py:1081 src/iac_code/cli/main.py:1130
+#: src/iac_code/cli/main.py:1209 src/iac_code/cli/main.py:1266
+#: src/iac_code/cli/main.py:1322 src/iac_code/cli/main.py:1379
 msgid "A2A JSON-RPC endpoint URL"
 msgstr "URL du point de terminaison JSON-RPC A2A"
 
-#: src/iac_code/cli/main.py:744 src/iac_code/cli/main.py:1413
+#: src/iac_code/cli/main.py:755 src/iac_code/cli/main.py:1424
 msgid "Route spec: name=url;skills=skill1,skill2;tags=tag1,tag2"
 msgstr "Spécification de route : name=url;skills=skill1,skill2;tags=tag1,tag2"
 
-#: src/iac_code/cli/main.py:745
+#: src/iac_code/cli/main.py:756
 msgid "Named A2A route to call"
 msgstr "Route A2A nommée à appeler"
 
-#: src/iac_code/cli/main.py:746
+#: src/iac_code/cli/main.py:757
 msgid "Prompt to send"
 msgstr "Prompt à envoyer"
 
-#: src/iac_code/cli/main.py:747
+#: src/iac_code/cli/main.py:758
 msgid "Working directory metadata to send with the request"
 msgstr "Métadonnées du répertoire de travail à envoyer avec la requête"
 
-#: src/iac_code/cli/main.py:748
+#: src/iac_code/cli/main.py:759
 msgid "A2A context ID to continue"
 msgstr "ID de contexte A2A à poursuivre"
 
-#: src/iac_code/cli/main.py:749 src/iac_code/cli/main.py:838
-#: src/iac_code/cli/main.py:910 src/iac_code/cli/main.py:967
-#: src/iac_code/cli/main.py:1022 src/iac_code/cli/main.py:1072
-#: src/iac_code/cli/main.py:1126 src/iac_code/cli/main.py:1201
-#: src/iac_code/cli/main.py:1259 src/iac_code/cli/main.py:1314
-#: src/iac_code/cli/main.py:1369
+#: src/iac_code/cli/main.py:760 src/iac_code/cli/main.py:849
+#: src/iac_code/cli/main.py:921 src/iac_code/cli/main.py:978
+#: src/iac_code/cli/main.py:1033 src/iac_code/cli/main.py:1083
+#: src/iac_code/cli/main.py:1137 src/iac_code/cli/main.py:1212
+#: src/iac_code/cli/main.py:1270 src/iac_code/cli/main.py:1325
+#: src/iac_code/cli/main.py:1380
 msgid "Bearer token for A2A HTTP requests"
 msgstr "Jeton Bearer pour les requêtes HTTP A2A"
 
-#: src/iac_code/cli/main.py:750 src/iac_code/cli/main.py:839
-#: src/iac_code/cli/main.py:911 src/iac_code/cli/main.py:968
-#: src/iac_code/cli/main.py:1023 src/iac_code/cli/main.py:1073
-#: src/iac_code/cli/main.py:1127 src/iac_code/cli/main.py:1202
-#: src/iac_code/cli/main.py:1260 src/iac_code/cli/main.py:1315
-#: src/iac_code/cli/main.py:1370
+#: src/iac_code/cli/main.py:761 src/iac_code/cli/main.py:850
+#: src/iac_code/cli/main.py:922 src/iac_code/cli/main.py:979
+#: src/iac_code/cli/main.py:1034 src/iac_code/cli/main.py:1084
+#: src/iac_code/cli/main.py:1138 src/iac_code/cli/main.py:1213
+#: src/iac_code/cli/main.py:1271 src/iac_code/cli/main.py:1326
+#: src/iac_code/cli/main.py:1381
 msgid "Basic auth username for A2A HTTP requests"
 msgstr "Nom d'utilisateur d'authentification basique pour les requêtes HTTP A2A"
 
-#: src/iac_code/cli/main.py:751 src/iac_code/cli/main.py:840
-#: src/iac_code/cli/main.py:912 src/iac_code/cli/main.py:969
-#: src/iac_code/cli/main.py:1024 src/iac_code/cli/main.py:1074
-#: src/iac_code/cli/main.py:1128 src/iac_code/cli/main.py:1203
-#: src/iac_code/cli/main.py:1261 src/iac_code/cli/main.py:1316
-#: src/iac_code/cli/main.py:1371
+#: src/iac_code/cli/main.py:762 src/iac_code/cli/main.py:851
+#: src/iac_code/cli/main.py:923 src/iac_code/cli/main.py:980
+#: src/iac_code/cli/main.py:1035 src/iac_code/cli/main.py:1085
+#: src/iac_code/cli/main.py:1139 src/iac_code/cli/main.py:1214
+#: src/iac_code/cli/main.py:1272 src/iac_code/cli/main.py:1327
+#: src/iac_code/cli/main.py:1382
 msgid "Basic auth password for A2A HTTP requests"
 msgstr "Mot de passe d'authentification basique pour les requêtes HTTP A2A"
 
-#: src/iac_code/cli/main.py:752 src/iac_code/cli/main.py:841
-#: src/iac_code/cli/main.py:913 src/iac_code/cli/main.py:970
-#: src/iac_code/cli/main.py:1025 src/iac_code/cli/main.py:1075
-#: src/iac_code/cli/main.py:1129 src/iac_code/cli/main.py:1204
-#: src/iac_code/cli/main.py:1262 src/iac_code/cli/main.py:1317
-#: src/iac_code/cli/main.py:1372
+#: src/iac_code/cli/main.py:763 src/iac_code/cli/main.py:852
+#: src/iac_code/cli/main.py:924 src/iac_code/cli/main.py:981
+#: src/iac_code/cli/main.py:1036 src/iac_code/cli/main.py:1086
+#: src/iac_code/cli/main.py:1140 src/iac_code/cli/main.py:1215
+#: src/iac_code/cli/main.py:1273 src/iac_code/cli/main.py:1328
+#: src/iac_code/cli/main.py:1383
 msgid "API key for A2A HTTP requests"
 msgstr "Clé d'API pour les requêtes HTTP A2A"
 
-#: src/iac_code/cli/main.py:753 src/iac_code/cli/main.py:842
-#: src/iac_code/cli/main.py:914 src/iac_code/cli/main.py:971
-#: src/iac_code/cli/main.py:1026 src/iac_code/cli/main.py:1076
-#: src/iac_code/cli/main.py:1130 src/iac_code/cli/main.py:1205
-#: src/iac_code/cli/main.py:1263 src/iac_code/cli/main.py:1318
-#: src/iac_code/cli/main.py:1373
+#: src/iac_code/cli/main.py:764 src/iac_code/cli/main.py:853
+#: src/iac_code/cli/main.py:925 src/iac_code/cli/main.py:982
+#: src/iac_code/cli/main.py:1037 src/iac_code/cli/main.py:1087
+#: src/iac_code/cli/main.py:1141 src/iac_code/cli/main.py:1216
+#: src/iac_code/cli/main.py:1274 src/iac_code/cli/main.py:1329
+#: src/iac_code/cli/main.py:1384
 msgid "HTTP header name for A2A API key"
 msgstr "Nom de l'en-tête HTTP pour la clé d'API A2A"
 
-#: src/iac_code/cli/main.py:758 src/iac_code/cli/main.py:847
+#: src/iac_code/cli/main.py:769 src/iac_code/cli/main.py:858
 msgid "Secret used to verify the A2A Agent Card"
 msgstr "Secret utilisé pour vérifier l'A2A Agent Card"
 
-#: src/iac_code/cli/main.py:763 src/iac_code/cli/main.py:852
+#: src/iac_code/cli/main.py:774 src/iac_code/cli/main.py:863
 msgid "Remote JWKS URL used to verify the A2A Agent Card"
 msgstr "URL JWKS distante utilisée pour vérifier l'A2A Agent Card"
 
-#: src/iac_code/cli/main.py:769 src/iac_code/cli/main.py:858
+#: src/iac_code/cli/main.py:780 src/iac_code/cli/main.py:869
 msgid "Require a valid A2A Agent Card signature"
 msgstr "Exiger une signature valide de l'A2A Agent Card"
 
-#: src/iac_code/cli/main.py:771
+#: src/iac_code/cli/main.py:782
 msgid "A2A call timeout in seconds"
 msgstr "Délai d'expiration de l'appel A2A en secondes"
 
-#: src/iac_code/cli/main.py:772
+#: src/iac_code/cli/main.py:783
 msgid "Use A2A streaming message delivery"
 msgstr "Utiliser la diffusion en continu de messages A2A"
 
-#: src/iac_code/cli/main.py:834
+#: src/iac_code/cli/main.py:845
 msgid "Discover an A2A Agent Card."
 msgstr "Découvre une A2A Agent Card."
 
-#: src/iac_code/cli/main.py:837
+#: src/iac_code/cli/main.py:848
 msgid "A2A agent base URL"
 msgstr "URL de base de l'agent A2A"
 
-#: src/iac_code/cli/main.py:904
+#: src/iac_code/cli/main.py:915
 msgid "Get an A2A task."
 msgstr "Récupère une tâche A2A."
 
-#: src/iac_code/cli/main.py:908 src/iac_code/cli/main.py:1021
-#: src/iac_code/cli/main.py:1071 src/iac_code/cli/main.py:1120
-#: src/iac_code/cli/main.py:1199 src/iac_code/cli/main.py:1256
-#: src/iac_code/cli/main.py:1312
+#: src/iac_code/cli/main.py:919 src/iac_code/cli/main.py:1032
+#: src/iac_code/cli/main.py:1082 src/iac_code/cli/main.py:1131
+#: src/iac_code/cli/main.py:1210 src/iac_code/cli/main.py:1267
+#: src/iac_code/cli/main.py:1323
 msgid "A2A task ID"
 msgstr "ID de tâche A2A"
 
-#: src/iac_code/cli/main.py:909
+#: src/iac_code/cli/main.py:920
 msgid "Maximum task history items to return"
 msgstr "Nombre maximal d'éléments d'historique de tâche à retourner"
 
-#: src/iac_code/cli/main.py:957
+#: src/iac_code/cli/main.py:968
 msgid "List A2A tasks."
 msgstr "Liste les tâches A2A."
 
-#: src/iac_code/cli/main.py:961
+#: src/iac_code/cli/main.py:972
 msgid "Filter by A2A context ID"
 msgstr "Filtrer par ID de contexte A2A"
 
-#: src/iac_code/cli/main.py:962
+#: src/iac_code/cli/main.py:973
 msgid "Filter by A2A task state"
 msgstr "Filtrer par état de tâche A2A"
 
-#: src/iac_code/cli/main.py:963
+#: src/iac_code/cli/main.py:974
 msgid "Maximum tasks to return"
 msgstr "Nombre maximal de tâches à retourner"
 
-#: src/iac_code/cli/main.py:964 src/iac_code/cli/main.py:1258
+#: src/iac_code/cli/main.py:975 src/iac_code/cli/main.py:1269
 msgid "Pagination token"
 msgstr "Jeton de pagination"
 
-#: src/iac_code/cli/main.py:965
+#: src/iac_code/cli/main.py:976
 msgid "Include task artifacts"
 msgstr "Inclure les artefacts de tâche"
 
-#: src/iac_code/cli/main.py:966
+#: src/iac_code/cli/main.py:977
 msgid "Output format: table or json"
 msgstr "Format de sortie : table ou json"
 
-#: src/iac_code/cli/main.py:1017
+#: src/iac_code/cli/main.py:1028
 msgid "Cancel an A2A task."
 msgstr "Annule une tâche A2A."
 
-#: src/iac_code/cli/main.py:1067
+#: src/iac_code/cli/main.py:1078
 msgid "Subscribe to an A2A task event stream."
 msgstr "S'abonne à un flux d'événements de tâche A2A."
 
-#: src/iac_code/cli/main.py:1116
+#: src/iac_code/cli/main.py:1127
 msgid "Create an A2A task push notification config."
 msgstr "Crée une configuration de notifications push de tâche A2A."
 
-#: src/iac_code/cli/main.py:1121 src/iac_code/cli/main.py:1200
-#: src/iac_code/cli/main.py:1313
+#: src/iac_code/cli/main.py:1132 src/iac_code/cli/main.py:1211
+#: src/iac_code/cli/main.py:1324
 msgid "Push config ID"
 msgstr "ID de configuration push"
 
-#: src/iac_code/cli/main.py:1122
+#: src/iac_code/cli/main.py:1133
 msgid "Push callback URL"
 msgstr "URL de rappel push"
 
-#: src/iac_code/cli/main.py:1123
+#: src/iac_code/cli/main.py:1134
 msgid "Notification verification token"
 msgstr "Jeton de vérification de notification"
 
-#: src/iac_code/cli/main.py:1124
+#: src/iac_code/cli/main.py:1135
 msgid "Callback authentication scheme"
 msgstr "Schéma d'authentification du rappel"
 
-#: src/iac_code/cli/main.py:1125
+#: src/iac_code/cli/main.py:1136
 msgid "Callback authentication credentials"
 msgstr "Identifiants d'authentification du rappel"
 
-#: src/iac_code/cli/main.py:1195
+#: src/iac_code/cli/main.py:1206
 msgid "Get an A2A task push notification config."
 msgstr "Récupère une configuration de notifications push de tâche A2A."
 
-#: src/iac_code/cli/main.py:1252
+#: src/iac_code/cli/main.py:1263
 msgid "List A2A task push notification configs."
 msgstr "Liste les configurations de notifications push de tâches A2A."
 
-#: src/iac_code/cli/main.py:1257
+#: src/iac_code/cli/main.py:1268
 msgid "Maximum configs to return"
 msgstr "Nombre maximal de configurations à retourner"
 
-#: src/iac_code/cli/main.py:1308
+#: src/iac_code/cli/main.py:1319
 msgid "Delete an A2A task push notification config."
 msgstr "Supprime une configuration de notifications push de tâche A2A."
 
-#: src/iac_code/cli/main.py:1365
+#: src/iac_code/cli/main.py:1376
 msgid "Get an authenticated extended A2A Agent Card."
 msgstr "Récupère une A2A Agent Card étendue authentifiée."
 
-#: src/iac_code/cli/main.py:1408
+#: src/iac_code/cli/main.py:1419
 msgid "Preview A2A route resolution."
 msgstr "Aperçu de la résolution des routes A2A."
 
-#: src/iac_code/cli/main.py:1415
+#: src/iac_code/cli/main.py:1426
 msgid "Route name to resolve"
 msgstr "Nom de route à résoudre"
 
-#: src/iac_code/cli/main.py:1416
+#: src/iac_code/cli/main.py:1427
 msgid "Skill ID to resolve"
 msgstr "ID de compétence à résoudre"
 
-#: src/iac_code/cli/main.py:1417
+#: src/iac_code/cli/main.py:1428
 msgid "Prompt text used for tag/name route matching"
 msgstr "Texte du prompt utilisé pour la correspondance des routes par tag/nom"
 
-#: src/iac_code/cli/main.py:1422
+#: src/iac_code/cli/main.py:1433
 msgid "Directory for persisted A2A routes"
 msgstr "Répertoire pour les routes A2A persistées"
 
-#: src/iac_code/cli/main.py:1424
+#: src/iac_code/cli/main.py:1435
 msgid "Save the provided routes as a route snapshot"
 msgstr "Enregistre les routes fournies sous forme d'instantané de routes"
 
@@ -2083,16 +2121,20 @@ msgstr ""
 "d'environnement IAC_CODE_GIT_BASH_PATH."
 
 #: src/iac_code/utils/platform.py:44
-msgid "To install, open PowerShell and run:"
-msgstr "Pour l'installer, ouvrez PowerShell et exécutez :"
+msgid "To install:"
+msgstr "Pour installer :"
 
 #: src/iac_code/utils/platform.py:47
 msgid "  Option 1 - winget (requires access to github.com):"
 msgstr "  Option 1 - winget (nécessite l'accès à github.com) :"
 
 #: src/iac_code/utils/platform.py:52
-msgid "  Option 2 - npmmirror (China-friendly mirror):"
-msgstr "  Option 2 - npmmirror (miroir pour la Chine) :"
+msgid ""
+"  Option 2 - if you cannot reach github.com, run this to install via "
+"npmmirror:"
+msgstr ""
+"  Option 2 - si vous ne pouvez pas accéder à github.com, exécutez ceci "
+"pour installer via npmmirror :"
 
 #~ msgid "DashScope Token Plan"
 #~ msgstr "DashScope Token Plan"
@@ -2111,3 +2153,10 @@ msgstr "  Option 2 - npmmirror (miroir pour la Chine) :"
 
 #~ msgid "Provider switched: {status}"
 #~ msgstr "Provider changé : {status}"
+
+#~ msgid "To install, open PowerShell and run:"
+#~ msgstr "Pour l'installer, ouvrez PowerShell et exécutez :"
+
+#~ msgid "  Option 2 - npmmirror (China-friendly mirror):"
+#~ msgstr "  Option 2 - npmmirror (miroir pour la Chine) :"
+

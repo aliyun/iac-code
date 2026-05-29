@@ -104,6 +104,24 @@ class TestRawInputCaptureWin:
         event = cap.read_key(timeout=0.05)
         assert event is None
 
+    def test_read_key_blocking_path_does_not_poll_kbhit(self, mock_msvcrt):
+        """Regression: timeout=None must NOT poll kbhit().
+
+        100Hz PeekConsoleInput polling (via kbhit) interferes with
+        Microsoft Pinyin's Shift→English mode and causes typed characters
+        to stay buffered inside the IME. The blocking path must rely on
+        getwch() alone.
+        """
+        mock_msvcrt.getwch.return_value = "a"
+
+        from iac_code.ui.core.raw_input_win import RawInputCapture
+
+        cap = RawInputCapture()
+        cap.__enter__()
+        event = cap.read_key()  # timeout=None
+        assert event == KeyEvent(key="a", char="a")
+        mock_msvcrt.kbhit.assert_not_called()
+
     def test_read_key_backspace(self, mock_msvcrt):
         mock_msvcrt.kbhit.return_value = True
         mock_msvcrt.getwch.return_value = "\x08"

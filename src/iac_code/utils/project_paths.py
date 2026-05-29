@@ -9,8 +9,8 @@ project is just a directory scan.
 
 from __future__ import annotations
 
+import os
 import re
-import subprocess
 from hashlib import blake2b
 from pathlib import Path
 
@@ -48,27 +48,62 @@ def get_session_path(cwd: str, session_id: str) -> Path:
     return get_project_dir(cwd) / f"{session_id}.jsonl"
 
 
+def _read_git_head(cwd: str) -> tuple[bool, str]:
+    """Walk up from *cwd* looking for ``.git``; if found, read ``HEAD``.
+
+    Returns ``(is_git_repo, head_content)`` where *head_content* is the
+    raw trimmed content of the ``HEAD`` file (e.g.
+    ``"ref: refs/heads/main"`` or a full SHA), or an empty string if HEAD
+    cannot be read.
+
+    This avoids spawning ``git`` — on Windows
+    ``subprocess.run(["git", ...], timeout=...)`` can hang the asyncio
+    event loop because git-for-windows leaves grandchild helper processes
+    holding the captured stdout/stderr pipes; after timeout fires and
+    ``process.kill()`` runs, the second ``communicate()`` blocks forever.
+    """
+    current = os.path.abspath(cwd)
+    while True:
+        git_path = os.path.join(current, ".git")
+        is_dir = os.path.isdir(git_path)
+        is_file = os.path.isfile(git_path)
+        if is_dir or is_file:
+            head_path: str | None = None
+            if is_dir:
+                head_path = os.path.join(git_path, "HEAD")
+            else:
+                try:
+                    with open(git_path, encoding="utf-8") as f:
+                        line = f.read().strip()
+                except OSError:
+                    return True, ""
+                if line.startswith("gitdir: "):
+                    gitdir = line[len("gitdir: ") :]
+                    if not os.path.isabs(gitdir):
+                        gitdir = os.path.join(current, gitdir)
+                    head_path = os.path.join(gitdir, "HEAD")
+            if head_path is None:
+                return True, ""
+            try:
+                with open(head_path, encoding="utf-8") as f:
+                    return True, f.read().strip()
+            except OSError:
+                return True, ""
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False, ""
+        current = parent
+
+
 def get_git_branch(cwd: str) -> str | None:
     """Return the current git branch name at ``cwd``, or ``None``.
 
-    ``None`` means either ``cwd`` is not inside a git repo, ``git`` is
-    unavailable, or the call timed out. Detached HEADs return ``"HEAD"``
-    from ``rev-parse --abbrev-ref``; we treat that as ``None``.
+    ``None`` means either ``cwd`` is not inside a git repo or HEAD is
+    detached.
     """
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    is_repo, head = _read_git_head(cwd)
+    if not is_repo:
         return None
-    if result.returncode != 0:
-        return None
-    branch = result.stdout.strip()
-    if not branch or branch == "HEAD":
-        return None
-    return branch
+    if head.startswith("ref: refs/heads/"):
+        return head[len("ref: refs/heads/") :]
+    return None

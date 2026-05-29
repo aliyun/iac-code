@@ -30,7 +30,7 @@ _NPMMIRROR_CMD = (
     "|?{$_ -match '64-bit\\.exe$' -and $_ -notmatch 'Portable'}); "
     '$u="https://registry.npmmirror.com/-/binary/git-for-windows/$v$f"; '
     "Invoke-WebRequest $u -OutFile $env:TEMP\\$f; "
-    "Start-Process $env:TEMP\\$f -ArgumentList '/VERYSILENT /NORESTART' -Wait"
+    "Start-Process $env:TEMP\\$f -ArgumentList '/SILENT /NORESTART' -Wait"
 )
 
 
@@ -41,7 +41,7 @@ def _git_bash_hint() -> str:
         + _("If installed but not on PATH, set IAC_CODE_GIT_BASH_PATH environment variable.")
         + "\n"
         + "\n"
-        + _("To install, open PowerShell and run:")
+        + _("To install:")
         + "\n"
         + "\n"
         + _("  Option 1 - winget (requires access to github.com):")
@@ -49,9 +49,9 @@ def _git_bash_hint() -> str:
         + _WINGET_CMD
         + "\n"
         + "\n"
-        + _("  Option 2 - npmmirror (China-friendly mirror):")
+        + _("  Option 2 - if you cannot reach github.com, run this to install via npmmirror:")
         + "\n"
-        + _NPMMIRROR_CMD
+        + "    iac-code install-git-bash"
     )
 
 
@@ -121,7 +121,12 @@ def _find_unix_shell() -> str:
 
 
 def _clear_cache() -> None:
-    """Reset cached platform info. For testing only."""
+    """Reset cached platform info.
+
+    Called by `install_git_bash` after running the installer to force
+    a fresh detection on the subsequent `_find_git_bash_path()` call.
+    Also used by tests to isolate detect() runs.
+    """
     global _cached_platform
     _cached_platform = None
 

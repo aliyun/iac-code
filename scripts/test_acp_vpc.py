@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Windows 兼容性验证脚本 — ACP 模式
-=================================
+Windows Compatibility Verification Script — ACP Mode
+=====================================================
 
-启动 ACP stdio 服务端，通过 stdin/stdout 发送 JSON-RPC 消息模拟
-一次完整的 initialize → new_session → prompt("创建VPC") → close 流程。
+Starts the ACP stdio server and sends JSON-RPC messages via stdin/stdout
+to simulate a full initialize -> new_session -> prompt("create VPC") -> close flow.
 
-用法:
+Usage:
     python scripts/test_acp_vpc.py
 
-前提:
-    - 已安装 iac-code (pip install -e . 或 pip install iac-code)
-    - 已配置好 LLM 凭证
+Prerequisites:
+    - iac-code installed (pip install -e . or pip install iac-code)
+    - LLM credentials configured
 """
 
 import json
@@ -40,7 +40,7 @@ def make_notification(method: str, params: dict | None = None) -> str:
 
 
 class ACPStdioClient:
-    """管理 ACP stdio 子进程的生命周期，发送 JSON-RPC 请求并收集响应。"""
+    """Manages the ACP stdio subprocess lifecycle, sends JSON-RPC requests and collects responses."""
 
     def __init__(self):
         self.process: subprocess.Popen | None = None
@@ -51,7 +51,7 @@ class ACPStdioClient:
 
     def start(self):
         cmd = [sys.executable, "-m", "iac_code.cli.main", "acp"]
-        print(f"{INFO} 启动 ACP 服务: {' '.join(cmd)}")
+        print(f"{INFO} Starting ACP server: {' '.join(cmd)}")
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
         self.process = subprocess.Popen(
@@ -95,7 +95,7 @@ class ACPStdioClient:
             params = msg.get("params", {})
             tool_call = params.get("toolCall", params.get("tool_call", {}))
             title = tool_call.get("title", "unknown")
-            print(f"{INFO} [权限请求] id={request_id}, tool={title} -> 自动批准")
+            print(f"{INFO} [Permission request] id={request_id}, tool={title} -> auto-approved")
             response = json.dumps({
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -108,7 +108,7 @@ class ACPStdioClient:
             })
             self.send(response)
         else:
-            print(f"{INFO} [服务端请求] method={method}, id={request_id} (未处理)")
+            print(f"{INFO} [Server request] method={method}, id={request_id} (not handled)")
 
     def send(self, message: str):
         assert self.process and self.process.stdin
@@ -150,21 +150,21 @@ class ACPStdioClient:
 
 
 def test_acp_lifecycle():
-    print("\n=== 测试: ACP stdio 完整生命周期 ===")
+    print("\n=== Test: ACP stdio Full Lifecycle ===")
     client = ACPStdioClient()
     checks: dict[str, bool] = {}
 
     try:
         client.start()
         if client.process and client.process.poll() is not None:
-            print(f"{FAIL} ACP 进程启动后立即退出，退出码: {client.process.returncode}")
+            print(f"{FAIL} ACP process exited immediately after start, exit code: {client.process.returncode}")
             return False
 
-        checks["ACP 进程启动成功"] = True
-        print(f"{INFO} ACP 进程 PID: {client.process.pid if client.process else 'N/A'}")
+        checks["ACP process started successfully"] = True
+        print(f"{INFO} ACP process PID: {client.process.pid if client.process else 'N/A'}")
 
         # 1. initialize
-        print(f"\n{INFO} 步骤 1: 发送 initialize 请求")
+        print(f"\n{INFO} Step 1: Send initialize request")
         client.send(make_jsonrpc("initialize", {
             "protocolVersion": 1,
             "clientInfo": {"name": "test-script", "version": "0.1"},
@@ -172,11 +172,11 @@ def test_acp_lifecycle():
 
         init_resp = client.wait_response(1, timeout=30)
         if init_resp is None:
-            print(f"{FAIL} initialize 响应超时")
-            checks["initialize 响应"] = False
+            print(f"{FAIL} initialize response timed out")
+            checks["initialize response"] = False
             return False
 
-        checks["initialize 响应"] = True
+        checks["initialize response"] = True
         result = init_resp.get("result", {})
         agent_info = result.get("agentInfo", {})
         print(f"{INFO} agentInfo: {agent_info}")
@@ -187,36 +187,36 @@ def test_acp_lifecycle():
         time.sleep(0.5)
 
         # 2. new_session
-        print(f"\n{INFO} 步骤 2: 发送 new_session 请求")
+        print(f"\n{INFO} Step 2: Send new_session request")
         cwd = os.path.abspath(".")
         client.send(make_jsonrpc("session/new", {"cwd": cwd, "mcpServers": []}, id=2))
 
         session_resp = client.wait_response(2, timeout=30)
         if session_resp is None:
-            print(f"{FAIL} new_session 响应超时")
-            checks["new_session 响应"] = False
+            print(f"{FAIL} new_session response timed out")
+            checks["new_session response"] = False
             return False
 
-        checks["new_session 响应"] = True
+        checks["new_session response"] = True
         session_result = session_resp.get("result", {})
         session_id = session_result.get("sessionId", "")
         print(f"{INFO} sessionId: {session_id}")
-        checks["获得 sessionId"] = bool(session_id)
+        checks["obtained sessionId"] = bool(session_id)
 
         if not session_id:
-            print(f"{FAIL} 无法获取 sessionId，跳过后续步骤")
+            print(f"{FAIL} Unable to get sessionId, skipping subsequent steps")
             if session_resp.get("error"):
-                print(f"{INFO} 错误: {session_resp['error']}")
+                print(f"{INFO} Error: {session_resp['error']}")
             return False
 
-        # 等待 available_commands 等初始化通知
+        # Wait for initialization notifications like available_commands
         time.sleep(2)
         init_notifications = len(client.notifications)
-        print(f"{INFO} 收到 {init_notifications} 条初始化通知")
+        print(f"{INFO} Received {init_notifications} initialization notifications")
 
-        # 3. prompt — 创建 VPC
-        print(f"\n{INFO} 步骤 3: 发送 prompt 请求 (创建VPC)")
-        client.notifications.clear()  # 清空旧通知，方便统计 prompt 产生的事件
+        # 3. prompt — create VPC
+        print(f"\n{INFO} Step 3: Send prompt request (create VPC)")
+        client.notifications.clear()
         client.send(make_jsonrpc("session/prompt", {
             "sessionId": session_id,
             "prompt": [{"type": "text", "text": "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12，只输出JSON模板"}],
@@ -224,19 +224,19 @@ def test_acp_lifecycle():
 
         prompt_resp = client.wait_response(3, timeout=TIMEOUT_SECONDS)
         if prompt_resp is None:
-            print(f"{FAIL} prompt 响应超时 ({TIMEOUT_SECONDS}s)")
-            checks["prompt 响应"] = False
+            print(f"{FAIL} prompt response timed out ({TIMEOUT_SECONDS}s)")
+            checks["prompt response"] = False
             return False
 
-        checks["prompt 响应"] = True
+        checks["prompt response"] = True
         prompt_result = prompt_resp.get("result", {})
         stop_reason = prompt_result.get("stopReason", "")
         print(f"{INFO} stopReason: {stop_reason}")
-        checks["stopReason 为 end_turn"] = stop_reason == "end_turn"
+        checks["stopReason is end_turn"] = stop_reason == "end_turn"
 
-        # 检查 session_update 通知
+        # Check session_update notifications
         prompt_notifications = client.notifications
-        print(f"{INFO} prompt 期间收到 {len(prompt_notifications)} 条通知")
+        print(f"{INFO} Received {len(prompt_notifications)} notifications during prompt")
 
         text_chunks = []
         tool_calls = []
@@ -252,60 +252,60 @@ def test_acp_lifecycle():
                 tool_calls.append(update.get("title", ""))
 
         combined_text = "".join(text_chunks)
-        print(f"{INFO} 文本块数: {len(text_chunks)}")
-        print(f"{INFO} 工具调用数: {len(tool_calls)}")
+        print(f"{INFO} Text chunks: {len(text_chunks)}")
+        print(f"{INFO} Tool calls: {len(tool_calls)}")
         if combined_text:
-            print(f"{INFO} 合并文本前200字符: {combined_text[:200]}")
+            print(f"{INFO} Combined text first 200 chars: {combined_text[:200]}")
 
-        checks["收到文本输出"] = len(combined_text) > 0
-        checks["文本包含VPC相关内容"] = any(
-            kw in combined_text.upper() for kw in ["VPC", "TEMPLATE", "模板", "CIDR"]
+        checks["received text output"] = len(combined_text) > 0
+        checks["text contains VPC-related content"] = any(
+            kw in combined_text.upper() for kw in ["VPC", "TEMPLATE", "CIDR"]
         )
 
         # 4. close_session
-        print(f"\n{INFO} 步骤 4: 关闭 session")
+        print(f"\n{INFO} Step 4: Close session")
         client.send(make_jsonrpc("session/close", {"sessionId": session_id}, id=4))
 
         close_resp = client.wait_response(4, timeout=15)
-        checks["close_session 响应"] = close_resp is not None
+        checks["close_session response"] = close_resp is not None
         if close_resp:
-            print(f"{INFO} close 响应: {json.dumps(close_resp.get('result', {}))}")
+            print(f"{INFO} close response: {json.dumps(close_resp.get('result', {}))}")
 
     except Exception as e:
-        print(f"{FAIL} 异常: {e}")
+        print(f"{FAIL} Exception: {e}")
         import traceback
         traceback.print_exc()
         return False
     finally:
         stderr = client.stop()
         if stderr and stderr.strip():
-            print(f"\n{INFO} ACP 进程 stderr (前3000字符):")
+            print(f"\n{INFO} ACP process stderr (first 3000 chars):")
             print(f"  {stderr[:3000]}")
 
-    # 汇总
-    print(f"\n--- 检查项 ---")
+    # Summary
+    print(f"\n--- Check Items ---")
     all_pass = True
     for desc, ok in checks.items():
         print(f"  {'✓' if ok else '✗'} {desc}")
         if not ok:
             all_pass = False
 
-    print(f"\n{PASS if all_pass else FAIL} ACP 生命周期测试{'通过' if all_pass else '失败'}")
+    print(f"\n{PASS if all_pass else FAIL} ACP lifecycle test {'passed' if all_pass else 'failed'}")
     return all_pass
 
 
 def main():
     print("=" * 60)
-    print("  iac-code ACP 模式 Windows 兼容性测试")
+    print("  iac-code ACP Mode Windows Compatibility Test")
     print("=" * 60)
 
     passed = test_acp_lifecycle()
 
     print()
     if passed:
-        print(f"{PASS} ACP 测试通过!")
+        print(f"{PASS} ACP test passed!")
     else:
-        print(f"{FAIL} ACP 测试失败，请检查上方输出")
+        print(f"{FAIL} ACP test failed, check output above")
 
     sys.exit(0 if passed else 1)
 

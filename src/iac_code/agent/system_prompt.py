@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import platform
-import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -139,28 +138,14 @@ def _build_environment_section(cwd: str) -> str:
     else:
         shell = os.environ.get("SHELL", "unknown")
 
-    is_git_repo = False
+    from iac_code.utils.project_paths import _read_git_head
+
+    is_git_repo, head_content = _read_git_head(cwd)
     git_branch = ""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        is_git_repo = result.returncode == 0
-        if is_git_repo:
-            branch_result = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
-            git_branch = branch_result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    if head_content.startswith("ref: refs/heads/"):
+        git_branch = head_content[len("ref: refs/heads/") :]
+    elif len(head_content) >= 7:
+        git_branch = head_content[:7]
 
     lines = [
         "# Environment",
