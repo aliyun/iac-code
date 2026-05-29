@@ -30,7 +30,10 @@ class WriteFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The path to write the file to.",
+                    "description": (
+                        "The path to write the file to. "
+                        "Always emit this field FIRST in the JSON arguments, before 'content'."
+                    ),
                 },
                 "content": {
                     "type": "string",
@@ -76,6 +79,9 @@ class WriteFileTool(Tool):
 
     def user_facing_name(self, input: dict | None = None) -> str:
         return _("Write")
+
+    def streaming_preview_fields(self) -> list[str]:
+        return ["path"]
 
     def get_activity_description(self, input: dict | None = None) -> str:
         if input:

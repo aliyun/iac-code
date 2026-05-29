@@ -156,6 +156,15 @@ class Tool(ABC):
         """Optional one-line summary of the tool invocation."""
         return None
 
+    def streaming_preview_fields(self) -> list[str]:
+        """Top-level string fields to extract from partial input JSON during streaming.
+
+        Returning a non-empty list lets the renderer show the tool header
+        with these fields filled in before the full input JSON is parsed.
+        Override to opt in; the default empty list means no streaming preview.
+        """
+        return []
+
     # --- Permission methods ---
     @property
     def supports_blanket_allow(self) -> bool:

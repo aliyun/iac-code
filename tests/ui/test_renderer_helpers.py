@@ -7,6 +7,7 @@ import pytest
 from rich.console import Console
 
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.stream_events import StackInstancesProgressEvent, StackProgressEvent
 from iac_code.ui.renderer import (
     RenderedTurn,
@@ -62,6 +63,12 @@ def make_renderer() -> Renderer:
     registry = ToolRegistry()
     registry.register(DemoTool())
     return Renderer(console, registry, status_callback=lambda: "ready")
+
+
+def make_renderer_with_read_tool() -> Renderer:
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    return Renderer(make_console(), registry, status_callback=lambda: "ready")
 
 
 class TestThinkingSegment:
@@ -220,3 +227,43 @@ class TestRendererHelpers:
         output = renderer.console.file.getvalue()
         assert "Allow this action?" in output
         assert "detail" in output
+
+
+class TestStreamingHeaderPreview:
+    def test_header_uses_partial_input_when_tool_input_is_empty(self):
+        renderer = make_renderer_with_read_tool()
+        rec = _ToolCallRecord(
+            tool_name="read_file",
+            tool_input={},
+            partial_input='{"path": "src/foo.py"',  # path closed, JSON object not closed
+        )
+
+        header = renderer._render_tool_header(rec)
+
+        assert "foo.py" in header.plain
+
+    def test_header_ignores_partial_input_when_tool_input_is_present(self):
+        renderer = make_renderer_with_read_tool()
+        rec = _ToolCallRecord(
+            tool_name="read_file",
+            tool_input={"path": "src/real.py"},
+            partial_input='{"path": "src/stale.py"',  # should be ignored
+        )
+
+        header = renderer._render_tool_header(rec)
+
+        assert "real.py" in header.plain
+        assert "stale.py" not in header.plain
+
+    def test_header_no_detail_when_partial_input_field_not_yet_closed(self):
+        renderer = make_renderer_with_read_tool()
+        rec = _ToolCallRecord(
+            tool_name="read_file",
+            tool_input={},
+            partial_input='{"path": "src/foo',  # value not closed
+        )
+
+        header = renderer._render_tool_header(rec)
+
+        # No parens means no detail rendered
+        assert "(" not in header.plain

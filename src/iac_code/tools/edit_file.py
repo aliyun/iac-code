@@ -30,7 +30,10 @@ class EditFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The path to the file to edit.",
+                    "description": (
+                        "The path to the file to edit. "
+                        "Always emit this field FIRST in the JSON arguments, before 'old_string' and 'new_string'."
+                    ),
                 },
                 "old_string": {
                     "type": "string",
@@ -112,6 +115,9 @@ class EditFileTool(Tool):
         if input and input.get("old_string") == "":
             return _("Create")
         return _("Update")
+
+    def streaming_preview_fields(self) -> list[str]:
+        return ["path"]
 
     def get_activity_description(self, input: dict | None = None) -> str:
         if input:

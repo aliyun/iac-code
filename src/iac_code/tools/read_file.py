@@ -119,6 +119,9 @@ class ReadFileTool(Tool):
     def user_facing_name(self, input: dict | None = None) -> str:
         return _("Read")
 
+    def streaming_preview_fields(self) -> list[str]:
+        return ["path"]
+
     def get_activity_description(self, input: dict | None = None) -> str:
         if input:
             return _("Reading {path}").format(path=input.get("path", ""))

@@ -58,6 +58,7 @@ from iac_code.types.stream_events import (
 )
 from iac_code.ui.components.select import OptionType, Select, SelectLayout, TextOption
 from iac_code.ui.spinner import ShimmerSpinner
+from iac_code.utils.json_utils import extract_partial_string_fields
 
 if TYPE_CHECKING:
     from iac_code.state.app_state import AppStateStore
@@ -493,8 +494,18 @@ class Renderer:
     def _render_tool_header(self, rec: _ToolCallRecord) -> Text:
         """Render ``● ToolName(detail)`` line with optional child tool tree."""
         tool = self._tool_registry.get(rec.tool_name)
-        tool_name = tool.user_facing_name(rec.tool_input) if tool else rec.tool_name
-        detail = tool.render_tool_use_message(rec.tool_input, verbose=self._verbose) if tool else None
+
+        # Streaming preview: if the real tool input has not arrived yet but we
+        # already accumulated some partial JSON, try to extract opt-in fields
+        # (e.g. file path) so the header shows useful detail mid-stream.
+        effective_input = rec.tool_input
+        if not effective_input and rec.partial_input and tool:
+            preview_fields = tool.streaming_preview_fields()
+            if preview_fields:
+                effective_input = extract_partial_string_fields(rec.partial_input, set(preview_fields))
+
+        tool_name = tool.user_facing_name(effective_input) if tool else rec.tool_name
+        detail = tool.render_tool_use_message(effective_input, verbose=self._verbose) if tool else None
 
         line = Text()
         if not rec.done:
