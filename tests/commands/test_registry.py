@@ -122,12 +122,32 @@ class TestCommandRegistry:
         assert registry.is_command("hello") is False
         assert registry.is_command("help") is False
 
+    def test_is_command_with_dollar(self):
+        """Test is_command returns True for $skill invocations."""
+        registry = CommandRegistry()
+        assert registry.is_command("$deploy") is True
+        assert registry.is_command("$") is True
+
     def test_parse_command_simple(self):
         """Test parsing a simple command."""
         registry = CommandRegistry()
         name, args = registry.parse("/help")
         assert name == "help"
         assert args == []
+
+    def test_parse_dollar_command_simple(self):
+        """Test parsing a $-triggered skill name."""
+        registry = CommandRegistry()
+        name, args = registry.parse("$deploy")
+        assert name == "deploy"
+        assert args == []
+
+    def test_parse_dollar_command_with_args(self):
+        """Test parsing a $-triggered skill with arguments."""
+        registry = CommandRegistry()
+        name, args = registry.parse("$deploy prod us-west")
+        assert name == "deploy"
+        assert args == ["prod", "us-west"]
 
     def test_parse_command_with_args(self):
         """Test parsing a command with arguments."""

@@ -112,3 +112,39 @@ def test_resume_str_cross_project_raises_with_hint(mock_mm, mock_ss, mock_pm, tm
 
     with pytest.raises(ValueError, match=r"cd /elsewhere/repo && iac-code --resume"):
         InlineREPL(model="test-model", resume_session_id="some-id")
+
+
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_dollar_local_command_shows_error(mock_mm, mock_ss, mock_pm):
+    """Typing $help (a built-in command) under the $ trigger errors clearly."""
+    import asyncio
+
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL(model="test-model")
+    asyncio.run(repl._handle_command("$help"))
+    assert repl._command_log
+    user_input, message, _count, is_error = repl._command_log[-1]
+    assert user_input == "$help"
+    assert is_error is True
+    assert "/help" in message
+
+
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_dollar_unknown_skill_shows_error(mock_mm, mock_ss, mock_pm):
+    """Typing $<unknown> under the $ trigger reports an unknown-skill error."""
+    import asyncio
+
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL(model="test-model")
+    asyncio.run(repl._handle_command("$nosuchskillxyz"))
+    assert repl._command_log
+    user_input, message, _count, is_error = repl._command_log[-1]
+    assert user_input == "$nosuchskillxyz"
+    assert is_error is True
+    assert "nosuchskillxyz" in message

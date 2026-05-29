@@ -49,6 +49,7 @@ from iac_code.ui.suggestions.command_provider import CommandProvider
 from iac_code.ui.suggestions.directory_provider import DirectoryProvider
 from iac_code.ui.suggestions.file_provider import FileProvider
 from iac_code.ui.suggestions.shell_history_provider import ShellHistoryProvider
+from iac_code.ui.suggestions.skill_provider import SkillProvider
 from iac_code.utils.background_housekeeping import start_background_housekeeping
 from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipboard, try_read_image_from_path
 from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
@@ -239,6 +240,7 @@ class InlineREPL:
         self._suggestion_aggregator = SuggestionAggregator(
             [
                 CommandProvider(self.command_registry),
+                SkillProvider(self.command_registry),
                 FileProvider(cwd),
                 DirectoryProvider(cwd),
                 ShellHistoryProvider(),
@@ -586,13 +588,25 @@ class InlineREPL:
 
     async def _handle_command(self, user_input: str) -> None:
         """Dispatch a slash command and print the result."""
+        is_skill_trigger = user_input.startswith("$")
         name, args = self.command_registry.parse(user_input)
         cmd = self.command_registry.get(name)
-        if cmd is None:
-            error_msg = _("Unknown command: /{name}. Type /help for available commands.").format(name=name)
+
+        def _emit_error(message: str) -> None:
             msg_count = len(self._agent_loop.context_manager.get_messages())
-            self._command_log.append((user_input, error_msg, msg_count, True))
-            self.renderer.print_system_message(error_msg, style="red")
+            self._command_log.append((user_input, message, msg_count, True))
+            self.renderer.print_system_message(message, style="red")
+
+        if cmd is None:
+            if is_skill_trigger:
+                _emit_error(_("Unknown skill: ${name}. Type / to list commands and skills.").format(name=name))
+            else:
+                _emit_error(_("Unknown command: /{name}. Type /help for available commands.").format(name=name))
+            return
+
+        # The "$" trigger invokes skills only; reject built-in commands with a clear hint.
+        if is_skill_trigger and not isinstance(cmd, PromptCommand):
+            _emit_error(_("$ only invokes skills. Use /{name} instead.").format(name=name))
             return
 
         if isinstance(cmd, PromptCommand):
