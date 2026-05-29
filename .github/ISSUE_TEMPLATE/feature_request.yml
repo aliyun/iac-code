@@ -1,0 +1,60 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for iac-code
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your feature suggestion! Please describe your idea below.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What problem does this feature solve? Or what use case does it enable?
+      placeholder: I'd like to be able to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or features you've considered.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Related Area
+      description: Which area of iac-code does this relate to?
+      options:
+        - CLI / Interactive Mode
+        - Template Generation (ROS / Terraform)
+        - LLM Provider Support
+        - Agent / Tool Execution
+        - A2A / ACP Protocol
+        - Skills System
+        - i18n / Localization
+        - Documentation
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, mockups, or references that might help.
+    validations:
+      required: false
