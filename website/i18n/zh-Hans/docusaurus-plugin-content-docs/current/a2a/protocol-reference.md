@@ -366,6 +366,8 @@ Assistant text 作为 status message 投递：
 | `iac_code.tool.input` | 已完成工具输入，每个字段截断为 4000 个字符 |
 | `iac_code.tool.result` | 工具结果，每个字段截断为 4000 个字符 |
 | `iac_code.permission.autoApproved` | A2A server 模式拒绝工具权限请求时为 `false` |
+| `iac_code.thinking.type` | 在 `thinking-exposure` 中启用 `raw-thinking` 时为 `raw_thinking` |
+| `iac_code.thinking.text` | 原始 provider 推理 chunk，截断为 4000 个字符，仅在受信任配置启用 `raw-thinking` 时发出 |
 | `iac_code.usage.inputTokens` | 该轮次的 input token 数 |
 | `iac_code.usage.outputTokens` | 该轮次的 output token 数 |
 | `iac_code.usage.totalTokens` | 该轮次的 total token 数 |
@@ -381,6 +383,14 @@ urn:iac-code:a2a:artifact-metadata:v1
 ```
 
 该扩展标识 `metadata.iac_code` 命名空间，该命名空间用于工具进度、权限决策、token 用量和本地 artifact 元数据。如果服务器配置了任何必需扩展，客户端必须在 `A2A-Extensions` header 中包含其 URI。缺少必需扩展会返回标准 A2A `ExtensionSupportRequiredError`。
+
+当 `thinking-exposure` 启用一种或多种信号类型时，Agent Card 还会公布：
+
+```text
+urn:iac-code:a2a:thinking-exposure:v1
+```
+
+扩展 params 包含 `enabledTypes`，例如 `["tool_trace", "raw_thinking"]`。这是 iac-code 元数据扩展，不是 A2A 核心流式事件类型。
 
 ## 错误处理
 

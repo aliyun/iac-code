@@ -6,6 +6,7 @@ from a2a.types import TaskStatusUpdateEvent
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.task_store import A2ATaskStore
@@ -50,6 +51,7 @@ async def test_executor_passes_artifact_store_to_stream_event_publisher(
     artifact_store = object()
     seen_artifact_stores: list[object | None] = []
     seen_auto_approve_permissions: list[bool] = []
+    seen_exposure_types: list[frozenset[A2AExposureType]] = []
 
     async def spy_publish_stream_event(
         event_queue,
@@ -60,9 +62,11 @@ async def test_executor_passes_artifact_store_to_stream_event_publisher(
         artifact_store=None,
         permission_resolver=None,
         auto_approve_permissions=False,
+        exposure_types=None,
     ):
         seen_artifact_stores.append(artifact_store)
         seen_auto_approve_permissions.append(auto_approve_permissions)
+        seen_exposure_types.append(exposure_types)
         return None
 
     loop = FakeAgentLoop(
@@ -80,12 +84,18 @@ async def test_executor_passes_artifact_store_to_stream_event_publisher(
     monkeypatch.setattr("iac_code.a2a.executor.publish_stream_event", spy_publish_stream_event)
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
-    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", artifact_store=artifact_store)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        artifact_store=artifact_store,
+        thinking_exposure_types=[A2AExposureType.RAW_THINKING, A2AExposureType.TOOL_TRACE],
+    )
 
     await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
 
     assert seen_artifact_stores == [artifact_store]
     assert seen_auto_approve_permissions == [False]
+    assert seen_exposure_types == [frozenset({A2AExposureType.RAW_THINKING, A2AExposureType.TOOL_TRACE})]
 
 
 @pytest.mark.asyncio

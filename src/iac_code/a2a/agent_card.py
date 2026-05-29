@@ -18,10 +18,12 @@ from a2a.types import (
 from google.protobuf.json_format import ParseDict
 
 from iac_code import __version__
+from iac_code.a2a.exposure import format_a2a_exposure_types
 from iac_code.a2a.parts import supported_input_mime_types
 from iac_code.a2a.signing import sign_agent_card_dict
 
 IAC_CODE_ARTIFACT_METADATA_EXTENSION_URI = "urn:iac-code:a2a:artifact-metadata:v1"
+IAC_CODE_THINKING_EXPOSURE_EXTENSION_URI = "urn:iac-code:a2a:thinking-exposure:v1"
 
 
 def _base_url(host: str, port: int) -> str:
@@ -66,6 +68,7 @@ def build_agent_card(
     push_notifications: bool = False,
     supported_interfaces: list[dict[str, str]] | None = None,
     agent_extensions: Any = None,
+    thinking_exposure_types: Any = None,
 ) -> AgentCard:
     url = _base_url(host, port)
     description = "AI-powered Infrastructure as Code assistant for Alibaba Cloud ROS and Terraform workflows."
@@ -152,6 +155,19 @@ def build_agent_card(
             required=False,
         )
     )
+    if thinking_exposure_types is not None:
+        enabled_types = format_a2a_exposure_types(thinking_exposure_types)
+        if enabled_types:
+            extension = AgentExtension(
+                uri=IAC_CODE_THINKING_EXPOSURE_EXTENSION_URI,
+                description=(
+                    "Optional iac-code metadata namespace for selected thinking exposure signals. "
+                    "Raw thinking is emitted only when raw_thinking is enabled."
+                ),
+                required=False,
+            )
+            ParseDict({"enabledTypes": enabled_types}, extension.params)
+            card.capabilities.extensions.append(extension)
     for item in _iter_agent_extensions(agent_extensions):
         card.capabilities.extensions.append(_agent_extension_from_dict(item))
 

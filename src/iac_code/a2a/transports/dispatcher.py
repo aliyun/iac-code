@@ -37,6 +37,7 @@ from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
 from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.push import (
@@ -114,8 +115,10 @@ def create_runtime_components(
     supported_interfaces: list[dict[str, str]] | None = None,
     agent_extensions: object | None = None,
     auto_approve_permissions: bool = False,
+    thinking_exposure: object | None = None,
 ) -> A2ARuntimeComponents:
     metrics = NoOpA2AMetrics()
+    thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure)
     persistence = A2APersistenceStore(persistence_dir) if persistence_dir is not None else None
     artifact_store = A2AArtifactStore(artifact_dir) if artifact_dir is not None else None
     push_config_store = None
@@ -166,6 +169,7 @@ def create_runtime_components(
         metrics=metrics,
         artifact_store=artifact_store,
         auto_approve_permissions=auto_approve_permissions,
+        thinking_exposure_types=thinking_exposure_types,
     )
     card = build_agent_card(
         host=host,
@@ -179,6 +183,7 @@ def create_runtime_components(
         push_notifications=push_notifications,
         supported_interfaces=supported_interfaces,
         agent_extensions=agent_extensions,
+        thinking_exposure_types=thinking_exposure_types,
     )
     handler = IacCodeRequestHandler(
         agent_executor=executor,

@@ -24,6 +24,7 @@ def test_a2a_help_shows_common_server_options_only() -> None:
     assert "--host" in stdout
     assert "--port" in stdout
     assert "--transport" in stdout
+    assert "--thinking-exposure" in stdout
     assert "--debug" in stdout
     assert "--socket-path" not in stdout
     assert "--token" not in stdout
@@ -94,6 +95,7 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
         push_consumer_name: str | None,
         push_lease_timeout_ms: int,
         auto_approve_permissions: bool,
+        thinking_exposure: list[str] | None,
     ) -> None:
         called.update(
             {
@@ -127,6 +129,7 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
                 "push_consumer_name": push_consumer_name,
                 "push_lease_timeout_ms": push_lease_timeout_ms,
                 "auto_approve_permissions": auto_approve_permissions,
+                "thinking_exposure": thinking_exposure,
             }
         )
 
@@ -159,6 +162,9 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
                 "push-consumer-name: worker-a",
                 "push-lease-timeout-ms: 120000",
                 "auto-approve-permissions: true",
+                "thinking-exposure:",
+                "  - raw-thinking",
+                "  - tool-trace",
             ]
         ),
         encoding="utf-8",
@@ -205,6 +211,7 @@ def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> N
         "push_consumer_name": "worker-a",
         "push_lease_timeout_ms": 120000,
         "auto_approve_permissions": True,
+        "thinking_exposure": ["raw-thinking", "tool-trace"],
     }
 
 
@@ -236,6 +243,7 @@ def test_a2a_command_loads_config_file_and_cli_overrides(monkeypatch, tmp_path) 
                 "persistence_dir: /tmp/from-config",
                 "push_notifications: true",
                 "auto_approve_permissions: true",
+                "thinking_exposure: raw-thinking, tool-trace",
             ]
         ),
         encoding="utf-8",
@@ -254,6 +262,40 @@ def test_a2a_command_loads_config_file_and_cli_overrides(monkeypatch, tmp_path) 
     assert captured["persistence_dir"] == "/tmp/from-config"
     assert captured["push_notifications"] is True
     assert captured["auto_approve_permissions"] is True
+    assert captured["thinking_exposure"] == "raw-thinking, tool-trace"
+
+
+def test_a2a_command_accepts_repeated_thinking_exposure_flags(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run_server(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("iac_code.a2a.app.run_server", fake_run_server)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "a2a",
+            "--thinking-exposure",
+            "raw-thinking",
+            "--thinking-exposure",
+            "tool-trace",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["thinking_exposure"] == ["raw-thinking", "tool-trace"]
+
+
+def test_a2a_command_reports_invalid_thinking_exposure(tmp_path) -> None:
+    config = tmp_path / "a2a.yml"
+    config.write_text("thinking-exposure: thought-summary\n", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["a2a", "--config", str(config)])
+
+    assert result.exit_code == 1
+    assert "Unsupported A2A thinking exposure type 'thought_summary'" in result.stderr
 
 
 def test_a2a_command_passes_unix_transport_options(monkeypatch, tmp_path) -> None:

@@ -33,6 +33,9 @@ persistence-dir: ~/.iac-code/a2a
 artifact-dir: ~/.iac-code/a2a/artifacts
 signing-secret: local-card-signing-secret
 push-notifications: true
+thinking-exposure:
+  - tool-trace
+  - raw-thinking
 ```
 
 使用以下命令运行：
@@ -42,6 +45,8 @@ iac-code a2a --config a2a-server.yml
 ```
 
 `push-notifications: true` 会启用 A2A 任务推送通知配置方法和终态投递。当多个 worker 需要协调推送投递时，请将 `push-queue: redis-streams` 与 `push-redis-url` 搭配使用。
+
+`thinking-exposure` 控制流式过程中通过 `metadata.iac_code` 暴露哪些非回答运行时信号。默认值是 `tool-trace`；只有允许看到 provider 推理内容的受信任客户端才应添加 `raw-thinking`。
 
 服务器暴露：
 

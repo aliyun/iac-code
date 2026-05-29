@@ -3,6 +3,7 @@ from a2a.types import TaskArtifactUpdateEvent
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.events import _ERROR_TEXT_MAX_CHARS, _METADATA_MAX_CHARS, _truncate, publish_stream_event
+from iac_code.a2a.exposure import A2AExposureType
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -168,6 +169,42 @@ async def test_thinking_delta_is_explicitly_ignored() -> None:
     queue = FakeEventQueue()
 
     await publish_stream_event(queue, task_id="task-1", context_id="ctx-1", event=ThinkingDeltaEvent(text="hidden"))
+
+    assert queue.events == []
+
+
+@pytest.mark.asyncio
+async def test_thinking_delta_publishes_raw_metadata_when_enabled() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ThinkingDeltaEvent(text="visible"),
+        exposure_types={A2AExposureType.RAW_THINKING},
+    )
+
+    assert len(queue.events) == 1
+    dumped = dump(queue.events[0])
+    assert dumped["status"]["state"] == "TASK_STATE_WORKING"
+    assert dumped["metadata"]["iac_code"]["thinking"] == {
+        "type": "raw_thinking",
+        "text": "visible",
+    }
+
+
+@pytest.mark.asyncio
+async def test_tool_events_are_suppressed_when_tool_trace_is_not_enabled() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseStartEvent(tool_use_id="tool-1", name="bash"),
+        exposure_types=frozenset(),
+    )
 
     assert queue.events == []
 

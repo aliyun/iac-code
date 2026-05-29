@@ -93,6 +93,7 @@ iac-code a2a
 | `--host` | `127.0.0.1` | HTTP サーバーホスト |
 | `--port` | `41242` | HTTP サーバーポート |
 | `--transport` | `http` | サーバートランスポート: `http`, `stdio`, `unix`, `websocket`, `grpc`, `grpc-jsonrpc`, or `redis-streams` |
+| `--thinking-exposure` | `tool-trace` | A2A thinking 信号タイプを公開します。複数指定するには繰り返します。値：`raw-thinking`、`tool-trace` |
 | `--debug`, `-d` | `false` | デバッグログを有効化 |
 
 例:
@@ -236,6 +237,20 @@ Redis Streams トランスポートオプション:
 | `request-stream` | `iac-code:a2a:requests` | リクエスト stream 名 |
 | `response-stream` | `iac-code:a2a:responses` | レスポンス stream 名 |
 | `consumer-group` | `iac-code` | リクエスト stream consumer group |
+
+### Thinking の公開
+
+| Config key | Default | 説明 |
+|--------|---------|-------------|
+| `thinking-exposure` | `tool-trace` | A2A `metadata.iac_code` を通じて公開する非回答ランタイム信号タイプ。YAML リスト、カンマ区切り文字列、または繰り返しの `--thinking-exposure` フラグを使用できます。対応値は `tool-trace` と `raw-thinking` です。 |
+
+`tool-trace` は既存のツール進行状況、権限、結果メタデータを維持します。`raw-thinking` は provider 推論チャンクを `metadata.iac_code.thinking` 更新として出力し、`type: raw_thinking` と `text` を含みます。iac-code は現在、独立した thought-summary または progress-summary イベントを生成しないため、それらは有効な公開タイプではありません。
+
+```yaml
+thinking-exposure:
+  - tool-trace
+  - raw-thinking
+```
 
 ### 権限の挙動
 
