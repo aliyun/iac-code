@@ -66,6 +66,7 @@ class TestRosClientFactoryModes:
         assert config.access_key_id == "ak"
         assert config.security_token == "tok"
         assert config.region_id == "cn-hangzhou"
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
 
     def test_ram_role_arn_mode_builds_config(self):
         from iac_code.services.providers.aliyun import AliyunCredential
@@ -83,6 +84,7 @@ class TestRosClientFactoryModes:
         # RamRoleArn mode uses credential client, not direct AK/SK
         assert config.region_id == "cn-hangzhou"
         assert config.credential is not None
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
 
     def test_ram_role_arn_default_session_name(self):
         from iac_code.services.providers.aliyun import AliyunCredential
