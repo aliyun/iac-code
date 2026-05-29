@@ -17,9 +17,9 @@ CLI 参数 > 环境变量 > 配置文件
 
 | 变量 | 说明 |
 |---|---|
-| `IAC_CODE_PROVIDER` | 模型提供商名称（大小写不敏感）：`Anthropic`、`OpenAI`、`DashScope`、`DashScopeTokenPlan`、`DeepSeek`、`OpenAPICompatible` |
+| `IAC_CODE_PROVIDER` | 模型提供商名称（大小写不敏感）。有效值：`DashScope`、`DashScope Token Plan`、`OpenAI`、`Anthropic`、`DeepSeek`、`Gemini`、`Azure OpenAI`、`ModelScope`、`Kimi CN`、`Kimi Intl`、`MiniMax CN`、`MiniMax Intl`、`ZhiPu CN`、`ZhiPu Intl`、`Volcengine CN`、`SiliconFlow CN`、`SiliconFlow Intl`、`Aliyun CodingPlan`、`Aliyun CodingPlan Intl`、`ZhiPu CN CodingPlan`、`ZhiPu Intl CodingPlan`、`Volcengine CodingPlan`、`OpenAPI Compatible`、`Anthropic Compatible`、`OpenRouter`、`Ollama`、`LM Studio` |
 | `IAC_CODE_MODEL` | 模型名称 |
-| `IAC_CODE_BASE_URL` | `OpenAPICompatible` 使用的 API 端点；其他提供商会忽略此值 |
+| `IAC_CODE_BASE_URL` | `OpenAPI Compatible` 和 `Anthropic Compatible` 使用的 API 端点；其他提供商会忽略此值 |
 | `IAC_CODE_API_KEY` | 提供商 API Key；覆盖 `.credentials.yml` 中活跃提供商的密钥 |
 
 详见 [LLM 提供商](./llm-providers.md)。
@@ -54,5 +54,7 @@ CLI 参数 > 环境变量 > 配置文件
 | `IAC_CODE_CONFIG_DIR` | 覆盖运行时配置目录（默认 `~/.iac-code/`）；支持 `~` 和 `$VAR` 展开。所有持久化产物（凭证、设置、历史、projects、image-cache、skills、telemetry 等）均会跟随该目录 |
 | `IAC_CODE_ENV` | 部署环境标签（默认：`production`） |
 | `IAC_CODE_TENANT_ID` | 遥测租户标识；如未以 `iac_tenant_` 开头则自动添加前缀 |
+| `IAC_CODE_GIT_BASH_PATH` | Windows 下 Git Bash `bash.exe` 的路径（不在 PATH 中时使用） |
+| `IAC_CODE_A2A_PUSH_KEYRING` | 由环境管理的 A2A 加密推送密钥环（JSON 格式） |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 标准 OpenTelemetry 端点；设置后启用 OTLP 导出 |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | 在 span 上捕获 GenAI 消息/工具内容：`SPAN_ONLY`、`EVENT_ONLY`、`SPAN_AND_EVENT` |

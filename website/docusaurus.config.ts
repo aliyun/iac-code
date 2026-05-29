@@ -62,6 +62,17 @@ const config: Config = {
     },
   },
 
+  themes: [
+    [
+      '@easyops-cn/docusaurus-search-local',
+      {
+        hashed: true,
+        language: ['en', 'zh'],
+        indexBlog: false,
+      },
+    ],
+  ],
+
   presets: [
     [
       'classic',
@@ -99,6 +110,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          href: 'https://github.com/aliyun/iac-code',
+          label: 'GitHub',
+          position: 'right',
+        },
+        {
           type: 'localeDropdown',
           position: 'right',
         },
@@ -121,6 +137,36 @@ const config: Config = {
             {
               label: 'Slash Commands',
               to: '/docs/cli/commands',
+            },
+          ],
+        },
+        {
+          title: 'Community',
+          items: [
+            {
+              label: 'GitHub',
+              href: 'https://github.com/aliyun/iac-code',
+            },
+            {
+              label: 'Issues',
+              href: 'https://github.com/aliyun/iac-code/issues',
+            },
+            {
+              label: 'Discussions',
+              href: 'https://github.com/aliyun/iac-code/discussions',
+            },
+          ],
+        },
+        {
+          title: 'More',
+          items: [
+            {
+              label: 'PyPI',
+              href: 'https://pypi.org/project/iac-code/',
+            },
+            {
+              label: 'Contact',
+              to: '/docs/contact',
             },
           ],
         },

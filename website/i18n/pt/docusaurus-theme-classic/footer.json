@@ -15,8 +15,36 @@
     "message": "Comandos slash",
     "description": "The label of footer link with label=Slash Commands linking to /docs/cli/commands"
   },
+  "link.title.Community": {
+    "message": "Comunidade",
+    "description": "The title of the footer links column with title=Community in the footer"
+  },
+  "link.item.label.GitHub": {
+    "message": "GitHub",
+    "description": "The label of footer link with label=GitHub linking to https://github.com/aliyun/iac-code"
+  },
+  "link.item.label.Issues": {
+    "message": "Issues",
+    "description": "The label of footer link with label=Issues linking to https://github.com/aliyun/iac-code/issues"
+  },
+  "link.item.label.Discussions": {
+    "message": "Discussoes",
+    "description": "The label of footer link with label=Discussions linking to https://github.com/aliyun/iac-code/discussions"
+  },
+  "link.title.More": {
+    "message": "Mais",
+    "description": "The title of the footer links column with title=More in the footer"
+  },
+  "link.item.label.PyPI": {
+    "message": "PyPI",
+    "description": "The label of footer link with label=PyPI linking to https://pypi.org/project/iac-code/"
+  },
+  "link.item.label.Contact": {
+    "message": "Contato",
+    "description": "The label of footer link with label=Contact linking to /docs/contact"
+  },
   "copyright": {
-    "message": "Copyright © 2026 IaC Code contributors.",
+    "message": "Copyright © 2026 Colaboradores do IaC Code.",
     "description": "The footer copyright"
   }
 }

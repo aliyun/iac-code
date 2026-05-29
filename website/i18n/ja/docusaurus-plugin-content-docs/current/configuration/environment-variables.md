@@ -17,9 +17,9 @@ CLI 引数 > 環境変数 > 設定ファイル
 
 | 変数 | 説明 |
 |---|---|
-| `IAC_CODE_PROVIDER` | モデルプロバイダー名（大文字小文字不問）：`Anthropic`、`OpenAI`、`DashScope`、`DashScopeTokenPlan`、`DeepSeek`、`OpenAPICompatible` |
+| `IAC_CODE_PROVIDER` | モデルプロバイダー名（大文字小文字不問）。有効な値：`DashScope`、`DashScope Token Plan`、`OpenAI`、`Anthropic`、`DeepSeek`、`Gemini`、`Azure OpenAI`、`ModelScope`、`Kimi CN`、`Kimi Intl`、`MiniMax CN`、`MiniMax Intl`、`ZhiPu CN`、`ZhiPu Intl`、`Volcengine CN`、`SiliconFlow CN`、`SiliconFlow Intl`、`Aliyun CodingPlan`、`Aliyun CodingPlan Intl`、`ZhiPu CN CodingPlan`、`ZhiPu Intl CodingPlan`、`Volcengine CodingPlan`、`OpenAPI Compatible`、`Anthropic Compatible`、`OpenRouter`、`Ollama`、`LM Studio` |
 | `IAC_CODE_MODEL` | モデル名 |
-| `IAC_CODE_BASE_URL` | `OpenAPICompatible` 専用の API エンドポイント。他のプロバイダーでは無視されます |
+| `IAC_CODE_BASE_URL` | `OpenAPI Compatible` と `Anthropic Compatible` 専用の API エンドポイント。他のプロバイダーでは無視されます |
 | `IAC_CODE_API_KEY` | プロバイダー API キー。`.credentials.yml` のアクティブプロバイダーのキーを上書きします |
 
 詳細は [LLM プロバイダー](./llm-providers.md) をご覧ください。
@@ -54,5 +54,7 @@ CLI 引数 > 環境変数 > 設定ファイル
 | `IAC_CODE_CONFIG_DIR` | ランタイム設定ディレクトリを上書き（デフォルト `~/.iac-code/`）。`~` と `$VAR` の展開をサポート。永続化されるすべての成果物（認証情報、設定、履歴、projects、image-cache、skills、telemetry など）はこのディレクトリに従います |
 | `IAC_CODE_ENV` | デプロイ環境ラベル（デフォルト：`production`） |
 | `IAC_CODE_TENANT_ID` | テレメトリ用テナント識別子。`iac_tenant_` プレフィックスが付いていない場合は自動的に付加されます |
+| `IAC_CODE_GIT_BASH_PATH` | Windows で Git Bash が PATH にない場合の `bash.exe` パス |
+| `IAC_CODE_A2A_PUSH_KEYRING` | 環境管理された A2A 暗号化プッシュシークレットキーリング（JSON 形式） |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 標準 OpenTelemetry エンドポイント。設定すると OTLP エクスポートが有効になります |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | スパンで GenAI メッセージ/ツールコンテンツをキャプチャ：`SPAN_ONLY`、`EVENT_ONLY`、`SPAN_AND_EVENT` |
