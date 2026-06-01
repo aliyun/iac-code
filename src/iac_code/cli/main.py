@@ -793,7 +793,8 @@ def a2a_call(
         route = _a2a_client_route_specs(ctx, config, route)
         route_name = _a2a_config_value(ctx, config, "route_name", route_name)
         cwd = _a2a_config_value(ctx, config, "cwd", cwd)
-        cwd = str(Path(cwd).resolve())
+        if cwd in ("", "."):
+            cwd = str(Path.cwd())
         context_id = _a2a_config_value(ctx, config, "context_id", context_id)
         timeout = _a2a_config_value(ctx, config, "timeout", timeout)
         stream = _a2a_config_value(ctx, config, "stream", stream)
