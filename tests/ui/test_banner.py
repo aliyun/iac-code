@@ -296,6 +296,14 @@ class TestRenderWelcomeBanner:
         assert panel.border_style == ACCENT
         assert ACCENT == "bright_cyan"
 
+    def test_banner_shows_iac_code_version(self):
+        """Banner should display the iac-code version as a dim metadata line."""
+        from iac_code import __version__
+
+        panel = self._call("model", str(Path.home()))
+        text = render_to_str(panel, width=120)
+        assert f"iac-code v{__version__}" in text
+
     def test_banner_renders_dashscope_token_plan_provider(self):
         with (
             patch("iac_code.config.get_active_provider_key", return_value="k"),
