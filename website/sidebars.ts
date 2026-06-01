@@ -23,6 +23,8 @@ const sidebars: SidebarsConfig = {
         'cli/interactive-mode',
         'cli/command-line-options',
         'cli/commands',
+        'cli/skills',
+        'cli/sessions',
       ],
     },
     {
