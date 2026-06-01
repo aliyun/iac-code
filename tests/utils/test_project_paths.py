@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from iac_code.utils.project_paths import (
     MAX_SANITIZED_LENGTH,
+    find_git_worktree_root,
     get_git_branch,
     sanitize_path,
 )
@@ -109,5 +110,58 @@ class TestGetGitBranch:
         """Hard guarantee: detection never invokes subprocess."""
         with patch("subprocess.run") as mock_run, patch("subprocess.Popen") as mock_popen:
             get_git_branch(str(tmp_path))
+            mock_run.assert_not_called()
+            mock_popen.assert_not_called()
+
+
+class TestFindGitWorktreeRoot:
+    """Regression: ``find_git_worktree_root`` must not spawn ``git``.
+
+    Same Windows-asyncio-hang reason as :class:`TestGetGitBranch`.
+    """
+
+    def test_outside_repo_returns_none(self, tmp_path: Path):
+        assert find_git_worktree_root(str(tmp_path)) is None
+
+    def test_repo_at_cwd(self, tmp_path: Path):
+        (tmp_path / ".git").mkdir()
+        assert find_git_worktree_root(str(tmp_path)) == tmp_path.resolve()
+
+    def test_repo_subdir_walks_up(self, tmp_path: Path):
+        (tmp_path / ".git").mkdir()
+        sub = tmp_path / "a" / "b"
+        sub.mkdir(parents=True)
+        assert find_git_worktree_root(str(sub)) == tmp_path.resolve()
+
+    def test_worktree_with_absolute_gitdir_pointer(self, tmp_path: Path):
+        """A linked worktree's root is the dir containing its .git file."""
+        real_git = tmp_path / "real" / ".git"
+        real_git.mkdir(parents=True)
+        meta = real_git / "worktrees" / "wt"
+        meta.mkdir(parents=True)
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / ".git").write_text(f"gitdir: {meta}\n", encoding="utf-8")
+
+        assert find_git_worktree_root(str(wt)) == wt.resolve()
+
+    def test_worktree_with_relative_gitdir_pointer(self, tmp_path: Path):
+        real_git = tmp_path / ".git"
+        real_git.mkdir()
+        meta = real_git / "worktrees" / "wt"
+        meta.mkdir(parents=True)
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / ".git").write_text("gitdir: ../.git/worktrees/wt\n", encoding="utf-8")
+
+        assert find_git_worktree_root(str(wt)) == wt.resolve()
+
+    def test_no_subprocess_call(self, tmp_path: Path):
+        """Hard guarantee: detection never invokes subprocess."""
+        (tmp_path / ".git").mkdir()
+        with patch("subprocess.run") as mock_run, patch("subprocess.Popen") as mock_popen:
+            find_git_worktree_root(str(tmp_path))
             mock_run.assert_not_called()
             mock_popen.assert_not_called()

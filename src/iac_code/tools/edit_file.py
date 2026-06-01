@@ -112,7 +112,9 @@ class EditFileTool(Tool):
         return first_line
 
     def user_facing_name(self, input: dict | None = None) -> str:
-        if input and input.get("old_string") == "":
+        if input is None or "old_string" not in input:
+            return _("Edit")
+        if input["old_string"] == "":
             return _("Create")
         return _("Update")
 

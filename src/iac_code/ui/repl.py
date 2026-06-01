@@ -437,6 +437,8 @@ class InlineREPL:
 
     def _handle_startup_update(self) -> PendingUpdate | None:
         """Prompt for a cached update before the welcome banner."""
+        if not sys.stdin.isatty():
+            return None
         update = get_pending_update()
         if update is None:
             return None
@@ -482,6 +484,9 @@ class InlineREPL:
 
         if result.returncode == 0:
             self.console.print("[green]{}[/green]".format(_("Update completed. Restart iac-code to continue.")))
+            from iac_code.services.telemetry import graceful_shutdown
+
+            graceful_shutdown()
             raise SystemExit(0)
 
         self.console.print(

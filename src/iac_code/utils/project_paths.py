@@ -48,15 +48,39 @@ def get_session_path(cwd: str, session_id: str) -> Path:
     return get_project_dir(cwd) / f"{session_id}.jsonl"
 
 
-def _read_git_head(cwd: str) -> tuple[bool, str]:
-    """Walk up from *cwd* looking for ``.git``; if found, read ``HEAD``.
+def _resolve_git_dir(worktree_root: str) -> str | None:
+    """Given a worktree root, return the absolute path of its git dir.
 
-    Returns ``(is_git_repo, head_content)`` where *head_content* is the
-    raw trimmed content of the ``HEAD`` file (e.g.
-    ``"ref: refs/heads/main"`` or a full SHA), or an empty string if HEAD
-    cannot be read.
+    For a normal repo, ``<worktree_root>/.git`` is a directory and is
+    itself the git dir. For a linked worktree or submodule,
+    ``<worktree_root>/.git`` is a file whose first line is
+    ``gitdir: <path>`` pointing at the real git dir (absolute or relative
+    to *worktree_root*).
+    """
+    git_path = os.path.join(worktree_root, ".git")
+    if os.path.isdir(git_path):
+        return git_path
+    try:
+        with open(git_path, encoding="utf-8") as f:
+            line = f.read().strip()
+    except OSError:
+        return None
+    if not line.startswith("gitdir: "):
+        return None
+    gitdir = line[len("gitdir: ") :]
+    if not os.path.isabs(gitdir):
+        gitdir = os.path.join(worktree_root, gitdir)
+    return gitdir
 
-    This avoids spawning ``git`` — on Windows
+
+def find_git_worktree_root(cwd: str) -> Path | None:
+    """Return the git worktree root for *cwd*, or ``None`` outside git.
+
+    Walks up from *cwd* looking for ``.git`` (directory for a normal repo,
+    file for a linked worktree or submodule). The worktree root is the
+    directory containing the ``.git`` entry.
+
+    Pure-Python — never spawns ``git``. On Windows
     ``subprocess.run(["git", ...], timeout=...)`` can hang the asyncio
     event loop because git-for-windows leaves grandchild helper processes
     holding the captured stdout/stderr pipes; after timeout fires and
@@ -65,34 +89,33 @@ def _read_git_head(cwd: str) -> tuple[bool, str]:
     current = os.path.abspath(cwd)
     while True:
         git_path = os.path.join(current, ".git")
-        is_dir = os.path.isdir(git_path)
-        is_file = os.path.isfile(git_path)
-        if is_dir or is_file:
-            head_path: str | None = None
-            if is_dir:
-                head_path = os.path.join(git_path, "HEAD")
-            else:
-                try:
-                    with open(git_path, encoding="utf-8") as f:
-                        line = f.read().strip()
-                except OSError:
-                    return True, ""
-                if line.startswith("gitdir: "):
-                    gitdir = line[len("gitdir: ") :]
-                    if not os.path.isabs(gitdir):
-                        gitdir = os.path.join(current, gitdir)
-                    head_path = os.path.join(gitdir, "HEAD")
-            if head_path is None:
-                return True, ""
-            try:
-                with open(head_path, encoding="utf-8") as f:
-                    return True, f.read().strip()
-            except OSError:
-                return True, ""
+        if os.path.isdir(git_path) or os.path.isfile(git_path):
+            return Path(current).resolve()
         parent = os.path.dirname(current)
         if parent == current:
-            return False, ""
+            return None
         current = parent
+
+
+def _read_git_head(cwd: str) -> tuple[bool, str]:
+    """Walk up from *cwd* looking for ``.git``; if found, read ``HEAD``.
+
+    Returns ``(is_git_repo, head_content)`` where *head_content* is the
+    raw trimmed content of the ``HEAD`` file (e.g.
+    ``"ref: refs/heads/main"`` or a full SHA), or an empty string if HEAD
+    cannot be read.
+    """
+    root = find_git_worktree_root(cwd)
+    if root is None:
+        return False, ""
+    git_dir = _resolve_git_dir(str(root))
+    if git_dir is None:
+        return True, ""
+    try:
+        with open(os.path.join(git_dir, "HEAD"), encoding="utf-8") as f:
+            return True, f.read().strip()
+    except OSError:
+        return True, ""
 
 
 def get_git_branch(cwd: str) -> str | None:

@@ -7,6 +7,8 @@ description: Complete reference for built-in interactive commands.
 
 Slash commands control IaC Code from inside an interactive session. Type `/` to see available commands, then continue typing to filter the list. A command is recognized only when it appears at the start of your message.
 
+The `/` listing includes both built-in commands and any skills you have configured. To restrict suggestions to skills only, use `$` instead — `$<name>` lists and invokes skills exclusively, and typing `$` followed by a built-in command name (for example `$help`) prints an error pointing at the `/` equivalent.
+
 Text after the command name is passed as arguments. In the table below, `<arg>` indicates a required argument and `[arg]` indicates an optional argument.
 
 | Command | Purpose |

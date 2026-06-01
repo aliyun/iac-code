@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 15:39+0800\n"
+"POT-Creation-Date: 2026-06-01 16:49+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: es\n"
@@ -150,31 +150,34 @@ msgstr ""
 #: src/iac_code/cli/install_git_bash.py:40
 #, python-brace-format
 msgid "Git Bash is already installed at {}"
-msgstr ""
+msgstr "Git Bash ya está instalado en {}"
 
 #: src/iac_code/cli/install_git_bash.py:43
 msgid "Installing Git for Windows via npmmirror..."
-msgstr ""
+msgstr "Instalando Git for Windows vía npmmirror..."
 
 #: src/iac_code/cli/install_git_bash.py:59
 msgid "powershell.exe was not found on PATH; cannot run installer."
-msgstr ""
+msgstr "powershell.exe no se encontró en PATH; no se puede ejecutar el instalador."
 
 #: src/iac_code/cli/install_git_bash.py:66
 #, python-brace-format
 msgid "Installation failed (PowerShell exited with code {})"
-msgstr ""
+msgstr "La instalación falló (PowerShell salió con código {})"
 
 #: src/iac_code/cli/install_git_bash.py:77
 msgid ""
 "Installer exited but bash.exe was not found in common locations; UAC may "
 "have been cancelled or the installer used a non-standard path."
 msgstr ""
+"El instalador terminó pero bash.exe no se encontró en las ubicaciones "
+"habituales; UAC pudo haber sido cancelado o el instalador usó una ruta no"
+" estándar."
 
 #: src/iac_code/cli/install_git_bash.py:84
 #, python-brace-format
 msgid "Git for Windows installed at {}"
-msgstr ""
+msgstr "Git for Windows instalado en {}"
 
 #: src/iac_code/cli/main.py:33 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
@@ -186,7 +189,7 @@ msgstr "Usa iac-code como cliente A2A."
 
 #: src/iac_code/cli/main.py:54
 msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
-msgstr ""
+msgstr "Instalar Git for Windows mediante el espejo npmmirror (solo Windows)."
 
 #: src/iac_code/cli/main.py:61
 msgid "YAML config file containing A2A client options"
@@ -311,6 +314,8 @@ msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
 msgstr ""
+"Expone tipos de señal de thinking A2A; repite para varios. Valores: raw-"
+"thinking, tool-trace."
 
 #: src/iac_code/cli/main.py:623
 msgid ""
@@ -1148,19 +1153,23 @@ msgstr ""
 "eficiencia; a continuación, corrija los problemas detectados."
 
 #: src/iac_code/tools/edit_file.py:116
+msgid "Edit"
+msgstr "Editar"
+
+#: src/iac_code/tools/edit_file.py:118
 msgid "Create"
 msgstr "Crear"
 
-#: src/iac_code/tools/edit_file.py:117
+#: src/iac_code/tools/edit_file.py:119
 msgid "Update"
 msgstr "Actualizar"
 
-#: src/iac_code/tools/edit_file.py:124
+#: src/iac_code/tools/edit_file.py:126
 #, python-brace-format
 msgid "Editing {path}"
 msgstr "Editando {path}"
 
-#: src/iac_code/tools/edit_file.py:125
+#: src/iac_code/tools/edit_file.py:127
 msgid "Editing file..."
 msgstr "Editando archivo..."
 
@@ -1869,54 +1878,54 @@ msgstr "¡Hasta luego!"
 msgid "Resume this session with:"
 msgstr "Para reanudar esta sesión, ejecute:"
 
-#: src/iac_code/ui/repl.py:448
+#: src/iac_code/ui/repl.py:450
 msgid "Update now"
 msgstr "Actualizar ahora"
 
-#: src/iac_code/ui/repl.py:450
+#: src/iac_code/ui/repl.py:452
 msgid "Run the shown update command and exit when it succeeds."
 msgstr ""
 "Ejecuta el comando de actualización mostrado y sale cuando finalice "
 "correctamente."
 
-#: src/iac_code/ui/repl.py:453
+#: src/iac_code/ui/repl.py:455
 msgid "Skip"
 msgstr "Omitir"
 
-#: src/iac_code/ui/repl.py:455
+#: src/iac_code/ui/repl.py:457
 msgid "Continue with the current version for this session."
 msgstr "Continuar con la versión actual durante esta sesión."
 
-#: src/iac_code/ui/repl.py:458
+#: src/iac_code/ui/repl.py:460
 msgid "Skip until next version"
 msgstr "Omitir hasta la siguiente versión"
 
-#: src/iac_code/ui/repl.py:460
+#: src/iac_code/ui/repl.py:462
 msgid "Hide this update until a newer version is available."
 msgstr ""
 "Ocultar esta actualización hasta que haya una versión más nueva "
 "disponible."
 
-#: src/iac_code/ui/repl.py:479 src/iac_code/ui/repl.py:488
+#: src/iac_code/ui/repl.py:481 src/iac_code/ui/repl.py:493
 msgid "Update command failed. Continuing with the current version."
 msgstr "El comando de actualización falló. Se continuará con la versión actual."
 
-#: src/iac_code/ui/repl.py:484
+#: src/iac_code/ui/repl.py:486
 msgid "Update completed. Restart iac-code to continue."
 msgstr "Actualización completada. Reinicia iac-code para continuar."
 
-#: src/iac_code/ui/repl.py:519
+#: src/iac_code/ui/repl.py:524
 msgid "No image in clipboard."
 msgstr "No hay ninguna imagen en el portapapeles."
 
-#: src/iac_code/ui/repl.py:672
+#: src/iac_code/ui/repl.py:677
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr ""
 "Habilidad desconocida: ${name}. Escribe / para listar comandos y "
 "habilidades."
 
-#: src/iac_code/ui/repl.py:674
+#: src/iac_code/ui/repl.py:679
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
@@ -1924,27 +1933,27 @@ msgstr ""
 "command: /{name}. Type /help for available commands.Comando desconocido: "
 "/{name}. Escriba /help para ver los comandos disponibles."
 
-#: src/iac_code/ui/repl.py:679
+#: src/iac_code/ui/repl.py:684
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ solo invoca habilidades. Usa /{name} en su lugar."
 
-#: src/iac_code/ui/repl.py:701 src/iac_code/ui/repl.py:746
+#: src/iac_code/ui/repl.py:706 src/iac_code/ui/repl.py:751
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Error de comando: {error}"
 
-#: src/iac_code/ui/repl.py:708
+#: src/iac_code/ui/repl.py:713
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "El comando no tiene controlador: {name}"
 
-#: src/iac_code/ui/repl.py:1013
+#: src/iac_code/ui/repl.py:1018
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Sesión no encontrada: {session_id}"
 
-#: src/iac_code/ui/repl.py:1032
+#: src/iac_code/ui/repl.py:1037
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1955,19 +1964,19 @@ msgstr ""
 "Para reanudar, ejecute:\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1071
+#: src/iac_code/ui/repl.py:1076
 msgid "This conversation is from a different directory."
 msgstr "Esta conversación procede de otro directorio."
 
-#: src/iac_code/ui/repl.py:1073
+#: src/iac_code/ui/repl.py:1078
 msgid "To resume, run:"
 msgstr "Para reanudar, ejecute:"
 
-#: src/iac_code/ui/repl.py:1078
+#: src/iac_code/ui/repl.py:1083
 msgid "(Command copied to clipboard)"
 msgstr "(Comando copiado al portapapeles)"
 
-#: src/iac_code/ui/repl.py:1235
+#: src/iac_code/ui/repl.py:1240
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
@@ -1976,12 +1985,12 @@ msgstr ""
 "El modelo actual {model} no admite entrada de imágenes. Usa /model para "
 "cambiar a un modelo con capacidad de visión."
 
-#: src/iac_code/ui/repl.py:1244
+#: src/iac_code/ui/repl.py:1249
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "Error de imagen: {err}"
 
-#: src/iac_code/ui/repl.py:1261
+#: src/iac_code/ui/repl.py:1266
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -2176,7 +2185,7 @@ msgstr ""
 
 #: src/iac_code/utils/platform.py:44
 msgid "To install:"
-msgstr ""
+msgstr "Para instalar:"
 
 #: src/iac_code/utils/platform.py:47
 msgid "  Option 1 - winget (requires access to github.com):"
@@ -2187,6 +2196,8 @@ msgid ""
 "  Option 2 - if you cannot reach github.com, run this to install via "
 "npmmirror:"
 msgstr ""
+"  Opción 2 - si no puedes acceder a github.com, ejecuta esto para "
+"instalar vía npmmirror:"
 
 #~ msgid "toggle preview"
 #~ msgstr "alternar vista previa"

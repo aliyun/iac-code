@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 15:39+0800\n"
+"POT-Creation-Date: 2026-06-01 16:49+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -137,31 +137,31 @@ msgstr ""
 #: src/iac_code/cli/install_git_bash.py:40
 #, python-brace-format
 msgid "Git Bash is already installed at {}"
-msgstr ""
+msgstr "Git Bash 已存在于 {}"
 
 #: src/iac_code/cli/install_git_bash.py:43
 msgid "Installing Git for Windows via npmmirror..."
-msgstr ""
+msgstr "正在通过 npmmirror 下载并安装 Git for Windows..."
 
 #: src/iac_code/cli/install_git_bash.py:59
 msgid "powershell.exe was not found on PATH; cannot run installer."
-msgstr ""
+msgstr "PATH 中未找到 powershell.exe，无法运行安装程序。"
 
 #: src/iac_code/cli/install_git_bash.py:66
 #, python-brace-format
 msgid "Installation failed (PowerShell exited with code {})"
-msgstr ""
+msgstr "安装失败（PowerShell 退出码 {}）"
 
 #: src/iac_code/cli/install_git_bash.py:77
 msgid ""
 "Installer exited but bash.exe was not found in common locations; UAC may "
 "have been cancelled or the installer used a non-standard path."
-msgstr ""
+msgstr "安装程序已退出，但常见路径下未找到 bash.exe；可能 UAC 被取消或安装程序使用了非标准路径。"
 
 #: src/iac_code/cli/install_git_bash.py:84
 #, python-brace-format
 msgid "Git for Windows installed at {}"
-msgstr ""
+msgstr "Git for Windows 已安装于 {}"
 
 #: src/iac_code/cli/main.py:33 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
@@ -173,7 +173,7 @@ msgstr "将 iac-code 作为 A2A 客户端使用。"
 
 #: src/iac_code/cli/main.py:54
 msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
-msgstr ""
+msgstr "通过 npmmirror 镜像安装 Git for Windows（仅 Windows）。"
 
 #: src/iac_code/cli/main.py:61
 msgid "YAML config file containing A2A client options"
@@ -287,7 +287,7 @@ msgstr "A2A 传输方式：http、stdio、unix、websocket、grpc、grpc-jsonrpc
 msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
-msgstr ""
+msgstr "暴露 A2A thinking 信号类型；可重复指定多个。取值：raw-thinking、tool-trace。"
 
 #: src/iac_code/cli/main.py:623
 msgid ""
@@ -1106,19 +1106,23 @@ msgid ""
 msgstr "审查变更的代码的可复用性、质量和效率，然后修复发现的问题。"
 
 #: src/iac_code/tools/edit_file.py:116
+msgid "Edit"
+msgstr "编辑"
+
+#: src/iac_code/tools/edit_file.py:118
 msgid "Create"
 msgstr "创建"
 
-#: src/iac_code/tools/edit_file.py:117
+#: src/iac_code/tools/edit_file.py:119
 msgid "Update"
 msgstr "更新"
 
-#: src/iac_code/tools/edit_file.py:124
+#: src/iac_code/tools/edit_file.py:126
 #, python-brace-format
 msgid "Editing {path}"
 msgstr "正在编辑 {path}"
 
-#: src/iac_code/tools/edit_file.py:125
+#: src/iac_code/tools/edit_file.py:127
 msgid "Editing file..."
 msgstr "正在编辑文件..."
 
@@ -1806,73 +1810,73 @@ msgstr "再见！"
 msgid "Resume this session with:"
 msgstr "恢复此会话请运行："
 
-#: src/iac_code/ui/repl.py:448
+#: src/iac_code/ui/repl.py:450
 msgid "Update now"
 msgstr "立即更新"
 
-#: src/iac_code/ui/repl.py:450
+#: src/iac_code/ui/repl.py:452
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "运行显示的更新命令，成功后退出。"
 
-#: src/iac_code/ui/repl.py:453
+#: src/iac_code/ui/repl.py:455
 msgid "Skip"
 msgstr "跳过"
 
-#: src/iac_code/ui/repl.py:455
+#: src/iac_code/ui/repl.py:457
 msgid "Continue with the current version for this session."
 msgstr "本次会话继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:458
+#: src/iac_code/ui/repl.py:460
 msgid "Skip until next version"
 msgstr "跳过直到下一个版本"
 
-#: src/iac_code/ui/repl.py:460
+#: src/iac_code/ui/repl.py:462
 msgid "Hide this update until a newer version is available."
 msgstr "隐藏此更新，直到有更新的版本可用。"
 
-#: src/iac_code/ui/repl.py:479 src/iac_code/ui/repl.py:488
+#: src/iac_code/ui/repl.py:481 src/iac_code/ui/repl.py:493
 msgid "Update command failed. Continuing with the current version."
 msgstr "更新命令失败。将继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:484
+#: src/iac_code/ui/repl.py:486
 msgid "Update completed. Restart iac-code to continue."
 msgstr "更新已完成。请重启 iac-code 以继续。"
 
-#: src/iac_code/ui/repl.py:519
+#: src/iac_code/ui/repl.py:524
 msgid "No image in clipboard."
 msgstr "剪贴板中没有图像。"
 
-#: src/iac_code/ui/repl.py:672
+#: src/iac_code/ui/repl.py:677
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr "未知技能：${name}。输入 / 可列出命令和技能。"
 
-#: src/iac_code/ui/repl.py:674
+#: src/iac_code/ui/repl.py:679
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "未知命令：/{name}。输入 /help 查看可用命令。"
 
-#: src/iac_code/ui/repl.py:679
+#: src/iac_code/ui/repl.py:684
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ 只能调用技能。请改用 /{name}。"
 
-#: src/iac_code/ui/repl.py:701 src/iac_code/ui/repl.py:746
+#: src/iac_code/ui/repl.py:706 src/iac_code/ui/repl.py:751
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "命令错误：{error}"
 
-#: src/iac_code/ui/repl.py:708
+#: src/iac_code/ui/repl.py:713
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
-#: src/iac_code/ui/repl.py:1013
+#: src/iac_code/ui/repl.py:1018
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "会话不存在：{session_id}"
 
-#: src/iac_code/ui/repl.py:1032
+#: src/iac_code/ui/repl.py:1037
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1883,31 +1887,31 @@ msgstr ""
 "请运行以下命令恢复：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1071
+#: src/iac_code/ui/repl.py:1076
 msgid "This conversation is from a different directory."
 msgstr "该会话来自另一个目录。"
 
-#: src/iac_code/ui/repl.py:1073
+#: src/iac_code/ui/repl.py:1078
 msgid "To resume, run:"
 msgstr "请运行以下命令恢复："
 
-#: src/iac_code/ui/repl.py:1078
+#: src/iac_code/ui/repl.py:1083
 msgid "(Command copied to clipboard)"
 msgstr "（命令已复制到剪贴板）"
 
-#: src/iac_code/ui/repl.py:1235
+#: src/iac_code/ui/repl.py:1240
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
 "to a vision-capable model."
 msgstr "当前模型 {model} 不支持图像输入。请使用 /model 切换到支持视觉的模型。"
 
-#: src/iac_code/ui/repl.py:1244
+#: src/iac_code/ui/repl.py:1249
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "图像错误：{err}"
 
-#: src/iac_code/ui/repl.py:1261
+#: src/iac_code/ui/repl.py:1266
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -2098,7 +2102,7 @@ msgstr "如果已安装但不在 PATH 中，请设置 IAC_CODE_GIT_BASH_PATH 环
 
 #: src/iac_code/utils/platform.py:44
 msgid "To install:"
-msgstr ""
+msgstr "安装方法："
 
 #: src/iac_code/utils/platform.py:47
 msgid "  Option 1 - winget (requires access to github.com):"
@@ -2108,7 +2112,7 @@ msgstr "  方式 1 - winget（需要能访问 github.com）："
 msgid ""
 "  Option 2 - if you cannot reach github.com, run this to install via "
 "npmmirror:"
-msgstr ""
+msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 npmmirror 安装："
 
 #~ msgid "toggle preview"
 #~ msgstr "切换预览"

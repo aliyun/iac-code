@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from unittest.mock import patch
+
+import pytest
 
 from iac_code.services.update_checker import PendingUpdate
 from iac_code.ui.components.select import SelectLayout
+
+
+@pytest.fixture(autouse=True)
+def _force_stdin_tty(monkeypatch):
+    """Default to interactive stdin so _handle_startup_update doesn't short-circuit.
+
+    Pytest captures stdin by default which makes ``sys.stdin.isatty()`` return
+    False; the non-TTY guard in ``_handle_startup_update`` would otherwise
+    skip the prompt under pytest. Individual tests that exercise the non-TTY
+    path explicitly re-patch ``sys.stdin``.
+    """
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
 
 def make_pending_update() -> PendingUpdate:
@@ -248,6 +263,7 @@ def test_handle_startup_update_exits_after_successful_update(mock_mm, mock_ss, m
         patch("iac_code.ui.repl.render_update_prompt_header", return_value="update prompt"),
         patch("iac_code.ui.repl.Select") as select,
         patch("iac_code.ui.repl.run_update_command", return_value=completed) as run_update_command,
+        patch("iac_code.services.telemetry.graceful_shutdown") as graceful_shutdown,
     ):
         select.return_value.run.return_value = "update_now"
 
@@ -256,6 +272,33 @@ def test_handle_startup_update_exits_after_successful_update(mock_mm, mock_ss, m
 
     assert exc_info.value.code == 0
     run_update_command.assert_called_once_with(update)
+    graceful_shutdown.assert_called_once_with()
+
+
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_handle_startup_update_returns_none_when_stdin_not_tty(mock_mm, mock_ss, mock_pm):
+    """Non-TTY callers (CI, container without TTY) must never hit Select.run().
+
+    Without this guard, a cached pending update would block the process
+    indefinitely waiting for keyboard input on a closed stdin.
+    """
+    from iac_code.ui.repl import InlineREPL
+
+    update = make_pending_update()
+    repl = InlineREPL(model="test-model")
+
+    with (
+        patch("iac_code.ui.repl.sys.stdin") as stdin,
+        patch("iac_code.ui.repl.get_pending_update", return_value=update) as get_pending,
+        patch("iac_code.ui.repl.Select") as select,
+    ):
+        stdin.isatty.return_value = False
+        assert repl._handle_startup_update() is None
+
+    get_pending.assert_not_called()
+    select.assert_not_called()
 
 
 @patch("iac_code.ui.repl.ProviderManager")

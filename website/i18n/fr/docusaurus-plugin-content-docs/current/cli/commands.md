@@ -7,6 +7,8 @@ description: Référence complète des commandes interactives intégrées.
 
 Les commandes slash contrôlent IaC Code depuis l'intérieur d'une session interactive. Tapez `/` pour voir les commandes disponibles, puis continuez à taper pour filtrer la liste. Une commande n'est reconnue que lorsqu'elle apparaît au début de votre message.
 
+La liste `/` inclut à la fois les commandes intégrées et toutes les skills que vous avez configurées. Pour restreindre les suggestions aux skills uniquement, utilisez `$` à la place — `$<nom>` liste et invoque exclusivement des skills, et taper `$` suivi du nom d'une commande intégrée (par exemple `$help`) affiche une erreur pointant vers l'équivalent `/`.
+
 Le texte après le nom de la commande est transmis comme arguments. Dans le tableau ci-dessous, `<arg>` indique un argument obligatoire et `[arg]` indique un argument optionnel.
 
 | Commande | Fonction |

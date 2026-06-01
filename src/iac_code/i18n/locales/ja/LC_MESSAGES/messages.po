@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 15:39+0800\n"
+"POT-Creation-Date: 2026-06-01 16:49+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: ja\n"
@@ -141,31 +141,33 @@ msgstr ""
 #: src/iac_code/cli/install_git_bash.py:40
 #, python-brace-format
 msgid "Git Bash is already installed at {}"
-msgstr ""
+msgstr "Git Bash は既に {} にインストールされています"
 
 #: src/iac_code/cli/install_git_bash.py:43
 msgid "Installing Git for Windows via npmmirror..."
-msgstr ""
+msgstr "npmmirror 経由で Git for Windows をインストール中..."
 
 #: src/iac_code/cli/install_git_bash.py:59
 msgid "powershell.exe was not found on PATH; cannot run installer."
-msgstr ""
+msgstr "PATH に powershell.exe が見つかりません。インストーラーを実行できません。"
 
 #: src/iac_code/cli/install_git_bash.py:66
 #, python-brace-format
 msgid "Installation failed (PowerShell exited with code {})"
-msgstr ""
+msgstr "インストールに失敗しました（PowerShell 終了コード {}）"
 
 #: src/iac_code/cli/install_git_bash.py:77
 msgid ""
 "Installer exited but bash.exe was not found in common locations; UAC may "
 "have been cancelled or the installer used a non-standard path."
 msgstr ""
+"インストーラーは終了しましたが、一般的な場所に bash.exe が見つかりませんでした。UAC "
+"がキャンセルされたか、インストーラーが標準外のパスを使用した可能性があります。"
 
 #: src/iac_code/cli/install_git_bash.py:84
 #, python-brace-format
 msgid "Git for Windows installed at {}"
-msgstr ""
+msgstr "Git for Windows を {} にインストールしました"
 
 #: src/iac_code/cli/main.py:33 src/iac_code/commands/help.py:26
 msgid "AI-powered infrastructure orchestration tool"
@@ -177,7 +179,7 @@ msgstr "iac-code を A2A クライアントとして使用します。"
 
 #: src/iac_code/cli/main.py:54
 msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
-msgstr ""
+msgstr "npmmirror ミラー経由で Git for Windows をインストールします（Windows 専用）。"
 
 #: src/iac_code/cli/main.py:61
 msgid "YAML config file containing A2A client options"
@@ -293,7 +295,7 @@ msgstr "A2A トランスポート: http、stdio、unix、websocket、grpc、grpc
 msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
-msgstr ""
+msgstr "A2A thinking 信号タイプを公開します。複数指定するには繰り返します。値：raw-thinking、tool-trace。"
 
 #: src/iac_code/cli/main.py:623
 msgid ""
@@ -1119,19 +1121,23 @@ msgid ""
 msgstr "変更されたコードの再利用性、品質、効率を確認し、見つかった問題を修正してください。"
 
 #: src/iac_code/tools/edit_file.py:116
+msgid "Edit"
+msgstr "編集"
+
+#: src/iac_code/tools/edit_file.py:118
 msgid "Create"
 msgstr "作成"
 
-#: src/iac_code/tools/edit_file.py:117
+#: src/iac_code/tools/edit_file.py:119
 msgid "Update"
 msgstr "更新"
 
-#: src/iac_code/tools/edit_file.py:124
+#: src/iac_code/tools/edit_file.py:126
 #, python-brace-format
 msgid "Editing {path}"
 msgstr "{path} を編集中"
 
-#: src/iac_code/tools/edit_file.py:125
+#: src/iac_code/tools/edit_file.py:127
 msgid "Editing file..."
 msgstr "ファイルを編集中…"
 
@@ -1823,75 +1829,75 @@ msgstr "さようなら。"
 msgid "Resume this session with:"
 msgstr "このセッションを再開するには次を実行してください："
 
-#: src/iac_code/ui/repl.py:448
+#: src/iac_code/ui/repl.py:450
 msgid "Update now"
 msgstr "今すぐ更新"
 
-#: src/iac_code/ui/repl.py:450
+#: src/iac_code/ui/repl.py:452
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "表示された更新コマンドを実行し、成功したら終了します。"
 
-#: src/iac_code/ui/repl.py:453
+#: src/iac_code/ui/repl.py:455
 msgid "Skip"
 msgstr "スキップ"
 
-#: src/iac_code/ui/repl.py:455
+#: src/iac_code/ui/repl.py:457
 msgid "Continue with the current version for this session."
 msgstr "このセッションでは現在のバージョンを使い続けます。"
 
-#: src/iac_code/ui/repl.py:458
+#: src/iac_code/ui/repl.py:460
 msgid "Skip until next version"
 msgstr "次のバージョンまでスキップ"
 
-#: src/iac_code/ui/repl.py:460
+#: src/iac_code/ui/repl.py:462
 msgid "Hide this update until a newer version is available."
 msgstr "より新しいバージョンが利用可能になるまで、この更新を非表示にします。"
 
-#: src/iac_code/ui/repl.py:479 src/iac_code/ui/repl.py:488
+#: src/iac_code/ui/repl.py:481 src/iac_code/ui/repl.py:493
 msgid "Update command failed. Continuing with the current version."
 msgstr "更新コマンドに失敗しました。現在のバージョンで続行します。"
 
-#: src/iac_code/ui/repl.py:484
+#: src/iac_code/ui/repl.py:486
 msgid "Update completed. Restart iac-code to continue."
 msgstr "更新が完了しました。続行するには iac-code を再起動してください。"
 
-#: src/iac_code/ui/repl.py:519
+#: src/iac_code/ui/repl.py:524
 msgid "No image in clipboard."
 msgstr "クリップボードに画像がありません。"
 
-#: src/iac_code/ui/repl.py:672
+#: src/iac_code/ui/repl.py:677
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr "不明なスキル: ${name}。/ を入力するとコマンドとスキルを一覧表示します。"
 
-#: src/iac_code/ui/repl.py:674
+#: src/iac_code/ui/repl.py:679
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available "
 "commands.不明なコマンドです：/{name}。利用可能なコマンドは /help を入力してください。"
 
-#: src/iac_code/ui/repl.py:679
+#: src/iac_code/ui/repl.py:684
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ はスキルのみを呼び出します。代わりに /{name} を使用してください。"
 
-#: src/iac_code/ui/repl.py:701 src/iac_code/ui/repl.py:746
+#: src/iac_code/ui/repl.py:706 src/iac_code/ui/repl.py:751
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "コマンドエラー：{error}"
 
-#: src/iac_code/ui/repl.py:708
+#: src/iac_code/ui/repl.py:713
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "ハンドラーがないコマンドです：{name}"
 
-#: src/iac_code/ui/repl.py:1013
+#: src/iac_code/ui/repl.py:1018
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "セッションが見つかりません：{session_id}"
 
-#: src/iac_code/ui/repl.py:1032
+#: src/iac_code/ui/repl.py:1037
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1902,31 +1908,31 @@ msgstr ""
 "再開するには次を実行してください：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1071
+#: src/iac_code/ui/repl.py:1076
 msgid "This conversation is from a different directory."
 msgstr "この会話は別のディレクトリ由来です。"
 
-#: src/iac_code/ui/repl.py:1073
+#: src/iac_code/ui/repl.py:1078
 msgid "To resume, run:"
 msgstr "再開するには次を実行してください："
 
-#: src/iac_code/ui/repl.py:1078
+#: src/iac_code/ui/repl.py:1083
 msgid "(Command copied to clipboard)"
 msgstr "（コマンドをクリップボードにコピーしました）"
 
-#: src/iac_code/ui/repl.py:1235
+#: src/iac_code/ui/repl.py:1240
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
 "to a vision-capable model."
 msgstr "現在のモデル {model} は画像入力をサポートしていません。/model を使用してビジョン対応モデルに切り替えてください。"
 
-#: src/iac_code/ui/repl.py:1244
+#: src/iac_code/ui/repl.py:1249
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "画像エラー：{err}"
 
-#: src/iac_code/ui/repl.py:1261
+#: src/iac_code/ui/repl.py:1266
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -2117,7 +2123,7 @@ msgstr "インストール済みで PATH に含まれていない場合は、IAC
 
 #: src/iac_code/utils/platform.py:44
 msgid "To install:"
-msgstr ""
+msgstr "インストール方法："
 
 #: src/iac_code/utils/platform.py:47
 msgid "  Option 1 - winget (requires access to github.com):"
@@ -2127,7 +2133,7 @@ msgstr "  方法 1 - winget（github.com へのアクセスが必要）："
 msgid ""
 "  Option 2 - if you cannot reach github.com, run this to install via "
 "npmmirror:"
-msgstr ""
+msgstr "  オプション 2 - github.com にアクセスできない場合は、npmmirror 経由でインストールするために以下を実行してください："
 
 #~ msgid "toggle preview"
 #~ msgstr "プレビューを切り替え"

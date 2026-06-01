@@ -1,6 +1,7 @@
 """Tests for skill discovery."""
 
 import subprocess
+from unittest.mock import patch
 
 from iac_code.skills.discovery import (
     DynamicSkillTracker,
@@ -137,6 +138,18 @@ class TestFindProjectSkillsDirs:
         child_skills.mkdir()
 
         assert _find_project_skills_dirs(str(nested)) == [root_skills, child_skills]
+
+    def test_does_not_spawn_git_subprocess(self, tmp_path):
+        """Regression: project lookup must never invoke ``git`` (Windows hang).
+
+        See iac_code.utils.project_paths.find_git_worktree_root docstring
+        for the asyncio deadlock background.
+        """
+        (tmp_path / ".git").mkdir()
+        with patch("subprocess.run") as mock_run, patch("subprocess.Popen") as mock_popen:
+            _find_project_skills_dirs(str(tmp_path))
+            mock_run.assert_not_called()
+            mock_popen.assert_not_called()
 
     def test_nearer_project_skills_have_higher_priority(self, tmp_path):
         """Returned directories are ordered from lower to higher priority."""

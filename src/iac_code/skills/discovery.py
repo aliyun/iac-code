@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import fnmatch
-import subprocess
 from pathlib import Path
 
 from iac_code.commands.registry import PromptCommand
@@ -11,6 +10,7 @@ from iac_code.config import get_config_dir
 from iac_code.skills.loader import load_skill_from_path
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.types.skill_source import SkillSource
+from iac_code.utils.project_paths import find_git_worktree_root
 
 
 def discover_all_skills(cwd: str) -> list[SkillDefinition]:
@@ -56,7 +56,7 @@ def _find_project_skills_dirs(cwd: str) -> list[Path]:
     """
     result: list[Path] = []
     current = Path(cwd).resolve()
-    git_root = _find_git_root(current)
+    git_root = find_git_worktree_root(str(current))
     search_dirs = _project_search_dirs(current, git_root)
 
     for current in search_dirs:
@@ -67,27 +67,6 @@ def _find_project_skills_dirs(cwd: str) -> list[Path]:
         if dotdir.is_dir():
             result.append(dotdir)
     return result
-
-
-def _find_git_root(cwd: Path) -> Path | None:
-    """Return the git worktree root for cwd, or None outside git."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
-
-    if result.returncode != 0:
-        return None
-
-    root = result.stdout.strip()
-    return Path(root).resolve() if root else None
 
 
 def _project_search_dirs(cwd: Path, git_root: Path | None) -> list[Path]:
