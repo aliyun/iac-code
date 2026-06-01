@@ -7,6 +7,7 @@ from time import monotonic
 from typing import Any, AsyncIterator
 
 import httpx
+from a2a.types import Role
 
 from iac_code.a2a.signing import AgentCardSignature, agent_card_signature_jwks_url, verify_agent_card_dict
 from iac_code.a2a.transport import A2AAuthConfig, A2ATransportBinding, UnsupportedA2ATransportError, headers_for_auth
@@ -54,8 +55,11 @@ class A2AClientResponse:
         return ""
 
 
+_AGENT_ROLE_NAME = Role.Name(Role.ROLE_AGENT)
+
+
 def _extract_agent_entry_text(entry: Any) -> str:
-    if not isinstance(entry, dict) or entry.get("role") != "ROLE_AGENT":
+    if not isinstance(entry, dict) or entry.get("role") != _AGENT_ROLE_NAME:
         return ""
     return _extract_parts_text(entry)
 
