@@ -88,6 +88,15 @@ class TestAliyunApiProperties:
         # ROS ValidateTemplate only validates template syntax server-side; no mutation.
         assert api.is_read_only({"action": "ValidateTemplate"}) is True
 
+    def test_is_read_only_for_ros_preview_stack(self, api: AliyunApi) -> None:
+        assert api.is_read_only({"product": "ros", "action": "PreviewStack"}) is True
+
+    def test_is_concurrency_safe_for_ros_preview_stack(self, api: AliyunApi) -> None:
+        assert api.is_concurrency_safe({"product": "ros", "action": "PreviewStack"}) is True
+
+    def test_preview_stack_is_not_generically_read_only_for_other_products(self, api: AliyunApi) -> None:
+        assert api.is_read_only({"product": "ecs", "action": "PreviewStack"}) is False
+
     def test_is_read_only_false_for_create(self, api: AliyunApi) -> None:
         assert api.is_read_only({"action": "CreateInstance"}) is False
 

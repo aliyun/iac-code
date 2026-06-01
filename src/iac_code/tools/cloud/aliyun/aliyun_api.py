@@ -175,6 +175,15 @@ class AliyunApi(BaseCloudApi):
         cred = credentials.get_provider("aliyun")
         return cred.region_id if cred else ""
 
+    def is_read_only(self, input: dict | None = None) -> bool:
+        if input is None:
+            return False
+        product = input.get("product", "")
+        action = input.get("action", "")
+        if product == "ros" and action == "PreviewStack":
+            return True
+        return super().is_read_only(input)
+
     @property
     def input_schema(self) -> dict[str, Any]:
         region_desc = "The region to call the action in."
