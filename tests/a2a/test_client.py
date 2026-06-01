@@ -138,6 +138,57 @@ async def test_send_message_posts_a2a_1_jsonrpc_request() -> None:
     assert headers == {"A2A-Version": "1.0"}
 
 
+def test_response_text_extracts_from_task_history_agent_message() -> None:
+    response = A2AClientResponse(
+        payload={
+            "result": {
+                "task": {
+                    "history": [
+                        {"role": "ROLE_USER", "parts": [{"text": "hello"}]},
+                        {
+                            "role": "ROLE_AGENT",
+                            "parts": [{"text": "first "}, {"text": "answer"}],
+                        },
+                        {"role": "ROLE_USER", "parts": [{"text": "follow up"}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "final answer"}]},
+                    ]
+                }
+            }
+        }
+    )
+
+    assert response.text == "final answer"
+
+
+def test_response_text_extracts_from_task_status_message_parts() -> None:
+    response = A2AClientResponse(
+        payload={
+            "result": {
+                "task": {
+                    "status": {
+                        "message": {
+                            "role": "ROLE_AGENT",
+                            "parts": [{"text": "status "}, {"text": "text"}],
+                        }
+                    },
+                    "history": [{"role": "ROLE_USER", "parts": [{"text": "hi"}]}],
+                }
+            }
+        }
+    )
+
+    assert response.text == "status text"
+
+
+def test_response_text_returns_empty_for_malformed_payload() -> None:
+    assert A2AClientResponse(payload={}).text == ""
+    assert A2AClientResponse(payload={"result": "nope"}).text == ""
+    assert (
+        A2AClientResponse(payload={"result": {"task": {"history": [{"role": "ROLE_AGENT", "parts": "broken"}]}}}).text
+        == ""
+    )
+
+
 @pytest.mark.asyncio
 async def test_stream_message_posts_stream_request_and_yields_events() -> None:
     http = FakeHTTPClient()

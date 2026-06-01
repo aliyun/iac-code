@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from iac_code.a2a.transport import A2ATransportBinding, UnsupportedA2ATransportError
 from iac_code.i18n import _
 
-RUNNABLE_TRANSPORTS = frozenset({"http", "stdio", "unix", "websocket", "grpc", "grpc-jsonrpc", "redis-streams"})
+SUPPORTED_TRANSPORTS = frozenset({"http", "stdio", "unix", "websocket", "grpc", "grpc-jsonrpc", "redis-streams"})
 
 
 class A2ATransportConfigError(ValueError):
@@ -159,8 +159,16 @@ def select_binding(bindings: Sequence[A2ATransportBinding]) -> A2ATransportBindi
     raise UnsupportedA2ATransportError(f"No runnable A2A transport found. Candidate bindings: {names}")
 
 
+def validate_transport_supported(transport: str) -> None:
+    """Raise ValueError if the transport name is not recognised."""
+    if transport not in SUPPORTED_TRANSPORTS:
+        supported = ", ".join(sorted(SUPPORTED_TRANSPORTS))
+        raise ValueError(f"Unsupported transport '{transport}'. Supported values: {supported}")
+
+
 def validate_transport_for_platform(transport: str) -> None:
-    """Raise RuntimeError if the transport is unavailable on the current platform."""
+    """Raise an error if the transport is unsupported or unavailable on the current platform."""
+    validate_transport_supported(transport)
     if transport == "unix" and sys.platform == "win32":
         raise RuntimeError(
             _(

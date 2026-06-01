@@ -7,6 +7,7 @@ from time import monotonic
 from typing import Any, AsyncIterator
 
 import httpx
+from a2a.types import Role
 
 from iac_code.a2a.signing import AgentCardSignature, agent_card_signature_jwks_url, verify_agent_card_dict
 from iac_code.a2a.transport import A2AAuthConfig, A2ATransportBinding, UnsupportedA2ATransportError, headers_for_auth
@@ -31,19 +32,52 @@ class A2AClientResponse:
         if not isinstance(result, dict):
             return ""
         text = result.get("text")
-        if isinstance(text, str):
+        if isinstance(text, str) and text:
             return text
         status = result.get("status")
-        if not isinstance(status, dict):
-            return ""
-        message = status.get("message")
-        if not isinstance(message, dict):
-            return ""
-        parts = message.get("parts")
-        if not isinstance(parts, list) or not parts or not isinstance(parts[0], dict):
-            return ""
-        value = parts[0].get("text")
-        return value if isinstance(value, str) else ""
+        if isinstance(status, dict):
+            extracted = _extract_parts_text(status.get("message"))
+            if extracted:
+                return extracted
+        task = result.get("task")
+        if isinstance(task, dict):
+            task_status = task.get("status")
+            if isinstance(task_status, dict):
+                extracted = _extract_parts_text(task_status.get("message"))
+                if extracted:
+                    return extracted
+            history = task.get("history")
+            if isinstance(history, list):
+                for entry in reversed(history):
+                    extracted = _extract_agent_entry_text(entry)
+                    if extracted:
+                        return extracted
+        return ""
+
+
+_AGENT_ROLE_NAME = Role.Name(Role.ROLE_AGENT)
+
+
+def _extract_agent_entry_text(entry: Any) -> str:
+    if not isinstance(entry, dict) or entry.get("role") != _AGENT_ROLE_NAME:
+        return ""
+    return _extract_parts_text(entry)
+
+
+def _extract_parts_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    parts = message.get("parts")
+    if not isinstance(parts, list):
+        return ""
+    pieces: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        value = part.get("text")
+        if isinstance(value, str):
+            pieces.append(value)
+    return "".join(pieces)
 
 
 class A2AClient:

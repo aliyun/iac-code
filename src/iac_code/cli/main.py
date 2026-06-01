@@ -573,7 +573,11 @@ def a2a(
     ),
 ) -> None:
     """Run iac-code as an A2A 1.0 server."""
-    config = _load_a2a_config(config_path) if config_path else {}
+    try:
+        config = _load_a2a_config(config_path) if config_path else {}
+    except Exception as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
     host = _a2a_config_value(ctx, config, "host", host)
     port = _a2a_config_value(ctx, config, "port", port)
     transport = _a2a_config_value(ctx, config, "transport", transport)
@@ -789,6 +793,8 @@ def a2a_call(
         route = _a2a_client_route_specs(ctx, config, route)
         route_name = _a2a_config_value(ctx, config, "route_name", route_name)
         cwd = _a2a_config_value(ctx, config, "cwd", cwd)
+        if cwd in ("", "."):
+            cwd = str(Path.cwd())
         context_id = _a2a_config_value(ctx, config, "context_id", context_id)
         timeout = _a2a_config_value(ctx, config, "timeout", timeout)
         stream = _a2a_config_value(ctx, config, "stream", stream)
@@ -809,6 +815,10 @@ def a2a_call(
             require_card_signature=require_card_signature,
         )
         if not url:
+            if not route and not route_name:
+                raise ValueError(
+                    "url is required. Provide --url or url in --config, or configure --route/--route-name."
+                )
             from iac_code.a2a.router import A2ARouter
 
             selected = A2ARouter([_parse_a2a_route_spec(value) for value in route]).resolve(
