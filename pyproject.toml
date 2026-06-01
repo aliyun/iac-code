@@ -21,6 +21,7 @@ dependencies = [
     "pyperclip>=1.8.0",
     "openai>=1.50",
     "httpx>=0.27.0",
+    "packaging>=24.0",
     "tiktoken>=0.7.0",
     "jsonschema>=4.20",
     "alibabacloud-ros20190910>=3.0.0",

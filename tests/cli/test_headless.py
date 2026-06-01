@@ -186,6 +186,83 @@ class TestCLIFlags:
             mock_runner.assert_called_once()
             mock_instance.run.assert_called_once_with("hello")
 
+    def test_prompt_flag_does_not_start_update_checker(self):
+        from iac_code.cli.main import app
+
+        with (
+            patch("iac_code.cli.headless.HeadlessRunner") as mock_runner,
+            patch("iac_code.services.update_checker.start_background_update_check") as update_checker,
+        ):
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value=0)
+            mock_runner.return_value = mock_instance
+
+            result = runner_cli.invoke(app, ["-p", "hello"])
+
+            assert result.exit_code == 0
+            mock_runner.assert_called_once()
+            mock_instance.run.assert_called_once_with("hello")
+            update_checker.assert_not_called()
+
+    def test_acp_server_does_not_start_update_checker(self):
+        import sys
+        import types
+
+        from iac_code.cli.main import app
+
+        fake_acp = types.ModuleType("iac_code.acp")
+        fake_acp.acp_main = MagicMock()
+        fake_acp.acp_main_http = MagicMock()
+
+        with (
+            patch.dict(sys.modules, {"iac_code.acp": fake_acp}),
+            patch("iac_code.services.update_checker.start_background_update_check") as update_checker,
+        ):
+            result = runner_cli.invoke(app, ["acp"])
+
+        assert result.exit_code == 0
+        fake_acp.acp_main.assert_called_once()
+        update_checker.assert_not_called()
+
+    def test_a2a_server_does_not_start_update_checker(self):
+        import sys
+        import types
+
+        from iac_code.cli.main import app
+
+        fake_a2a_app = types.ModuleType("iac_code.a2a.app")
+        fake_a2a_app.run_server = MagicMock()
+        fake_a2a_app.resolve_token = MagicMock(return_value=None)
+        fake_a2a_app.resolve_basic_credentials = MagicMock(return_value=None)
+        fake_a2a_app.resolve_api_key = MagicMock(return_value=None)
+        fake_a2a_app.resolve_api_key_header = MagicMock(return_value=None)
+
+        with (
+            patch.dict(sys.modules, {"iac_code.a2a.app": fake_a2a_app}),
+            patch("iac_code.services.update_checker.start_background_update_check") as update_checker,
+        ):
+            result = runner_cli.invoke(app, ["a2a"])
+
+        assert result.exit_code == 0
+        fake_a2a_app.run_server.assert_called_once()
+        update_checker.assert_not_called()
+
+    def test_a2a_client_call_does_not_start_update_checker(self):
+        from iac_code.cli.main import app
+
+        with (
+            patch("iac_code.cli.main._run_a2a_call", new=AsyncMock(return_value="")) as run_a2a_call,
+            patch("iac_code.services.update_checker.start_background_update_check") as update_checker,
+        ):
+            result = runner_cli.invoke(
+                app,
+                ["a2a-client", "call", "--url", "http://example.test/a2a", "--prompt", "hello"],
+            )
+
+        assert result.exit_code == 0
+        run_a2a_call.assert_awaited_once()
+        update_checker.assert_not_called()
+
     def test_output_format_passed_to_headless(self):
         from iac_code.cli.main import app
 

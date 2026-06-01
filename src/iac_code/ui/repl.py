@@ -34,12 +34,20 @@ from iac_code.memory.memory_manager import MemoryManager
 from iac_code.providers.manager import ProviderManager
 from iac_code.services.session_index import SessionIndex
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.update_checker import (
+    PendingUpdate,
+    get_pending_update,
+    run_update_command,
+    start_background_update_check,
+    suppress_version,
+)
 from iac_code.state import AppStateStore
 from iac_code.state.app_state import AppState
 from iac_code.tasks.notification_queue import NotificationQueue
 from iac_code.tasks.task_state import TaskManager
 from iac_code.tools.base import ToolRegistry
-from iac_code.ui.banner import render_welcome_banner
+from iac_code.ui.banner import render_update_notice, render_update_prompt_header, render_welcome_banner
+from iac_code.ui.components.select import Select, SelectLayout, TextOption
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.ui.core.prompt_input import PromptInput, PromptInputResult
 from iac_code.ui.keybindings.manager import KeyBinding, KeybindingManager
@@ -276,12 +284,16 @@ class InlineREPL:
         # Capture session start time for duration calculation
         self._started_monotonic = time.monotonic()
 
+        startup_update = self._handle_startup_update()
         state = self.store.get_state()
+        if startup_update is not None:
+            self.console.print(render_update_notice(startup_update))
         self.console.print(render_welcome_banner(state.model, state.cwd, session_id=self._session_id))
         if self._resume_messages:
             self.renderer.replay_history(self._resume_messages)
             self.console.print()  # blank line before first new user turn
         start_background_housekeeping(session_id=self._session_id)
+        self._start_background_update_checker()
         self._register_global_keybindings()
 
         # Clear IEXTEN for the whole session so macOS/BSD can't latch Ctrl+O
@@ -422,6 +434,64 @@ class InlineREPL:
             await self._handle_command(prompt)
         else:
             await self._handle_chat(prompt)
+
+    def _handle_startup_update(self) -> PendingUpdate | None:
+        """Prompt for a cached update before the welcome banner."""
+        update = get_pending_update()
+        if update is None:
+            return None
+
+        self.console.print(render_update_prompt_header(update))
+        selection = Select(
+            [
+                TextOption(
+                    label=_("Update now"),
+                    value="update_now",
+                    description=_("Run the shown update command and exit when it succeeds."),
+                ),
+                TextOption(
+                    label=_("Skip"),
+                    value="skip",
+                    description=_("Continue with the current version for this session."),
+                ),
+                TextOption(
+                    label=_("Skip until next version"),
+                    value="skip_until_next",
+                    description=_("Hide this update until a newer version is available."),
+                ),
+            ],
+            default_value="skip",
+            layout=SelectLayout.EXPANDED,
+            visible_count=3,
+        ).run()
+
+        if selection == "skip_until_next":
+            suppress_version(update.version)
+            return None
+        if selection in (None, "skip"):
+            return update
+
+        try:
+            result = run_update_command(update)
+        except Exception:
+            logger.opt(exception=True).debug("Startup update command failed")
+            self.console.print(
+                "[yellow]{}[/yellow]".format(_("Update command failed. Continuing with the current version."))
+            )
+            return update
+
+        if result.returncode == 0:
+            self.console.print("[green]{}[/green]".format(_("Update completed. Restart iac-code to continue.")))
+            raise SystemExit(0)
+
+        self.console.print(
+            "[yellow]{}[/yellow]".format(_("Update command failed. Continuing with the current version."))
+        )
+        return update
+
+    def _start_background_update_checker(self) -> None:
+        """Start the asynchronous update check for a future session."""
+        start_background_update_check()
 
     # ------------------------------------------------------------------
     # Keybinding registration
