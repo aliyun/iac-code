@@ -282,7 +282,7 @@ class TelemetryClient:
 
     @staticmethod
     def _user_otlp_enabled() -> bool:
-        return bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"))
+        return bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")) and not is_telemetry_disabled()
 
     def _maybe_append_user_metric_reader(self, readers: list) -> None:
         if not self._user_otlp_enabled():

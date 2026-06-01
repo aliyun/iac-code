@@ -34,12 +34,20 @@ from iac_code.memory.memory_manager import MemoryManager
 from iac_code.providers.manager import ProviderManager
 from iac_code.services.session_index import SessionIndex
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.update_checker import (
+    PendingUpdate,
+    get_pending_update,
+    run_update_command,
+    start_background_update_check,
+    suppress_version,
+)
 from iac_code.state import AppStateStore
 from iac_code.state.app_state import AppState
 from iac_code.tasks.notification_queue import NotificationQueue
 from iac_code.tasks.task_state import TaskManager
 from iac_code.tools.base import ToolRegistry
-from iac_code.ui.banner import render_welcome_banner
+from iac_code.ui.banner import render_update_notice, render_update_prompt_header, render_welcome_banner
+from iac_code.ui.components.select import Select, SelectLayout, TextOption
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.ui.core.prompt_input import PromptInput, PromptInputResult
 from iac_code.ui.keybindings.manager import KeyBinding, KeybindingManager
@@ -49,6 +57,7 @@ from iac_code.ui.suggestions.command_provider import CommandProvider
 from iac_code.ui.suggestions.directory_provider import DirectoryProvider
 from iac_code.ui.suggestions.file_provider import FileProvider
 from iac_code.ui.suggestions.shell_history_provider import ShellHistoryProvider
+from iac_code.ui.suggestions.skill_provider import SkillProvider
 from iac_code.utils.background_housekeeping import start_background_housekeeping
 from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipboard, try_read_image_from_path
 from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
@@ -239,6 +248,7 @@ class InlineREPL:
         self._suggestion_aggregator = SuggestionAggregator(
             [
                 CommandProvider(self.command_registry),
+                SkillProvider(self.command_registry),
                 FileProvider(cwd),
                 DirectoryProvider(cwd),
                 ShellHistoryProvider(),
@@ -274,12 +284,16 @@ class InlineREPL:
         # Capture session start time for duration calculation
         self._started_monotonic = time.monotonic()
 
+        startup_update = self._handle_startup_update()
         state = self.store.get_state()
+        if startup_update is not None:
+            self.console.print(render_update_notice(startup_update))
         self.console.print(render_welcome_banner(state.model, state.cwd, session_id=self._session_id))
         if self._resume_messages:
             self.renderer.replay_history(self._resume_messages)
             self.console.print()  # blank line before first new user turn
         start_background_housekeeping(session_id=self._session_id)
+        self._start_background_update_checker()
         self._register_global_keybindings()
 
         # Clear IEXTEN for the whole session so macOS/BSD can't latch Ctrl+O
@@ -420,6 +434,69 @@ class InlineREPL:
             await self._handle_command(prompt)
         else:
             await self._handle_chat(prompt)
+
+    def _handle_startup_update(self) -> PendingUpdate | None:
+        """Prompt for a cached update before the welcome banner."""
+        if not sys.stdin.isatty():
+            return None
+        update = get_pending_update()
+        if update is None:
+            return None
+
+        self.console.print(render_update_prompt_header(update))
+        selection = Select(
+            [
+                TextOption(
+                    label=_("Update now"),
+                    value="update_now",
+                    description=_("Run the shown update command and exit when it succeeds."),
+                ),
+                TextOption(
+                    label=_("Skip"),
+                    value="skip",
+                    description=_("Continue with the current version for this session."),
+                ),
+                TextOption(
+                    label=_("Skip until next version"),
+                    value="skip_until_next",
+                    description=_("Hide this update until a newer version is available."),
+                ),
+            ],
+            default_value="skip",
+            layout=SelectLayout.EXPANDED,
+            visible_count=3,
+        ).run()
+
+        if selection == "skip_until_next":
+            suppress_version(update.version)
+            return None
+        if selection in (None, "skip"):
+            return update
+
+        try:
+            result = run_update_command(update)
+        except Exception:
+            logger.opt(exception=True).debug("Startup update command failed")
+            self.console.print(
+                "[yellow]{}[/yellow]".format(_("Update command failed. Continuing with the current version."))
+            )
+            return update
+
+        if result.returncode == 0:
+            self.console.print("[green]{}[/green]".format(_("Update completed. Restart iac-code to continue.")))
+            from iac_code.services.telemetry import graceful_shutdown
+
+            graceful_shutdown()
+            raise SystemExit(0)
+
+        self.console.print(
+            "[yellow]{}[/yellow]".format(_("Update command failed. Continuing with the current version."))
+        )
+        return update
+
+    def _start_background_update_checker(self) -> None:
+        """Start the asynchronous update check for a future session."""
+        start_background_update_check()
 
     # ------------------------------------------------------------------
     # Keybinding registration
@@ -586,13 +663,25 @@ class InlineREPL:
 
     async def _handle_command(self, user_input: str) -> None:
         """Dispatch a slash command and print the result."""
+        is_skill_trigger = user_input.startswith("$")
         name, args = self.command_registry.parse(user_input)
         cmd = self.command_registry.get(name)
-        if cmd is None:
-            error_msg = _("Unknown command: /{name}. Type /help for available commands.").format(name=name)
+
+        def _emit_error(message: str) -> None:
             msg_count = len(self._agent_loop.context_manager.get_messages())
-            self._command_log.append((user_input, error_msg, msg_count, True))
-            self.renderer.print_system_message(error_msg, style="red")
+            self._command_log.append((user_input, message, msg_count, True))
+            self.renderer.print_system_message(message, style="red")
+
+        if cmd is None:
+            if is_skill_trigger:
+                _emit_error(_("Unknown skill: ${name}. Type / to list commands and skills.").format(name=name))
+            else:
+                _emit_error(_("Unknown command: /{name}. Type /help for available commands.").format(name=name))
+            return
+
+        # The "$" trigger invokes skills only; reject built-in commands with a clear hint.
+        if is_skill_trigger and not isinstance(cmd, PromptCommand):
+            _emit_error(_("$ only invokes skills. Use /{name} instead.").format(name=name))
             return
 
         if isinstance(cmd, PromptCommand):

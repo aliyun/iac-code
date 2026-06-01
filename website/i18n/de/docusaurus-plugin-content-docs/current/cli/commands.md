@@ -7,6 +7,8 @@ description: Vollstaendige Referenz fuer eingebaute interaktive Befehle.
 
 Slash-Befehle steuern IaC Code innerhalb einer interaktiven Sitzung. Tippen Sie `/`, um verfuegbare Befehle anzuzeigen, und tippen Sie weiter, um die Liste zu filtern. Ein Befehl wird nur erkannt, wenn er am Anfang Ihrer Nachricht steht.
 
+Die `/`-Liste enthaelt sowohl integrierte Befehle als auch alle konfigurierten Skills. Um die Vorschlaege nur auf Skills zu beschraenken, verwenden Sie stattdessen `$` — `$<name>` listet und ruft ausschliesslich Skills auf, und wenn Sie `$` gefolgt vom Namen eines integrierten Befehls (zum Beispiel `$help`) eingeben, wird ein Fehler ausgegeben, der auf das `/`-Aequivalent verweist.
+
 Text nach dem Befehlsnamen wird als Argumente uebergeben. In der folgenden Tabelle kennzeichnet `<arg>` ein erforderliches Argument und `[arg]` ein optionales Argument.
 
 | Befehl | Zweck |

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import getpass
+import shlex
 from io import StringIO
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from rich.console import Console
@@ -22,7 +24,7 @@ def make_console(width: int = 80) -> Console:
     )
 
 
-def render_to_str(panel: Panel, width: int = 80) -> str:
+def render_to_str(panel: Any, width: int = 80) -> str:
     console = make_console(width=width)
     console.print(panel)
     return console.file.getvalue()  # type: ignore[attr-defined]
@@ -294,6 +296,14 @@ class TestRenderWelcomeBanner:
         assert panel.border_style == ACCENT
         assert ACCENT == "bright_cyan"
 
+    def test_banner_shows_iac_code_version(self):
+        """Banner should display the iac-code version as a dim metadata line."""
+        from iac_code import __version__
+
+        panel = self._call("model", str(Path.home()))
+        text = render_to_str(panel, width=120)
+        assert f"iac-code v{__version__}" in text
+
     def test_banner_renders_dashscope_token_plan_provider(self):
         with (
             patch("iac_code.config.get_active_provider_key", return_value="k"),
@@ -307,3 +317,63 @@ class TestRenderWelcomeBanner:
         assert "qwen3.6-plus" in text
         # Source or translated form — either proves the dict lookup hit.
         assert "DashScope Token Plan" in text or "百炼" in text
+
+
+# ---------------------------------------------------------------------------
+# update prompt rendering
+# ---------------------------------------------------------------------------
+
+
+class TestUpdatePromptRendering:
+    """Tests for update prompt and skipped-update notice rendering."""
+
+    def _pending_update(self, update_command: tuple[str, ...]):
+        from iac_code.services.update_checker import PendingUpdate
+
+        return PendingUpdate(
+            version="0.4.0",
+            current_version="0.3.0",
+            source="official_pypi",
+            checked_at=100.0,
+            update_command=update_command,
+            release_notes_url="https://github.com/aliyun/iac-code/releases/latest",
+        )
+
+    def test_prompt_header_contains_versions_command_and_release_notes(self):
+        from iac_code.ui.banner import render_update_prompt_header
+
+        update = self._pending_update(("/python", "-m", "pip", "install", "--upgrade", "iac-code"))
+        command_text = shlex.join(update.update_command)
+
+        text = render_to_str(render_update_prompt_header(update), width=120)
+
+        assert "Update available" in text
+        assert update.current_version in text
+        assert update.version in text
+        assert command_text in text
+        assert update.release_notes_url in text
+
+    def test_notice_contains_update_notice_command_and_release_notes(self):
+        from iac_code.ui.banner import render_update_notice
+
+        update = self._pending_update(("/python", "-m", "pip", "install", "--upgrade", "iac-code"))
+        command_text = shlex.join(update.update_command)
+
+        text = render_to_str(render_update_notice(update), width=120)
+
+        assert "Update available" in text
+        assert command_text in text
+        assert update.release_notes_url in text
+
+    def test_prompt_and_notice_quote_command_parts_with_spaces(self):
+        from iac_code.ui.banner import render_update_notice, render_update_prompt_header
+
+        update = self._pending_update(("/path with spaces/python", "-m", "pip", "install", "--upgrade", "iac-code"))
+        command_text = shlex.join(update.update_command)
+
+        prompt_text = render_to_str(render_update_prompt_header(update), width=140)
+        notice_text = render_to_str(render_update_notice(update), width=140)
+
+        assert command_text == "'/path with spaces/python' -m pip install --upgrade iac-code"
+        assert command_text in prompt_text
+        assert command_text in notice_text

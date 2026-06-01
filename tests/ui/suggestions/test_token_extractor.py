@@ -126,3 +126,36 @@ class TestTokenExtractor:
         assert token is not None
         assert token.trigger == "!"
         assert token.text == "!"
+
+    def test_dollar_at_start(self, extractor):
+        """'$dep' at line start → trigger='$'"""
+        text = "$dep"
+        token = extractor.extract(text, len(text))
+        assert token is not None
+        assert token.trigger == "$"
+        assert token.text == "$dep"
+        assert token.start == 0
+        assert token.end == 4
+
+    def test_dollar_alone(self, extractor):
+        """'$' alone → trigger='$'"""
+        text = "$"
+        token = extractor.extract(text, len(text))
+        assert token is not None
+        assert token.trigger == "$"
+        assert token.text == "$"
+
+    def test_dollar_after_space(self, extractor):
+        """'run $deploy' → trigger='$'"""
+        text = "run $deploy"
+        token = extractor.extract(text, len(text))
+        assert token is not None
+        assert token.trigger == "$"
+        assert token.text == "$deploy"
+
+    def test_dollar_mid_word_no_trigger(self, extractor):
+        """'cost$5' has $ inside a word → no skill trigger"""
+        text = "cost$5"
+        token = extractor.extract(text, len(text))
+        # "$" is not at the start of the token, so no "$" trigger
+        assert token is None

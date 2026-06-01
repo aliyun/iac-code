@@ -311,9 +311,14 @@ class TestEditFileRendering:
     def test_user_facing_name_create_for_empty_old(self, edit_file_tool):
         assert edit_file_tool.user_facing_name({"old_string": ""}) == "Create"
 
-    def test_user_facing_name_update_default(self, edit_file_tool):
+    def test_user_facing_name_update_for_nonempty_old(self, edit_file_tool):
         assert edit_file_tool.user_facing_name({"old_string": "x"}) == "Update"
-        assert edit_file_tool.user_facing_name(None) == "Update"
+
+    def test_user_facing_name_neutral_when_old_string_missing(self, edit_file_tool):
+        """During streaming `old_string` may not have arrived yet; fall back to
+        a neutral name so a Create operation doesn't briefly render as Update."""
+        assert edit_file_tool.user_facing_name(None) == "Edit"
+        assert edit_file_tool.user_facing_name({"path": "/f.py"}) == "Edit"
 
     def test_get_activity_description_with_input(self, edit_file_tool):
         msg = edit_file_tool.get_activity_description({"path": "/f.py"})

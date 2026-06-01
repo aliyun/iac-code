@@ -2,6 +2,7 @@ from alibabacloud_ros20190910.client import Client as RosClient
 from alibabacloud_tea_openapi import models as open_api_models
 
 from iac_code.services.providers.aliyun import AliyunCredential
+from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 
 
 class RosClientFactory:
@@ -22,6 +23,7 @@ class RosClientFactory:
     @staticmethod
     def _build_config(credential: AliyunCredential, region_id: str) -> open_api_models.Config:
         mode = credential.mode
+        user_agent = build_user_agent()
 
         if mode == "StsToken":
             return open_api_models.Config(
@@ -29,6 +31,7 @@ class RosClientFactory:
                 access_key_secret=credential.access_key_secret,
                 security_token=credential.sts_token,
                 region_id=region_id,
+                user_agent=user_agent,
             )
 
         if mode == "RamRoleArn":
@@ -46,6 +49,7 @@ class RosClientFactory:
             return open_api_models.Config(
                 credential=cred_client,
                 region_id=region_id,
+                user_agent=user_agent,
             )
 
         # Default: AK mode
@@ -53,4 +57,5 @@ class RosClientFactory:
             access_key_id=credential.access_key_id,
             access_key_secret=credential.access_key_secret,
             region_id=region_id,
+            user_agent=user_agent,
         )

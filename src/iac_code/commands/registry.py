@@ -240,12 +240,16 @@ class CommandRegistry:
         return None
 
     def is_command(self, text: str) -> bool:
-        """Check if text is a command"""
-        return text.startswith("/")
+        """Check if text is a command (``/``) or skill (``$``) invocation."""
+        return text.startswith(("/", "$"))
 
     def parse(self, text: str) -> tuple[str, list[str]]:
-        """Parse command text, return (command name, argument list)"""
-        parts = text.lstrip("/").split()
+        """Parse command text, return (command name, argument list).
+
+        Accepts both the ``/`` trigger (commands + skills) and the ``$``
+        trigger (skills only).
+        """
+        parts = text.lstrip("/$").split()
         name = parts[0] if parts else ""
         args = parts[1:] if len(parts) > 1 else []
         return name, args

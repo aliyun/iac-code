@@ -82,7 +82,7 @@ paths:
 | `argument_hint` | 否 | `""` | 命令名后显示的占位符提示 |
 | `arguments` | 否 | `[]` | 用于位置替换的命名参数列表 |
 | `allowed_tools` | 否 | `[]` | 技能允许使用的工具（适用于 fork 模式） |
-| `user_invocable` | 否 | `true` | 用户是否可以通过 `/name` 直接调用 |
+| `user_invocable` | 否 | `true` | 用户是否可以通过 `/name`（或 `$name`）直接调用 |
 | `model` | 否 | `"inherit"` | 技能执行时的模型覆盖 |
 | `effort` | 否 | `""` | 思考 effort 覆盖 |
 | `context` | 否 | `"inline"` | 执行模式：`inline` 或 `fork` |
@@ -181,7 +181,7 @@ user_invocable: true
 如果提供了资源栈名称，还需检查当前资源栈状态。
 ```
 
-将此文件保存为 `~/.iac-code/skills/checklist.md` 或项目中的 `.iac-code/skills/checklist.md`，然后在 REPL 中通过 `/checklist` 调用。
+将此文件保存为 `~/.iac-code/skills/checklist.md` 或项目中的 `.iac-code/skills/checklist.md`，然后在 REPL 中通过 `/checklist` 调用 —— 也可以使用 `$checklist`，效果完全相同，但 `$` 触发器只会筛选 skill 候选项。
 
 ## 权限
 

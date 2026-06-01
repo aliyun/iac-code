@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import getpass
+import shlex
+from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.align import Align
 from rich.console import Group
@@ -12,6 +15,9 @@ from rich.table import Table
 from rich.text import Text
 
 from iac_code.i18n import _
+
+if TYPE_CHECKING:
+    from iac_code.services.update_checker import PendingUpdate
 
 # Cloud logo (same as components/logo.py)
 LOGO_LINES = [
@@ -23,6 +29,34 @@ LOGO_LINES = [
 ]
 
 ACCENT = "bright_cyan"
+
+
+def _format_update_command(command: Iterable[str]) -> str:
+    return shlex.join(tuple(command))
+
+
+def render_update_prompt_header(update: PendingUpdate) -> Group:
+    """Render update information above the interactive update prompt."""
+    command_text = _format_update_command(update.update_command)
+    items = [
+        Text(_("Update available! {} -> {}").format(update.current_version, update.version), style="bold bright_cyan"),
+        Text("{}: {}".format(_("Update command"), command_text), style="bold"),
+    ]
+    if update.release_notes_url:
+        items.append(Text("{}: {}".format(_("Release notes"), update.release_notes_url), style="dim"))
+    return Group(*items)
+
+
+def render_update_notice(update: PendingUpdate) -> Panel:
+    """Render a notice for an update the user previously skipped."""
+    command_text = _format_update_command(update.update_command)
+    items = [
+        Text(_("Update available! {} -> {}").format(update.current_version, update.version), style="bold bright_cyan"),
+        Text(_("Run {} to update.").format(command_text)),
+    ]
+    if update.release_notes_url:
+        items.append(Text("{}: {}".format(_("Release notes"), update.release_notes_url), style="dim"))
+    return Panel(Group(*items), border_style=ACCENT, expand=True)
 
 
 def _get_provider_display() -> str:
@@ -90,12 +124,15 @@ def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -
     else:
         model_display = model
 
+    from iac_code import __version__
+
     items = [
         Text(),
         Text("  {} {}!".format(_("Welcome back"), username), style="bold"),
         Text(),
         logo_table,
         Text(),
+        Text(f"  iac-code v{__version__}", style="dim"),
         Text(f"  {model_display}", style="dim") if model_display else Text(),
         Text(f"  {cwd_display}", style="dim"),
         Text("  {}: {}".format(_("Session"), session_id), style="dim") if session_id else Text(),

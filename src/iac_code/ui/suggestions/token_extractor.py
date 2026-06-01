@@ -7,7 +7,7 @@ import re
 from iac_code.ui.suggestions.types import CompletionToken
 
 # Characters that can form part of a token
-_TOKEN_CHARS = re.compile(r"[\w._\-/\\~@#!]")
+_TOKEN_CHARS = re.compile(r"[\w._\-/\\~@#!$]")
 
 
 def _is_token_char(ch: str) -> bool:
@@ -52,6 +52,17 @@ class TokenExtractor:
                     start=token_start,
                     end=end,
                     trigger="/",
+                )
+            return None
+
+        if first_char == "$":
+            # "$" trigger: skills only; same placement rule as "/".
+            if token_start == 0 or text[token_start - 1] in (" ", "\t", "\n"):
+                return CompletionToken(
+                    text=token_text,
+                    start=token_start,
+                    end=end,
+                    trigger="$",
                 )
             return None
 

@@ -82,7 +82,7 @@ paths:
 | `argument_hint` | No | `""` | Placeholder shown after the command name |
 | `arguments` | No | `[]` | Named argument list for positional substitution |
 | `allowed_tools` | No | `[]` | Tools the skill is allowed to use (applies to fork mode) |
-| `user_invocable` | No | `true` | Whether the user can invoke this skill directly via `/name` |
+| `user_invocable` | No | `true` | Whether the user can invoke this skill directly via `/name` (or `$name`) |
 | `model` | No | `"inherit"` | Model override for this skill execution |
 | `effort` | No | `""` | Thinking effort override |
 | `context` | No | `"inline"` | Execution mode: `inline` or `fork` |
@@ -181,7 +181,7 @@ Review the current project and generate a pre-deployment checklist covering:
 If a stack name is provided, also check the current stack status.
 ```
 
-Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md` in your project. Then invoke it with `/checklist` in the REPL.
+Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
 
 ## Permissions
 

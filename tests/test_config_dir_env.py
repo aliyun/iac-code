@@ -158,8 +158,9 @@ class TestUserSkillsFollowEnv:
 
         # Place a skill under the configured user-global skills dir.
         user_skills = target / "skills"
-        user_skills.mkdir(parents=True)
-        (user_skills / "my-skill.md").write_text("---\ndescription: Sample skill\n---\nBody.\n")
+        skill_dir = user_skills / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\ndescription: Sample skill\n---\nBody.\n")
 
         # Use a cwd with no project skills so the only USER skill found
         # must come from <env>/skills/.

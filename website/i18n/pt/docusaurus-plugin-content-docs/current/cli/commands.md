@@ -7,6 +7,8 @@ description: Referencia completa dos comandos interativos integrados.
 
 Os comandos slash controlam o IaC Code de dentro de uma sessao interativa. Digite `/` para ver os comandos disponiveis e continue digitando para filtrar a lista. Um comando so e reconhecido quando aparece no inicio da sua mensagem.
 
+A listagem de `/` inclui tanto comandos integrados quanto skills que voce configurou. Para restringir as sugestoes apenas a skills, use `$` em vez disso — `$<nome>` lista e invoca skills exclusivamente, e digitar `$` seguido do nome de um comando integrado (por exemplo `$help`) imprime um erro apontando para o equivalente `/`.
+
 O texto apos o nome do comando e passado como argumentos. Na tabela abaixo, `<arg>` indica um argumento obrigatorio e `[arg]` indica um argumento opcional.
 
 | Comando | Finalidade |

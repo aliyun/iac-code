@@ -23,7 +23,6 @@ _FRAME_INTERVAL = 0.08
 # Verbs displayed in spinner while processing (present participle)
 # These are i18n keys — call _() on them before display.
 SPINNER_VERBS = [
-    "Thinking",
     "Processing",
     "Working",
 ]
@@ -50,7 +49,6 @@ def random_spinner_verb() -> str:
     from iac_code.i18n import _
 
     # NOTE: explicit _() calls for pybabel extraction
-    _("Thinking")
     _("Processing")
     _("Working")
     return _(random.choice(SPINNER_VERBS))

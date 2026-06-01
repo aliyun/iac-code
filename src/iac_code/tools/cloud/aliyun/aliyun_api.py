@@ -20,6 +20,7 @@ from iac_code.services.telemetry import add_metric, log_event
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.services.telemetry.sanitize import sanitize_error_message
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
 
 logger = logging.getLogger(__name__)
@@ -322,6 +323,7 @@ class AliyunApi(BaseCloudApi):
     def _build_config(credential: AliyunCredential, endpoint: str, region_id: str) -> open_api_models.Config:
         """Build OpenAPI config from credential, endpoint, and region."""
         mode = credential.mode
+        user_agent = build_user_agent()
 
         if mode == "StsToken":
             return open_api_models.Config(
@@ -330,6 +332,7 @@ class AliyunApi(BaseCloudApi):
                 security_token=credential.sts_token,
                 endpoint=endpoint,
                 region_id=region_id,
+                user_agent=user_agent,
             )
 
         if mode == "RamRoleArn":
@@ -348,6 +351,7 @@ class AliyunApi(BaseCloudApi):
                 credential=cred_client,
                 endpoint=endpoint,
                 region_id=region_id,
+                user_agent=user_agent,
             )
 
         # Default: AK mode
@@ -356,6 +360,7 @@ class AliyunApi(BaseCloudApi):
             access_key_secret=credential.access_key_secret,
             endpoint=endpoint,
             region_id=region_id,
+            user_agent=user_agent,
         )
 
     @staticmethod

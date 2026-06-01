@@ -45,3 +45,12 @@ def _isolate_iac_home(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("USERPROFILE", str(fake_home))
     monkeypatch.delenv("IAC_CODE_CONFIG_DIR", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _stamp_release_date(monkeypatch):
+    """Simulate a packaged release build so the telemetry local-build gate
+    (empty ``__release_date__`` disables telemetry) doesn't auto-disable
+    telemetry under tests. Individual tests can override to test the gate.
+    """
+    monkeypatch.setattr("iac_code.__release_date__", "2026-01-01")

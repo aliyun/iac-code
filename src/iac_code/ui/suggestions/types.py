@@ -13,7 +13,7 @@ class CompletionToken:
     text: str  # e.g. "/mod" or "@src/u"
     start: int  # start position in input
     end: int  # end position in input
-    trigger: str  # "/" | "@" | "!"
+    trigger: str  # "/" | "$" | "@" | "!"
 
 
 @dataclass(slots=True)
@@ -24,8 +24,8 @@ class SuggestionItem:
     display_text: str
     completion: str  # full text after completion
     description: str
-    icon: str  # "/" command, "+" file, "◇" directory, "↑" history
-    source: str  # "command" | "file" | "directory" | "shell"
+    icon: str  # "/" command, "$" skill, "+" file, "◇" directory, "↑" history
+    source: str  # "command" | "skill" | "file" | "directory" | "shell"
     score: float
     arg_hint: str | None = None  # inline ghost-text hint shown after the full command
 

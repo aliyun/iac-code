@@ -500,6 +500,7 @@ class TestAliyunApiBuildConfig:
         assert config.region_id == "cn-hangzhou"
         assert config.security_token is None
         assert config.credential is None
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
 
     def test_sts_token_mode(self) -> None:
         credential = AliyunCredential(
@@ -515,6 +516,7 @@ class TestAliyunApiBuildConfig:
         assert config.security_token == "my-sts-token"
         assert config.endpoint == "ecs.aliyuncs.com"
         assert config.region_id == "cn-beijing"
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
 
     def test_ram_role_arn_mode(self) -> None:
         credential = AliyunCredential(
@@ -532,3 +534,4 @@ class TestAliyunApiBuildConfig:
         # AK fields should not be set when using credential client
         assert config.access_key_id is None
         assert config.access_key_secret is None
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
