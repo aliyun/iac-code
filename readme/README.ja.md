@@ -54,6 +54,20 @@ stdin からの読み取りもサポートされています：
 echo "OSS バケットを作成" | iac-code --prompt -
 ```
 
+## コントリビュート
+
+[uv](https://docs.astral.sh/uv/getting-started/installation/) をインストールしてから：
+
+```bash
+make install   # 依存関係と pre-commit フックをインストール
+make dev       # デバッグモードで実行
+make test      # テストを実行
+make lint      # リンターを実行
+make format    # コードをフォーマット
+```
+
+詳細は[コントリビュートガイド](https://aliyun.github.io/iac-code/ja/getting-started/contributing)をご覧ください。
+
 ## お問い合わせ
 
 | [DingTalk](https://qr.dingtalk.com/action/joingroup?code=v1,k1,ubm/77U7qRh/STFZUNBP26X4PNg2z6+uhiPcLGtDNfU=&_dt_no_comment=1&origin=11) | [Discord](https://discord.gg/qECFuFBwF) |

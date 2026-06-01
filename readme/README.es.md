@@ -54,6 +54,20 @@ También se admite la lectura desde stdin:
 echo "Crear un bucket OSS" | iac-code --prompt -
 ```
 
+## Contribuir
+
+Instale [uv](https://docs.astral.sh/uv/getting-started/installation/), luego:
+
+```bash
+make install   # instalar dependencias y hooks de pre-commit
+make dev       # ejecutar en modo depuración
+make test      # ejecutar pruebas
+make lint      # ejecutar linters
+make format    # formatear código
+```
+
+Consulte la [Guía de contribución](https://aliyun.github.io/iac-code/es/getting-started/contributing) para más detalles.
+
 ## Contáctenos
 
 | [DingTalk](https://qr.dingtalk.com/action/joingroup?code=v1,k1,ubm/77U7qRh/STFZUNBP26X4PNg2z6+uhiPcLGtDNfU=&_dt_no_comment=1&origin=11) | [Discord](https://discord.gg/qECFuFBwF) |

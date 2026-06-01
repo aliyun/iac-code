@@ -54,6 +54,20 @@ iac-code --prompt "创建一个 VPC 和两台 ECS 实例"
 echo "创建一个 OSS Bucket" | iac-code --prompt -
 ```
 
+## 贡献
+
+安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，然后：
+
+```bash
+make install   # 安装依赖和 pre-commit 钩子
+make dev       # 以调试模式运行
+make test      # 运行测试
+make lint      # 运行代码检查
+make format    # 格式化代码
+```
+
+详见[贡献指南](https://aliyun.github.io/iac-code/zh-Hans/getting-started/contributing)。
+
 ## 联系我们
 
 | [钉钉](https://qr.dingtalk.com/action/joingroup?code=v1,k1,ubm/77U7qRh/STFZUNBP26X4PNg2z6+uhiPcLGtDNfU=&_dt_no_comment=1&origin=11) | [Discord](https://discord.gg/qECFuFBwF) |

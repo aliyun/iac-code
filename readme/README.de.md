@@ -54,6 +54,20 @@ Das Lesen von stdin wird ebenfalls unterstützt:
 echo "Erstelle einen OSS-Bucket" | iac-code --prompt -
 ```
 
+## Mitwirken
+
+Installieren Sie [uv](https://docs.astral.sh/uv/getting-started/installation/), dann:
+
+```bash
+make install   # Abhängigkeiten und Pre-Commit-Hooks installieren
+make dev       # im Debug-Modus ausführen
+make test      # Tests ausführen
+make lint      # Linter ausführen
+make format    # Code formatieren
+```
+
+Weitere Details finden Sie im [Beitragsleitfaden](https://aliyun.github.io/iac-code/de/getting-started/contributing).
+
 ## Kontakt
 
 | [DingTalk](https://qr.dingtalk.com/action/joingroup?code=v1,k1,ubm/77U7qRh/STFZUNBP26X4PNg2z6+uhiPcLGtDNfU=&_dt_no_comment=1&origin=11) | [Discord](https://discord.gg/qECFuFBwF) |
