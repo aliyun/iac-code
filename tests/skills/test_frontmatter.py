@@ -139,3 +139,12 @@ class TestParseFrontmatter:
         assert fm.allowed_tools == ["bash"]
         assert fm.arguments == ["repo"]
         assert fm.paths == ["src"]
+
+    def test_auto_trigger_metadata_mapping(self):
+        md = "---\nauto_trigger:\n  script: auto_trigger.py\n---\nBody"
+        fm, _ = parse_frontmatter(md)
+        assert fm.auto_trigger == {"script": "auto_trigger.py"}
+
+    def test_auto_trigger_metadata_ignores_non_mapping(self):
+        fm = _data_to_frontmatter({"auto_trigger": "auto_trigger.py"})
+        assert fm.auto_trigger == {}

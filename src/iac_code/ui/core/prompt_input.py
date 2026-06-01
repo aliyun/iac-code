@@ -114,6 +114,12 @@ class PromptInput:
         """Return current buffer contents as a string."""
         return "".join(self._buffer)
 
+    def insert_text(self, text: str) -> None:
+        """Insert text at the current cursor position."""
+        if not text:
+            return
+        self._insert(text)
+
     def attach_image(self, pc: "PastedContent") -> None:
         """Insert ``[Image #N]`` at the cursor and track the paste.
 
@@ -209,7 +215,12 @@ class PromptInput:
                 self._cancelled = True
             return
 
-        # 4. Enter — accept suggestion and submit immediately
+        # 4. Shift+Enter → insert newline when the terminal reports Shift.
+        if key == "enter" and key_event.shift:
+            self._insert("\n")
+            return
+
+        # 5. Enter — accept suggestion and submit immediately
         if key == "enter":
             if self._aggregator and self._aggregator.suggestions:
                 result = self._aggregator.accept_selected()
@@ -219,7 +230,7 @@ class PromptInput:
             self._submitted = True
             return
 
-        # 5. Tab → accept ghost text
+        # 6. Tab → accept ghost text
         if key == "tab":
             if self._aggregator:
                 result = self._aggregator.accept_ghost_text()
@@ -229,11 +240,11 @@ class PromptInput:
                     return
             return
 
-        # 6. KeybindingManager resolution (Ctrl+R, Ctrl+P, etc.)
+        # 7. KeybindingManager resolution (Ctrl+R, Ctrl+P, etc.)
         if self._km.resolve(key_event):
             return
 
-        # 7. Up/Down with active suggestions → move selection
+        # 8. Up/Down with active suggestions → move selection
         #    But if the user is actively navigating history, prioritize history.
         _in_history_nav = self._history and self._history.is_navigating
         if self._aggregator and self._aggregator.suggestions and not _in_history_nav:
@@ -244,7 +255,7 @@ class PromptInput:
                 self._aggregator.move_selection(1)
                 return
 
-        # 8. Up/Down with history
+        # 9. Up/Down with history
         if self._history:
             if key == "up":
                 entry = self._history.navigate(-1, self._get_text())
@@ -261,7 +272,7 @@ class PromptInput:
                     self._set_text(entry)
                 return
 
-        # 9. Line editing
+        # 10. Line editing
         if (ctrl and key == "a") or key == "home":
             self._cursor = 0
             return
@@ -307,7 +318,7 @@ class PromptInput:
                 self._text_changed = True
             return
 
-        # 10. Printable character insertion
+        # 11. Printable character insertion
         char = key_event.char
         if char and char.isprintable():
             # Clear clipboard indicator on visible character input

@@ -29,6 +29,32 @@ def test_unix_directory_permissions(tmp_path):
     assert oct(d.stat().st_mode & 0o777) == "0o700"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod has no effect on Windows NTFS")
+def test_ensure_private_dir_creates_and_restricts(tmp_path):
+    from iac_code.utils.file_security import ensure_private_dir
+
+    path = tmp_path / "a" / "private"
+    with patch("iac_code.utils.file_security._IS_WINDOWS", False):
+        result = ensure_private_dir(path)
+
+    assert result == path
+    assert path.is_dir()
+    assert oct(path.stat().st_mode & 0o777) == "0o700"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod has no effect on Windows NTFS")
+def test_ensure_private_file_restricts_existing_file(tmp_path):
+    from iac_code.utils.file_security import ensure_private_file
+
+    path = tmp_path / "secret.txt"
+    path.write_text("secret", encoding="utf-8")
+    with patch("iac_code.utils.file_security._IS_WINDOWS", False):
+        result = ensure_private_file(path)
+
+    assert result == path
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+
+
 def test_windows_file_calls_icacls(tmp_path):
     f = tmp_path / "secret.txt"
     f.write_text("data")

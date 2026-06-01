@@ -167,6 +167,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         max_turns=options.max_turns,
         cwd=cwd,
         permission_context=permission_context,
+        auto_trigger_skills=command_registry.get_model_invocable_skills(),
     )
 
     return AgentRuntime(

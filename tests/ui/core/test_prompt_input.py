@@ -180,6 +180,28 @@ class TestPromptInputHandleKey:
         assert "\n" in inp._get_text()
         assert inp._submitted is False
 
+    def test_shift_enter_inserts_newline(self):
+        inp = make_input()
+        inp._handle_key(_key("a"))
+        inp._handle_key(KeyEvent(key="enter", char="", shift=True))
+
+        assert inp._get_text() == "a\n"
+        assert inp._submitted is False
+
+    def test_shift_enter_with_suggestions_inserts_newline_without_accepting(self):
+        from unittest.mock import MagicMock
+
+        aggregator = MagicMock()
+        aggregator.suggestions = [MagicMock()]
+        aggregator.accept_selected.return_value = ("/model ", 0, 4)
+        inp = make_input(suggestion_aggregator=aggregator)
+
+        inp._handle_key(KeyEvent(key="enter", char="", shift=True))
+
+        assert inp._get_text() == "\n"
+        assert inp._submitted is False
+        aggregator.accept_selected.assert_not_called()
+
     def test_enter_submits(self):
         inp = make_input()
         for ch in "hello":
@@ -227,6 +249,17 @@ class TestPromptInputHandleKey:
         inp = make_input(history=history)
         inp._handle_key(_key("up"))
         assert inp._get_text() == "prev command"
+
+    def test_history_navigate_multiline_entry_sets_full_buffer(self, tmp_path):
+        from iac_code.ui.core.input_history import InputHistory
+
+        history = InputHistory(str(tmp_path / "hist.txt"))
+        history.append("line1\nline2")
+        inp = make_input(history=history)
+
+        inp._handle_key(_key("up"))
+
+        assert inp._get_text() == "line1\nline2"
 
     def test_history_navigate_down(self, tmp_path):
         """Down arrow after navigating up restores None (clears buffer signal)."""
@@ -330,6 +363,32 @@ class TestPromptInputHandleKey:
         inp._handle_key(_key("escape"))
 
         assert aggregator.dismissed is True
+
+
+class TestPromptInputInsertText:
+    def test_insert_text_at_cursor(self):
+        inp = make_input()
+        for ch in "hello":
+            inp._handle_key(_key(ch))
+        inp._handle_key(_key("left"))
+        inp._handle_key(_key("left"))
+
+        inp.insert_text(" brave")
+
+        assert inp._get_text() == "hel bravelo"
+        assert inp._cursor == len("hel brave")
+        assert inp._text_changed is True
+
+    def test_insert_empty_text_does_not_mark_changed(self):
+        inp = make_input()
+        inp._handle_key(_key("h"))
+        inp._text_changed = False
+
+        inp.insert_text("")
+
+        assert inp._get_text() == "h"
+        assert inp._cursor == 1
+        assert inp._text_changed is False
 
 
 class TestPromptInputHelpers:

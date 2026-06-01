@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 
 class TestResolveConfigDirFallback:
@@ -38,6 +41,16 @@ class TestResolveConfigDirFallback:
         result = get_config_dir()
         assert result == target.resolve()
         assert result.is_dir()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes are not meaningful on Windows")
+    def test_get_config_dir_is_owner_only(self, monkeypatch, tmp_path):
+        target = tmp_path / "custom-config"
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(target))
+        from iac_code.config import get_config_dir
+
+        result = get_config_dir()
+
+        assert oct(result.stat().st_mode & 0o777) == "0o700"
 
 
 class TestResolveConfigDirExpansion:

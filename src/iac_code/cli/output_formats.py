@@ -81,12 +81,17 @@ class JsonWriter:
             entry["result"] = event.result
             entry["is_error"] = event.is_error
         elif isinstance(event, MessageEndEvent):
-            self._usage = {
+            usage = {
                 "input_tokens": event.usage.input_tokens,
                 "output_tokens": event.usage.output_tokens,
                 "cache_creation_input_tokens": event.usage.cache_creation_input_tokens,
                 "cache_read_input_tokens": event.usage.cache_read_input_tokens,
             }
+            is_empty_synthetic_max_turns = (
+                event.stop_reason == "max_turns" and self._usage is not None and not any(usage.values())
+            )
+            if not is_empty_synthetic_max_turns:
+                self._usage = usage
         elif isinstance(event, ErrorEvent):
             self._error = event.error
 

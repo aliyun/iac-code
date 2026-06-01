@@ -9,6 +9,7 @@ from pathlib import Path
 from loguru import logger
 
 from iac_code.config import get_config_dir
+from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 
 _LOG_FORMAT = "{time:YYYY-MM-DDTHH:mm:ss.SSS} [{level:<5}] {name}:{function}:{line} - {message}"
 
@@ -31,6 +32,7 @@ def _link_latest(log_dir: Path, log_file: Path) -> None:
     except OSError:
         try:
             shutil.copy2(log_file, latest)
+            ensure_private_file(latest)
         except OSError:
             pass
 
@@ -66,8 +68,7 @@ def setup_logging(
     logger.remove()
     _runtime_debug_handler_ids = []
 
-    log_dir = get_config_dir() / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = ensure_private_dir(get_config_dir() / "logs")
     log_file = log_dir / f"{session_id}.log"
     level = "DEBUG" if debug else "INFO"
 
@@ -79,6 +80,7 @@ def setup_logging(
     )
     _debug_enabled = debug
     _current_log_file = log_file
+    ensure_private_file(log_file)
 
     _link_latest(log_dir, log_file)
 
@@ -103,8 +105,7 @@ def enable_debug_at_runtime(session_id: str) -> Path:
     """
     global _debug_enabled, _current_log_file
 
-    log_dir = get_config_dir() / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = ensure_private_dir(get_config_dir() / "logs")
     log_file = log_dir / f"{session_id}.log"
     _current_log_file = log_file
 
@@ -119,6 +120,7 @@ def enable_debug_at_runtime(session_id: str) -> Path:
     )
     _runtime_debug_handler_ids.append(handler_id)
     _debug_enabled = True
+    ensure_private_file(log_file)
 
     _link_latest(log_dir, log_file)
 

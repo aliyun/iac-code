@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -96,6 +97,107 @@ def test_new_session_id_is_full_uuid(mock_mm, mock_ss, mock_pm):
 
     repl = InlineREPL(model="test-model")
     assert UUID4_RE.match(repl.session_id), f"expected UUID4, got {repl.session_id!r}"
+
+
+def test_insert_text_delegates_to_prompt_input():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._prompt_input = SimpleNamespace(insert_text=Mock())
+
+    repl._insert_text("hello from history")
+
+    repl._prompt_input.insert_text.assert_called_once_with("hello from history")
+
+
+def test_history_search_uses_agent_context_messages():
+    from iac_code.agent.message import Message
+    from iac_code.state.app_state import AppState
+    from iac_code.ui.repl import InlineREPL
+
+    captured: dict[str, object] = {}
+
+    class FakeHistorySearch:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def run(self):
+            return None
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = SimpleNamespace(get_state=Mock(return_value=AppState(messages=[])))
+    repl._agent_loop = SimpleNamespace(
+        context_manager=SimpleNamespace(
+            get_messages=Mock(return_value=[Message(role="user", content="prompt from agent context")])
+        )
+    )
+    repl._keybinding_manager = object()
+    repl._insert_text = Mock()
+
+    with patch("iac_code.ui.dialogs.history_search.HistorySearch", FakeHistorySearch):
+        assert repl._open_history_search() is True
+
+    assert captured["messages"] == [{"role": "user", "content": "prompt from agent context"}]
+
+
+def test_history_search_uses_input_history_when_context_is_empty():
+    from iac_code.state.app_state import AppState
+    from iac_code.ui.repl import InlineREPL
+
+    captured: dict[str, object] = {}
+
+    class FakeHistorySearch:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def run(self):
+            return None
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = SimpleNamespace(get_state=Mock(return_value=AppState(messages=[])))
+    repl._agent_loop = SimpleNamespace(context_manager=SimpleNamespace(get_messages=Mock(return_value=[])))
+    repl._history = SimpleNamespace(entries=Mock(return_value=["persisted prompt"]))
+    repl._keybinding_manager = object()
+    repl._insert_text = Mock()
+
+    with patch("iac_code.ui.dialogs.history_search.HistorySearch", FakeHistorySearch):
+        assert repl._open_history_search() is True
+
+    assert captured["messages"] == [{"role": "user", "content": "persisted prompt"}]
+
+
+@pytest.mark.asyncio
+async def test_run_once_routes_shell_escape_before_slash_command():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = SimpleNamespace(is_command=Mock(return_value=True))
+    repl._handle_shell_escape = AsyncMock()
+    repl._handle_command = AsyncMock()
+    repl._handle_chat = AsyncMock()
+
+    await repl.run_once("!echo hello")
+
+    repl._handle_shell_escape.assert_awaited_once_with("!echo hello")
+    repl._handle_command.assert_not_awaited()
+    repl._handle_chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_once_routes_normal_chat_unchanged():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = SimpleNamespace(is_command=Mock(return_value=False))
+    repl._handle_shell_escape = AsyncMock()
+    repl._handle_command = AsyncMock()
+    repl._handle_chat = AsyncMock()
+
+    await repl.run_once("hello")
+
+    repl._handle_shell_escape.assert_not_awaited()
+    repl._handle_command.assert_not_awaited()
+    repl._handle_chat.assert_awaited_once_with("hello")
 
 
 @patch("iac_code.ui.repl.ProviderManager")

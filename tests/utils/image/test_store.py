@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,21 @@ def test_store_writes_per_session_file_with_0o600(tmp_path, monkeypatch):
 
     if os.name == "posix":
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes are not meaningful on Windows")
+def test_store_directories_are_owner_only(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "image-cache")
+    store = ImageStore(session_id="sess-a")
+    pc = PastedContent(id=7, type="image", content="aGVsbG8=", media_type="image/png")
+
+    path = store.store(pc)
+
+    assert path is not None
+    base_dir = tmp_path / "image-cache"
+    session_dir = base_dir / "sess-a"
+    assert oct(base_dir.stat().st_mode & 0o777) == "0o700"
+    assert oct(session_dir.stat().st_mode & 0o777) == "0o700"
 
 
 def test_lru_eviction_cap(tmp_path, monkeypatch):

@@ -164,6 +164,36 @@ class TestParseEscapeSequence:
         event = RawInputCapture._parse_escape_sequence("[999~")
         assert event.key == "unknown"
 
+    def test_shift_enter_csi_u(self):
+        event = RawInputCapture._parse_escape_sequence("[13;2u")
+        assert event.key == "enter"
+        assert event.shift is True
+        assert event.key_id == "enter"
+
+    def test_shift_enter_xterm_modify_other_keys(self):
+        event = RawInputCapture._parse_escape_sequence("[27;2;13~")
+        assert event.key == "enter"
+        assert event.shift is True
+
+    def test_shift_enter_modified_special_key(self):
+        event = RawInputCapture._parse_escape_sequence("[13;2~")
+        assert event.key == "enter"
+        assert event.shift is True
+
+    def test_unknown_modified_enter_csi_u(self):
+        event = RawInputCapture._parse_escape_sequence("[13;5u")
+        assert event.key == "unknown"
+
+    def test_ctrl_c_xterm_modify_other_keys(self):
+        event = RawInputCapture._parse_escape_sequence("[27;5;99~")
+        assert event.key == "c"
+        assert event.ctrl is True
+
+    def test_ctrl_r_csi_u(self):
+        event = RawInputCapture._parse_escape_sequence("[114;5u")
+        assert event.key == "r"
+        assert event.ctrl is True
+
     def test_mouse_wheel_up(self):
         # SGR mouse encoding: button 64 = wheel up.
         event = RawInputCapture._parse_escape_sequence("[<64;10;5M")
@@ -209,6 +239,10 @@ class TestRawInputCaptureRuntime:
             ("setraw", 7),
             (7, b"\033[?2004h"),
             (7, b"\033[?1004h"),
+            (7, b"\033[>1u"),
+            (7, b"\033[>4;2m"),
+            (7, b"\033[>4;0m"),
+            (7, b"\033[<u"),
             (7, b"\033[?1004l"),
             (7, b"\033[?2004l"),
         ]

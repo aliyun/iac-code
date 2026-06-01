@@ -15,6 +15,9 @@ from typing import Any
 
 import yaml
 
+from iac_code.i18n import _
+from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
+
 # Default LLM model used when no model is saved in settings
 DEFAULT_MODEL = "qwen3.7-max"
 
@@ -47,8 +50,9 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 def _save_yaml(path: Path, data: dict[str, Any]) -> None:
     """Write *data* to a YAML file, creating parent directories as needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(path.parent)
     path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+    ensure_private_file(path)
 
 
 # ---------------------------------------------------------------------------
@@ -56,15 +60,29 @@ def _save_yaml(path: Path, data: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_provider_lookup_name(value: str) -> str:
+    """Normalize provider display names and keys for user-facing lookup."""
+    return value.lower().replace(" ", "").replace("-", "").replace("_", "")
+
+
 def _build_provider_name_to_key() -> dict[str, str]:
     from iac_code.providers.registry import PROVIDER_REGISTRY
 
     mapping: dict[str, str] = {}
+
+    def _add_alias(alias: str, provider_key: str) -> None:
+        normalized = _normalize_provider_lookup_name(alias)
+        existing = mapping.get(normalized)
+        if existing is not None and existing != provider_key:
+            raise ValueError(
+                f"Ambiguous provider alias {alias!r}: normalized form {normalized!r} "
+                f"maps to both {existing!r} and {provider_key!r}"
+            )
+        mapping[normalized] = provider_key
+
     for desc in PROVIDER_REGISTRY.values():
-        normalized = desc.name.lower().replace(" ", "").replace("-", "").replace("_", "")
-        mapping[normalized] = desc.key
-        key_norm = desc.key.lower().replace("_", "").replace("-", "")
-        mapping[key_norm] = desc.key
+        _add_alias(desc.name, desc.key)
+        _add_alias(desc.key, desc.key)
     return mapping
 
 
@@ -139,11 +157,13 @@ def _get_env_overrides() -> dict[str, str | None]:
     provider_raw = _read("IAC_CODE_PROVIDER")
     provider_key: str | None = None
     if provider_raw is not None:
-        key = _PROVIDER_NAME_TO_KEY.get(provider_raw.lower())
+        key = _PROVIDER_NAME_TO_KEY.get(_normalize_provider_lookup_name(provider_raw))
         if key is None:
             valid = ", ".join(_PROVIDER_CANONICAL_NAMES)
             raise ValueError(
-                f"Invalid IAC_CODE_PROVIDER value: {provider_raw!r}. Valid values (case-insensitive): {valid}"
+                _("Invalid IAC_CODE_PROVIDER value: {!r}. Valid values (case-insensitive): {}").format(
+                    provider_raw, valid
+                )
             )
         provider_key = key
 
@@ -248,8 +268,7 @@ def get_config_dir() -> Path:
     caching).
     """
     config_dir = _resolve_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir
+    return ensure_private_dir(config_dir)
 
 
 def get_credentials_path() -> Path:

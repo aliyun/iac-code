@@ -31,6 +31,7 @@ class SkillFrontmatter:
     context: str = "inline"  # "inline" | "fork"
     agent: str = "general-purpose"
     paths: list[str] = field(default_factory=list)
+    auto_trigger: dict[str, str] = field(default_factory=dict)
 
 
 def parse_frontmatter(markdown: str) -> tuple[SkillFrontmatter, str]:
@@ -115,5 +116,8 @@ def _data_to_frontmatter(data: dict[str, Any]) -> SkillFrontmatter:
     fm.context = data.get("context", "inline")
     fm.agent = data.get("agent", "general-purpose")
     fm.paths = list(data.get("paths", []))
+    auto_trigger = data.get("auto_trigger", {})
+    if isinstance(auto_trigger, dict):
+        fm.auto_trigger = {str(k): str(v) for k, v in auto_trigger.items() if v is not None}
 
     return fm

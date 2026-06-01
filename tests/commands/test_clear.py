@@ -33,6 +33,18 @@ async def test_clear_uses_kwargs_store():
 
 
 @pytest.mark.asyncio
+async def test_clear_resets_agent_loop():
+    agent_loop = MagicMock()
+    repl = MagicMock(_agent_loop=agent_loop)
+    context = MagicMock(repl=repl)
+    context.console = None
+
+    await clear_command(context=context)
+
+    agent_loop.reset.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_clear_with_console_writes_ansi_and_banner(monkeypatch):
     store = MagicMock()
     state = MagicMock(model="claude-sonnet-4-6", cwd="/tmp")

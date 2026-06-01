@@ -24,3 +24,20 @@ iac-code
 ```text
 Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
 ```
+
+## 入力の編集
+
+`Shift+Enter` を使うと、プロンプトを送信せずに改行を挿入できます。完全なプロンプトを送信するには、通常の `Enter` を押します。
+
+端末が `Shift+Enter` を個別に通知しない場合は、`Esc` を押してから `Enter` を押すと改行を挿入できます。複数行プロンプトは 1 つの履歴項目として保存されるため、`Up` で完全なプロンプトを復元できます。
+
+## Shell escapes
+
+行の先頭に `!` を付けると、REPL から組み込みの `bash` ツール経由でローカルシェルコマンドを実行できます：
+
+```text
+!pwd
+!git status --short
+```
+
+IaC Code は通常のツール権限チェックを適用し、現在のプロジェクトコンテキストでコマンドを実行して、出力を端末に表示します。このコマンドはチャットメッセージとしてモデルには送信されません。

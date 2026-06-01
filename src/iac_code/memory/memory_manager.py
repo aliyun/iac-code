@@ -3,20 +3,40 @@
 from __future__ import annotations
 
 import os
+import re
+from pathlib import Path
 from typing import Any
+
+from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 
 MEMORY_TYPES = {"user", "feedback", "project", "reference"}
 INDEX_FILE = "MEMORY.md"
 MAX_INDEX_LINES = 200
+_MEMORY_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_RESERVED_MEMORY_FILENAMES = {INDEX_FILE.casefold()}
 
 
 class MemoryManager:
     def __init__(self, memory_dir: str):
         self._memory_dir = memory_dir
-        os.makedirs(memory_dir, exist_ok=True)
+        ensure_private_dir(Path(memory_dir))
+
+    @staticmethod
+    def _validate_name(name: str) -> str:
+        cleaned = name.strip()
+        if not cleaned or cleaned in {".", ".."}:
+            raise ValueError(f"Invalid memory name: {name!r}")
+        if "/" in cleaned or "\\" in cleaned or ".." in cleaned:
+            raise ValueError(f"Invalid memory name: {name!r}")
+        if os.path.isabs(cleaned) or not _MEMORY_NAME_RE.fullmatch(cleaned):
+            raise ValueError(f"Invalid memory name: {name!r}")
+        if f"{cleaned}.md".casefold() in _RESERVED_MEMORY_FILENAMES:
+            raise ValueError(f"Invalid memory name: {name!r}")
+        return cleaned
 
     def _memory_path(self, name: str) -> str:
-        return os.path.join(self._memory_dir, f"{name}.md")
+        safe_name = self._validate_name(name)
+        return os.path.join(self._memory_dir, f"{safe_name}.md")
 
     def _index_path(self) -> str:
         return os.path.join(self._memory_dir, INDEX_FILE)
@@ -25,16 +45,17 @@ class MemoryManager:
         if memory_type not in MEMORY_TYPES:
             raise ValueError(f"Invalid memory type: {memory_type}")
         file_content = f"---\nname: {name}\ndescription: {description}\ntype: {memory_type}\n---\n\n{content}\n"
-        with open(self._memory_path(name), "w", encoding="utf-8", newline="\n") as f:
+        path = self._memory_path(name)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(file_content)
+        ensure_private_file(Path(path))
         self._update_index()
 
     def load(self, name: str) -> dict[str, Any] | None:
         path = self._memory_path(name)
         if not os.path.exists(path):
             return None
-        with open(path, encoding="utf-8") as f:
-            return self._parse_memory_file(f.read())
+        return self._load_memory_file(Path(path))
 
     def delete(self, name: str) -> None:
         path = self._memory_path(name)
@@ -44,11 +65,10 @@ class MemoryManager:
 
     def list_memories(self) -> list[dict[str, Any]]:
         memories = []
-        for filename in os.listdir(self._memory_dir):
-            if filename.endswith(".md") and filename != INDEX_FILE:
-                mem = self.load(filename[:-3])
-                if mem:
-                    memories.append(mem)
+        for path in self._iter_memory_files():
+            mem = self._load_memory_file(path)
+            if mem:
+                memories.append(mem)
         return memories
 
     def get_index_content(self) -> str:
@@ -66,13 +86,28 @@ class MemoryManager:
 
     def _update_index(self) -> None:
         entries = []
-        for filename in sorted(os.listdir(self._memory_dir)):
-            if filename.endswith(".md") and filename != INDEX_FILE:
-                mem = self.load(filename[:-3])
-                if mem:
-                    entries.append(f"- [{filename[:-3]}]({filename}) — {mem.get('description', '')}")
-        with open(self._index_path(), "w", encoding="utf-8", newline="\n") as f:
+        for path in sorted(self._iter_memory_files(), key=lambda item: item.name):
+            mem = self._load_memory_file(path)
+            if mem:
+                entries.append(f"- [{path.stem}]({path.name}) — {mem.get('description', '')}")
+        index_path = self._index_path()
+        with open(index_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(entries[:MAX_INDEX_LINES]) + "\n")
+        ensure_private_file(Path(index_path))
+
+    def _iter_memory_files(self) -> list[Path]:
+        root = Path(self._memory_dir)
+        return [
+            path
+            for path in root.iterdir()
+            if path.is_file() and path.suffix == ".md" and path.name.casefold() != INDEX_FILE.casefold()
+        ]
+
+    def _load_memory_file(self, path: Path) -> dict[str, Any] | None:
+        try:
+            return self._parse_memory_file(path.read_text(encoding="utf-8"))
+        except OSError:
+            return None
 
     @staticmethod
     def _parse_memory_file(text: str) -> dict[str, Any]:

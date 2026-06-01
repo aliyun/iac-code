@@ -24,6 +24,7 @@ from typing import Any
 
 from iac_code import __version__
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
+from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.project_paths import (
     get_project_dir,
     get_projects_dir,
@@ -35,7 +36,7 @@ class SessionStorage:
     """Persist conversation sessions partitioned by working directory."""
 
     def __init__(self, projects_dir: Path | str | None = None) -> None:
-        self._projects_dir = Path(projects_dir) if projects_dir is not None else get_projects_dir()
+        self._projects_dir = ensure_private_dir(Path(projects_dir) if projects_dir is not None else get_projects_dir())
 
     # ------------------------------------------------------------------
     # Internal path helpers
@@ -86,21 +87,23 @@ class SessionStorage:
     ) -> None:
         """Append a single message (real-time persistence)."""
         path = self._session_path(cwd, session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(path.parent)
         data = self._stamp(message.to_dict(), cwd, session_id, git_branch)
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        ensure_private_file(path)
 
     def append_meta(self, cwd: str, session_id: str, meta_entry: dict[str, Any]) -> None:
         """Append a lite-meta row (no ``role``, distinguished by ``type``)."""
         if "type" not in meta_entry:
             raise ValueError("meta_entry must include a 'type' field")
         path = self._session_path(cwd, session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(path.parent)
         entry = dict(meta_entry)
         entry["session_id"] = session_id
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        ensure_private_file(path)
 
     def save(
         self,
@@ -112,11 +115,12 @@ class SessionStorage:
     ) -> None:
         """Overwrite the session file with the given messages."""
         path = self._session_path(cwd, session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(path.parent)
         with open(path, "w", encoding="utf-8") as f:
             for msg in messages:
                 data = self._stamp(msg.to_dict(), cwd, session_id, git_branch)
                 f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        ensure_private_file(path)
 
     # ------------------------------------------------------------------
     # Read

@@ -24,6 +24,11 @@ from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
     PermissionRequestEvent,
+    StackInstancesProgressEvent,
+    StackProgressEvent,
+    SubAgentToolEvent,
+    ToolResultEvent,
+    ToolUseStartEvent,
 )
 from iac_code.utils.background_housekeeping import start_background_housekeeping
 
@@ -31,6 +36,47 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_MAX_TURNS = 2
 __all__ = ["HeadlessRunner", "logger"]
+
+
+class _ProgressWriter:
+    """Write human-readable headless progress to stderr."""
+
+    def __init__(self, stream: IO[str]) -> None:
+        self._stream = stream
+
+    def handle(self, event: Any) -> None:
+        line: str | None = None
+        if isinstance(event, ToolUseStartEvent):
+            line = _("Tool started: {}").format(event.name)
+        elif isinstance(event, ToolResultEvent):
+            if event.is_error:
+                line = _("Tool failed: {}").format(event.tool_name)
+            else:
+                line = _("Tool finished: {}").format(event.tool_name)
+        elif isinstance(event, SubAgentToolEvent):
+            if event.is_done:
+                if event.is_error:
+                    line = _("Child tool failed: {}").format(event.child_tool_name)
+                else:
+                    line = _("Child tool finished: {}").format(event.child_tool_name)
+            else:
+                line = _("Child tool started: {}").format(event.child_tool_name)
+        elif isinstance(event, StackProgressEvent):
+            line = _("Stack {}: {} ({:.1f}%)").format(
+                event.stack_name,
+                event.status,
+                event.progress_percentage,
+            )
+        elif isinstance(event, StackInstancesProgressEvent):
+            line = _("Stack group {}: {} ({}%)").format(
+                event.stack_group_name,
+                event.status,
+                event.progress_percentage,
+            )
+
+        if line is not None:
+            self._stream.write(line + "\n")
+            self._stream.flush()
 
 
 class HeadlessRunner:
@@ -45,6 +91,8 @@ class HeadlessRunner:
         cli_allowed_tools: list[str] | None = None,
         cli_disallowed_tools: list[str] | None = None,
         cli_permission_mode: str | None = None,
+        verbose: bool = False,
+        progress_stream: IO[str] | None = None,
     ) -> None:
         self._model = model
         self._output_format = output_format
@@ -53,6 +101,8 @@ class HeadlessRunner:
         self._cli_allowed_tools = cli_allowed_tools
         self._cli_disallowed_tools = cli_disallowed_tools
         self._cli_permission_mode = cli_permission_mode
+        self._verbose = verbose
+        self._progress_stream = progress_stream or sys.stderr
 
     def _print_provider_not_configured(self, exc: Exception) -> None:
         logger.error("Provider not configured: {}", exc)
@@ -91,6 +141,7 @@ class HeadlessRunner:
 
         agent_loop = self._create_agent_loop()
         writer = create_writer(self._output_format, self._output_stream)
+        progress_writer = _ProgressWriter(self._progress_stream) if self._verbose else None
 
         has_error = False
         hit_max_turns = False
@@ -117,6 +168,9 @@ class HeadlessRunner:
 
                 if isinstance(event, MessageEndEvent) and event.stop_reason == "max_turns":
                     hit_max_turns = True
+
+                if progress_writer is not None:
+                    progress_writer.handle(event)
 
                 writer.handle(event)
         except ProviderNotConfiguredError as exc:

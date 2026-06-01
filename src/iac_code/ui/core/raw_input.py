@@ -30,6 +30,11 @@ else:
     # *after* the ESC byte, since we strip the ESC before parsing escape
     # sequences.
     _MOUSE_SGR_RE = re.compile(r"\[<(\d+);(\d+);(\d+)([Mm])")
+    _CSI_U_RE = re.compile(r"\[(\d+);(\d+)u")
+    _XTERM_MODIFY_OTHER_KEYS_RE = re.compile(r"\[27;(\d+);(\d+)~")
+    _MODIFIED_SPECIAL_KEY_RE = re.compile(r"\[(\d+);(\d+)~")
+
+    _ENTER_CODEPOINTS = {10, 13}
 
     def query_cursor_row(fd: int, timeout: float = 0.1) -> int | None:
         """Send Device Status Report 6 and parse the cursor's 1-indexed row.
@@ -110,6 +115,9 @@ else:
                 os.write(self._fd, b"\033[?2004h")
                 # Enable focus reporting so we can detect terminal focus changes
                 os.write(self._fd, b"\033[?1004h")
+                # Ask supporting terminals to report Shift+Enter distinctly.
+                os.write(self._fd, b"\033[>1u")
+                os.write(self._fd, b"\033[>4;2m")
             except OSError:
                 # File descriptor may be invalid after interruption (e.g. double Ctrl+C)
                 self._old_settings = None
@@ -118,6 +126,9 @@ else:
 
         def __exit__(self, exc_type, exc_val, exc_tb) -> None:
             try:
+                # Restore terminal modified-key reporting before leaving raw mode.
+                os.write(self._fd, b"\033[>4;0m")
+                os.write(self._fd, b"\033[<u")
                 # Disable focus reporting
                 os.write(self._fd, b"\033[?1004l")
                 # Disable bracket paste mode
@@ -302,6 +313,10 @@ else:
             if seq in _ESCAPE_SEQUENCES:
                 return KeyEvent(key=_ESCAPE_SEQUENCES[seq], char="")
 
+            modified_key = RawInputCapture._parse_modified_key_sequence(seq)
+            if modified_key is not None:
+                return modified_key
+
             # SGR mouse event — only wheel up/down are useful here.  The
             # ``rest`` buffer may contain multiple back-to-back wheel events
             # when the user spins the wheel quickly; ``re.match`` picks up
@@ -323,3 +338,46 @@ else:
                 return KeyEvent(key=seq, char=seq, alt=True)
 
             return KeyEvent(key="unknown", char="")
+
+        @staticmethod
+        def _event_from_codepoint(codepoint: int, modifier: int) -> KeyEvent | None:
+            """Build a KeyEvent from CSI-u / modifyOtherKeys codepoint data."""
+            flags = max(modifier - 1, 0)
+            shift = bool(flags & 1)
+            alt = bool(flags & 2)
+            ctrl = bool(flags & 4)
+
+            if codepoint in _ENTER_CODEPOINTS:
+                if shift and not alt and not ctrl:
+                    return KeyEvent(key="enter", char="", shift=True)
+                return None
+
+            if 32 <= codepoint <= 0x10FFFF:
+                key = chr(codepoint)
+                if ctrl:
+                    key = key.lower()
+                return KeyEvent(key=key, char="", ctrl=ctrl, alt=alt, shift=shift)
+
+            return None
+
+        @staticmethod
+        def _parse_modified_key_sequence(seq: str) -> KeyEvent | None:
+            """Parse common terminal encodings for modified keys."""
+            m = _CSI_U_RE.fullmatch(seq)
+            if m is not None:
+                codepoint = int(m.group(1))
+                modifier = int(m.group(2))
+                return RawInputCapture._event_from_codepoint(codepoint, modifier)
+
+            m = _XTERM_MODIFY_OTHER_KEYS_RE.fullmatch(seq)
+            if m is not None:
+                modifier = int(m.group(1))
+                codepoint = int(m.group(2))
+                return RawInputCapture._event_from_codepoint(codepoint, modifier)
+
+            m = _MODIFIED_SPECIAL_KEY_RE.fullmatch(seq)
+            if m is not None:
+                key_code = int(m.group(1))
+                modifier = int(m.group(2))
+                return RawInputCapture._event_from_codepoint(key_code, modifier)
+            return None

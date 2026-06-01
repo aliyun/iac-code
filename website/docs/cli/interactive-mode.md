@@ -24,3 +24,26 @@ Then describe what you want to build:
 ```text
 Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
 ```
+
+## Editing input
+
+Use `Shift+Enter` to insert a newline without sending the prompt. Press `Enter`
+on its own to submit the complete prompt.
+
+If your terminal does not report `Shift+Enter` separately, press `Esc` and then
+`Enter` to insert a newline. Multi-line prompts are saved as one history entry,
+so pressing `Up` restores the full prompt.
+
+## Shell escapes
+
+Prefix a line with `!` to run a local shell command from the REPL through the
+built-in `bash` tool:
+
+```text
+!pwd
+!git status --short
+```
+
+IaC Code applies the normal tool permission checks, runs the command in the
+current project context, and prints the output in the terminal. The command is
+not sent to the model as a chat message.

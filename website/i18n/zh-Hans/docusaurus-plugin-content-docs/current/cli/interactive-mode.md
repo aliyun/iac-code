@@ -24,3 +24,20 @@ iac-code
 ```text
 创建一个 VPC、两台 ECS 实例，以及一个允许办公 IP 通过 SSH 访问的安全组。
 ```
+
+## 编辑输入
+
+使用 `Shift+Enter` 可以插入换行而不发送 prompt。单独按 `Enter` 会提交完整 prompt。
+
+如果你的终端无法单独上报 `Shift+Enter`，可以先按 `Esc` 再按 `Enter` 来插入换行。多行 prompt 会作为一个完整的历史记录保存，因此按 `Up` 可以恢复完整 prompt。
+
+## Shell escapes
+
+在一行开头输入 `!`，可以在 REPL 中通过内置 `bash` 工具运行本地 shell 命令：
+
+```text
+!pwd
+!git status --short
+```
+
+IaC Code 会应用正常的工具权限检查，在当前项目上下文中运行命令，并把输出显示在终端里。该命令不会作为聊天消息发送给模型。

@@ -19,7 +19,12 @@ from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
     PermissionRequestEvent,
+    StackInstancesProgressEvent,
+    StackProgressEvent,
+    SubAgentToolEvent,
     TextDeltaEvent,
+    ToolResultEvent,
+    ToolUseStartEvent,
     Usage,
 )
 
@@ -276,6 +281,58 @@ class TestCLIFlags:
             call_kwargs = mock_runner.call_args[1]
             assert call_kwargs["output_format"] == OutputFormat.JSON
 
+    def test_invalid_output_format_exits_before_headless_runner(self):
+        from iac_code.cli.main import app
+
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            result = runner_cli.invoke(app, ["-p", "hello", "--output-format", "invalid"])
+
+        assert result.exit_code != 0
+        assert "Invalid --output-format 'invalid'" in result.output
+        assert "Valid values: text, json, stream-json" in result.output
+        assert "Traceback" not in result.output
+        mock_runner.assert_not_called()
+
+    def test_invalid_output_format_exits_before_provider_env_lookup(self, monkeypatch):
+        from iac_code.cli.main import app
+
+        monkeypatch.setenv("IAC_CODE_PROVIDER", "NotAProvider")
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            result = runner_cli.invoke(app, ["-p", "hello", "--output-format", "invalid"])
+
+        assert result.exit_code != 0
+        assert "Invalid --output-format 'invalid'" in result.output
+        assert "Invalid IAC_CODE_PROVIDER" not in result.output
+        mock_runner.assert_not_called()
+
+    def test_output_format_is_case_insensitive(self):
+        from iac_code.cli.main import app
+
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value=0)
+            mock_runner.return_value = mock_instance
+
+            result = runner_cli.invoke(app, ["-p", "hello", "--output-format", "TEXT"])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_runner.call_args[1]
+        assert call_kwargs["output_format"] == OutputFormat.TEXT
+
+    def test_verbose_passed_to_headless(self):
+        from iac_code.cli.main import app
+
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value=0)
+            mock_runner.return_value = mock_instance
+
+            result = runner_cli.invoke(app, ["-p", "hello", "--verbose"])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_runner.call_args[1]
+        assert call_kwargs["verbose"] is True
+
     def test_max_turns_passed_to_headless(self):
         from iac_code.cli.main import app
 
@@ -309,6 +366,16 @@ class TestCLIFlags:
         assert result.exit_code != 0
         assert "Invalid IAC_CODE_PROVIDER" in result.output
 
+    def test_invalid_permission_mode_exits_before_headless_runner(self):
+        from iac_code.cli.main import app
+
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            result = runner_cli.invoke(app, ["-p", "write", "--permission-mode", "nonsense"])
+
+        assert result.exit_code != 0
+        assert "Invalid --permission-mode 'nonsense'" in result.output
+        mock_runner.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_permission_without_response_future_is_ignored_and_writer_finalized():
@@ -341,6 +408,222 @@ async def test_permission_without_response_future_is_ignored_and_writer_finalize
     assert exit_code == EXIT_OK
     housekeeping.assert_called_once()
     writer.finalize.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_verbose_progress_writes_tool_events_to_progress_stream():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.TEXT,
+        output_stream=stdout,
+        verbose=True,
+        progress_stream=progress,
+    )
+
+    events = [
+        ToolUseStartEvent(tool_use_id="tu_1", name="bash"),
+        TextDeltaEvent(text="done"),
+        ToolResultEvent(tool_use_id="tu_1", tool_name="bash", result="ok", is_error=False),
+        MessageEndEvent(stop_reason="end_turn", usage=Usage()),
+    ]
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+        mock_create.return_value = mock_loop
+
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    assert stdout.getvalue() == "done\n"
+    progress_output = progress.getvalue()
+    assert "Tool started: bash" in progress_output
+    assert "Tool finished: bash" in progress_output
+
+
+@pytest.mark.asyncio
+async def test_verbose_progress_preserves_json_stdout():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.JSON,
+        output_stream=stdout,
+        verbose=True,
+        progress_stream=progress,
+    )
+
+    events = [
+        ToolUseStartEvent(tool_use_id="tu_1", name="bash"),
+        TextDeltaEvent(text="done"),
+        ToolResultEvent(tool_use_id="tu_1", tool_name="bash", result="ok", is_error=False),
+        MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=1, output_tokens=2)),
+    ]
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+        mock_create.return_value = mock_loop
+
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    parsed = json.loads(stdout.getvalue())
+    assert parsed["text"] == "done"
+    assert parsed["tool_uses"][0]["name"] == "bash"
+    assert "Tool started: bash" in progress.getvalue()
+    assert "Tool started: bash" not in stdout.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_verbose_progress_preserves_stream_json_stdout():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.STREAM_JSON,
+        output_stream=stdout,
+        verbose=True,
+        progress_stream=progress,
+    )
+
+    events = [
+        ToolUseStartEvent(tool_use_id="tu_1", name="bash"),
+        TextDeltaEvent(text="done"),
+        ToolResultEvent(tool_use_id="tu_1", tool_name="bash", result="ok", is_error=False),
+        MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=1, output_tokens=2)),
+    ]
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+        mock_create.return_value = mock_loop
+
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    lines = stdout.getvalue().splitlines()
+    assert [json.loads(line)["type"] for line in lines] == [
+        "tool_use_start",
+        "text_delta",
+        "tool_result",
+        "message_end",
+    ]
+    assert "Tool started: bash" in progress.getvalue()
+    assert "Tool started: bash" not in stdout.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_verbose_progress_marks_failed_tool_results():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.TEXT,
+        output_stream=stdout,
+        verbose=True,
+        progress_stream=progress,
+    )
+
+    events = [
+        ToolResultEvent(tool_use_id="tu_1", tool_name="bash", result="boom", is_error=True),
+        MessageEndEvent(stop_reason="end_turn", usage=Usage()),
+    ]
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+        mock_create.return_value = mock_loop
+
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    assert "Tool failed: bash" in progress.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_verbose_false_does_not_write_progress_stream():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.TEXT,
+        output_stream=stdout,
+        verbose=False,
+        progress_stream=progress,
+    )
+
+    events = [
+        ToolUseStartEvent(tool_use_id="tu_1", name="bash"),
+        ToolResultEvent(tool_use_id="tu_1", tool_name="bash", result="ok", is_error=False),
+        MessageEndEvent(stop_reason="end_turn", usage=Usage()),
+    ]
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+        mock_create.return_value = mock_loop
+
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    assert progress.getvalue() == ""
+
+
+@pytest.mark.asyncio
+async def test_verbose_progress_writes_subagent_and_stack_events():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.TEXT,
+        output_stream=stdout,
+        verbose=True,
+        progress_stream=progress,
+    )
+
+    events = [
+        SubAgentToolEvent(parent_tool_use_id="parent", child_tool_name="read_file", child_tool_input={}),
+        SubAgentToolEvent(
+            parent_tool_use_id="parent",
+            child_tool_name="read_file",
+            child_tool_input={},
+            is_done=True,
+        ),
+        StackProgressEvent(
+            stack_id="sid",
+            stack_name="stack",
+            status="CREATE_IN_PROGRESS",
+            progress_percentage=42.5,
+            resources=[],
+            elapsed_seconds=3,
+        ),
+        StackInstancesProgressEvent(
+            stack_group_name="group",
+            operation_id="op",
+            status="RUNNING",
+            progress_percentage=67,
+            instances=[],
+            elapsed_seconds=4,
+        ),
+        MessageEndEvent(stop_reason="end_turn", usage=Usage()),
+    ]
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+        mock_create.return_value = mock_loop
+
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    progress_output = progress.getvalue()
+    assert "Child tool started: read_file" in progress_output
+    assert "Child tool finished: read_file" in progress_output
+    assert "Stack stack: CREATE_IN_PROGRESS (42.5%)" in progress_output
+    assert "Stack group group: RUNNING (67%)" in progress_output
 
 
 class FakeToolRegistry:

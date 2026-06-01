@@ -1,6 +1,8 @@
 """Tests for skill listing generation."""
 
 from iac_code.commands.registry import PromptCommand
+from iac_code.skills.bundled import get_bundled_skills, init_bundled_skills
+from iac_code.skills.discovery import skill_to_command
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.listing import _assemble, _format_full, _format_truncated, build_skill_listing, get_char_budget
 from iac_code.skills.skill_definition import SkillDefinition
@@ -87,3 +89,13 @@ class TestBuildSkillListing:
         result = _assemble(["- test: description"])
         assert result.startswith("The following skills are available")
         assert result.endswith("- test: description")
+
+    def test_iac_aliyun_listing_contains_strong_trigger_guidance(self):
+        init_bundled_skills()
+        skill = next(s for s in get_bundled_skills() if s.name == "iac-aliyun")
+        result = build_skill_listing([skill_to_command(skill)])
+        assert "iac-aliyun" in result
+        assert "Alibaba Cloud" in result
+        assert "Terraform" in result
+        assert "alicloud provider" in result
+        assert "必须先调用 skill 工具加载 iac-aliyun" in result

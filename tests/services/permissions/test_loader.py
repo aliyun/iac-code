@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from iac_code.services.permissions.loader import load_permission_context, load_settings_permissions
@@ -64,6 +65,30 @@ class TestLoadPermissionContext:
         assert "bash(npm test)" in ctx.allow_rules.get("cli_arg", [])
         assert "bash(rm *)" in ctx.deny_rules.get("cli_arg", [])
         assert ctx.mode == PermissionMode.BYPASS_PERMISSIONS
+
+    def test_parse_cli_permission_mode_rejects_invalid_value(self):
+        from iac_code.services.permissions.loader import parse_cli_permission_mode
+
+        with pytest.raises(ValueError, match="Invalid --permission-mode 'nonsense'"):
+            parse_cli_permission_mode("nonsense")
+
+    def test_parse_cli_permission_mode_error_is_translatable(self, monkeypatch):
+        import iac_code.services.permissions.loader as loader
+
+        monkeypatch.setattr(loader, "_", lambda msg: f"TRANSLATED:{msg}", raising=False)
+
+        with pytest.raises(ValueError) as exc:
+            loader.parse_cli_permission_mode("nonsense")
+
+        assert str(exc.value).startswith("TRANSLATED:Invalid --permission-mode")
+
+    def test_load_permission_context_rejects_invalid_cli_mode(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "iac_code.services.permissions.loader._get_global_settings_path", lambda: tmp_path / "nonexistent.yml"
+        )
+
+        with pytest.raises(ValueError, match="Invalid --permission-mode 'nonsense'"):
+            load_permission_context(str(tmp_path), cli_mode="nonsense")
 
     def test_project_settings_merge(self, tmp_path, monkeypatch):
         monkeypatch.setattr(

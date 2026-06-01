@@ -28,6 +28,7 @@ def register_bundled_skill(
     context: str = "inline",
     agent: str = "general-purpose",
     skill_root: str = "",
+    auto_trigger: dict[str, str] | None = None,
 ) -> None:
     """Register a bundled skill."""
     frontmatter = SkillFrontmatter(
@@ -42,6 +43,7 @@ def register_bundled_skill(
         user_invocable=user_invocable,
         context=context,
         agent=agent,
+        auto_trigger=auto_trigger or {},
     )
 
     # Create prompt provider
