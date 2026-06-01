@@ -229,6 +229,7 @@ class InlineREPL:
             cwd=self._original_cwd,
             permission_context=permission_context,
             permission_context_getter=lambda: self.store.get_state().permission_context,
+            auto_trigger_skills=skill_commands,
         )
         self.renderer = Renderer(
             self.console,
@@ -373,6 +374,10 @@ class InlineREPL:
                     if not user_input:
                         continue
 
+                    if user_input.startswith("!"):
+                        await self._handle_interactive_shell_escape(user_input)
+                        continue
+
                     if self.command_registry.is_command(user_input):
                         self._record_command_history(user_input)
                         await self._handle_command(user_input)
@@ -430,7 +435,10 @@ class InlineREPL:
 
     async def run_once(self, prompt: str) -> None:
         """Process a single prompt and exit (non-interactive mode)."""
-        if self.command_registry.is_command(prompt):
+        stripped_prompt = prompt.strip()
+        if stripped_prompt.startswith("!"):
+            await self._handle_shell_escape(stripped_prompt)
+        elif self.command_registry.is_command(prompt):
             await self._handle_command(prompt)
         else:
             await self._handle_chat(prompt)
@@ -614,7 +622,7 @@ class InlineREPL:
     def _open_history_search(self) -> bool:
         from iac_code.ui.dialogs.history_search import HistorySearch
 
-        messages = self.store.get_state().messages
+        messages = self._history_search_messages()
         dialog = HistorySearch(
             messages=messages,
             on_select=self._insert_text,
@@ -623,6 +631,42 @@ class InlineREPL:
         )
         dialog.run()
         return True
+
+    def _history_search_messages(self) -> list[dict[str, str]]:
+        """Build searchable user-history rows from prompt history and conversation context."""
+        entries: list[str] = []
+        seen: set[str] = set()
+
+        def add_text(text: str) -> None:
+            cleaned = text.strip()
+            if not cleaned or cleaned in seen:
+                return
+            seen.add(cleaned)
+            entries.append(cleaned)
+
+        history = getattr(self, "_history", None)
+        if history is not None and hasattr(history, "entries"):
+            try:
+                for entry in history.entries():
+                    add_text(str(entry))
+            except Exception:
+                pass
+
+        try:
+            context_messages = self._agent_loop.context_manager.get_messages()
+        except Exception:
+            context_messages = []
+        for msg in context_messages:
+            if getattr(msg, "role", None) != "user":
+                continue
+            get_text = getattr(msg, "get_text", None)
+            if callable(get_text):
+                add_text(get_text())
+                continue
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                add_text(str(msg.get("content", "")))
+
+        return [{"role": "user", "content": entry} for entry in entries]
 
     def _open_quick_open(self) -> bool:
         from iac_code.ui.dialogs.quick_open import QuickOpen
@@ -649,8 +693,14 @@ class InlineREPL:
         return True
 
     def _insert_text(self, text: str) -> None:
-        """Insert text into the prompt input buffer (future enhancement)."""
-        pass  # Will be enhanced when PromptInput supports external text insertion
+        """Insert text into the active prompt input buffer."""
+        self._prompt_input.insert_text(text)
+
+    async def _handle_interactive_shell_escape(self, user_input: str) -> None:
+        """Handle an interactive shell escape without adding it to prompt history."""
+        await self._handle_shell_escape(user_input)
+        self._history.reset_navigation()
+        self._clear_cancel_state()
 
     def _expand_last_turn(self) -> bool:
         """Keybinding handler: open the verbose transcript view."""
@@ -660,6 +710,66 @@ class InlineREPL:
     # ------------------------------------------------------------------
     # Command handling
     # ------------------------------------------------------------------
+
+    async def _handle_shell_escape(self, user_input: str) -> None:
+        """Execute a local shell command from a leading ! REPL input."""
+        command = user_input[1:].strip()
+        if not command:
+            self.renderer.print_system_message(_("Usage: !<shell command>"), style="yellow")
+            return
+
+        tool = self.tool_registry.get("bash")
+        if tool is None:
+            self.renderer.print_system_message(_("Shell command support is unavailable."), style="red")
+            return
+
+        tool_input = {"command": command}
+        if not await self._request_shell_escape_permission(tool, tool_input):
+            return
+
+        from iac_code.tools.base import ToolContext
+        from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
+
+        executor = ToolExecutor(self.tool_registry)
+        results = await executor.execute_batch(
+            [ToolCallRequest(id="shell-escape", name="bash", input=tool_input)],
+            ToolContext(cwd=self._original_cwd),
+        )
+        result = results[0]
+        self.renderer.print_system_message(f"$ {command}", style="dim")
+        output = result.content.rstrip()
+        if output:
+            self.renderer.print_system_message(output, style="red" if result.is_error else "white")
+
+    async def _request_shell_escape_permission(self, tool, tool_input: dict) -> bool:
+        """Check permission for a display-only shell escape before execution."""
+        permission_context = self.store.get_state().permission_context
+        if permission_context is not None:
+            from iac_code.services.permissions.pipeline import check_tool_permission
+
+            permission = await check_tool_permission(tool, tool_input, permission_context)
+        else:
+            permission = await tool.check_permissions(tool_input, {"cwd": self._original_cwd})
+
+        if permission.behavior == "allow":
+            return True
+        if permission.behavior == "deny":
+            self.renderer.print_system_message(permission.message or _("Permission denied."), style="red")
+            return False
+
+        from iac_code.types.stream_events import PermissionRequestEvent
+
+        allowed = await self.renderer.prompt_permission(
+            PermissionRequestEvent(
+                tool_name="bash",
+                tool_input=tool_input,
+                tool_use_id="shell-escape",
+                permission_result=permission,
+            )
+        )
+        if not allowed:
+            self.renderer.print_system_message(_("Permission denied."), style="red")
+        return allowed
 
     async def _handle_command(self, user_input: str) -> None:
         """Dispatch a slash command and print the result."""

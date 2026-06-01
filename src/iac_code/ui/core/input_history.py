@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
+from typing import Any
+
+from iac_code.utils.file_security import ensure_private_file
+
+_HISTORY_FORMAT = "iac-code-input-history-v1"
 
 
 class InputHistory:
-    """Stores and retrieves terminal input history from a plain text file.
+    """Stores and retrieves terminal input history from a JSONL file.
 
-    File format: one entry per line, most-recently-appended at the end.
+    New entries are stored as marked JSONL records, one entry per physical
+    line, most-recently-appended at the end. Legacy plain-line entries remain
+    readable.
 
     Attributes:
         _entries: In-memory list of history entries (oldest first).
@@ -28,22 +37,39 @@ class InputHistory:
     # Persistence
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _decode_line(line: str) -> str:
+        """Decode one history file line, accepting JSONL and legacy plain text."""
+        try:
+            data: Any = json.loads(line)
+        except json.JSONDecodeError:
+            return line
+        if isinstance(data, dict) and data.get("format") == _HISTORY_FORMAT and isinstance(data.get("text"), str):
+            return data["text"]
+        return line
+
+    @staticmethod
+    def _encode_entry(entry: str) -> str:
+        """Encode one history entry as a JSONL object."""
+        return json.dumps({"format": _HISTORY_FORMAT, "text": entry}, ensure_ascii=False)
+
     def _load(self) -> None:
         """Load entries from the history file if it exists."""
         if not os.path.exists(self._file):
             return
         with open(self._file, encoding="utf-8") as f:
             for line in f:
-                entry = line.rstrip("\n")
-                if entry:
-                    self._entries.append(entry)
+                raw = line.rstrip("\n")
+                if raw:
+                    self._entries.append(self._decode_line(raw))
 
     def _save(self) -> None:
         """Persist only non-session-only entries to the history file."""
         with open(self._file, "w", encoding="utf-8") as f:
             for i, entry in enumerate(self._entries):
                 if i not in self._session_only:
-                    f.write(entry + "\n")
+                    f.write(self._encode_entry(entry) + "\n")
+        ensure_private_file(Path(self._file))
 
     # ------------------------------------------------------------------
     # Mutation
@@ -93,6 +119,10 @@ class InputHistory:
     def search(self, prefix: str) -> list[str]:
         """Return entries whose text starts with *prefix*, most recent first."""
         return [e for e in reversed(self._entries) if e.startswith(prefix)]
+
+    def entries(self) -> list[str]:
+        """Return all in-memory history entries, oldest first."""
+        return list(self._entries)
 
     # ------------------------------------------------------------------
     # Navigation

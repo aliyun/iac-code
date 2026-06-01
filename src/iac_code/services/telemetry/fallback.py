@@ -7,6 +7,8 @@ import uuid
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
+
 _FAILED_PREFIX = "failed_events."
 _FAILED_SUFFIX = ".jsonl"
 
@@ -18,8 +20,7 @@ class FallbackStore:
         self._base_dir = base_dir
 
     def _ensure_dir(self) -> Path:
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-        return self._base_dir
+        return ensure_private_dir(self._base_dir)
 
     def write(self, session_id: str, events: Iterable[dict]) -> Path:
         """Write one JSONL file per batch. One line per event."""
@@ -28,6 +29,7 @@ class FallbackStore:
         with path.open("w", encoding="utf-8") as fh:
             for event in events:
                 fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+        ensure_private_file(path)
         return path
 
     def list_pending(self) -> Iterator[Path]:

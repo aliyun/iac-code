@@ -14,6 +14,10 @@ class TestBundledSkills:
         """Clear bundled skills before each test."""
         _bundled_skills.clear()
 
+    def teardown_method(self):
+        """Avoid leaking test-only bundled skills into later test modules."""
+        _bundled_skills.clear()
+
     def test_register_static_skill(self):
         register_bundled_skill(
             name="test",
@@ -72,3 +76,13 @@ class TestBundledSkills:
         assert skill.frontmatter.effort == "high"
         assert skill.frontmatter.context == "fork"
         assert skill.frontmatter.agent == "explore"
+
+    def test_register_static_skill_with_auto_trigger_metadata(self):
+        register_bundled_skill(
+            name="test",
+            description="A test skill",
+            prompt="Do something.",
+            auto_trigger={"script": "auto_trigger.py"},
+        )
+        skill = get_bundled_skills()[0]
+        assert skill.auto_trigger == {"script": "auto_trigger.py"}

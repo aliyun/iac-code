@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from iac_code.config import PARTNER_SOURCES, PartnerSource, get_available_partner_sources
 
@@ -221,6 +224,18 @@ class TestYamlHelpers:
         assert path.exists()
         content = yaml.safe_load(path.read_text())
         assert content == {"key": "value", "num": 42}
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes are not meaningful on Windows")
+    def test_save_yaml_writes_owner_only_file(self, tmp_path):
+        """_save_yaml restricts parent directory and written file."""
+        path = tmp_path / "private" / "settings.yml"
+
+        from iac_code.config import _save_yaml
+
+        _save_yaml(path, {"secret": "value"})
+
+        assert oct(path.parent.stat().st_mode & 0o777) == "0o700"
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
 
     def test_save_yaml_creates_parent_dirs(self, tmp_path):
         """_save_yaml creates parent directories if they don't exist."""

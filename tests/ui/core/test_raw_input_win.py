@@ -253,6 +253,78 @@ class TestAnsiEscapeSequences:
         event = cap.read_key(timeout=1.0)
         assert event == KeyEvent(key="unknown", char="")
 
+    def test_shift_enter_csi_u(self):
+        self.mock.kbhit.side_effect = [True, True, True, True, True, True, True]
+        self.mock.getwch.side_effect = ["\x1b", "[", "1", "3", ";", "2", "u"]
+
+        from iac_code.ui.core.raw_input_win import RawInputCapture
+
+        cap = RawInputCapture()
+        cap.__enter__()
+        event = cap.read_key(timeout=1.0)
+
+        assert event == KeyEvent(key="enter", char="", shift=True)
+
+    def test_shift_enter_xterm_modify_other_keys(self):
+        self.mock.kbhit.side_effect = [True, True, True, True, True, True, True, True, True, True]
+        self.mock.getwch.side_effect = ["\x1b", "[", "2", "7", ";", "2", ";", "1", "3", "~"]
+
+        from iac_code.ui.core.raw_input_win import RawInputCapture
+
+        cap = RawInputCapture()
+        cap.__enter__()
+        event = cap.read_key(timeout=1.0)
+
+        assert event == KeyEvent(key="enter", char="", shift=True)
+
+    def test_shift_enter_modified_special_key(self):
+        self.mock.kbhit.side_effect = [True, True, True, True, True, True, True]
+        self.mock.getwch.side_effect = ["\x1b", "[", "1", "3", ";", "2", "~"]
+
+        from iac_code.ui.core.raw_input_win import RawInputCapture
+
+        cap = RawInputCapture()
+        cap.__enter__()
+        event = cap.read_key(timeout=1.0)
+
+        assert event == KeyEvent(key="enter", char="", shift=True)
+
+    def test_unknown_modified_enter_csi_u(self):
+        self.mock.kbhit.side_effect = [True, True, True, True, True, True, True]
+        self.mock.getwch.side_effect = ["\x1b", "[", "1", "3", ";", "5", "u"]
+
+        from iac_code.ui.core.raw_input_win import RawInputCapture
+
+        cap = RawInputCapture()
+        cap.__enter__()
+        event = cap.read_key(timeout=1.0)
+
+        assert event == KeyEvent(key="unknown", char="")
+
+    def test_ctrl_c_xterm_modify_other_keys(self):
+        self.mock.kbhit.side_effect = [True, True, True, True, True, True, True, True, True, True, True]
+        self.mock.getwch.side_effect = ["\x1b", "[", "2", "7", ";", "5", ";", "9", "9", "~"]
+
+        from iac_code.ui.core.raw_input_win import RawInputCapture
+
+        cap = RawInputCapture()
+        cap.__enter__()
+        event = cap.read_key(timeout=1.0)
+
+        assert event == KeyEvent(key="c", char="", ctrl=True)
+
+    def test_ctrl_r_csi_u(self):
+        self.mock.kbhit.side_effect = [True, True, True, True, True, True, True, True]
+        self.mock.getwch.side_effect = ["\x1b", "[", "1", "1", "4", ";", "5", "u"]
+
+        from iac_code.ui.core.raw_input_win import RawInputCapture
+
+        cap = RawInputCapture()
+        cap.__enter__()
+        event = cap.read_key(timeout=1.0)
+
+        assert event == KeyEvent(key="r", char="", ctrl=True)
+
     def test_esc_followup_delayed_arrival(self):
         """ESC followed by '[' after a brief delay should still parse as CSI."""
         call_count = 0

@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 
@@ -45,6 +46,14 @@ class TestSessionStorage:
         loaded = storage.load(CWD, "s2")
         assert len(loaded) == 2
         assert loaded[0].get_text() == "First"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes are not meaningful on Windows")
+    def test_append_writes_owner_only_session_file(self, storage):
+        storage.append(CWD, "private-session", Message(role="user", content="hi"), git_branch=None)
+        path = storage.session_path(CWD, "private-session")
+
+        assert oct(path.parent.stat().st_mode & 0o777) == "0o700"
+        assert oct(path.stat().st_mode & 0o777) == "0o600"
 
     def test_load_nonexistent(self, storage):
         assert storage.load(CWD, "nope") == []

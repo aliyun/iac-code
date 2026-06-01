@@ -1,6 +1,7 @@
 """Tests for the FallbackStore class."""
 
 import json
+import sys
 
 import pytest
 
@@ -18,6 +19,14 @@ def test_write_creates_jsonl_file(store, tmp_path):
     assert path.parent == tmp_path / "telemetry"
     assert "iac_sess_abc" in path.name
     assert path.suffix == ".jsonl"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes are not meaningful on Windows")
+def test_write_creates_owner_only_file(store):
+    path = store.write("iac_sess_private", [{"event.name": "iac.test", "k": 1}])
+
+    assert oct(path.parent.stat().st_mode & 0o777) == "0o700"
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
 
 
 def test_write_produces_one_line_per_event(store):

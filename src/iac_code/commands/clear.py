@@ -12,7 +12,7 @@ async def clear_command(context=None, **kwargs) -> str:
     if context and hasattr(context, "repl"):
         agent_loop = getattr(context.repl, "_agent_loop", None)
         if agent_loop:
-            agent_loop.context_manager.reset()
+            agent_loop.reset()
         if hasattr(context.repl, "_command_log"):
             context.repl._command_log.clear()
 

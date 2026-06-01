@@ -8,6 +8,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from iac_code.config import get_config_dir
+from iac_code.utils.file_security import ensure_private_dir
 from iac_code.utils.image.pasted_content import PastedContent
 
 IMAGE_STORE_DIR_NAME = "image-cache"
@@ -40,8 +41,8 @@ class ImageStore:
     def store(self, pc: PastedContent) -> str | None:
         if not pc.is_valid_image():
             return None
-        d = self._session_dir()
-        d.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(_get_base_dir())
+        d = ensure_private_dir(self._session_dir())
         ext = (pc.media_type or "image/png").split("/")[-1]
         path = d / f"{pc.id}.{ext}"
         try:
@@ -79,6 +80,7 @@ def cleanup_old_image_caches(
     base = _get_base_dir()
     if not base.exists():
         return
+    ensure_private_dir(base)
     now = time.time()
     for entry in base.iterdir():
         if not entry.is_dir() or entry.name == current_session_id:

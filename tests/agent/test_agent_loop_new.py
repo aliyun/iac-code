@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -199,6 +199,297 @@ class TestAgentLoopStreaming:
         assert len(assistant_blocks) == 1
         assert assistant_blocks[0].text == "final"
 
+    async def test_max_turns_zero_emits_max_turns_without_provider_call(self, mock_provider, mock_registry):
+        mock_provider.stream = AsyncMock()
+
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            max_turns=0,
+        )
+        loop.context_manager = MagicMock()
+        loop.context_manager.needs_compaction.return_value = False
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        assert any(isinstance(e, MessageEndEvent) and e.stop_reason == "max_turns" for e in events)
+        mock_provider.stream.assert_not_called()
+
+    async def test_tool_use_exhaustion_emits_max_turns_after_tool_result(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
+            yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
+            yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [SimpleNamespace(name="read_file", description="Read", input_schema={})]
+
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            max_turns=1,
+        )
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(content="processed result")
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_api_messages.return_value = []
+        loop.context_manager.needs_compaction.return_value = False
+        loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="raw result", is_error=False)])
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        event_types = [e.type for e in events]
+        assert "tool_result" in event_types
+        assert isinstance(events[-1], MessageEndEvent)
+        assert events[-1].stop_reason == "max_turns"
+
+    async def test_normal_completion_does_not_emit_synthetic_max_turns(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="Hello!")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            max_turns=1,
+        )
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        assert not any(isinstance(e, MessageEndEvent) and e.stop_reason == "max_turns" for e in events)
+
+    async def test_auto_trigger_injects_skill_before_provider_call(self, mock_provider, mock_registry):
+        from iac_code.commands.registry import PromptCommand
+        from iac_code.skills.frontmatter import SkillFrontmatter
+        from iac_code.skills.skill_definition import SkillDefinition
+        from iac_code.types.skill_source import SkillSource
+
+        fm = SkillFrontmatter(description="demo", auto_trigger={"script": "auto_trigger.py"})
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=fm,
+            content="Demo skill prompt",
+            source=SkillSource.BUNDLED,
+            skill_root="/tmp",
+        )
+        command = PromptCommand(name="demo", description="demo", skill=skill, source=SkillSource.BUNDLED)
+
+        async def fake_process(prompt, skills, *, loaded_skill_names, context_messages=None, session_id=""):
+            loaded_skill_names.add("demo")
+            return [
+                SimpleNamespace(
+                    skill_name="demo",
+                    new_messages=[{"role": "user", "content": "<skill-name>demo</skill-name>\n\nDemo skill prompt"}],
+                    context_modifier=None,
+                )
+            ]
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            assert messages[0].content.startswith("<skill-name>demo</skill-name>")
+            assert messages[1].content == "please match"
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            auto_trigger_skills=[command],
+        )
+
+        with patch("iac_code.skills.auto_trigger.process_auto_triggered_skills", fake_process):
+            events = [e async for e in loop.run_streaming("please match")]
+
+        assert any(isinstance(e, TextDeltaEvent) for e in events)
+        assert loop._auto_loaded_skills == {"demo"}
+
+    async def test_auto_trigger_persists_injected_message_before_user_message(self, mock_provider, mock_registry):
+        from iac_code.commands.registry import PromptCommand
+        from iac_code.skills.frontmatter import SkillFrontmatter
+        from iac_code.skills.skill_definition import SkillDefinition
+        from iac_code.types.skill_source import SkillSource
+
+        fm = SkillFrontmatter(description="demo", auto_trigger={"script": "auto_trigger.py"})
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=fm,
+            content="Demo skill prompt",
+            source=SkillSource.BUNDLED,
+            skill_root="/tmp",
+        )
+        command = PromptCommand(name="demo", description="demo", skill=skill, source=SkillSource.BUNDLED)
+        session_storage = MagicMock()
+
+        async def fake_process(prompt, skills, *, loaded_skill_names, context_messages=None, session_id=""):
+            loaded_skill_names.add("demo")
+            return [
+                SimpleNamespace(
+                    skill_name="demo",
+                    new_messages=[{"role": "user", "content": "<skill-name>demo</skill-name>\n\nDemo skill prompt"}],
+                    context_modifier=None,
+                )
+            ]
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            assert messages[0].content.startswith("<skill-name>demo</skill-name>")
+            assert messages[1].content == "please match"
+            yield MessageStartEvent(message_id="m1")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=session_storage,
+            session_id="session-a",
+            auto_trigger_skills=[command],
+        )
+
+        with patch("iac_code.skills.auto_trigger.process_auto_triggered_skills", fake_process):
+            await loop.run("please match")
+
+        persisted_messages = [call.args[2] for call in session_storage.append.call_args_list]
+        assert persisted_messages[0].content.startswith("<skill-name>demo</skill-name>")
+        assert persisted_messages[1].content == "please match"
+
+    async def test_auto_trigger_resume_keeps_persisted_skill_idempotent(self, tmp_path, mock_provider, mock_registry):
+        from iac_code.commands.registry import PromptCommand
+        from iac_code.services.session_storage import SessionStorage
+        from iac_code.skills.frontmatter import SkillFrontmatter
+        from iac_code.skills.skill_definition import SkillDefinition
+        from iac_code.types.skill_source import SkillSource
+
+        skill_root = tmp_path / "skill"
+        skill_root.mkdir()
+        (skill_root / "auto_trigger.py").write_text(
+            "ENABLE_AUTO_TRIGGER = True\ndef should_trigger(prompt):\n    return 'match me' in prompt\n",
+            encoding="utf-8",
+        )
+        fm = SkillFrontmatter(description="demo", auto_trigger={"script": "auto_trigger.py"})
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=fm,
+            content="Demo skill prompt",
+            source=SkillSource.BUNDLED,
+            skill_root=str(skill_root),
+        )
+        command = PromptCommand(name="demo", description="demo", skill=skill, source=SkillSource.BUNDLED)
+        storage = SessionStorage(projects_dir=tmp_path / "projects")
+        cwd = str(tmp_path / "cwd")
+        session_id = "session-a"
+
+        async def first_stream(messages, system, tools=None, max_tokens=8192):
+            assert messages[0].content.startswith("<skill-name>demo</skill-name>")
+            assert messages[1].content == "please match me"
+            yield MessageStartEvent(message_id="m1")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = first_stream
+        first_loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=storage,
+            session_id=session_id,
+            cwd=cwd,
+            auto_trigger_skills=[command],
+        )
+
+        await first_loop.run("please match me")
+        loaded = storage.load(cwd, session_id)
+        assert sum("<skill-name>demo</skill-name>" in message.get_text() for message in loaded) == 1
+
+        async def resumed_stream(messages, system, tools=None, max_tokens=8192):
+            assert sum("<skill-name>demo</skill-name>" in message.content for message in messages) == 1
+            assert messages[-1].content == "please match me again"
+            yield MessageStartEvent(message_id="m2")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = resumed_stream
+        resumed_loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=storage,
+            session_id=session_id,
+            resume_messages=loaded,
+            cwd=cwd,
+            auto_trigger_skills=[command],
+        )
+
+        await resumed_loop.run("please match me again")
+        reloaded = storage.load(cwd, session_id)
+
+        assert sum("<skill-name>demo</skill-name>" in message.get_text() for message in reloaded) == 1
+        assert resumed_loop._auto_loaded_skills == {"demo"}
+
+    async def test_auto_trigger_does_not_repeat_loaded_skill(self, mock_provider, mock_registry):
+        from iac_code.commands.registry import PromptCommand
+        from iac_code.skills.frontmatter import SkillFrontmatter
+        from iac_code.skills.skill_definition import SkillDefinition
+        from iac_code.types.skill_source import SkillSource
+
+        fm = SkillFrontmatter(description="demo", auto_trigger={"script": "auto_trigger.py"})
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=fm,
+            content="Demo skill prompt",
+            source=SkillSource.BUNDLED,
+            skill_root="/tmp",
+        )
+        command = PromptCommand(name="demo", description="demo", skill=skill, source=SkillSource.BUNDLED)
+        calls = 0
+
+        async def fake_process(prompt, skills, *, loaded_skill_names, context_messages=None, session_id=""):
+            nonlocal calls
+            calls += 1
+            loaded_skill_names.add("demo")
+            return [
+                SimpleNamespace(
+                    skill_name="demo",
+                    new_messages=[{"role": "user", "content": "<skill-name>demo</skill-name>\n\nDemo skill prompt"}],
+                    context_modifier=None,
+                )
+            ]
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            auto_trigger_skills=[command],
+        )
+
+        with patch("iac_code.skills.auto_trigger.process_auto_triggered_skills", fake_process):
+            await loop.run("first")
+            await loop.run("second")
+
+        injected = [
+            message
+            for message in loop.context_manager.get_messages()
+            if isinstance(message.content, str) and "<skill-name>demo</skill-name>" in message.content
+        ]
+        assert calls == 1
+        assert len(injected) == 1
+
 
 @pytest.mark.asyncio
 class TestAgentLoopCompaction:
@@ -273,12 +564,24 @@ class TestAgentLoopHelpers:
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         loop.context_manager = MagicMock()
         loop.context_manager.get_usage.return_value = {"total_tokens": 10}
+        loop._auto_loaded_skills.add("iac-aliyun")
 
         loop.reset()
         usage = loop.get_context_usage()
 
         loop.context_manager.reset.assert_called_once()
+        assert loop._auto_loaded_skills == set()
         assert usage == {"total_tokens": 10}
+
+    def test_replace_session_clears_auto_loaded_skills(self, mock_provider, mock_registry):
+        from iac_code.agent.message import Message
+
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._auto_loaded_skills.add("demo")
+
+        loop.replace_session("session-b", [Message(role="user", content="new session")])
+
+        assert loop._auto_loaded_skills == set()
 
 
 class TestAgentLoopSetProvider:

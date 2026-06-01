@@ -32,6 +32,7 @@ from iac_code.types.stream_events import (
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
+    Usage,
 )
 
 
@@ -69,6 +70,7 @@ class AgentLoop:
         cwd: str | None = None,
         permission_context: Any = None,  # ToolPermissionContext
         permission_context_getter: Any = None,  # Callable[[], ToolPermissionContext | None]
+        auto_trigger_skills: list[Any] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -79,6 +81,8 @@ class AgentLoop:
         self._cwd = cwd or os.getcwd()
         self._permission_context = permission_context
         self._permission_context_getter = permission_context_getter
+        self._auto_trigger_skills = auto_trigger_skills or []
+        self._auto_loaded_skills: set[str] = set()
         self._current_git_branch: str | None = None
 
         model_name = ""
@@ -224,6 +228,7 @@ class AgentLoop:
                 # between turns (user runs git checkout via Bash tool), but
                 # is treated as stable within a single in-flight request.
                 self._refresh_git_branch()
+                await self._apply_auto_triggers(user_input)
                 self.context_manager.add_user_message(user_input)
                 if self._session_storage:
                     from iac_code.agent.message import Message
@@ -535,6 +540,46 @@ class AgentLoop:
                             self.context_manager.add_raw_message(msg)
                     if result.context_modifier is not None:
                         self._apply_context_modifier(result.context_modifier)
+        else:
+            yield MessageEndEvent(stop_reason="max_turns", usage=Usage())
+
+    async def _apply_auto_triggers(self, user_input: str | list[ContentBlock]) -> None:
+        if not self._auto_trigger_skills:
+            return
+        if all(command.name in self._auto_loaded_skills for command in self._auto_trigger_skills):
+            return
+        prompt_text = self._auto_trigger_text(user_input)
+        if not prompt_text:
+            return
+
+        from iac_code.skills.auto_trigger import process_auto_triggered_skills
+
+        results = await process_auto_triggered_skills(
+            prompt_text,
+            self._auto_trigger_skills,
+            loaded_skill_names=self._auto_loaded_skills,
+            context_messages=self.context_manager.get_messages(),
+            session_id=self._session_id,
+        )
+        for result in results:
+            for msg in result.new_messages:
+                injected = self.context_manager.add_raw_message(msg)
+                if self._session_storage:
+                    self._session_storage.append(
+                        self._cwd,
+                        self._session_id,
+                        injected,
+                        git_branch=self._current_git_branch,
+                    )
+            if result.context_modifier is not None:
+                self._apply_context_modifier(result.context_modifier)
+
+    @staticmethod
+    def _auto_trigger_text(user_input: str | list[ContentBlock]) -> str:
+        if isinstance(user_input, str):
+            return user_input
+        parts = [block.text for block in user_input if isinstance(block, TextBlock)]
+        return " ".join(part for part in parts if part).strip()
 
     def _apply_context_modifier(self, modifier: Any) -> None:
         """Apply a context modifier from a ToolResult to the current execution context."""
@@ -642,6 +687,7 @@ class AgentLoop:
 
         self._session_id = session_id
         self._current_git_branch = None
+        self._auto_loaded_skills.clear()
         self.context_manager.reset()
         if resume_messages:
             self.context_manager.load_messages(resume_messages)
@@ -663,6 +709,7 @@ class AgentLoop:
             self._current_git_branch = None
 
     def reset(self) -> None:
+        self._auto_loaded_skills.clear()
         self.context_manager.reset()
 
     def get_context_usage(self) -> dict:

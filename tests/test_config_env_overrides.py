@@ -71,6 +71,42 @@ class TestGetEnvOverrides:
 
         assert _get_env_overrides()["provider_key"] == "dashscope"
 
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("OpenAPI Compatible", "openapi_compatible"),
+            ("openapi-compatible", "openapi_compatible"),
+            ("openapi_compatible", "openapi_compatible"),
+            ("oPeNaPi CoMpAtIbLe", "openapi_compatible"),
+            ("DashScope Token Plan", "dashscope_token_plan"),
+            ("dashscope-token-plan", "dashscope_token_plan"),
+            ("dashscope_token_plan", "dashscope_token_plan"),
+        ],
+    )
+    def test_provider_env_accepts_normalized_display_names_and_keys(self, monkeypatch, value, expected):
+        monkeypatch.setenv("IAC_CODE_PROVIDER", value)
+        from iac_code.config import _get_env_overrides
+
+        assert _get_env_overrides()["provider_key"] == expected
+
+    def test_provider_name_lookup_rejects_colliding_normalized_aliases(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import iac_code.providers.registry as registry
+        from iac_code.config import _build_provider_name_to_key
+
+        monkeypatch.setattr(
+            registry,
+            "PROVIDER_REGISTRY",
+            {
+                "foo_bar": SimpleNamespace(key="foo_bar", name="Foo Bar"),
+                "foobar": SimpleNamespace(key="foobar", name="Foobar"),
+            },
+        )
+
+        with pytest.raises(ValueError, match="Ambiguous provider alias"):
+            _build_provider_name_to_key()
+
     def test_provider_invalid_raises_with_canonical_names(self, monkeypatch):
         monkeypatch.setenv("IAC_CODE_PROVIDER", "Unknown")
         from iac_code.config import _get_env_overrides
@@ -80,6 +116,17 @@ class TestGetEnvOverrides:
         msg = str(exc.value)
         for canonical in ("Anthropic", "OpenAI", "DashScope", "DeepSeek"):
             assert canonical in msg
+
+    def test_provider_invalid_error_is_translatable(self, monkeypatch):
+        import iac_code.config as config
+
+        monkeypatch.setenv("IAC_CODE_PROVIDER", "Unknown")
+        monkeypatch.setattr(config, "_", lambda msg: f"TRANSLATED:{msg}", raising=False)
+
+        with pytest.raises(ValueError) as exc:
+            config._get_env_overrides()
+
+        assert str(exc.value).startswith("TRANSLATED:Invalid IAC_CODE_PROVIDER value")
 
     def test_all_four_env_vars_returned(self, monkeypatch):
         monkeypatch.setenv("IAC_CODE_PROVIDER", "DeepSeek")

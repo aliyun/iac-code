@@ -84,6 +84,7 @@ def main(
     output_format: str = typer.Option("text", "--output-format", help=_("Output format: text, json, stream-json")),
     max_turns: int = typer.Option(100, "--max-turns", help=_("Maximum agent turns in headless mode")),
     debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
+    verbose: bool = typer.Option(False, "--verbose", help=_("Show headless progress on stderr")),
     version: bool = typer.Option(False, "--version", "-v", "-V", is_eager=True, help=_("Show version and exit")),
     resume: str = typer.Option("", "--resume", "-r", help=_("Resume a session by ID")),
     continue_session: bool = typer.Option(False, "--continue", "-c", help=_("Resume the most recent session")),
@@ -150,6 +151,18 @@ def main(
         typer.echo(_("Error: --resume and --continue cannot be used together."), err=True)
         raise typer.Exit(1)
 
+    fmt = None
+    if prompt:
+        from iac_code.cli.output_formats import OutputFormat
+
+        normalized_output_format = (output_format or "text").strip().lower()
+        try:
+            fmt = OutputFormat(normalized_output_format)
+        except ValueError as exc:
+            valid = ", ".join(item.value for item in OutputFormat)
+            typer.echo(_("Invalid --output-format '{}'. Valid values: {}").format(output_format, valid), err=True)
+            raise typer.Exit(1) from exc
+
     # Priority: CLI parameter > saved config > default
     if not model:
         try:
@@ -159,9 +172,20 @@ def main(
             raise typer.Exit(1)
 
     if prompt:
+        assert fmt is not None
+
         # Read from stdin if prompt is "-"
         if prompt == "-":
             prompt = sys.stdin.read().strip()
+
+        if permission_mode:
+            from iac_code.services.permissions.loader import parse_cli_permission_mode
+
+            try:
+                parse_cli_permission_mode(permission_mode)
+            except ValueError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(1) from exc
 
         # Headless mode: generate session_id for logging only
         session_id = str(uuid.uuid4())
@@ -175,7 +199,7 @@ def main(
             Events.SESSION_STARTED,
             {
                 "headless": True,
-                "output_format": output_format or "text",
+                "output_format": fmt.value,
             },
         )
         add_metric(Metrics.SESSION_COUNT, 1, {})
@@ -215,9 +239,7 @@ def main(
             return await coro
 
         from iac_code.cli.headless import HeadlessRunner
-        from iac_code.cli.output_formats import OutputFormat
 
-        fmt = OutputFormat(output_format)
         cli_allowed = [s.strip() for s in allowed_tools.split(",") if s.strip()] if allowed_tools else None
         cli_disallowed = [s.strip() for s in disallowed_tools.split(",") if s.strip()] if disallowed_tools else None
         try:
@@ -228,6 +250,7 @@ def main(
                 cli_allowed_tools=cli_allowed,
                 cli_disallowed_tools=cli_disallowed,
                 cli_permission_mode=permission_mode or None,
+                verbose=verbose,
             )
             exit_code = asyncio.run(_run_with_handler(runner.run(prompt)))
         except _QwenPawError as exc:

@@ -24,3 +24,20 @@ Beschreiben Sie dann, was Sie erstellen moechten:
 ```text
 Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
 ```
+
+## Eingabe bearbeiten
+
+Verwenden Sie `Shift+Enter`, um eine neue Zeile einzufuegen, ohne den Prompt zu senden. Druecken Sie normales `Enter`, um den vollstaendigen Prompt zu senden.
+
+Wenn Ihr Terminal `Shift+Enter` nicht getrennt uebermittelt, druecken Sie `Esc` und dann `Enter`, um eine neue Zeile einzufuegen. Mehrzeilige Prompts werden als ein Verlaufseintrag gespeichert, sodass `Up` den vollstaendigen Prompt wiederherstellt.
+
+## Shell-Escapes
+
+Stellen Sie einer Zeile `!` voran, um im REPL einen lokalen Shell-Befehl ueber das integrierte `bash`-Tool auszufuehren:
+
+```text
+!pwd
+!git status --short
+```
+
+IaC Code wendet die normalen Tool-Berechtigungspruefungen an, fuehrt den Befehl im aktuellen Projektkontext aus und zeigt die Ausgabe im Terminal an. Der Befehl wird nicht als Chat-Nachricht an das Modell gesendet.

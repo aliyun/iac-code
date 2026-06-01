@@ -112,6 +112,21 @@ class TestJsonWriter:
         result = json.loads(stream.getvalue())
         assert result["error"] == "something went wrong"
 
+    def test_synthetic_max_turns_does_not_overwrite_previous_usage(self) -> None:
+        stream = io.StringIO()
+        writer = JsonWriter(stream)
+        writer.handle(MessageEndEvent(stop_reason="tool_use", usage=Usage(input_tokens=10, output_tokens=5)))
+        writer.handle(MessageEndEvent(stop_reason="max_turns", usage=Usage()))
+        writer.finalize()
+
+        result = json.loads(stream.getvalue())
+        assert result["usage"] == {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        }
+
 
 # ---------------------------------------------------------------------------
 # TestStreamJsonWriter

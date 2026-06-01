@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 from loguru import logger
 
+from iac_code.i18n import _
 from iac_code.types.permissions import PermissionMode, ToolPermissionContext
 
 
@@ -38,6 +39,15 @@ def _coerce_str_list(value: Any) -> list[str]:
         elif item is not None:
             out.append(str(item))
     return out
+
+
+def parse_cli_permission_mode(value: str) -> PermissionMode:
+    """Parse a CLI permission mode, raising on invalid explicit input."""
+    try:
+        return PermissionMode(value)
+    except ValueError as exc:
+        valid = ", ".join(m.value for m in PermissionMode)
+        raise ValueError(_("Invalid --permission-mode {!r}. Valid values: {}").format(value, valid)) from exc
 
 
 def load_settings_permissions(path: Path, source: str) -> dict[str, Any]:
@@ -147,11 +157,7 @@ def load_permission_context(
     if cli_disallowed:
         deny_rules["cli_arg"] = list(cli_disallowed)
     if cli_mode is not None:
-        try:
-            mode_holder[0] = PermissionMode(cli_mode)
-        except ValueError:
-            valid = ", ".join(m.value for m in PermissionMode)
-            logger.warning("Invalid --permission-mode '{}'; valid: {}", cli_mode, valid)
+        mode_holder[0] = parse_cli_permission_mode(cli_mode)
 
     resolved_mode = mode_holder[0] if mode_holder[0] is not None else PermissionMode.DEFAULT
 

@@ -122,5 +122,24 @@ class TestWriteMemoryTool:
         assert result.is_error is True
         assert result.content == "disk full"
 
+    async def test_write_memory_returns_error_for_invalid_name(self, tmp_path):
+        from iac_code.memory.memory_manager import MemoryManager
+
+        tool = WriteMemoryTool(MemoryManager(memory_dir=str(tmp_path)))
+
+        result = await tool.execute(
+            tool_input={
+                "name": "../escape",
+                "content": "escaped",
+                "memory_type": "user",
+                "description": "bad",
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error is True
+        assert "Invalid memory name" in result.content
+        assert not (tmp_path.parent / "escape.md").exists()
+
     async def test_is_read_only(self):
         assert WriteMemoryTool(FakeMemoryManager()).is_read_only() is False

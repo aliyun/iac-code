@@ -144,17 +144,15 @@ async def test_compact_exception(registry: ACPSlashRegistry) -> None:
 @pytest.mark.asyncio
 async def test_clear_success(registry: ACPSlashRegistry) -> None:
     agent_loop = MagicMock()
-    agent_loop.context_manager = MagicMock()
     result = await registry.execute("/clear", agent_loop=agent_loop)
-    agent_loop.context_manager.reset.assert_called_once()
+    agent_loop.reset.assert_called_once()
     assert "clear" in result.lower() or "清" in result
 
 
 @pytest.mark.asyncio
 async def test_clear_exception(registry: ACPSlashRegistry) -> None:
     agent_loop = MagicMock()
-    agent_loop.context_manager = MagicMock()
-    agent_loop.context_manager.reset.side_effect = RuntimeError("db error")
+    agent_loop.reset.side_effect = RuntimeError("db error")
     result = await registry.execute("/clear", agent_loop=agent_loop)
     assert "db error" in result
 

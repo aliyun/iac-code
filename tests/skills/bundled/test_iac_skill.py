@@ -19,3 +19,9 @@ class TestIacSkill:
         skills = get_bundled_skills()
         iac_skill = next(s for s in skills if s.name == "iac-aliyun")
         assert len(iac_skill.description) > 0
+
+    def test_iac_skill_has_auto_trigger_metadata(self):
+        init_bundled_skills()
+        skills = get_bundled_skills()
+        iac_skill = next(s for s in skills if s.name == "iac-aliyun")
+        assert iac_skill.auto_trigger == {"script": "auto_trigger.py"}

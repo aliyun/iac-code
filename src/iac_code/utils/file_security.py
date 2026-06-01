@@ -34,6 +34,20 @@ def restrict_file_permissions(path: Path, *, directory: bool) -> None:
             return
 
 
+def ensure_private_dir(path: Path) -> Path:
+    """Create a directory and restrict it to owner-only access."""
+    path.mkdir(parents=True, exist_ok=True)
+    restrict_file_permissions(path, directory=True)
+    return path
+
+
+def ensure_private_file(path: Path) -> Path:
+    """Restrict an existing file to owner-only access."""
+    if path.exists():
+        restrict_file_permissions(path, directory=False)
+    return path
+
+
 def _restrict_windows(path: Path, *, directory: bool) -> None:
     username = os.environ.get("USERNAME", "")
     if not username:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 from iac_code.ui.core.key_event import KeyEvent
@@ -31,6 +32,10 @@ _ANSI_CSI_MAP: dict[str, str] = {
     "5~": "pageup",
     "6~": "pagedown",
 }
+_CSI_U_RE = re.compile(r"(\d+);(\d+)u")
+_XTERM_MODIFY_OTHER_KEYS_RE = re.compile(r"27;(\d+);(\d+)~")
+_MODIFIED_SPECIAL_KEY_RE = re.compile(r"(\d+);(\d+)~")
+_ENTER_CODEPOINTS = {10, 13}
 
 
 def _get_msvcrt():
@@ -161,5 +166,51 @@ class RawInputCapture:
             buf += ch
             if ch.isalpha() or ch == "~":
                 break
+        modified_key = RawInputCapture._parse_modified_key_sequence(buf)
+        if modified_key is not None:
+            return modified_key
         key_name = _ANSI_CSI_MAP.get(buf, "unknown")
         return KeyEvent(key=key_name, char="")
+
+    @staticmethod
+    def _event_from_codepoint(codepoint: int, modifier: int) -> KeyEvent | None:
+        """Build a KeyEvent from CSI-u / modifyOtherKeys codepoint data."""
+        flags = max(modifier - 1, 0)
+        shift = bool(flags & 1)
+        alt = bool(flags & 2)
+        ctrl = bool(flags & 4)
+
+        if codepoint in _ENTER_CODEPOINTS:
+            if shift and not alt and not ctrl:
+                return KeyEvent(key="enter", char="", shift=True)
+            return None
+
+        if 32 <= codepoint <= 0x10FFFF:
+            key = chr(codepoint)
+            if ctrl:
+                key = key.lower()
+            return KeyEvent(key=key, char="", ctrl=ctrl, alt=alt, shift=shift)
+
+        return None
+
+    @staticmethod
+    def _parse_modified_key_sequence(seq: str) -> KeyEvent | None:
+        """Parse common terminal encodings for modified keys."""
+        m = _CSI_U_RE.fullmatch(seq)
+        if m is not None:
+            codepoint = int(m.group(1))
+            modifier = int(m.group(2))
+            return RawInputCapture._event_from_codepoint(codepoint, modifier)
+
+        m = _XTERM_MODIFY_OTHER_KEYS_RE.fullmatch(seq)
+        if m is not None:
+            modifier = int(m.group(1))
+            codepoint = int(m.group(2))
+            return RawInputCapture._event_from_codepoint(codepoint, modifier)
+
+        m = _MODIFIED_SPECIAL_KEY_RE.fullmatch(seq)
+        if m is not None:
+            key_code = int(m.group(1))
+            modifier = int(m.group(2))
+            return RawInputCapture._event_from_codepoint(key_code, modifier)
+        return None

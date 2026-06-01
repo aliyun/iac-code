@@ -72,6 +72,10 @@ class SkillDefinition:
     def when_to_use(self) -> str:
         return self.frontmatter.when_to_use
 
+    @property
+    def auto_trigger(self) -> dict[str, str]:
+        return self.frontmatter.auto_trigger
+
     async def get_prompt(self, args: str, context: SkillContext) -> str:
         """Generate the final prompt content."""
         if self._prompt_provider is not None:

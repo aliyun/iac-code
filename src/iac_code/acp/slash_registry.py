@@ -91,7 +91,7 @@ class ACPSlashRegistry:
     async def _handle_clear(self, agent_loop) -> str:
         """Clear the agent_loop conversation history."""
         try:
-            agent_loop.context_manager.reset()
+            agent_loop.reset()
         except Exception as exc:
             logger.warning("ACP /clear failed: %s", exc)
             return _("Clear failed: {error}").format(error=exc)
