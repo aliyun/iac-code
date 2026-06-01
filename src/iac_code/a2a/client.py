@@ -31,19 +31,49 @@ class A2AClientResponse:
         if not isinstance(result, dict):
             return ""
         text = result.get("text")
-        if isinstance(text, str):
+        if isinstance(text, str) and text:
             return text
         status = result.get("status")
-        if not isinstance(status, dict):
-            return ""
-        message = status.get("message")
-        if not isinstance(message, dict):
-            return ""
-        parts = message.get("parts")
-        if not isinstance(parts, list) or not parts or not isinstance(parts[0], dict):
-            return ""
-        value = parts[0].get("text")
-        return value if isinstance(value, str) else ""
+        if isinstance(status, dict):
+            extracted = _extract_parts_text(status.get("message"))
+            if extracted:
+                return extracted
+        task = result.get("task")
+        if isinstance(task, dict):
+            task_status = task.get("status")
+            if isinstance(task_status, dict):
+                extracted = _extract_parts_text(task_status.get("message"))
+                if extracted:
+                    return extracted
+            history = task.get("history")
+            if isinstance(history, list):
+                for entry in reversed(history):
+                    extracted = _extract_agent_entry_text(entry)
+                    if extracted:
+                        return extracted
+        return ""
+
+
+def _extract_agent_entry_text(entry: Any) -> str:
+    if not isinstance(entry, dict) or entry.get("role") != "ROLE_AGENT":
+        return ""
+    return _extract_parts_text(entry)
+
+
+def _extract_parts_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    parts = message.get("parts")
+    if not isinstance(parts, list):
+        return ""
+    pieces: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        value = part.get("text")
+        if isinstance(value, str):
+            pieces.append(value)
+    return "".join(pieces)
 
 
 class A2AClient:

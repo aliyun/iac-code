@@ -43,3 +43,19 @@ class TestValidateTransportForPlatform:
         mock_sys.platform = "win32"
         validate_transport_for_platform("http")
         validate_transport_for_platform("stdio")
+
+    def test_unknown_transport_raises_value_error(self):
+        from iac_code.a2a.transports.base import (
+            validate_transport_for_platform,
+            validate_transport_supported,
+        )
+
+        expected = (
+            "Unsupported transport 'invalid-transport'. Supported values: "
+            "grpc, grpc-jsonrpc, http, redis-streams, stdio, unix, websocket"
+        )
+        with pytest.raises(ValueError, match=r"Unsupported transport 'invalid-transport'"):
+            validate_transport_supported("invalid-transport")
+        with pytest.raises(ValueError) as exc_info:
+            validate_transport_for_platform("invalid-transport")
+        assert str(exc_info.value) == expected
