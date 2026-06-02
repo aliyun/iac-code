@@ -37,6 +37,14 @@ auto_trigger:
 - 分析用户提供的模板，解释结构和功能
 - 按用户需求在已有模板上迭代完善
 
+### 已有模板参数推荐
+- 用户提供已有 ROS 原生模板或 ROS Terraform 类型模板，并要求推荐、补全、预览创建或部署前选择参数时，按 [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) 执行。
+- 首版仅覆盖 `CreateStack` 前的新建栈参数推荐；`UpdateStack`、`ContinueCreateStack`、资源栈组和资源栈实例不走该流程。
+- 纯 Terraform 工作目录不直接走该流程；必须先按 [references/terraform-template.md](references/terraform-template.md) 打包为 ROS Terraform 类型模板。
+- 推荐结果必须先通过 `PreviewStack`，形成 Preview-Validated Parameter Set 后才能展示为推荐参数；这不等于保证 `CreateStack` 一定成功。
+- 密码类测试输入可在用户要求代理准备参数时生成合规随机值并脱敏；LicenseKey、Token、证书、真实域名、已有资源 ID 等外部输入不得编造。
+- `PreviewStack` 和后续 `CreateStack` 对共同支持的输入必须保持一致，包括模板来源、地域、最终 `StackName`、`DisableRollback` 和模板参数。
+
 ### 部署/更新/删除
 - 所有写操作必须先向用户确认，删除/更新操作使用 ⚠️ 警告措辞
 - 简洁询问是否部署，不展示工具调用细节
@@ -157,6 +165,7 @@ auto_trigger:
 | 文件 | 内容 |
 |------|------|
 | [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组（ROS/Terraform 共用） |
+| [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) | 已有 ROS 可部署模板的部署前参数推荐流程 |
 | [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、rds.md、redis.md、slb.md、vpc.md、oss.md） |
 | [references/ros-template.md](references/ros-template.md) | ROS 原生模板最佳实践：RunCommand、嵌套栈、条件部署 |
 | [references/terraform-template.md](references/terraform-template.md) | Terraform 最佳实践：文件组织、变量、Data Source、ROS 集成 |
