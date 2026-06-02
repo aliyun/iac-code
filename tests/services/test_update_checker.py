@@ -459,7 +459,7 @@ def test_official_success_without_update_falls_back_to_configured_pip(monkeypatc
         return subprocess.CompletedProcess(
             args=args[0],
             returncode=0,
-            stdout="iac-code (0.3.1)\nAvailable versions: 0.3.1, 0.3.0\n",
+            stdout="iac-code (0.3.1)\nAvailable versions: 100.0.0, 0.3.1, 0.3.0\n",
             stderr="",
         )
 
@@ -468,7 +468,7 @@ def test_official_success_without_update_falls_back_to_configured_pip(monkeypatc
     state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
 
     assert state.pending is not None
-    assert state.pending.version == "0.3.1"
+    assert state.pending.version == "100.0.0"
     assert state.pending.source == CONFIGURED_PIP_SOURCE
     assert state.last_successful_check_at == 1000.0
 
@@ -864,7 +864,7 @@ def test_official_pypi_without_installable_newer_release_falls_back_to_configure
         return subprocess.CompletedProcess(
             args=args[0],
             returncode=0,
-            stdout="iac-code (0.3.1)\nAvailable versions: 0.3.1, 0.3.0\n",
+            stdout="iac-code (0.3.1)\nAvailable versions:100.0.0, 0.3.1, 0.3.0\n",
             stderr="",
         )
 
@@ -873,7 +873,7 @@ def test_official_pypi_without_installable_newer_release_falls_back_to_configure
     state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
 
     assert state.pending is not None
-    assert state.pending.version == "0.3.1"
+    assert state.pending.version == "100.0.0"
     assert state.pending.source == CONFIGURED_PIP_SOURCE
     assert state.pending.release_notes_url == DEFAULT_RELEASE_NOTES_URL
 

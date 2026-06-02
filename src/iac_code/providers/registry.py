@@ -45,7 +45,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         provider_class="iac_code.providers.dashscope_provider.DashScopeProvider",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         models=[
-            ModelEntry("qwen3.7-max", is_default=True, support_multimodal=True),
+            ModelEntry("qwen3.7-max", is_default=True),
             ModelEntry("qwen3.6-plus", support_multimodal=True),
             ModelEntry("qwen3.6-max-preview"),
             ModelEntry("qwen3-max"),
