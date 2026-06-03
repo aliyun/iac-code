@@ -392,7 +392,13 @@ def test_official_pypi_wins_over_configured_pip(monkeypatch, tmp_path):
 
     monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.4.0"
@@ -433,7 +439,13 @@ def test_official_failure_falls_back_to_configured_pip(monkeypatch, tmp_path):
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.3.2"
@@ -465,7 +477,13 @@ def test_official_success_without_update_falls_back_to_configured_pip(monkeypatc
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "100.0.0"
@@ -502,7 +520,13 @@ def test_failed_check_does_not_update_last_successful_check_at(monkeypatch, tmp_
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is None
     assert state.last_successful_check_at is None
@@ -520,6 +544,7 @@ def test_failed_check_is_retried_on_next_startup(monkeypatch, tmp_path):
 
     check_for_updates_once(
         path=path,
+        current_version="0.3.0",
         http_client=first_http_client,
         now=1000.0,
         python_executable="/python",
@@ -540,6 +565,7 @@ def test_failed_check_is_retried_on_next_startup(monkeypatch, tmp_path):
 
     second_state = check_for_updates_once(
         path=path,
+        current_version="0.3.0",
         http_client=second_http_client,
         now=1001.0,
         python_executable="/python",
@@ -600,7 +626,13 @@ def test_stable_installed_version_ignores_prerelease_target(monkeypatch, tmp_pat
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is None
     assert state.last_successful_check_at == 1000.0
@@ -655,7 +687,13 @@ def test_newer_existing_pending_is_preserved_when_detector_races(monkeypatch, tm
 
     monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.5.0"
@@ -837,7 +875,13 @@ def test_official_pypi_ignores_empty_and_yanked_releases(monkeypatch, tmp_path):
 
     monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.3.2"
@@ -1105,7 +1149,13 @@ def test_successful_no_update_check_preserves_newer_race_pending(monkeypatch, tm
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.4.0"
@@ -1131,7 +1181,13 @@ def test_all_update_sources_fail_preserves_existing_state(monkeypatch, tmp_path)
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=8000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=8000.0,
+        python_executable="/python",
+    )
 
     assert state.pending == PendingUpdate(**_pending_update_data())
     assert state.last_successful_check_at == 500.0
