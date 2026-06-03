@@ -9,8 +9,11 @@ project is just a directory scan.
 
 from __future__ import annotations
 
+import ntpath
 import os
 import re
+import shlex
+import sys
 from hashlib import blake2b
 from pathlib import Path
 
@@ -18,6 +21,7 @@ from iac_code.config import get_config_dir
 
 MAX_SANITIZED_LENGTH = 200
 _NON_ALNUM = re.compile(r"[^a-zA-Z0-9]")
+_WINDOWS_DRIVE_PATH = re.compile(r"^[a-zA-Z]:[\\/]")
 
 
 def sanitize_path(name: str) -> str:
@@ -51,6 +55,41 @@ def get_session_path(cwd: str, session_id: str) -> Path:
 def is_conversation_session_file(path: Path) -> bool:
     """Return True for real conversation session JSONL files."""
     return path.name.endswith(".jsonl") and not path.name.endswith(".usage.jsonl")
+
+
+def same_project_path(left: str, right: str) -> bool:
+    """Return whether two cwd strings identify the same project directory."""
+    return _canonical_project_path(left) == _canonical_project_path(right)
+
+
+def format_resume_command(cwd: str, session_id: str, *, platform: str | None = None) -> str:
+    """Build a copy-paste resume command for the current platform."""
+    if (platform or sys.platform).startswith("win"):
+        return 'cd /d "{}" && iac-code --resume {}'.format(_escape_cmd_double_quotes(cwd), session_id)
+    return "cd {cwd} && iac-code --resume {session_id}".format(
+        cwd=shlex.quote(cwd),
+        session_id=shlex.quote(session_id),
+    )
+
+
+def _canonical_project_path(value: str) -> str:
+    expanded = os.path.expanduser(value)
+    if _looks_like_windows_path(expanded):
+        return ntpath.normcase(ntpath.normpath(expanded))
+    try:
+        path = Path(expanded).resolve(strict=False)
+    except (OSError, RuntimeError):
+        path = Path(os.path.abspath(expanded))
+    normalized = os.path.normpath(str(path))
+    return os.path.normcase(normalized)
+
+
+def _looks_like_windows_path(value: str) -> bool:
+    return bool(_WINDOWS_DRIVE_PATH.match(value)) or value.startswith(("\\\\", "//"))
+
+
+def _escape_cmd_double_quotes(value: str) -> str:
+    return value.replace('"', '\\"')
 
 
 def _resolve_git_dir(worktree_root: str) -> str | None:

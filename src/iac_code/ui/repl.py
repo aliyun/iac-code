@@ -67,6 +67,7 @@ from iac_code.ui.suggestions.skill_provider import SkillProvider
 from iac_code.utils.background_housekeeping import start_background_housekeeping
 from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipboard, try_read_image_from_path
 from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
+from iac_code.utils.project_paths import format_resume_command, same_project_path
 
 termios: ModuleType | None
 try:
@@ -1200,7 +1201,7 @@ class InlineREPL:
             if latest is None:
                 return str(uuid.uuid4())
             cwd, sid = latest
-            if cwd and cwd != self._original_cwd:
+            if cwd and not same_project_path(cwd, self._original_cwd):
                 raise ValueError(self._cross_project_message(cwd, sid))
             return sid
         if isinstance(resume, str) and resume:
@@ -1211,7 +1212,7 @@ class InlineREPL:
                 raise ValueError(self._ambiguous_resume_message(resolution.candidates))
             if resolution.entry is None:
                 raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
-            if resolution.entry.cwd and resolution.entry.cwd != self._original_cwd:
+            if resolution.entry.cwd and not same_project_path(resolution.entry.cwd, self._original_cwd):
                 raise ValueError(self._cross_project_message(resolution.entry.cwd, resolution.entry.session_id))
             return resolution.entry.session_id
         return str(uuid.uuid4())
@@ -1274,18 +1275,14 @@ class InlineREPL:
 
     @staticmethod
     def _cross_project_message(cwd: str, session_id: str) -> str:
-        import shlex
-
-        cmd = f"cd {shlex.quote(cwd)} && iac-code --resume {session_id}"
+        cmd = format_resume_command(cwd, session_id)
         return _("This session belongs to a different directory.\nTo resume, run:\n  {cmd}").format(cmd=cmd)
 
     @staticmethod
     def _ambiguous_resume_message(entries) -> str:
-        import shlex
-
         lines = [_("Multiple sessions match. Resume one by ID:"), ""]
         for entry in entries:
-            cmd = f"cd {shlex.quote(entry.cwd)} && iac-code --resume {entry.session_id}"
+            cmd = format_resume_command(entry.cwd, entry.session_id)
             lines.append(f"  {cmd}")
         return "\n".join(lines)
 
@@ -1387,15 +1384,13 @@ class InlineREPL:
 
     async def swap_or_announce_session(self, entry) -> None:
         """Hot-swap if same project; otherwise print the resume command."""
-        if entry.cwd and entry.cwd == self._original_cwd:
+        if entry.cwd and same_project_path(entry.cwd, self._original_cwd):
             self.swap_session(entry.session_id)
             return
         await self._announce_cross_project(entry)
 
     async def _announce_cross_project(self, entry) -> None:
-        import shlex
-
-        cmd = f"cd {shlex.quote(entry.cwd)} && iac-code --resume {entry.session_id}"
+        cmd = format_resume_command(entry.cwd, entry.session_id)
         msg_lines = [
             "",
             _("This conversation is from a different directory."),

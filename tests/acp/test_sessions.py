@@ -484,6 +484,23 @@ async def test_resume_active_session_returns_immediately(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_resume_active_session_accepts_windows_equivalent_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows path case and separator differences should not trip project ownership checks."""
+    _patch_resume_server(monkeypatch)
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+
+    resp = await server.new_session(cwd=r"C:\Users\Me\Repo")
+    sid = resp.session_id
+
+    result = await server.resume_session(cwd="c:/Users/Me/Repo", session_id=sid)
+
+    assert isinstance(result, acp.schema.ResumeSessionResponse)
+    assert sid in server.sessions
+
+
+@pytest.mark.asyncio
 async def test_resume_active_session_from_other_cwd_raises_hint(monkeypatch: pytest.MonkeyPatch) -> None:
     """An in-memory active session follows the same project boundary as persisted sessions."""
     _patch_resume_server(monkeypatch)

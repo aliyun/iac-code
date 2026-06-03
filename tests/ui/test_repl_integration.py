@@ -390,6 +390,18 @@ def test_resolve_session_id_continue_returns_latest_current_project_session():
     repl._session_storage.get_latest_session_anywhere.assert_called_once_with()
 
 
+def test_resolve_session_id_continue_accepts_windows_equivalent_cwd():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = r"C:\Users\Me\Repo"
+    repl._session_storage = SimpleNamespace(
+        get_latest_session_anywhere=Mock(return_value=("c:/Users/Me/Repo", "latest-id"))
+    )
+
+    assert repl._resolve_session_id(True) == "latest-id"
+
+
 def test_resolve_session_id_continue_cross_project_raises_with_hint():
     from iac_code.ui.repl import InlineREPL
 
@@ -401,6 +413,17 @@ def test_resolve_session_id_continue_cross_project_raises_with_hint():
 
     with pytest.raises(ValueError, match=r"cd /elsewhere/repo && iac-code --resume latest-id"):
         repl._resolve_session_id(True)
+
+
+def test_cross_project_message_uses_windows_resume_command(monkeypatch):
+    import iac_code.utils.project_paths as project_paths
+    from iac_code.ui.repl import InlineREPL
+
+    monkeypatch.setattr(project_paths.sys, "platform", "win32")
+
+    message = InlineREPL._cross_project_message(r"C:\Users\Me\iac repo & unsafe", "abc123")
+
+    assert r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume abc123' in message
 
 
 @patch("iac_code.ui.repl.ProviderManager")

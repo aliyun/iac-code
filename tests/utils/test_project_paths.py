@@ -8,7 +8,9 @@ from unittest.mock import patch
 from iac_code.utils.project_paths import (
     MAX_SANITIZED_LENGTH,
     find_git_worktree_root,
+    format_resume_command,
     get_git_branch,
+    same_project_path,
     sanitize_path,
 )
 
@@ -40,6 +42,23 @@ class TestSanitizePath:
 
     def test_empty_string(self):
         assert sanitize_path("") == ""
+
+
+class TestProjectPathComparison:
+    def test_windows_drive_case_and_separators_match(self):
+        assert same_project_path(r"C:\Users\Me\Repo", "c:/Users/Me/Repo")
+
+
+class TestFormatResumeCommand:
+    def test_windows_command_quotes_for_cmd_exe(self):
+        command = format_resume_command(r"C:\Users\Me\iac repo & unsafe", "abc123", platform="win32")
+
+        assert command == r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume abc123'
+
+    def test_posix_command_keeps_shell_quoting(self):
+        command = format_resume_command("/project a;unsafe", "abc123", platform="linux")
+
+        assert command == "cd '/project a;unsafe' && iac-code --resume abc123"
 
 
 class TestGetGitBranch:

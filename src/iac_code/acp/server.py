@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import shlex
 import time
 import uuid
 from typing import Any
@@ -24,6 +23,7 @@ from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_ru
 from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
 from iac_code.services.session_storage import SessionStorage
+from iac_code.utils.project_paths import format_resume_command, same_project_path
 
 SESSION_IDLE_TIMEOUT = 3600  # 1 hour
 CLEANUP_INTERVAL = 300  # 5 minutes
@@ -429,7 +429,7 @@ class ACPServer:
             raise _invalid_params(_("Session not found"), {"session_id": session_id})
 
         resolved_session_id = entry.session_id
-        if entry.cwd and entry.cwd != cwd:
+        if entry.cwd and not same_project_path(entry.cwd, cwd):
             hint = _resume_command(entry.cwd, resolved_session_id)
             message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
             raise _invalid_params(
@@ -690,7 +690,7 @@ def _invalid_params(message: str, data: dict[str, Any] | None = None) -> acp.Req
 
 
 def _resume_command(cwd: str, session_id: str) -> str:
-    return "cd {cwd} && iac-code --resume {session_id}".format(cwd=shlex.quote(cwd), session_id=session_id)
+    return format_resume_command(cwd, session_id)
 
 
 def _active_session_cwd(session: ACPSession) -> str | None:
@@ -702,7 +702,7 @@ def _active_session_project_error(
     cwd: str, session_id: str, resolved_session_id: str, session: ACPSession
 ) -> acp.RequestError | None:
     active_cwd = _active_session_cwd(session)
-    if not active_cwd or active_cwd == cwd:
+    if not active_cwd or same_project_path(active_cwd, cwd):
         return None
     hint = _resume_command(active_cwd, resolved_session_id)
     message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
