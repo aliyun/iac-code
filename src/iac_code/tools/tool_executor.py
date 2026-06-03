@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 from iac_code.services.telemetry import add_metric, log_event, start_span
 from iac_code.services.telemetry.config import should_capture_content_on_span
@@ -16,10 +16,6 @@ from iac_code.tools.base import ToolContext, ToolResult
 
 if TYPE_CHECKING:
     from iac_code.tools.base import ToolRegistry
-
-
-class _ToolWithEventQueue(Protocol):
-    _event_queue: asyncio.Queue | None
 
 
 @dataclass
@@ -65,10 +61,6 @@ class ToolExecutor:
                 f"Invalid input for tool '{call.name}': {error}. "
                 f"Please provide all required parameters as defined in the tool schema."
             )
-
-        # Pass event_queue to tool if provided (for sub-agent event forwarding)
-        if call.event_queue is not None and hasattr(tool, "_event_queue"):
-            cast(_ToolWithEventQueue, tool)._event_queue = call.event_queue
 
         # Pass event_queue from call to context for tools that emit progress events
         if call.event_queue is not None:

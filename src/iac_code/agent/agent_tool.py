@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -128,7 +129,6 @@ class AgentTool(Tool):
         self._tool_registry = tool_registry
         self._system_prompt = system_prompt
         self._permission_context = permission_context
-        self._event_queue: asyncio.Queue | None = None  # Set by ToolExecutor via ToolCallRequest
 
     @property
     def name(self) -> str:
@@ -171,6 +171,7 @@ class AgentTool(Tool):
         prompt = tool_input["prompt"]
         agent_type = tool_input.get("subagent_type", tool_input.get("agent_type", "general-purpose"))
         run_in_background = tool_input.get("run_in_background", False)
+        event_queue = context.event_queue
 
         defn = get_agent_definition(agent_type)
         if defn is None:
@@ -181,7 +182,13 @@ class AgentTool(Tool):
                 description=tool_input.get("description", "Sub-agent task"),
                 agent_type=agent_type,
             )
-            asyncio.create_task(self._run_background(task_id, prompt, agent_type, context))
+            background_task = asyncio.create_task(self._run_background(task_id, prompt, agent_type, context))
+            attach_task = getattr(self._task_manager, "attach_task", None)
+            if callable(attach_task):
+                attach_task(task_id, background_task)
+            background_task.add_done_callback(self._consume_background_task_exception)
+            if event_queue is not None:
+                await event_queue.put(None)
             return ToolResult.success(f"Background agent launched (task_id: {task_id}, type: {agent_type})")
 
         try:
@@ -192,18 +199,25 @@ class AgentTool(Tool):
                 parent_provider_manager=self._provider_manager,
                 parent_tool_registry=self._tool_registry,
                 parent_system_prompt=self._system_prompt,
-                event_queue=self._event_queue,
+                event_queue=event_queue,
                 permission_context=self._permission_context,
             )
-            if self._event_queue:
-                await self._event_queue.put(None)
+            if event_queue is not None:
+                await event_queue.put(None)
             return ToolResult.success(
                 f"{result_text}\n\n[Agent stats: {progress.tool_use_count} tool calls, {progress.token_count} tokens]"
             )
         except Exception as e:
-            if self._event_queue:
-                await self._event_queue.put(None)
+            if event_queue is not None:
+                await event_queue.put(None)
             return ToolResult.error(f"Sub-agent failed: {e}")
+
+    @staticmethod
+    def _consume_background_task_exception(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        with suppress(asyncio.CancelledError):
+            task.exception()
 
     async def _run_background(
         self,
@@ -233,6 +247,14 @@ class AgentTool(Tool):
                     task_id=task_id,
                     message=f"Agent completed: {progress.tool_use_count} tool calls",
                 )
+        except asyncio.CancelledError:
+            self._task_manager.stop(task_id)
+            if self._notification_queue:
+                self._notification_queue.enqueue(
+                    task_id=task_id,
+                    message="Agent stopped",
+                )
+            raise
         except Exception as e:
             self._task_manager.fail(task_id, error=str(e))
             if self._notification_queue:

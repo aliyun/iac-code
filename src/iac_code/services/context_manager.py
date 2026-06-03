@@ -7,7 +7,7 @@ from typing import Any
 
 from loguru import logger
 
-from iac_code.agent.message import ContentBlock, Conversation, Message, ToolResultBlock
+from iac_code.agent.message import ContentBlock, Conversation, Message, ToolResultBlock, ToolUseBlock
 from iac_code.services.token_counter import TokenCounter
 
 
@@ -162,6 +162,38 @@ class ContextManager:
         threshold = self._config.context_window * self._config.compact_threshold
         return total > threshold
 
+    @staticmethod
+    def _tool_use_ids(message: Message) -> set[str]:
+        if isinstance(message.content, str):
+            return set()
+        return {block.id for block in message.content if isinstance(block, ToolUseBlock)}
+
+    @staticmethod
+    def _tool_result_ids(message: Message) -> set[str]:
+        if isinstance(message.content, str):
+            return set()
+        return {block.tool_use_id for block in message.content if isinstance(block, ToolResultBlock)}
+
+    @classmethod
+    def _find_safe_compaction_split(cls, messages: list[Message], split_point: int) -> int:
+        split_point = max(0, min(split_point, len(messages)))
+        while split_point > 0:
+            old_tool_uses: dict[str, int] = {}
+            old_tool_results: set[str] = set()
+
+            for index, message in enumerate(messages[:split_point]):
+                for tool_use_id in cls._tool_use_ids(message):
+                    old_tool_uses.setdefault(tool_use_id, index)
+                old_tool_results.update(cls._tool_result_ids(message))
+
+            unpaired_tool_uses = set(old_tool_uses) - old_tool_results
+            if not unpaired_tool_uses:
+                return split_point
+
+            split_point = min(old_tool_uses[tool_use_id] for tool_use_id in unpaired_tool_uses)
+
+        return split_point
+
     def _split_messages_for_compaction(self) -> tuple[list[Message], list[Message]]:
         """Split messages into [old_messages, recent_messages].
 
@@ -175,6 +207,7 @@ class ContextManager:
             return [], messages
 
         split_point = len(messages) - preserve_count
+        split_point = self._find_safe_compaction_split(messages, split_point)
         return messages[:split_point], messages[split_point:]
 
     def build_compaction_prompt(self) -> str:

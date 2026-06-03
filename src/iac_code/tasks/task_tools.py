@@ -107,7 +107,8 @@ class TaskStopTool(Tool):
         task = self._manager.get(tool_input["task_id"])
         if not task:
             return ToolResult.error(f"Task '{tool_input['task_id']}' not found.")
-        self._manager.stop(tool_input["task_id"])
+        if not self._manager.stop(tool_input["task_id"]):
+            return ToolResult.success(f"Task '{tool_input['task_id']}' already {task.status.value}.")
         return ToolResult.success(f"Task '{tool_input['task_id']}' stopped.")
 
     def is_read_only(self, input: dict | None = None) -> bool:

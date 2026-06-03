@@ -1,10 +1,12 @@
 import asyncio
+import contextlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from iac_code.agent.agent_tool import AgentProgress, AgentTool, run_sub_agent
+from iac_code.tasks.task_state import TaskManager, TaskStatus
 from iac_code.tools.base import ToolContext
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
 
@@ -148,8 +150,6 @@ class TestAgentToolExecution:
             assert "Done" in result.content
 
     async def test_background_execution(self):
-        from iac_code.tasks.task_state import TaskManager
-
         tm = TaskManager()
         tool = AgentTool(task_manager=tm)
         with patch(
@@ -163,6 +163,34 @@ class TestAgentToolExecution:
             )
             assert "task_id" in result.content
             assert len(tm.list_all()) == 1
+
+    async def test_background_execution_closes_context_event_queue(self):
+        tm = TaskManager()
+        tool = AgentTool(task_manager=tm)
+        queue = asyncio.Queue()
+        release = asyncio.Event()
+
+        async def fake_run_sub_agent(**kwargs):
+            await release.wait()
+            return "bg done", AgentProgress()
+
+        with patch("iac_code.agent.agent_tool.run_sub_agent", side_effect=fake_run_sub_agent):
+            result = await tool.execute(
+                tool_input={"prompt": "task", "description": "bg", "run_in_background": True},
+                context=ToolContext(event_queue=queue),
+            )
+
+        task_info = tm.list_all()[0]
+        background_task = task_info.background_task
+        try:
+            assert result.is_error is False
+            assert await asyncio.wait_for(queue.get(), timeout=0.1) is None
+        finally:
+            tm.stop(task_info.id)
+            release.set()
+            if background_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await background_task
 
     async def test_render_tool_use(self, agent_tool):
         msg = agent_tool.render_tool_use_message({"description": "Search", "subagent_type": "explore"})
@@ -184,36 +212,37 @@ class TestAgentToolExecution:
         msg = agent_tool.render_tool_result_message(output, verbose=True)
         assert msg == output
 
-    async def test_execute_closes_event_queue_on_success(self):
+    async def test_execute_uses_context_event_queue_on_success(self):
         tool = AgentTool()
-        tool._event_queue = asyncio.Queue()
+        queue = asyncio.Queue()
 
         with patch(
             "iac_code.agent.agent_tool.run_sub_agent",
             new_callable=AsyncMock,
             return_value=("Done", AgentProgress(tool_use_count=2, token_count=99)),
-        ):
+        ) as run_sub_agent:
             result = await tool.execute(
                 tool_input={"prompt": "Find files", "description": "Find"},
-                context=ToolContext(),
+                context=ToolContext(event_queue=queue),
             )
 
         assert result.is_error is False
-        assert await tool._event_queue.get() is None
+        assert run_sub_agent.await_args.kwargs["event_queue"] is queue
+        assert await queue.get() is None
 
-    async def test_execute_closes_event_queue_on_failure(self):
+    async def test_execute_closes_context_event_queue_on_failure(self):
         tool = AgentTool()
-        tool._event_queue = asyncio.Queue()
+        queue = asyncio.Queue()
 
         with patch("iac_code.agent.agent_tool.run_sub_agent", new_callable=AsyncMock, side_effect=RuntimeError("boom")):
             result = await tool.execute(
                 tool_input={"prompt": "Find files", "description": "Find"},
-                context=ToolContext(),
+                context=ToolContext(event_queue=queue),
             )
 
         assert result.is_error is True
         assert "boom" in result.content
-        assert await tool._event_queue.get() is None
+        assert await queue.get() is None
 
     async def test_run_background_success_updates_task_manager_and_notifications(self):
         task_manager = MagicMock()
@@ -241,3 +270,44 @@ class TestAgentToolExecution:
 
         task_manager.fail.assert_called_once_with("task-1", error="bad")
         notifications.enqueue.assert_called_once()
+
+    async def test_background_execution_attaches_task_handle(self):
+        tm = TaskManager()
+        tool = AgentTool(task_manager=tm)
+        release = asyncio.Event()
+
+        async def fake_run_sub_agent(**kwargs):
+            await release.wait()
+            return "bg done", AgentProgress()
+
+        with patch("iac_code.agent.agent_tool.run_sub_agent", side_effect=fake_run_sub_agent):
+            result = await tool.execute(
+                tool_input={"prompt": "task", "description": "bg", "run_in_background": True},
+                context=ToolContext(),
+            )
+
+        task_info = tm.list_all()[0]
+        assert "task_id" in result.content
+        assert task_info.background_task is not None
+        assert not task_info.background_task.done()
+
+        background_task = task_info.background_task
+        tm.stop(task_info.id)
+        release.set()
+        with contextlib.suppress(asyncio.CancelledError):
+            await background_task
+
+    async def test_run_background_cancellation_marks_task_stopped(self):
+        tm = TaskManager()
+        tid = tm.register(description="bg")
+        tool = AgentTool(task_manager=tm)
+
+        with patch(
+            "iac_code.agent.agent_tool.run_sub_agent",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await tool._run_background(tid, "prompt", "general-purpose", ToolContext(cwd="/tmp"))
+
+        assert tm.get(tid).status == TaskStatus.STOPPED

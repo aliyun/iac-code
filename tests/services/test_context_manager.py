@@ -1,4 +1,4 @@
-from iac_code.agent.message import TextBlock, ToolResultBlock
+from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.services.context_manager import ContextManager, get_context_window_config
 
 
@@ -101,6 +101,48 @@ class TestSegmentedCompaction:
 
         original, new = cm.apply_compaction("Brief summary")
         assert new < original
+
+    def test_apply_compaction_does_not_split_tool_round_trip(self):
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cm.add_user_message("User message 0")
+        cm.add_assistant_message([TextBlock(text="Assistant response 0")])
+        cm.add_user_message("Please read a file")
+        cm.add_assistant_message([ToolUseBlock(id="toolu_read", name="read_file", input={"path": "a.txt"})])
+        cm.add_tool_results([ToolResultBlock(tool_use_id="toolu_read", content="file contents")])
+        cm.add_assistant_message([TextBlock(text="Read complete")])
+        cm.add_user_message("User message 2")
+        cm.add_assistant_message([TextBlock(text="Assistant response 2")])
+        cm.add_user_message("User message 3")
+        cm.add_assistant_message([TextBlock(text="Assistant response 3")])
+
+        cm.apply_compaction("Summary of old conversation")
+
+        messages = cm.get_messages()
+        assert "Summary" in messages[0].get_text()
+        assert messages[1].role == "assistant"
+        assert messages[1].get_tool_use_blocks()[0].id == "toolu_read"
+        assert messages[2].role == "user"
+        assert isinstance(messages[2].content, list)
+        assert messages[2].content[0].tool_use_id == "toolu_read"
+
+    def test_compaction_keeps_unfinished_tool_use_in_recent_messages(self):
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cm.add_user_message("User message 0")
+        cm.add_assistant_message([TextBlock(text="Assistant response 0")])
+        cm.add_user_message("Start a tool")
+        cm.add_assistant_message([ToolUseBlock(id="toolu_pending", name="bash", input={"command": "sleep 1"})])
+        cm.add_user_message("Follow-up after interrupted tool use")
+        cm.add_assistant_message([TextBlock(text="Assistant response after interruption")])
+        cm.add_user_message("User message 3")
+        cm.add_assistant_message([TextBlock(text="Assistant response 3")])
+
+        cm.apply_compaction("Summary of old conversation")
+
+        messages = cm.get_messages()
+        assert "Summary" in messages[0].get_text()
+        assert any(
+            msg.get_tool_use_blocks() and msg.get_tool_use_blocks()[0].id == "toolu_pending" for msg in messages[1:]
+        )
 
 
 class TestSetModel:
