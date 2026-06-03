@@ -16,7 +16,7 @@ def test_totals_adds_usage_and_tracks_record_count() -> None:
     assert totals.output_tokens == 6
     assert totals.cache_read_input_tokens == 3
     assert totals.cache_creation_input_tokens == 2
-    assert totals.total_tokens == 28
+    assert totals.total_tokens == 23
     assert totals.recorded_events == 2
     assert totals.has_recorded_usage is True
 
@@ -48,7 +48,7 @@ def test_append_and_load_round_trip(tmp_path) -> None:
     assert totals.output_tokens == 5
     assert totals.cache_read_input_tokens == 4
     assert totals.cache_creation_input_tokens == 1
-    assert totals.total_tokens == 27
+    assert totals.total_tokens == 22
     assert totals.recorded_events == 2
 
     lines = store.path_for(CWD, "s2").read_text(encoding="utf-8").splitlines()
@@ -84,5 +84,41 @@ def test_load_skips_corrupt_and_unrelated_rows(tmp_path) -> None:
     assert totals.output_tokens == 8
     assert totals.cache_read_input_tokens == 1
     assert totals.cache_creation_input_tokens == 0
-    assert totals.total_tokens == 16
+    assert totals.total_tokens == 15
+    assert totals.recorded_events == 2
+
+
+def test_path_for_uses_directory_session_layout(tmp_path) -> None:
+    store = SessionUsageStore(projects_dir=tmp_path)
+
+    path = store.path_for(CWD, "s4")
+
+    assert path == tmp_path / "-tmp-status-project" / "s4" / "usage.jsonl"
+
+
+def test_load_reads_new_and_legacy_sidecars(tmp_path) -> None:
+    store = SessionUsageStore(projects_dir=tmp_path)
+    new_path = store.path_for(CWD, "s5")
+    legacy_path = store.legacy_path_for(CWD, "s5")
+    new_path.parent.mkdir(parents=True)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+
+    new_path.write_text(
+        '{"type":"usage","version":1,"input_tokens":4,"output_tokens":6,'
+        '"cache_read_input_tokens":1,"cache_creation_input_tokens":0}\n',
+        encoding="utf-8",
+    )
+    legacy_path.write_text(
+        '{"type":"usage","version":1,"input_tokens":3,"output_tokens":2,'
+        '"cache_read_input_tokens":5,"cache_creation_input_tokens":7}\n',
+        encoding="utf-8",
+    )
+
+    totals = store.load(CWD, "s5")
+
+    assert totals.input_tokens == 7
+    assert totals.output_tokens == 8
+    assert totals.cache_read_input_tokens == 6
+    assert totals.cache_creation_input_tokens == 7
+    assert totals.total_tokens == 15
     assert totals.recorded_events == 2

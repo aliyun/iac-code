@@ -807,6 +807,8 @@ async def auth_command(context: "CommandContext | None" = None, **kwargs) -> str
     if context and hasattr(context, "repl") and context.repl:
         repl = context.repl
         repl._reinitialize_provider(repl.store.get_state().model)
+        if hasattr(repl, "refresh_cloud_tools"):
+            repl.refresh_cloud_tools()
 
     return result
 

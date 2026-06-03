@@ -79,3 +79,54 @@ def test_create_agent_runtime_auto_session_id(tmp_path, monkeypatch) -> None:
 
     assert runtime.session_id is not None
     assert len(runtime.session_id) == 8  # uuid4()[:8]
+
+
+def test_create_agent_runtime_respects_disabled_skills(tmp_path, monkeypatch) -> None:
+    from iac_code.skills.frontmatter import SkillFrontmatter
+    from iac_code.skills.skill_definition import SkillDefinition
+    from iac_code.types.skill_source import SkillSource
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+
+    enabled_skill = SkillDefinition(
+        name="enabled-skill",
+        description="Enabled skill",
+        frontmatter=SkillFrontmatter(description="Enabled skill", auto_trigger={"script": "auto_trigger.py"}),
+        content="Enabled body",
+        source=SkillSource.PROJECT,
+    )
+    disabled_skill = SkillDefinition(
+        name="disabled-skill",
+        description="Disabled skill",
+        frontmatter=SkillFrontmatter(description="Disabled skill", auto_trigger={"script": "auto_trigger.py"}),
+        content="Disabled body",
+        source=SkillSource.PROJECT,
+    )
+
+    monkeypatch.setattr(
+        "iac_code.skills.discovery.discover_all_skills",
+        lambda cwd: [enabled_skill, disabled_skill],
+    )
+    monkeypatch.setattr("iac_code.skills.settings.load_disabled_skills", lambda: {"disabled-skill"})
+
+    captured_listing = {}
+
+    def fake_build_skill_listing(commands):
+        captured_listing["names"] = [command.name for command in commands]
+        return "skill listing"
+
+    monkeypatch.setattr("iac_code.skills.listing.build_skill_listing", fake_build_skill_listing)
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(model="qwen3.6-plus", session_id="skill-runtime", cwd=str(tmp_path))
+    )
+
+    assert runtime.command_registry.get("enabled-skill") is not None
+    assert runtime.command_registry.get("disabled-skill") is None
+    assert captured_listing["names"] == ["enabled-skill"]
+    assert [command.name for command in runtime.agent_loop._auto_trigger_skills] == ["enabled-skill"]
+
+    skill_tool = runtime.tool_registry.get("skill")
+    assert skill_tool is not None
+    assert "disabled-skill" in skill_tool._disabled_skills

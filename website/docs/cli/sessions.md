@@ -17,20 +17,37 @@ In the REPL, use the `/resume` command:
 /resume
 ```
 
-This opens an interactive picker showing recent sessions for the current project, with their last prompt as the title.
+This opens an interactive picker showing recent sessions for the current project, with the session name as the title when set, otherwise the last prompt or first prompt fallback.
 
-To resume a specific session by ID or ID prefix:
+To resume a specific session by exact session ID, unique ID prefix, or unique session name:
 
 ```text
 /resume abc123
 ```
 
+### Naming Sessions
+
+Use `/rename` to give the active session a stable, human-readable name:
+
+```text
+/rename deploy-prod
+```
+
+The name is stored in the session metadata. It appears in the welcome banner when you resume, in the exit hint, and in the `/resume` picker.
+
+You can resume by name when it uniquely identifies a session:
+
+```text
+/resume deploy-prod
+iac-code --resume deploy-prod
+```
+
 ### CLI: `--resume` and `--continue`
 
-Resume a specific session from the command line:
+Resume a specific session from the command line by exact session ID, unique ID prefix, or unique session name:
 
 ```bash
-iac-code --resume <session-id>
+iac-code --resume <session-id-or-name>
 ```
 
 Resume the most recent session:
@@ -42,7 +59,7 @@ iac-code --continue
 The short flags `-r` and `-c` are also available:
 
 ```bash
-iac-code -r <session-id>
+iac-code -r <session-id-or-name>
 iac-code -c
 ```
 
@@ -66,7 +83,7 @@ The `/resume` picker displays:
 
 | Column | Description |
 |--------|-------------|
-| Title | Last user prompt (or first prompt if no metadata) |
+| Title | Session name when set, otherwise last user prompt or first prompt |
 | Branch | Git branch at the time of the session |
 | Time | Last modification time |
 

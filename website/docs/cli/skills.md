@@ -89,6 +89,14 @@ paths:
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
 
+## Managing Skills
+
+Run `/skills` in the interactive REPL to open the skill management picker. The picker lists discovered bundled, user, and project skills with their source, size, and enabled state. You can search by name or description, sort by name/source/size, and toggle user or project skills on and off.
+
+Disabled skills are saved in `settings.yml` under `disabled_skills`. Bundled skills are locked enabled and are not written to the disabled list.
+
+Use `$<skill-name>` when you want autocomplete and invocation to target skills only. This is useful when a skill name overlaps with ordinary text or when you want to avoid built-in slash commands.
+
 ## Execution Modes
 
 ### Inline (default)
@@ -188,3 +196,4 @@ Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md
 - **Bundled skills** are always allowed automatically.
 - **User/project skills** with no shell commands and no `allowed_tools` are auto-allowed.
 - **Other skills** prompt for user confirmation on first use.
+- **Disabled user/project skills** are hidden from model-visible skill listings and automatic triggers, and direct `skill` tool calls return a disabled-skill error.

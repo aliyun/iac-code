@@ -209,6 +209,10 @@ class ToolRegistry:
         """Register a tool."""
         self._tools[tool.name] = tool
 
+    def unregister(self, name: str) -> None:
+        """Unregister a tool if it exists."""
+        self._tools.pop(name, None)
+
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)

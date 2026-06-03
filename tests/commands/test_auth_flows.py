@@ -42,8 +42,7 @@ class TestAuthCommand:
 
     @pytest.mark.asyncio
     async def test_reinitialize_provider_called_after_auth(self, monkeypatch):
-        """After auth completes, provider should be reinitialized so
-        credential changes take effect immediately."""
+        """After auth completes, provider and cloud tools refresh immediately."""
         monkeypatch.setattr(
             "iac_code.commands.auth._auth_flow",
             lambda console, store: "Configured: test",
@@ -66,6 +65,7 @@ class TestAuthCommand:
 
         assert result == "Configured: test"
         repl._reinitialize_provider.assert_called_once_with("test-model")
+        repl.refresh_cloud_tools.assert_called_once_with()
 
 
 class TestAuthFlow:

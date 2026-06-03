@@ -16,7 +16,7 @@ Command line options change how IaC Code starts. Use them before entering the in
 | `--output-format <format>` | Set output format for non-interactive mode. Supported values are `text`, `json`, and `stream-json`. The default is `text`. |
 | `--max-turns <number>` | Limit the maximum number of agent turns in non-interactive mode. The default is `100`. |
 | `-d`, `--debug` | Enable debug logging for the current run. In interactive mode, use `/debug` to inspect or change debug logging after startup. |
-| `-r <session-id>`, `--resume <session-id>` | Resume a previous session by ID. This is for returning to a known conversation. |
+| `-r <session-id-or-name>`, `--resume <session-id-or-name>` | Resume a previous session by exact session ID, unique ID prefix, or unique session name. Cross-project resolved sessions print a `cd ... && iac-code --resume <id>` command instead of hot-swapping the current project. |
 | `-c`, `--continue` | Resume the most recent session. This cannot be used together with `--resume`. |
 | `--allowed-tools <patterns>` | Comma-separated tool permission patterns to allow, e.g. `'bash(git *),write_file'`. |
 | `--disallowed-tools <patterns>` | Comma-separated tool permission patterns to deny, e.g. `'bash(rm *)'`. |

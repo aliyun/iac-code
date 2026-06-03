@@ -49,7 +49,7 @@ def test_status_snapshot_uses_agent_loop_and_original_cwd(monkeypatch) -> None:
 
     monkeypatch.setattr("iac_code.ui.repl.get_active_provider_key", lambda: "dashscope")
     monkeypatch.setattr(
-        "iac_code.ui.repl.CloudCredentials",
+        "iac_code.services.cloud_credentials.CloudCredentials",
         lambda: SimpleNamespace(get_provider=lambda name: SimpleNamespace(region_id="cn-beijing")),
     )
 
@@ -88,7 +88,7 @@ def test_status_snapshot_uses_runtime_provider_manager(monkeypatch) -> None:
 
     monkeypatch.setattr("iac_code.ui.repl.get_active_provider_key", lambda: "openai")
     monkeypatch.setattr(
-        "iac_code.ui.repl.CloudCredentials",
+        "iac_code.services.cloud_credentials.CloudCredentials",
         lambda: SimpleNamespace(get_provider=lambda name: None),
     )
 

@@ -20,5 +20,24 @@ class TestRegisterCloudTools:
         credentials.has_provider.return_value = False
         register_cloud_tools(registry, credentials)
         assert registry.get("aliyun_api") is None
+        assert registry.get("aliyun_doc_search") is None
+        assert registry.get("ros_stack") is None
+        assert registry.get("ros_stack_instances") is None
+
+    def test_removes_stale_aliyun_tools_when_credentials_become_unavailable(self):
+        registry = ToolRegistry()
+        credentials = MagicMock()
+        credentials.has_provider.side_effect = [True, False]
+
+        register_cloud_tools(registry, credentials)
+        assert registry.get("aliyun_api") is not None
+        assert registry.get("aliyun_doc_search") is not None
+        assert registry.get("ros_stack") is not None
+        assert registry.get("ros_stack_instances") is not None
+
+        register_cloud_tools(registry, credentials)
+
+        assert registry.get("aliyun_api") is None
+        assert registry.get("aliyun_doc_search") is None
         assert registry.get("ros_stack") is None
         assert registry.get("ros_stack_instances") is None

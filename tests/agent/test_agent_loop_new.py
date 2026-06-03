@@ -177,7 +177,7 @@ class TestAgentLoopStreaming:
         assert totals.cache_read_input_tokens == 3
         assert totals.cache_creation_input_tokens == 2
         assert totals.recorded_events == 1
-        assert store.load("/tmp/status-project", "usage-session").total_tokens == 20
+        assert store.load("/tmp/status-project", "usage-session").total_tokens == 15
 
     async def test_records_usage_with_runtime_provider_key(self, mock_provider, mock_registry, tmp_path, monkeypatch):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
@@ -711,7 +711,7 @@ class TestAgentLoopCompaction:
         assert totals.output_tokens == 4
         assert totals.cache_read_input_tokens == 2
         assert totals.recorded_events == 1
-        assert store.load("/tmp/status-project", "auto-compact-usage").total_tokens == 17
+        assert store.load("/tmp/status-project", "auto-compact-usage").total_tokens == 15
 
     async def test_auto_compact_returns_none_without_prompt(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
@@ -764,7 +764,7 @@ class TestAgentLoopCompaction:
         assert totals.output_tokens == 6
         assert totals.cache_creation_input_tokens == 3
         assert totals.recorded_events == 1
-        assert store.load("/tmp/status-project", "manual-compact-usage").total_tokens == 22
+        assert store.load("/tmp/status-project", "manual-compact-usage").total_tokens == 19
 
     async def test_compact_returns_empty_when_no_messages(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)

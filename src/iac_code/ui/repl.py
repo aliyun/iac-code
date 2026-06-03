@@ -35,7 +35,6 @@ from iac_code.i18n import _
 from iac_code.memory.memory_manager import MemoryManager
 from iac_code.providers.manager import ProviderManager
 from iac_code.providers.registry import PROVIDER_REGISTRY
-from iac_code.services.cloud_credentials import CloudCredentials
 from iac_code.services.session_index import SessionIndex
 from iac_code.services.session_metadata import normalize_session_name
 from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
@@ -120,10 +119,7 @@ class InlineREPL:
         self.command_registry = create_default_registry()
         self.tool_registry = ToolRegistry()
         self.tool_registry.register_default_tools()
-        from iac_code.services.cloud_credentials import CloudCredentials
-        from iac_code.tools.cloud.registry import register_cloud_tools
-
-        register_cloud_tools(self.tool_registry, CloudCredentials())
+        self.refresh_cloud_tools()
         self._current_model = model
         from iac_code.config import load_active_provider_config
 
@@ -266,6 +262,13 @@ class InlineREPL:
     def locked_skill_names(self):
         """Return skill names that cannot be disabled."""
         return getattr(self, "_locked_skill_names", set())
+
+    def refresh_cloud_tools(self) -> None:
+        """Register cloud tools that are available with current cloud credentials."""
+        from iac_code.services.cloud_credentials import CloudCredentials
+        from iac_code.tools.cloud.registry import register_cloud_tools
+
+        register_cloud_tools(self.tool_registry, CloudCredentials())
 
     def refresh_skills(self) -> None:
         """Rediscover skills and refresh enabled/disabled skill state."""
@@ -1334,6 +1337,8 @@ class InlineREPL:
 
     @staticmethod
     def _status_region() -> str:
+        from iac_code.services.cloud_credentials import CloudCredentials
+
         credential = CloudCredentials().get_provider("aliyun")
         return credential.region_id if credential and credential.region_id else ""
 

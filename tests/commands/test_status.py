@@ -66,7 +66,7 @@ async def test_status_prints_recorded_usage_panel() -> None:
             output_tokens=3280,
             cache_read_input_tokens=8200,
             cache_creation_input_tokens=10,
-            total_tokens=21940,
+            total_tokens=15730,
             recorded_events=3,
             has_recorded_usage=True,
         ),
@@ -93,7 +93,7 @@ async def test_status_prints_recorded_usage_panel() -> None:
     assert "12,450" in rendered
     assert "3,280" in rendered
     assert "8,200" in rendered
-    assert "21,940" in rendered
+    assert "15,730" in rendered
     assert "Cache create" not in rendered
     assert "7 / 100" in rendered
     assert "45%" in rendered
@@ -184,7 +184,7 @@ async def test_status_aligns_translated_labels_by_display_width(monkeypatch) -> 
                 input_tokens=43210,
                 output_tokens=5678,
                 cache_read_input_tokens=9012,
-                total_tokens=52800,
+                total_tokens=48888,
                 has_recorded_usage=True,
             ),
             "turn_count": 7,
@@ -216,7 +216,7 @@ async def test_status_aligns_translated_labels_by_display_width(monkeypatch) -> 
                 "43,210",
                 "5,678",
                 "9,012",
-                "52,800",
+                "48,888",
             ]
         }
 

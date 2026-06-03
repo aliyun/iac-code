@@ -14,6 +14,8 @@ from iac_code.types.stream_events import Usage
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.project_paths import get_project_dir, get_projects_dir, sanitize_path
 
+USAGE_JSONL_FILENAME = "usage.jsonl"
+
 
 @dataclass
 class SessionUsageTotals:
@@ -27,7 +29,7 @@ class SessionUsageTotals:
 
     @property
     def total_tokens(self) -> int:
-        return self.input_tokens + self.output_tokens + self.cache_read_input_tokens + self.cache_creation_input_tokens
+        return self.input_tokens + self.output_tokens
 
     @property
     def has_recorded_usage(self) -> bool:
@@ -61,6 +63,9 @@ class SessionUsageStore:
         self._projects_dir = Path(projects_dir) if projects_dir is not None else get_projects_dir()
 
     def path_for(self, cwd: str, session_id: str) -> Path:
+        return self._project_dir_for(cwd) / session_id / USAGE_JSONL_FILENAME
+
+    def legacy_path_for(self, cwd: str, session_id: str) -> Path:
         return self._project_dir_for(cwd) / f"{session_id}.usage.jsonl"
 
     def append(
@@ -87,10 +92,14 @@ class SessionUsageStore:
 
     def load(self, cwd: str, session_id: str) -> SessionUsageTotals:
         """Load cumulative usage totals, skipping corrupt or unrelated rows."""
-        path = self.path_for(cwd, session_id)
         totals = SessionUsageTotals()
+        for path in (self.path_for(cwd, session_id), self.legacy_path_for(cwd, session_id)):
+            self._load_path(path, totals)
+        return totals
+
+    def _load_path(self, path: Path, totals: SessionUsageTotals) -> None:
         if not path.exists():
-            return totals
+            return
 
         try:
             with open(path, encoding="utf-8") as f:
@@ -108,7 +117,6 @@ class SessionUsageStore:
                     totals.add(_row_to_usage(row))
         except OSError as exc:
             logger.debug("Failed to load usage sidecar {}: {}", path, exc)
-        return totals
 
     def _project_dir_for(self, cwd: str) -> Path:
         if self._projects_dir == get_projects_dir():
