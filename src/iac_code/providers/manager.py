@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -42,6 +44,17 @@ from iac_code.types.stream_events import (
 
 class ProviderNotConfiguredError(ValueError):
     """Raised when the LLM provider cannot be determined or has no API key."""
+
+
+class ProviderConfigurationError(RuntimeError):
+    """Raised when provider configuration cannot be loaded during a request."""
+
+
+@dataclass(frozen=True)
+class _CompletionResult:
+    response: NonStreamingResponse
+    model: str
+    provider_name: str
 
 
 MODEL_FALLBACK_MAP = {
@@ -179,12 +192,7 @@ class ProviderManager:
         try:
             config = load_from_qwenpaw()
         except QwenPawError as exc:
-            import sys
-
-            from rich.console import Console
-
-            Console(stderr=True).print(str(exc), style="bold red")
-            sys.exit(1)
+            raise ProviderConfigurationError(str(exc)) from exc
         if config is None:
             return
         if config.model != self._model or config.provider_key != self._provider_key_override:
@@ -261,7 +269,11 @@ class ProviderManager:
     async def stream(
         self, messages: list[Message], system: str, tools: list[ToolDefinition] | None = None, max_tokens: int = 8192
     ) -> AsyncGenerator[StreamEvent, None]:
-        self._check_qwenpaw_config_change()
+        try:
+            self._check_qwenpaw_config_change()
+        except ProviderConfigurationError as exc:
+            yield ErrorEvent(error=f"{type(exc).__name__}: {str(exc)[:1000]}", is_retryable=False)
+            return
         provider = self._ensure_provider()
         provider_name = type(provider).__name__.replace("Provider", "").lower()
         sanitized_model = sanitize_model_name(self._model)
@@ -299,7 +311,12 @@ class ProviderManager:
             try:
                 watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
                 watchdog.start()
-                async for event in provider.stream(messages, system, tools, max_tokens):
+                stream_iter = provider.stream(messages, system, tools, max_tokens).__aiter__()
+                while True:
+                    try:
+                        event = await asyncio.wait_for(stream_iter.__anext__(), timeout=self._stream_idle_timeout)
+                    except StopAsyncIteration:
+                        break
                     watchdog.ping()
                     if isinstance(event, MessageStartEvent):
                         orphaned_message_ids.append(event.message_id)
@@ -314,6 +331,9 @@ class ProviderManager:
                         self._set_llm_response_span_attrs(span, event, self._model)
                         self._emit_success_telemetry(provider_name, sanitized_model, started, event.usage)
                         return
+                streaming_failed = True
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 streaming_failed = True
                 logger.warning(f"Streaming failed, falling back to non-streaming: {e}")
@@ -321,14 +341,16 @@ class ProviderManager:
                 for msg_id in orphaned_message_ids:
                     yield TombstoneEvent(message_id=msg_id)
                 try:
-                    response = await self._complete_with_retry(messages, system, tools, max_tokens)
+                    completion = await self._complete_with_retry_result(messages, system, tools, max_tokens)
                 except Exception as e:
                     self._emit_failure_telemetry(provider_name, sanitized_model, started, e)
                     yield ErrorEvent(error=f"{type(e).__name__}: {str(e)[:1000]}", is_retryable=False)
                     return
+                response = completion.response
+                response_model = sanitize_model_name(completion.model)
                 span.set_attribute(GenAiAttr.RESPONSE_ID, response.message_id)
-                self._set_llm_response_span_attrs_from_response(span, response, self._model)
-                self._emit_success_telemetry(provider_name, sanitized_model, started, response.usage)
+                self._set_llm_response_span_attrs_from_response(span, response, completion.model)
+                self._emit_success_telemetry(completion.provider_name, response_model, started, response.usage)
                 yield MessageStartEvent(message_id=response.message_id)
                 if response.thinking:
                     yield ThinkingDeltaEvent(text=response.thinking)
@@ -418,11 +440,40 @@ class ProviderManager:
         return await self._complete_with_retry(messages, system, tools, max_tokens, is_fallback=False)
 
     async def _complete_with_retry(
-        self, messages, system, tools, max_tokens, is_fallback=False
+        self,
+        messages,
+        system,
+        tools,
+        max_tokens,
+        is_fallback=False,
+        provider_override: Provider | None = None,
+        model_override: str | None = None,
     ) -> NonStreamingResponse:
-        provider = self._ensure_provider()
+        result = await self._complete_with_retry_result(
+            messages,
+            system,
+            tools,
+            max_tokens,
+            is_fallback=is_fallback,
+            provider_override=provider_override,
+            model_override=model_override,
+        )
+        return result.response
+
+    async def _complete_with_retry_result(
+        self,
+        messages,
+        system,
+        tools,
+        max_tokens,
+        is_fallback=False,
+        provider_override: Provider | None = None,
+        model_override: str | None = None,
+    ) -> _CompletionResult:
+        provider = provider_override or self._ensure_provider()
+        model = model_override or self._model
         provider_name = type(provider).__name__.replace("Provider", "").lower()
-        sanitized_model = sanitize_model_name(self._model)
+        sanitized_model = sanitize_model_name(model)
 
         async def _on_retry(attempt, exc, delay):
             log_event(
@@ -437,7 +488,8 @@ class ProviderManager:
 
         async def operation():
             try:
-                return await provider.complete(messages, system, tools, max_tokens)
+                response = await provider.complete(messages, system, tools, max_tokens)
+                return _CompletionResult(response=response, model=model, provider_name=provider_name)
             except Exception as e:
                 status = getattr(e, "status_code", None) or getattr(e, "status", None)
                 if status and status in {408, 409, 429, 500, 502, 503, 529}:
@@ -452,8 +504,6 @@ class ProviderManager:
             if not is_fallback:
                 fallback = self._get_fallback_model()
                 if fallback is not None:
-                    original_model = self._model
-                    original_provider = self._provider
                     log_event(
                         Events.MODEL_FALLBACK_TRIGGERED,
                         {
@@ -462,17 +512,22 @@ class ProviderManager:
                             "reason": "model_degradation",
                         },
                     )
-                    self._model = fallback
-                    self._provider = create_provider(
-                        fallback,
-                        self._credentials,
-                        base_url=self._base_url_override,
-                        provider_key_override=self._provider_key_override,
-                    )
                     try:
-                        return await self._complete_with_retry(messages, system, tools, max_tokens, is_fallback=True)
+                        fallback_provider = create_provider(
+                            fallback,
+                            self._credentials,
+                            base_url=self._base_url_override,
+                            provider_key_override=self._provider_key_override,
+                        )
+                        return await self._complete_with_retry_result(
+                            messages,
+                            system,
+                            tools,
+                            max_tokens,
+                            is_fallback=True,
+                            provider_override=fallback_provider,
+                            model_override=fallback,
+                        )
                     except Exception:
-                        self._model = original_model
-                        self._provider = original_provider
                         raise original_exc from None
             raise
