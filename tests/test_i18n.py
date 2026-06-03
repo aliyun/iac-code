@@ -327,6 +327,31 @@ def test_memory_command_translations_are_complete():
     assert not errors, "\n".join(errors)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_aliyun_credential_labels_are_translatable():
+    """Aliyun auth menu labels come from data tables, so guard against dynamic gettext misses."""
+    from iac_code.services.providers.aliyun import MODE_DISPLAY_NAMES, MODE_FIELDS
+
+    required_msgids = set(MODE_DISPLAY_NAMES.values())
+    for mode_fields in MODE_FIELDS.values():
+        required_msgids.update(label for _field_name, label, _sensitive in mode_fields)
+
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = sorted(required_msgids - pot_msgids)
+    assert not missing_from_pot, "Aliyun credential labels missing from messages.pot: {}".format(missing_from_pot)
+
+    missing_or_empty_by_language: dict[str, list[str]] = {}
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        missing_or_empty = sorted(msgid for msgid in required_msgids if not translations.get(msgid))
+        if missing_or_empty:
+            missing_or_empty_by_language[lang_dir.name] = missing_or_empty
+
+    assert not missing_or_empty_by_language, "Aliyun credential labels missing translations: {}".format(
+        missing_or_empty_by_language
+    )
+
+
 class TestDetectWindowsUILanguage:
     """_detect_windows_ui_language wraps GetUserDefaultLocaleName via ctypes."""
 

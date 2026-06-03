@@ -2,6 +2,7 @@ import json
 import os
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from iac_code.services.providers.aliyun import (
@@ -9,6 +10,7 @@ from iac_code.services.providers.aliyun import (
     AliyunCredentials,
     mask_sensitive,
 )
+from iac_code.services.providers.aliyun_oauth import AliyunOAuthReloginRequired, OAuthStsCredentials, OAuthToken
 
 
 class TestAliyunCredential:
@@ -57,6 +59,33 @@ class TestAliyunCredential:
         assert cred.mode == "RamRoleArn"
         assert cred.ram_role_arn == "acs:ram::123:role/test"
         assert cred.ram_session_name == "session1"
+
+    def test_oauth_mode_fields(self):
+        cred = AliyunCredential(
+            mode="OAuth",
+            access_key_id="tmp-ak",
+            access_key_secret="tmp-sk",
+            sts_token="tmp-sts",
+            sts_expiration=1798794000,
+            oauth_site_type="CN",
+            oauth_access_token="oauth-access",
+            oauth_refresh_token="oauth-refresh",
+            oauth_access_token_expire=1798790400,
+            oauth_refresh_token_expire=1801382400,
+            region_id="cn-hangzhou",
+        )
+
+        assert cred.mode == "OAuth"
+        assert cred.access_key_id == "tmp-ak"
+        assert cred.access_key_secret == "tmp-sk"
+        assert cred.sts_token == "tmp-sts"
+        assert cred.sts_expiration == 1798794000
+        assert cred.oauth_site_type == "CN"
+        assert cred.oauth_access_token == "oauth-access"
+        assert cred.oauth_refresh_token == "oauth-refresh"
+        assert cred.oauth_access_token_expire == 1798790400
+        assert cred.oauth_refresh_token_expire == 1801382400
+        assert cred.region_id == "cn-hangzhou"
 
 
 class TestMaskSensitive:
@@ -286,6 +315,48 @@ class TestAliyunCredentialsLoadFromAliyunCli:
         assert cred.region_id == "cn-shenzhen"
         assert cred.mode == "AK"
 
+    def test_load_oauth_from_aliyun_cli_default_profile(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {
+                    "name": "default",
+                    "mode": "OAuth",
+                    "access_key_id": "tmp-ak",
+                    "access_key_secret": "tmp-sk",
+                    "sts_token": "tmp-sts",
+                    "sts_expiration": 1798794000,
+                    "oauth_site_type": "CN",
+                    "oauth_access_token": "oauth-access",
+                    "oauth_refresh_token": "oauth-refresh",
+                    "oauth_access_token_expire": 1798790400,
+                    "oauth_refresh_token_expire": 1801382400,
+                    "region_id": "cn-hangzhou",
+                }
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            cred = AliyunCredentials.load(config_path=str(config_file))
+
+        assert cred is not None
+        assert cred.mode == "OAuth"
+        assert cred.access_key_id == "tmp-ak"
+        assert cred.access_key_secret == "tmp-sk"
+        assert cred.sts_token == "tmp-sts"
+        assert cred.sts_expiration == 1798794000
+        assert cred.oauth_site_type == "CN"
+        assert cred.oauth_access_token == "oauth-access"
+        assert cred.oauth_refresh_token == "oauth-refresh"
+        assert cred.oauth_access_token_expire == 1798790400
+        assert cred.oauth_refresh_token_expire == 1801382400
+        assert cred.region_id == "cn-hangzhou"
+
     def test_load_ram_role_arn_from_config_file(self, tmp_path):
         config_file = tmp_path / "config.json"
         config = {
@@ -408,6 +479,41 @@ class TestAliyunCredentialsLoadFromIacCode:
         assert cred.access_key_secret == "iac_secret"
         assert cred.region_id == "cn-beijing"
 
+    def test_load_oauth_from_iac_code_config(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+        data = {
+            "aliyun": {
+                "mode": "OAuth",
+                "region_id": "cn-hangzhou",
+                "oauth_site_type": "CN",
+                "oauth_access_token": "oauth-access",
+                "oauth_refresh_token": "oauth-refresh",
+                "oauth_access_token_expire": 1798790400,
+                "oauth_refresh_token_expire": 1801382400,
+                "access_key_id": "tmp-ak",
+                "access_key_secret": "tmp-sk",
+                "sts_token": "tmp-sts",
+                "sts_expiration": 1798794000,
+            }
+        }
+        cloud_creds_file.write_text(yaml.dump(data))
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredentials._load_from_iac_code_config()
+
+        assert cred is not None
+        assert cred.mode == "OAuth"
+        assert cred.region_id == "cn-hangzhou"
+        assert cred.oauth_site_type == "CN"
+        assert cred.oauth_access_token == "oauth-access"
+        assert cred.oauth_refresh_token == "oauth-refresh"
+        assert cred.oauth_access_token_expire == 1798790400
+        assert cred.oauth_refresh_token_expire == 1801382400
+        assert cred.access_key_id == "tmp-ak"
+        assert cred.access_key_secret == "tmp-sk"
+        assert cred.sts_token == "tmp-sts"
+        assert cred.sts_expiration == 1798794000
+
     def test_load_from_iac_code_returns_none_when_no_file(self, tmp_path):
         cloud_creds_file = tmp_path / ".cloud-credentials.yml"
 
@@ -522,6 +628,40 @@ class TestAliyunCredentialsSave:
         assert data["aliyun"]["ram_role_arn"] == "acs:ram::123:role/test"
         assert data["aliyun"]["ram_session_name"] == "session1"
 
+    def test_save_oauth_to_iac_code_config(self, tmp_path):
+        cloud_creds_file = tmp_path / ".cloud-credentials.yml"
+
+        with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
+            cred = AliyunCredential(
+                mode="OAuth",
+                region_id="cn-hangzhou",
+                oauth_site_type="INTL",
+                oauth_access_token="oauth-access",
+                oauth_refresh_token="oauth-refresh",
+                oauth_access_token_expire=1798790400,
+                oauth_refresh_token_expire=1801382400,
+                access_key_id="tmp-ak",
+                access_key_secret="tmp-sk",
+                sts_token="tmp-sts",
+                sts_expiration=1798794000,
+            )
+            AliyunCredentials.save(cred)
+
+        data = yaml.safe_load(cloud_creds_file.read_text())
+        assert data["aliyun"] == {
+            "mode": "OAuth",
+            "region_id": "cn-hangzhou",
+            "oauth_site_type": "INTL",
+            "oauth_access_token": "oauth-access",
+            "oauth_refresh_token": "oauth-refresh",
+            "oauth_access_token_expire": 1798790400,
+            "oauth_refresh_token_expire": 1801382400,
+            "access_key_id": "tmp-ak",
+            "access_key_secret": "tmp-sk",
+            "sts_token": "tmp-sts",
+            "sts_expiration": 1798794000,
+        }
+
     def test_save_to_aliyun_cli_format(self, tmp_path):
         """Test save with config_path (aliyun CLI format, for testing)."""
         config_file = tmp_path / "config.json"
@@ -610,6 +750,167 @@ class TestAliyunCredentialsSave:
 
         assert cloud_creds_file.exists()
         assert not aliyun_cli_file.exists()
+
+
+class TestAliyunCredentialsOAuthRefresh:
+    def test_refresh_oauth_uses_unexpired_sts_without_network(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="access",
+            oauth_refresh_token="refresh",
+            oauth_access_token_expire=2000,
+            access_key_id="tmp-ak",
+            access_key_secret="tmp-sk",
+            sts_token="tmp-sts",
+            sts_expiration=1900,
+        )
+
+        class FailingClient:
+            def refresh_access_token(self, refresh_token, *, now=None):
+                raise AssertionError("refresh_access_token should not be called")
+
+            def exchange_access_token_for_sts(self, access_token):
+                raise AssertionError("exchange_access_token_for_sts should not be called")
+
+        monkeypatch.setattr(
+            AliyunCredentials,
+            "save",
+            lambda credential: (_ for _ in ()).throw(AssertionError("save should not be called")),
+        )
+
+        refreshed = AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=FailingClient(), now=1000)
+
+        assert refreshed is cred
+        assert cred.access_key_id == "tmp-ak"
+        assert cred.access_key_secret == "tmp-sk"
+        assert cred.sts_token == "tmp-sts"
+        assert cred.sts_expiration == 1900
+
+    def test_refresh_oauth_exchanges_expired_sts_with_current_access_token(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="access",
+            oauth_refresh_token="refresh",
+            oauth_access_token_expire=2000,
+            access_key_id="old-ak",
+            access_key_secret="old-sk",
+            sts_token="old-sts",
+            sts_expiration=900,
+        )
+        saved: list[AliyunCredential] = []
+
+        class FakeClient:
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "access"
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+        monkeypatch.setattr(AliyunCredentials, "save", saved.append)
+
+        refreshed = AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=FakeClient(), now=1000)
+
+        assert refreshed is cred
+        assert saved == [cred]
+        assert cred.access_key_id == "new-ak"
+        assert cred.access_key_secret == "new-sk"
+        assert cred.sts_token == "new-sts"
+        assert cred.sts_expiration == 2500
+
+    def test_refresh_oauth_refreshes_access_token_before_exchange(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="old-access",
+            oauth_refresh_token="old-refresh",
+            oauth_access_token_expire=900,
+            access_key_id="old-ak",
+            access_key_secret="old-sk",
+            sts_token="old-sts",
+            sts_expiration=900,
+        )
+        saved: list[AliyunCredential] = []
+
+        class FakeClient:
+            def refresh_access_token(self, refresh_token, *, now=None):
+                assert refresh_token == "old-refresh"
+                assert now == 1000
+                return OAuthToken("new-access", "new-refresh", 4600, 0)
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "new-access"
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+        monkeypatch.setattr(AliyunCredentials, "save", saved.append)
+
+        refreshed = AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=FakeClient(), now=1000)
+
+        assert refreshed is cred
+        assert saved == [cred]
+        assert cred.oauth_access_token == "new-access"
+        assert cred.oauth_refresh_token == "new-refresh"
+        assert cred.oauth_access_token_expire == 4600
+        assert cred.oauth_refresh_token_expire == 0
+        assert cred.access_key_id == "new-ak"
+        assert cred.access_key_secret == "new-sk"
+        assert cred.sts_token == "new-sts"
+        assert cred.sts_expiration == 2500
+
+    def test_refresh_oauth_requires_relogin_when_refresh_token_missing(self):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="old-access",
+            oauth_access_token_expire=900,
+            access_key_id="old-ak",
+            access_key_secret="old-sk",
+            sts_token="old-sts",
+            sts_expiration=900,
+        )
+
+        with pytest.raises(AliyunOAuthReloginRequired, match="/auth"):
+            AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=object(), now=1000)
+
+    def test_refresh_oauth_returns_non_oauth_credentials_without_network(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="AK",
+            access_key_id="ak",
+            access_key_secret="sk",
+        )
+
+        class FailingClient:
+            def refresh_access_token(self, refresh_token, *, now=None):
+                raise AssertionError("refresh_access_token should not be called")
+
+            def exchange_access_token_for_sts(self, access_token):
+                raise AssertionError("exchange_access_token_for_sts should not be called")
+
+        monkeypatch.setattr(
+            AliyunCredentials,
+            "save",
+            lambda credential: (_ for _ in ()).throw(AssertionError("save should not be called")),
+        )
+
+        refreshed = AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=FailingClient(), now=1000)
+
+        assert refreshed is cred
+        assert cred.access_key_id == "ak"
+        assert cred.access_key_secret == "sk"
+
+    def test_refresh_oauth_requires_relogin_when_oauth_site_type_missing(self):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_access_token="access",
+            oauth_refresh_token="refresh",
+            oauth_access_token_expire=2000,
+            access_key_id="old-ak",
+            access_key_secret="old-sk",
+            sts_token="old-sts",
+            sts_expiration=900,
+        )
+
+        with pytest.raises(AliyunOAuthReloginRequired, match="/auth"):
+            AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=object(), now=1000)
 
 
 class TestAliyunCredentialsIsConfigured:
