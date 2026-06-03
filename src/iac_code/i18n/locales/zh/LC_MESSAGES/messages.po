@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 17:56+0800\n"
+"POT-Creation-Date: 2026-06-02 11:24+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -35,68 +35,72 @@ msgid ""
 "{supported}"
 msgstr "命令 '/{cmd_name}' 不支持通过 ACP 使用。支持的命令：{supported}"
 
-#: src/iac_code/acp/slash_registry.py:56
+#: src/iac_code/acp/slash_registry.py:58
 #, python-brace-format
 msgid "Command '/{cmd_name}' handler not implemented."
 msgstr "命令 '/{cmd_name}' 的处理器尚未实现。"
 
-#: src/iac_code/acp/slash_registry.py:68
+#: src/iac_code/acp/slash_registry.py:70
 #, python-brace-format
 msgid "Compaction failed: {error}"
 msgstr "压缩失败：{error}"
 
-#: src/iac_code/acp/slash_registry.py:71 src/iac_code/commands/compact.py:24
+#: src/iac_code/acp/slash_registry.py:73 src/iac_code/commands/compact.py:24
 msgid "Nothing to compact: conversation is empty."
 msgstr "无内容可压缩：对话为空。"
 
-#: src/iac_code/acp/slash_registry.py:74 src/iac_code/commands/compact.py:27
+#: src/iac_code/acp/slash_registry.py:76 src/iac_code/commands/compact.py:27
 #, python-brace-format
 msgid ""
 "Conversation too short to compact: all messages are within the recent "
 "{turns}-turn preservation window."
 msgstr "对话过短，无需压缩：所有消息都在最近 {turns} 轮保留窗口内。"
 
-#: src/iac_code/acp/slash_registry.py:78 src/iac_code/commands/compact.py:30
+#: src/iac_code/acp/slash_registry.py:80 src/iac_code/commands/compact.py:30
 msgid "Compaction failed. See logs for details."
 msgstr "压缩失败，详情请查看日志。"
 
-#: src/iac_code/acp/slash_registry.py:83
+#: src/iac_code/acp/slash_registry.py:85
 #, python-brace-format
 msgid ""
 "Context compacted: {original} → {compacted} tokens ({percent} reduction)."
 " Context usage: {usage}"
 msgstr "上下文已压缩：{original} → {compacted} tokens（减少 {percent}）。上下文用量：{usage}"
 
-#: src/iac_code/acp/slash_registry.py:97
+#: src/iac_code/acp/slash_registry.py:99
 #, python-brace-format
 msgid "Clear failed: {error}"
 msgstr "清除失败：{error}"
 
-#: src/iac_code/acp/slash_registry.py:98
+#: src/iac_code/acp/slash_registry.py:100
 msgid "Conversation history cleared."
 msgstr "对话历史已清除。"
 
-#: src/iac_code/acp/slash_registry.py:114 src/iac_code/commands/debug.py:34
+#: src/iac_code/acp/slash_registry.py:116 src/iac_code/commands/debug.py:34
 #, python-brace-format
 msgid "Debug logging is on. Log file: {path}"
 msgstr "调试日志已启用。日志文件：{path}"
 
-#: src/iac_code/acp/slash_registry.py:115 src/iac_code/commands/debug.py:35
+#: src/iac_code/acp/slash_registry.py:117 src/iac_code/commands/debug.py:35
 msgid "Debug logging is off."
 msgstr "调试日志已关闭。"
 
-#: src/iac_code/acp/slash_registry.py:119 src/iac_code/commands/debug.py:39
+#: src/iac_code/acp/slash_registry.py:121 src/iac_code/commands/debug.py:39
 #, python-brace-format
 msgid "Debug logging enabled. Log file: {path}"
 msgstr "调试日志已启用。日志文件：{path}"
 
-#: src/iac_code/acp/slash_registry.py:123 src/iac_code/commands/debug.py:43
+#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:43
 msgid "Debug logging disabled."
 msgstr "调试日志已关闭。"
 
-#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:45
+#: src/iac_code/acp/slash_registry.py:127 src/iac_code/commands/debug.py:45
 msgid "Usage: /debug [on|off]"
 msgstr "用法：/debug [on|off]"
+
+#: src/iac_code/acp/slash_registry.py:132 src/iac_code/commands/memory.py:84
+msgid "Memory manager is unavailable."
+msgstr "记忆管理器不可用。"
 
 #: src/iac_code/agent/agent_loop.py:404 src/iac_code/agent/agent_loop.py:419
 #: src/iac_code/ui/repl.py:757 src/iac_code/ui/repl.py:771
@@ -575,47 +579,55 @@ msgstr "持久化 A2A 路由的目录"
 msgid "Save the provided routes as a route snapshot"
 msgstr "将提供的路由保存为路由快照"
 
-#: src/iac_code/commands/__init__.py:22
+#: src/iac_code/commands/__init__.py:23
 msgid "Show available commands"
 msgstr "显示可用命令"
 
-#: src/iac_code/commands/__init__.py:31
+#: src/iac_code/commands/__init__.py:32
 msgid "Clear conversation history"
 msgstr "清除对话历史"
 
-#: src/iac_code/commands/__init__.py:39
+#: src/iac_code/commands/__init__.py:40
 msgid "Show or switch model"
 msgstr "显示或切换模型"
 
-#: src/iac_code/commands/__init__.py:48
+#: src/iac_code/commands/__init__.py:49
 msgid "Show or switch thinking effort"
 msgstr "显示或切换思考强度"
 
-#: src/iac_code/commands/__init__.py:57
+#: src/iac_code/commands/__init__.py:58
 msgid "Compact conversation context"
 msgstr "压缩对话上下文"
 
-#: src/iac_code/commands/__init__.py:59
+#: src/iac_code/commands/__init__.py:60
 msgid "Compacting conversation"
 msgstr "正在压缩对话"
 
-#: src/iac_code/commands/__init__.py:66
+#: src/iac_code/commands/__init__.py:67
 msgid "Exit the application"
 msgstr "退出应用程序"
 
-#: src/iac_code/commands/__init__.py:75
+#: src/iac_code/commands/__init__.py:76
 msgid "Authenticate with LLM provider"
 msgstr "配置 LLM 提供商认证"
 
-#: src/iac_code/commands/__init__.py:84
+#: src/iac_code/commands/__init__.py:85
 msgid "Toggle debug logging"
 msgstr "切换调试日志开关"
 
-#: src/iac_code/commands/__init__.py:93
+#: src/iac_code/commands/__init__.py:94
+msgid "View and manage persistent memories"
+msgstr "查看和管理持久记忆"
+
+#: src/iac_code/commands/__init__.py:96
+msgid "[<name>|search <query>|delete <name>|help]"
+msgstr "[<名称>|search <查询>|delete <名称>|help]"
+
+#: src/iac_code/commands/__init__.py:103
 msgid "Resume a previous session"
 msgstr "恢复之前的会话"
 
-#: src/iac_code/commands/__init__.py:95
+#: src/iac_code/commands/__init__.py:105
 msgid "[conversation id or search term]"
 msgstr "[会话 ID 或搜索词]"
 
@@ -933,6 +945,36 @@ msgstr "显示命令建议"
 #: src/iac_code/commands/help.py:42
 msgid "Exit"
 msgstr "退出"
+
+#: src/iac_code/commands/memory.py:10
+msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
+msgstr "用法：/memory [<名称>|search <查询>|delete <名称>|help]"
+
+#: src/iac_code/commands/memory.py:40
+msgid "Saved memories:"
+msgstr "已保存的记忆："
+
+#: src/iac_code/commands/memory.py:40
+msgid "No memories saved yet."
+msgstr "尚未保存任何记忆。"
+
+#: src/iac_code/commands/memory.py:51
+msgid "Matching memories:"
+msgstr "匹配的记忆："
+
+#: src/iac_code/commands/memory.py:51
+msgid "No matching memories."
+msgstr "没有匹配的记忆。"
+
+#: src/iac_code/commands/memory.py:60 src/iac_code/commands/memory.py:75
+#, python-brace-format
+msgid "Memory '{name}' not found."
+msgstr "未找到记忆 '{name}'。"
+
+#: src/iac_code/commands/memory.py:64
+#, python-brace-format
+msgid "Memory '{name}' deleted."
+msgstr "记忆 '{name}' 已删除。"
 
 #: src/iac_code/commands/model.py:57
 #, python-brace-format
@@ -2157,6 +2199,22 @@ msgstr "{n} 小时前"
 #, python-brace-format
 msgid "{n} day{s} ago"
 msgstr "{n} 天前"
+
+#: src/iac_code/ui/suggestions/command_provider.py:79
+msgid "Search saved memories"
+msgstr "搜索已保存的记忆"
+
+#: src/iac_code/ui/suggestions/command_provider.py:80
+msgid "Delete a saved memory"
+msgstr "删除已保存的记忆"
+
+#: src/iac_code/ui/suggestions/command_provider.py:81
+msgid "Show memory command help"
+msgstr "显示 memory 命令帮助"
+
+#: src/iac_code/ui/suggestions/command_provider.py:116
+msgid "Saved memory"
+msgstr "已保存的记忆"
 
 #: src/iac_code/utils/platform.py:39
 msgid "iac-code on Windows requires Git for Windows."

@@ -7,6 +7,7 @@ from iac_code.commands.debug import debug_command
 from iac_code.commands.effort import effort_command
 from iac_code.commands.exit import exit_command
 from iac_code.commands.help import help_command
+from iac_code.commands.memory import memory_command
 from iac_code.commands.model import model_command
 from iac_code.commands.registry import Command, CommandRegistry, LocalCommand, PromptCommand
 from iac_code.commands.resume import resume_command
@@ -84,6 +85,15 @@ def create_default_registry() -> CommandRegistry:
             description=_("Toggle debug logging"),
             handler=debug_command,
             arg_hint="[on|off]",
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="memory",
+            description=_("View and manage persistent memories"),
+            handler=memory_command,
+            arg_hint=_("[<name>|search <query>|delete <name>|help]"),
             history_mode="session",
         )
     )

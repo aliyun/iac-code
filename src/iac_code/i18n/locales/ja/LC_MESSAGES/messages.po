@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 17:56+0800\n"
+"POT-Creation-Date: 2026-06-02 11:24+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: ja\n"
@@ -37,32 +37,32 @@ msgid ""
 "{supported}"
 msgstr "コマンド '/{cmd_name}' は ACP 上ではサポートされていません。サポートされているコマンド：{supported}"
 
-#: src/iac_code/acp/slash_registry.py:56
+#: src/iac_code/acp/slash_registry.py:58
 #, python-brace-format
 msgid "Command '/{cmd_name}' handler not implemented."
 msgstr "コマンド '/{cmd_name}' のハンドラーは未実装です。"
 
-#: src/iac_code/acp/slash_registry.py:68
+#: src/iac_code/acp/slash_registry.py:70
 #, python-brace-format
 msgid "Compaction failed: {error}"
 msgstr "圧縮に失敗しました：{error}"
 
-#: src/iac_code/acp/slash_registry.py:71 src/iac_code/commands/compact.py:24
+#: src/iac_code/acp/slash_registry.py:73 src/iac_code/commands/compact.py:24
 msgid "Nothing to compact: conversation is empty."
 msgstr "圧縮できる内容がありません：会話が空です。"
 
-#: src/iac_code/acp/slash_registry.py:74 src/iac_code/commands/compact.py:27
+#: src/iac_code/acp/slash_registry.py:76 src/iac_code/commands/compact.py:27
 #, python-brace-format
 msgid ""
 "Conversation too short to compact: all messages are within the recent "
 "{turns}-turn preservation window."
 msgstr "会話が短すぎて圧縮できません：すべてのメッセージが直近 {turns} ターンの保持ウィンドウ内にあります。"
 
-#: src/iac_code/acp/slash_registry.py:78 src/iac_code/commands/compact.py:30
+#: src/iac_code/acp/slash_registry.py:80 src/iac_code/commands/compact.py:30
 msgid "Compaction failed. See logs for details."
 msgstr "圧縮に失敗しました。詳細はログをご確認ください。"
 
-#: src/iac_code/acp/slash_registry.py:83
+#: src/iac_code/acp/slash_registry.py:85
 #, python-brace-format
 msgid ""
 "Context compacted: {original} → {compacted} tokens ({percent} reduction)."
@@ -71,36 +71,40 @@ msgstr ""
 "コンテキストを圧縮しました：{original} → {compacted} tokens（{percent} 削減）。 "
 "コンテキスト使用量：{usage}"
 
-#: src/iac_code/acp/slash_registry.py:97
+#: src/iac_code/acp/slash_registry.py:99
 #, python-brace-format
 msgid "Clear failed: {error}"
 msgstr "クリアに失敗しました：{error}"
 
-#: src/iac_code/acp/slash_registry.py:98
+#: src/iac_code/acp/slash_registry.py:100
 msgid "Conversation history cleared."
 msgstr "会話履歴をクリアしました。"
 
-#: src/iac_code/acp/slash_registry.py:114 src/iac_code/commands/debug.py:34
+#: src/iac_code/acp/slash_registry.py:116 src/iac_code/commands/debug.py:34
 #, python-brace-format
 msgid "Debug logging is on. Log file: {path}"
 msgstr "デバッグログはオンです。ログファイル：{path}"
 
-#: src/iac_code/acp/slash_registry.py:115 src/iac_code/commands/debug.py:35
+#: src/iac_code/acp/slash_registry.py:117 src/iac_code/commands/debug.py:35
 msgid "Debug logging is off."
 msgstr "デバッグログはオフです。"
 
-#: src/iac_code/acp/slash_registry.py:119 src/iac_code/commands/debug.py:39
+#: src/iac_code/acp/slash_registry.py:121 src/iac_code/commands/debug.py:39
 #, python-brace-format
 msgid "Debug logging enabled. Log file: {path}"
 msgstr "デバッグログを有効にしました。ログファイル：{path}"
 
-#: src/iac_code/acp/slash_registry.py:123 src/iac_code/commands/debug.py:43
+#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:43
 msgid "Debug logging disabled."
 msgstr "デバッグログを無効にしました。"
 
-#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:45
+#: src/iac_code/acp/slash_registry.py:127 src/iac_code/commands/debug.py:45
 msgid "Usage: /debug [on|off]"
 msgstr "使用方法：/debug [on|off]"
+
+#: src/iac_code/acp/slash_registry.py:132 src/iac_code/commands/memory.py:84
+msgid "Memory manager is unavailable."
+msgstr "メモリマネージャーを利用できません。"
 
 #: src/iac_code/agent/agent_loop.py:404 src/iac_code/agent/agent_loop.py:419
 #: src/iac_code/ui/repl.py:757 src/iac_code/ui/repl.py:771
@@ -583,47 +587,55 @@ msgstr "永続化された A2A ルート用のディレクトリ"
 msgid "Save the provided routes as a route snapshot"
 msgstr "指定されたルートをルートスナップショットとして保存します"
 
-#: src/iac_code/commands/__init__.py:22
+#: src/iac_code/commands/__init__.py:23
 msgid "Show available commands"
 msgstr "利用可能なコマンドを表示します"
 
-#: src/iac_code/commands/__init__.py:31
+#: src/iac_code/commands/__init__.py:32
 msgid "Clear conversation history"
 msgstr "会話履歴をクリアします"
 
-#: src/iac_code/commands/__init__.py:39
+#: src/iac_code/commands/__init__.py:40
 msgid "Show or switch model"
 msgstr "モデルを表示または切り替えます"
 
-#: src/iac_code/commands/__init__.py:48
+#: src/iac_code/commands/__init__.py:49
 msgid "Show or switch thinking effort"
 msgstr "思考の負荷（effort）を表示または切り替えます"
 
-#: src/iac_code/commands/__init__.py:57
+#: src/iac_code/commands/__init__.py:58
 msgid "Compact conversation context"
 msgstr "会話コンテキストを圧縮します"
 
-#: src/iac_code/commands/__init__.py:59
+#: src/iac_code/commands/__init__.py:60
 msgid "Compacting conversation"
 msgstr "会話を圧縮しています"
 
-#: src/iac_code/commands/__init__.py:66
+#: src/iac_code/commands/__init__.py:67
 msgid "Exit the application"
 msgstr "アプリケーションを終了します"
 
-#: src/iac_code/commands/__init__.py:75
+#: src/iac_code/commands/__init__.py:76
 msgid "Authenticate with LLM provider"
 msgstr "LLM プロバイダーで認証を行います"
 
-#: src/iac_code/commands/__init__.py:84
+#: src/iac_code/commands/__init__.py:85
 msgid "Toggle debug logging"
 msgstr "デバッグログのオン／オフを切り替えます"
 
-#: src/iac_code/commands/__init__.py:93
+#: src/iac_code/commands/__init__.py:94
+msgid "View and manage persistent memories"
+msgstr "永続メモリを表示および管理"
+
+#: src/iac_code/commands/__init__.py:96
+msgid "[<name>|search <query>|delete <name>|help]"
+msgstr "[<名前>|search <検索語>|delete <名前>|help]"
+
+#: src/iac_code/commands/__init__.py:103
 msgid "Resume a previous session"
 msgstr "以前のセッションを再開します"
 
-#: src/iac_code/commands/__init__.py:95
+#: src/iac_code/commands/__init__.py:105
 msgid "[conversation id or search term]"
 msgstr "[会話 ID または検索語]"
 
@@ -943,6 +955,36 @@ msgstr "コマンド候補を表示"
 #: src/iac_code/commands/help.py:42
 msgid "Exit"
 msgstr "終了"
+
+#: src/iac_code/commands/memory.py:10
+msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
+msgstr "使用法: /memory [<名前>|search <検索語>|delete <名前>|help]"
+
+#: src/iac_code/commands/memory.py:40
+msgid "Saved memories:"
+msgstr "保存済みメモリ:"
+
+#: src/iac_code/commands/memory.py:40
+msgid "No memories saved yet."
+msgstr "保存済みメモリはまだありません。"
+
+#: src/iac_code/commands/memory.py:51
+msgid "Matching memories:"
+msgstr "一致するメモリ:"
+
+#: src/iac_code/commands/memory.py:51
+msgid "No matching memories."
+msgstr "一致するメモリはありません。"
+
+#: src/iac_code/commands/memory.py:60 src/iac_code/commands/memory.py:75
+#, python-brace-format
+msgid "Memory '{name}' not found."
+msgstr "メモリ '{name}' が見つかりません。"
+
+#: src/iac_code/commands/memory.py:64
+#, python-brace-format
+msgid "Memory '{name}' deleted."
+msgstr "メモリ '{name}' を削除しました。"
 
 #: src/iac_code/commands/model.py:57
 #, python-brace-format
@@ -2178,6 +2220,22 @@ msgstr "{n} 時間{s}前"
 #, python-brace-format
 msgid "{n} day{s} ago"
 msgstr "{n} 日{s}前"
+
+#: src/iac_code/ui/suggestions/command_provider.py:79
+msgid "Search saved memories"
+msgstr "保存済みメモリを検索"
+
+#: src/iac_code/ui/suggestions/command_provider.py:80
+msgid "Delete a saved memory"
+msgstr "保存済みメモリを削除"
+
+#: src/iac_code/ui/suggestions/command_provider.py:81
+msgid "Show memory command help"
+msgstr "memory コマンドのヘルプを表示"
+
+#: src/iac_code/ui/suggestions/command_provider.py:116
+msgid "Saved memory"
+msgstr "保存済みメモリ"
 
 #: src/iac_code/utils/platform.py:39
 msgid "iac-code on Windows requires Git for Windows."

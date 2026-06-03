@@ -199,18 +199,29 @@ class TestCreateDefaultRegistry:
         registry = create_default_registry()
         assert isinstance(registry, CommandRegistry)
 
-    def test_create_default_registry_has_9_commands(self):
-        """Test create_default_registry has 9 commands."""
+    def test_create_default_registry_has_10_commands(self):
+        """Test create_default_registry has 10 commands."""
         registry = create_default_registry()
         all_cmds = registry.get_all()
-        assert len(all_cmds) == 9
+        assert len(all_cmds) == 10
 
     def test_create_default_registry_command_names(self):
         """Test create_default_registry has expected command names."""
         registry = create_default_registry()
         all_cmds = registry.get_all()
         names = {c.name for c in all_cmds}
-        assert names == {"help", "clear", "model", "compact", "exit", "auth", "debug", "effort", "resume"}
+        assert names == {
+            "help",
+            "clear",
+            "model",
+            "compact",
+            "exit",
+            "auth",
+            "debug",
+            "effort",
+            "resume",
+            "memory",
+        }
 
     def test_help_command_has_alias(self):
         """Test help command has ? alias."""

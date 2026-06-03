@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 17:56+0800\n"
+"POT-Creation-Date: 2026-06-02 11:24+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: es\n"
@@ -41,21 +41,21 @@ msgstr ""
 "El comando '/{cmd_name}' no está admitido en ACP. Comandos admitidos: "
 "{supported}"
 
-#: src/iac_code/acp/slash_registry.py:56
+#: src/iac_code/acp/slash_registry.py:58
 #, python-brace-format
 msgid "Command '/{cmd_name}' handler not implemented."
 msgstr "El controlador del comando '/{cmd_name}' no está implementado."
 
-#: src/iac_code/acp/slash_registry.py:68
+#: src/iac_code/acp/slash_registry.py:70
 #, python-brace-format
 msgid "Compaction failed: {error}"
 msgstr "Error al compactar: {error}"
 
-#: src/iac_code/acp/slash_registry.py:71 src/iac_code/commands/compact.py:24
+#: src/iac_code/acp/slash_registry.py:73 src/iac_code/commands/compact.py:24
 msgid "Nothing to compact: conversation is empty."
 msgstr "Nada que compactar: la conversación está vacía."
 
-#: src/iac_code/acp/slash_registry.py:74 src/iac_code/commands/compact.py:27
+#: src/iac_code/acp/slash_registry.py:76 src/iac_code/commands/compact.py:27
 #, python-brace-format
 msgid ""
 "Conversation too short to compact: all messages are within the recent "
@@ -64,14 +64,14 @@ msgstr ""
 "Conversación demasiado corta para compactar: todos los mensajes están "
 "dentro de la ventana de retención de las últimas {turns} interacciones."
 
-#: src/iac_code/acp/slash_registry.py:78 src/iac_code/commands/compact.py:30
+#: src/iac_code/acp/slash_registry.py:80 src/iac_code/commands/compact.py:30
 msgid "Compaction failed. See logs for details."
 msgstr ""
 "Compaction failed. See logs for details.Compaction failed. See logs for "
 "details.La compactación falló. Consulte los registros para obtener más "
 "información."
 
-#: src/iac_code/acp/slash_registry.py:83
+#: src/iac_code/acp/slash_registry.py:85
 #, python-brace-format
 msgid ""
 "Context compacted: {original} → {compacted} tokens ({percent} reduction)."
@@ -80,36 +80,40 @@ msgstr ""
 "Contexto compactado: {original} → {compacted} tokens (reducción del "
 "{percent}). Uso del contexto: {usage}"
 
-#: src/iac_code/acp/slash_registry.py:97
+#: src/iac_code/acp/slash_registry.py:99
 #, python-brace-format
 msgid "Clear failed: {error}"
 msgstr "Error al borrar: {error}"
 
-#: src/iac_code/acp/slash_registry.py:98
+#: src/iac_code/acp/slash_registry.py:100
 msgid "Conversation history cleared."
 msgstr "Historial de conversación borrado."
 
-#: src/iac_code/acp/slash_registry.py:114 src/iac_code/commands/debug.py:34
+#: src/iac_code/acp/slash_registry.py:116 src/iac_code/commands/debug.py:34
 #, python-brace-format
 msgid "Debug logging is on. Log file: {path}"
 msgstr "El registro de depuración está activado. Archivo de registro: {path}"
 
-#: src/iac_code/acp/slash_registry.py:115 src/iac_code/commands/debug.py:35
+#: src/iac_code/acp/slash_registry.py:117 src/iac_code/commands/debug.py:35
 msgid "Debug logging is off."
 msgstr "El registro de depuración está desactivado."
 
-#: src/iac_code/acp/slash_registry.py:119 src/iac_code/commands/debug.py:39
+#: src/iac_code/acp/slash_registry.py:121 src/iac_code/commands/debug.py:39
 #, python-brace-format
 msgid "Debug logging enabled. Log file: {path}"
 msgstr "Registro de depuración habilitado. Archivo de registro: {path}"
 
-#: src/iac_code/acp/slash_registry.py:123 src/iac_code/commands/debug.py:43
+#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:43
 msgid "Debug logging disabled."
 msgstr "Registro de depuración deshabilitado."
 
-#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:45
+#: src/iac_code/acp/slash_registry.py:127 src/iac_code/commands/debug.py:45
 msgid "Usage: /debug [on|off]"
 msgstr "Uso: /debug [on|off]"
+
+#: src/iac_code/acp/slash_registry.py:132 src/iac_code/commands/memory.py:84
+msgid "Memory manager is unavailable."
+msgstr "El gestor de memoria no está disponible."
 
 #: src/iac_code/agent/agent_loop.py:404 src/iac_code/agent/agent_loop.py:419
 #: src/iac_code/ui/repl.py:757 src/iac_code/ui/repl.py:771
@@ -609,47 +613,55 @@ msgstr "Directorio para rutas A2A persistentes"
 msgid "Save the provided routes as a route snapshot"
 msgstr "Guarda las rutas proporcionadas como una instantánea de rutas"
 
-#: src/iac_code/commands/__init__.py:22
+#: src/iac_code/commands/__init__.py:23
 msgid "Show available commands"
 msgstr "Mostrar los comandos disponibles"
 
-#: src/iac_code/commands/__init__.py:31
+#: src/iac_code/commands/__init__.py:32
 msgid "Clear conversation history"
 msgstr "Borrar el historial de conversación"
 
-#: src/iac_code/commands/__init__.py:39
+#: src/iac_code/commands/__init__.py:40
 msgid "Show or switch model"
 msgstr "Mostrar o cambiar de modelo"
 
-#: src/iac_code/commands/__init__.py:48
+#: src/iac_code/commands/__init__.py:49
 msgid "Show or switch thinking effort"
 msgstr "Mostrar o cambiar el nivel de razonamiento (effort)"
 
-#: src/iac_code/commands/__init__.py:57
+#: src/iac_code/commands/__init__.py:58
 msgid "Compact conversation context"
 msgstr "Compactar el contexto de la conversación"
 
-#: src/iac_code/commands/__init__.py:59
+#: src/iac_code/commands/__init__.py:60
 msgid "Compacting conversation"
 msgstr "Compactando la conversación"
 
-#: src/iac_code/commands/__init__.py:66
+#: src/iac_code/commands/__init__.py:67
 msgid "Exit the application"
 msgstr "Salir de la aplicación"
 
-#: src/iac_code/commands/__init__.py:75
+#: src/iac_code/commands/__init__.py:76
 msgid "Authenticate with LLM provider"
 msgstr "Autenticar con el proveedor LLM"
 
-#: src/iac_code/commands/__init__.py:84
+#: src/iac_code/commands/__init__.py:85
 msgid "Toggle debug logging"
 msgstr "Activar o desactivar el registro de depuración"
 
-#: src/iac_code/commands/__init__.py:93
+#: src/iac_code/commands/__init__.py:94
+msgid "View and manage persistent memories"
+msgstr "Ver y administrar memorias persistentes"
+
+#: src/iac_code/commands/__init__.py:96
+msgid "[<name>|search <query>|delete <name>|help]"
+msgstr "[<nombre>|search <consulta>|delete <nombre>|help]"
+
+#: src/iac_code/commands/__init__.py:103
 msgid "Resume a previous session"
 msgstr "Reanudar una sesión anterior"
 
-#: src/iac_code/commands/__init__.py:95
+#: src/iac_code/commands/__init__.py:105
 msgid "[conversation id or search term]"
 msgstr "[id de conversación o término de búsqueda]"
 
@@ -967,6 +979,36 @@ msgstr "Mostrar sugerencias de comandos"
 #: src/iac_code/commands/help.py:42
 msgid "Exit"
 msgstr "Salir"
+
+#: src/iac_code/commands/memory.py:10
+msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
+msgstr "Uso: /memory [<nombre>|search <consulta>|delete <nombre>|help]"
+
+#: src/iac_code/commands/memory.py:40
+msgid "Saved memories:"
+msgstr "Memorias guardadas:"
+
+#: src/iac_code/commands/memory.py:40
+msgid "No memories saved yet."
+msgstr "Todavía no hay memorias guardadas."
+
+#: src/iac_code/commands/memory.py:51
+msgid "Matching memories:"
+msgstr "Memorias coincidentes:"
+
+#: src/iac_code/commands/memory.py:51
+msgid "No matching memories."
+msgstr "No hay memorias coincidentes."
+
+#: src/iac_code/commands/memory.py:60 src/iac_code/commands/memory.py:75
+#, python-brace-format
+msgid "Memory '{name}' not found."
+msgstr "No se encontró la memoria '{name}'."
+
+#: src/iac_code/commands/memory.py:64
+#, python-brace-format
+msgid "Memory '{name}' deleted."
+msgstr "Memoria '{name}' eliminada."
 
 #: src/iac_code/commands/model.py:57
 #, python-brace-format
@@ -2240,6 +2282,22 @@ msgstr "hace {n} hora{s}"
 #, python-brace-format
 msgid "{n} day{s} ago"
 msgstr "hace {n} día{s}"
+
+#: src/iac_code/ui/suggestions/command_provider.py:79
+msgid "Search saved memories"
+msgstr "Buscar memorias guardadas"
+
+#: src/iac_code/ui/suggestions/command_provider.py:80
+msgid "Delete a saved memory"
+msgstr "Eliminar una memoria guardada"
+
+#: src/iac_code/ui/suggestions/command_provider.py:81
+msgid "Show memory command help"
+msgstr "Mostrar la ayuda del comando memory"
+
+#: src/iac_code/ui/suggestions/command_provider.py:116
+msgid "Saved memory"
+msgstr "Memoria guardada"
 
 #: src/iac_code/utils/platform.py:39
 msgid "iac-code on Windows requires Git for Windows."

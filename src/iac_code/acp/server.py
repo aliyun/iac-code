@@ -152,7 +152,12 @@ class ACPServer:
             runtime.session_id,
         )
         session = ACPSession(
-            runtime.session_id, runtime.agent_loop, self.conn, mcp_configs=mcp_configs, metrics=self.metrics
+            runtime.session_id,
+            runtime.agent_loop,
+            self.conn,
+            mcp_configs=mcp_configs,
+            metrics=self.metrics,
+            memory_manager=getattr(runtime, "memory_manager", None),
         )
         self.sessions[session.id] = session
         self.metrics.record_session_created()
@@ -297,7 +302,14 @@ class ACPServer:
             runtime.agent_loop.context_manager.load_messages(history)
 
         # 4. Register session
-        session = ACPSession(session_id, runtime.agent_loop, self.conn, mcp_configs=mcp_configs, metrics=self.metrics)
+        session = ACPSession(
+            session_id,
+            runtime.agent_loop,
+            self.conn,
+            mcp_configs=mcp_configs,
+            metrics=self.metrics,
+            memory_manager=getattr(runtime, "memory_manager", None),
+        )
         self.sessions[session_id] = session
         self.metrics.record_session_created()
         logger.info("Session loaded, session_id=%s, history_messages=%d", session_id, len(history))
@@ -360,7 +372,12 @@ class ACPServer:
 
         # 4. Register the forked session
         session = ACPSession(
-            new_session_id, runtime.agent_loop, self.conn, mcp_configs=mcp_configs, metrics=self.metrics
+            new_session_id,
+            runtime.agent_loop,
+            self.conn,
+            mcp_configs=mcp_configs,
+            metrics=self.metrics,
+            memory_manager=getattr(runtime, "memory_manager", None),
         )
         self.sessions[new_session_id] = session
         self.metrics.record_session_created()
@@ -418,7 +435,14 @@ class ACPServer:
             runtime.agent_loop.context_manager.load_messages(history)
 
         # 4. Register the resumed session
-        session = ACPSession(session_id, runtime.agent_loop, self.conn, mcp_configs=mcp_configs, metrics=self.metrics)
+        session = ACPSession(
+            session_id,
+            runtime.agent_loop,
+            self.conn,
+            mcp_configs=mcp_configs,
+            metrics=self.metrics,
+            memory_manager=getattr(runtime, "memory_manager", None),
+        )
         self.sessions[session_id] = session
         self.metrics.record_session_created()
         await self._push_available_commands(session_id)

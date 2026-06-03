@@ -1,7 +1,7 @@
 """ACP slash command registry.
 
 Manages commands supported over the ACP protocol.
-Only /compact, /clear, and /debug are allowed;
+Only /compact, /clear, /debug, and /memory are allowed;
 all other slash commands are rejected with a clear message.
 """
 
@@ -13,7 +13,7 @@ from iac_code.i18n import _
 
 logger = logging.getLogger(__name__)
 
-ACP_SUPPORTED_COMMANDS: frozenset[str] = frozenset({"compact", "clear", "debug"})
+ACP_SUPPORTED_COMMANDS: frozenset[str] = frozenset({"compact", "clear", "debug", "memory"})
 
 
 class ACPSlashRegistry:
@@ -51,6 +51,8 @@ class ACPSlashRegistry:
             return await self._handle_clear(agent_loop)
         if cmd_name == "debug":
             return self._handle_debug(args_str)
+        if cmd_name == "memory":
+            return self._handle_memory(args_str, context.get("memory_manager"))
 
         # Should not reach here
         return _("Command '/{cmd_name}' handler not implemented.").format(cmd_name=cmd_name)  # pragma: no cover
@@ -123,3 +125,12 @@ class ACPSlashRegistry:
             return _("Debug logging disabled.")
 
         return _("Usage: /debug [on|off]")
+
+    def _handle_memory(self, args: str, memory_manager) -> str:
+        """View and manage persistent memories."""
+        if memory_manager is None:
+            return _("Memory manager is unavailable.")
+
+        from iac_code.commands.memory import execute_memory_command
+
+        return execute_memory_command(memory_manager, args.split())

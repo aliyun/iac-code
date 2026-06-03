@@ -20,6 +20,23 @@ I18N_DIR = PROJECT_ROOT / "src" / "iac_code" / "i18n"
 POT_FILE = I18N_DIR / "messages.pot"
 LOCALES_DIR = I18N_DIR / "locales"
 
+MEMORY_COMMAND_MSGIDS = {
+    "Usage: /memory [<name>|search <query>|delete <name>|help]",
+    "Saved memories:",
+    "No memories saved yet.",
+    "Matching memories:",
+    "No matching memories.",
+    "Memory '{name}' not found.",
+    "Memory '{name}' deleted.",
+    "Memory manager is unavailable.",
+    "View and manage persistent memories",
+    "[<name>|search <query>|delete <name>|help]",
+    "Search saved memories",
+    "Delete a saved memory",
+    "Show memory command help",
+    "Saved memory",
+}
+
 
 def _get_all_msgids_from_pot(pot_file: Path) -> set[str]:
     """Extract all msgids from a .pot template file.
@@ -274,6 +291,31 @@ def test_translation_completeness():
             error_messages.append(f"Language '{lang}' has incomplete translations:")
             error_messages.extend(errors)
         pytest.fail("\n".join(error_messages))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_memory_command_translations_are_complete():
+    """Verify /memory-specific strings are translated, not copied as placeholders."""
+    assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = MEMORY_COMMAND_MSGIDS - pot_msgids
+    assert not missing_from_pot, f"/memory msgids missing from messages.pot: {sorted(missing_from_pot)}"
+
+    language_dirs = _discover_language_dirs()
+    assert language_dirs, "No language directories found"
+
+    errors = []
+    for lang_dir in language_dirs:
+        po_file = lang_dir / "LC_MESSAGES" / "messages.po"
+        translations = _get_all_translations_from_po(po_file)
+        for msgid in sorted(MEMORY_COMMAND_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+
+    assert not errors, "\n".join(errors)
 
 
 class TestDetectWindowsUILanguage:

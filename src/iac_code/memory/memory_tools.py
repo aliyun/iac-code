@@ -57,7 +57,12 @@ class WriteMemoryTool(Tool):
 
     @property
     def description(self) -> str:
-        return f"Save a persistent memory. Types: {', '.join(sorted(MEMORY_TYPES))}."
+        types = ", ".join(sorted(MEMORY_TYPES))
+        return (
+            "Save a persistent memory. Use when the user explicitly asks you to remember or preserve information. "
+            "Choose a concise, stable name, an appropriate type, a short description, and the useful content to keep. "
+            f"Types: {types}."
+        )
 
     @property
     def input_schema(self) -> dict[str, Any]:

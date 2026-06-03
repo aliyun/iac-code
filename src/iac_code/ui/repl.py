@@ -248,7 +248,7 @@ class InlineREPL:
         cwd = os.getcwd()
         self._suggestion_aggregator = SuggestionAggregator(
             [
-                CommandProvider(self.command_registry),
+                CommandProvider(self.command_registry, memory_manager=self._memory_manager),
                 SkillProvider(self.command_registry),
                 FileProvider(cwd),
                 DirectoryProvider(cwd),

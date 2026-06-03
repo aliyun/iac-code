@@ -102,6 +102,26 @@ class TestTokenExtractor:
         assert token is not None
         assert token.trigger == "/"
 
+    def test_slash_command_token_includes_trailing_space(self, extractor):
+        """/memory<space> stays active for argument suggestions."""
+        text = "/memory "
+        token = extractor.extract(text, len(text))
+        assert token is not None
+        assert token.trigger == "/"
+        assert token.text == "/memory "
+        assert token.start == 0
+        assert token.end == len(text)
+
+    def test_slash_command_token_includes_arguments(self, extractor):
+        """Slash command suggestions can inspect the second input item."""
+        text = "run /memory delete "
+        token = extractor.extract(text, len(text))
+        assert token is not None
+        assert token.trigger == "/"
+        assert token.text == "/memory delete "
+        assert token.start == 4
+        assert token.end == len(text)
+
     def test_token_start_and_end_positions(self, extractor):
         """Verify start and end positions are correct."""
         text = "look at @config"
