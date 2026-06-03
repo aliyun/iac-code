@@ -56,8 +56,8 @@ async def test_clear_with_console_writes_ansi_and_banner(monkeypatch):
 
     calls = []
 
-    def fake_banner(model, cwd):
-        calls.append((model, cwd))
+    def fake_banner(model, cwd, *, session_id=None, session_name=None):
+        calls.append((model, cwd, session_id, session_name))
         return "BANNER"
 
     monkeypatch.setattr("iac_code.ui.banner.render_welcome_banner", fake_banner)
@@ -66,4 +66,30 @@ async def test_clear_with_console_writes_ansi_and_banner(monkeypatch):
     # ANSI escape written
     console.file.write.assert_called()
     console.print.assert_called_with("BANNER")
-    assert calls == [("claude-sonnet-4-6", "/tmp")]
+    assert calls == [("claude-sonnet-4-6", "/tmp", None, None)]
+
+
+@pytest.mark.asyncio
+async def test_clear_banner_preserves_repl_session_identity(monkeypatch):
+    store = MagicMock()
+    state = MagicMock(model="claude-sonnet-4-6", cwd="/tmp")
+    store.get_state.return_value = state
+
+    console = MagicMock()
+    console.file = MagicMock()
+    repl = MagicMock(_session_id="session-123", _session_name="deploy-prod")
+    context = MagicMock(store=store, console=console, repl=repl)
+
+    calls = []
+
+    def fake_banner(model, cwd, *, session_id=None, session_name=None):
+        calls.append((model, cwd, session_id, session_name))
+        return "BANNER"
+
+    monkeypatch.setattr("iac_code.ui.banner.render_welcome_banner", fake_banner)
+
+    result = await clear_command(context=context)
+
+    assert result == ""
+    console.print.assert_called_with("BANNER")
+    assert calls == [("claude-sonnet-4-6", "/tmp", "session-123", "deploy-prod")]

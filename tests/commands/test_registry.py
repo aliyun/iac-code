@@ -214,11 +214,11 @@ class TestCreateDefaultRegistry:
         registry = create_default_registry()
         assert isinstance(registry, CommandRegistry)
 
-    def test_create_default_registry_has_12_commands(self):
-        """Test create_default_registry has 12 commands."""
+    def test_create_default_registry_has_13_commands(self):
+        """Test create_default_registry has 13 commands."""
         registry = create_default_registry()
         all_cmds = registry.get_all()
-        assert len(all_cmds) == 12
+        assert len(all_cmds) == 13
 
     def test_create_default_registry_command_names(self):
         """Test create_default_registry has expected command names."""
@@ -238,7 +238,16 @@ class TestCreateDefaultRegistry:
             "memory",
             "skills",
             "status",
+            "rename",
         }
+
+    def test_default_registry_includes_rename(self):
+        """Test rename command metadata."""
+        registry = create_default_registry()
+        rename_cmd = registry.get("rename")
+        assert rename_cmd is not None
+        assert rename_cmd.arg_hint == "<name>"
+        assert rename_cmd.history_mode == "session"
 
     def test_help_command_has_alias(self):
         """Test help command has ? alias."""

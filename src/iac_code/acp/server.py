@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shlex
 import time
 import uuid
 from typing import Any
@@ -18,7 +19,10 @@ from iac_code.acp.types import ACPContentBlock, MCPServer
 from iac_code.acp.version import negotiate_version
 from iac_code.commands import LocalCommand, create_default_registry
 from iac_code.config import DEFAULT_MODEL, get_active_provider_key, load_saved_model
+from iac_code.i18n import _
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+from iac_code.services.session_index import SessionEntry, SessionIndex
+from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
 from iac_code.services.session_storage import SessionStorage
 
 SESSION_IDLE_TIMEOUT = 3600  # 1 hour
@@ -233,25 +237,16 @@ class ACPServer:
         cwd: str | None = None,
         **kwargs: Any,
     ) -> acp.schema.ListSessionsResponse:
-        from iac_code.utils.project_paths import get_project_dir, get_projects_dir
-
-        session_ids: list[str] = []
-        if cwd:
-            project_dir = get_project_dir(cwd)
-            if project_dir.exists():
-                session_ids = [p.stem for p in project_dir.glob("*.jsonl")]
-        else:
-            projects_root = get_projects_dir()
-            if projects_root.exists():
-                session_ids = [p.stem for p in projects_root.glob("*/*.jsonl")]
+        index = SessionIndex()
+        entries = index.list_for_cwd(cwd) if cwd else index.list_all_projects()
         return acp.schema.ListSessionsResponse(
             sessions=[
                 acp.schema.SessionInfo(
-                    session_id=session_id,
-                    cwd=cwd or "",
-                    title=session_id,
+                    session_id=entry.session_id,
+                    cwd=entry.cwd or cwd or "",
+                    title=entry.title,
                 )
-                for session_id in session_ids
+                for entry in entries
             ],
             next_cursor=None,
         )
@@ -401,20 +396,66 @@ class ACPServer:
         mcp_servers: list[MCPServer] | None = None,
         **kwargs: Any,
     ) -> acp.schema.ResumeSessionResponse:
-        # 1. If session is still active in memory, return directly
-        if session_id in self.sessions:
+        # 1. If session is still active in memory by exact id, enforce project ownership before returning.
+        active_session = self.sessions.get(session_id)
+        if active_session is not None:
+            error = _active_session_project_error(cwd, session_id, session_id, active_session)
+            if error is not None:
+                raise error
             await self._push_available_commands(session_id)
             return acp.schema.ResumeSessionResponse()
 
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
 
-        # 2. Try to load persisted history from SessionStorage
-        storage = SessionStorage()
-        if not storage.exists(cwd, session_id):
-            raise acp.RequestError.invalid_params({"session_id": "Session not found"})
+        resolution = resolve_session_argument(SessionIndex(), cwd, session_id)
+        if resolution.status == ResolutionStatus.NOT_FOUND:
+            raise _invalid_params(_("Session not found"), {"session_id": session_id})
+        if resolution.status == ResolutionStatus.AMBIGUOUS_NAME:
+            candidate_ids = [entry.session_id for entry in resolution.candidates]
+            message = _("Session name is ambiguous. Candidates: {candidates}").format(
+                candidates=", ".join(candidate_ids)
+            )
+            raise _invalid_params(
+                message,
+                {
+                    "session_id": session_id,
+                    "candidates": [_resume_candidate_data(entry) for entry in resolution.candidates],
+                },
+            )
 
-        history = storage.load(cwd, session_id)
+        entry = resolution.entry
+        if entry is None:  # pragma: no cover - defensive guard for inconsistent resolver output
+            raise _invalid_params(_("Session not found"), {"session_id": session_id})
+
+        resolved_session_id = entry.session_id
+        if entry.cwd and entry.cwd != cwd:
+            hint = _resume_command(entry.cwd, resolved_session_id)
+            message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
+            raise _invalid_params(
+                message,
+                {
+                    "session_id": session_id,
+                    "resolved_session_id": resolved_session_id,
+                    "cwd": entry.cwd,
+                    "hint": hint,
+                },
+            )
+
+        active_session = self.sessions.get(resolved_session_id)
+        if active_session is not None:
+            error = _active_session_project_error(cwd, session_id, resolved_session_id, active_session)
+            if error is not None:
+                raise error
+            await self._push_available_commands(resolved_session_id)
+            return acp.schema.ResumeSessionResponse()
+
+        # 2. Try to load persisted history from SessionStorage.
+        storage = SessionStorage()
+        if not storage.exists(cwd, resolved_session_id):
+            raise _invalid_params(_("Session not found"), {"session_id": session_id})
+
+        history = storage.load(cwd, resolved_session_id)
         history = SessionStorage.repair_interrupted(history)
 
         # Convert MCP server configs from ACP protocol types to internal dicts
@@ -422,7 +463,7 @@ class ACPServer:
 
         # 3. Rebuild agent runtime with restored history
         model = load_saved_model() or DEFAULT_MODEL
-        runtime = self._create_runtime_with_auth_check(model=model, session_id=session_id, cwd=cwd)
+        runtime = self._create_runtime_with_auth_check(model=model, session_id=resolved_session_id, cwd=cwd)
         replace_bash_with_acp_terminal(
             runtime.tool_registry,
             self.client_capabilities,
@@ -436,16 +477,16 @@ class ACPServer:
 
         # 4. Register the resumed session
         session = ACPSession(
-            session_id,
+            resolved_session_id,
             runtime.agent_loop,
             self.conn,
             mcp_configs=mcp_configs,
             metrics=self.metrics,
             memory_manager=getattr(runtime, "memory_manager", None),
         )
-        self.sessions[session_id] = session
+        self.sessions[resolved_session_id] = session
         self.metrics.record_session_created()
-        await self._push_available_commands(session_id)
+        await self._push_available_commands(resolved_session_id)
 
         return acp.schema.ResumeSessionResponse()
 
@@ -641,6 +682,48 @@ def _convert_mcp_servers(mcp_servers: list[MCPServer] | None) -> list[dict[str, 
     if configs:
         logger.info("Received %d MCP server config(s): %s", len(configs), [c["name"] for c in configs])
     return configs
+
+
+def _invalid_params(message: str, data: dict[str, Any] | None = None) -> acp.RequestError:
+    """Create an ACP invalid-params error with a useful message."""
+    return acp.RequestError(-32602, message, data)
+
+
+def _resume_command(cwd: str, session_id: str) -> str:
+    return "cd {cwd} && iac-code --resume {session_id}".format(cwd=shlex.quote(cwd), session_id=session_id)
+
+
+def _active_session_cwd(session: ACPSession) -> str | None:
+    cwd = getattr(session.agent_loop, "_cwd", None)
+    return cwd if isinstance(cwd, str) and cwd else None
+
+
+def _active_session_project_error(
+    cwd: str, session_id: str, resolved_session_id: str, session: ACPSession
+) -> acp.RequestError | None:
+    active_cwd = _active_session_cwd(session)
+    if not active_cwd or active_cwd == cwd:
+        return None
+    hint = _resume_command(active_cwd, resolved_session_id)
+    message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
+    return _invalid_params(
+        message,
+        {
+            "session_id": session_id,
+            "resolved_session_id": resolved_session_id,
+            "cwd": active_cwd,
+            "hint": hint,
+        },
+    )
+
+
+def _resume_candidate_data(entry: SessionEntry) -> dict[str, str | None]:
+    return {
+        "session_id": entry.session_id,
+        "name": entry.name,
+        "cwd": entry.cwd,
+        "command": _resume_command(entry.cwd, entry.session_id),
+    }
 
 
 # ---------------------------------------------------------------------------

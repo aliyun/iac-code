@@ -16,6 +16,8 @@ class FakeRenderer:
     def __init__(self, permission_allowed: bool = True) -> None:
         self.messages: list[tuple[str, str]] = []
         self.recorded_turns: list[str] = []
+        self.user_messages: list[str] = []
+        self.command_results: list[tuple[str, str]] = []
         self.permission_allowed = permission_allowed
         self.permission_events = []
 
@@ -24,6 +26,12 @@ class FakeRenderer:
 
     def record_user_turn(self, text: str) -> None:
         self.recorded_turns.append(text)
+
+    def print_user_message(self, text: str) -> None:
+        self.user_messages.append(text)
+
+    def print_command_result(self, command: str, result: str) -> None:
+        self.command_results.append((command, result))
 
     async def prompt_permission(self, event) -> bool:
         self.permission_events.append(event)
@@ -45,6 +53,9 @@ class RecordingContextManager:
     def __init__(self) -> None:
         self.user_messages: list[str] = []
         self.assistant_messages: list[str] = []
+
+    def get_messages(self) -> list:
+        return []
 
     def add_user_message(self, message: str) -> None:
         self.user_messages.append(message)
@@ -94,6 +105,8 @@ def make_repl(
     repl._original_cwd = cwd
     repl.renderer = FakeRenderer(permission_allowed=permission_allowed)
     repl._history = RecordingHistory()
+    repl._command_log = []
+    repl._streaming_error_log = []
     repl._agent_loop = SimpleNamespace(context_manager=RecordingContextManager())
     repl.store = SimpleNamespace(get_state=lambda: SimpleNamespace(permission_context=permission_context))
     repl.tool_registry = SimpleNamespace(get=lambda name: tool if name == "bash" else None)
@@ -112,6 +125,7 @@ async def test_shell_escape_executes_registered_bash_tool(tmp_path):
     assert ("STDOUT:\nhello\nExit code: 0", "white") in repl.renderer.messages
     assert repl.renderer.recorded_turns == []
     assert repl._history.appended == []
+    assert repl._command_log == [("!echo hello", "$ echo hello\nSTDOUT:\nhello\nExit code: 0", 0, False)]
     assert repl._agent_loop.context_manager.user_messages == []
     assert repl._agent_loop.context_manager.assistant_messages == []
 
@@ -160,6 +174,7 @@ async def test_shell_escape_error_result_prints_red_output(tmp_path):
 
     assert tool.calls == [({"command": "missing-command"}, str(tmp_path))]
     assert ("STDERR:\nnot found\nExit code: 127", "red") in repl.renderer.messages
+    assert repl._command_log == [("!missing-command", "$ missing-command\nSTDERR:\nnot found\nExit code: 127", 0, True)]
 
 
 @pytest.mark.asyncio
@@ -215,3 +230,25 @@ async def test_interactive_shell_escape_resets_history_navigation_without_append
     assert handled == ["!echo hello"]
     assert history.is_navigating is False
     assert history.search("") == ["previous prompt"]
+
+
+def test_refresh_banner_replays_shell_escape_command(tmp_path):
+    from iac_code.state.app_state import AppState
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "session-1"
+    repl._session_name = "deploy-prod"
+    repl.store = SimpleNamespace(get_state=lambda: AppState(model="test-model", cwd=str(tmp_path)))
+    repl.console = SimpleNamespace(
+        file=SimpleNamespace(write=lambda _text: None, flush=lambda: None),
+        print=lambda *_: None,
+    )
+    repl.renderer = FakeRenderer()
+    repl._agent_loop = SimpleNamespace(context_manager=SimpleNamespace(get_messages=lambda: []))
+    repl._streaming_error_log = []
+    repl._command_log = [("!echo hello", "$ echo hello\nhello", 0, False)]
+
+    repl._refresh_banner()
+
+    assert repl.renderer.user_messages == ["!echo hello"]
+    assert repl.renderer.command_results == [("!echo hello", "$ echo hello\nhello")]

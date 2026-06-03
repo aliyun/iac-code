@@ -14,6 +14,8 @@ import pytest
 from iac_code.acp.server import SESSION_IDLE_TIMEOUT, ACPServer
 from iac_code.acp.session import ACPSession, _current_turn_id
 from iac_code.acp.state import TurnState
+from iac_code.agent.message import Message, TextBlock
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import MessageEndEvent, TextDeltaEvent, Usage
 
 
@@ -446,9 +448,10 @@ class _ResumeLoop:
 
 
 class _ResumeRuntime:
-    def __init__(self, session_id: str = "test-session") -> None:
+    def __init__(self, session_id: str = "test-session", cwd: str | None = None) -> None:
         self.session_id = session_id
         self.agent_loop = _ResumeLoop()
+        self.agent_loop._cwd = cwd
         self.tool_registry = None
 
 
@@ -456,7 +459,7 @@ def _patch_resume_server(monkeypatch: pytest.MonkeyPatch, session_id: str = "tes
     monkeypatch.setattr("iac_code.acp.server.load_saved_model", lambda: "fake-model")
     monkeypatch.setattr(
         "iac_code.acp.server.create_agent_runtime",
-        lambda options: _ResumeRuntime(session_id=options.session_id or session_id),
+        lambda options: _ResumeRuntime(session_id=options.session_id or session_id, cwd=options.cwd),
     )
     monkeypatch.setattr(
         "iac_code.acp.server.replace_bash_with_acp_terminal",
@@ -478,6 +481,57 @@ async def test_resume_active_session_returns_immediately(monkeypatch: pytest.Mon
     result = await server.resume_session(cwd="/tmp", session_id=sid)
     assert isinstance(result, acp.schema.ResumeSessionResponse)
     assert sid in server.sessions
+
+
+@pytest.mark.asyncio
+async def test_resume_active_session_from_other_cwd_raises_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An in-memory active session follows the same project boundary as persisted sessions."""
+    _patch_resume_server(monkeypatch)
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+
+    resp = await server.new_session(cwd="/source project;unsafe")
+    sid = resp.session_id
+
+    with pytest.raises(acp.RequestError) as exc_info:
+        await server.resume_session(cwd="/other", session_id=sid)
+
+    assert isinstance(exc_info.value.data, dict)
+    assert exc_info.value.data["cwd"] == "/source project;unsafe"
+    assert exc_info.value.data["hint"] == "cd '/source project;unsafe' && iac-code --resume test-session"
+    assert sid in str(exc_info.value)
+    assert "cd '/source project;unsafe' && iac-code --resume test-session" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_resume_resolved_name_rejects_active_session_from_other_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The post-resolution active-session fast path also enforces project ownership."""
+    _patch_resume_server(monkeypatch, session_id="same-id")
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    storage = SessionStorage()
+    storage.save(
+        "/current",
+        "same-id",
+        [Message(role="user", content=[TextBlock(text="hello")])],
+    )
+    storage.rename_session("/current", "same-id", "deploy-prod", git_branch=None)
+
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+    await server.new_session(cwd="/other project;unsafe")
+
+    with pytest.raises(acp.RequestError) as exc_info:
+        await server.resume_session(cwd="/current", session_id="deploy-prod")
+
+    assert isinstance(exc_info.value.data, dict)
+    assert exc_info.value.data["cwd"] == "/other project;unsafe"
+    assert exc_info.value.data["hint"] == "cd '/other project;unsafe' && iac-code --resume same-id"
+    assert "cd '/other project;unsafe' && iac-code --resume same-id" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -517,6 +571,116 @@ async def test_resume_from_storage(monkeypatch: pytest.MonkeyPatch, tmp_path) ->
     resumed_session = server.sessions["stored-session"]
     ctx = resumed_session.agent_loop.context_manager
     assert len(ctx.loaded_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_session_accepts_name(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Resuming by session name resolves to the persisted session id."""
+    _patch_resume_server(monkeypatch)
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    storage = SessionStorage()
+    storage.save(
+        "/tmp",
+        "stored-named-session",
+        [Message(role="user", content=[TextBlock(text="hello")])],
+    )
+    storage.rename_session("/tmp", "stored-named-session", "deploy-prod", git_branch="main")
+
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+
+    result = await server.resume_session(cwd="/tmp", session_id="deploy-prod")
+
+    assert isinstance(result, acp.schema.ResumeSessionResponse)
+    assert "deploy-prod" not in server.sessions
+    assert "stored-named-session" in server.sessions
+    resumed_session = server.sessions["stored-named-session"]
+    assert resumed_session.id == "stored-named-session"
+    ctx = resumed_session.agent_loop.context_manager
+    assert len(ctx.loaded_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_session_accepts_id_prefix(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Resuming by unique session id prefix resolves to the full persisted session id."""
+    _patch_resume_server(monkeypatch)
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    storage = SessionStorage()
+    storage.save(
+        "/tmp",
+        "prefix-session-123",
+        [Message(role="user", content=[TextBlock(text="hello")])],
+    )
+
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+
+    result = await server.resume_session(cwd="/tmp", session_id="prefix-session")
+
+    assert isinstance(result, acp.schema.ResumeSessionResponse)
+    assert "prefix-session" not in server.sessions
+    assert "prefix-session-123" in server.sessions
+
+
+@pytest.mark.asyncio
+async def test_resume_session_single_cross_project_match_raises_hint(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """A single foreign-project match is rejected with a concrete resume command hint."""
+    _patch_resume_server(monkeypatch)
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    storage = SessionStorage()
+    foreign_cwd = "/other project;unsafe"
+    storage.save(
+        foreign_cwd,
+        "foreign-session-123",
+        [Message(role="user", content=[TextBlock(text="hello")])],
+    )
+    storage.rename_session(foreign_cwd, "foreign-session-123", "foreign-deploy", git_branch=None)
+
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+
+    with pytest.raises(acp.RequestError) as exc_info:
+        await server.resume_session(cwd="/tmp", session_id="foreign-deploy")
+
+    assert isinstance(exc_info.value.data, dict)
+    assert exc_info.value.data["hint"] == "cd '/other project;unsafe' && iac-code --resume foreign-session-123"
+    assert "foreign-session-123" in str(exc_info.value)
+    assert "cd '/other project;unsafe' && iac-code --resume foreign-session-123" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_resume_session_ambiguous_name_raises_candidates(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """ACP resume reports candidate ids when a name exists in multiple projects."""
+    _patch_resume_server(monkeypatch)
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    storage = SessionStorage()
+    message = Message(role="user", content=[TextBlock(text="hello")])
+    storage.save("/project a;bad", "candidate-a", [message])
+    storage.rename_session("/project a;bad", "candidate-a", "deploy-prod", git_branch=None)
+    storage.save("/project-b", "candidate-b", [message])
+    storage.rename_session("/project-b", "candidate-b", "deploy-prod", git_branch=None)
+
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+
+    with pytest.raises(acp.RequestError) as exc_info:
+        await server.resume_session(cwd="/current", session_id="deploy-prod")
+
+    assert "candidate-a" in str(exc_info.value)
+    assert "candidate-b" in str(exc_info.value)
+    assert isinstance(exc_info.value.data, dict)
+    candidates = exc_info.value.data["candidates"]
+    commands_by_id = {candidate["session_id"]: candidate["command"] for candidate in candidates}
+    assert commands_by_id["candidate-a"] == "cd '/project a;bad' && iac-code --resume candidate-a"
+    assert commands_by_id["candidate-b"] == "cd /project-b && iac-code --resume candidate-b"
 
 
 @pytest.mark.asyncio

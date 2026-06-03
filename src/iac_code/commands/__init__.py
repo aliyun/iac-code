@@ -9,7 +9,8 @@ from iac_code.commands.exit import exit_command
 from iac_code.commands.help import help_command
 from iac_code.commands.memory import memory_command
 from iac_code.commands.model import model_command
-from iac_code.commands.registry import Command, CommandRegistry, LocalCommand, PromptCommand
+from iac_code.commands.registry import Command, CommandRegistry, CommandResult, LocalCommand, PromptCommand
+from iac_code.commands.rename import rename_command
 from iac_code.commands.resume import resume_command
 from iac_code.commands.skills import skills_command
 from iac_code.commands.status import status_command
@@ -110,6 +111,15 @@ def create_default_registry() -> CommandRegistry:
     )
     registry.register(
         LocalCommand(
+            name="rename",
+            description=_("Rename the current session"),
+            handler=rename_command,
+            arg_hint="<name>",
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
             name="skills",
             description=_("Manage skills"),
             handler=skills_command,
@@ -127,4 +137,4 @@ def create_default_registry() -> CommandRegistry:
     return registry
 
 
-__all__ = ["Command", "CommandRegistry", "LocalCommand", "PromptCommand", "create_default_registry"]
+__all__ = ["Command", "CommandRegistry", "CommandResult", "LocalCommand", "PromptCommand", "create_default_registry"]

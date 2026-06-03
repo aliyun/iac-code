@@ -2,9 +2,13 @@
 
 Layout::
 
-    ~/.iac-code/projects/<sanitize(cwd)>/<session_id>.jsonl
+    ~/.iac-code/projects/<sanitize(cwd)>/<session_id>/session.jsonl
+    ~/.iac-code/projects/<sanitize(cwd)>/<session_id>/metadata.json
 
-Each session file is a stream of two kinds of JSONL lines:
+Legacy sessions at ``<session_id>.jsonl`` remain readable and are
+migrated to the directory format when renamed.
+
+Each ``session.jsonl`` file is a stream of two kinds of JSONL lines:
 
 * **Message rows** — one per :class:`Message`, with extra stamp fields
   (``session_id``, ``cwd``, ``git_branch``, ``version``) appended at write
@@ -19,11 +23,21 @@ Each session file is a stream of two kinds of JSONL lines:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from shutil import move
 from typing import Any
 
 from iac_code import __version__
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
+from iac_code.i18n import _
+from iac_code.services.session_metadata import (
+    SESSION_JSONL_FILENAME,
+    SessionMetadata,
+    normalize_session_name,
+    read_session_metadata,
+    write_session_metadata,
+)
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.project_paths import (
     get_project_dir,
@@ -31,6 +45,10 @@ from iac_code.utils.project_paths import (
     get_session_path,
     is_conversation_session_file,
 )
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class SessionStorage:
@@ -43,7 +61,7 @@ class SessionStorage:
     # Internal path helpers
     # ------------------------------------------------------------------
 
-    def _session_path(self, cwd: str, session_id: str) -> Path:
+    def _legacy_session_path(self, cwd: str, session_id: str) -> Path:
         if self._projects_dir == get_projects_dir():
             return get_session_path(cwd, session_id)
         from iac_code.utils.project_paths import sanitize_path
@@ -57,9 +75,33 @@ class SessionStorage:
 
         return self._projects_dir / sanitize_path(cwd)
 
+    def _session_dir(self, cwd: str, session_id: str) -> Path:
+        return self._project_dir_for(cwd) / session_id
+
+    def _directory_session_path(self, cwd: str, session_id: str) -> Path:
+        return self._session_dir(cwd, session_id) / SESSION_JSONL_FILENAME
+
+    def _session_path(self, cwd: str, session_id: str) -> Path:
+        directory_path = self._directory_session_path(cwd, session_id)
+        legacy_path = self._legacy_session_path(cwd, session_id)
+        if directory_path.exists():
+            return directory_path
+        if legacy_path.exists():
+            return legacy_path
+        return directory_path
+
     def session_path(self, cwd: str, session_id: str) -> Path:
         """Public accessor for the on-disk JSONL path of a session."""
         return self._session_path(cwd, session_id)
+
+    def legacy_session_path(self, cwd: str, session_id: str) -> Path:
+        return self._legacy_session_path(cwd, session_id)
+
+    def session_dir(self, cwd: str, session_id: str) -> Path:
+        return self._session_dir(cwd, session_id)
+
+    def read_metadata(self, cwd: str, session_id: str) -> SessionMetadata | None:
+        return read_session_metadata(self._session_dir(cwd, session_id))
 
     # ------------------------------------------------------------------
     # Stamp helpers
@@ -157,6 +199,60 @@ class SessionStorage:
         return self._session_path(cwd, session_id).exists()
 
     # ------------------------------------------------------------------
+    # Rename / migration
+    # ------------------------------------------------------------------
+
+    def _iter_project_session_dirs(self, cwd: str) -> list[Path]:
+        project_dir = self._project_dir_for(cwd)
+        if not project_dir.exists():
+            return []
+        return [p for p in project_dir.iterdir() if p.is_dir() and (p / SESSION_JSONL_FILENAME).exists()]
+
+    def _name_owner_in_project(self, cwd: str, name: str) -> str | None:
+        for session_dir in self._iter_project_session_dirs(cwd):
+            metadata = read_session_metadata(session_dir)
+            if metadata and metadata.name == name:
+                return metadata.session_id
+        return None
+
+    def _ensure_directory_format(self, cwd: str, session_id: str) -> Path:
+        session_dir = self._session_dir(cwd, session_id)
+        directory_path = session_dir / SESSION_JSONL_FILENAME
+        if directory_path.exists():
+            return session_dir
+        legacy_path = self._legacy_session_path(cwd, session_id)
+        if not legacy_path.exists():
+            ensure_private_dir(session_dir)
+            directory_path.touch()
+            ensure_private_file(directory_path)
+            return session_dir
+        ensure_private_dir(session_dir)
+        move(str(legacy_path), str(directory_path))
+        ensure_private_file(directory_path)
+        return session_dir
+
+    def rename_session(self, cwd: str, session_id: str, name: str, *, git_branch: str | None = None) -> str:
+        normalized = normalize_session_name(name)
+        current = self.read_metadata(cwd, session_id)
+        if current and current.name == normalized:
+            return "unchanged"
+        owner = self._name_owner_in_project(cwd, normalized)
+        if owner is not None and owner != session_id:
+            raise ValueError(_("Session name already exists in this project: {name}").format(name=normalized))
+        session_dir = self._ensure_directory_format(cwd, session_id)
+        now = _utc_now()
+        metadata = SessionMetadata(
+            session_id=session_id,
+            name=normalized,
+            cwd=cwd,
+            git_branch=git_branch,
+            created_at=current.created_at if current else now,
+            updated_at=now,
+        )
+        write_session_metadata(session_dir, metadata)
+        return "renamed"
+
+    # ------------------------------------------------------------------
     # Cross-project lookups (used by CLI --resume / --continue)
     # ------------------------------------------------------------------
 
@@ -172,6 +268,10 @@ class SessionStorage:
         for proj_dir in self._projects_dir.iterdir():
             if not proj_dir.is_dir():
                 continue
+            candidate = proj_dir / session_id / SESSION_JSONL_FILENAME
+            if candidate.exists():
+                cwd = self._read_cwd_from_file(candidate) or ""
+                return cwd, candidate
             candidate = proj_dir / f"{session_id}.jsonl"
             if candidate.exists() and is_conversation_session_file(candidate):
                 cwd = self._read_cwd_from_file(candidate) or ""
@@ -186,6 +286,14 @@ class SessionStorage:
         for proj_dir in self._projects_dir.iterdir():
             if not proj_dir.is_dir():
                 continue
+            for session_dir in proj_dir.iterdir():
+                if not session_dir.is_dir():
+                    continue
+                jsonl = session_dir / SESSION_JSONL_FILENAME
+                if jsonl.exists():
+                    mtime = jsonl.stat().st_mtime
+                    if latest is None or mtime > latest[0]:
+                        latest = (mtime, jsonl)
             for jsonl in proj_dir.glob("*.jsonl"):
                 if not is_conversation_session_file(jsonl):
                     continue
@@ -196,7 +304,7 @@ class SessionStorage:
             return None
         path = latest[1]
         cwd = self._read_cwd_from_file(path) or ""
-        session_id = path.stem
+        session_id = path.parent.name if path.name == SESSION_JSONL_FILENAME else path.stem
         return cwd, session_id
 
     @staticmethod

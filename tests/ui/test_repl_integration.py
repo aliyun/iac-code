@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -34,6 +35,22 @@ def make_pending_update() -> PendingUpdate:
         checked_at=123.0,
         update_command=(".venv/bin/python", "-m", "pip", "install", "--upgrade", "iac-code"),
         release_notes_url="https://example.test/releases/1.2.0",
+    )
+
+
+def make_session_entry(session_id: str, cwd: str, name: str | None = None):
+    from iac_code.services.session_index import SessionEntry
+
+    return SessionEntry(
+        session_id=session_id,
+        cwd=cwd,
+        project_name="repo",
+        git_branch=None,
+        title=name or session_id,
+        mtime=123.0,
+        size_bytes=456,
+        name=name,
+        is_legacy=False,
     )
 
 
@@ -273,17 +290,137 @@ def test_refresh_skills_updates_agent_loop_auto_trigger_skills(mock_mm, mock_ss,
     assert all(command.name != "project-skill" for command in repl._agent_loop._auto_trigger_skills)
 
 
+def test_repl_rename_current_session_updates_storage_and_name():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/repo"
+    repl._session_id = "session-123"
+    repl._session_storage = Mock()
+    repl.current_git_branch = Mock(return_value="main")
+    repl._load_current_session_name = Mock(return_value="deploy-prod")
+
+    result = repl.rename_current_session("deploy-prod")
+
+    assert result == repl._session_storage.rename_session.return_value
+    repl._session_storage.rename_session.assert_called_once_with(
+        "/repo",
+        "session-123",
+        "deploy-prod",
+        git_branch="main",
+    )
+    repl._load_current_session_name.assert_called_once_with()
+    assert repl._session_name == "deploy-prod"
+
+
+def test_swap_session_refreshes_session_name_and_renders_banner():
+    from iac_code.state.app_state import AppState
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/repo"
+    repl._session_id = "old-session"
+    repl._session_storage = SimpleNamespace(
+        load=Mock(return_value=[]),
+        repair_interrupted=Mock(return_value=[]),
+    )
+    repl._agent_loop = SimpleNamespace(replace_session=Mock())
+    repl._load_current_session_name = Mock(return_value="deploy-prod")
+    repl.store = SimpleNamespace(get_state=Mock(return_value=AppState(model="test-model", cwd="/repo")))
+    repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
+    repl.renderer = SimpleNamespace(replay_history=Mock())
+
+    with patch("iac_code.ui.repl.render_welcome_banner", return_value="banner") as render_welcome_banner:
+        repl.swap_session("new-session")
+
+    assert repl._session_name == "deploy-prod"
+    repl._load_current_session_name.assert_called_once_with()
+    render_welcome_banner.assert_called_once_with(
+        "test-model",
+        "/repo",
+        session_id="new-session",
+        session_name="deploy-prod",
+    )
+    repl.console.print.assert_called_once_with("banner")
+
+
+def test_print_exit_text_uses_session_name_and_prints_session_id():
+    from rich.text import Text
+
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "abc123"
+    repl._session_name = "deploy-prod"
+    repl.console = SimpleNamespace(print=Mock())
+
+    repl._print_exit_text()
+
+    printed = [call.args[0] for call in repl.console.print.call_args_list]
+    assert "[dim]Goodbye![/dim]" in printed
+    assert any(isinstance(item, Text) and "iac-code --resume deploy-prod" in item.plain for item in printed)
+    assert any(isinstance(item, Text) and "Session ID: abc123" in item.plain for item in printed)
+
+
+@pytest.mark.asyncio
+async def test_prompt_for_session_name_retries_until_valid():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._prompt_input = SimpleNamespace(get_input=AsyncMock(side_effect=[" ", "bad name", "deploy-prod"]))
+    repl.renderer = SimpleNamespace(print_system_message=Mock())
+
+    result = await repl.prompt_for_session_name()
+
+    assert result == "deploy-prod"
+    assert repl._prompt_input.get_input.await_count == 3
+    assert repl.renderer.print_system_message.call_count == 2
+    styles = [call.kwargs["style"] for call in repl.renderer.print_system_message.call_args_list]
+    assert styles == ["red", "red"]
+
+
+def test_resolve_session_id_continue_returns_latest_current_project_session():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/repo"
+    repl._session_storage = SimpleNamespace(get_latest_session_anywhere=Mock(return_value=("/repo", "latest-id")))
+
+    assert repl._resolve_session_id(True) == "latest-id"
+    repl._session_storage.get_latest_session_anywhere.assert_called_once_with()
+
+
+def test_resolve_session_id_continue_cross_project_raises_with_hint():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/repo"
+    repl._session_storage = SimpleNamespace(
+        get_latest_session_anywhere=Mock(return_value=("/elsewhere/repo", "latest-id"))
+    )
+
+    with pytest.raises(ValueError, match=r"cd /elsewhere/repo && iac-code --resume latest-id"):
+        repl._resolve_session_id(True)
+
+
 @patch("iac_code.ui.repl.ProviderManager")
 @patch("iac_code.ui.repl.SessionStorage")
 @patch("iac_code.ui.repl.MemoryManager")
 def test_resume_str_accepted_when_session_exists(mock_mm, mock_ss, mock_pm):
+    from iac_code.services.session_resolver import ResolutionStatus, SessionResolution
     from iac_code.ui.repl import InlineREPL
 
     existing_id = "99646984-35a9-4850-b72a-4131a1690774"
-    mock_ss.return_value.exists.return_value = True
     mock_ss.return_value.load.return_value = []
     mock_ss.return_value.repair_interrupted.return_value = []
-    repl = InlineREPL(model="test-model", resume_session_id=existing_id)
+    with patch(
+        "iac_code.ui.repl.resolve_session_argument",
+        return_value=SessionResolution(
+            status=ResolutionStatus.FOUND,
+            entry=make_session_entry(existing_id, str(Path.cwd())),
+        ),
+    ):
+        repl = InlineREPL(model="test-model", resume_session_id=existing_id)
     assert repl.session_id == existing_id
 
 
@@ -291,32 +428,206 @@ def test_resume_str_accepted_when_session_exists(mock_mm, mock_ss, mock_pm):
 @patch("iac_code.ui.repl.SessionStorage")
 @patch("iac_code.ui.repl.MemoryManager")
 def test_resume_str_raises_when_session_missing(mock_mm, mock_ss, mock_pm):
+    from iac_code.services.session_resolver import ResolutionStatus, SessionResolution
     from iac_code.ui.repl import InlineREPL
 
-    mock_ss.return_value.exists.return_value = False
-    mock_ss.return_value.find_session_anywhere.return_value = None
-    import pytest
-
-    with pytest.raises(ValueError, match="Session not found"):
+    with (
+        patch(
+            "iac_code.ui.repl.resolve_session_argument",
+            return_value=SessionResolution(status=ResolutionStatus.NOT_FOUND),
+        ),
+        pytest.raises(ValueError, match="Session not found"),
+    ):
         InlineREPL(model="test-model", resume_session_id="no-such-id")
 
 
 @patch("iac_code.ui.repl.ProviderManager")
 @patch("iac_code.ui.repl.SessionStorage")
 @patch("iac_code.ui.repl.MemoryManager")
-def test_resume_str_cross_project_raises_with_hint(mock_mm, mock_ss, mock_pm, tmp_path):
+def test_resume_str_cross_project_raises_with_hint(mock_mm, mock_ss, mock_pm):
     """A resume id resolved in a different project must surface the cd command."""
+    from iac_code.services.session_resolver import ResolutionStatus, SessionResolution
     from iac_code.ui.repl import InlineREPL
 
-    mock_ss.return_value.exists.return_value = False
-    mock_ss.return_value.find_session_anywhere.return_value = (
-        "/elsewhere/repo",
-        tmp_path / "fake.jsonl",
-    )
-    import pytest
-
-    with pytest.raises(ValueError, match=r"cd /elsewhere/repo && iac-code --resume"):
+    with (
+        patch(
+            "iac_code.ui.repl.resolve_session_argument",
+            return_value=SessionResolution(
+                status=ResolutionStatus.FOUND,
+                entry=make_session_entry("some-id", "/elsewhere/repo"),
+            ),
+        ),
+        pytest.raises(ValueError, match=r"cd /elsewhere/repo && iac-code --resume some-id"),
+    ):
         InlineREPL(model="test-model", resume_session_id="some-id")
+
+
+def test_resolve_session_id_accepts_current_project_name():
+    from iac_code.services.session_resolver import ResolutionStatus, SessionResolution
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/repo"
+    repl.session_index = object()
+
+    with patch(
+        "iac_code.ui.repl.resolve_session_argument",
+        return_value=SessionResolution(
+            status=ResolutionStatus.FOUND,
+            entry=make_session_entry("abc123", repl._original_cwd, name="deploy-prod"),
+        ),
+    ) as resolve_session_argument:
+        result = repl._resolve_session_id("deploy-prod")
+
+    assert result == "abc123"
+    resolve_session_argument.assert_called_once_with(repl.session_index, repl._original_cwd, "deploy-prod")
+
+
+def test_resolve_session_id_ambiguous_name_raises_candidates():
+    from iac_code.services.session_resolver import ResolutionStatus, SessionResolution
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/repo"
+    repl.session_index = object()
+    candidates = [
+        make_session_entry("abc123", "/repo", name="deploy-prod"),
+        make_session_entry("def456", "/elsewhere/repo", name="deploy-prod"),
+    ]
+
+    with (
+        patch(
+            "iac_code.ui.repl.resolve_session_argument",
+            return_value=SessionResolution(status=ResolutionStatus.AMBIGUOUS_NAME, candidates=candidates),
+        ),
+        pytest.raises(ValueError) as exc_info,
+    ):
+        repl._resolve_session_id("deploy-prod")
+
+    message = str(exc_info.value)
+    assert "Multiple sessions match" in message
+    assert "abc123" in message
+    assert "def456" in message
+    assert "cd /repo && iac-code --resume abc123" in message
+    assert "cd /elsewhere/repo && iac-code --resume def456" in message
+
+
+def test_printed_session_name_resume_command_resolves_to_session_id():
+    from rich.text import Text
+
+    from iac_code.services.session_resolver import ResolutionStatus, SessionResolution
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/repo"
+    repl._session_id = "abc123"
+    repl._session_name = "deploy-prod"
+    repl.session_index = object()
+    repl.console = SimpleNamespace(print=Mock())
+
+    repl._print_exit_text()
+    command = next(
+        item.plain
+        for call in repl.console.print.call_args_list
+        for item in call.args
+        if isinstance(item, Text) and item.plain.startswith("iac-code --resume ")
+    )
+    resume_arg = command.rsplit(" ", 1)[-1]
+
+    with patch(
+        "iac_code.ui.repl.resolve_session_argument",
+        return_value=SessionResolution(
+            status=ResolutionStatus.FOUND,
+            entry=make_session_entry("abc123", repl._original_cwd, name="deploy-prod"),
+        ),
+    ):
+        assert repl._resolve_session_id(resume_arg) == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_rename_error_result_prints_red_and_records_error():
+    from iac_code.commands.registry import LocalCommand
+    from iac_code.commands.rename import rename_command
+    from iac_code.state.app_state import AppState
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = SimpleNamespace(
+        parse=Mock(return_value=("rename", ["-bad"])),
+        get=Mock(return_value=LocalCommand(name="rename", description="Rename", handler=rename_command)),
+    )
+    repl.renderer = SimpleNamespace(print_system_message=Mock(), print_command_result=Mock())
+    repl.console = SimpleNamespace()
+    repl._agent_loop = SimpleNamespace(context_manager=SimpleNamespace(get_messages=Mock(return_value=[])))
+    repl._command_log = []
+    repl.store = SimpleNamespace(get_state=Mock(return_value=AppState(model="test-model", cwd="/repo")))
+    repl._refresh_banner = Mock()
+    repl.rename_current_session = Mock()
+
+    await repl._handle_command("/rename -bad")
+
+    repl.renderer.print_system_message.assert_called_once()
+    assert repl.renderer.print_system_message.call_args.kwargs["style"] == "red"
+    repl.renderer.print_command_result.assert_not_called()
+    assert repl._command_log[-1][0] == "/rename -bad"
+    assert repl._command_log[-1][3] is True
+    repl._refresh_banner.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rename_success_refreshes_banner():
+    from iac_code.commands.registry import LocalCommand
+    from iac_code.commands.rename import rename_command
+    from iac_code.state.app_state import AppState
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = SimpleNamespace(
+        parse=Mock(return_value=("rename", ["deploy-prod"])),
+        get=Mock(return_value=LocalCommand(name="rename", description="Rename", handler=rename_command)),
+    )
+    repl.renderer = SimpleNamespace(print_system_message=Mock(), print_command_result=Mock())
+    repl.console = SimpleNamespace()
+    repl._agent_loop = SimpleNamespace(context_manager=SimpleNamespace(get_messages=Mock(return_value=[])))
+    repl._command_log = []
+    repl.store = SimpleNamespace(get_state=Mock(return_value=AppState(model="test-model", cwd="/repo")))
+    repl._refresh_banner = Mock()
+    repl.rename_current_session = Mock(return_value="renamed")
+
+    await repl._handle_command("/rename deploy-prod")
+
+    repl._refresh_banner.assert_called_once_with()
+    repl.renderer.print_command_result.assert_not_called()
+    assert repl._command_log[-1][0] == "/rename deploy-prod"
+    assert repl._command_log[-1][3] is False
+
+
+@pytest.mark.asyncio
+async def test_rename_unchanged_does_not_refresh_banner():
+    from iac_code.commands.registry import LocalCommand
+    from iac_code.commands.rename import rename_command
+    from iac_code.state.app_state import AppState
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = SimpleNamespace(
+        parse=Mock(return_value=("rename", ["deploy-prod"])),
+        get=Mock(return_value=LocalCommand(name="rename", description="Rename", handler=rename_command)),
+    )
+    repl.renderer = SimpleNamespace(print_system_message=Mock(), print_command_result=Mock())
+    repl.console = SimpleNamespace()
+    repl._agent_loop = SimpleNamespace(context_manager=SimpleNamespace(get_messages=Mock(return_value=[])))
+    repl._command_log = []
+    repl.store = SimpleNamespace(get_state=Mock(return_value=AppState(model="test-model", cwd="/repo")))
+    repl._refresh_banner = Mock()
+    repl.rename_current_session = Mock(return_value="unchanged")
+
+    await repl._handle_command("/rename deploy-prod")
+
+    repl._refresh_banner.assert_not_called()
+    repl.renderer.print_command_result.assert_called_once()
+    assert repl._command_log[-1][0] == "/rename deploy-prod"
+    assert repl._command_log[-1][3] is False
 
 
 @patch("iac_code.ui.repl.ProviderManager")

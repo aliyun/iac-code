@@ -1415,6 +1415,10 @@ async def test_pushed_commands_include_input_hint(monkeypatch: pytest.MonkeyPatc
     assert debug_cmd.input is not None
     assert debug_cmd.input.root.hint == "[on|off]"
 
+    rename_cmd = commands_by_name["rename"]
+    assert rename_cmd.input is not None
+    assert rename_cmd.input.root.hint == "<name>"
+
     # Only ACP-supported commands are pushed, model/effort are excluded
     assert "model" not in commands_by_name
     assert "effort" not in commands_by_name

@@ -50,6 +50,18 @@ class LocalCommand(Command):
     """
 
 
+@dataclass(frozen=True)
+class CommandResult:
+    """Structured result for local commands that need UI metadata."""
+
+    message: str
+    is_error: bool = False
+    refresh_banner: bool = False
+
+    def __bool__(self) -> bool:
+        return bool(self.message)
+
+
 @dataclass
 class PromptCommand(Command):
     """Skill-based command backed by a SkillDefinition.

@@ -274,3 +274,78 @@ async def test_memory_help_missing_invalid_name_and_unknown_usage(registry: ACPS
     assert missing == "Memory 'missing' not found."
     assert invalid == "Invalid memory name: '../escape'"
     assert unknown == "Usage: /memory [<name>|search <query>|delete <name>|help]"
+
+
+# ---------------------------------------------------------------------------
+# execute — /rename
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rename_success_calls_storage_with_session_context(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+    agent_loop._cwd = "/project"
+    agent_loop._session_id = "session-1"
+    agent_loop._current_git_branch = "main"
+
+    storage = MagicMock()
+    storage.rename_session.return_value = "renamed"
+
+    with patch("iac_code.acp.slash_registry.SessionStorage", return_value=storage):
+        result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
+
+    storage.rename_session.assert_called_once_with(
+        "/project",
+        "session-1",
+        "deploy-prod",
+        git_branch="main",
+    )
+    assert result == "Renamed session to deploy-prod"
+
+
+@pytest.mark.asyncio
+async def test_rename_requires_name(registry: ACPSlashRegistry) -> None:
+    result = await registry.execute("/rename", agent_loop=MagicMock())
+
+    assert result == "Usage: /rename <name>"
+
+
+@pytest.mark.asyncio
+async def test_rename_rejects_multi_token_name(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+
+    result = await registry.execute("/rename deploy prod", agent_loop=agent_loop)
+
+    assert result == "Usage: /rename <name>"
+
+
+@pytest.mark.asyncio
+async def test_rename_value_error_returns_message(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+    agent_loop._cwd = "/project"
+    agent_loop._session_id = "session-1"
+    agent_loop._current_git_branch = None
+
+    storage = MagicMock()
+    storage.rename_session.side_effect = ValueError("Session name already exists in this project: deploy-prod")
+
+    with patch("iac_code.acp.slash_registry.SessionStorage", return_value=storage):
+        result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
+
+    assert result == "Session name already exists in this project: deploy-prod"
+
+
+@pytest.mark.asyncio
+async def test_rename_unchanged_message(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+    agent_loop._cwd = "/project"
+    agent_loop._session_id = "session-1"
+    agent_loop._current_git_branch = None
+
+    storage = MagicMock()
+    storage.rename_session.return_value = "unchanged"
+
+    with patch("iac_code.acp.slash_registry.SessionStorage", return_value=storage):
+        result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
+
+    assert result == "Session is already named deploy-prod"

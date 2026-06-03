@@ -183,10 +183,10 @@ class TestGetProviderDisplay:
 class TestRenderWelcomeBanner:
     """Tests for render_welcome_banner(model, cwd)."""
 
-    def _call(self, model: str, cwd: str) -> Panel:
+    def _call(self, model: str, cwd: str, session_id: str | None = None, session_name: str | None = None) -> Panel:
         from iac_code.ui.banner import render_welcome_banner
 
-        return render_welcome_banner(model, cwd)
+        return render_welcome_banner(model, cwd, session_id=session_id, session_name=session_name)
 
     # ------------------------------------------------------------------
     # Return-type tests
@@ -195,6 +195,13 @@ class TestRenderWelcomeBanner:
     def test_returns_panel(self, tmp_path):
         result = self._call("claude-3-5-sonnet", str(tmp_path))
         assert isinstance(result, Panel)
+
+    def test_banner_shows_named_session(self, tmp_path):
+        panel = self._call("some-model", str(tmp_path), session_id="abc123", session_name="deploy-prod")
+        text = render_to_str(panel)
+        assert "Session" in text
+        assert "deploy-prod" in text
+        assert "abc123" in text
 
     # ------------------------------------------------------------------
     # cwd display: inside HOME → ~/... prefix

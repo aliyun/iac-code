@@ -32,6 +32,7 @@ from iac_code.acp.server import (
 )
 from iac_code.acp.session import ACPSession
 from iac_code.agent.message import Message
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import MessageEndEvent, TextDeltaEvent, Usage
 
 # ---------------------------------------------------------------------------
@@ -115,6 +116,24 @@ async def test_list_sessions_with_cwd_project_dir_exists(monkeypatch, tmp_path) 
     assert "sess-1" in session_ids
     assert "sess-2" in session_ids
     assert resp.next_cursor is None
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_with_cwd_includes_directory_sessions_and_names(monkeypatch, tmp_path) -> None:
+    """list_sessions with cwd includes directory-format sessions and uses metadata names as titles."""
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    storage = SessionStorage()
+    storage.save("/tmp", "named-dir-session", [Message(role="user", content="hello")])
+    storage.rename_session("/tmp", "named-dir-session", "deploy-prod", git_branch="main")
+
+    server = ACPServer()
+    resp = await server.list_sessions(cwd="/tmp")
+
+    sessions_by_id = {session.session_id: session for session in resp.sessions}
+    assert "named-dir-session" in sessions_by_id
+    assert sessions_by_id["named-dir-session"].title == "deploy-prod"
+    assert sessions_by_id["named-dir-session"].cwd == "/tmp"
 
 
 @pytest.mark.asyncio

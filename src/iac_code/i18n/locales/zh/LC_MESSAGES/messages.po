@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-02 21:26+0800\n"
+"POT-Creation-Date: 2026-06-02 22:08+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -23,79 +23,120 @@ msgid "Invalid IAC_CODE_PROVIDER value: {!r}. Valid values (case-insensitive): {
 msgstr "无效的 IAC_CODE_PROVIDER 值：{!r}。有效值（不区分大小写）：{}"
 
 #: src/iac_code/a2a/transports/base.py:175
-msgid "Unix domain socket transport is not supported on Windows. Use --transport http or --transport stdio instead."
+msgid ""
+"Unix domain socket transport is not supported on Windows. Use --transport"
+" http or --transport stdio instead."
 msgstr "Windows 不支持 Unix 域套接字传输。请使用 --transport http 或 --transport stdio。"
 
-#: src/iac_code/acp/slash_registry.py:44
+#: src/iac_code/acp/server.py:413 src/iac_code/acp/server.py:429
+#: src/iac_code/acp/server.py:456
+msgid "Session not found"
+msgstr "未找到会话"
+
+#: src/iac_code/acp/server.py:416
 #, python-brace-format
-msgid "Command '/{cmd_name}' is not supported over ACP. Supported commands: {supported}"
+msgid "Session name is ambiguous. Candidates: {candidates}"
+msgstr "会话名称不唯一。候选项：{candidates}"
+
+#: src/iac_code/acp/server.py:434 src/iac_code/acp/server.py:708
+#, python-brace-format
+msgid "Session belongs to another project. Run: {hint}"
+msgstr "会话属于另一个项目。请运行：{hint}"
+
+#: src/iac_code/acp/slash_registry.py:46
+#, python-brace-format
+msgid ""
+"Command '/{cmd_name}' is not supported over ACP. Supported commands: "
+"{supported}"
 msgstr "命令 '/{cmd_name}' 不支持通过 ACP 使用。支持的命令：{supported}"
 
-#: src/iac_code/acp/slash_registry.py:58
+#: src/iac_code/acp/slash_registry.py:62
 #, python-brace-format
 msgid "Command '/{cmd_name}' handler not implemented."
 msgstr "命令 '/{cmd_name}' 的处理器尚未实现。"
 
-#: src/iac_code/acp/slash_registry.py:70
+#: src/iac_code/acp/slash_registry.py:74
 #, python-brace-format
 msgid "Compaction failed: {error}"
 msgstr "压缩失败：{error}"
 
-#: src/iac_code/acp/slash_registry.py:73 src/iac_code/commands/compact.py:24
+#: src/iac_code/acp/slash_registry.py:77 src/iac_code/commands/compact.py:24
 msgid "Nothing to compact: conversation is empty."
 msgstr "无内容可压缩：对话为空。"
 
-#: src/iac_code/acp/slash_registry.py:76 src/iac_code/commands/compact.py:27
+#: src/iac_code/acp/slash_registry.py:80 src/iac_code/commands/compact.py:27
 #, python-brace-format
-msgid "Conversation too short to compact: all messages are within the recent {turns}-turn preservation window."
+msgid ""
+"Conversation too short to compact: all messages are within the recent "
+"{turns}-turn preservation window."
 msgstr "对话过短，无需压缩：所有消息都在最近 {turns} 轮保留窗口内。"
 
-#: src/iac_code/acp/slash_registry.py:80 src/iac_code/commands/compact.py:30
+#: src/iac_code/acp/slash_registry.py:84 src/iac_code/commands/compact.py:30
 msgid "Compaction failed. See logs for details."
 msgstr "压缩失败，详情请查看日志。"
 
-#: src/iac_code/acp/slash_registry.py:85
+#: src/iac_code/acp/slash_registry.py:89
 #, python-brace-format
-msgid "Context compacted: {original} → {compacted} tokens ({percent} reduction). Context usage: {usage}"
+msgid ""
+"Context compacted: {original} → {compacted} tokens ({percent} reduction)."
+" Context usage: {usage}"
 msgstr "上下文已压缩：{original} → {compacted} tokens（减少 {percent}）。上下文用量：{usage}"
 
-#: src/iac_code/acp/slash_registry.py:99
+#: src/iac_code/acp/slash_registry.py:103
 #, python-brace-format
 msgid "Clear failed: {error}"
 msgstr "清除失败：{error}"
 
-#: src/iac_code/acp/slash_registry.py:100
+#: src/iac_code/acp/slash_registry.py:104
 msgid "Conversation history cleared."
 msgstr "对话历史已清除。"
 
-#: src/iac_code/acp/slash_registry.py:116 src/iac_code/commands/debug.py:34
+#: src/iac_code/acp/slash_registry.py:120 src/iac_code/commands/debug.py:34
 #, python-brace-format
 msgid "Debug logging is on. Log file: {path}"
 msgstr "调试日志已启用。日志文件：{path}"
 
-#: src/iac_code/acp/slash_registry.py:117 src/iac_code/commands/debug.py:35
+#: src/iac_code/acp/slash_registry.py:121 src/iac_code/commands/debug.py:35
 msgid "Debug logging is off."
 msgstr "调试日志已关闭。"
 
-#: src/iac_code/acp/slash_registry.py:121 src/iac_code/commands/debug.py:39
+#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:39
 #, python-brace-format
 msgid "Debug logging enabled. Log file: {path}"
 msgstr "调试日志已启用。日志文件：{path}"
 
-#: src/iac_code/acp/slash_registry.py:125 src/iac_code/commands/debug.py:43
+#: src/iac_code/acp/slash_registry.py:129 src/iac_code/commands/debug.py:43
 msgid "Debug logging disabled."
 msgstr "调试日志已关闭。"
 
-#: src/iac_code/acp/slash_registry.py:127 src/iac_code/commands/debug.py:45
+#: src/iac_code/acp/slash_registry.py:131 src/iac_code/commands/debug.py:45
 msgid "Usage: /debug [on|off]"
 msgstr "用法：/debug [on|off]"
 
-#: src/iac_code/acp/slash_registry.py:132 src/iac_code/commands/memory.py:84
+#: src/iac_code/acp/slash_registry.py:136 src/iac_code/commands/memory.py:84
 msgid "Memory manager is unavailable."
 msgstr "记忆管理器不可用。"
 
-#: src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428 src/iac_code/ui/repl.py:793
-#: src/iac_code/ui/repl.py:807
+#: src/iac_code/acp/slash_registry.py:146 src/iac_code/commands/rename.py:20
+msgid "Usage: /rename <name>"
+msgstr "用法：/rename <名称>"
+
+#: src/iac_code/acp/slash_registry.py:152
+msgid "Rename is only available after a session is created."
+msgstr "创建会话后才能重命名。"
+
+#: src/iac_code/acp/slash_registry.py:163 src/iac_code/commands/rename.py:41
+#, python-brace-format
+msgid "Session is already named {name}"
+msgstr "会话已命名为 {name}"
+
+#: src/iac_code/acp/slash_registry.py:164 src/iac_code/commands/rename.py:42
+#, python-brace-format
+msgid "Renamed session to {name}"
+msgstr "已将会话重命名为 {name}"
+
+#: src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428
+#: src/iac_code/ui/repl.py:795 src/iac_code/ui/repl.py:809
 msgid "Permission denied."
 msgstr "权限被拒绝。"
 
@@ -112,7 +153,8 @@ msgstr "探索"
 msgid "Plan"
 msgstr "规划"
 
-#: src/iac_code/agent/agent_tool.py:278 src/iac_code/agent/agent_tool.py:279 src/iac_code/agent/agent_tool.py:280
+#: src/iac_code/agent/agent_tool.py:278 src/iac_code/agent/agent_tool.py:279
+#: src/iac_code/agent/agent_tool.py:280
 msgid "Agent"
 msgstr "智能体"
 
@@ -164,14 +206,16 @@ msgid ""
 "\n"
 "  Fix: run  iac-code  then type /auth\n"
 "   or: set  IAC_CODE_API_KEY=<your-key>\n"
-"  Docs: https://aliyun.github.io/iac-code/docs/configuration/authentication\n"
+"  Docs: https://aliyun.github.io/iac-"
+"code/docs/configuration/authentication\n"
 msgstr ""
 "\n"
 "  {error}\n"
 "\n"
 "  修复方法：运行 iac-code 后输入 /auth\n"
 "  或者设置环境变量：IAC_CODE_API_KEY=<你的密钥>\n"
-"  文档：https://aliyun.github.io/iac-code/zh-Hans/docs/configuration/authentication\n"
+"  文档：https://aliyun.github.io/iac-code/zh-"
+"Hans/docs/configuration/authentication\n"
 
 #: src/iac_code/cli/install_git_bash.py:40
 #, python-brace-format
@@ -193,8 +237,8 @@ msgstr "安装失败（PowerShell 退出码 {}）"
 
 #: src/iac_code/cli/install_git_bash.py:77
 msgid ""
-"Installer exited but bash.exe was not found in common locations; UAC may have been cancelled or the installer used a "
-"non-standard path."
+"Installer exited but bash.exe was not found in common locations; UAC may "
+"have been cancelled or the installer used a non-standard path."
 msgstr "安装程序已退出，但常见路径下未找到 bash.exe；可能 UAC 被取消或安装程序使用了非标准路径。"
 
 #: src/iac_code/cli/install_git_bash.py:84
@@ -218,8 +262,11 @@ msgstr "通过 npmmirror 镜像安装 Git for Windows（仅 Windows）。"
 msgid "YAML config file containing A2A client options"
 msgstr "包含 A2A 客户端选项的 YAML 配置文件"
 
-#: src/iac_code/cli/main.py:68 src/iac_code/cli/main.py:1501 src/iac_code/cli/main.py:1862 src/iac_code/cli/main.py:1901
-msgid "A2A client dependencies are missing. Install with: pip install 'iac-code[a2a]'"
+#: src/iac_code/cli/main.py:68 src/iac_code/cli/main.py:1501
+#: src/iac_code/cli/main.py:1862 src/iac_code/cli/main.py:1901
+msgid ""
+"A2A client dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
 msgstr "缺少 A2A 客户端依赖。请使用以下命令安装：pip install 'iac-code[a2a]'"
 
 #: src/iac_code/cli/main.py:82
@@ -238,7 +285,8 @@ msgstr "输出格式：text、json、stream-json"
 msgid "Maximum agent turns in headless mode"
 msgstr "无头模式下最大智能体轮次"
 
-#: src/iac_code/cli/main.py:86 src/iac_code/cli/main.py:366 src/iac_code/cli/main.py:591
+#: src/iac_code/cli/main.py:86 src/iac_code/cli/main.py:366
+#: src/iac_code/cli/main.py:591
 msgid "Enable debug logging"
 msgstr "启用调试日志"
 
@@ -251,8 +299,8 @@ msgid "Show version and exit"
 msgstr "显示版本号并退出"
 
 #: src/iac_code/cli/main.py:89
-msgid "Resume a session by ID"
-msgstr "通过 ID 恢复会话"
+msgid "Resume a session by ID or name"
+msgstr "通过 ID 或名称恢复会话"
 
 #: src/iac_code/cli/main.py:90
 msgid "Resume the most recent session"
@@ -263,11 +311,15 @@ msgid "Install completion for the current shell."
 msgstr "为当前 shell 安装自动补全。"
 
 #: src/iac_code/cli/main.py:105 src/iac_code/i18n/__init__.py:56
-msgid "Show completion for the current shell, to copy it or customize the installation."
+msgid ""
+"Show completion for the current shell, to copy it or customize the "
+"installation."
 msgstr "显示当前 shell 的自动补全脚本，可复制或自定义安装。"
 
 #: src/iac_code/cli/main.py:110
-msgid "Comma-separated tool permission patterns to allow, e.g. 'bash(git *),write_file'"
+msgid ""
+"Comma-separated tool permission patterns to allow, e.g. 'bash(git "
+"*),write_file'"
 msgstr "允许的工具权限模式（逗号分隔），例如 'bash(git *),write_file'"
 
 #: src/iac_code/cli/main.py:115
@@ -312,27 +364,37 @@ msgid "YAML config file for A2A server options"
 msgstr "用于 A2A 服务器选项的 YAML 配置文件"
 
 #: src/iac_code/cli/main.py:584
-msgid "HTTP server port. 41242 is the iac-code default inspired by Gemini CLI, not a registered A2A port."
+msgid ""
+"HTTP server port. 41242 is the iac-code default inspired by Gemini CLI, "
+"not a registered A2A port."
 msgstr "HTTP 服务器端口。41242 是受 Gemini CLI 启发的 iac-code 默认值，并非已注册的 A2A 端口。"
 
 #: src/iac_code/cli/main.py:589
-msgid "A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or redis-streams"
+msgid ""
+"A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or "
+"redis-streams"
 msgstr "A2A 传输方式：http、stdio、unix、websocket、grpc、grpc-jsonrpc 或 redis-streams"
 
 #: src/iac_code/cli/main.py:595
-msgid "Expose A2A thinking signal types; repeat for multiple. Values: raw-thinking, tool-trace."
+msgid ""
+"Expose A2A thinking signal types; repeat for multiple. Values: raw-"
+"thinking, tool-trace."
 msgstr "暴露 A2A thinking 信号类型；可重复指定多个。取值：raw-thinking、tool-trace。"
 
 #: src/iac_code/cli/main.py:646
-msgid "A2A server dependencies are missing. Install with: pip install 'iac-code[a2a]'"
+msgid ""
+"A2A server dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
 msgstr "缺少 A2A 服务器依赖。请使用以下命令安装：pip install 'iac-code[a2a]'"
 
 #: src/iac_code/cli/main.py:778
 msgid "Send a prompt to an A2A JSON-RPC endpoint."
 msgstr "向 A2A JSON-RPC 端点发送提示。"
 
-#: src/iac_code/cli/main.py:781 src/iac_code/cli/main.py:951 src/iac_code/cli/main.py:1004 src/iac_code/cli/main.py:1064
-#: src/iac_code/cli/main.py:1114 src/iac_code/cli/main.py:1163 src/iac_code/cli/main.py:1242 src/iac_code/cli/main.py:1299
+#: src/iac_code/cli/main.py:781 src/iac_code/cli/main.py:951
+#: src/iac_code/cli/main.py:1004 src/iac_code/cli/main.py:1064
+#: src/iac_code/cli/main.py:1114 src/iac_code/cli/main.py:1163
+#: src/iac_code/cli/main.py:1242 src/iac_code/cli/main.py:1299
 #: src/iac_code/cli/main.py:1355 src/iac_code/cli/main.py:1412
 msgid "A2A JSON-RPC endpoint URL"
 msgstr "A2A JSON-RPC 端点 URL"
@@ -357,33 +419,48 @@ msgstr "随请求一起发送的工作目录元数据"
 msgid "A2A context ID to continue"
 msgstr "要继续的 A2A 上下文 ID"
 
-#: src/iac_code/cli/main.py:787 src/iac_code/cli/main.py:882 src/iac_code/cli/main.py:954 src/iac_code/cli/main.py:1011
-#: src/iac_code/cli/main.py:1066 src/iac_code/cli/main.py:1116 src/iac_code/cli/main.py:1170 src/iac_code/cli/main.py:1245
-#: src/iac_code/cli/main.py:1303 src/iac_code/cli/main.py:1358 src/iac_code/cli/main.py:1413
+#: src/iac_code/cli/main.py:787 src/iac_code/cli/main.py:882
+#: src/iac_code/cli/main.py:954 src/iac_code/cli/main.py:1011
+#: src/iac_code/cli/main.py:1066 src/iac_code/cli/main.py:1116
+#: src/iac_code/cli/main.py:1170 src/iac_code/cli/main.py:1245
+#: src/iac_code/cli/main.py:1303 src/iac_code/cli/main.py:1358
+#: src/iac_code/cli/main.py:1413
 msgid "Bearer token for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的 Bearer 令牌"
 
-#: src/iac_code/cli/main.py:788 src/iac_code/cli/main.py:883 src/iac_code/cli/main.py:955 src/iac_code/cli/main.py:1012
-#: src/iac_code/cli/main.py:1067 src/iac_code/cli/main.py:1117 src/iac_code/cli/main.py:1171 src/iac_code/cli/main.py:1246
-#: src/iac_code/cli/main.py:1304 src/iac_code/cli/main.py:1359 src/iac_code/cli/main.py:1414
+#: src/iac_code/cli/main.py:788 src/iac_code/cli/main.py:883
+#: src/iac_code/cli/main.py:955 src/iac_code/cli/main.py:1012
+#: src/iac_code/cli/main.py:1067 src/iac_code/cli/main.py:1117
+#: src/iac_code/cli/main.py:1171 src/iac_code/cli/main.py:1246
+#: src/iac_code/cli/main.py:1304 src/iac_code/cli/main.py:1359
+#: src/iac_code/cli/main.py:1414
 msgid "Basic auth username for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的基本认证用户名"
 
-#: src/iac_code/cli/main.py:789 src/iac_code/cli/main.py:884 src/iac_code/cli/main.py:956 src/iac_code/cli/main.py:1013
-#: src/iac_code/cli/main.py:1068 src/iac_code/cli/main.py:1118 src/iac_code/cli/main.py:1172 src/iac_code/cli/main.py:1247
-#: src/iac_code/cli/main.py:1305 src/iac_code/cli/main.py:1360 src/iac_code/cli/main.py:1415
+#: src/iac_code/cli/main.py:789 src/iac_code/cli/main.py:884
+#: src/iac_code/cli/main.py:956 src/iac_code/cli/main.py:1013
+#: src/iac_code/cli/main.py:1068 src/iac_code/cli/main.py:1118
+#: src/iac_code/cli/main.py:1172 src/iac_code/cli/main.py:1247
+#: src/iac_code/cli/main.py:1305 src/iac_code/cli/main.py:1360
+#: src/iac_code/cli/main.py:1415
 msgid "Basic auth password for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的基本认证密码"
 
-#: src/iac_code/cli/main.py:790 src/iac_code/cli/main.py:885 src/iac_code/cli/main.py:957 src/iac_code/cli/main.py:1014
-#: src/iac_code/cli/main.py:1069 src/iac_code/cli/main.py:1119 src/iac_code/cli/main.py:1173 src/iac_code/cli/main.py:1248
-#: src/iac_code/cli/main.py:1306 src/iac_code/cli/main.py:1361 src/iac_code/cli/main.py:1416
+#: src/iac_code/cli/main.py:790 src/iac_code/cli/main.py:885
+#: src/iac_code/cli/main.py:957 src/iac_code/cli/main.py:1014
+#: src/iac_code/cli/main.py:1069 src/iac_code/cli/main.py:1119
+#: src/iac_code/cli/main.py:1173 src/iac_code/cli/main.py:1248
+#: src/iac_code/cli/main.py:1306 src/iac_code/cli/main.py:1361
+#: src/iac_code/cli/main.py:1416
 msgid "API key for A2A HTTP requests"
 msgstr "用于 A2A HTTP 请求的 API 密钥"
 
-#: src/iac_code/cli/main.py:791 src/iac_code/cli/main.py:886 src/iac_code/cli/main.py:958 src/iac_code/cli/main.py:1015
-#: src/iac_code/cli/main.py:1070 src/iac_code/cli/main.py:1120 src/iac_code/cli/main.py:1174 src/iac_code/cli/main.py:1249
-#: src/iac_code/cli/main.py:1307 src/iac_code/cli/main.py:1362 src/iac_code/cli/main.py:1417
+#: src/iac_code/cli/main.py:791 src/iac_code/cli/main.py:886
+#: src/iac_code/cli/main.py:958 src/iac_code/cli/main.py:1015
+#: src/iac_code/cli/main.py:1070 src/iac_code/cli/main.py:1120
+#: src/iac_code/cli/main.py:1174 src/iac_code/cli/main.py:1249
+#: src/iac_code/cli/main.py:1307 src/iac_code/cli/main.py:1362
+#: src/iac_code/cli/main.py:1417
 msgid "HTTP header name for A2A API key"
 msgstr "A2A API 密钥使用的 HTTP 请求头名称"
 
@@ -419,8 +496,10 @@ msgstr "A2A 代理基础 URL"
 msgid "Get an A2A task."
 msgstr "获取 A2A 任务。"
 
-#: src/iac_code/cli/main.py:952 src/iac_code/cli/main.py:1065 src/iac_code/cli/main.py:1115 src/iac_code/cli/main.py:1164
-#: src/iac_code/cli/main.py:1243 src/iac_code/cli/main.py:1300 src/iac_code/cli/main.py:1356
+#: src/iac_code/cli/main.py:952 src/iac_code/cli/main.py:1065
+#: src/iac_code/cli/main.py:1115 src/iac_code/cli/main.py:1164
+#: src/iac_code/cli/main.py:1243 src/iac_code/cli/main.py:1300
+#: src/iac_code/cli/main.py:1356
 msgid "A2A task ID"
 msgstr "A2A 任务 ID"
 
@@ -468,7 +547,8 @@ msgstr "订阅 A2A 任务事件流。"
 msgid "Create an A2A task push notification config."
 msgstr "创建 A2A 任务推送通知配置。"
 
-#: src/iac_code/cli/main.py:1165 src/iac_code/cli/main.py:1244 src/iac_code/cli/main.py:1357
+#: src/iac_code/cli/main.py:1165 src/iac_code/cli/main.py:1244
+#: src/iac_code/cli/main.py:1357
 msgid "Push config ID"
 msgstr "推送配置 ID"
 
@@ -532,81 +612,89 @@ msgstr "持久化 A2A 路由的目录"
 msgid "Save the provided routes as a route snapshot"
 msgstr "将提供的路由保存为路由快照"
 
-#: src/iac_code/commands/__init__.py:25
+#: src/iac_code/commands/__init__.py:26
 msgid "Show available commands"
 msgstr "显示可用命令"
 
-#: src/iac_code/commands/__init__.py:34
+#: src/iac_code/commands/__init__.py:35
 msgid "Clear conversation history"
 msgstr "清除对话历史"
 
-#: src/iac_code/commands/__init__.py:42
+#: src/iac_code/commands/__init__.py:43
 msgid "Show or switch model"
 msgstr "显示或切换模型"
 
-#: src/iac_code/commands/__init__.py:51
+#: src/iac_code/commands/__init__.py:52
 msgid "Show or switch thinking effort"
 msgstr "显示或切换思考强度"
 
-#: src/iac_code/commands/__init__.py:60
+#: src/iac_code/commands/__init__.py:61
 msgid "Compact conversation context"
 msgstr "压缩对话上下文"
 
-#: src/iac_code/commands/__init__.py:62
+#: src/iac_code/commands/__init__.py:63
 msgid "Compacting conversation"
 msgstr "正在压缩对话"
 
-#: src/iac_code/commands/__init__.py:69
+#: src/iac_code/commands/__init__.py:70
 msgid "Exit the application"
 msgstr "退出应用程序"
 
-#: src/iac_code/commands/__init__.py:78
+#: src/iac_code/commands/__init__.py:79
 msgid "Authenticate with LLM provider"
 msgstr "配置 LLM 提供商认证"
 
-#: src/iac_code/commands/__init__.py:87
+#: src/iac_code/commands/__init__.py:88
 msgid "Toggle debug logging"
 msgstr "切换调试日志开关"
 
-#: src/iac_code/commands/__init__.py:96
+#: src/iac_code/commands/__init__.py:97
 msgid "View and manage persistent memories"
 msgstr "查看和管理持久记忆"
 
-#: src/iac_code/commands/__init__.py:98
+#: src/iac_code/commands/__init__.py:99
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<名称>|search <查询>|delete <名称>|help]"
 
-#: src/iac_code/commands/__init__.py:105
+#: src/iac_code/commands/__init__.py:106
 msgid "Resume a previous session"
 msgstr "恢复之前的会话"
 
-#: src/iac_code/commands/__init__.py:107
+#: src/iac_code/commands/__init__.py:108
 msgid "[conversation id or search term]"
 msgstr "[会话 ID 或搜索词]"
 
-#: src/iac_code/commands/__init__.py:114
+#: src/iac_code/commands/__init__.py:115
+msgid "Rename the current session"
+msgstr "重命名当前会话"
+
+#: src/iac_code/commands/__init__.py:124
 msgid "Manage skills"
 msgstr "管理技能"
 
-#: src/iac_code/commands/__init__.py:122
+#: src/iac_code/commands/__init__.py:132
 msgid "Show current session status"
 msgstr "显示当前会话状态"
 
-#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:1115 src/iac_code/ui/core/prompt_input.py:557
+#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:1115
+#: src/iac_code/ui/core/prompt_input.py:557
 msgid "Navigate"
 msgstr "导航"
 
-#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:538 src/iac_code/commands/auth.py:570
-#: src/iac_code/commands/auth.py:577 src/iac_code/commands/auth.py:612 src/iac_code/commands/auth.py:619
-#: src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:1115 src/iac_code/commands/auth.py:1549
-#: src/iac_code/ui/core/prompt_input.py:557
+#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:538
+#: src/iac_code/commands/auth.py:570 src/iac_code/commands/auth.py:577
+#: src/iac_code/commands/auth.py:612 src/iac_code/commands/auth.py:619
+#: src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:1115
+#: src/iac_code/commands/auth.py:1549 src/iac_code/ui/core/prompt_input.py:557
 msgid "Confirm"
 msgstr "确认"
 
-#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:536 src/iac_code/commands/auth.py:538
-#: src/iac_code/commands/auth.py:570 src/iac_code/commands/auth.py:577 src/iac_code/commands/auth.py:612
-#: src/iac_code/commands/auth.py:619 src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:1115
-#: src/iac_code/commands/auth.py:1441 src/iac_code/commands/auth.py:1549
+#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:536
+#: src/iac_code/commands/auth.py:538 src/iac_code/commands/auth.py:570
+#: src/iac_code/commands/auth.py:577 src/iac_code/commands/auth.py:612
+#: src/iac_code/commands/auth.py:619 src/iac_code/commands/auth.py:640
+#: src/iac_code/commands/auth.py:1115 src/iac_code/commands/auth.py:1441
+#: src/iac_code/commands/auth.py:1549
 msgid "Back"
 msgstr "返回"
 
@@ -618,8 +706,9 @@ msgstr "保留"
 msgid "Re-enter"
 msgstr "重新输入"
 
-#: src/iac_code/commands/auth.py:749 src/iac_code/commands/auth.py:861 src/iac_code/commands/auth.py:919
-#: src/iac_code/commands/auth.py:927 src/iac_code/commands/auth.py:954
+#: src/iac_code/commands/auth.py:749 src/iac_code/commands/auth.py:861
+#: src/iac_code/commands/auth.py:919 src/iac_code/commands/auth.py:927
+#: src/iac_code/commands/auth.py:954
 msgid " (current)"
 msgstr " (当前)"
 
@@ -656,17 +745,20 @@ msgstr "配置 IaC 云服务"
 msgid "Select configuration type"
 msgstr "选择配置类型"
 
-#: src/iac_code/commands/auth.py:823 src/iac_code/commands/auth.py:979 src/iac_code/commands/auth.py:995
-#: src/iac_code/commands/auth.py:1074 src/iac_code/commands/auth.py:1488 src/iac_code/commands/auth.py:1529
+#: src/iac_code/commands/auth.py:823 src/iac_code/commands/auth.py:979
+#: src/iac_code/commands/auth.py:995 src/iac_code/commands/auth.py:1074
+#: src/iac_code/commands/auth.py:1488 src/iac_code/commands/auth.py:1529
 msgid "Auth cancelled"
 msgstr "认证已取消"
 
-#: src/iac_code/commands/auth.py:865 src/iac_code/commands/auth.py:959 src/iac_code/commands/auth.py:1049
+#: src/iac_code/commands/auth.py:865 src/iac_code/commands/auth.py:959
+#: src/iac_code/commands/auth.py:1049
 #, python-brace-format
 msgid "Select provider — {group}"
 msgstr "选择提供商 — {group}"
 
-#: src/iac_code/commands/auth.py:865 src/iac_code/commands/auth.py:917 src/iac_code/commands/auth.py:1034
+#: src/iac_code/commands/auth.py:865 src/iac_code/commands/auth.py:917
+#: src/iac_code/commands/auth.py:1034
 msgid "Third-party"
 msgstr "第三方"
 
@@ -762,8 +854,9 @@ msgstr "选择云服务商"
 msgid "Credential"
 msgstr "凭证"
 
-#: src/iac_code/commands/auth.py:1082 src/iac_code/commands/auth.py:1197 src/iac_code/commands/auth.py:1525
-#: src/iac_code/commands/status.py:36 src/iac_code/ui/renderer.py:455
+#: src/iac_code/commands/auth.py:1082 src/iac_code/commands/auth.py:1197
+#: src/iac_code/commands/auth.py:1525 src/iac_code/commands/status.py:36
+#: src/iac_code/ui/renderer.py:455
 msgid "Region"
 msgstr "地域"
 
@@ -898,8 +991,12 @@ msgstr "没有活动的智能体循环。"
 
 #: src/iac_code/commands/compact.py:35
 #, python-brace-format
-msgid "Context compacted: {original} → {compacted} tokens ({percent_display} reduction). Context usage: {usage_display}"
-msgstr "上下文已压缩：{original} → {compacted} tokens（减少 {percent_display}）。上下文用量：{usage_display}"
+msgid ""
+"Context compacted: {original} → {compacted} tokens ({percent_display} "
+"reduction). Context usage: {usage_display}"
+msgstr ""
+"上下文已压缩：{original} → {compacted} tokens（减少 "
+"{percent_display}）。上下文用量：{usage_display}"
 
 #: src/iac_code/commands/debug.py:21
 msgid "Debug command requires a context."
@@ -909,7 +1006,8 @@ msgstr "调试命令需要上下文。"
 msgid "No active session."
 msgstr "没有活动的会话。"
 
-#: src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py:95 src/iac_code/commands/model.py:99
+#: src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py:95
+#: src/iac_code/commands/model.py:99
 msgid "No configured providers. Run /auth first."
 msgstr "没有已配置的提供商。请先运行 /auth。"
 
@@ -1003,7 +1101,9 @@ msgstr "记忆 '{name}' 已删除。"
 
 #: src/iac_code/commands/model.py:57
 #, python-brace-format
-msgid "Model is managed by '{source}'. To change model, modify it in {source} or switch provider via /auth."
+msgid ""
+"Model is managed by '{source}'. To change model, modify it in {source} or"
+" switch provider via /auth."
 msgstr "模型由 '{source}' 管理。如需修改模型，请在 {source} 中调整，或通过 /auth 切换其他 Provider。"
 
 #: src/iac_code/commands/model.py:88 src/iac_code/commands/model.py:143
@@ -1021,22 +1121,35 @@ msgstr "当前模型：{model}"
 msgid "Kept model as {model}"
 msgstr "保持模型为 {model}"
 
-#: src/iac_code/commands/resume.py:21
+#: src/iac_code/commands/rename.py:15 src/iac_code/commands/rename.py:27
+msgid "Rename is only available in interactive mode."
+msgstr "重命名仅在交互模式下可用。"
+
+#: src/iac_code/commands/rename.py:30
+msgid "Rename cancelled"
+msgstr "已取消重命名"
+
+#: src/iac_code/commands/resume.py:22
 msgid "Resume is only available in interactive mode."
 msgstr "/resume 仅在交互模式下可用。"
 
-#: src/iac_code/commands/resume.py:27
+#: src/iac_code/commands/resume.py:28
 msgid "Resume is unavailable: session index not initialised."
 msgstr "无法恢复：会话索引未初始化。"
 
-#: src/iac_code/commands/resume.py:32
+#: src/iac_code/commands/resume.py:33 src/iac_code/commands/resume.py:36
 #, python-brace-format
 msgid "Session not found: {arg}"
 msgstr "未找到会话：{arg}"
 
-#: src/iac_code/commands/resume.py:47
+#: src/iac_code/commands/resume.py:52 src/iac_code/commands/resume.py:68
 msgid "Resume cancelled"
 msgstr "已取消恢复"
+
+#: src/iac_code/commands/resume.py:55
+#, python-brace-format
+msgid "Unable to resolve session: {arg}"
+msgstr "无法解析会话：{arg}"
 
 #: src/iac_code/commands/skills.py:14
 msgid "Skills management is only available in interactive mode."
@@ -1062,7 +1175,8 @@ msgstr "status 命令需要 REPL 上下文。"
 msgid "Status is only available in interactive mode."
 msgstr "status 仅在交互模式下可用。"
 
-#: src/iac_code/commands/status.py:33 src/iac_code/ui/banner.py:138
+#: src/iac_code/commands/status.py:33 src/iac_code/ui/banner.py:136
+#: src/iac_code/ui/banner.py:138
 msgid "Session"
 msgstr "会话"
 
@@ -1070,7 +1184,8 @@ msgstr "会话"
 msgid "Provider"
 msgstr "提供商"
 
-#: src/iac_code/commands/status.py:34 src/iac_code/commands/status.py:35 src/iac_code/commands/status.py:36
+#: src/iac_code/commands/status.py:34 src/iac_code/commands/status.py:35
+#: src/iac_code/commands/status.py:36
 msgid "not configured"
 msgstr "未配置"
 
@@ -1179,22 +1294,30 @@ msgstr "未知的 Provider 标识：'{key}'。请运行 /auth 进行配置。"
 
 #: src/iac_code/providers/manager.py:100
 #, python-brace-format
-msgid "No API key configured for provider '{provider}' (model: {model}). Run /auth to configure."
+msgid ""
+"No API key configured for provider '{provider}' (model: {model}). Run "
+"/auth to configure."
 msgstr "提供商 '{provider}' 未配置 API 密钥（模型: {model}）。请运行 /auth 进行配置。"
 
 #: src/iac_code/providers/openai_provider.py:307
 #, python-brace-format
 msgid ""
-"API returned no data. Please check that your API Base URL is correct (current: {base_url}). Many OpenAI-compatible "
-"endpoints require a /v1 suffix (e.g. {base_url}/v1)."
-msgstr "API 未返回数据。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 后缀（如 {base_url}/v1）。"
+"API returned no data. Please check that your API Base URL is correct "
+"(current: {base_url}). Many OpenAI-compatible endpoints require a /v1 "
+"suffix (e.g. {base_url}/v1)."
+msgstr ""
+"API 未返回数据。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
+"后缀（如 {base_url}/v1）。"
 
 #: src/iac_code/providers/openai_provider.py:348
 #, python-brace-format
 msgid ""
-"API returned an invalid response. Please check that your API Base URL is correct (current: {base_url}). Many OpenAI-"
-"compatible endpoints require a /v1 suffix (e.g. {base_url}/v1)."
-msgstr "API 返回了无效响应。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 后缀（如 {base_url}/v1）。"
+"API returned an invalid response. Please check that your API Base URL is "
+"correct (current: {base_url}). Many OpenAI-compatible endpoints require a"
+" /v1 suffix (e.g. {base_url}/v1)."
+msgstr ""
+"API 返回了无效响应。请检查您的 API Base URL 是否正确（当前：{base_url}）。许多 OpenAI 兼容端点需要 /v1 "
+"后缀（如 {base_url}/v1）。"
 
 #: src/iac_code/providers/registry.py:415
 msgid "Alibaba Cloud Bailian"
@@ -1275,21 +1398,34 @@ msgstr "Anthropic 兼容"
 #: src/iac_code/services/qwenpaw_source.py:205
 #, python-brace-format
 msgid ""
-"[QwenPaw mode] Unknown provider '{provider_id}'. iac-code does not support this provider.\n"
+"[QwenPaw mode] Unknown provider '{provider_id}'. iac-code does not "
+"support this provider.\n"
 "Supported QwenPaw provider IDs: {supported_ids}\n"
-"To fix: switch to a supported provider in QwenPaw, or disable QwenPaw mode (remove 'llm_source: qwenpaw' from "
-"settings.yml)."
+"To fix: switch to a supported provider in QwenPaw, or disable QwenPaw "
+"mode (remove 'llm_source: qwenpaw' from settings.yml)."
 msgstr ""
 "[QwenPaw 模式] 无法识别 provider '{provider_id}'，iac-code 不支持该 provider。\n"
 "支持的 QwenPaw provider ID：{supported_ids}\n"
-"解决方法：在 QwenPaw 中切换到已支持的 provider，或关闭 QwenPaw 模式（从 settings.yml 移除 'llm_source: qwenpaw'）。"
+"解决方法：在 QwenPaw 中切换到已支持的 provider，或关闭 QwenPaw 模式（从 settings.yml 移除 "
+"'llm_source: qwenpaw'）。"
+
+#: src/iac_code/services/session_metadata.py:52
+#, python-brace-format
+msgid "Session name must match {pattern}"
+msgstr "会话名称必须匹配 {pattern}"
+
+#: src/iac_code/services/session_storage.py:241
+#, python-brace-format
+msgid "Session name already exists in this project: {name}"
+msgstr "此项目中已存在会话名称：{name}"
 
 #: src/iac_code/services/permissions/loader.py:50
 #, python-brace-format
 msgid "Invalid --permission-mode {!r}. Valid values: {}"
 msgstr "无效的 --permission-mode {!r}。有效值：{}"
 
-#: src/iac_code/services/permissions/pipeline.py:54 src/iac_code/tools/base.py:199 src/iac_code/tools/bash/bash_tool.py:175
+#: src/iac_code/services/permissions/pipeline.py:54
+#: src/iac_code/tools/base.py:199 src/iac_code/tools/bash/bash_tool.py:175
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "允许 {}？"
@@ -1357,21 +1493,28 @@ msgid "Waiting for browser authorization"
 msgstr "等待浏览器授权"
 
 #: src/iac_code/services/providers/aliyun_oauth.py:300
-msgid "1. The browser may show official-cli; this is the Alibaba Cloud official CLI OAuth application."
+msgid ""
+"1. The browser may show official-cli; this is the Alibaba Cloud official "
+"CLI OAuth application."
 msgstr "1. 浏览器可能显示 official-cli，这是 Alibaba Cloud 官方 CLI OAuth 应用。"
 
 #: src/iac_code/services/providers/aliyun_oauth.py:302
-msgid "2. If assignment is required, assign the RAM user or RAM role that is signed in. User groups are not supported."
+msgid ""
+"2. If assignment is required, assign the RAM user or RAM role that is "
+"signed in. User groups are not supported."
 msgstr "2. 如需分配应用，请分配给当前登录的 RAM 用户或 RAM 角色；不支持用户组。"
 
 #: src/iac_code/services/providers/aliyun_oauth.py:306
 msgid ""
-"3. After assignment, close the old authorization page and run OAuth Login (Browser) again. If it still fails, sign "
-"out of Alibaba Cloud and sign in again."
+"3. After assignment, close the old authorization page and run OAuth Login"
+" (Browser) again. If it still fails, sign out of Alibaba Cloud and sign "
+"in again."
 msgstr "3. 分配后关闭旧授权页，并再次运行 OAuth 登录（浏览器）。若仍失败，请退出 Alibaba Cloud 后重新登录。"
 
 #: src/iac_code/services/providers/aliyun_oauth.py:310
-msgid "4. STS credentials refresh when possible until Alibaba Cloud expires them. If refresh fails, run /auth again."
+msgid ""
+"4. STS credentials refresh when possible until Alibaba Cloud expires "
+"them. If refresh fails, run /auth again."
 msgstr "4. STS 凭证会在可能时自动刷新；如果刷新失败，请重新运行 /auth。"
 
 #: src/iac_code/services/providers/aliyun_oauth.py:313
@@ -1380,14 +1523,17 @@ msgstr "按 Esc 可取消等待。"
 
 #: src/iac_code/services/providers/aliyun_oauth.py:321
 msgid ""
-"Timed out waiting for OAuth callback. If Alibaba Cloud asked you to assign the official-cli application, assign it to"
-" the exact RAM user or RAM role currently signed in. User groups are not supported. Then close the old authorization "
-"page, sign out of Alibaba Cloud and sign in again if needed, and run /auth to choose OAuth Login (Browser) again."
+"Timed out waiting for OAuth callback. If Alibaba Cloud asked you to "
+"assign the official-cli application, assign it to the exact RAM user or "
+"RAM role currently signed in. User groups are not supported. Then close "
+"the old authorization page, sign out of Alibaba Cloud and sign in again "
+"if needed, and run /auth to choose OAuth Login (Browser) again."
 msgstr ""
-"等待 OAuth 回调超时。如果 Alibaba Cloud 要求分配 official-cli 应用，请将它分配给当前实际登录的 RAM 用户或 RAM 角色。不支持用户组。然后关闭旧的授权页面，必要时退出 Alibaba "
-"Cloud 并重新登录，再运行 /auth 重新选择 OAuth 登录（浏览器）。"
+"等待 OAuth 回调超时。如果 Alibaba Cloud 要求分配 official-cli 应用，请将它分配给当前实际登录的 RAM 用户或"
+" RAM 角色。不支持用户组。然后关闭旧的授权页面，必要时退出 Alibaba Cloud 并重新登录，再运行 /auth 重新选择 OAuth "
+"登录（浏览器）。"
 
-#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:823
+#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:825
 #, python-brace-format
 msgid "Skill '{name}' is disabled. Run /skills to enable it."
 msgstr "技能“{name}”已禁用。运行 /skills 以启用它。"
@@ -1407,7 +1553,9 @@ msgid "Skill disabled: {name}"
 msgstr "技能已禁用：{name}"
 
 #: src/iac_code/skills/bundled/simplify.py:25
-msgid "Review changed code for reuse, quality, and efficiency, then fix issues found."
+msgid ""
+"Review changed code for reuse, quality, and efficiency, then fix issues "
+"found."
 msgstr "审查变更的代码的可复用性、质量和效率，然后修复发现的问题。"
 
 #: src/iac_code/tools/edit_file.py:116
@@ -1614,7 +1762,8 @@ msgstr "匹配到拒绝规则：{}"
 msgid "matched ask rule(s): {}"
 msgstr "匹配到询问规则：{}"
 
-#: src/iac_code/tools/bash/permissions.py:154 src/iac_code/tools/bash/permissions.py:220
+#: src/iac_code/tools/bash/permissions.py:154
+#: src/iac_code/tools/bash/permissions.py:220
 #, python-brace-format
 msgid "matched allow rule(s): {}"
 msgstr "匹配到允许规则：{}"
@@ -1671,7 +1820,8 @@ msgstr "云API"
 msgid "Calling {action}..."
 msgstr "正在调用 {action}..."
 
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:400 src/iac_code/tools/cloud/base_api.py:123
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:400
+#: src/iac_code/tools/cloud/base_api.py:123
 msgid "Call succeeded"
 msgstr "调用成功"
 
@@ -1684,7 +1834,8 @@ msgstr "收到响应（{count} 行）"
 msgid "CloudStack"
 msgstr "云资源栈"
 
-#: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py:117 src/iac_code/tools/cloud/base_stack.py:150
+#: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py:117
+#: src/iac_code/tools/cloud/base_stack.py:150
 #, python-brace-format
 msgid "Running {action}..."
 msgstr "正在运行 {action}..."
@@ -1922,11 +2073,15 @@ msgstr "模板 JSON 语法错误（第 {line} 行，第 {col} 列）：{msg}"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:85
 #, python-brace-format
-msgid "Template {fmt} parse result is not an object (dict), please check the template format"
+msgid ""
+"Template {fmt} parse result is not an object (dict), please check the "
+"template format"
 msgstr "模板 {fmt} 解析结果不是对象（dict），请检查模板格式"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:104
-msgid "Template is missing ROSTemplateFormatVersion (ROS templates must include this field, e.g. '2015-09-01')"
+msgid ""
+"Template is missing ROSTemplateFormatVersion (ROS templates must include "
+"this field, e.g. '2015-09-01')"
 msgstr "模板缺少 ROSTemplateFormatVersion 字段（ROS 模板必须包含此字段，如 '2015-09-01'）"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:110
@@ -1940,7 +2095,9 @@ msgstr "Resources 必须是对象（dict），当前类型为 {}"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:117
 #, python-brace-format
-msgid "Resource '{name}' definition must be an object (dict), current type is {type}"
+msgid ""
+"Resource '{name}' definition must be an object (dict), current type is "
+"{type}"
 msgstr "资源 '{name}' 定义必须是对象（dict），当前类型为 {type}"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:123
@@ -1954,7 +2111,9 @@ msgid "Resource '{name}' has incorrect type '{wrong}', should be '{correct}'"
 msgstr "资源 '{name}' 的类型 '{wrong}' 不正确，应改为 '{correct}'"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py:151
-msgid "Template structure validation found the following issues, please fix and retry:"
+msgid ""
+"Template structure validation found the following issues, please fix and "
+"retry:"
 msgstr "模板结构校验发现以下问题，请修复后重试："
 
 #: src/iac_code/ui/banner.py:42 src/iac_code/ui/banner.py:54
@@ -1975,28 +2134,30 @@ msgstr "发行说明"
 msgid "Run {} to update."
 msgstr "运行 {} 进行更新。"
 
-#: src/iac_code/ui/banner.py:105
+#: src/iac_code/ui/banner.py:110
 msgid "Your AI-powered Infrastructure as Code assistant"
 msgstr "您的 AI 驱动的基础设施即代码助手"
 
-#: src/iac_code/ui/banner.py:131
+#: src/iac_code/ui/banner.py:144
 msgid "Welcome back"
 msgstr "欢迎回来"
 
-#: src/iac_code/ui/banner.py:148
+#: src/iac_code/ui/banner.py:161
 msgid "Debug mode"
 msgstr "调试模式"
 
-#: src/iac_code/ui/banner.py:149
+#: src/iac_code/ui/banner.py:162
 msgid "Log file"
 msgstr "日志文件"
 
-#: src/iac_code/ui/renderer.py:388 src/iac_code/ui/renderer.py:668 src/iac_code/ui/renderer.py:1455
+#: src/iac_code/ui/renderer.py:388 src/iac_code/ui/renderer.py:668
+#: src/iac_code/ui/renderer.py:1455
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "思考完成（耗时 {seconds:.1f}s）"
 
-#: src/iac_code/ui/renderer.py:404 src/iac_code/ui/renderer.py:700 src/iac_code/ui/renderer.py:1476
+#: src/iac_code/ui/renderer.py:404 src/iac_code/ui/renderer.py:700
+#: src/iac_code/ui/renderer.py:1476
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o 展开)"
 
@@ -2082,97 +2243,109 @@ msgstr "否，始终拒绝 \"{rule}\"（本次会话）"
 msgid "No, always reject this tool"
 msgstr "否，始终拒绝此工具"
 
-#: src/iac_code/ui/repl.py:406
+#: src/iac_code/ui/repl.py:412
 msgid "Press Ctrl+C again to exit."
 msgstr "再次按 Ctrl+C 退出。"
 
-#: src/iac_code/ui/repl.py:431
+#: src/iac_code/ui/repl.py:437
 msgid "Interrupted."
 msgstr "已中断。"
 
-#: src/iac_code/ui/repl.py:468
-msgid "Goodbye!"
-msgstr "再见！"
-
-#: src/iac_code/ui/repl.py:469
-msgid "Resume this session with:"
-msgstr "恢复此会话请运行："
-
-#: src/iac_code/ui/repl.py:494
+#: src/iac_code/ui/repl.py:496
 msgid "Update now"
 msgstr "立即更新"
 
-#: src/iac_code/ui/repl.py:496
+#: src/iac_code/ui/repl.py:498
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "运行显示的更新命令，成功后退出。"
 
-#: src/iac_code/ui/repl.py:499
+#: src/iac_code/ui/repl.py:501
 msgid "Skip"
 msgstr "跳过"
 
-#: src/iac_code/ui/repl.py:501
+#: src/iac_code/ui/repl.py:503
 msgid "Continue with the current version for this session."
 msgstr "本次会话继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:504
+#: src/iac_code/ui/repl.py:506
 msgid "Skip until next version"
 msgstr "跳过直到下一个版本"
 
-#: src/iac_code/ui/repl.py:506
+#: src/iac_code/ui/repl.py:508
 msgid "Hide this update until a newer version is available."
 msgstr "隐藏此更新，直到有更新的版本可用。"
 
-#: src/iac_code/ui/repl.py:525 src/iac_code/ui/repl.py:537
+#: src/iac_code/ui/repl.py:527 src/iac_code/ui/repl.py:539
 msgid "Update command failed. Continuing with the current version."
 msgstr "更新命令失败。将继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:530
+#: src/iac_code/ui/repl.py:532
 msgid "Update completed. Restart iac-code to continue."
 msgstr "更新已完成。请重启 iac-code 以继续。"
 
-#: src/iac_code/ui/repl.py:568
+#: src/iac_code/ui/repl.py:570
 msgid "No image in clipboard."
 msgstr "剪贴板中没有图像。"
 
-#: src/iac_code/ui/repl.py:754
+#: src/iac_code/ui/repl.py:756
 msgid "Usage: !<shell command>"
 msgstr "用法：!<shell command>"
 
-#: src/iac_code/ui/repl.py:759
+#: src/iac_code/ui/repl.py:761
 msgid "Shell command support is unavailable."
 msgstr "Shell 命令支持不可用。"
 
-#: src/iac_code/ui/repl.py:826
+#: src/iac_code/ui/repl.py:828
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr "未知技能：${name}。输入 / 可列出命令和技能。"
 
-#: src/iac_code/ui/repl.py:828
+#: src/iac_code/ui/repl.py:830
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "未知命令：/{name}。输入 /help 查看可用命令。"
 
-#: src/iac_code/ui/repl.py:833
+#: src/iac_code/ui/repl.py:835
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ 只能调用技能。请改用 /{name}。"
 
-#: src/iac_code/ui/repl.py:855 src/iac_code/ui/repl.py:900
+#: src/iac_code/ui/repl.py:857 src/iac_code/ui/repl.py:902
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "命令错误：{error}"
 
-#: src/iac_code/ui/repl.py:862
+#: src/iac_code/ui/repl.py:864
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
-#: src/iac_code/ui/repl.py:1167
+#: src/iac_code/ui/repl.py:1126
+msgid "Goodbye!"
+msgstr "再见！"
+
+#: src/iac_code/ui/repl.py:1127
+msgid "Resume this session with:"
+msgstr "恢复此会话请运行："
+
+#: src/iac_code/ui/repl.py:1130
+msgid "Session ID"
+msgstr "会话 ID"
+
+#: src/iac_code/ui/repl.py:1180 src/iac_code/ui/repl.py:1184
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "会话不存在：{session_id}"
 
-#: src/iac_code/ui/repl.py:1186
+#: src/iac_code/ui/repl.py:1233
+msgid "Session name: "
+msgstr "会话名称："
+
+#: src/iac_code/ui/repl.py:1239
+msgid "Session name cannot be empty."
+msgstr "会话名称不能为空。"
+
+#: src/iac_code/ui/repl.py:1251
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2183,30 +2356,38 @@ msgstr ""
 "请运行以下命令恢复：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1287
+#: src/iac_code/ui/repl.py:1257
+msgid "Multiple sessions match. Resume one by ID:"
+msgstr "匹配到多个会话。请通过 ID 恢复其中一个："
+
+#: src/iac_code/ui/repl.py:1370
 msgid "This conversation is from a different directory."
 msgstr "该会话来自另一个目录。"
 
-#: src/iac_code/ui/repl.py:1289
+#: src/iac_code/ui/repl.py:1372
 msgid "To resume, run:"
 msgstr "请运行以下命令恢复："
 
-#: src/iac_code/ui/repl.py:1294
+#: src/iac_code/ui/repl.py:1377
 msgid "(Command copied to clipboard)"
 msgstr "（命令已复制到剪贴板）"
 
-#: src/iac_code/ui/repl.py:1451
+#: src/iac_code/ui/repl.py:1534
 #, python-brace-format
-msgid "Current model {model} does not support image input. Use /model to switch to a vision-capable model."
+msgid ""
+"Current model {model} does not support image input. Use /model to switch "
+"to a vision-capable model."
 msgstr "当前模型 {model} 不支持图像输入。请使用 /model 切换到支持视觉的模型。"
 
-#: src/iac_code/ui/repl.py:1460
+#: src/iac_code/ui/repl.py:1543
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "图像错误：{err}"
 
-#: src/iac_code/ui/repl.py:1477
-msgid "Failed to persist image to cache; it will only exist in memory for this turn."
+#: src/iac_code/ui/repl.py:1560
+msgid ""
+"Failed to persist image to cache; it will only exist in memory for this "
+"turn."
 msgstr "无法将图像持久化到缓存；本轮对话期间它仅存在于内存中。"
 
 #: src/iac_code/ui/spinner.py:52
@@ -2297,87 +2478,87 @@ msgstr "输入以搜索文件..."
 msgid "No matching files"
 msgstr "没有匹配的文件"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:114
+#: src/iac_code/ui/dialogs/resume_picker.py:116
 msgid "Search..."
 msgstr "搜索…"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:359
+#: src/iac_code/ui/dialogs/resume_picker.py:374
 msgid "Resume Session"
 msgstr "恢复会话"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:369
+#: src/iac_code/ui/dialogs/resume_picker.py:384
 msgid "No sessions found"
 msgstr "未找到会话"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:427
+#: src/iac_code/ui/dialogs/resume_picker.py:444
 msgid "show current dir"
 msgstr "显示当前目录"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:429
+#: src/iac_code/ui/dialogs/resume_picker.py:446
 msgid "show all projects"
 msgstr "显示所有项目"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:432
+#: src/iac_code/ui/dialogs/resume_picker.py:449
 msgid "show all branches"
 msgstr "显示所有分支"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:434
+#: src/iac_code/ui/dialogs/resume_picker.py:451
 msgid "only show current branch"
 msgstr "仅显示当前分支"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:435
+#: src/iac_code/ui/dialogs/resume_picker.py:452
 msgid "preview"
 msgstr "预览"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:436
+#: src/iac_code/ui/dialogs/resume_picker.py:453
 msgid "Type to search"
 msgstr "输入以搜索"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:437
+#: src/iac_code/ui/dialogs/resume_picker.py:454
 msgid "cancel"
 msgstr "取消"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:552
+#: src/iac_code/ui/dialogs/resume_picker.py:569
 #, python-brace-format
 msgid "{n} more line{s}"
 msgstr "还有 {n} 行"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:566
+#: src/iac_code/ui/dialogs/resume_picker.py:583
 #, python-brace-format
 msgid "{n} message{s}"
 msgstr "{n} 条消息"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:580
+#: src/iac_code/ui/dialogs/resume_picker.py:597
 msgid "resume"
 msgstr "恢复"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:584
+#: src/iac_code/ui/dialogs/resume_picker.py:601
 msgid "back"
 msgstr "返回"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:589
+#: src/iac_code/ui/dialogs/resume_picker.py:606
 msgid "scroll"
 msgstr "滚动"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:608
+#: src/iac_code/ui/dialogs/resume_picker.py:625
 msgid "(empty session)"
 msgstr "（空会话）"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:728
+#: src/iac_code/ui/dialogs/resume_picker.py:745
 msgid "just now"
 msgstr "刚刚"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:731
+#: src/iac_code/ui/dialogs/resume_picker.py:748
 #, python-brace-format
 msgid "{n} minute{s} ago"
 msgstr "{n} 分钟前"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:734
+#: src/iac_code/ui/dialogs/resume_picker.py:751
 #, python-brace-format
 msgid "{n} hour{s} ago"
 msgstr "{n} 小时前"
 
-#: src/iac_code/ui/dialogs/resume_picker.py:736
+#: src/iac_code/ui/dialogs/resume_picker.py:753
 #, python-brace-format
 msgid "{n} day{s} ago"
 msgstr "{n} 天前"
@@ -2397,7 +2578,9 @@ msgstr "{current} / {total}"
 
 #: src/iac_code/ui/dialogs/skills_picker.py:165
 #, python-brace-format
-msgid "{count} skills - Space to toggle, Enter to save, Tab to sort, Esc to cancel"
+msgid ""
+"{count} skills - Space to toggle, Enter to save, Tab to sort, Esc to "
+"cancel"
 msgstr "{count} 个技能 - 空格切换，Enter 保存，Tab 排序，Esc 取消"
 
 #: src/iac_code/ui/dialogs/skills_picker.py:171
@@ -2484,7 +2667,9 @@ msgid "iac-code on Windows requires Git for Windows."
 msgstr "iac-code 在 Windows 上需要安装 Git for Windows。"
 
 #: src/iac_code/utils/platform.py:41
-msgid "If installed but not on PATH, set IAC_CODE_GIT_BASH_PATH environment variable."
+msgid ""
+"If installed but not on PATH, set IAC_CODE_GIT_BASH_PATH environment "
+"variable."
 msgstr "如果已安装但不在 PATH 中，请设置 IAC_CODE_GIT_BASH_PATH 环境变量。"
 
 #: src/iac_code/utils/platform.py:44
@@ -2496,7 +2681,9 @@ msgid "  Option 1 - winget (requires access to github.com):"
 msgstr "  方式 1 - winget（需要能访问 github.com）："
 
 #: src/iac_code/utils/platform.py:52
-msgid "  Option 2 - if you cannot reach github.com, run this to install via npmmirror:"
+msgid ""
+"  Option 2 - if you cannot reach github.com, run this to install via "
+"npmmirror:"
 msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 npmmirror 安装："
 
 #~ msgid "toggle preview"
@@ -2520,7 +2707,10 @@ msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 np
 #~ msgid "tree-sitter not available"
 #~ msgstr "tree-sitter 不可用"
 
-#~ msgid "LLM provider is locked by '{source}'. To change, modify llm_source in settings.yml."
+#~ msgid ""
+#~ "LLM provider is locked by '{source}'."
+#~ " To change, modify llm_source in "
+#~ "settings.yml."
 #~ msgstr "LLM 提供商已被 '{source}' 锁定。如需修改，请调整 settings.yml 中的 llm_source 配置。"
 
 #~ msgid "Provider switched: {status}"
@@ -2538,6 +2728,12 @@ msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 np
 #~ msgid "Cache create"
 #~ msgstr "缓存创建"
 
-#~ msgid "{count} skills - Space to toggle, Enter to save, / to search, t to sort, Esc to cancel"
+#~ msgid ""
+#~ "{count} skills - Space to toggle, "
+#~ "Enter to save, / to search, t "
+#~ "to sort, Esc to cancel"
 #~ msgstr "{count} 个技能 - 空格切换，Enter 保存，/ 搜索，t 排序，Esc 取消"
+
+#~ msgid "Resume a session by ID"
+#~ msgstr "通过 ID 恢复会话"
 

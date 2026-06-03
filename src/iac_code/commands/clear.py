@@ -31,6 +31,16 @@ async def clear_command(context=None, **kwargs) -> str:
 
         state = store.get_state() if store else None
         if state:
-            console.print(render_welcome_banner(state.model, state.cwd))
+            repl = getattr(context, "repl", None)
+            session_id = getattr(repl, "_session_id", None)
+            session_name = getattr(repl, "_session_name", None)
+            console.print(
+                render_welcome_banner(
+                    state.model,
+                    state.cwd,
+                    session_id=session_id if isinstance(session_id, str) else None,
+                    session_name=session_name if isinstance(session_name, str) else None,
+                )
+            )
 
     return ""

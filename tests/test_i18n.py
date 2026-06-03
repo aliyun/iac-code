@@ -352,6 +352,28 @@ def test_aliyun_credential_labels_are_translatable():
     )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_session_name_error_messages_are_translated():
+    """Session rename validation errors are user-facing and must not stay English-only."""
+    required_msgids = {
+        "Session name must match {pattern}",
+        "Session name already exists in this project: {name}",
+    }
+    language_dirs = _discover_language_dirs()
+    if not language_dirs:
+        pytest.skip("No language directories found")
+
+    untranslated: list[str] = []
+    for lang_dir in language_dirs:
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(required_msgids):
+            msgstr = translations.get(msgid, "")
+            if not msgstr.strip() or msgstr == msgid:
+                untranslated.append(f"{lang_dir.name}: {msgid!r}")
+
+    assert not untranslated
+
+
 class TestDetectWindowsUILanguage:
     """_detect_windows_ui_language wraps GetUserDefaultLocaleName via ctypes."""
 
