@@ -269,6 +269,8 @@ class SkillTool(Tool):
         """Check if a skill only has safe properties (no tools, no shell commands)."""
         if skill.frontmatter.allowed_tools:
             return False
-        if "!`" in skill.content or "```!" in skill.content:
+        from iac_code.skills.renderer import contains_shell_commands
+
+        if contains_shell_commands(skill.content):
             return False
         return True
