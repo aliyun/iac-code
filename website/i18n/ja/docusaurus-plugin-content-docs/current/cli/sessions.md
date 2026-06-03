@@ -1,73 +1,90 @@
 ---
-title: Sessions
-description: Persist and resume conversations across runs.
+title: セッション
+description: 実行をまたいで会話を保存し、再開します。
 ---
 
-# Sessions
+# セッション
 
-IaC Code automatically persists every conversation to disk. You can resume any previous session to continue where you left off.
+IaC Code はすべての会話を自動的にディスクへ保存します。以前のセッションを再開して、中断したところから作業を続けられます。
 
-## Resuming Sessions
+## セッションの再開
 
-### Interactive: `/resume`
+### 対話式：`/resume`
 
-In the REPL, use the `/resume` command:
+REPL では `/resume` コマンドを使用します：
 
 ```text
 /resume
 ```
 
-This opens an interactive picker showing recent sessions for the current project, with their last prompt as the title.
+これにより、現在のプロジェクトの最近のセッションを表示する対話ピッカーが開きます。セッション名が設定されている場合はそれをタイトルとして表示し、未設定の場合は最後のプロンプト、または最初のプロンプトを代替として表示します。
 
-To resume a specific session by ID or ID prefix:
+正確なセッション ID、一意な ID プレフィックス、または一意なセッション名で特定のセッションを再開できます：
 
 ```text
 /resume abc123
 ```
 
-### CLI: `--resume` and `--continue`
+### セッションに名前を付ける
 
-Resume a specific session from the command line:
+`/rename` を使うと、アクティブなセッションに安定した読みやすい名前を付けられます：
 
-```bash
-iac-code --resume <session-id>
+```text
+/rename deploy-prod
 ```
 
-Resume the most recent session:
+名前はセッションメタデータに保存されます。再開時のウェルカムバナー、終了時のヒント、`/resume` ピッカーに表示されます。
+
+名前がセッションを一意に識別する場合は、その名前で再開できます：
+
+```text
+/resume deploy-prod
+iac-code --resume deploy-prod
+```
+
+### CLI：`--resume` と `--continue`
+
+コマンドラインから、正確なセッション ID、一意な ID プレフィックス、または一意なセッション名で特定のセッションを再開できます：
+
+```bash
+iac-code --resume <セッションIDまたは名前>
+```
+
+最新のセッションを再開します：
 
 ```bash
 iac-code --continue
 ```
 
-The short flags `-r` and `-c` are also available:
+短いオプション `-r` と `-c` も利用できます：
 
 ```bash
-iac-code -r <session-id>
+iac-code -r <セッションIDまたは名前>
 iac-code -c
 ```
 
-### Cross-project Sessions
+### プロジェクト間セッション
 
-When a session belongs to a different project directory, IaC Code does not hot-swap the working directory. Instead, it prints the command to resume in the correct context:
+セッションが別のプロジェクトディレクトリに属している場合、IaC Code は作業ディレクトリをその場で切り替えません。代わりに、正しいコンテキストで再開するためのコマンドを表示します：
 
 ```text
 cd /path/to/other/project && iac-code --resume <session-id>
 ```
 
-This command is also copied to the clipboard when possible.
+可能な場合、このコマンドはクリップボードにもコピーされます。
 
-## Interruption Recovery
+## 中断からの復旧
 
-If a session was interrupted mid-execution (e.g., the process was killed while a tool was running), IaC Code detects the orphaned tool calls on resume and appends synthetic error results. This allows the model to recover gracefully without getting stuck waiting for tool output that will never arrive.
+ツール実行中にプロセスが終了した場合など、セッションが実行途中で中断された場合、IaC Code は再開時に孤立したツール呼び出しを検出し、合成されたエラー結果を追加します。これにより、モデルは届くことのないツール出力を待ち続けずに復旧できます。
 
-## Session Picker
+## セッションピッカー
 
-The `/resume` picker displays:
+`/resume` ピッカーには次の情報が表示されます：
 
-| Column | Description |
-|--------|-------------|
-| Title | Last user prompt (or first prompt if no metadata) |
-| Branch | Git branch at the time of the session |
-| Time | Last modification time |
+| 列 | 説明 |
+|----|------|
+| タイトル | 設定済みのセッション名、または最後/最初のユーザープロンプト |
+| ブランチ | セッション時点の Git ブランチ |
+| 時刻 | 最終更新時刻 |
 
-Sessions are sorted by most recent first. You can type to filter by title content.
+セッションは新しい順に並びます。タイトル内容で絞り込むために文字を入力できます。

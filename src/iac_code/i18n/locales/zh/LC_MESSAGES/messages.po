@@ -4,9 +4,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.3.1\n"
+"Project-Id-Version: iac-code 0.4.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-03 11:39+0800\n"
+"POT-Creation-Date: 2026-06-03 13:32+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -136,7 +136,7 @@ msgid "Renamed session to {name}"
 msgstr "已将会话重命名为 {name}"
 
 #: src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428
-#: src/iac_code/ui/repl.py:812 src/iac_code/ui/repl.py:826
+#: src/iac_code/ui/repl.py:813 src/iac_code/ui/repl.py:827
 msgid "Permission denied."
 msgstr "权限被拒绝。"
 
@@ -1533,7 +1533,7 @@ msgstr ""
 " RAM 角色。不支持用户组。然后关闭旧的授权页面，必要时退出 Alibaba Cloud 并重新登录，再运行 /auth 重新选择 OAuth "
 "登录（浏览器）。"
 
-#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:841
+#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:842
 #, python-brace-format
 msgid "Skill '{name}' is disabled. Run /skills to enable it."
 msgstr "技能“{name}”已禁用。运行 /skills 以启用它。"
@@ -2243,109 +2243,109 @@ msgstr "否，始终拒绝 \"{rule}\"（本次会话）"
 msgid "No, always reject this tool"
 msgstr "否，始终拒绝此工具"
 
-#: src/iac_code/ui/repl.py:423
+#: src/iac_code/ui/repl.py:424
 msgid "Press Ctrl+C again to exit."
 msgstr "再次按 Ctrl+C 退出。"
 
-#: src/iac_code/ui/repl.py:448
+#: src/iac_code/ui/repl.py:449
 msgid "Interrupted."
 msgstr "已中断。"
 
-#: src/iac_code/ui/repl.py:507
+#: src/iac_code/ui/repl.py:508
 msgid "Update now"
 msgstr "立即更新"
 
-#: src/iac_code/ui/repl.py:509
+#: src/iac_code/ui/repl.py:510
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "运行显示的更新命令，成功后退出。"
 
-#: src/iac_code/ui/repl.py:512
+#: src/iac_code/ui/repl.py:513
 msgid "Skip"
 msgstr "跳过"
 
-#: src/iac_code/ui/repl.py:514
+#: src/iac_code/ui/repl.py:515
 msgid "Continue with the current version for this session."
 msgstr "本次会话继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:517
+#: src/iac_code/ui/repl.py:518
 msgid "Skip until next version"
 msgstr "跳过直到下一个版本"
 
-#: src/iac_code/ui/repl.py:519
+#: src/iac_code/ui/repl.py:520
 msgid "Hide this update until a newer version is available."
 msgstr "隐藏此更新，直到有更新的版本可用。"
 
-#: src/iac_code/ui/repl.py:538 src/iac_code/ui/repl.py:550
+#: src/iac_code/ui/repl.py:539 src/iac_code/ui/repl.py:551
 msgid "Update command failed. Continuing with the current version."
 msgstr "更新命令失败。将继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:543
+#: src/iac_code/ui/repl.py:544
 msgid "Update completed. Restart iac-code to continue."
 msgstr "更新已完成。请重启 iac-code 以继续。"
 
-#: src/iac_code/ui/repl.py:581
+#: src/iac_code/ui/repl.py:582
 msgid "No image in clipboard."
 msgstr "剪贴板中没有图像。"
 
-#: src/iac_code/ui/repl.py:767
+#: src/iac_code/ui/repl.py:768
 msgid "Usage: !<shell command>"
 msgstr "用法：!<shell command>"
 
-#: src/iac_code/ui/repl.py:774
+#: src/iac_code/ui/repl.py:775
 msgid "Shell command support is unavailable."
 msgstr "Shell 命令支持不可用。"
 
-#: src/iac_code/ui/repl.py:844
+#: src/iac_code/ui/repl.py:845
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr "未知技能：${name}。输入 / 可列出命令和技能。"
 
-#: src/iac_code/ui/repl.py:846
+#: src/iac_code/ui/repl.py:847
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "未知命令：/{name}。输入 /help 查看可用命令。"
 
-#: src/iac_code/ui/repl.py:851
+#: src/iac_code/ui/repl.py:852
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ 只能调用技能。请改用 /{name}。"
 
-#: src/iac_code/ui/repl.py:873 src/iac_code/ui/repl.py:921
+#: src/iac_code/ui/repl.py:874 src/iac_code/ui/repl.py:922
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "命令错误：{error}"
 
-#: src/iac_code/ui/repl.py:880
+#: src/iac_code/ui/repl.py:881
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
-#: src/iac_code/ui/repl.py:1155
+#: src/iac_code/ui/repl.py:1156
 msgid "Goodbye!"
 msgstr "再见！"
 
-#: src/iac_code/ui/repl.py:1156
+#: src/iac_code/ui/repl.py:1157
 msgid "Resume this session with:"
 msgstr "恢复此会话请运行："
 
-#: src/iac_code/ui/repl.py:1159
+#: src/iac_code/ui/repl.py:1160
 msgid "Session ID"
 msgstr "会话 ID"
 
-#: src/iac_code/ui/repl.py:1209 src/iac_code/ui/repl.py:1213
+#: src/iac_code/ui/repl.py:1210 src/iac_code/ui/repl.py:1214
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "会话不存在：{session_id}"
 
-#: src/iac_code/ui/repl.py:1262
+#: src/iac_code/ui/repl.py:1263
 msgid "Session name: "
 msgstr "会话名称："
 
-#: src/iac_code/ui/repl.py:1268
+#: src/iac_code/ui/repl.py:1269
 msgid "Session name cannot be empty."
 msgstr "会话名称不能为空。"
 
-#: src/iac_code/ui/repl.py:1280
+#: src/iac_code/ui/repl.py:1279
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2356,35 +2356,35 @@ msgstr ""
 "请运行以下命令恢复：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1286
+#: src/iac_code/ui/repl.py:1283
 msgid "Multiple sessions match. Resume one by ID:"
 msgstr "匹配到多个会话。请通过 ID 恢复其中一个："
 
-#: src/iac_code/ui/repl.py:1401
+#: src/iac_code/ui/repl.py:1396
 msgid "This conversation is from a different directory."
 msgstr "该会话来自另一个目录。"
 
-#: src/iac_code/ui/repl.py:1403
+#: src/iac_code/ui/repl.py:1398
 msgid "To resume, run:"
 msgstr "请运行以下命令恢复："
 
-#: src/iac_code/ui/repl.py:1408
+#: src/iac_code/ui/repl.py:1403
 msgid "(Command copied to clipboard)"
 msgstr "（命令已复制到剪贴板）"
 
-#: src/iac_code/ui/repl.py:1565
+#: src/iac_code/ui/repl.py:1560
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
 "to a vision-capable model."
 msgstr "当前模型 {model} 不支持图像输入。请使用 /model 切换到支持视觉的模型。"
 
-#: src/iac_code/ui/repl.py:1574
+#: src/iac_code/ui/repl.py:1569
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "图像错误：{err}"
 
-#: src/iac_code/ui/repl.py:1591
+#: src/iac_code/ui/repl.py:1586
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."

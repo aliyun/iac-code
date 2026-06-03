@@ -25,6 +25,12 @@ iac-code
 Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
 ```
 
+## コマンド
+
+`/` を入力すると、利用可能なスラッシュコマンドを確認できます。よく使う運用コマンドには、現在のセッション状態を表示する `/status`、スキル管理の `/skills`、保存済みメモリの `/memory`、アクティブなセッションに名前を付ける `/rename`、セッションを切り替える `/resume` があります。
+
+`$` を入力すると、スキルだけを検索して呼び出せます。
+
 ## 入力の編集
 
 `Shift+Enter` を使うと、プロンプトを送信せずに改行を挿入できます。完全なプロンプトを送信するには、通常の `Enter` を押します。

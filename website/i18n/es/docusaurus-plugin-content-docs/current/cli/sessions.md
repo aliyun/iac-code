@@ -1,73 +1,90 @@
 ---
-title: Sessions
-description: Persist and resume conversations across runs.
+title: Sesiones
+description: Persistir y reanudar conversaciones entre ejecuciones.
 ---
 
-# Sessions
+# Sesiones
 
-IaC Code automatically persists every conversation to disk. You can resume any previous session to continue where you left off.
+IaC Code guarda automáticamente cada conversación en disco. Puedes reanudar cualquier sesión anterior para continuar donde la dejaste.
 
-## Resuming Sessions
+## Reanudar sesiones
 
-### Interactive: `/resume`
+### Interactivo: `/resume`
 
-In the REPL, use the `/resume` command:
+En el REPL, usa el comando `/resume`:
 
 ```text
 /resume
 ```
 
-This opens an interactive picker showing recent sessions for the current project, with their last prompt as the title.
+Esto abre un selector interactivo con las sesiones recientes del proyecto actual. Si la sesión tiene nombre, se muestra como título; de lo contrario se usa el último prompt o, como alternativa, el primero.
 
-To resume a specific session by ID or ID prefix:
+Para reanudar una sesión concreta por ID exacto, prefijo único de ID o nombre único de sesión:
 
 ```text
 /resume abc123
 ```
 
-### CLI: `--resume` and `--continue`
+### Nombrar sesiones
 
-Resume a specific session from the command line:
+Usa `/rename` para dar a la sesión activa un nombre estable y legible:
 
-```bash
-iac-code --resume <session-id>
+```text
+/rename deploy-prod
 ```
 
-Resume the most recent session:
+El nombre se guarda en los metadatos de la sesión. Aparece en el banner de bienvenida al reanudar, en la sugerencia de salida y en el selector de `/resume`.
+
+Puedes reanudar por nombre cuando identifica una sesión de forma única:
+
+```text
+/resume deploy-prod
+iac-code --resume deploy-prod
+```
+
+### CLI: `--resume` y `--continue`
+
+Reanuda una sesión concreta desde la línea de comandos por ID exacto, prefijo único de ID o nombre único de sesión:
+
+```bash
+iac-code --resume <id-o-nombre-de-sesion>
+```
+
+Reanuda la sesión más reciente:
 
 ```bash
 iac-code --continue
 ```
 
-The short flags `-r` and `-c` are also available:
+También están disponibles las opciones cortas `-r` y `-c`:
 
 ```bash
-iac-code -r <session-id>
+iac-code -r <id-o-nombre-de-sesion>
 iac-code -c
 ```
 
-### Cross-project Sessions
+### Sesiones de otros proyectos
 
-When a session belongs to a different project directory, IaC Code does not hot-swap the working directory. Instead, it prints the command to resume in the correct context:
+Cuando una sesión pertenece a otro directorio de proyecto, IaC Code no cambia el directorio de trabajo en caliente. En su lugar, imprime el comando para reanudarla en el contexto correcto:
 
 ```text
 cd /path/to/other/project && iac-code --resume <session-id>
 ```
 
-This command is also copied to the clipboard when possible.
+El comando también se copia al portapapeles cuando es posible.
 
-## Interruption Recovery
+## Recuperación ante interrupciones
 
-If a session was interrupted mid-execution (e.g., the process was killed while a tool was running), IaC Code detects the orphaned tool calls on resume and appends synthetic error results. This allows the model to recover gracefully without getting stuck waiting for tool output that will never arrive.
+Si una sesión se interrumpió durante la ejecución, por ejemplo porque el proceso se terminó mientras una herramienta estaba en curso, IaC Code detecta las llamadas de herramienta huérfanas al reanudar y agrega resultados de error sintéticos. Esto permite que el modelo se recupere sin quedarse esperando una salida de herramienta que nunca llegará.
 
-## Session Picker
+## Selector de sesiones
 
-The `/resume` picker displays:
+El selector de `/resume` muestra:
 
-| Column | Description |
-|--------|-------------|
-| Title | Last user prompt (or first prompt if no metadata) |
-| Branch | Git branch at the time of the session |
-| Time | Last modification time |
+| Columna | Descripción |
+|---------|-------------|
+| Título | Nombre de sesión si existe; de lo contrario, último o primer prompt del usuario |
+| Rama | Rama de Git en el momento de la sesión |
+| Hora | Última hora de modificación |
 
-Sessions are sorted by most recent first. You can type to filter by title content.
+Las sesiones se ordenan de más reciente a más antigua. Puedes escribir para filtrar por contenido del título.

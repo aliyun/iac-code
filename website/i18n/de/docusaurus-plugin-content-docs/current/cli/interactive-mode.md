@@ -25,6 +25,12 @@ Beschreiben Sie dann, was Sie erstellen moechten:
 Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
 ```
 
+## Befehle
+
+Tippen Sie `/`, um verfügbare Slash-Befehle zu entdecken. Zu den häufigen Betriebsbefehlen gehören `/status` für den aktuellen Sitzungszustand, `/skills` für die Skill-Verwaltung, `/memory` für gespeicherte Erinnerungen, `/rename` zum Benennen der aktiven Sitzung und `/resume` zum Wechseln zwischen Sitzungen.
+
+Tippen Sie `$`, um ausschließlich Skills zu entdecken und aufzurufen.
+
 ## Eingabe bearbeiten
 
 Verwenden Sie `Shift+Enter`, um eine neue Zeile einzufuegen, ohne den Prompt zu senden. Druecken Sie normales `Enter`, um den vollstaendigen Prompt zu senden.

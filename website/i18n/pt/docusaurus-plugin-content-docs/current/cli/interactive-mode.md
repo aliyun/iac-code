@@ -25,6 +25,12 @@ Em seguida, descreva o que deseja construir:
 Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
 ```
 
+## Comandos
+
+Digite `/` para descobrir os comandos slash disponíveis. Comandos operacionais comuns incluem `/status` para o estado da sessão atual, `/skills` para gerenciamento de habilidades, `/memory` para memórias salvas, `/rename` para nomear a sessão ativa e `/resume` para alternar sessões.
+
+Digite `$` para descobrir e invocar apenas habilidades.
+
 ## Editar entrada
 
 Use `Shift+Enter` para inserir uma nova linha sem enviar o prompt. Pressione `Enter` sozinho para enviar o prompt completo.

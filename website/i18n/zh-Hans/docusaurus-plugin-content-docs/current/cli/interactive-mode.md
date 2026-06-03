@@ -25,6 +25,12 @@ iac-code
 创建一个 VPC、两台 ECS 实例，以及一个允许办公 IP 通过 SSH 访问的安全组。
 ```
 
+## 命令
+
+输入 `/` 可以发现可用的 Slash 命令。常用运维命令包括：用 `/status` 查看当前会话状态，用 `/skills` 管理技能，用 `/memory` 查看已保存记忆，用 `/rename` 命名当前会话，以及用 `/resume` 切换会话。
+
+输入 `$` 只会发现并调用技能。
+
 ## 编辑输入
 
 使用 `Shift+Enter` 可以插入换行而不发送 prompt。单独按 `Enter` 会提交完整 prompt。

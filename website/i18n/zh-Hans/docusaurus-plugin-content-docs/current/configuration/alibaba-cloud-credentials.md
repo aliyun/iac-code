@@ -7,6 +7,22 @@ description: 配置阿里云 AccessKey 或 STS 凭证。
 
 需要检查或管理云资源时，必须配置阿里云凭证。
 
+## OAuth 浏览器登录
+
+推荐的交互式配置入口是 `/auth`：
+
+```text
+/auth
+```
+
+选择 **配置 IaC 云服务**，然后选择 **Alibaba Cloud**，再选择 **OAuth Login (Browser)**。IaC Code 会打开浏览器授权流程，等待本地回调，使用 PKCE 交换授权码，并将基于 OAuth 的临时凭证保存到 IaC Code 配置目录下的 `.cloud-credentials.yml`。
+
+配置过程中可以选择中国站或国际站 OAuth。IaC Code 会把所选站点与 refresh token 一起保存，后续刷新会继续使用同一 endpoint。
+
+当 access token 或 STS 凭证即将过期时，OAuth 凭证会自动刷新。如果 refresh token 过期或被撤销，请重新运行 `/auth` 并选择 OAuth Login (Browser)。
+
+## 环境变量
+
 支持的环境变量：
 
 | 变量 | 说明 |

@@ -16,7 +16,7 @@ Befehlszeilenoptionen steuern, wie IaC Code gestartet wird. Sie können vor dem 
 | `--output-format <format>` | Ausgabeformat für den nicht-interaktiven Modus festlegen. Unterstützte Werte sind `text`, `json` und `stream-json`. Standard ist `text`. |
 | `--max-turns <number>` | Maximale Anzahl der Agenten-Runden im nicht-interaktiven Modus begrenzen. Standard ist `100`. |
 | `-d`, `--debug` | Debug-Protokollierung für den aktuellen Lauf aktivieren. Im interaktiven Modus verwenden Sie `/debug`, um die Debug-Protokollierung nach dem Start zu prüfen oder zu ändern. |
-| `-r <session-id>`, `--resume <session-id>` | Eine vorherige Sitzung anhand der ID fortsetzen. Dies dient zum Zurückkehren zu einer bekannten Konversation. |
+| `-r <session-id-oder-name>`, `--resume <session-id-oder-name>` | Eine vorherige Sitzung über die exakte Sitzungs-ID, ein eindeutiges ID-Präfix oder einen eindeutigen Sitzungsnamen fortsetzen. Projektübergreifend aufgelöste Sitzungen geben einen `cd ... && iac-code --resume <id>`-Befehl aus, statt das aktuelle Projekt direkt zu wechseln. |
 | `-c`, `--continue` | Die letzte Sitzung fortsetzen. Kann nicht zusammen mit `--resume` verwendet werden. |
 | `--allowed-tools <patterns>` | Kommagetrennte Werkzeug-Berechtigungsmuster zum Erlauben, z.B. `'bash(git *),write_file'`. |
 | `--disallowed-tools <patterns>` | Kommagetrennte Werkzeug-Berechtigungsmuster zum Verweigern, z.B. `'bash(rm *)'`. |

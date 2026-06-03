@@ -16,7 +16,7 @@ description: IaC Code 启动选项和一次性执行参数参考。
 | `--output-format <format>` | 设置非交互模式的输出格式。支持 `text`、`json` 和 `stream-json`，默认值为 `text`。 |
 | `--max-turns <number>` | 限制非交互模式中的最大代理轮次，默认值为 `100`。 |
 | `-d`, `--debug` | 为本次运行启用调试日志。交互模式启动后，可以使用 `/debug` 查看或调整调试日志。 |
-| `-r <session-id>`, `--resume <session-id>` | 按会话 ID 恢复历史会话。适合回到已知的对话。 |
+| `-r <session-id-or-name>`, `--resume <session-id-or-name>` | 按精确会话 ID、唯一 ID 前缀或唯一会话名称恢复历史会话。解析到跨项目会话时，会打印 `cd ... && iac-code --resume <id>` 命令，而不是直接热切换当前项目。 |
 | `-c`, `--continue` | 恢复最近一次会话。不能与 `--resume` 同时使用。 |
 | `--allowed-tools <patterns>` | 逗号分隔的工具权限允许模式，例如 `'bash(git *),write_file'`。 |
 | `--disallowed-tools <patterns>` | 逗号分隔的工具权限拒绝模式，例如 `'bash(rm *)'`。 |

@@ -4,9 +4,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.3.1\n"
+"Project-Id-Version: iac-code 0.4.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-03 11:39+0800\n"
+"POT-Creation-Date: 2026-06-03 13:32+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: fr\n"
@@ -146,7 +146,7 @@ msgid "Renamed session to {name}"
 msgstr "Session renommée en {name}"
 
 #: src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428
-#: src/iac_code/ui/repl.py:812 src/iac_code/ui/repl.py:826
+#: src/iac_code/ui/repl.py:813 src/iac_code/ui/repl.py:827
 msgid "Permission denied."
 msgstr "Permission refusée."
 
@@ -1598,7 +1598,7 @@ msgstr ""
 " si nécessaire, puis exécutez /auth pour choisir de nouveau Connexion "
 "OAuth (navigateur)."
 
-#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:841
+#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:842
 #, python-brace-format
 msgid "Skill '{name}' is disabled. Run /skills to enable it."
 msgstr "La compétence « {name} » est désactivée. Exécutez /skills pour l'activer."
@@ -2332,115 +2332,115 @@ msgstr "Non, toujours refuser \"{rule}\" (cette session)"
 msgid "No, always reject this tool"
 msgstr "Non, toujours refuser cet outil"
 
-#: src/iac_code/ui/repl.py:423
+#: src/iac_code/ui/repl.py:424
 msgid "Press Ctrl+C again to exit."
 msgstr "Appuyez de nouveau sur Ctrl+C pour quitter."
 
-#: src/iac_code/ui/repl.py:448
+#: src/iac_code/ui/repl.py:449
 msgid "Interrupted."
 msgstr "Interrompu."
 
-#: src/iac_code/ui/repl.py:507
+#: src/iac_code/ui/repl.py:508
 msgid "Update now"
 msgstr "Mettre à jour maintenant"
 
-#: src/iac_code/ui/repl.py:509
+#: src/iac_code/ui/repl.py:510
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "Exécute la commande de mise à jour affichée et quitte en cas de succès."
 
-#: src/iac_code/ui/repl.py:512
+#: src/iac_code/ui/repl.py:513
 msgid "Skip"
 msgstr "Ignorer"
 
-#: src/iac_code/ui/repl.py:514
+#: src/iac_code/ui/repl.py:515
 msgid "Continue with the current version for this session."
 msgstr "Continuer avec la version actuelle pour cette session."
 
-#: src/iac_code/ui/repl.py:517
+#: src/iac_code/ui/repl.py:518
 msgid "Skip until next version"
 msgstr "Ignorer jusqu’à la prochaine version"
 
-#: src/iac_code/ui/repl.py:519
+#: src/iac_code/ui/repl.py:520
 msgid "Hide this update until a newer version is available."
 msgstr ""
 "Masquer cette mise à jour jusqu’à ce qu’une version plus récente soit "
 "disponible."
 
-#: src/iac_code/ui/repl.py:538 src/iac_code/ui/repl.py:550
+#: src/iac_code/ui/repl.py:539 src/iac_code/ui/repl.py:551
 msgid "Update command failed. Continuing with the current version."
 msgstr "La commande de mise à jour a échoué. La version actuelle sera conservée."
 
-#: src/iac_code/ui/repl.py:543
+#: src/iac_code/ui/repl.py:544
 msgid "Update completed. Restart iac-code to continue."
 msgstr "Mise à jour terminée. Redémarrez iac-code pour continuer."
 
-#: src/iac_code/ui/repl.py:581
+#: src/iac_code/ui/repl.py:582
 msgid "No image in clipboard."
 msgstr "Aucune image dans le presse-papiers."
 
-#: src/iac_code/ui/repl.py:767
+#: src/iac_code/ui/repl.py:768
 msgid "Usage: !<shell command>"
 msgstr "Utilisation : !<commande shell>"
 
-#: src/iac_code/ui/repl.py:774
+#: src/iac_code/ui/repl.py:775
 msgid "Shell command support is unavailable."
 msgstr "La prise en charge des commandes shell n'est pas disponible."
 
-#: src/iac_code/ui/repl.py:844
+#: src/iac_code/ui/repl.py:845
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr ""
 "Compétence inconnue : ${name}. Tapez / pour lister les commandes et les "
 "compétences."
 
-#: src/iac_code/ui/repl.py:846
+#: src/iac_code/ui/repl.py:847
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available commands.Commande "
 "inconnue : /{name}. Saisissez /help pour la liste des commandes."
 
-#: src/iac_code/ui/repl.py:851
+#: src/iac_code/ui/repl.py:852
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ n'invoque que des compétences. Utilisez plutôt /{name}."
 
-#: src/iac_code/ui/repl.py:873 src/iac_code/ui/repl.py:921
+#: src/iac_code/ui/repl.py:874 src/iac_code/ui/repl.py:922
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Erreur de commande : {error}"
 
-#: src/iac_code/ui/repl.py:880
+#: src/iac_code/ui/repl.py:881
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "Aucun gestionnaire pour la commande : {name}"
 
-#: src/iac_code/ui/repl.py:1155
+#: src/iac_code/ui/repl.py:1156
 msgid "Goodbye!"
 msgstr "Au revoir !"
 
-#: src/iac_code/ui/repl.py:1156
+#: src/iac_code/ui/repl.py:1157
 msgid "Resume this session with:"
 msgstr "Pour reprendre cette session :"
 
-#: src/iac_code/ui/repl.py:1159
+#: src/iac_code/ui/repl.py:1160
 msgid "Session ID"
 msgstr "ID de session"
 
-#: src/iac_code/ui/repl.py:1209 src/iac_code/ui/repl.py:1213
+#: src/iac_code/ui/repl.py:1210 src/iac_code/ui/repl.py:1214
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Session introuvable : {session_id}"
 
-#: src/iac_code/ui/repl.py:1262
+#: src/iac_code/ui/repl.py:1263
 msgid "Session name: "
 msgstr "Nom de session : "
 
-#: src/iac_code/ui/repl.py:1268
+#: src/iac_code/ui/repl.py:1269
 msgid "Session name cannot be empty."
 msgstr "Le nom de session ne peut pas être vide."
 
-#: src/iac_code/ui/repl.py:1280
+#: src/iac_code/ui/repl.py:1279
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2451,23 +2451,23 @@ msgstr ""
 "Pour la reprendre, exécutez :\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1286
+#: src/iac_code/ui/repl.py:1283
 msgid "Multiple sessions match. Resume one by ID:"
 msgstr "Plusieurs sessions correspondent. Reprenez-en une par ID :"
 
-#: src/iac_code/ui/repl.py:1401
+#: src/iac_code/ui/repl.py:1396
 msgid "This conversation is from a different directory."
 msgstr "Cette conversation provient d’un autre répertoire."
 
-#: src/iac_code/ui/repl.py:1403
+#: src/iac_code/ui/repl.py:1398
 msgid "To resume, run:"
 msgstr "Pour reprendre, exécutez :"
 
-#: src/iac_code/ui/repl.py:1408
+#: src/iac_code/ui/repl.py:1403
 msgid "(Command copied to clipboard)"
 msgstr "(Commande copiée dans le presse-papiers)"
 
-#: src/iac_code/ui/repl.py:1565
+#: src/iac_code/ui/repl.py:1560
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
@@ -2476,12 +2476,12 @@ msgstr ""
 "Le modèle actuel {model} ne prend pas en charge l’entrée d’image. "
 "Utilisez /model pour passer à un modèle compatible vision."
 
-#: src/iac_code/ui/repl.py:1574
+#: src/iac_code/ui/repl.py:1569
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "Erreur d’image : {err}"
 
-#: src/iac_code/ui/repl.py:1591
+#: src/iac_code/ui/repl.py:1586
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
