@@ -10,6 +10,8 @@ import pytest
 
 from iac_code.acp.mcp import convert_mcp_configs
 from iac_code.acp.server import ACPServer
+from iac_code.services.session_index import SessionEntry
+from iac_code.services.session_resolver import ResolutionStatus, SessionResolution
 
 # ---------------------------------------------------------------------------
 # Helper factories
@@ -232,6 +234,24 @@ class TestNewSessionMcpInjection:
         # that resume_session skips history injection into agent_loop.
         mock_storage_cls.repair_interrupted.return_value = []
         monkeypatch.setattr("iac_code.acp.server.SessionStorage", mock_storage_cls)
+        monkeypatch.setattr(
+            "iac_code.acp.server.resolve_session_argument",
+            lambda index, cwd, arg: SessionResolution(
+                status=ResolutionStatus.FOUND,
+                entry=SessionEntry(
+                    session_id="test-session",
+                    cwd="/tmp",
+                    project_name="-tmp",
+                    git_branch=None,
+                    title="test-session",
+                    mtime=0.0,
+                    size_bytes=0,
+                    name=None,
+                    auto_title=None,
+                    is_legacy=False,
+                ),
+            ),
+        )
 
         sse = _make_sse_server(name="resumed-sse")
         await server.resume_session(cwd="/tmp", session_id="test-session", mcp_servers=[sse])

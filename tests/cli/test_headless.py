@@ -15,6 +15,8 @@ from typer.testing import CliRunner
 from iac_code.cli.headless import EXIT_ERROR, EXIT_MAX_TURNS, EXIT_OK, HeadlessRunner
 from iac_code.cli.output_formats import OutputFormat
 from iac_code.providers.manager import ProviderNotConfiguredError
+from iac_code.skills.frontmatter import SkillFrontmatter
+from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -757,6 +759,10 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
         "iac_code.skills.discovery.skill_to_command",
         lambda skill: SimpleNamespace(name=skill.name),
     )
+    monkeypatch.setattr(
+        "iac_code.skills.management.skill_to_command",
+        lambda skill: SimpleNamespace(name=skill.name),
+    )
     monkeypatch.setattr("iac_code.skills.listing.build_skill_listing", lambda skill_commands: "skill listing")
     monkeypatch.setattr(
         "iac_code.agent.system_prompt.build_system_prompt",
@@ -806,7 +812,12 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
 def test_create_agent_loop_handles_credential_load_failure_and_skill_conflict(monkeypatch):
     runner = _make_runner()
     existing_cmd = {"skill-one": object()}
-    skill = SimpleNamespace(name="skill-one")
+    skill = SkillDefinition(
+        name="skill-one",
+        description="skill-one description",
+        frontmatter=SkillFrontmatter(description="skill-one description"),
+        content="",
+    )
     captured, fake_registry, fake_command_registry = _install_headless_fakes(
         monkeypatch,
         creds=None,

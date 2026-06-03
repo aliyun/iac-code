@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import unicodedata
 from collections.abc import Callable
+from contextlib import contextmanager
+from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
 from urllib.parse import urlparse
 
@@ -102,6 +105,11 @@ _C_RST = "\033[0m"
 _C_BOLD = "\033[1m"
 
 _BACK = _BackSentinel()
+_ALIYUN_EPOCH_FIELDS = {
+    "oauth_access_token_expire",
+    "oauth_refresh_token_expire",
+    "sts_expiration",
+}
 
 
 # ── Data helpers ──────────────────────────────────────────────────────
@@ -799,6 +807,8 @@ async def auth_command(context: "CommandContext | None" = None, **kwargs) -> str
     if context and hasattr(context, "repl") and context.repl:
         repl = context.repl
         repl._reinitialize_provider(repl.store.get_state().model)
+        if hasattr(repl, "refresh_cloud_tools"):
+            repl.refresh_cloud_tools()
 
     return result
 
@@ -1173,29 +1183,245 @@ def _select_with_info(
 
 def _render_credential_info(credential: AliyunCredential, source: str) -> None:
     """Write current credential info lines (called between title and options)."""
-    from iac_code.services.providers.aliyun import MODE_DISPLAY_NAMES, MODE_FIELDS, mask_sensitive
+    from iac_code.services.providers.aliyun import MODE_FIELDS, mask_sensitive
 
     _write("  {}{} ({}){}\n".format(_C_DIM, _("Current configuration"), source, _C_RST))
-    mode_display = _(MODE_DISPLAY_NAMES.get(credential.mode, credential.mode))
+    mode_display = _aliyun_credential_mode_label(credential.mode)
     _write("  {}{}: {}{}\n".format(_C_DIM, _("Mode"), mode_display, _C_RST))
 
     mode_fields = MODE_FIELDS.get(credential.mode, [])
     for field_name, label, sensitive in mode_fields:
-        value = getattr(credential, field_name, "")
-        if value and sensitive:
-            value = mask_sensitive(value)
+        raw_value = getattr(credential, field_name, "")
+        value = _format_aliyun_credential_field_value(field_name, raw_value, sensitive, mask_sensitive)
         display_value = value if value else _("(not set)")
-        _write(f"  {_C_DIM}{label}: {display_value}{_C_RST}\n")
+        _write("  {}{}: {}{}\n".format(_C_DIM, _aliyun_credential_field_label(label), display_value, _C_RST))
 
     _write("  {}{}: {}{}\n".format(_C_DIM, _("Region"), credential.region_id, _C_RST))
     _write("\n")
+
+
+def _aliyun_credential_mode_label(mode: str) -> str:
+    if mode == "AK":
+        return _("AccessKey")
+    if mode == "StsToken":
+        return _("STS Token")
+    if mode == "RamRoleArn":
+        return _("RAM Role")
+    if mode == "OAuth":
+        return _("OAuth Login (Browser)")
+    return mode
+
+
+def _aliyun_credential_field_label(label: str) -> str:
+    translations = {
+        "AccessKey ID": _("AccessKey ID"),
+        "AccessKey Secret": _("AccessKey Secret"),
+        "STS Token": _("STS Token"),
+        "RAM Role ARN": _("RAM Role ARN"),
+        "Session Name": _("Session Name"),
+        "OAuth Site Type": _("OAuth Site Type"),
+        "OAuth Access Token": _("OAuth Access Token"),
+        "OAuth Refresh Token": _("OAuth Refresh Token"),
+        "OAuth Access Token Expire": _("OAuth Access Token Expire"),
+        "OAuth Refresh Token Expire": _("OAuth Refresh Token Expire"),
+        "STS Expiration": _("STS Expiration"),
+    }
+    return translations.get(label, label)
+
+
+def _format_aliyun_credential_field_value(
+    field_name: str,
+    raw_value: object,
+    sensitive: bool,
+    mask_sensitive: Callable[[str], str],
+) -> str:
+    if field_name in _ALIYUN_EPOCH_FIELDS:
+        return _format_local_epoch(raw_value)
+
+    value = str(raw_value) if raw_value not in ("", None) else ""
+    if value and sensitive:
+        value = mask_sensitive(value)
+    return value
+
+
+def _format_local_epoch(raw_value: object) -> str:
+    if raw_value in ("", None):
+        return ""
+
+    if isinstance(raw_value, int):
+        epoch = raw_value
+    elif isinstance(raw_value, str):
+        try:
+            epoch = int(raw_value)
+        except ValueError:
+            return raw_value
+    else:
+        return str(raw_value)
+
+    if epoch <= 0:
+        return ""
+
+    try:
+        dt = datetime.fromtimestamp(epoch).astimezone()
+    except (OSError, OverflowError, ValueError):
+        return str(raw_value)
+
+    display = dt.strftime("%Y-%m-%d %H:%M:%S")
+    offset = dt.strftime("%z")
+    if offset:
+        return "{} (UTC{}:{})".format(display, offset[:3], offset[3:])
+    timezone_name = dt.tzname()
+    if timezone_name:
+        return "{} ({})".format(display, timezone_name)
+    return display
+
+
+@contextmanager
+def _oauth_escape_cancel_event():
+    cancel_event = threading.Event()
+    stop_event = threading.Event()
+    listener: threading.Thread | None = None
+    fd: int | None = None
+    old_terminal_settings = None
+
+    if sys.stdin is None or not sys.stdin.isatty():
+        yield cancel_event
+        return
+
+    if _IS_WIN32:
+        listener = threading.Thread(target=_watch_oauth_escape_win, args=(cancel_event, stop_event), daemon=True)
+    else:
+        import termios
+        import tty
+
+        try:
+            fd = sys.stdin.fileno()
+            old_terminal_settings = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except Exception:
+            yield cancel_event
+            return
+        listener = threading.Thread(target=_watch_oauth_escape_posix, args=(fd, cancel_event, stop_event), daemon=True)
+
+    listener.start()
+    try:
+        yield cancel_event
+    finally:
+        stop_event.set()
+        listener.join(timeout=0.2)
+        if fd is not None and old_terminal_settings is not None:
+            import termios
+
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_terminal_settings)
+
+
+def _watch_oauth_escape_win(cancel_event: threading.Event, stop_event: threading.Event) -> None:
+    try:
+        msvcrt = _get_msvcrt()
+        while not stop_event.wait(0.05):
+            if not msvcrt.kbhit():
+                continue
+            key = msvcrt.getch()[0]
+            if key in (0x00, 0xE0):
+                if msvcrt.kbhit():
+                    msvcrt.getch()
+                continue
+            if key in (3, 27):
+                cancel_event.set()
+                return
+    except (Exception, KeyboardInterrupt):
+        cancel_event.set()
+
+
+def _watch_oauth_escape_posix(fd: int, cancel_event: threading.Event, stop_event: threading.Event) -> None:
+    import select as select_mod
+
+    while not stop_event.is_set():
+        try:
+            ready, _, _ = select_mod.select([fd], [], [], 0.05)
+        except Exception:
+            return
+        if not ready:
+            continue
+
+        try:
+            key = os.read(fd, 1)
+        except OSError:
+            return
+
+        if key == b"\x03":
+            cancel_event.set()
+            return
+        if key != b"\x1b":
+            continue
+
+        # Treat lone Esc as cancel, but consume escape sequences such as arrow keys.
+        try:
+            ready, _, _ = select_mod.select([fd], [], [], 0.03)
+            if ready:
+                os.read(fd, 4096)
+                continue
+        except OSError:
+            return
+
+        cancel_event.set()
+        return
+
+
+def _aliyun_oauth_login_flow(existing_cred: "AliyunCredential | None") -> str | None | _BackSentinel:
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+    from iac_code.services.providers.aliyun_oauth import (
+        AliyunOAuthCancelledError,
+        AliyunOAuthClient,
+        AliyunOAuthError,
+        get_oauth_site,
+        oauth_site_options,
+        run_browser_oauth_flow,
+    )
+
+    site_options = oauth_site_options()
+    site_label_by_type = {
+        "CN": _("China"),
+        "INTL": _("International"),
+    }
+    site_idx = _select(_("Choose site type"), [site_label_by_type[site_type] for site_type, _label in site_options])
+    if site_idx is None:
+        return _BACK
+
+    site_type = site_options[site_idx][0]
+    site = get_oauth_site(site_type)
+    client = AliyunOAuthClient(site)
+
+    try:
+        with _oauth_escape_cancel_event() as cancel_event:
+            token = run_browser_oauth_flow(site_type, oauth_client=client, cancel_event=cancel_event)
+        sts = client.exchange_access_token_for_sts(token.access_token)
+    except AliyunOAuthCancelledError:
+        return _BACK
+    except AliyunOAuthError as exc:
+        return _("Alibaba Cloud OAuth login failed: {error}").format(error=str(exc))
+
+    credential = AliyunCredential(
+        mode="OAuth",
+        region_id=existing_cred.region_id if existing_cred else "cn-hangzhou",
+        oauth_site_type=site_type,
+        oauth_access_token=token.access_token,
+        oauth_refresh_token=token.refresh_token,
+        oauth_access_token_expire=token.access_token_expire,
+        oauth_refresh_token_expire=token.refresh_token_expire,
+        access_key_id=sts.access_key_id,
+        access_key_secret=sts.access_key_secret,
+        sts_token=sts.sts_token,
+        sts_expiration=sts.sts_expiration,
+    )
+    AliyunCredentials.save(credential)
+    return _("Configured: Alibaba Cloud OAuth credentials saved")
 
 
 def _aliyun_credential_flow() -> str | None | _BackSentinel:
     """Configure Aliyun credentials with type selection."""
     from iac_code.services.providers.aliyun import (
         CREDENTIAL_MODES,
-        MODE_DISPLAY_NAMES,
         MODE_FIELDS,
         AliyunCredential,
         AliyunCredentials,
@@ -1222,7 +1448,7 @@ def _aliyun_credential_flow() -> str | None | _BackSentinel:
             # action_idx == 0: continue to reconfigure
 
         # Select credential mode
-        mode_options = [_(MODE_DISPLAY_NAMES[m]) for m in CREDENTIAL_MODES]
+        mode_options = [_aliyun_credential_mode_label(mode) for mode in CREDENTIAL_MODES]
         default_mode_idx = 0
         if existing_cred and existing_cred.mode in CREDENTIAL_MODES:
             default_mode_idx = CREDENTIAL_MODES.index(existing_cred.mode)
@@ -1234,6 +1460,12 @@ def _aliyun_credential_flow() -> str | None | _BackSentinel:
             return _BACK
 
         selected_mode = CREDENTIAL_MODES[mode_idx]
+        if selected_mode == "OAuth":
+            result = _aliyun_oauth_login_flow(existing_cred)
+            if result is _BACK:
+                continue
+            return result
+
         mode_fields = MODE_FIELDS[selected_mode]
 
         # Collect field values

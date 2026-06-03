@@ -32,6 +32,7 @@ class SkillTool(Tool):
         provider_manager: Any = None,
         tool_registry: Any = None,
         system_prompt: str = "",
+        disabled_skills: dict[str, Any] | None = None,
     ) -> None:
         self._command_registry = command_registry
         self._session_id = session_id
@@ -39,6 +40,9 @@ class SkillTool(Tool):
         self._provider_manager = provider_manager
         self._tool_registry = tool_registry
         self._system_prompt = system_prompt
+        self._disabled_skills = {
+            self._normalize_name(name): command for name, command in (disabled_skills or {}).items()
+        }
 
     @property
     def name(self) -> str:
@@ -76,6 +80,9 @@ class SkillTool(Tool):
         args = tool_input.get("args", "")
 
         from iac_code.commands.registry import PromptCommand
+
+        if skill_name in self._disabled_skills:
+            return ToolResult.error(_("Skill '{name}' is disabled. Run /skills to enable it.").format(name=skill_name))
 
         command = self._command_registry.get(skill_name)
         if not isinstance(command, PromptCommand):
@@ -232,6 +239,12 @@ class SkillTool(Tool):
         from iac_code.types.permissions import PermissionResult
 
         skill_name = self._normalize_name(input.get("skill", ""))
+        if skill_name in self._disabled_skills:
+            return PermissionResult(
+                behavior="deny",
+                message=_("Skill disabled: {name}").format(name=skill_name),
+            )
+
         command = self._command_registry.get(skill_name)
         if not isinstance(command, PromptCommand):
             return PermissionResult(behavior="deny", message=f"Skill not found: {skill_name}")

@@ -1,7 +1,7 @@
 """Tests for the commands/registry module."""
 
 from iac_code.commands import create_default_registry
-from iac_code.commands.registry import CommandRegistry, LocalCommand, _subsequence_score
+from iac_code.commands.registry import CommandRegistry, LocalCommand, PromptCommand, _subsequence_score
 
 
 async def dummy_handler(**kwargs):
@@ -190,6 +190,21 @@ class TestCommandRegistry:
         completions = registry.get_completions("m")
         assert completions == ["map", "mark", "model"]
 
+    def test_clear_prompt_commands_preserves_local_commands(self):
+        """Test clearing prompt commands removes skills while preserving built-ins."""
+        registry = CommandRegistry()
+        local = LocalCommand(name="help", description="Help", handler=dummy_handler, aliases=["?"])
+        skill = PromptCommand(name="deploy", description="Deploy", aliases=["d"])
+        registry.register(local)
+        registry.register(skill)
+
+        registry.clear_prompt_commands()
+
+        assert registry.get("help") is local
+        assert registry.get("?") is local
+        assert registry.get("deploy") is None
+        assert registry.get("d") is None
+
 
 class TestCreateDefaultRegistry:
     """Tests for create_default_registry function."""
@@ -199,18 +214,40 @@ class TestCreateDefaultRegistry:
         registry = create_default_registry()
         assert isinstance(registry, CommandRegistry)
 
-    def test_create_default_registry_has_9_commands(self):
-        """Test create_default_registry has 9 commands."""
+    def test_create_default_registry_has_13_commands(self):
+        """Test create_default_registry has 13 commands."""
         registry = create_default_registry()
         all_cmds = registry.get_all()
-        assert len(all_cmds) == 9
+        assert len(all_cmds) == 13
 
     def test_create_default_registry_command_names(self):
         """Test create_default_registry has expected command names."""
         registry = create_default_registry()
         all_cmds = registry.get_all()
         names = {c.name for c in all_cmds}
-        assert names == {"help", "clear", "model", "compact", "exit", "auth", "debug", "effort", "resume"}
+        assert names == {
+            "help",
+            "clear",
+            "model",
+            "compact",
+            "exit",
+            "auth",
+            "debug",
+            "effort",
+            "resume",
+            "memory",
+            "skills",
+            "status",
+            "rename",
+        }
+
+    def test_default_registry_includes_rename(self):
+        """Test rename command metadata."""
+        registry = create_default_registry()
+        rename_cmd = registry.get("rename")
+        assert rename_cmd is not None
+        assert rename_cmd.arg_hint == "<name>"
+        assert rename_cmd.history_mode == "session"
 
     def test_help_command_has_alias(self):
         """Test help command has ? alias."""

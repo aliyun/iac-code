@@ -78,6 +78,17 @@ class TestSkillTool:
         assert "not found" in result.content.lower()
 
     @pytest.mark.asyncio
+    async def test_execute_disabled_skill_returns_disabled_error(self):
+        registry = CommandRegistry()
+        tool = SkillTool(command_registry=registry, disabled_skills={"demo": object()})
+
+        result = await tool.execute(tool_input={"skill": "demo"}, context=ToolContext())
+
+        assert result.is_error
+        assert "disabled" in result.content.lower()
+        assert "/skills" in result.content
+
+    @pytest.mark.asyncio
     async def test_execute_with_args(self):
         registry = _make_registry_with_skill(content="Process $ARGUMENTS")
         tool = SkillTool(command_registry=registry)
@@ -236,6 +247,16 @@ class TestSkillToolPermissions:
 
         result = await tool.check_permissions({"skill": "nonexistent"})
         assert result.behavior == "deny"
+
+    @pytest.mark.asyncio
+    async def test_disabled_skill_denied(self):
+        registry = CommandRegistry()
+        tool = SkillTool(command_registry=registry, disabled_skills={"demo": object()})
+
+        result = await tool.check_permissions({"skill": "demo"})
+
+        assert result.behavior == "deny"
+        assert "disabled" in result.message.lower()
 
     @pytest.mark.asyncio
     async def test_permission_message_includes_project_source(self):

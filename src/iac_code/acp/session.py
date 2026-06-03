@@ -165,9 +165,11 @@ class ACPSession:
         conn: acp.Client,
         mcp_configs: list[dict] | None = None,
         metrics: ACPMetrics | None = None,
+        memory_manager=None,
     ) -> None:
         self.id = session_id
         self.agent_loop = agent_loop
+        self.memory_manager = memory_manager
         self._conn = conn
         self._current_task: asyncio.Task | None = None
         self._replay_task: asyncio.Task[None] | None = None
@@ -292,7 +294,11 @@ class ACPSession:
         prompt_text = acp_blocks_to_prompt_text(prompt)
         slash_registry = ACPSlashRegistry()
         if slash_registry.is_slash_command(prompt_text):
-            result = await slash_registry.execute(prompt_text, self.agent_loop)
+            result = await slash_registry.execute(
+                prompt_text,
+                self.agent_loop,
+                memory_manager=self.memory_manager,
+            )
             await self._conn.session_update(
                 session_id=self.id,
                 update=acp.schema.AgentMessageChunk(

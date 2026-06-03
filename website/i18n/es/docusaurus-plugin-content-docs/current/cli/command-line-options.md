@@ -16,7 +16,7 @@ Las opciones de línea de comandos cambian cómo se inicia IaC Code. Úselas ant
 | `--output-format <format>` | Establecer el formato de salida para el modo no interactivo. Los valores soportados son `text`, `json` y `stream-json`. El valor predeterminado es `text`. |
 | `--max-turns <number>` | Limitar el número máximo de turnos del agente en modo no interactivo. El valor predeterminado es `100`. |
 | `-d`, `--debug` | Habilitar el registro de depuración para la ejecución actual. En modo interactivo, use `/debug` para inspeccionar o cambiar el registro de depuración después del inicio. |
-| `-r <session-id>`, `--resume <session-id>` | Reanudar una sesión anterior por ID. Esto es para volver a una conversación conocida. |
+| `-r <id-o-nombre-de-sesion>`, `--resume <id-o-nombre-de-sesion>` | Reanudar una sesión anterior por ID exacto, prefijo único de ID o nombre único de sesión. Las sesiones resueltas en otro proyecto imprimen un comando `cd ... && iac-code --resume <id>` en lugar de cambiar en caliente el proyecto actual. |
 | `-c`, `--continue` | Reanudar la sesión más reciente. No se puede usar junto con `--resume`. |
 | `--allowed-tools <patterns>` | Patrones de permisos de herramientas separados por comas para permitir, ej. `'bash(git *),write_file'`. |
 | `--disallowed-tools <patterns>` | Patrones de permisos de herramientas separados por comas para denegar, ej. `'bash(rm *)'`. |

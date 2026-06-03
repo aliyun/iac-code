@@ -14,7 +14,10 @@ from iac_code.services.session_index import (
     extract_last_json_string_field,
     read_lite_metadata,
 )
+from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.session_usage import SessionUsageStore
+from iac_code.types.stream_events import Usage
 
 # ---------------------------------------------------------------------------
 # Field extraction helpers
@@ -108,6 +111,77 @@ class TestSessionIndex:
         ids = {e.session_id for e in index.list_all_projects()}
         assert ids == {"id-a", "id-b"}
 
+    def test_list_all_projects_includes_legacy_sessions(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        legacy_path = storage.legacy_session_path("/legacy", "legacy-id")
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text('{"role":"user","content":"old","cwd":"/legacy"}\n', encoding="utf-8")
+
+        index = SessionIndex(projects_dir=tmp_path)
+        entries = index.list_all_projects()
+
+        assert [(e.session_id, e.cwd, e.title) for e in entries] == [("legacy-id", "/legacy", "old")]
+
+    def test_directory_session_metadata_name_takes_precedence(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append("/p", "named", Message(role="user", content="first prompt"), git_branch=None)
+        storage.rename_session("/p", "named", "deploy-prod", git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.session_id == "named"
+        assert entry.name == "deploy-prod"
+        assert entry.title == "deploy-prod"
+        assert entry.auto_title == "first prompt"
+        assert entry.is_legacy is False
+
+    def test_legacy_session_still_indexed(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        legacy_path = storage.legacy_session_path("/legacy", "legacy")
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text('{"role":"user","content":"old","cwd":"/legacy"}\n', encoding="utf-8")
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/legacy")[0]
+
+        assert entry.session_id == "legacy"
+        assert entry.name is None
+        assert entry.title == "old"
+        assert entry.is_legacy is True
+
+    def test_directory_session_ignores_stale_metadata_session_id(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append("/p", "actual", Message(role="user", content="first prompt"), git_branch=None)
+        storage.rename_session("/p", "actual", "deploy-prod", git_branch=None)
+        write_session_metadata(
+            storage.session_dir("/p", "actual"),
+            SessionMetadata(session_id="stale", name="copied-name", cwd="/p", git_branch=None),
+        )
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.session_id == "actual"
+        assert entry.name is None
+        assert entry.title == "first prompt"
+        assert entry.auto_title == "first prompt"
+        assert entry.is_legacy is False
+
+    def test_duplicate_legacy_and_directory_session_id_prefers_directory(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        legacy_path = storage.legacy_session_path("/p", "same")
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text('{"role":"user","content":"legacy","cwd":"/p"}\n', encoding="utf-8")
+
+        session_dir = storage.session_dir("/p", "same")
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / SESSION_JSONL_FILENAME).write_text(
+            '{"role":"user","content":"directory","cwd":"/p"}\n',
+            encoding="utf-8",
+        )
+
+        entries = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")
+
+        assert [(entry.session_id, entry.title, entry.is_legacy) for entry in entries] == [("same", "directory", False)]
+
     def test_list_sorted_by_mtime_desc(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
         storage.append("/p", "older", Message(role="user", content="o"), git_branch=None)
@@ -143,3 +217,16 @@ class TestSessionIndex:
         index = SessionIndex(projects_dir=tmp_path)
         entry = index.find_by_id_or_prefix("abc")
         assert entry is not None and entry.session_id == "abc"
+
+    def test_ignores_usage_sidecars(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        usage_store = SessionUsageStore(projects_dir=tmp_path)
+        storage.append("/p", "abc", Message(role="user", content="x"), git_branch=None)
+        usage_store.append("/p", "abc", Usage(input_tokens=10, output_tokens=5), provider="dashscope", model="qwen")
+
+        index = SessionIndex(projects_dir=tmp_path)
+
+        assert [entry.session_id for entry in index.list_for_cwd("/p")] == ["abc"]
+        assert {entry.session_id for entry in index.list_all_projects()} == {"abc"}
+        assert index.find_by_id_or_prefix("abc").session_id == "abc"
+        assert index.find_by_id_or_prefix("abc.usage") is None

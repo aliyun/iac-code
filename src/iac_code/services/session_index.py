@@ -14,7 +14,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from iac_code.utils.project_paths import get_project_dir, get_projects_dir, sanitize_path
+from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, read_session_metadata
+from iac_code.utils.project_paths import (
+    get_project_dir,
+    get_projects_dir,
+    is_conversation_session_file,
+    sanitize_path,
+)
 
 LITE_READ_BUF_SIZE = 64 * 1024
 
@@ -36,6 +42,9 @@ class SessionEntry:
     title: str
     mtime: float
     size_bytes: int
+    name: str | None = None
+    auto_title: str | None = None
+    is_legacy: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -199,23 +208,45 @@ def _trim_title(text: str, max_len: int = 200) -> str:
     return flat[:max_len].rstrip() + "…"
 
 
-def _build_entry(path: Path, fallback_cwd: str) -> SessionEntry | None:
+def _iter_session_files(project_dir: Path) -> list[tuple[Path, str]]:
+    files_by_session_id = {
+        jsonl.stem: jsonl for jsonl in project_dir.glob("*.jsonl") if is_conversation_session_file(jsonl)
+    }
+    for session_dir in project_dir.iterdir():
+        if not session_dir.is_dir():
+            continue
+        jsonl = session_dir / SESSION_JSONL_FILENAME
+        if jsonl.exists():
+            files_by_session_id[session_dir.name] = jsonl
+    return [(jsonl, session_id) for session_id, jsonl in files_by_session_id.items()]
+
+
+def _build_entry(path: Path, fallback_cwd: str, session_id: str | None = None) -> SessionEntry | None:
     try:
         stat = path.stat()
     except OSError:
         return None
-    meta = read_lite_metadata(path)
-    cwd = meta.cwd or fallback_cwd
-    title_raw = meta.last_prompt or meta.first_prompt or ""
-    title = _trim_title(title_raw) if title_raw else "(empty)"
+    lite_meta = read_lite_metadata(path)
+    path_session_id = session_id or path.stem
+    directory_metadata = read_session_metadata(path.parent) if path.name == SESSION_JSONL_FILENAME else None
+    if directory_metadata and directory_metadata.session_id != path_session_id:
+        directory_metadata = None
+    name = directory_metadata.name if directory_metadata else None
+    auto_title_raw = lite_meta.last_prompt or lite_meta.first_prompt
+    auto_title = _trim_title(auto_title_raw) if auto_title_raw else None
+    cwd = (directory_metadata.cwd if directory_metadata else None) or lite_meta.cwd or fallback_cwd
+    title = name or auto_title or "(empty)"
     return SessionEntry(
-        session_id=path.stem,
+        session_id=path_session_id,
         cwd=cwd,
         project_name=os.path.basename(cwd) if cwd else "?",
-        git_branch=meta.git_branch,
+        git_branch=(directory_metadata.git_branch if directory_metadata else None) or lite_meta.git_branch,
         title=title,
         mtime=stat.st_mtime,
         size_bytes=stat.st_size,
+        name=name,
+        auto_title=auto_title,
+        is_legacy=path.name != SESSION_JSONL_FILENAME,
     )
 
 
@@ -238,8 +269,8 @@ class SessionIndex:
         if not project_dir.exists():
             return []
         entries: list[SessionEntry] = []
-        for jsonl in project_dir.glob("*.jsonl"):
-            entry = _build_entry(jsonl, fallback_cwd=cwd)
+        for jsonl, session_id in _iter_session_files(project_dir):
+            entry = _build_entry(jsonl, fallback_cwd=cwd, session_id=session_id)
             if entry is not None:
                 entries.append(entry)
         entries.sort(key=lambda e: e.mtime, reverse=True)
@@ -253,8 +284,8 @@ class SessionIndex:
         for proj_dir in self._projects_dir.iterdir():
             if not proj_dir.is_dir():
                 continue
-            for jsonl in proj_dir.glob("*.jsonl"):
-                entry = _build_entry(jsonl, fallback_cwd="")
+            for jsonl, session_id in _iter_session_files(proj_dir):
+                entry = _build_entry(jsonl, fallback_cwd="", session_id=session_id)
                 if entry is not None:
                     entries.append(entry)
         entries.sort(key=lambda e: e.mtime, reverse=True)
@@ -264,18 +295,11 @@ class SessionIndex:
         """Locate a single entry by exact session id or unique id prefix."""
         if not self._projects_dir.exists() or not arg:
             return None
-        matches: list[SessionEntry] = []
-        for proj_dir in self._projects_dir.iterdir():
-            if not proj_dir.is_dir():
-                continue
-            for jsonl in proj_dir.glob("*.jsonl"):
-                sid = jsonl.stem
-                if sid == arg:
-                    return _build_entry(jsonl, fallback_cwd="")
-                if sid.startswith(arg):
-                    entry = _build_entry(jsonl, fallback_cwd="")
-                    if entry is not None:
-                        matches.append(entry)
+        entries = self.list_all_projects()
+        for entry in entries:
+            if entry.session_id == arg:
+                return entry
+        matches = [entry for entry in entries if entry.session_id.startswith(arg)]
         if len(matches) == 1:
             return matches[0]
         return None

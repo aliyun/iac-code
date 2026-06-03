@@ -89,6 +89,14 @@ paths:
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
 
+## Skills verwalten
+
+Führen Sie `/skills` im interaktiven REPL aus, um die Skill-Verwaltungsauswahl zu öffnen. Die Auswahl zeigt gefundene gebündelte, Benutzer- und Projekt-Skills mit Quelle, Größe und Aktivierungsstatus. Sie können nach Name oder Beschreibung suchen, nach Name/Quelle/Größe sortieren und Benutzer- oder Projekt-Skills ein- und ausschalten.
+
+Deaktivierte Skills werden in `settings.yml` unter `disabled_skills` gespeichert. Gebündelte Skills sind fest aktiviert und werden nicht in die Deaktivierungsliste geschrieben.
+
+Verwenden Sie `$<skill-name>`, wenn Autovervollständigung und Aufruf nur auf Skills zielen sollen. Das ist nützlich, wenn ein Skill-Name sich mit normalem Text überschneidet oder wenn Sie eingebaute Slash-Befehle vermeiden möchten.
+
 ## Execution Modes
 
 ### Inline (default)
@@ -188,3 +196,4 @@ Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md
 - **Bundled skills** are always allowed automatically.
 - **User/project skills** with no shell commands and no `allowed_tools` are auto-allowed.
 - **Other skills** prompt for user confirmation on first use.
+- **Deaktivierte Benutzer-/Projekt-Skills** werden aus modell-sichtbaren Skill-Listen und automatischen Triggern ausgeblendet; direkte `skill`-Tool-Aufrufe geben einen Fehler für deaktivierte Skills zurück.

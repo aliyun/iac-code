@@ -89,6 +89,14 @@ paths:
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
 
+## Gérer les compétences
+
+Exécutez `/skills` dans le REPL interactif pour ouvrir le sélecteur de gestion des compétences. Le sélecteur affiche les compétences intégrées, utilisateur et projet détectées, avec leur source, leur taille et leur état d'activation. Vous pouvez rechercher par nom ou description, trier par nom/source/taille, et activer ou désactiver les compétences utilisateur ou projet.
+
+Les compétences désactivées sont enregistrées dans `settings.yml` sous `disabled_skills`. Les compétences intégrées restent verrouillées comme activées et ne sont pas écrites dans la liste des désactivations.
+
+Utilisez `$<skill-name>` lorsque vous voulez limiter l'autocomplétion et l'appel aux compétences uniquement. C'est utile lorsqu'un nom de compétence recoupe du texte ordinaire ou lorsque vous voulez éviter les commandes slash intégrées.
+
 ## Execution Modes
 
 ### Inline (default)
@@ -188,3 +196,4 @@ Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md
 - **Bundled skills** are always allowed automatically.
 - **User/project skills** with no shell commands and no `allowed_tools` are auto-allowed.
 - **Other skills** prompt for user confirmation on first use.
+- **Les compétences utilisateur/projet désactivées** sont masquées des listes visibles par le modèle et des déclencheurs automatiques ; les appels directs à l'outil `skill` renvoient une erreur de compétence désactivée.

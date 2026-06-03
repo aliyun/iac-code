@@ -195,12 +195,13 @@ class RosStackInstances(Tool):
             await asyncio.sleep(self.__class__.poll_interval)
 
             try:
-                status = await self._get_operation_status(client, operation_id, region)
+                poll_client = self._get_client(region)
+                status = await self._get_operation_status(poll_client, operation_id, region)
             except Exception as e:
                 return ToolResult.error(f"[GetStackGroupOperation] {e}")
 
             try:
-                instances = await self._get_instances(client, stack_group_name, region)
+                instances = await self._get_instances(poll_client, stack_group_name, region)
             except Exception as e:
                 return ToolResult.error(f"[ListStackInstances] {e}")
 

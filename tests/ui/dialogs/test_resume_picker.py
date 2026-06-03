@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import io
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from rich.console import Console as RichConsole
 
 from iac_code.agent.message import Message
-from iac_code.services.session_index import SessionIndex
+from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.services.session_storage import SessionStorage
 from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.dialogs.resume_picker import (
@@ -52,6 +52,23 @@ def _make_renderer():
     return Renderer(scratch, registry)
 
 
+def _entry(**overrides) -> SessionEntry:
+    defaults = dict(
+        session_id="1234567890abcdef",
+        cwd="/proj/a",
+        project_name="a",
+        git_branch="main",
+        title="deploy-prod",
+        mtime=time.time(),
+        size_bytes=42,
+        name=None,
+        auto_title="create vpc resources",
+        is_legacy=False,
+    )
+    defaults.update(overrides)
+    return SessionEntry(**defaults)
+
+
 class TestResumePickerLoad:
     def test_default_view_is_current_cwd(self, picker):
         ids = [e.session_id for e in picker._all_entries]
@@ -69,6 +86,43 @@ class TestResumePickerLoad:
             )
         ids = [e.session_id for e in p._all_entries]
         assert ids == ["id-aa"]
+
+    def test_supplied_entries_are_used_without_index_reload(self):
+        index = MagicMock()
+        index.list_for_cwd = MagicMock(side_effect=AssertionError("should not reload from index"))
+        index.list_all_projects = MagicMock(side_effect=AssertionError("should not reload from index"))
+        entries = [
+            _entry(session_id="candidate-a"),
+            _entry(session_id="current-session"),
+            _entry(session_id="candidate-b"),
+        ]
+
+        with patch("iac_code.ui.dialogs.resume_picker.get_git_branch", return_value=None):
+            p = ResumePicker(
+                index=index,
+                current_cwd="/proj/a",
+                current_session_id="current-session",
+                entries=entries,
+            )
+
+        assert [entry.session_id for entry in p._all_entries] == ["candidate-a", "candidate-b"]
+
+    def test_supplied_entries_are_not_reloaded_when_toggling_all_projects(self):
+        index = MagicMock()
+        index.list_for_cwd = MagicMock(side_effect=AssertionError("should not reload from index"))
+        index.list_all_projects = MagicMock(side_effect=AssertionError("should not reload from index"))
+        entries = [_entry(session_id="candidate-a")]
+
+        with patch("iac_code.ui.dialogs.resume_picker.get_git_branch", return_value=None):
+            p = ResumePicker(
+                index=index,
+                current_cwd="/proj/a",
+                current_session_id=None,
+                entries=entries,
+            )
+        p.handle_key(KeyEvent(key="a", char="\x01", ctrl=True))
+
+        assert [entry.session_id for entry in p._all_entries] == ["candidate-a"]
 
 
 class TestResumePickerKeys:
@@ -193,6 +247,29 @@ class TestResumePickerKeys:
         ids = [e.session_id for e in picker._filtered]
         assert ids == ["id-aa"]
 
+    def test_search_matches_name_session_id_auto_title_project_and_branch(self, two_session_index):
+        entries = [
+            _entry(
+                session_id="session-by-id",
+                project_name="networking",
+                git_branch="feature-branch",
+                title="title text",
+                name="named-session",
+                auto_title="auto title text",
+            )
+        ]
+        for query in ("named", "session-by-id", "title", "auto", "networking", "feature"):
+            with patch("iac_code.ui.dialogs.resume_picker.get_git_branch", return_value=None):
+                p = ResumePicker(
+                    index=two_session_index,
+                    current_cwd="/proj/a",
+                    current_session_id=None,
+                    entries=entries,
+                )
+            for ch in query:
+                p.handle_key(KeyEvent(key=ch, char=ch))
+            assert [entry.session_id for entry in p._filtered] == ["session-by-id"]
+
     def test_down_arrow_moves_focus(self, picker):
         assert len(picker._filtered) >= 2
         starting = picker._focused_index
@@ -215,6 +292,13 @@ class TestResumePickerRender:
                 current_session_id=None,
             )
         p.render()
+
+    def test_named_subtitle_includes_short_session_id(self):
+        entry = _entry(session_id="1234567890abcdef", name="deploy-prod", title="deploy-prod")
+        subtitle = ResumePicker._render_subtitle_line(entry).plain
+
+        assert "12345678" in subtitle
+        assert "123456789" not in subtitle
 
 
 class TestResumePickerPreviewDraw:

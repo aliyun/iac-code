@@ -85,7 +85,12 @@ def _get_provider_display() -> str:
         return ""
 
 
-def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -> Panel:
+def render_welcome_banner(
+    model: str,
+    cwd: str,
+    session_id: str | None = None,
+    session_name: str | None = None,
+) -> Panel:
     """Produce a Rich Panel for the welcome banner."""
     # Username
     try:
@@ -126,6 +131,14 @@ def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -
 
     from iac_code import __version__
 
+    session_display: Text
+    if session_name and session_id:
+        session_display = Text("  {}: {} ({})".format(_("Session"), session_name, session_id), style="dim")
+    elif session_id:
+        session_display = Text("  {}: {}".format(_("Session"), session_id), style="dim")
+    else:
+        session_display = Text()
+
     items = [
         Text(),
         Text("  {} {}!".format(_("Welcome back"), username), style="bold"),
@@ -135,7 +148,7 @@ def render_welcome_banner(model: str, cwd: str, session_id: str | None = None) -
         Text(f"  iac-code v{__version__}", style="dim"),
         Text(f"  {model_display}", style="dim") if model_display else Text(),
         Text(f"  {cwd_display}", style="dim"),
-        Text("  {}: {}".format(_("Session"), session_id), style="dim") if session_id else Text(),
+        session_display,
     ]
 
     from iac_code.utils.log import is_debug_enabled

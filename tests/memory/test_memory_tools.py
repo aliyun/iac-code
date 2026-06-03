@@ -143,3 +143,10 @@ class TestWriteMemoryTool:
 
     async def test_is_read_only(self):
         assert WriteMemoryTool(FakeMemoryManager()).is_read_only() is False
+
+    async def test_description_guides_explicit_remember_requests(self):
+        description = WriteMemoryTool(FakeMemoryManager()).description
+
+        assert "explicitly asks" in description
+        assert "remember" in description
+        assert "concise" in description

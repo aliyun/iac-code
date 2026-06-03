@@ -44,8 +44,10 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     from iac_code.services.cloud_credentials import CloudCredentials
     from iac_code.services.session_storage import SessionStorage
     from iac_code.skills.bundled import init_bundled_skills
-    from iac_code.skills.discovery import discover_all_skills, skill_to_command
+    from iac_code.skills.discovery import discover_all_skills
     from iac_code.skills.listing import build_skill_listing
+    from iac_code.skills.management import build_skill_management_state
+    from iac_code.skills.settings import load_disabled_skills
     from iac_code.skills.skill_tool import SkillTool
     from iac_code.tasks.notification_queue import NotificationQueue
     from iac_code.tasks.task_state import TaskManager
@@ -123,8 +125,8 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
 
     init_bundled_skills()
     command_registry = create_default_registry()
-    for skill in discover_all_skills(cwd):
-        cmd = skill_to_command(skill)
+    skill_state = build_skill_management_state(discover_all_skills(cwd), load_disabled_skills())
+    for cmd in skill_state.enabled_commands:
         existing = command_registry.get(cmd.name)
         if existing is not None and not isinstance(existing, PromptCommand):
             logger.warning("Skill '{}' skipped: conflicts with built-in command", cmd.name)
@@ -139,6 +141,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             provider_manager=provider_manager,
             tool_registry=tool_registry,
             system_prompt=base_system_prompt,
+            disabled_skills=skill_state.disabled_commands,
         )
     )
 

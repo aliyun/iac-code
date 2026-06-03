@@ -16,10 +16,12 @@ import asyncio
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from types import ModuleType
+from typing import Any
 
 from loguru import logger
 from rich.console import Console
@@ -27,12 +29,15 @@ from rich.console import Console
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.system_prompt import build_system_prompt
 from iac_code.commands import create_default_registry
-from iac_code.commands.registry import LocalCommand, PromptCommand
-from iac_code.config import get_config_dir, get_history_path, load_credentials
+from iac_code.commands.registry import CommandResult, LocalCommand, PromptCommand
+from iac_code.config import get_active_provider_key, get_config_dir, get_history_path, load_credentials
 from iac_code.i18n import _
 from iac_code.memory.memory_manager import MemoryManager
 from iac_code.providers.manager import ProviderManager
+from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.services.session_index import SessionIndex
+from iac_code.services.session_metadata import normalize_session_name
+from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.update_checker import (
     PendingUpdate,
@@ -41,6 +46,7 @@ from iac_code.services.update_checker import (
     start_background_update_check,
     suppress_version,
 )
+from iac_code.skills.settings import normalize_skill_name
 from iac_code.state import AppStateStore
 from iac_code.state.app_state import AppState
 from iac_code.tasks.notification_queue import NotificationQueue
@@ -61,6 +67,7 @@ from iac_code.ui.suggestions.skill_provider import SkillProvider
 from iac_code.utils.background_housekeeping import start_background_housekeeping
 from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipboard, try_read_image_from_path
 from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
+from iac_code.utils.project_paths import format_resume_command, same_project_path
 
 termios: ModuleType | None
 try:
@@ -84,6 +91,14 @@ class CommandContext:
     repl: "InlineREPL"
 
 
+def _normalize_command_result(result: object) -> tuple[str, bool, bool]:
+    if result is None:
+        return "", False, False
+    if isinstance(result, CommandResult):
+        return result.message, result.is_error, result.refresh_banner
+    return str(result), False, False
+
+
 class InlineREPL:
     """Inline terminal REPL integrating all subsystems."""
 
@@ -105,10 +120,7 @@ class InlineREPL:
         self.command_registry = create_default_registry()
         self.tool_registry = ToolRegistry()
         self.tool_registry.register_default_tools()
-        from iac_code.services.cloud_credentials import CloudCredentials
-        from iac_code.tools.cloud.registry import register_cloud_tools
-
-        register_cloud_tools(self.tool_registry, CloudCredentials())
+        self.refresh_cloud_tools()
         self._current_model = model
         from iac_code.config import load_active_provider_config
 
@@ -128,10 +140,12 @@ class InlineREPL:
         self._session_storage = SessionStorage()
         self.session_index = SessionIndex()
         self._session_id = self._resolve_session_id(resume_session_id)
+        self._was_resumed = resume_session_id is not None
         from iac_code.utils.image.store import ImageStore
 
         self._image_store = ImageStore(session_id=self._session_id)
         self._resume_messages = self._load_resume_messages(resume_session_id)
+        self._session_name = self._load_current_session_name()
         self._task_manager = TaskManager()
         self._notification_queue = NotificationQueue()
         self._command_log: list[tuple[str, str, int, bool]] = []
@@ -163,45 +177,10 @@ class InlineREPL:
         self.tool_registry.register(TaskGetTool(self._task_manager))
         self.tool_registry.register(TaskStopTool(self._task_manager))
 
-        # === Skill system initialization ===
-        from iac_code.skills.bundled import init_bundled_skills
-        from iac_code.skills.discovery import discover_all_skills, skill_to_command
-        from iac_code.skills.listing import build_skill_listing
-        from iac_code.skills.skill_tool import SkillTool
-
-        # 1. Initialize bundled skills (once)
-        init_bundled_skills()
-
-        # 2. Discover all skills and register to unified CommandRegistry
         cwd = os.getcwd()
-        all_skills = discover_all_skills(cwd)
-        for skill in all_skills:
-            cmd = skill_to_command(skill)
-            existing = self.command_registry.get(cmd.name)
-            if existing is not None and not isinstance(existing, PromptCommand):
-                logger.warning(
-                    "Skill '%s' (source=%s) skipped: conflicts with built-in command",
-                    cmd.name,
-                    cmd.source,
-                )
-                continue
-            self.command_registry.register(cmd)
-
-        # 3. Register SkillTool
-        self.tool_registry.register(
-            SkillTool(
-                command_registry=self.command_registry,
-                session_id=self._session_id,
-                cwd=cwd,
-                provider_manager=self._provider_manager,
-                tool_registry=self.tool_registry,
-                system_prompt=build_system_prompt(cwd=cwd, memory_content=memory_content),
-            )
-        )
-
-        # 4. Generate skill listing for system prompt
+        self._memory_content = memory_content
+        self.refresh_skills()
         skill_commands = self.command_registry.get_model_invocable_skills()
-        self._skill_listing = build_skill_listing(skill_commands)
 
         from iac_code.services.permissions.loader import load_permission_context
 
@@ -248,7 +227,7 @@ class InlineREPL:
         cwd = os.getcwd()
         self._suggestion_aggregator = SuggestionAggregator(
             [
-                CommandProvider(self.command_registry),
+                CommandProvider(self.command_registry, memory_manager=self._memory_manager),
                 SkillProvider(self.command_registry),
                 FileProvider(cwd),
                 DirectoryProvider(cwd),
@@ -275,6 +254,79 @@ class InlineREPL:
     # Public entry-point
     # ------------------------------------------------------------------
 
+    @property
+    def skill_management_items(self):
+        """Return all discovered skills with management state."""
+        return getattr(self, "_skill_management_items", [])
+
+    @property
+    def locked_skill_names(self):
+        """Return skill names that cannot be disabled."""
+        return getattr(self, "_locked_skill_names", set())
+
+    def refresh_cloud_tools(self) -> None:
+        """Register cloud tools that are available with current cloud credentials."""
+        from iac_code.services.cloud_credentials import CloudCredentials
+        from iac_code.tools.cloud.registry import register_cloud_tools
+
+        register_cloud_tools(self.tool_registry, CloudCredentials())
+
+    def refresh_skills(self) -> None:
+        """Rediscover skills and refresh enabled/disabled skill state."""
+        from iac_code.skills.bundled import init_bundled_skills
+        from iac_code.skills.discovery import discover_all_skills
+        from iac_code.skills.listing import build_skill_listing
+        from iac_code.skills.management import build_skill_management_state
+        from iac_code.skills.settings import load_disabled_skills
+        from iac_code.skills.skill_tool import SkillTool
+
+        init_bundled_skills()
+        cwd = os.getcwd()
+        all_skills = discover_all_skills(cwd)
+        state = build_skill_management_state(all_skills, load_disabled_skills())
+        self._skill_management_items = state.items
+        self._disabled_skill_commands = state.disabled_commands
+        self._locked_skill_names = state.locked_skill_names
+
+        self.command_registry.clear_prompt_commands()
+        for cmd in state.enabled_commands:
+            existing = self.command_registry.get(cmd.name)
+            if existing is not None and not isinstance(existing, PromptCommand):
+                logger.warning(
+                    "Skill '%s' (source=%s) skipped: conflicts with built-in command",
+                    cmd.name,
+                    cmd.source,
+                )
+                continue
+            self.command_registry.register(cmd)
+
+        memory_content = getattr(self, "_memory_content", "")
+        self.tool_registry.register(
+            SkillTool(
+                command_registry=self.command_registry,
+                disabled_skills=self._disabled_skill_commands,
+                session_id=self._session_id,
+                cwd=cwd,
+                provider_manager=self._provider_manager,
+                tool_registry=self.tool_registry,
+                system_prompt=build_system_prompt(cwd=cwd, memory_content=memory_content),
+            )
+        )
+
+        skill_commands = self.command_registry.get_model_invocable_skills()
+        self._skill_listing = build_skill_listing(skill_commands)
+
+        if hasattr(self, "_agent_loop"):
+            self._agent_loop.set_auto_trigger_skills(skill_commands)
+            self._agent_loop.set_provider(
+                self._provider_manager,
+                system_prompt=build_system_prompt(
+                    cwd=cwd,
+                    memory_content=memory_content,
+                    skill_listing=self._skill_listing,
+                ),
+            )
+
     async def run(self, initial_prompt: str | None = None) -> None:
         """Run the REPL until the user exits.
 
@@ -289,7 +341,9 @@ class InlineREPL:
         state = self.store.get_state()
         if startup_update is not None:
             self.console.print(render_update_notice(startup_update))
-        self.console.print(render_welcome_banner(state.model, state.cwd, session_id=self._session_id))
+        self.console.print(
+            render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
+        )
         if self._resume_messages:
             self.renderer.replay_history(self._resume_messages)
             self.console.print()  # blank line before first new user turn
@@ -427,11 +481,7 @@ class InlineREPL:
                 except (termios.error, OSError, ValueError):
                     pass
 
-        from rich.text import Text
-
-        self.console.print("[dim]{}[/dim]".format(_("Goodbye!")))
-        self.console.print(Text(_("Resume this session with:"), style="dim"))
-        self.console.print(Text(f"iac-code --resume {self._session_id}", style="dim"))
+        self._print_exit_text()
 
     async def run_once(self, prompt: str) -> None:
         """Process a single prompt and exit (non-interactive mode)."""
@@ -715,12 +765,16 @@ class InlineREPL:
         """Execute a local shell command from a leading ! REPL input."""
         command = user_input[1:].strip()
         if not command:
-            self.renderer.print_system_message(_("Usage: !<shell command>"), style="yellow")
+            message = _("Usage: !<shell command>")
+            self._record_command_log(user_input, message, is_error=True)
+            self.renderer.print_system_message(message, style="yellow")
             return
 
         tool = self.tool_registry.get("bash")
         if tool is None:
-            self.renderer.print_system_message(_("Shell command support is unavailable."), style="red")
+            message = _("Shell command support is unavailable.")
+            self._record_command_log(user_input, message, is_error=True)
+            self.renderer.print_system_message(message, style="red")
             return
 
         tool_input = {"command": command}
@@ -740,6 +794,8 @@ class InlineREPL:
         output = result.content.rstrip()
         if output:
             self.renderer.print_system_message(output, style="red" if result.is_error else "white")
+        log_result = f"$ {command}" if not output else f"$ {command}\n{output}"
+        self._record_command_log(user_input, log_result, is_error=result.is_error)
 
     async def _request_shell_escape_permission(self, tool, tool_input: dict) -> bool:
         """Check permission for a display-only shell escape before execution."""
@@ -778,11 +834,13 @@ class InlineREPL:
         cmd = self.command_registry.get(name)
 
         def _emit_error(message: str) -> None:
-            msg_count = len(self._agent_loop.context_manager.get_messages())
-            self._command_log.append((user_input, message, msg_count, True))
+            self._record_command_log(user_input, message, is_error=True)
             self.renderer.print_system_message(message, style="red")
 
         if cmd is None:
+            if is_skill_trigger and normalize_skill_name(name) in getattr(self, "_disabled_skill_commands", {}):
+                _emit_error(_("Skill '{name}' is disabled. Run /skills to enable it.").format(name=name))
+                return
             if is_skill_trigger:
                 _emit_error(_("Unknown skill: ${name}. Type / to list commands and skills.").format(name=name))
             else:
@@ -843,17 +901,20 @@ class InlineREPL:
                         self.store.set_state(is_busy=False)
                 else:
                     result = await handler_call
-                if result:
-                    msg_count = len(self._agent_loop.context_manager.get_messages())
-                    self._command_log.append((user_input, result, msg_count, False))
+                result_message, is_error, refresh_banner = _normalize_command_result(result)
+                if result_message:
+                    self._record_command_log(user_input, result_message, is_error=is_error)
                 # Re-render banner when model/provider actually switched
                 new_state = self.store.get_state()
                 new_provider_key = get_active_provider_key()
-                if new_state.model != prev_model or new_provider_key != prev_provider_key:
+                if refresh_banner or new_state.model != prev_model or new_provider_key != prev_provider_key:
                     self._refresh_banner()
                 else:
-                    if result:
-                        self.renderer.print_command_result(user_input, result)
+                    if result_message:
+                        if is_error:
+                            self.renderer.print_system_message(result_message, style="red")
+                        else:
+                            self.renderer.print_command_result(user_input, result_message)
             except ExitREPLError:
                 raise
             except Exception as exc:
@@ -862,12 +923,24 @@ class InlineREPL:
                     style="red",
                 )
 
+    def _message_count(self) -> int:
+        try:
+            return len(self._agent_loop.context_manager.get_messages())
+        except Exception:
+            return 0
+
+    def _record_command_log(self, user_input: str, result: str, *, is_error: bool) -> None:
+        if hasattr(self, "_command_log"):
+            self._command_log.append((user_input, result, self._message_count(), is_error))
+
     def _refresh_banner(self) -> None:
         """Clear screen and re-render the welcome banner, then replay history with commands."""
         self.console.file.write("\033[H\033[2J\033[3J")
         self.console.file.flush()
         state = self.store.get_state()
-        self.console.print(render_welcome_banner(state.model, state.cwd, session_id=self._session_id))
+        self.console.print(
+            render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
+        )
         messages = self._agent_loop.context_manager.get_messages()
         if not messages and not self._command_log and not self._streaming_error_log:
             return
@@ -1075,6 +1148,17 @@ class InlineREPL:
             return
         self._history.append(user_input)
 
+    def _print_exit_text(self) -> None:
+        """Print the session resume hint shown when the REPL exits."""
+        from rich.text import Text
+
+        resume_arg = self._session_name or self._session_id
+        self.console.print("[dim]{}[/dim]".format(_("Goodbye!")))
+        self.console.print(Text(_("Resume this session with:"), style="dim"))
+        self.console.print(Text("iac-code --resume {}".format(resume_arg), style="dim"))
+        if self._session_name:
+            self.console.print(Text("{}: {}".format(_("Session ID"), self._session_id), style="dim"))
+
     def _apply_qwenpaw_config(self, model: str) -> None:
         """Apply QwenPaw config if active and env vars don't override."""
         from iac_code.config import _get_env_overrides, get_llm_source
@@ -1117,19 +1201,20 @@ class InlineREPL:
             if latest is None:
                 return str(uuid.uuid4())
             cwd, sid = latest
-            if cwd and cwd != self._original_cwd:
+            if cwd and not same_project_path(cwd, self._original_cwd):
                 raise ValueError(self._cross_project_message(cwd, sid))
             return sid
-        elif isinstance(resume, str) and resume:
-            if self._session_storage.exists(self._original_cwd, resume):
-                return resume
-            located = self._session_storage.find_session_anywhere(resume)
-            if located is None:
+        if isinstance(resume, str) and resume:
+            resolution = resolve_session_argument(self.session_index, self._original_cwd, resume)
+            if resolution.status == ResolutionStatus.NOT_FOUND:
                 raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
-            cwd, _path = located
-            if cwd and cwd != self._original_cwd:
-                raise ValueError(self._cross_project_message(cwd, resume))
-            return resume
+            if resolution.status == ResolutionStatus.AMBIGUOUS_NAME:
+                raise ValueError(self._ambiguous_resume_message(resolution.candidates))
+            if resolution.entry is None:
+                raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
+            if resolution.entry.cwd and not same_project_path(resolution.entry.cwd, self._original_cwd):
+                raise ValueError(self._cross_project_message(resolution.entry.cwd, resolution.entry.session_id))
+            return resolution.entry.session_id
         return str(uuid.uuid4())
 
     def _load_resume_messages(self, resume: str | bool | None) -> list:
@@ -1139,16 +1224,134 @@ class InlineREPL:
         messages = self._session_storage.load(self._original_cwd, self._session_id)
         return self._session_storage.repair_interrupted(messages)
 
+    def _load_current_session_name(self) -> str | None:
+        """Read the persisted display name for the active session."""
+        metadata = self._session_storage.read_metadata(self._original_cwd, self._session_id)
+        return metadata.name if metadata else None
+
+    def current_git_branch(self) -> str | None:
+        """Return the current git branch for the REPL's original directory."""
+        try:
+            result = subprocess.run(
+                ["git", "-C", self._original_cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+        except OSError:
+            return None
+        if result.returncode != 0:
+            return None
+        branch = result.stdout.strip()
+        return branch if branch and branch != "HEAD" else None
+
+    def rename_current_session(self, name: str) -> str:
+        """Rename the active session and refresh cached session metadata."""
+        result = self._session_storage.rename_session(
+            self._original_cwd,
+            self._session_id,
+            name,
+            git_branch=self.current_git_branch(),
+        )
+        self._session_name = self._load_current_session_name()
+        return result
+
+    async def prompt_for_session_name(self) -> str | None:
+        """Prompt until the user provides a valid session name or cancels."""
+        while True:
+            try:
+                raw_name = await self._prompt_input.get_input(_("Session name: "))
+            except (EOFError, KeyboardInterrupt):
+                return None
+            if raw_name is None:
+                return None
+            if not raw_name.strip():
+                self.renderer.print_system_message(_("Session name cannot be empty."), style="red")
+                continue
+            try:
+                return normalize_session_name(raw_name)
+            except ValueError as exc:
+                self.renderer.print_system_message(str(exc), style="red")
+
     @staticmethod
     def _cross_project_message(cwd: str, session_id: str) -> str:
-        import shlex
-
-        cmd = f"cd {shlex.quote(cwd)} && iac-code --resume {session_id}"
+        cmd = format_resume_command(cwd, session_id)
         return _("This session belongs to a different directory.\nTo resume, run:\n  {cmd}").format(cmd=cmd)
+
+    @staticmethod
+    def _ambiguous_resume_message(entries) -> str:
+        lines = [_("Multiple sessions match. Resume one by ID:"), ""]
+        for entry in entries:
+            cmd = format_resume_command(entry.cwd, entry.session_id)
+            lines.append(f"  {cmd}")
+        return "\n".join(lines)
 
     @property
     def session_id(self) -> str:
         return self._session_id
+
+    def get_status_snapshot(self) -> dict[str, Any]:
+        state = self.store.get_state()
+        messages = self._agent_loop.context_manager.get_messages()
+        return {
+            "session_id": self._session_id,
+            "resumed": self._was_resumed,
+            "provider": self._status_provider_display(),
+            "model": self._status_model(state.model),
+            "region": self._status_region(),
+            "cwd": self._original_cwd,
+            "api_usage": self._agent_loop.get_session_usage(),
+            "turn_count": self._count_user_turns(messages),
+            "max_turns": self._agent_loop.max_turns,
+            "context_usage": self._agent_loop.get_context_usage(),
+        }
+
+    def _status_provider_display(self) -> str:
+        if hasattr(self._provider_manager, "get_provider_display"):
+            try:
+                display = self._provider_manager.get_provider_display()
+            except Exception:
+                display = ""
+            if isinstance(display, str) and display:
+                return display
+        key = get_active_provider_key()
+        if not key:
+            return ""
+        descriptor = PROVIDER_REGISTRY.get(key)
+        if descriptor is not None:
+            return descriptor.display_name
+        return key
+
+    def _status_model(self, fallback: str) -> str:
+        if hasattr(self._provider_manager, "get_model_name"):
+            try:
+                model = self._provider_manager.get_model_name()
+            except Exception:
+                model = ""
+            if isinstance(model, str) and model:
+                return model
+        return fallback
+
+    @staticmethod
+    def _status_region() -> str:
+        from iac_code.services.cloud_credentials import CloudCredentials
+
+        credential = CloudCredentials().get_provider("aliyun")
+        return credential.region_id if credential and credential.region_id else ""
+
+    @staticmethod
+    def _count_user_turns(messages: list) -> int:
+        from iac_code.agent.message import ToolResultBlock
+
+        turns = 0
+        for message in messages:
+            if getattr(message, "role", None) != "user":
+                continue
+            content = getattr(message, "content", "")
+            if isinstance(content, list) and any(isinstance(block, ToolResultBlock) for block in content):
+                continue
+            turns += 1
+        return turns
 
     # ------------------------------------------------------------------
     # Session swap (used by /resume command)
@@ -1160,27 +1363,34 @@ class InlineREPL:
         new_messages = self._session_storage.repair_interrupted(new_messages)
         self._agent_loop.replace_session(new_session_id, new_messages or None)
         self._session_id = new_session_id
+        self._was_resumed = True
+        self._session_name = self._load_current_session_name()
 
         # Clear screen + scrollback, redraw banner, replay history.
         self.console.file.write("\033[H\033[2J\033[3J")
         self.console.file.flush()
         state = self.store.get_state()
-        self.console.print(render_welcome_banner(state.model, state.cwd, session_id=new_session_id))
+        self.console.print(
+            render_welcome_banner(
+                state.model,
+                state.cwd,
+                session_id=new_session_id,
+                session_name=self._session_name,
+            )
+        )
         if new_messages:
             self.renderer.replay_history(new_messages)
             self.console.print()
 
     async def swap_or_announce_session(self, entry) -> None:
         """Hot-swap if same project; otherwise print the resume command."""
-        if entry.cwd and entry.cwd == self._original_cwd:
+        if entry.cwd and same_project_path(entry.cwd, self._original_cwd):
             self.swap_session(entry.session_id)
             return
         await self._announce_cross_project(entry)
 
     async def _announce_cross_project(self, entry) -> None:
-        import shlex
-
-        cmd = f"cd {shlex.quote(entry.cwd)} && iac-code --resume {entry.session_id}"
+        cmd = format_resume_command(entry.cwd, entry.session_id)
         msg_lines = [
             "",
             _("This conversation is from a different directory."),

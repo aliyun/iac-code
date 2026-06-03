@@ -64,11 +64,13 @@ class ResumePicker:
         current_session_id: str | None,
         keybinding_manager: object | None = None,
         renderer: "Renderer | None" = None,
+        entries: list[SessionEntry] | None = None,
     ) -> None:
         self._index = index
         self._current_cwd = current_cwd
         self._current_session_id = current_session_id
         self._km = keybinding_manager
+        self._entries_override = entries
         # Live REPL renderer — reused inside the preview so the dump
         # uses the same tool-name translation, argument formatting, and
         # result-summary helpers as the live UI.
@@ -285,7 +287,9 @@ class ResumePicker:
         self._apply_filter()
 
     def _reload_entries(self) -> None:
-        if self._show_all_projects:
+        if self._entries_override is not None:
+            entries = list(self._entries_override)
+        elif self._show_all_projects:
             entries = self._index.list_all_projects()
         else:
             entries = self._index.list_for_cwd(self._current_cwd)
@@ -304,7 +308,18 @@ class ResumePicker:
         else:
             scored: list[tuple[float, SessionEntry]] = []
             for entry in candidates:
-                haystack = " ".join(part for part in (entry.title, entry.project_name, entry.git_branch or "") if part)
+                haystack = " ".join(
+                    part
+                    for part in (
+                        entry.name,
+                        entry.session_id,
+                        entry.title,
+                        entry.auto_title,
+                        entry.project_name,
+                        entry.git_branch or "",
+                    )
+                    if part
+                )
                 if entry.session_id.startswith(query):
                     scored.append((1_000_000.0, entry))
                     continue
@@ -415,6 +430,8 @@ class ResumePicker:
     def _render_subtitle_line(entry: SessionEntry) -> Text:
         text = Text("  ", style="dim")
         parts = [_format_relative_time(entry.mtime)]
+        if entry.name:
+            parts.append(_short_session_id(entry.session_id))
         if entry.git_branch:
             parts.append(entry.git_branch)
         parts.append(_format_size(entry.size_bytes))
@@ -747,3 +764,9 @@ def _format_size(size_bytes: int) -> str:
         return f"{mb:.1f}MB"
     gb = mb / 1024
     return f"{gb:.1f}GB"
+
+
+def _short_session_id(session_id: str) -> str:
+    if len(session_id) <= 8:
+        return session_id
+    return session_id[:8]

@@ -12,13 +12,30 @@ from pathlib import Path
 import pytest
 from babel.messages.pofile import read_po
 
-from iac_code.i18n import DEFAULT_LANGUAGE
+from iac_code.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 
 # Get the project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 I18N_DIR = PROJECT_ROOT / "src" / "iac_code" / "i18n"
 POT_FILE = I18N_DIR / "messages.pot"
 LOCALES_DIR = I18N_DIR / "locales"
+
+MEMORY_COMMAND_MSGIDS = {
+    "Usage: /memory [<name>|search <query>|delete <name>|help]",
+    "Saved memories:",
+    "No memories saved yet.",
+    "Matching memories:",
+    "No matching memories.",
+    "Memory '{name}' not found.",
+    "Memory '{name}' deleted.",
+    "Memory manager is unavailable.",
+    "View and manage persistent memories",
+    "[<name>|search <query>|delete <name>|help]",
+    "Search saved memories",
+    "Delete a saved memory",
+    "Show memory command help",
+    "Saved memory",
+}
 
 
 def _get_all_msgids_from_pot(pot_file: Path) -> set[str]:
@@ -140,6 +157,15 @@ def test_all_languages_have_po_files():
             missing_po_files.append(f"{lang_dir.name}/LC_MESSAGES/messages.po")
 
     assert not missing_po_files, f"Missing .po files for languages: {missing_po_files}"
+
+
+def test_supported_languages_match_locale_dirs():
+    """Verify supported languages are the default language plus locale directories."""
+    language_dirs = _discover_language_dirs()
+    locale_codes = {lang_dir.name for lang_dir in language_dirs}
+
+    assert len(SUPPORTED_LANGUAGES) == 7
+    assert set(SUPPORTED_LANGUAGES) == {DEFAULT_LANGUAGE, *locale_codes}
 
 
 def test_mo_files_up_to_date():
@@ -274,6 +300,78 @@ def test_translation_completeness():
             error_messages.append(f"Language '{lang}' has incomplete translations:")
             error_messages.extend(errors)
         pytest.fail("\n".join(error_messages))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_memory_command_translations_are_complete():
+    """Verify /memory-specific strings are translated, not copied as placeholders."""
+    assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = MEMORY_COMMAND_MSGIDS - pot_msgids
+    assert not missing_from_pot, f"/memory msgids missing from messages.pot: {sorted(missing_from_pot)}"
+
+    language_dirs = _discover_language_dirs()
+    assert language_dirs, "No language directories found"
+
+    errors = []
+    for lang_dir in language_dirs:
+        po_file = lang_dir / "LC_MESSAGES" / "messages.po"
+        translations = _get_all_translations_from_po(po_file)
+        for msgid in sorted(MEMORY_COMMAND_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+
+    assert not errors, "\n".join(errors)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_aliyun_credential_labels_are_translatable():
+    """Aliyun auth menu labels come from data tables, so guard against dynamic gettext misses."""
+    from iac_code.services.providers.aliyun import MODE_DISPLAY_NAMES, MODE_FIELDS
+
+    required_msgids = set(MODE_DISPLAY_NAMES.values())
+    for mode_fields in MODE_FIELDS.values():
+        required_msgids.update(label for _field_name, label, _sensitive in mode_fields)
+
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = sorted(required_msgids - pot_msgids)
+    assert not missing_from_pot, "Aliyun credential labels missing from messages.pot: {}".format(missing_from_pot)
+
+    missing_or_empty_by_language: dict[str, list[str]] = {}
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        missing_or_empty = sorted(msgid for msgid in required_msgids if not translations.get(msgid))
+        if missing_or_empty:
+            missing_or_empty_by_language[lang_dir.name] = missing_or_empty
+
+    assert not missing_or_empty_by_language, "Aliyun credential labels missing translations: {}".format(
+        missing_or_empty_by_language
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_session_name_error_messages_are_translated():
+    """Session rename validation errors are user-facing and must not stay English-only."""
+    required_msgids = {
+        "Session name must match {pattern}",
+        "Session name already exists in this project: {name}",
+    }
+    language_dirs = _discover_language_dirs()
+    if not language_dirs:
+        pytest.skip("No language directories found")
+
+    untranslated: list[str] = []
+    for lang_dir in language_dirs:
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(required_msgids):
+            msgstr = translations.get(msgid, "")
+            if not msgstr.strip() or msgstr == msgid:
+                untranslated.append(f"{lang_dir.name}: {msgid!r}")
+
+    assert not untranslated
 
 
 class TestDetectWindowsUILanguage:

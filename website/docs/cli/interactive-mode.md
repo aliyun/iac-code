@@ -25,6 +25,12 @@ Then describe what you want to build:
 Create a VPC, two ECS instances, and a security group that allows SSH from my office IP.
 ```
 
+## Commands
+
+Type `/` to discover available slash commands. Common operational commands include `/status` for the current session state, `/skills` for skill management, `/memory` for saved memories, `/rename` for naming the active session, and `/resume` for switching sessions.
+
+Type `$` to discover and invoke skills only.
+
 ## Editing input
 
 Use `Shift+Enter` to insert a newline without sending the prompt. Press `Enter`

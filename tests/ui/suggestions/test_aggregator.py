@@ -19,6 +19,16 @@ def aggregator(command_provider) -> SuggestionAggregator:
     return SuggestionAggregator([command_provider])
 
 
+class _MemoryManager:
+    def list_memories(self):
+        return [{"name": "user-role", "description": "Role", "type": "user", "content": "Senior engineer"}]
+
+
+@pytest.fixture
+def memory_aggregator() -> SuggestionAggregator:
+    return SuggestionAggregator([CommandProvider(create_default_registry(), memory_manager=_MemoryManager())])
+
+
 class TestSuggestionAggregator:
     def test_update_with_slash_trigger(self, aggregator):
         """/mod → suggestions > 0."""
@@ -156,3 +166,16 @@ class TestSuggestionAggregator:
         assert result is not None
         text, _start, _end = result
         assert text == "/debug "
+
+    def test_memory_argument_ghost_text(self, memory_aggregator):
+        """/memory d → ghost text completes the delete action."""
+        memory_aggregator.update("/memory d", 9)
+        assert memory_aggregator.ghost_text == "elete "
+
+    def test_accept_memory_argument_suggestion_replaces_command_span(self, memory_aggregator):
+        """/memory delete<space> suggestion replaces the full slash command token."""
+        text = "/memory delete "
+        memory_aggregator.update(text, len(text))
+        result = memory_aggregator.accept_selected()
+
+        assert result == ("/memory delete user-role", 0, len(text))

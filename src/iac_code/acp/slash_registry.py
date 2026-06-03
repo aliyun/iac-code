@@ -1,7 +1,7 @@
 """ACP slash command registry.
 
 Manages commands supported over the ACP protocol.
-Only /compact, /clear, and /debug are allowed;
+Only /compact, /clear, /debug, /memory, and /rename are allowed;
 all other slash commands are rejected with a clear message.
 """
 
@@ -10,10 +10,12 @@ from __future__ import annotations
 import logging
 
 from iac_code.i18n import _
+from iac_code.services.session_metadata import normalize_session_name
+from iac_code.services.session_storage import SessionStorage
 
 logger = logging.getLogger(__name__)
 
-ACP_SUPPORTED_COMMANDS: frozenset[str] = frozenset({"compact", "clear", "debug"})
+ACP_SUPPORTED_COMMANDS: frozenset[str] = frozenset({"compact", "clear", "debug", "memory", "rename"})
 
 
 class ACPSlashRegistry:
@@ -51,6 +53,10 @@ class ACPSlashRegistry:
             return await self._handle_clear(agent_loop)
         if cmd_name == "debug":
             return self._handle_debug(args_str)
+        if cmd_name == "memory":
+            return self._handle_memory(args_str, context.get("memory_manager"))
+        if cmd_name == "rename":
+            return self._handle_rename(args_str, agent_loop)
 
         # Should not reach here
         return _("Command '/{cmd_name}' handler not implemented.").format(cmd_name=cmd_name)  # pragma: no cover
@@ -123,3 +129,36 @@ class ACPSlashRegistry:
             return _("Debug logging disabled.")
 
         return _("Usage: /debug [on|off]")
+
+    def _handle_memory(self, args: str, memory_manager) -> str:
+        """View and manage persistent memories."""
+        if memory_manager is None:
+            return _("Memory manager is unavailable.")
+
+        from iac_code.commands.memory import execute_memory_command
+
+        return execute_memory_command(memory_manager, args.split())
+
+    def _handle_rename(self, args: str, agent_loop) -> str:
+        """Rename the current ACP session non-interactively."""
+        parts = args.split()
+        if len(parts) != 1:
+            return _("Usage: /rename <name>")
+
+        cwd = getattr(agent_loop, "_cwd", None)
+        session_id = getattr(agent_loop, "_session_id", None)
+        git_branch = getattr(agent_loop, "_current_git_branch", None)
+        if not isinstance(cwd, str) or not isinstance(session_id, str):
+            return _("Rename is only available after a session is created.")
+        if not isinstance(git_branch, str):
+            git_branch = None
+
+        try:
+            name = normalize_session_name(parts[0])
+            result = SessionStorage().rename_session(cwd, session_id, name, git_branch=git_branch)
+        except ValueError as exc:
+            return str(exc)
+
+        if result == "unchanged":
+            return _("Session is already named {name}").format(name=name)
+        return _("Renamed session to {name}").format(name=name)

@@ -197,3 +197,155 @@ async def test_debug_off(registry: ACPSlashRegistry) -> None:
 async def test_debug_invalid_arg(registry: ACPSlashRegistry) -> None:
     result = await registry.execute("/debug foo", agent_loop=None)
     assert "usage" in result.lower() or "/debug" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# execute — /memory
+# ---------------------------------------------------------------------------
+
+
+class _MemoryManager:
+    def __init__(self):
+        self.memories = {
+            "user-role": {"name": "user-role", "type": "user", "description": "Role", "content": "Senior engineer"},
+            "feedback-testing": {
+                "name": "feedback-testing",
+                "type": "feedback",
+                "description": "Testing",
+                "content": "Prefer integration tests",
+            },
+        }
+        self.deleted: list[str] = []
+
+    def list_memories(self):
+        return list(self.memories.values())
+
+    def load(self, name):
+        if name == "../escape":
+            raise ValueError("Invalid memory name: '../escape'")
+        return self.memories.get(name)
+
+    def delete(self, name):
+        self.deleted.append(name)
+        self.memories.pop(name, None)
+
+    def search(self, query):
+        query = query.casefold()
+        return [
+            memory
+            for memory in self.memories.values()
+            if query
+            in "\n".join(str(memory.get(field, "")) for field in ("name", "description", "type", "content")).casefold()
+        ]
+
+
+@pytest.mark.asyncio
+async def test_memory_without_manager_returns_unavailable(registry: ACPSlashRegistry) -> None:
+    result = await registry.execute("/memory", agent_loop=None)
+    assert result == "Memory manager is unavailable."
+
+
+@pytest.mark.asyncio
+async def test_memory_list_view_search_delete(registry: ACPSlashRegistry) -> None:
+    memory_manager = _MemoryManager()
+
+    listed = await registry.execute("/memory", agent_loop=None, memory_manager=memory_manager)
+    viewed = await registry.execute("/memory user-role", agent_loop=None, memory_manager=memory_manager)
+    searched = await registry.execute("/memory search integration", agent_loop=None, memory_manager=memory_manager)
+    deleted = await registry.execute("/memory delete user-role", agent_loop=None, memory_manager=memory_manager)
+
+    assert "Saved memories:" in listed
+    assert viewed == "[user] Role\n\nSenior engineer"
+    assert searched == "Matching memories:\n  - feedback-testing - Testing"
+    assert deleted == "Memory 'user-role' deleted."
+    assert memory_manager.deleted == ["user-role"]
+
+
+@pytest.mark.asyncio
+async def test_memory_help_missing_invalid_name_and_unknown_usage(registry: ACPSlashRegistry) -> None:
+    memory_manager = _MemoryManager()
+
+    helped = await registry.execute("/memory help", agent_loop=None, memory_manager=memory_manager)
+    missing = await registry.execute("/memory missing", agent_loop=None, memory_manager=memory_manager)
+    invalid = await registry.execute("/memory ../escape", agent_loop=None, memory_manager=memory_manager)
+    unknown = await registry.execute("/memory remove user-role", agent_loop=None, memory_manager=memory_manager)
+
+    assert helped == "Usage: /memory [<name>|search <query>|delete <name>|help]"
+    assert missing == "Memory 'missing' not found."
+    assert invalid == "Invalid memory name: '../escape'"
+    assert unknown == "Usage: /memory [<name>|search <query>|delete <name>|help]"
+
+
+# ---------------------------------------------------------------------------
+# execute — /rename
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rename_success_calls_storage_with_session_context(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+    agent_loop._cwd = "/project"
+    agent_loop._session_id = "session-1"
+    agent_loop._current_git_branch = "main"
+
+    storage = MagicMock()
+    storage.rename_session.return_value = "renamed"
+
+    with patch("iac_code.acp.slash_registry.SessionStorage", return_value=storage):
+        result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
+
+    storage.rename_session.assert_called_once_with(
+        "/project",
+        "session-1",
+        "deploy-prod",
+        git_branch="main",
+    )
+    assert result == "Renamed session to deploy-prod"
+
+
+@pytest.mark.asyncio
+async def test_rename_requires_name(registry: ACPSlashRegistry) -> None:
+    result = await registry.execute("/rename", agent_loop=MagicMock())
+
+    assert result == "Usage: /rename <name>"
+
+
+@pytest.mark.asyncio
+async def test_rename_rejects_multi_token_name(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+
+    result = await registry.execute("/rename deploy prod", agent_loop=agent_loop)
+
+    assert result == "Usage: /rename <name>"
+
+
+@pytest.mark.asyncio
+async def test_rename_value_error_returns_message(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+    agent_loop._cwd = "/project"
+    agent_loop._session_id = "session-1"
+    agent_loop._current_git_branch = None
+
+    storage = MagicMock()
+    storage.rename_session.side_effect = ValueError("Session name already exists in this project: deploy-prod")
+
+    with patch("iac_code.acp.slash_registry.SessionStorage", return_value=storage):
+        result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
+
+    assert result == "Session name already exists in this project: deploy-prod"
+
+
+@pytest.mark.asyncio
+async def test_rename_unchanged_message(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+    agent_loop._cwd = "/project"
+    agent_loop._session_id = "session-1"
+    agent_loop._current_git_branch = None
+
+    storage = MagicMock()
+    storage.rename_session.return_value = "unchanged"
+
+    with patch("iac_code.acp.slash_registry.SessionStorage", return_value=storage):
+        result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
+
+    assert result == "Session is already named deploy-prod"

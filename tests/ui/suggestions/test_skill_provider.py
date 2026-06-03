@@ -46,6 +46,16 @@ class TestSkillProvider:
         assert "help" not in names
         assert "model" not in names
 
+    def test_disabled_skills_not_suggested_when_not_registered(self):
+        """Disabled skills are omitted from registry, so '$' suggests enabled skills only."""
+        reg = CommandRegistry()
+        reg.register(PromptCommand(name="enabled", description="Enabled skill"))
+        provider = SkillProvider(reg)
+
+        items = provider.provide(make_token("$"))
+
+        assert {item.display_text for item in items} == {"enabled"}
+
     def test_partial_match_skill(self, provider):
         """'$dep' → results contain 'deploy'."""
         items = provider.provide(make_token("$dep"))

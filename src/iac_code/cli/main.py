@@ -86,7 +86,7 @@ def main(
     debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
     verbose: bool = typer.Option(False, "--verbose", help=_("Show headless progress on stderr")),
     version: bool = typer.Option(False, "--version", "-v", "-V", is_eager=True, help=_("Show version and exit")),
-    resume: str = typer.Option("", "--resume", "-r", help=_("Resume a session by ID")),
+    resume: str = typer.Option("", "--resume", "-r", help=_("Resume a session by ID or name")),
     continue_session: bool = typer.Option(False, "--continue", "-c", help=_("Resume the most recent session")),
     install_completion: bool = typer.Option(
         None,

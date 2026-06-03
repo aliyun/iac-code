@@ -15,7 +15,8 @@ from darabonba.runtime import RuntimeOptions
 
 from iac_code.i18n import _
 from iac_code.services.cloud_credentials import CloudCredentials
-from iac_code.services.providers.aliyun import AliyunCredential
+from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+from iac_code.services.providers.aliyun_oauth import AliyunOAuthError
 from iac_code.services.telemetry import add_metric, log_event
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.services.telemetry.sanitize import sanitize_error_message
@@ -334,7 +335,7 @@ class AliyunApi(BaseCloudApi):
         mode = credential.mode
         user_agent = build_user_agent()
 
-        if mode == "StsToken":
+        if mode in {"StsToken", "OAuth"}:
             return open_api_models.Config(
                 access_key_id=credential.access_key_id,
                 access_key_secret=credential.access_key_secret,
@@ -430,6 +431,12 @@ class AliyunApi(BaseCloudApi):
                 "Alibaba Cloud credentials not configured. "
                 "Run 'iac-code auth' and select 'Cloud Provider' to configure."
             )
+
+        if credential.mode == "OAuth":
+            try:
+                credential = AliyunCredentials.refresh_oauth_if_needed(credential)
+            except AliyunOAuthError as exc:
+                return ToolResult.error(str(exc))
 
         endpoint = (
             self._get_endpoint(product, region)

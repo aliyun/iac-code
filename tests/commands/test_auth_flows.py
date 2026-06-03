@@ -1,5 +1,6 @@
 """Tests for auth_command and _auth_flow orchestration."""
 
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,11 +8,14 @@ import pytest
 from iac_code.commands.auth import (
     _BACK,
     _aliyun_auth_flow,
+    _aliyun_credential_flow,
     _aliyun_region_flow,
     _auth_flow,
     _cloud_auth_flow,
     _cloud_provider_display,
     _llm_auth_flow,
+    _oauth_escape_cancel_event,
+    _render_credential_info,
     auth_command,
 )
 
@@ -38,8 +42,7 @@ class TestAuthCommand:
 
     @pytest.mark.asyncio
     async def test_reinitialize_provider_called_after_auth(self, monkeypatch):
-        """After auth completes, provider should be reinitialized so
-        credential changes take effect immediately."""
+        """After auth completes, provider and cloud tools refresh immediately."""
         monkeypatch.setattr(
             "iac_code.commands.auth._auth_flow",
             lambda console, store: "Configured: test",
@@ -62,6 +65,7 @@ class TestAuthCommand:
 
         assert result == "Configured: test"
         repl._reinitialize_provider.assert_called_once_with("test-model")
+        repl.refresh_cloud_tools.assert_called_once_with()
 
 
 class TestAuthFlow:
@@ -341,6 +345,31 @@ class TestCloudAuthFlow:
         assert _aliyun_auth_flow() is _BACK
         assert calls["select"] == 2
 
+    def test_render_credential_info_formats_oauth_expiration_as_local_datetime(self, monkeypatch):
+        from iac_code.services.providers.aliyun import AliyunCredential
+
+        writes: list[str] = []
+        monkeypatch.setattr("iac_code.commands.auth._write", writes.append)
+        credential = AliyunCredential(
+            mode="OAuth",
+            region_id="cn-hangzhou",
+            oauth_site_type="CN",
+            oauth_access_token="access-token",
+            oauth_refresh_token="refresh-token",
+            oauth_access_token_expire=1780397040,
+            sts_expiration=1780397041,
+        )
+
+        _render_credential_info(credential, "iac-code")
+
+        output = "".join(writes)
+        expected_access_time = datetime.fromtimestamp(1780397040).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        expected_sts_time = datetime.fromtimestamp(1780397041).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        assert expected_access_time in output
+        assert expected_sts_time in output
+        assert "1780397040" not in output
+        assert "1780397041" not in output
+
     def test_region_flow_updates_existing_credential(self, monkeypatch):
         from iac_code.services.providers.aliyun import AliyunCredential
 
@@ -388,6 +417,258 @@ class TestCloudAuthFlow:
 
         assert "Configured" in result
         assert saved["credential"].region_id == "cn-hangzhou"
+
+    def test_aliyun_credential_flow_shows_oauth_mode(self, monkeypatch):
+        options_seen = []
+
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+            lambda: None,
+        )
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.load_from_aliyun_cli",
+            lambda config_path=None: None,
+        )
+
+        def fake_select(title, options, default_index=0):
+            if "credential type" in title.lower():
+                options_seen.extend(options)
+            return None
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+
+        assert _aliyun_credential_flow() is _BACK
+        assert "OAuth Login (Browser)" in options_seen
+
+    def test_aliyun_credential_flow_oauth_login_saves_credentials(self, monkeypatch):
+        from iac_code.services.providers.aliyun_oauth import OAuthStsCredentials, OAuthToken
+
+        saved = {}
+
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+            lambda: None,
+        )
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.load_from_aliyun_cli",
+            lambda config_path=None: None,
+        )
+
+        def fake_select(title, options, default_index=0):
+            if "credential type" in title.lower():
+                return options.index("OAuth Login (Browser)")
+            if "site type" in title.lower():
+                return options.index("China")
+            return None
+
+        class FakeOAuthClient:
+            def __init__(self, site):
+                self.site = site
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "access-token"
+                return OAuthStsCredentials("tmp-ak", "tmp-sk", "tmp-sts", 1798794000)
+
+        def fake_browser_oauth_flow(site_type, oauth_client=None, cancel_event=None):
+            assert site_type == "CN"
+            assert isinstance(oauth_client, FakeOAuthClient)
+            assert cancel_event is not None
+            return OAuthToken("access-token", "refresh-token", 1798790400, 1822320000)
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun_oauth.run_browser_oauth_flow",
+            fake_browser_oauth_flow,
+        )
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeOAuthClient)
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.save",
+            lambda credential: saved.setdefault("credential", credential),
+        )
+
+        result = _aliyun_credential_flow()
+
+        assert result == "Configured: Alibaba Cloud OAuth credentials saved"
+        credential = saved["credential"]
+        assert credential.mode == "OAuth"
+        assert credential.region_id == "cn-hangzhou"
+        assert credential.oauth_site_type == "CN"
+        assert credential.oauth_access_token == "access-token"
+        assert credential.oauth_refresh_token == "refresh-token"
+        assert credential.oauth_access_token_expire == 1798790400
+        assert credential.oauth_refresh_token_expire == 1822320000
+        assert credential.access_key_id == "tmp-ak"
+        assert credential.access_key_secret == "tmp-sk"
+        assert credential.sts_token == "tmp-sts"
+        assert credential.sts_expiration == 1798794000
+
+    def test_aliyun_credential_flow_oauth_preserves_existing_region(self, monkeypatch):
+        from iac_code.services.providers.aliyun import AliyunCredential
+        from iac_code.services.providers.aliyun_oauth import OAuthStsCredentials, OAuthToken
+
+        existing = AliyunCredential(region_id="cn-shanghai")
+        saved = {}
+
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+            lambda: existing,
+        )
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.load_from_aliyun_cli",
+            lambda config_path=None: None,
+        )
+        monkeypatch.setattr(
+            "iac_code.commands.auth._select_with_info",
+            lambda title, options, info_renderer=None, default_index=0: 0,
+        )
+
+        def fake_select(title, options, default_index=0):
+            if "credential type" in title.lower():
+                return options.index("OAuth Login (Browser)")
+            if "site type" in title.lower():
+                return options.index("International")
+            return None
+
+        class FakeOAuthClient:
+            def __init__(self, site):
+                self.site = site
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "access-token"
+                return OAuthStsCredentials("tmp-ak", "tmp-sk", "tmp-sts", 1798794000)
+
+        def fake_browser_oauth_flow(site_type, oauth_client=None, cancel_event=None):
+            assert site_type == "INTL"
+            assert isinstance(oauth_client, FakeOAuthClient)
+            assert cancel_event is not None
+            return OAuthToken("access-token", "refresh-token", 1798790400, 1822320000)
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun_oauth.run_browser_oauth_flow",
+            fake_browser_oauth_flow,
+        )
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeOAuthClient)
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.save",
+            lambda credential: saved.setdefault("credential", credential),
+        )
+
+        _aliyun_credential_flow()
+
+        assert saved["credential"].region_id == "cn-shanghai"
+        assert saved["credential"].oauth_site_type == "INTL"
+
+    def test_aliyun_credential_flow_oauth_error_returns_message_without_saving(self, monkeypatch):
+        from iac_code.services.providers.aliyun_oauth import AliyunOAuthError
+
+        saved = {}
+
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+            lambda: None,
+        )
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.load_from_aliyun_cli",
+            lambda config_path=None: None,
+        )
+
+        def fake_select(title, options, default_index=0):
+            if "credential type" in title.lower():
+                return options.index("OAuth Login (Browser)")
+            if "site type" in title.lower():
+                return options.index("China")
+            return None
+
+        def fail_oauth(site_type, oauth_client=None, cancel_event=None):
+            assert site_type == "CN"
+            assert oauth_client is not None
+            assert cancel_event is not None
+            raise AliyunOAuthError("No available callback port")
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.run_browser_oauth_flow", fail_oauth)
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.save",
+            lambda credential: saved.setdefault("credential", credential),
+        )
+
+        result = _aliyun_credential_flow()
+
+        assert result == "Alibaba Cloud OAuth login failed: No available callback port"
+        assert saved == {}
+
+    def test_aliyun_credential_flow_oauth_cancel_returns_to_mode_selection(self, monkeypatch):
+        from iac_code.services.providers.aliyun_oauth import AliyunOAuthCancelledError
+
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+            lambda: None,
+        )
+        monkeypatch.setattr(
+            "iac_code.services.providers.aliyun.AliyunCredentials.load_from_aliyun_cli",
+            lambda config_path=None: None,
+        )
+
+        selections = iter(["credential", "site", "cancel"])
+
+        def fake_select(title, options, default_index=0):
+            step = next(selections)
+            if step == "credential":
+                return options.index("OAuth Login (Browser)")
+            if step == "site":
+                return options.index("China")
+            return None
+
+        def cancel_oauth(site_type, oauth_client=None, cancel_event=None):
+            assert site_type == "CN"
+            assert cancel_event is not None
+            raise AliyunOAuthCancelledError("OAuth login cancelled.")
+
+        monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.run_browser_oauth_flow", cancel_oauth)
+
+        assert _aliyun_credential_flow() is _BACK
+
+    def test_oauth_escape_cancel_event_uses_cbreak_mode_to_preserve_output_newlines(self, monkeypatch):
+        termios = pytest.importorskip("termios")
+        tty = pytest.importorskip("tty")
+        calls: list[tuple] = []
+
+        class FakeStdin:
+            def isatty(self):
+                return True
+
+            def fileno(self):
+                return 42
+
+        class FakeThread:
+            def __init__(self, target, args, daemon=False):
+                calls.append(("thread", target.__name__, daemon))
+
+            def start(self):
+                calls.append(("start",))
+
+            def join(self, timeout=None):
+                calls.append(("join", timeout))
+
+        def fail_setraw(fd):
+            raise AssertionError("OAuth Esc listener should not use raw mode because it breaks terminal newlines")
+
+        monkeypatch.setattr("iac_code.commands.auth._IS_WIN32", False)
+        monkeypatch.setattr("iac_code.commands.auth.sys.stdin", FakeStdin())
+        monkeypatch.setattr("iac_code.commands.auth.threading.Thread", FakeThread)
+        monkeypatch.setattr(termios, "tcgetattr", lambda fd: calls.append(("tcgetattr", fd)) or "old-settings")
+        monkeypatch.setattr(termios, "tcsetattr", lambda fd, when, settings: calls.append(("tcsetattr", fd, settings)))
+        monkeypatch.setattr(tty, "setraw", fail_setraw)
+        monkeypatch.setattr(tty, "setcbreak", lambda fd: calls.append(("setcbreak", fd)))
+
+        with _oauth_escape_cancel_event():
+            calls.append(("body",))
+
+        assert ("setcbreak", 42) in calls
+        assert ("body",) in calls
+        assert ("tcsetattr", 42, "old-settings") in calls
 
 
 class TestAuthLlmSourceLock:

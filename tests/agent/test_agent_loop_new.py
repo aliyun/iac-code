@@ -60,6 +60,22 @@ class TestAgentLoopInit:
         assert defs[0].name == "read_file"
         assert defs[0].description == "Read file"
 
+    def test_set_auto_trigger_skills_refreshes_candidates(self, mock_provider, mock_registry):
+        old_command = SimpleNamespace(name="old-skill")
+        new_command = SimpleNamespace(name="new-skill")
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            auto_trigger_skills=[old_command],
+        )
+        loop._auto_loaded_skills.add("old-skill")
+
+        loop.set_auto_trigger_skills([new_command])
+
+        assert loop._auto_trigger_skills == [new_command]
+        assert loop._auto_loaded_skills == {"old-skill"}
+
     def test_get_provider_messages_converts_strings_and_blocks(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         loop.context_manager = MagicMock()
@@ -124,6 +140,165 @@ class TestAgentLoopStreaming:
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         result = await loop.run("Hi")
         assert result == "Hello!"
+
+    async def test_records_non_zero_message_end_usage(self, mock_provider, mock_registry, tmp_path):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="Hello!")
+            yield MessageEndEvent(
+                stop_reason="end_turn",
+                usage=Usage(
+                    input_tokens=10,
+                    output_tokens=5,
+                    cache_read_input_tokens=3,
+                    cache_creation_input_tokens=2,
+                ),
+            )
+
+        from iac_code.services.session_usage import SessionUsageStore
+
+        mock_provider.stream = fake_stream
+        store = SessionUsageStore(projects_dir=tmp_path)
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="usage-session",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        assert any(isinstance(e, MessageEndEvent) for e in events)
+        totals = loop.get_session_usage()
+        assert totals.input_tokens == 10
+        assert totals.output_tokens == 5
+        assert totals.cache_read_input_tokens == 3
+        assert totals.cache_creation_input_tokens == 2
+        assert totals.recorded_events == 1
+        assert store.load("/tmp/status-project", "usage-session").total_tokens == 15
+
+    async def test_records_usage_with_runtime_provider_key(self, mock_provider, mock_registry, tmp_path, monkeypatch):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="Hello!")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=10, output_tokens=5))
+
+        from iac_code.services.session_usage import SessionUsageStore
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai")
+        mock_provider.stream = fake_stream
+        mock_provider.get_provider_key.return_value = "dashscope_token_plan"
+        mock_provider.get_model_name.return_value = "runtime-model"
+        store = SessionUsageStore(projects_dir=tmp_path)
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="runtime-session",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+
+        await loop.run("Hi")
+
+        row = store.path_for("/tmp/status-project", "runtime-session").read_text(encoding="utf-8")
+        assert '"provider": "dashscope_token_plan"' in row
+        assert '"model": "runtime-model"' in row
+
+    async def test_records_usage_from_multiple_model_calls_in_one_prompt(self, mock_provider, mock_registry, tmp_path):
+        call_count = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield MessageStartEvent(message_id="m1")
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
+                yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage(input_tokens=10, output_tokens=5))
+                return
+
+            yield MessageStartEvent(message_id="m2")
+            yield TextDeltaEvent(text="After tool")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=7, output_tokens=3))
+
+        from iac_code.services.session_usage import SessionUsageStore
+
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [SimpleNamespace(name="read_file", description="Read", input_schema={})]
+        store = SessionUsageStore(projects_dir=tmp_path)
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="multi-call-session",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(content="processed result")
+        loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="raw result", is_error=False)])
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        assert call_count == 2
+        assert any(isinstance(e, ToolResultEvent) for e in events)
+        totals = loop.get_session_usage()
+        assert totals.input_tokens == 17
+        assert totals.output_tokens == 8
+        assert totals.recorded_events == 2
+        assert store.load("/tmp/status-project", "multi-call-session").total_tokens == 25
+
+    async def test_does_not_record_zero_message_end_usage(self, mock_provider, mock_registry, tmp_path):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="Hello!")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        from iac_code.services.session_usage import SessionUsageStore
+
+        mock_provider.stream = fake_stream
+        store = SessionUsageStore(projects_dir=tmp_path)
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="zero-session",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+
+        await loop.run("Hi")
+
+        assert loop.get_session_usage().has_recorded_usage is False
+        assert not store.path_for("/tmp/status-project", "zero-session").exists()
+
+    async def test_replace_session_reloads_usage_totals(self, mock_provider, mock_registry, tmp_path):
+        from iac_code.services.session_usage import SessionUsageStore
+
+        store = SessionUsageStore(projects_dir=tmp_path)
+        store.append("/tmp/status-project", "old-session", Usage(input_tokens=1, output_tokens=2))
+        store.append("/tmp/status-project", "new-session", Usage(input_tokens=7, output_tokens=8))
+
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="old-session",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+
+        assert loop.get_session_usage().total_tokens == 3
+
+        loop.replace_session("new-session", resume_messages=None)
+
+        assert loop.session_id == "new-session"
+        assert loop.get_session_usage().input_tokens == 7
+        assert loop.get_session_usage().output_tokens == 8
+        assert loop.get_session_usage().total_tokens == 15
 
     async def test_run_streaming_executes_tools_and_applies_extensions(self, mock_provider, mock_registry):
         call_count = 0
@@ -506,6 +681,38 @@ class TestAgentLoopCompaction:
         assert event.original_tokens == 1200
         assert event.compacted_tokens == 400
 
+    async def test_auto_compact_records_response_usage(self, mock_provider, mock_registry, tmp_path):
+        from iac_code.services.session_usage import SessionUsageStore
+
+        mock_provider.complete = AsyncMock(
+            return_value=SimpleNamespace(
+                text="summary",
+                usage=Usage(input_tokens=11, output_tokens=4, cache_read_input_tokens=2),
+            )
+        )
+        store = SessionUsageStore(projects_dir=tmp_path)
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="auto-compact-usage",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+        loop.context_manager = MagicMock()
+        loop.context_manager.build_compaction_prompt.return_value = "compact me"
+        loop.context_manager.apply_compaction.return_value = (1200, 400)
+
+        event = await loop._auto_compact()
+
+        assert isinstance(event, CompactionEvent)
+        totals = loop.get_session_usage()
+        assert totals.input_tokens == 11
+        assert totals.output_tokens == 4
+        assert totals.cache_read_input_tokens == 2
+        assert totals.recorded_events == 1
+        assert store.load("/tmp/status-project", "auto-compact-usage").total_tokens == 15
+
     async def test_auto_compact_returns_none_without_prompt(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         loop.context_manager = MagicMock()
@@ -525,6 +732,39 @@ class TestAgentLoopCompaction:
 
         assert result.status == "success"
         assert (result.original_tokens, result.compacted_tokens) == (900, 300)
+
+    async def test_compact_records_response_usage(self, mock_provider, mock_registry, tmp_path):
+        from iac_code.services.session_usage import SessionUsageStore
+
+        mock_provider.complete = AsyncMock(
+            return_value=SimpleNamespace(
+                text="summary",
+                usage=Usage(input_tokens=13, output_tokens=6, cache_creation_input_tokens=3),
+            )
+        )
+        store = SessionUsageStore(projects_dir=tmp_path)
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="manual-compact-usage",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_messages.return_value = [object()]
+        loop.context_manager.build_compaction_prompt.return_value = "compact me"
+        loop.context_manager.apply_compaction.return_value = (900, 300)
+
+        result = await loop.compact()
+
+        assert result.status == "success"
+        totals = loop.get_session_usage()
+        assert totals.input_tokens == 13
+        assert totals.output_tokens == 6
+        assert totals.cache_creation_input_tokens == 3
+        assert totals.recorded_events == 1
+        assert store.load("/tmp/status-project", "manual-compact-usage").total_tokens == 19
 
     async def test_compact_returns_empty_when_no_messages(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)

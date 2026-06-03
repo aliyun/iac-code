@@ -131,6 +131,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     },
     "dashscope": {
         "qwen3.7-max": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "qwen3.7-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-max-preview": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.6-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "qwen3.5-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),

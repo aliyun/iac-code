@@ -1,7 +1,8 @@
 from alibabacloud_ros20190910.client import Client as RosClient
 from alibabacloud_tea_openapi import models as open_api_models
 
-from iac_code.services.providers.aliyun import AliyunCredential
+from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+from iac_code.services.providers.aliyun_oauth import AliyunOAuthError
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 
 
@@ -14,6 +15,12 @@ class RosClientFactory:
                 "Run 'iac-code auth' and select 'Cloud Provider' to configure."
             )
 
+        if credential.mode == "OAuth":
+            try:
+                credential = AliyunCredentials.refresh_oauth_if_needed(credential)
+            except AliyunOAuthError as exc:
+                raise ValueError(str(exc)) from exc
+
         effective_region = region_id or credential.region_id
         if not effective_region:
             raise ValueError("Region not configured. Run 'iac-code auth' and configure the region for Alibaba Cloud.")
@@ -25,7 +32,7 @@ class RosClientFactory:
         mode = credential.mode
         user_agent = build_user_agent()
 
-        if mode == "StsToken":
+        if mode in {"StsToken", "OAuth"}:
             return open_api_models.Config(
                 access_key_id=credential.access_key_id,
                 access_key_secret=credential.access_key_secret,

@@ -89,6 +89,14 @@ paths:
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
 
+## Gestionar habilidades
+
+Ejecuta `/skills` en el REPL interactivo para abrir el selector de gestión de habilidades. El selector muestra las habilidades integradas, de usuario y de proyecto descubiertas, junto con su origen, tamaño y estado de habilitación. Puedes buscar por nombre o descripción, ordenar por nombre/origen/tamaño y activar o desactivar habilidades de usuario o de proyecto.
+
+Las habilidades deshabilitadas se guardan en `settings.yml` bajo `disabled_skills`. Las habilidades integradas permanecen siempre habilitadas y no se escriben en la lista de deshabilitadas.
+
+Usa `$<skill-name>` cuando quieras que el autocompletado y la invocación apunten solo a habilidades. Es útil cuando el nombre de una habilidad se solapa con texto normal o cuando quieres evitar los comandos slash integrados.
+
 ## Execution Modes
 
 ### Inline (default)
@@ -188,3 +196,4 @@ Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md
 - **Bundled skills** are always allowed automatically.
 - **User/project skills** with no shell commands and no `allowed_tools` are auto-allowed.
 - **Other skills** prompt for user confirmation on first use.
+- **Las habilidades de usuario/proyecto deshabilitadas** se ocultan de los listados visibles para el modelo y de los disparadores automáticos; las llamadas directas a la herramienta `skill` devuelven un error de habilidad deshabilitada.

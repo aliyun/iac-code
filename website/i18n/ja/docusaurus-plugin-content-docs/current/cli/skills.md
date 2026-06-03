@@ -89,6 +89,14 @@ paths:
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
 
+## スキルの管理
+
+インタラクティブ REPL で `/skills` を実行すると、スキル管理ピッカーを開けます。ピッカーには検出された組み込みスキル、ユーザースキル、プロジェクトスキルが表示され、ソース、サイズ、有効状態を確認できます。名前または説明で検索し、名前/ソース/サイズで並べ替え、ユーザースキルまたはプロジェクトスキルを有効化・無効化できます。
+
+無効化されたスキルは `settings.yml` の `disabled_skills` に保存されます。組み込みスキルは常に有効に固定され、無効化リストには書き込まれません。
+
+オートコンプリートと呼び出し対象をスキルだけに絞りたい場合は `$<skill-name>` を使用します。スキル名が通常のテキストと重なる場合や、組み込み Slash コマンドを避けたい場合に便利です。
+
 ## Execution Modes
 
 ### Inline (default)
@@ -188,3 +196,4 @@ Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md
 - **Bundled skills** are always allowed automatically.
 - **User/project skills** with no shell commands and no `allowed_tools` are auto-allowed.
 - **Other skills** prompt for user confirmation on first use.
+- **無効化されたユーザー/プロジェクトスキル**は、モデルから見えるスキル一覧と自動トリガーから非表示になり、直接の `skill` ツール呼び出しは無効化スキルのエラーを返します。

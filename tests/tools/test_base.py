@@ -105,6 +105,17 @@ class TestToolRegistry:
         registry = ToolRegistry()
         assert registry.get("nonexistent") is None
 
+    def test_unregister_removes_tool_if_registered(self):
+        """Test unregistering a tool removes it from the registry."""
+        registry = ToolRegistry()
+        tool = DummyTool()
+        registry.register(tool)
+
+        registry.unregister("dummy")
+        registry.unregister("missing")
+
+        assert registry.get("dummy") is None
+
     def test_list_tools(self):
         """Test listing all registered tools."""
         registry = ToolRegistry()

@@ -15,6 +15,7 @@ from loguru import logger
 from iac_code.agent.message import ContentBlock, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 from iac_code.i18n import _
 from iac_code.services.context_manager import ContextManager
+from iac_code.services.session_usage import SessionUsageStore, SessionUsageTotals
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.result_storage import ResultStorage
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
@@ -65,6 +66,7 @@ class AgentLoop:
         tool_registry: ToolRegistry,
         max_turns: int = 100,
         session_storage: Any = None,  # SessionStorage
+        session_usage_store: SessionUsageStore | None = None,
         session_id: str | None = None,
         resume_messages: list | None = None,
         cwd: str | None = None,
@@ -79,6 +81,8 @@ class AgentLoop:
         self._session_storage = session_storage
         self._session_id = session_id or str(uuid.uuid4())[:8]
         self._cwd = cwd or os.getcwd()
+        self._session_usage_store = session_usage_store or SessionUsageStore()
+        self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
         self._permission_context = permission_context
         self._permission_context_getter = permission_context_getter
         self._auto_trigger_skills = auto_trigger_skills or []
@@ -112,6 +116,10 @@ class AgentLoop:
         if system_prompt is not None:
             self.system_prompt = system_prompt
             self.context_manager.set_system_prompt(system_prompt)
+
+    def set_auto_trigger_skills(self, skill_commands: list[Any] | None) -> None:
+        """Refresh skills considered for automatic trigger injection."""
+        self._auto_trigger_skills = list(skill_commands or [])
 
     def _get_tool_definitions(self):
         """Convert tool registry to provider ToolDefinition format."""
@@ -250,6 +258,7 @@ class AgentLoop:
                             final_text_chunks.append(event.text)
                         if isinstance(event, MessageEndEvent):
                             final_stop_reason = event.stop_reason
+                            self._record_session_usage(event.usage)
                         yield event
                 except asyncio.CancelledError:
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
@@ -609,6 +618,7 @@ class AgentLoop:
                 messages=[ProviderMessage.user(compaction_prompt)],
                 system="You are a helpful assistant that summarizes conversations concisely.",
             )
+            self._record_response_usage(response)
             if response.text:
                 original, new = self.context_manager.apply_compaction(response.text)
                 duration_ms = int((time.monotonic() - started) * 1000)
@@ -650,6 +660,7 @@ class AgentLoop:
                 messages=[ProviderMessage.user(compaction_prompt)],
                 system="You are a helpful assistant that summarizes conversations concisely.",
             )
+            self._record_response_usage(response)
             if response.text:
                 original, compacted = self.context_manager.apply_compaction(response.text)
                 return CompactResult(
@@ -691,6 +702,7 @@ class AgentLoop:
         self.context_manager.reset()
         if resume_messages:
             self.context_manager.load_messages(resume_messages)
+        self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
         self._result_storage = ResultStorage(
             storage_dir=os.path.join(str(get_config_dir()), "tool-results", session_id),
         )
@@ -712,5 +724,54 @@ class AgentLoop:
         self._auto_loaded_skills.clear()
         self.context_manager.reset()
 
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def max_turns(self) -> int:
+        return self._max_turns
+
     def get_context_usage(self) -> dict:
         return self.context_manager.get_usage()
+
+    def get_session_usage(self) -> SessionUsageTotals:
+        return self._session_usage_totals.copy()
+
+    def _record_session_usage(self, usage: Usage) -> None:
+        if not self._session_usage_totals.add(usage):
+            return
+
+        provider = self._get_runtime_provider_key()
+        model = self._provider_manager.get_model_name() if hasattr(self._provider_manager, "get_model_name") else ""
+        try:
+            self._session_usage_store.append(
+                self._cwd,
+                self._session_id,
+                usage,
+                provider=provider,
+                model=model,
+            )
+        except Exception as exc:
+            logger.debug("Failed to persist session usage for {}: {}", self._session_id, exc)
+
+    def _record_response_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        if isinstance(usage, Usage):
+            self._record_session_usage(usage)
+
+    def _get_runtime_provider_key(self) -> str:
+        if hasattr(self._provider_manager, "get_provider_key"):
+            try:
+                provider_key = self._provider_manager.get_provider_key()
+            except Exception:
+                pass
+            else:
+                if isinstance(provider_key, str):
+                    return provider_key
+        try:
+            from iac_code.config import get_active_provider_key
+
+            return get_active_provider_key() or ""
+        except Exception:
+            return ""

@@ -7,7 +7,23 @@ description: Configure Alibaba Cloud AccessKey or STS credentials.
 
 Alibaba Cloud credentials are required for operations that inspect or manage cloud resources.
 
-Supported environment variables:
+## OAuth Browser Login
+
+The recommended interactive setup path is `/auth`:
+
+```text
+/auth
+```
+
+Choose **Configure IaC Cloud Service**, then **Alibaba Cloud**, then **OAuth Login (Browser)**. IaC Code opens a browser authorization flow, listens for the local callback, exchanges the authorization code with PKCE, and saves OAuth-backed temporary credentials to `.cloud-credentials.yml` under the IaC Code config directory.
+
+During setup you can choose the China or International OAuth site. IaC Code stores the selected site with the refresh token so future refreshes use the same endpoint.
+
+OAuth credentials are refreshed automatically when the access token or STS credentials are near expiration. If the refresh token expires or is revoked, run `/auth` again and choose OAuth Login (Browser).
+
+## Environment Variables
+
+Environment variables are still supported for AccessKey and STS workflows:
 
 | Variable | Description |
 |---|---|

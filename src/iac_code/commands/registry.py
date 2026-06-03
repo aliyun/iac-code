@@ -50,6 +50,18 @@ class LocalCommand(Command):
     """
 
 
+@dataclass(frozen=True)
+class CommandResult:
+    """Structured result for local commands that need UI metadata."""
+
+    message: str
+    is_error: bool = False
+    refresh_banner: bool = False
+
+    def __bool__(self) -> bool:
+        return bool(self.message)
+
+
 @dataclass
 class PromptCommand(Command):
     """Skill-based command backed by a SkillDefinition.
@@ -126,6 +138,12 @@ class CommandRegistry:
         self._commands[command.name] = command
         for alias in command.aliases:
             self._commands[alias] = command
+
+    def clear_prompt_commands(self) -> None:
+        """Remove all skill-backed commands while preserving local commands."""
+        for name, command in list(self._commands.items()):
+            if isinstance(command, PromptCommand):
+                del self._commands[name]
 
     def get(self, name: str) -> Command | None:
         """Get command by name or alias."""

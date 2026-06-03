@@ -4,7 +4,10 @@ import sys
 import pytest
 
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.session_usage import SessionUsageStore
+from iac_code.types.stream_events import Usage
 
 CWD = "/tmp/proj-x"
 
@@ -103,7 +106,7 @@ class TestSessionStorage:
         assert result is not None
         cwd, path = result
         assert cwd == "/tmp/b"
-        assert path.name == "id-bb.jsonl"
+        assert path.name == SESSION_JSONL_FILENAME
         assert storage.find_session_anywhere("missing") is None
 
     def test_get_latest_session_anywhere(self, storage):
@@ -119,6 +122,18 @@ class TestSessionStorage:
 
         result = storage.get_latest_session_anywhere()
         assert result == ("/tmp/b", "newer")
+
+    def test_cross_project_lookup_ignores_usage_sidecars(self, storage):
+        import os
+
+        usage_store = SessionUsageStore(projects_dir=storage._projects_dir)
+        storage.append(CWD, "real", Message(role="user", content="real"), git_branch=None)
+        usage_store.append(CWD, "real", Usage(input_tokens=10, output_tokens=5), provider="dashscope", model="qwen")
+        usage_path = usage_store.path_for(CWD, "real")
+        os.utime(usage_path, (usage_path.stat().st_atime, usage_path.stat().st_mtime + 100))
+
+        assert storage.find_session_anywhere("real.usage") is None
+        assert storage.get_latest_session_anywhere() == (CWD, "real")
 
     def test_repair_interrupted_inserts_synthetic_results(self, storage):
         storage.append(
@@ -141,3 +156,67 @@ class TestSessionStorage:
         repaired = SessionStorage.repair_interrupted(loaded)
         assert repaired[-1].role == "user"
         assert any(getattr(b, "is_error", False) for b in repaired[-1].content)
+
+
+def test_new_session_uses_directory_format(storage):
+    storage.append(CWD, "dir-session", Message(role="user", content="hi"), git_branch="main")
+
+    legacy_path = storage.legacy_session_path(CWD, "dir-session")
+    session_dir = storage.session_dir(CWD, "dir-session")
+
+    assert session_dir.is_dir()
+    assert (session_dir / SESSION_JSONL_FILENAME).exists()
+    assert not legacy_path.exists()
+    assert storage.load(CWD, "dir-session") == [Message(role="user", content="hi")]
+
+
+def test_existing_legacy_session_stays_legacy_until_rename(storage):
+    legacy_path = storage.legacy_session_path(CWD, "legacy")
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"role":"user","content":"old"}\n', encoding="utf-8")
+
+    storage.append(CWD, "legacy", Message(role="assistant", content="next"), git_branch=None)
+
+    assert legacy_path.exists()
+    assert not storage.session_dir(CWD, "legacy").exists()
+    assert [m.role for m in storage.load(CWD, "legacy")] == ["user", "assistant"]
+
+
+def test_rename_legacy_session_migrates_to_directory(storage):
+    legacy_path = storage.legacy_session_path(CWD, "legacy-rename")
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"role":"user","content":"old"}\n', encoding="utf-8")
+
+    result = storage.rename_session(CWD, "legacy-rename", "deploy-prod", git_branch="main")
+
+    session_dir = storage.session_dir(CWD, "legacy-rename")
+    assert result == "renamed"
+    assert not legacy_path.exists()
+    assert (session_dir / SESSION_JSONL_FILENAME).exists()
+    assert (session_dir / SESSION_METADATA_FILENAME).exists()
+    assert storage.read_metadata(CWD, "legacy-rename").name == "deploy-prod"
+    assert storage.load(CWD, "legacy-rename")[0].content == "old"
+
+
+def test_rename_rejects_same_project_duplicate_name(storage):
+    storage.append(CWD, "one", Message(role="user", content="one"), git_branch=None)
+    storage.append(CWD, "two", Message(role="user", content="two"), git_branch=None)
+    storage.rename_session(CWD, "one", "deploy-prod", git_branch=None)
+
+    with pytest.raises(ValueError, match="already exists"):
+        storage.rename_session(CWD, "two", "deploy-prod", git_branch=None)
+
+
+def test_rename_allows_same_name_in_different_projects(storage):
+    storage.append("/p1", "one", Message(role="user", content="one"), git_branch=None)
+    storage.append("/p2", "two", Message(role="user", content="two"), git_branch=None)
+
+    assert storage.rename_session("/p1", "one", "deploy-prod", git_branch=None) == "renamed"
+    assert storage.rename_session("/p2", "two", "deploy-prod", git_branch=None) == "renamed"
+
+
+def test_rename_to_existing_name_is_noop(storage):
+    storage.append(CWD, "same", Message(role="user", content="one"), git_branch=None)
+    storage.rename_session(CWD, "same", "deploy-prod", git_branch=None)
+
+    assert storage.rename_session(CWD, "same", "deploy-prod", git_branch=None) == "unchanged"

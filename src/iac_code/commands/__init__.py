@@ -7,9 +7,13 @@ from iac_code.commands.debug import debug_command
 from iac_code.commands.effort import effort_command
 from iac_code.commands.exit import exit_command
 from iac_code.commands.help import help_command
+from iac_code.commands.memory import memory_command
 from iac_code.commands.model import model_command
-from iac_code.commands.registry import Command, CommandRegistry, LocalCommand, PromptCommand
+from iac_code.commands.registry import Command, CommandRegistry, CommandResult, LocalCommand, PromptCommand
+from iac_code.commands.rename import rename_command
 from iac_code.commands.resume import resume_command
+from iac_code.commands.skills import skills_command
+from iac_code.commands.status import status_command
 from iac_code.i18n import _
 
 
@@ -89,6 +93,15 @@ def create_default_registry() -> CommandRegistry:
     )
     registry.register(
         LocalCommand(
+            name="memory",
+            description=_("View and manage persistent memories"),
+            handler=memory_command,
+            arg_hint=_("[<name>|search <query>|delete <name>|help]"),
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
             name="resume",
             description=_("Resume a previous session"),
             handler=resume_command,
@@ -96,7 +109,32 @@ def create_default_registry() -> CommandRegistry:
             history_mode="session",
         )
     )
+    registry.register(
+        LocalCommand(
+            name="rename",
+            description=_("Rename the current session"),
+            handler=rename_command,
+            arg_hint="<name>",
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="skills",
+            description=_("Manage skills"),
+            handler=skills_command,
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="status",
+            description=_("Show current session status"),
+            handler=status_command,
+            history_mode="session",
+        )
+    )
     return registry
 
 
-__all__ = ["Command", "CommandRegistry", "LocalCommand", "PromptCommand", "create_default_registry"]
+__all__ = ["Command", "CommandRegistry", "CommandResult", "LocalCommand", "PromptCommand", "create_default_registry"]

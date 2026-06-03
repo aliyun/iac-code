@@ -26,10 +26,9 @@ def mock_credentials():
 
 
 @pytest.fixture
-def tool() -> RosStackInstances:
-    t = RosStackInstances()
-    t.poll_interval = 0
-    return t
+def tool(monkeypatch) -> RosStackInstances:
+    monkeypatch.setattr(RosStackInstances, "poll_interval", 0)
+    return RosStackInstances()
 
 
 @pytest.fixture
@@ -197,6 +196,40 @@ class TestRosStackInstancesExecute:
         assert first.instances[0]["account_id"] == "123456789"
         assert first.instances[0]["region_id"] == "cn-hangzhou"
         assert first.instances[0]["status"] == "SUCCEEDED"
+
+    @pytest.mark.asyncio
+    async def test_execute_reacquires_clients_while_polling(self, tool: RosStackInstances) -> None:
+        initiate_client = MagicMock(name="initiate-client")
+        first_poll_client = MagicMock(name="first-poll-client")
+        second_poll_client = MagicMock(name="second-poll-client")
+
+        clients = [initiate_client, first_poll_client, second_poll_client]
+        statuses = ["RUNNING", "SUCCEEDED"]
+        status_clients = []
+        instance_clients = []
+
+        async def fake_get_operation_status(client, operation_id, region):
+            status_clients.append(client)
+            return statuses.pop(0)
+
+        async def fake_get_instances(client, stack_group_name, region):
+            instance_clients.append(client)
+            return []
+
+        with (
+            patch.object(tool, "_get_client", side_effect=clients),
+            patch.object(tool, "_initiate", return_value="op-1"),
+            patch.object(tool, "_get_operation_status", side_effect=fake_get_operation_status),
+            patch.object(tool, "_get_instances", side_effect=fake_get_instances),
+        ):
+            result = await tool.execute(
+                tool_input={"action": "CreateStackInstances", "params": {"StackGroupName": "demo"}},
+                context=ToolContext(),
+            )
+
+        assert result.is_error is False
+        assert status_clients == [first_poll_client, second_poll_client]
+        assert instance_clients == [first_poll_client, second_poll_client]
 
     @pytest.mark.asyncio
     async def test_execute_returns_initiate_error(self, tool: RosStackInstances) -> None:

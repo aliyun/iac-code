@@ -28,6 +28,10 @@ class TokenExtractor:
         # Clamp cursor_pos to valid range
         end = min(cursor_pos, len(text))
 
+        slash_token = self._extract_slash_command(text, end)
+        if slash_token is not None:
+            return slash_token
+
         # Walk backwards to find start of token
         token_start = end
         while token_start > 0 and _is_token_char(text[token_start - 1]):
@@ -85,4 +89,20 @@ class TokenExtractor:
                 )
             return None
 
+        return None
+
+    @staticmethod
+    def _extract_slash_command(text: str, end: int) -> CompletionToken | None:
+        """Return a slash-command token spanning arguments on the current line."""
+        line_start = text.rfind("\n", 0, end) + 1
+        for index in range(line_start, end):
+            if text[index] != "/":
+                continue
+            if index == 0 or text[index - 1] in (" ", "\t", "\n"):
+                return CompletionToken(
+                    text=text[index:end],
+                    start=index,
+                    end=end,
+                    trigger="/",
+                )
         return None

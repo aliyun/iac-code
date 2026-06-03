@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from iac_code.services.providers.aliyun import AliyunCredential
+from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAuthReloginRequired
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun import aliyun_api as aliyun_api_module
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
@@ -424,6 +425,122 @@ class TestAliyunApiExecute:
         assert request.query["PageSize"] == "10"
         assert request.query["DryRun"] == "true"
 
+    @pytest.mark.asyncio
+    async def test_execute_refreshes_oauth_before_endpoint_discovery(
+        self, api: AliyunApi, context: ToolContext
+    ) -> None:
+        oauth_cred = AliyunCredential(
+            mode="OAuth",
+            access_key_id="tmp-ak",
+            access_key_secret="tmp-sk",
+            sts_token="tmp-sts",
+            region_id="cn-hangzhou",
+            oauth_access_token="access-token",
+            oauth_refresh_token="refresh-token",
+        )
+        refreshed = AliyunCredential(
+            mode="OAuth",
+            access_key_id="new-ak",
+            access_key_secret="new-sk",
+            sts_token="new-sts",
+            region_id="cn-hangzhou",
+            oauth_access_token="access-token",
+            oauth_refresh_token="refresh-token",
+        )
+        mock_client = MagicMock()
+        mock_client.call_api.side_effect = [
+            {"body": {"Endpoints": {"Endpoint": [{"Type": "openAPI", "Endpoint": "custom.aliyuncs.com"}]}}},
+            {"body": {"Instances": []}},
+        ]
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.CloudCredentials") as cloud_credentials,
+            patch.object(
+                aliyun_api_module.AliyunCredentials, "refresh_oauth_if_needed", return_value=refreshed
+            ) as refresh,
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client) as client_cls,
+        ):
+            cloud_credentials.return_value.get_provider.return_value = oauth_cred
+            result = await api.execute(
+                tool_input={
+                    "product": "custom-svc",
+                    "action": "DescribeInstances",
+                    "version": "2023-01-01",
+                    "region_id": "cn-hangzhou",
+                },
+                context=context,
+            )
+
+        assert result.is_error is False
+        refresh.assert_called_once_with(oauth_cred)
+        discovery_config = client_cls.call_args_list[0].args[0]
+        call_config = client_cls.call_args_list[1].args[0]
+        assert discovery_config.access_key_id == "new-ak"
+        assert discovery_config.security_token == "new-sts"
+        assert call_config.access_key_id == "new-ak"
+        assert call_config.security_token == "new-sts"
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_relogin_error_when_oauth_refresh_requires_login(
+        self, api: AliyunApi, context: ToolContext
+    ) -> None:
+        oauth_cred = AliyunCredential(
+            mode="OAuth",
+            access_key_id="tmp-ak",
+            access_key_secret="tmp-sk",
+            sts_token="tmp-sts",
+            region_id="cn-hangzhou",
+            oauth_access_token="access-token",
+            oauth_refresh_token="refresh-token",
+        )
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.CloudCredentials") as cloud_credentials,
+            patch.object(
+                aliyun_api_module.AliyunCredentials,
+                "refresh_oauth_if_needed",
+                side_effect=AliyunOAuthReloginRequired("Run /auth and choose OAuth Login (Browser)."),
+            ),
+        ):
+            cloud_credentials.return_value.get_provider.return_value = oauth_cred
+            result = await api.execute(
+                tool_input={"product": "ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou"},
+                context=context,
+            )
+
+        assert result.is_error is True
+        assert "/auth" in result.content
+        assert "OAuth Login (Browser)" in result.content
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_oauth_error_when_refresh_fails(self, api: AliyunApi, context: ToolContext) -> None:
+        oauth_cred = AliyunCredential(
+            mode="OAuth",
+            access_key_id="tmp-ak",
+            access_key_secret="tmp-sk",
+            sts_token="tmp-sts",
+            region_id="cn-hangzhou",
+            oauth_access_token="access-token",
+            oauth_refresh_token="refresh-token",
+        )
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.CloudCredentials") as cloud_credentials,
+            patch.object(
+                aliyun_api_module.AliyunCredentials,
+                "refresh_oauth_if_needed",
+                side_effect=AliyunOAuthError("temporary oauth refresh failure"),
+            ),
+        ):
+            cloud_credentials.return_value.get_provider.return_value = oauth_cred
+            result = await api.execute(
+                tool_input={"product": "ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou"},
+                context=context,
+            )
+
+        assert result.is_error is True
+        assert "temporary oauth refresh failure" in result.content
+
 
 class TestAliyunApiProductNormalization:
     @pytest.mark.asyncio
@@ -525,6 +642,22 @@ class TestAliyunApiBuildConfig:
         assert config.security_token == "my-sts-token"
         assert config.endpoint == "ecs.aliyuncs.com"
         assert config.region_id == "cn-beijing"
+        assert config.user_agent and config.user_agent.startswith("iac-code/")
+
+    def test_oauth_mode_builds_sts_config(self) -> None:
+        credential = AliyunCredential(
+            mode="OAuth",
+            access_key_id="tmp-ak",
+            access_key_secret="tmp-sk",
+            sts_token="tmp-sts",
+            region_id="cn-hangzhou",
+        )
+        config = AliyunApi._build_config(credential, "ecs.aliyuncs.com", "cn-hangzhou")
+        assert config.access_key_id == "tmp-ak"
+        assert config.access_key_secret == "tmp-sk"
+        assert config.security_token == "tmp-sts"
+        assert config.endpoint == "ecs.aliyuncs.com"
+        assert config.region_id == "cn-hangzhou"
         assert config.user_agent and config.user_agent.startswith("iac-code/")
 
     def test_ram_role_arn_mode(self) -> None:
