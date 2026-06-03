@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-02 22:08+0800\n"
+"POT-Creation-Date: 2026-06-03 11:39+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: fr\n"
@@ -127,7 +127,7 @@ msgstr "Utilisation : /debug [on|off]"
 msgid "Memory manager is unavailable."
 msgstr "Le gestionnaire de mémoire est indisponible."
 
-#: src/iac_code/acp/slash_registry.py:146 src/iac_code/commands/rename.py:20
+#: src/iac_code/acp/slash_registry.py:146 src/iac_code/commands/rename.py:21
 msgid "Usage: /rename <name>"
 msgstr "Utilisation : /rename <nom>"
 
@@ -135,18 +135,18 @@ msgstr "Utilisation : /rename <nom>"
 msgid "Rename is only available after a session is created."
 msgstr "Le renommage n'est disponible qu'après la création d'une session."
 
-#: src/iac_code/acp/slash_registry.py:163 src/iac_code/commands/rename.py:41
+#: src/iac_code/acp/slash_registry.py:163 src/iac_code/commands/rename.py:42
 #, python-brace-format
 msgid "Session is already named {name}"
 msgstr "La session porte déjà le nom {name}"
 
-#: src/iac_code/acp/slash_registry.py:164 src/iac_code/commands/rename.py:42
+#: src/iac_code/acp/slash_registry.py:164 src/iac_code/commands/rename.py:43
 #, python-brace-format
 msgid "Renamed session to {name}"
 msgstr "Session renommée en {name}"
 
 #: src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428
-#: src/iac_code/ui/repl.py:795 src/iac_code/ui/repl.py:809
+#: src/iac_code/ui/repl.py:812 src/iac_code/ui/repl.py:826
 msgid "Permission denied."
 msgstr "Permission refusée."
 
@@ -708,7 +708,7 @@ msgstr "Gérer les compétences"
 msgid "Show current session status"
 msgstr "Afficher l’état actuel de la session"
 
-#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:1115
+#: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:1117
 #: src/iac_code/ui/core/prompt_input.py:557
 msgid "Navigate"
 msgstr "Naviguer"
@@ -716,8 +716,8 @@ msgstr "Naviguer"
 #: src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:538
 #: src/iac_code/commands/auth.py:570 src/iac_code/commands/auth.py:577
 #: src/iac_code/commands/auth.py:612 src/iac_code/commands/auth.py:619
-#: src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:1115
-#: src/iac_code/commands/auth.py:1549 src/iac_code/ui/core/prompt_input.py:557
+#: src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:1117
+#: src/iac_code/commands/auth.py:1551 src/iac_code/ui/core/prompt_input.py:557
 msgid "Confirm"
 msgstr "Confirmer"
 
@@ -725,8 +725,8 @@ msgstr "Confirmer"
 #: src/iac_code/commands/auth.py:538 src/iac_code/commands/auth.py:570
 #: src/iac_code/commands/auth.py:577 src/iac_code/commands/auth.py:612
 #: src/iac_code/commands/auth.py:619 src/iac_code/commands/auth.py:640
-#: src/iac_code/commands/auth.py:1115 src/iac_code/commands/auth.py:1441
-#: src/iac_code/commands/auth.py:1549
+#: src/iac_code/commands/auth.py:1117 src/iac_code/commands/auth.py:1443
+#: src/iac_code/commands/auth.py:1551
 msgid "Back"
 msgstr "Retour"
 
@@ -738,9 +738,9 @@ msgstr "Conserver"
 msgid "Re-enter"
 msgstr "Saisir à nouveau"
 
-#: src/iac_code/commands/auth.py:749 src/iac_code/commands/auth.py:861
-#: src/iac_code/commands/auth.py:919 src/iac_code/commands/auth.py:927
-#: src/iac_code/commands/auth.py:954
+#: src/iac_code/commands/auth.py:749 src/iac_code/commands/auth.py:863
+#: src/iac_code/commands/auth.py:921 src/iac_code/commands/auth.py:929
+#: src/iac_code/commands/auth.py:956
 msgid " (current)"
 msgstr " (actuel)"
 
@@ -765,250 +765,250 @@ msgstr "Saisir le nom du modèle personnalisé : "
 msgid "Error: console not available"
 msgstr "Erreur : console indisponible"
 
-#: src/iac_code/commands/auth.py:818
+#: src/iac_code/commands/auth.py:820
 msgid "Configure LLM Provider"
 msgstr "Configurer le fournisseur LLM"
 
-#: src/iac_code/commands/auth.py:819
+#: src/iac_code/commands/auth.py:821
 msgid "Configure IaC Cloud Service"
 msgstr "Configurer le service cloud IaC"
 
-#: src/iac_code/commands/auth.py:821
+#: src/iac_code/commands/auth.py:823
 msgid "Select configuration type"
 msgstr "Sélectionner le type de configuration"
 
-#: src/iac_code/commands/auth.py:823 src/iac_code/commands/auth.py:979
-#: src/iac_code/commands/auth.py:995 src/iac_code/commands/auth.py:1074
-#: src/iac_code/commands/auth.py:1488 src/iac_code/commands/auth.py:1529
+#: src/iac_code/commands/auth.py:825 src/iac_code/commands/auth.py:981
+#: src/iac_code/commands/auth.py:997 src/iac_code/commands/auth.py:1076
+#: src/iac_code/commands/auth.py:1490 src/iac_code/commands/auth.py:1531
 msgid "Auth cancelled"
 msgstr "Authentification annulée"
 
-#: src/iac_code/commands/auth.py:865 src/iac_code/commands/auth.py:959
-#: src/iac_code/commands/auth.py:1049
+#: src/iac_code/commands/auth.py:867 src/iac_code/commands/auth.py:961
+#: src/iac_code/commands/auth.py:1051
 #, python-brace-format
 msgid "Select provider — {group}"
 msgstr "Sélectionner le fournisseur — {group}"
 
-#: src/iac_code/commands/auth.py:865 src/iac_code/commands/auth.py:917
-#: src/iac_code/commands/auth.py:1034
+#: src/iac_code/commands/auth.py:867 src/iac_code/commands/auth.py:919
+#: src/iac_code/commands/auth.py:1036
 msgid "Third-party"
 msgstr "Tiers"
 
-#: src/iac_code/commands/auth.py:875
+#: src/iac_code/commands/auth.py:877
 #, python-brace-format
 msgid "{status}: {provider}"
 msgstr "{status} : {provider}"
 
-#: src/iac_code/commands/auth.py:876 src/iac_code/commands/auth.py:1027
+#: src/iac_code/commands/auth.py:878 src/iac_code/commands/auth.py:1029
 msgid "Configured"
 msgstr "Configuré"
 
-#: src/iac_code/commands/auth.py:931
+#: src/iac_code/commands/auth.py:933
 msgid "Select provider"
 msgstr "Sélectionner le fournisseur"
 
-#: src/iac_code/commands/auth.py:972
+#: src/iac_code/commands/auth.py:974
 #, python-brace-format
 msgid "Configure {provider}"
 msgstr "Configurer {provider}"
 
-#: src/iac_code/commands/auth.py:988
+#: src/iac_code/commands/auth.py:990
 #, python-brace-format
 msgid "Enter API key for {provider}"
 msgstr "Saisir la clé API pour {provider}"
 
-#: src/iac_code/commands/auth.py:1026
+#: src/iac_code/commands/auth.py:1028
 #, python-brace-format
 msgid "{status}: {provider} / {model}"
 msgstr "{status} : {provider} / {model}"
 
-#: src/iac_code/commands/auth.py:1035 src/iac_code/commands/auth.py:1056
+#: src/iac_code/commands/auth.py:1037 src/iac_code/commands/auth.py:1058
 msgid "Alibaba Cloud"
 msgstr "Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:1036 src/iac_code/providers/registry.py:426
+#: src/iac_code/commands/auth.py:1038 src/iac_code/providers/registry.py:427
 msgid "ZhiPu AI"
 msgstr "ZhiPu AI"
 
-#: src/iac_code/commands/auth.py:1037
+#: src/iac_code/commands/auth.py:1039
 msgid "Kimi"
 msgstr "Kimi"
 
-#: src/iac_code/commands/auth.py:1038
+#: src/iac_code/commands/auth.py:1040
 msgid "MiniMax"
 msgstr "MiniMax"
 
-#: src/iac_code/commands/auth.py:1039 src/iac_code/providers/registry.py:428
+#: src/iac_code/commands/auth.py:1041 src/iac_code/providers/registry.py:429
 msgid "Volcengine"
 msgstr "Volcengine"
 
-#: src/iac_code/commands/auth.py:1040
+#: src/iac_code/commands/auth.py:1042
 msgid "SiliconFlow"
 msgstr "SiliconFlow"
 
-#: src/iac_code/commands/auth.py:1041 src/iac_code/providers/registry.py:419
+#: src/iac_code/commands/auth.py:1043 src/iac_code/providers/registry.py:420
 msgid "DeepSeek"
 msgstr "DeepSeek"
 
-#: src/iac_code/commands/auth.py:1042 src/iac_code/providers/registry.py:417
+#: src/iac_code/commands/auth.py:1044 src/iac_code/providers/registry.py:418
 msgid "OpenAI"
 msgstr "OpenAI"
 
-#: src/iac_code/commands/auth.py:1043 src/iac_code/providers/registry.py:418
+#: src/iac_code/commands/auth.py:1045 src/iac_code/providers/registry.py:419
 msgid "Anthropic"
 msgstr "Anthropic"
 
-#: src/iac_code/commands/auth.py:1044 src/iac_code/providers/registry.py:421
+#: src/iac_code/commands/auth.py:1046 src/iac_code/providers/registry.py:422
 msgid "Google Gemini"
 msgstr "Google Gemini"
 
-#: src/iac_code/commands/auth.py:1045 src/iac_code/providers/registry.py:434
+#: src/iac_code/commands/auth.py:1047 src/iac_code/providers/registry.py:435
 msgid "Azure OpenAI"
 msgstr "Azure OpenAI"
 
-#: src/iac_code/commands/auth.py:1046 src/iac_code/providers/registry.py:433
+#: src/iac_code/commands/auth.py:1048 src/iac_code/providers/registry.py:434
 msgid "OpenRouter"
 msgstr "OpenRouter"
 
-#: src/iac_code/commands/auth.py:1047
+#: src/iac_code/commands/auth.py:1049
 msgid "Local"
 msgstr "Local"
 
-#: src/iac_code/commands/auth.py:1048
+#: src/iac_code/commands/auth.py:1050
 msgid "Compatible"
 msgstr "Compatible"
 
-#: src/iac_code/commands/auth.py:1065
+#: src/iac_code/commands/auth.py:1067
 msgid "Select Cloud Provider"
 msgstr "Sélectionner le fournisseur cloud"
 
-#: src/iac_code/commands/auth.py:1081
+#: src/iac_code/commands/auth.py:1083
 msgid "Credential"
 msgstr "Identifiants"
 
-#: src/iac_code/commands/auth.py:1082 src/iac_code/commands/auth.py:1197
-#: src/iac_code/commands/auth.py:1525 src/iac_code/commands/status.py:36
+#: src/iac_code/commands/auth.py:1084 src/iac_code/commands/auth.py:1199
+#: src/iac_code/commands/auth.py:1527 src/iac_code/commands/status.py:36
 #: src/iac_code/ui/renderer.py:455
 msgid "Region"
 msgstr "Région"
 
-#: src/iac_code/commands/auth.py:1084
+#: src/iac_code/commands/auth.py:1086
 msgid "Configure Alibaba Cloud"
 msgstr "Configurer Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:1186
+#: src/iac_code/commands/auth.py:1188
 msgid "Current configuration"
 msgstr "Configuration actuelle"
 
-#: src/iac_code/commands/auth.py:1188
+#: src/iac_code/commands/auth.py:1190
 msgid "Mode"
 msgstr "Mode"
 
-#: src/iac_code/commands/auth.py:1194
+#: src/iac_code/commands/auth.py:1196
 msgid "(not set)"
 msgstr "(non défini)"
 
-#: src/iac_code/commands/auth.py:1203
+#: src/iac_code/commands/auth.py:1205
 msgid "AccessKey"
 msgstr "AccessKey"
 
-#: src/iac_code/commands/auth.py:1205 src/iac_code/commands/auth.py:1217
+#: src/iac_code/commands/auth.py:1207 src/iac_code/commands/auth.py:1219
 msgid "STS Token"
 msgstr "Jeton STS"
 
-#: src/iac_code/commands/auth.py:1207
+#: src/iac_code/commands/auth.py:1209
 msgid "RAM Role"
 msgstr "Rôle RAM"
 
-#: src/iac_code/commands/auth.py:1209
+#: src/iac_code/commands/auth.py:1211
 msgid "OAuth Login (Browser)"
 msgstr "Connexion OAuth (navigateur)"
 
-#: src/iac_code/commands/auth.py:1215
+#: src/iac_code/commands/auth.py:1217
 msgid "AccessKey ID"
 msgstr "ID AccessKey"
 
-#: src/iac_code/commands/auth.py:1216
+#: src/iac_code/commands/auth.py:1218
 msgid "AccessKey Secret"
 msgstr "Secret AccessKey"
 
-#: src/iac_code/commands/auth.py:1218
+#: src/iac_code/commands/auth.py:1220
 msgid "RAM Role ARN"
 msgstr "ARN du rôle RAM"
 
-#: src/iac_code/commands/auth.py:1219
+#: src/iac_code/commands/auth.py:1221
 msgid "Session Name"
 msgstr "Nom de session"
 
-#: src/iac_code/commands/auth.py:1220
+#: src/iac_code/commands/auth.py:1222
 msgid "OAuth Site Type"
 msgstr "Type de site OAuth"
 
-#: src/iac_code/commands/auth.py:1221
+#: src/iac_code/commands/auth.py:1223
 msgid "OAuth Access Token"
 msgstr "Jeton d'accès OAuth"
 
-#: src/iac_code/commands/auth.py:1222
+#: src/iac_code/commands/auth.py:1224
 msgid "OAuth Refresh Token"
 msgstr "Jeton de rafraîchissement OAuth"
 
-#: src/iac_code/commands/auth.py:1223
+#: src/iac_code/commands/auth.py:1225
 msgid "OAuth Access Token Expire"
 msgstr "Expiration du jeton d'accès OAuth"
 
-#: src/iac_code/commands/auth.py:1224
+#: src/iac_code/commands/auth.py:1226
 msgid "OAuth Refresh Token Expire"
 msgstr "Expiration du jeton de rafraîchissement OAuth"
 
-#: src/iac_code/commands/auth.py:1225
+#: src/iac_code/commands/auth.py:1227
 msgid "STS Expiration"
 msgstr "Expiration STS"
 
-#: src/iac_code/commands/auth.py:1382
+#: src/iac_code/commands/auth.py:1384
 msgid "China"
 msgstr "Chine"
 
-#: src/iac_code/commands/auth.py:1383
+#: src/iac_code/commands/auth.py:1385
 msgid "International"
 msgstr "International"
 
-#: src/iac_code/commands/auth.py:1385
+#: src/iac_code/commands/auth.py:1387
 msgid "Choose site type"
 msgstr "Choisir le type de site"
 
-#: src/iac_code/commands/auth.py:1400
+#: src/iac_code/commands/auth.py:1402
 #, python-brace-format
 msgid "Alibaba Cloud OAuth login failed: {error}"
 msgstr "Échec de la connexion OAuth Alibaba Cloud : {error}"
 
-#: src/iac_code/commands/auth.py:1416
+#: src/iac_code/commands/auth.py:1418
 msgid "Configured: Alibaba Cloud OAuth credentials saved"
 msgstr "Configuré : identifiants OAuth Alibaba Cloud enregistrés"
 
-#: src/iac_code/commands/auth.py:1428
+#: src/iac_code/commands/auth.py:1430
 msgid "Configure Alibaba Cloud credentials"
 msgstr "Configurer les identifiants Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:1441
+#: src/iac_code/commands/auth.py:1443
 msgid "Reconfigure credential"
 msgstr "Reconfigurer les identifiants"
 
-#: src/iac_code/commands/auth.py:1454
+#: src/iac_code/commands/auth.py:1456
 msgid "Select credential type"
 msgstr "Sélectionner le type d’identifiants"
 
-#: src/iac_code/commands/auth.py:1510
+#: src/iac_code/commands/auth.py:1512
 msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
 msgstr ""
 "Configured: Alibaba Cloud credentials saved to ~/.iac-codeConfigured: "
 "Alibaba Cloud credentials saved to ~/.iac-codeConfiguration effectuée : "
 "identifiants Alibaba Cloud enregistrés dans ~/.iac-code"
 
-#: src/iac_code/commands/auth.py:1517
+#: src/iac_code/commands/auth.py:1519
 msgid "Configure Alibaba Cloud region"
 msgstr "Configurer la région Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py:1543
+#: src/iac_code/commands/auth.py:1545
 msgid "Configured: Alibaba Cloud region saved to ~/.iac-code"
 msgstr ""
 "Configured: Alibaba Cloud region saved to ~/.iac-codeConfigured: Alibaba "
@@ -1161,11 +1161,11 @@ msgstr "Modèle actuel : {model}"
 msgid "Kept model as {model}"
 msgstr "Modèle conservé : {model}"
 
-#: src/iac_code/commands/rename.py:15 src/iac_code/commands/rename.py:27
+#: src/iac_code/commands/rename.py:16 src/iac_code/commands/rename.py:28
 msgid "Rename is only available in interactive mode."
 msgstr "Le renommage n'est disponible qu'en mode interactif."
 
-#: src/iac_code/commands/rename.py:30
+#: src/iac_code/commands/rename.py:31
 msgid "Rename cancelled"
 msgstr "Renommage annulé"
 
@@ -1367,79 +1367,79 @@ msgstr ""
 " correcte (actuelle : {base_url}). De nombreux points de terminaison "
 "compatibles OpenAI exigent le suffixe /v1 (p. ex. {base_url}/v1)."
 
-#: src/iac_code/providers/registry.py:415
+#: src/iac_code/providers/registry.py:416
 msgid "Alibaba Cloud Bailian"
 msgstr "Alibaba Cloud Bailian"
 
-#: src/iac_code/providers/registry.py:416
+#: src/iac_code/providers/registry.py:417
 msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "Alibaba Cloud Bailian Token Plan"
 
-#: src/iac_code/providers/registry.py:420
+#: src/iac_code/providers/registry.py:421
 msgid "OpenAPI Compatible"
 msgstr "Compatible OpenAPI"
 
-#: src/iac_code/providers/registry.py:422
+#: src/iac_code/providers/registry.py:423
 msgid "Kimi (China)"
 msgstr "Kimi (Chine)"
 
-#: src/iac_code/providers/registry.py:423
+#: src/iac_code/providers/registry.py:424
 msgid "Kimi (International)"
 msgstr "Kimi (International)"
 
-#: src/iac_code/providers/registry.py:424
+#: src/iac_code/providers/registry.py:425
 msgid "MiniMax (China)"
 msgstr "MiniMax (Chine)"
 
-#: src/iac_code/providers/registry.py:425
+#: src/iac_code/providers/registry.py:426
 msgid "MiniMax (International)"
 msgstr "MiniMax (International)"
 
-#: src/iac_code/providers/registry.py:427
+#: src/iac_code/providers/registry.py:428
 msgid "ZhiPu AI (International)"
 msgstr "ZhiPu AI (International)"
 
-#: src/iac_code/providers/registry.py:429
+#: src/iac_code/providers/registry.py:430
 msgid "SiliconFlow (China)"
 msgstr "SiliconFlow (Chine)"
 
-#: src/iac_code/providers/registry.py:430
+#: src/iac_code/providers/registry.py:431
 msgid "SiliconFlow (International)"
 msgstr "SiliconFlow (International)"
 
-#: src/iac_code/providers/registry.py:431
+#: src/iac_code/providers/registry.py:432
 msgid "Ollama (Local)"
 msgstr "Ollama (Local)"
 
-#: src/iac_code/providers/registry.py:432
+#: src/iac_code/providers/registry.py:433
 msgid "LM Studio (Local)"
 msgstr "LM Studio (Local)"
 
-#: src/iac_code/providers/registry.py:435
+#: src/iac_code/providers/registry.py:436
 msgid "ModelScope"
 msgstr "ModelScope"
 
-#: src/iac_code/providers/registry.py:436
+#: src/iac_code/providers/registry.py:437
 msgid "Alibaba Cloud CodingPlan"
 msgstr "Alibaba Cloud CodingPlan"
 
-#: src/iac_code/providers/registry.py:437
+#: src/iac_code/providers/registry.py:438
 msgid "Alibaba Cloud CodingPlan (International)"
 msgstr "Alibaba Cloud CodingPlan (International)"
 
-#: src/iac_code/providers/registry.py:438
+#: src/iac_code/providers/registry.py:439
 msgid "ZhiPu AI CodingPlan"
 msgstr "ZhiPu AI CodingPlan"
 
-#: src/iac_code/providers/registry.py:439
+#: src/iac_code/providers/registry.py:440
 msgid "ZhiPu AI CodingPlan (International)"
 msgstr "ZhiPu AI CodingPlan (International)"
 
-#: src/iac_code/providers/registry.py:440
+#: src/iac_code/providers/registry.py:441
 msgid "Volcengine CodingPlan"
 msgstr "Volcengine CodingPlan"
 
-#: src/iac_code/providers/registry.py:441
+#: src/iac_code/providers/registry.py:442
 msgid "Anthropic Compatible"
 msgstr "Compatible Anthropic"
 
@@ -1598,7 +1598,7 @@ msgstr ""
 " si nécessaire, puis exécutez /auth pour choisir de nouveau Connexion "
 "OAuth (navigateur)."
 
-#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:825
+#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:841
 #, python-brace-format
 msgid "Skill '{name}' is disabled. Run /skills to enable it."
 msgstr "La compétence « {name} » est désactivée. Exécutez /skills pour l'activer."
@@ -2332,115 +2332,115 @@ msgstr "Non, toujours refuser \"{rule}\" (cette session)"
 msgid "No, always reject this tool"
 msgstr "Non, toujours refuser cet outil"
 
-#: src/iac_code/ui/repl.py:412
+#: src/iac_code/ui/repl.py:423
 msgid "Press Ctrl+C again to exit."
 msgstr "Appuyez de nouveau sur Ctrl+C pour quitter."
 
-#: src/iac_code/ui/repl.py:437
+#: src/iac_code/ui/repl.py:448
 msgid "Interrupted."
 msgstr "Interrompu."
 
-#: src/iac_code/ui/repl.py:496
+#: src/iac_code/ui/repl.py:507
 msgid "Update now"
 msgstr "Mettre à jour maintenant"
 
-#: src/iac_code/ui/repl.py:498
+#: src/iac_code/ui/repl.py:509
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "Exécute la commande de mise à jour affichée et quitte en cas de succès."
 
-#: src/iac_code/ui/repl.py:501
+#: src/iac_code/ui/repl.py:512
 msgid "Skip"
 msgstr "Ignorer"
 
-#: src/iac_code/ui/repl.py:503
+#: src/iac_code/ui/repl.py:514
 msgid "Continue with the current version for this session."
 msgstr "Continuer avec la version actuelle pour cette session."
 
-#: src/iac_code/ui/repl.py:506
+#: src/iac_code/ui/repl.py:517
 msgid "Skip until next version"
 msgstr "Ignorer jusqu’à la prochaine version"
 
-#: src/iac_code/ui/repl.py:508
+#: src/iac_code/ui/repl.py:519
 msgid "Hide this update until a newer version is available."
 msgstr ""
 "Masquer cette mise à jour jusqu’à ce qu’une version plus récente soit "
 "disponible."
 
-#: src/iac_code/ui/repl.py:527 src/iac_code/ui/repl.py:539
+#: src/iac_code/ui/repl.py:538 src/iac_code/ui/repl.py:550
 msgid "Update command failed. Continuing with the current version."
 msgstr "La commande de mise à jour a échoué. La version actuelle sera conservée."
 
-#: src/iac_code/ui/repl.py:532
+#: src/iac_code/ui/repl.py:543
 msgid "Update completed. Restart iac-code to continue."
 msgstr "Mise à jour terminée. Redémarrez iac-code pour continuer."
 
-#: src/iac_code/ui/repl.py:570
+#: src/iac_code/ui/repl.py:581
 msgid "No image in clipboard."
 msgstr "Aucune image dans le presse-papiers."
 
-#: src/iac_code/ui/repl.py:756
+#: src/iac_code/ui/repl.py:767
 msgid "Usage: !<shell command>"
 msgstr "Utilisation : !<commande shell>"
 
-#: src/iac_code/ui/repl.py:761
+#: src/iac_code/ui/repl.py:774
 msgid "Shell command support is unavailable."
 msgstr "La prise en charge des commandes shell n'est pas disponible."
 
-#: src/iac_code/ui/repl.py:828
+#: src/iac_code/ui/repl.py:844
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr ""
 "Compétence inconnue : ${name}. Tapez / pour lister les commandes et les "
 "compétences."
 
-#: src/iac_code/ui/repl.py:830
+#: src/iac_code/ui/repl.py:846
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available commands.Commande "
 "inconnue : /{name}. Saisissez /help pour la liste des commandes."
 
-#: src/iac_code/ui/repl.py:835
+#: src/iac_code/ui/repl.py:851
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ n'invoque que des compétences. Utilisez plutôt /{name}."
 
-#: src/iac_code/ui/repl.py:857 src/iac_code/ui/repl.py:902
+#: src/iac_code/ui/repl.py:873 src/iac_code/ui/repl.py:921
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Erreur de commande : {error}"
 
-#: src/iac_code/ui/repl.py:864
+#: src/iac_code/ui/repl.py:880
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "Aucun gestionnaire pour la commande : {name}"
 
-#: src/iac_code/ui/repl.py:1126
+#: src/iac_code/ui/repl.py:1155
 msgid "Goodbye!"
 msgstr "Au revoir !"
 
-#: src/iac_code/ui/repl.py:1127
+#: src/iac_code/ui/repl.py:1156
 msgid "Resume this session with:"
 msgstr "Pour reprendre cette session :"
 
-#: src/iac_code/ui/repl.py:1130
+#: src/iac_code/ui/repl.py:1159
 msgid "Session ID"
 msgstr "ID de session"
 
-#: src/iac_code/ui/repl.py:1180 src/iac_code/ui/repl.py:1184
+#: src/iac_code/ui/repl.py:1209 src/iac_code/ui/repl.py:1213
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Session introuvable : {session_id}"
 
-#: src/iac_code/ui/repl.py:1233
+#: src/iac_code/ui/repl.py:1262
 msgid "Session name: "
 msgstr "Nom de session : "
 
-#: src/iac_code/ui/repl.py:1239
+#: src/iac_code/ui/repl.py:1268
 msgid "Session name cannot be empty."
 msgstr "Le nom de session ne peut pas être vide."
 
-#: src/iac_code/ui/repl.py:1251
+#: src/iac_code/ui/repl.py:1280
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2451,23 +2451,23 @@ msgstr ""
 "Pour la reprendre, exécutez :\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1257
+#: src/iac_code/ui/repl.py:1286
 msgid "Multiple sessions match. Resume one by ID:"
 msgstr "Plusieurs sessions correspondent. Reprenez-en une par ID :"
 
-#: src/iac_code/ui/repl.py:1370
+#: src/iac_code/ui/repl.py:1401
 msgid "This conversation is from a different directory."
 msgstr "Cette conversation provient d’un autre répertoire."
 
-#: src/iac_code/ui/repl.py:1372
+#: src/iac_code/ui/repl.py:1403
 msgid "To resume, run:"
 msgstr "Pour reprendre, exécutez :"
 
-#: src/iac_code/ui/repl.py:1377
+#: src/iac_code/ui/repl.py:1408
 msgid "(Command copied to clipboard)"
 msgstr "(Commande copiée dans le presse-papiers)"
 
-#: src/iac_code/ui/repl.py:1534
+#: src/iac_code/ui/repl.py:1565
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
@@ -2476,12 +2476,12 @@ msgstr ""
 "Le modèle actuel {model} ne prend pas en charge l’entrée d’image. "
 "Utilisez /model pour passer à un modèle compatible vision."
 
-#: src/iac_code/ui/repl.py:1543
+#: src/iac_code/ui/repl.py:1574
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "Erreur d’image : {err}"
 
-#: src/iac_code/ui/repl.py:1560
+#: src/iac_code/ui/repl.py:1591
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
