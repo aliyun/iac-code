@@ -233,6 +233,28 @@ class ProviderManager:
     def get_model_name(self) -> str:
         return self._model
 
+    def get_provider_key(self) -> str:
+        """Return the runtime provider key without forcing provider creation."""
+        if self._provider_key_override:
+            return self._provider_key_override
+        if self._provider is not None:
+            key = getattr(self._provider, "_PROVIDER_KEY", "")
+            if isinstance(key, str) and key:
+                return key
+        try:
+            return _detect_provider_name(self._model)
+        except ValueError:
+            return ""
+
+    def get_provider_display(self) -> str:
+        key = self.get_provider_key()
+        if not key:
+            return ""
+        from iac_code.providers.registry import PROVIDER_REGISTRY
+
+        descriptor = PROVIDER_REGISTRY.get(key)
+        return descriptor.display_name if descriptor is not None else key
+
     def _get_fallback_model(self) -> str | None:
         return MODEL_FALLBACK_MAP.get(self._model)
 

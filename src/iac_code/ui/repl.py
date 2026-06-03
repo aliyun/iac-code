@@ -20,6 +20,7 @@ import sys
 import time
 from dataclasses import dataclass
 from types import ModuleType
+from typing import Any
 
 from loguru import logger
 from rich.console import Console
@@ -28,10 +29,12 @@ from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.system_prompt import build_system_prompt
 from iac_code.commands import create_default_registry
 from iac_code.commands.registry import LocalCommand, PromptCommand
-from iac_code.config import get_config_dir, get_history_path, load_credentials
+from iac_code.config import get_active_provider_key, get_config_dir, get_history_path, load_credentials
 from iac_code.i18n import _
 from iac_code.memory.memory_manager import MemoryManager
 from iac_code.providers.manager import ProviderManager
+from iac_code.providers.registry import PROVIDER_REGISTRY
+from iac_code.services.cloud_credentials import CloudCredentials
 from iac_code.services.session_index import SessionIndex
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.update_checker import (
@@ -128,6 +131,7 @@ class InlineREPL:
         self._session_storage = SessionStorage()
         self.session_index = SessionIndex()
         self._session_id = self._resolve_session_id(resume_session_id)
+        self._was_resumed = resume_session_id is not None
         from iac_code.utils.image.store import ImageStore
 
         self._image_store = ImageStore(session_id=self._session_id)
@@ -1150,6 +1154,67 @@ class InlineREPL:
     def session_id(self) -> str:
         return self._session_id
 
+    def get_status_snapshot(self) -> dict[str, Any]:
+        state = self.store.get_state()
+        messages = self._agent_loop.context_manager.get_messages()
+        return {
+            "session_id": self._session_id,
+            "resumed": self._was_resumed,
+            "provider": self._status_provider_display(),
+            "model": self._status_model(state.model),
+            "region": self._status_region(),
+            "cwd": self._original_cwd,
+            "api_usage": self._agent_loop.get_session_usage(),
+            "turn_count": self._count_user_turns(messages),
+            "max_turns": self._agent_loop.max_turns,
+            "context_usage": self._agent_loop.get_context_usage(),
+        }
+
+    def _status_provider_display(self) -> str:
+        if hasattr(self._provider_manager, "get_provider_display"):
+            try:
+                display = self._provider_manager.get_provider_display()
+            except Exception:
+                display = ""
+            if isinstance(display, str) and display:
+                return display
+        key = get_active_provider_key()
+        if not key:
+            return ""
+        descriptor = PROVIDER_REGISTRY.get(key)
+        if descriptor is not None:
+            return descriptor.display_name
+        return key
+
+    def _status_model(self, fallback: str) -> str:
+        if hasattr(self._provider_manager, "get_model_name"):
+            try:
+                model = self._provider_manager.get_model_name()
+            except Exception:
+                model = ""
+            if isinstance(model, str) and model:
+                return model
+        return fallback
+
+    @staticmethod
+    def _status_region() -> str:
+        credential = CloudCredentials().get_provider("aliyun")
+        return credential.region_id if credential and credential.region_id else ""
+
+    @staticmethod
+    def _count_user_turns(messages: list) -> int:
+        from iac_code.agent.message import ToolResultBlock
+
+        turns = 0
+        for message in messages:
+            if getattr(message, "role", None) != "user":
+                continue
+            content = getattr(message, "content", "")
+            if isinstance(content, list) and any(isinstance(block, ToolResultBlock) for block in content):
+                continue
+            turns += 1
+        return turns
+
     # ------------------------------------------------------------------
     # Session swap (used by /resume command)
     # ------------------------------------------------------------------
@@ -1160,6 +1225,7 @@ class InlineREPL:
         new_messages = self._session_storage.repair_interrupted(new_messages)
         self._agent_loop.replace_session(new_session_id, new_messages or None)
         self._session_id = new_session_id
+        self._was_resumed = True
 
         # Clear screen + scrollback, redraw banner, replay history.
         self.console.file.write("\033[H\033[2J\033[3J")

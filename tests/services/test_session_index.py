@@ -15,6 +15,8 @@ from iac_code.services.session_index import (
     read_lite_metadata,
 )
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.session_usage import SessionUsageStore
+from iac_code.types.stream_events import Usage
 
 # ---------------------------------------------------------------------------
 # Field extraction helpers
@@ -143,3 +145,16 @@ class TestSessionIndex:
         index = SessionIndex(projects_dir=tmp_path)
         entry = index.find_by_id_or_prefix("abc")
         assert entry is not None and entry.session_id == "abc"
+
+    def test_ignores_usage_sidecars(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        usage_store = SessionUsageStore(projects_dir=tmp_path)
+        storage.append("/p", "abc", Message(role="user", content="x"), git_branch=None)
+        usage_store.append("/p", "abc", Usage(input_tokens=10, output_tokens=5), provider="dashscope", model="qwen")
+
+        index = SessionIndex(projects_dir=tmp_path)
+
+        assert [entry.session_id for entry in index.list_for_cwd("/p")] == ["abc"]
+        assert {entry.session_id for entry in index.list_all_projects()} == {"abc"}
+        assert index.find_by_id_or_prefix("abc").session_id == "abc"
+        assert index.find_by_id_or_prefix("abc.usage") is None

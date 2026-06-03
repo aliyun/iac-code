@@ -48,6 +48,11 @@ def get_session_path(cwd: str, session_id: str) -> Path:
     return get_project_dir(cwd) / f"{session_id}.jsonl"
 
 
+def is_conversation_session_file(path: Path) -> bool:
+    """Return True for real conversation session JSONL files."""
+    return path.name.endswith(".jsonl") and not path.name.endswith(".usage.jsonl")
+
+
 def _resolve_git_dir(worktree_root: str) -> str | None:
     """Given a worktree root, return the absolute path of its git dir.
 

@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from iac_code.utils.project_paths import get_project_dir, get_projects_dir, sanitize_path
+from iac_code.utils.project_paths import get_project_dir, get_projects_dir, is_conversation_session_file, sanitize_path
 
 LITE_READ_BUF_SIZE = 64 * 1024
 
@@ -239,6 +239,8 @@ class SessionIndex:
             return []
         entries: list[SessionEntry] = []
         for jsonl in project_dir.glob("*.jsonl"):
+            if not is_conversation_session_file(jsonl):
+                continue
             entry = _build_entry(jsonl, fallback_cwd=cwd)
             if entry is not None:
                 entries.append(entry)
@@ -254,6 +256,8 @@ class SessionIndex:
             if not proj_dir.is_dir():
                 continue
             for jsonl in proj_dir.glob("*.jsonl"):
+                if not is_conversation_session_file(jsonl):
+                    continue
                 entry = _build_entry(jsonl, fallback_cwd="")
                 if entry is not None:
                     entries.append(entry)
@@ -269,6 +273,8 @@ class SessionIndex:
             if not proj_dir.is_dir():
                 continue
             for jsonl in proj_dir.glob("*.jsonl"):
+                if not is_conversation_session_file(jsonl):
+                    continue
                 sid = jsonl.stem
                 if sid == arg:
                     return _build_entry(jsonl, fallback_cwd="")

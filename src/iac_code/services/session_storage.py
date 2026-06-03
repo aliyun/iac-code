@@ -29,6 +29,7 @@ from iac_code.utils.project_paths import (
     get_project_dir,
     get_projects_dir,
     get_session_path,
+    is_conversation_session_file,
 )
 
 
@@ -172,7 +173,7 @@ class SessionStorage:
             if not proj_dir.is_dir():
                 continue
             candidate = proj_dir / f"{session_id}.jsonl"
-            if candidate.exists():
+            if candidate.exists() and is_conversation_session_file(candidate):
                 cwd = self._read_cwd_from_file(candidate) or ""
                 return cwd, candidate
         return None
@@ -186,6 +187,8 @@ class SessionStorage:
             if not proj_dir.is_dir():
                 continue
             for jsonl in proj_dir.glob("*.jsonl"):
+                if not is_conversation_session_file(jsonl):
+                    continue
                 mtime = jsonl.stat().st_mtime
                 if latest is None or mtime > latest[0]:
                     latest = (mtime, jsonl)

@@ -4,9 +4,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.3.0\n"
+"Project-Id-Version: iac-code 0.3.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-02 11:24+0800\n"
+"POT-Creation-Date: 2026-06-02 20:13+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
 "Last-Translator: \n"
 "Language: zh\n"
@@ -102,8 +102,8 @@ msgstr "用法：/debug [on|off]"
 msgid "Memory manager is unavailable."
 msgstr "记忆管理器不可用。"
 
-#: src/iac_code/agent/agent_loop.py:404 src/iac_code/agent/agent_loop.py:419
-#: src/iac_code/ui/repl.py:757 src/iac_code/ui/repl.py:771
+#: src/iac_code/agent/agent_loop.py:409 src/iac_code/agent/agent_loop.py:424
+#: src/iac_code/ui/repl.py:761 src/iac_code/ui/repl.py:775
 msgid "Permission denied."
 msgstr "权限被拒绝。"
 
@@ -579,57 +579,61 @@ msgstr "持久化 A2A 路由的目录"
 msgid "Save the provided routes as a route snapshot"
 msgstr "将提供的路由保存为路由快照"
 
-#: src/iac_code/commands/__init__.py:23
+#: src/iac_code/commands/__init__.py:24
 msgid "Show available commands"
 msgstr "显示可用命令"
 
-#: src/iac_code/commands/__init__.py:32
+#: src/iac_code/commands/__init__.py:33
 msgid "Clear conversation history"
 msgstr "清除对话历史"
 
-#: src/iac_code/commands/__init__.py:40
+#: src/iac_code/commands/__init__.py:41
 msgid "Show or switch model"
 msgstr "显示或切换模型"
 
-#: src/iac_code/commands/__init__.py:49
+#: src/iac_code/commands/__init__.py:50
 msgid "Show or switch thinking effort"
 msgstr "显示或切换思考强度"
 
-#: src/iac_code/commands/__init__.py:58
+#: src/iac_code/commands/__init__.py:59
 msgid "Compact conversation context"
 msgstr "压缩对话上下文"
 
-#: src/iac_code/commands/__init__.py:60
+#: src/iac_code/commands/__init__.py:61
 msgid "Compacting conversation"
 msgstr "正在压缩对话"
 
-#: src/iac_code/commands/__init__.py:67
+#: src/iac_code/commands/__init__.py:68
 msgid "Exit the application"
 msgstr "退出应用程序"
 
-#: src/iac_code/commands/__init__.py:76
+#: src/iac_code/commands/__init__.py:77
 msgid "Authenticate with LLM provider"
 msgstr "配置 LLM 提供商认证"
 
-#: src/iac_code/commands/__init__.py:85
+#: src/iac_code/commands/__init__.py:86
 msgid "Toggle debug logging"
 msgstr "切换调试日志开关"
 
-#: src/iac_code/commands/__init__.py:94
+#: src/iac_code/commands/__init__.py:95
 msgid "View and manage persistent memories"
 msgstr "查看和管理持久记忆"
 
-#: src/iac_code/commands/__init__.py:96
+#: src/iac_code/commands/__init__.py:97
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<名称>|search <查询>|delete <名称>|help]"
 
-#: src/iac_code/commands/__init__.py:103
+#: src/iac_code/commands/__init__.py:104
 msgid "Resume a previous session"
 msgstr "恢复之前的会话"
 
-#: src/iac_code/commands/__init__.py:105
+#: src/iac_code/commands/__init__.py:106
 msgid "[conversation id or search term]"
 msgstr "[会话 ID 或搜索词]"
+
+#: src/iac_code/commands/__init__.py:113
+msgid "Show current session status"
+msgstr "显示当前会话状态"
 
 #: src/iac_code/commands/auth.py:382 src/iac_code/commands/auth.py:1107
 #: src/iac_code/ui/core/prompt_input.py:557
@@ -810,7 +814,8 @@ msgid "Credential"
 msgstr "凭证"
 
 #: src/iac_code/commands/auth.py:1074 src/iac_code/commands/auth.py:1190
-#: src/iac_code/commands/auth.py:1295 src/iac_code/ui/renderer.py:455
+#: src/iac_code/commands/auth.py:1295 src/iac_code/commands/status.py:33
+#: src/iac_code/ui/renderer.py:455
 msgid "Region"
 msgstr "地域"
 
@@ -1014,6 +1019,85 @@ msgstr "未找到会话：{arg}"
 #: src/iac_code/commands/resume.py:47
 msgid "Resume cancelled"
 msgstr "已取消恢复"
+
+#: src/iac_code/commands/status.py:16
+msgid "Status command requires a context."
+msgstr "status 命令需要上下文。"
+
+#: src/iac_code/commands/status.py:19
+msgid "Status command requires a REPL context."
+msgstr "status 命令需要 REPL 上下文。"
+
+#: src/iac_code/commands/status.py:21
+msgid "Status is only available in interactive mode."
+msgstr "status 仅在交互模式下可用。"
+
+#: src/iac_code/commands/status.py:30 src/iac_code/ui/banner.py:138
+msgid "Session"
+msgstr "会话"
+
+#: src/iac_code/commands/status.py:31
+msgid "Provider"
+msgstr "提供商"
+
+#: src/iac_code/commands/status.py:31 src/iac_code/commands/status.py:32
+#: src/iac_code/commands/status.py:33
+msgid "not configured"
+msgstr "未配置"
+
+#: src/iac_code/commands/status.py:32
+msgid "Model"
+msgstr "模型"
+
+#: src/iac_code/commands/status.py:34
+msgid "CWD"
+msgstr "当前目录"
+
+#: src/iac_code/commands/status.py:38
+msgid "API Token Usage (recorded):"
+msgstr "API Token 用量（已记录）："
+
+#: src/iac_code/commands/status.py:41
+msgid "Input"
+msgstr "输入"
+
+#: src/iac_code/commands/status.py:42
+msgid "Output"
+msgstr "输出"
+
+#: src/iac_code/commands/status.py:43
+msgid "Cache read"
+msgstr "缓存读取"
+
+#: src/iac_code/commands/status.py:44
+msgid "Total"
+msgstr "总计"
+
+#: src/iac_code/commands/status.py:47
+msgid "No recorded API usage for this session yet."
+msgstr "此会话尚无已记录的 API 用量。"
+
+#: src/iac_code/commands/status.py:51
+msgid "Turns"
+msgstr "轮次"
+
+#: src/iac_code/commands/status.py:52
+msgid "Context"
+msgstr "上下文"
+
+#: src/iac_code/commands/status.py:54
+msgid "Session Status"
+msgstr "会话状态"
+
+#: src/iac_code/commands/status.py:68
+#, python-brace-format
+msgid "{session_id} (resumed)"
+msgstr "{session_id}（已恢复）"
+
+#: src/iac_code/commands/status.py:76
+#, python-brace-format
+msgid "{percent} used ({total} / {window})"
+msgstr "已使用 {percent}（{total} / {window}）"
 
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py:51
@@ -1469,7 +1553,7 @@ msgstr "云API"
 msgid "Calling {action}..."
 msgstr "正在调用 {action}..."
 
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:390
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:399
 #: src/iac_code/tools/cloud/base_api.py:123
 msgid "Call succeeded"
 msgstr "调用成功"
@@ -1633,7 +1717,7 @@ msgstr "导入失败"
 msgid "Aliyun API"
 msgstr "阿里云 API"
 
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:389
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:398
 #, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "调用成功（RequestId: {request_id}）"
@@ -1791,10 +1875,6 @@ msgstr "您的 AI 驱动的基础设施即代码助手"
 msgid "Welcome back"
 msgstr "欢迎回来"
 
-#: src/iac_code/ui/banner.py:138
-msgid "Session"
-msgstr "会话"
-
 #: src/iac_code/ui/banner.py:148
 msgid "Debug mode"
 msgstr "调试模式"
@@ -1896,97 +1976,97 @@ msgstr "否，始终拒绝 \"{rule}\"（本次会话）"
 msgid "No, always reject this tool"
 msgstr "否，始终拒绝此工具"
 
-#: src/iac_code/ui/repl.py:370
+#: src/iac_code/ui/repl.py:374
 msgid "Press Ctrl+C again to exit."
 msgstr "再次按 Ctrl+C 退出。"
 
-#: src/iac_code/ui/repl.py:395
+#: src/iac_code/ui/repl.py:399
 msgid "Interrupted."
 msgstr "已中断。"
 
-#: src/iac_code/ui/repl.py:432
+#: src/iac_code/ui/repl.py:436
 msgid "Goodbye!"
 msgstr "再见！"
 
-#: src/iac_code/ui/repl.py:433
+#: src/iac_code/ui/repl.py:437
 msgid "Resume this session with:"
 msgstr "恢复此会话请运行："
 
-#: src/iac_code/ui/repl.py:458
+#: src/iac_code/ui/repl.py:462
 msgid "Update now"
 msgstr "立即更新"
 
-#: src/iac_code/ui/repl.py:460
+#: src/iac_code/ui/repl.py:464
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "运行显示的更新命令，成功后退出。"
 
-#: src/iac_code/ui/repl.py:463
+#: src/iac_code/ui/repl.py:467
 msgid "Skip"
 msgstr "跳过"
 
-#: src/iac_code/ui/repl.py:465
+#: src/iac_code/ui/repl.py:469
 msgid "Continue with the current version for this session."
 msgstr "本次会话继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:468
+#: src/iac_code/ui/repl.py:472
 msgid "Skip until next version"
 msgstr "跳过直到下一个版本"
 
-#: src/iac_code/ui/repl.py:470
+#: src/iac_code/ui/repl.py:474
 msgid "Hide this update until a newer version is available."
 msgstr "隐藏此更新，直到有更新的版本可用。"
 
-#: src/iac_code/ui/repl.py:489 src/iac_code/ui/repl.py:501
+#: src/iac_code/ui/repl.py:493 src/iac_code/ui/repl.py:505
 msgid "Update command failed. Continuing with the current version."
 msgstr "更新命令失败。将继续使用当前版本。"
 
-#: src/iac_code/ui/repl.py:494
+#: src/iac_code/ui/repl.py:498
 msgid "Update completed. Restart iac-code to continue."
 msgstr "更新已完成。请重启 iac-code 以继续。"
 
-#: src/iac_code/ui/repl.py:532
+#: src/iac_code/ui/repl.py:536
 msgid "No image in clipboard."
 msgstr "剪贴板中没有图像。"
 
-#: src/iac_code/ui/repl.py:718
+#: src/iac_code/ui/repl.py:722
 msgid "Usage: !<shell command>"
 msgstr "用法：!<shell command>"
 
-#: src/iac_code/ui/repl.py:723
+#: src/iac_code/ui/repl.py:727
 msgid "Shell command support is unavailable."
 msgstr "Shell 命令支持不可用。"
 
-#: src/iac_code/ui/repl.py:787
+#: src/iac_code/ui/repl.py:791
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr "未知技能：${name}。输入 / 可列出命令和技能。"
 
-#: src/iac_code/ui/repl.py:789
+#: src/iac_code/ui/repl.py:793
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "未知命令：/{name}。输入 /help 查看可用命令。"
 
-#: src/iac_code/ui/repl.py:794
+#: src/iac_code/ui/repl.py:798
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ 只能调用技能。请改用 /{name}。"
 
-#: src/iac_code/ui/repl.py:816 src/iac_code/ui/repl.py:861
+#: src/iac_code/ui/repl.py:820 src/iac_code/ui/repl.py:865
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "命令错误：{error}"
 
-#: src/iac_code/ui/repl.py:823
+#: src/iac_code/ui/repl.py:827
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
-#: src/iac_code/ui/repl.py:1128
+#: src/iac_code/ui/repl.py:1132
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "会话不存在：{session_id}"
 
-#: src/iac_code/ui/repl.py:1147
+#: src/iac_code/ui/repl.py:1151
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -1997,31 +2077,31 @@ msgstr ""
 "请运行以下命令恢复：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1186
+#: src/iac_code/ui/repl.py:1252
 msgid "This conversation is from a different directory."
 msgstr "该会话来自另一个目录。"
 
-#: src/iac_code/ui/repl.py:1188
+#: src/iac_code/ui/repl.py:1254
 msgid "To resume, run:"
 msgstr "请运行以下命令恢复："
 
-#: src/iac_code/ui/repl.py:1193
+#: src/iac_code/ui/repl.py:1259
 msgid "(Command copied to clipboard)"
 msgstr "（命令已复制到剪贴板）"
 
-#: src/iac_code/ui/repl.py:1350
+#: src/iac_code/ui/repl.py:1416
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
 "to a vision-capable model."
 msgstr "当前模型 {model} 不支持图像输入。请使用 /model 切换到支持视觉的模型。"
 
-#: src/iac_code/ui/repl.py:1359
+#: src/iac_code/ui/repl.py:1425
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "图像错误：{err}"
 
-#: src/iac_code/ui/repl.py:1376
+#: src/iac_code/ui/repl.py:1442
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -2278,4 +2358,7 @@ msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 np
 
 #~ msgid "  Option 2 - npmmirror (China-friendly mirror):"
 #~ msgstr "  方式 2 - npmmirror（国内镜像）："
+
+#~ msgid "Cache create"
+#~ msgstr "缓存创建"
 

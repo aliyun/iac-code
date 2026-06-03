@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from babel.messages.pofile import read_po
 
-from iac_code.i18n import DEFAULT_LANGUAGE
+from iac_code.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 
 # Get the project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -157,6 +157,15 @@ def test_all_languages_have_po_files():
             missing_po_files.append(f"{lang_dir.name}/LC_MESSAGES/messages.po")
 
     assert not missing_po_files, f"Missing .po files for languages: {missing_po_files}"
+
+
+def test_supported_languages_match_locale_dirs():
+    """Verify supported languages are the default language plus locale directories."""
+    language_dirs = _discover_language_dirs()
+    locale_codes = {lang_dir.name for lang_dir in language_dirs}
+
+    assert len(SUPPORTED_LANGUAGES) == 7
+    assert set(SUPPORTED_LANGUAGES) == {DEFAULT_LANGUAGE, *locale_codes}
 
 
 def test_mo_files_up_to_date():

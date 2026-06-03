@@ -5,6 +5,8 @@ import pytest
 
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.services.session_storage import SessionStorage
+from iac_code.services.session_usage import SessionUsageStore
+from iac_code.types.stream_events import Usage
 
 CWD = "/tmp/proj-x"
 
@@ -119,6 +121,18 @@ class TestSessionStorage:
 
         result = storage.get_latest_session_anywhere()
         assert result == ("/tmp/b", "newer")
+
+    def test_cross_project_lookup_ignores_usage_sidecars(self, storage):
+        import os
+
+        usage_store = SessionUsageStore(projects_dir=storage._projects_dir)
+        storage.append(CWD, "real", Message(role="user", content="real"), git_branch=None)
+        usage_store.append(CWD, "real", Usage(input_tokens=10, output_tokens=5), provider="dashscope", model="qwen")
+        usage_path = usage_store.path_for(CWD, "real")
+        os.utime(usage_path, (usage_path.stat().st_atime, usage_path.stat().st_mtime + 100))
+
+        assert storage.find_session_anywhere("real.usage") is None
+        assert storage.get_latest_session_anywhere() == (CWD, "real")
 
     def test_repair_interrupted_inserts_synthetic_results(self, storage):
         storage.append(

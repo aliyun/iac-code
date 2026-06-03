@@ -114,6 +114,18 @@ class TestProviderManager:
         m = ProviderManager(model="some-model-without-fallback", credentials={})
         assert m._get_fallback_model() is None
 
+    def test_provider_key_and_display_use_runtime_override(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
+        m = ProviderManager(
+            model="qwen3.6-plus",
+            credentials={"dashscope_token_plan": "tp-key"},
+            provider_key_override="dashscope_token_plan",
+        )
+
+        assert m.get_provider_key() == "dashscope_token_plan"
+        assert m.get_provider_display() == "Alibaba Cloud Bailian Token Plan"
+
     def test_reconfigure_swaps_model_and_credentials(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         m = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "old"})

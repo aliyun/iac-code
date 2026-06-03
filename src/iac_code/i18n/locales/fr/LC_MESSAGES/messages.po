@@ -4,9 +4,9 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.3.0\n"
+"Project-Id-Version: iac-code 0.3.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-02 11:24+0800\n"
+"POT-Creation-Date: 2026-06-02 20:13+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: fr\n"
@@ -112,8 +112,8 @@ msgstr "Utilisation : /debug [on|off]"
 msgid "Memory manager is unavailable."
 msgstr "Le gestionnaire de mémoire est indisponible."
 
-#: src/iac_code/agent/agent_loop.py:404 src/iac_code/agent/agent_loop.py:419
-#: src/iac_code/ui/repl.py:757 src/iac_code/ui/repl.py:771
+#: src/iac_code/agent/agent_loop.py:409 src/iac_code/agent/agent_loop.py:424
+#: src/iac_code/ui/repl.py:761 src/iac_code/ui/repl.py:775
 msgid "Permission denied."
 msgstr "Permission refusée."
 
@@ -611,57 +611,61 @@ msgstr "Répertoire pour les routes A2A persistées"
 msgid "Save the provided routes as a route snapshot"
 msgstr "Enregistre les routes fournies sous forme d'instantané de routes"
 
-#: src/iac_code/commands/__init__.py:23
+#: src/iac_code/commands/__init__.py:24
 msgid "Show available commands"
 msgstr "Afficher les commandes disponibles"
 
-#: src/iac_code/commands/__init__.py:32
+#: src/iac_code/commands/__init__.py:33
 msgid "Clear conversation history"
 msgstr "Effacer l’historique de conversation"
 
-#: src/iac_code/commands/__init__.py:40
+#: src/iac_code/commands/__init__.py:41
 msgid "Show or switch model"
 msgstr "Afficher ou changer de modèle"
 
-#: src/iac_code/commands/__init__.py:49
+#: src/iac_code/commands/__init__.py:50
 msgid "Show or switch thinking effort"
 msgstr "Afficher ou modifier l’effort de raisonnement"
 
-#: src/iac_code/commands/__init__.py:58
+#: src/iac_code/commands/__init__.py:59
 msgid "Compact conversation context"
 msgstr "Compacter le contexte de conversation"
 
-#: src/iac_code/commands/__init__.py:60
+#: src/iac_code/commands/__init__.py:61
 msgid "Compacting conversation"
 msgstr "Compactage de la conversation"
 
-#: src/iac_code/commands/__init__.py:67
+#: src/iac_code/commands/__init__.py:68
 msgid "Exit the application"
 msgstr "Quitter l’application"
 
-#: src/iac_code/commands/__init__.py:76
+#: src/iac_code/commands/__init__.py:77
 msgid "Authenticate with LLM provider"
 msgstr "S’authentifier auprès du fournisseur LLM"
 
-#: src/iac_code/commands/__init__.py:85
+#: src/iac_code/commands/__init__.py:86
 msgid "Toggle debug logging"
 msgstr "Activer ou désactiver la journalisation debug"
 
-#: src/iac_code/commands/__init__.py:94
+#: src/iac_code/commands/__init__.py:95
 msgid "View and manage persistent memories"
 msgstr "Afficher et gérer les mémoires persistantes"
 
-#: src/iac_code/commands/__init__.py:96
+#: src/iac_code/commands/__init__.py:97
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<nom>|search <requête>|delete <nom>|help]"
 
-#: src/iac_code/commands/__init__.py:103
+#: src/iac_code/commands/__init__.py:104
 msgid "Resume a previous session"
 msgstr "Reprendre une session précédente"
 
-#: src/iac_code/commands/__init__.py:105
+#: src/iac_code/commands/__init__.py:106
 msgid "[conversation id or search term]"
 msgstr "[identifiant de conversation ou terme de recherche]"
+
+#: src/iac_code/commands/__init__.py:113
+msgid "Show current session status"
+msgstr "Afficher l’état actuel de la session"
 
 #: src/iac_code/commands/auth.py:382 src/iac_code/commands/auth.py:1107
 #: src/iac_code/ui/core/prompt_input.py:557
@@ -842,7 +846,8 @@ msgid "Credential"
 msgstr "Identifiants"
 
 #: src/iac_code/commands/auth.py:1074 src/iac_code/commands/auth.py:1190
-#: src/iac_code/commands/auth.py:1295 src/iac_code/ui/renderer.py:455
+#: src/iac_code/commands/auth.py:1295 src/iac_code/commands/status.py:33
+#: src/iac_code/ui/renderer.py:455
 msgid "Region"
 msgstr "Région"
 
@@ -1054,6 +1059,85 @@ msgstr "Session introuvable : {arg}"
 #: src/iac_code/commands/resume.py:47
 msgid "Resume cancelled"
 msgstr "Reprise annulée"
+
+#: src/iac_code/commands/status.py:16
+msgid "Status command requires a context."
+msgstr "La commande status nécessite un contexte."
+
+#: src/iac_code/commands/status.py:19
+msgid "Status command requires a REPL context."
+msgstr "La commande status nécessite un contexte REPL."
+
+#: src/iac_code/commands/status.py:21
+msgid "Status is only available in interactive mode."
+msgstr "status n’est disponible qu’en mode interactif."
+
+#: src/iac_code/commands/status.py:30 src/iac_code/ui/banner.py:138
+msgid "Session"
+msgstr "Session"
+
+#: src/iac_code/commands/status.py:31
+msgid "Provider"
+msgstr "Fournisseur"
+
+#: src/iac_code/commands/status.py:31 src/iac_code/commands/status.py:32
+#: src/iac_code/commands/status.py:33
+msgid "not configured"
+msgstr "non configuré"
+
+#: src/iac_code/commands/status.py:32
+msgid "Model"
+msgstr "Modèle"
+
+#: src/iac_code/commands/status.py:34
+msgid "CWD"
+msgstr "Répertoire courant"
+
+#: src/iac_code/commands/status.py:38
+msgid "API Token Usage (recorded):"
+msgstr "Utilisation des tokens API (enregistrée) :"
+
+#: src/iac_code/commands/status.py:41
+msgid "Input"
+msgstr "Entrée"
+
+#: src/iac_code/commands/status.py:42
+msgid "Output"
+msgstr "Sortie"
+
+#: src/iac_code/commands/status.py:43
+msgid "Cache read"
+msgstr "Lecture du cache"
+
+#: src/iac_code/commands/status.py:44
+msgid "Total"
+msgstr "Total"
+
+#: src/iac_code/commands/status.py:47
+msgid "No recorded API usage for this session yet."
+msgstr "Aucune utilisation d’API enregistrée pour cette session pour le moment."
+
+#: src/iac_code/commands/status.py:51
+msgid "Turns"
+msgstr "Tours"
+
+#: src/iac_code/commands/status.py:52
+msgid "Context"
+msgstr "Contexte"
+
+#: src/iac_code/commands/status.py:54
+msgid "Session Status"
+msgstr "État de la session"
+
+#: src/iac_code/commands/status.py:68
+#, python-brace-format
+msgid "{session_id} (resumed)"
+msgstr "{session_id} (reprise)"
+
+#: src/iac_code/commands/status.py:76
+#, python-brace-format
+msgid "{percent} used ({total} / {window})"
+msgstr "{percent} utilisé ({total} / {window})"
 
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py:51
@@ -1524,7 +1608,7 @@ msgstr "CloudAPI"
 msgid "Calling {action}..."
 msgstr "Appel de {action}…"
 
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:390
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:399
 #: src/iac_code/tools/cloud/base_api.py:123
 msgid "Call succeeded"
 msgstr "Appel réussi"
@@ -1688,7 +1772,7 @@ msgstr "ÉCHEC DE L’IMPORT"
 msgid "Aliyun API"
 msgstr "Aliyun API"
 
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:389
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py:398
 #, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "Appel réussi (RequestId : {request_id})"
@@ -1863,10 +1947,6 @@ msgstr "Votre assistant Infrastructure as Code assisté par IA"
 msgid "Welcome back"
 msgstr "Bon retour"
 
-#: src/iac_code/ui/banner.py:138
-msgid "Session"
-msgstr "Session"
-
 #: src/iac_code/ui/banner.py:148
 msgid "Debug mode"
 msgstr "Mode debug"
@@ -1970,103 +2050,103 @@ msgstr "Non, toujours refuser \"{rule}\" (cette session)"
 msgid "No, always reject this tool"
 msgstr "Non, toujours refuser cet outil"
 
-#: src/iac_code/ui/repl.py:370
+#: src/iac_code/ui/repl.py:374
 msgid "Press Ctrl+C again to exit."
 msgstr "Appuyez de nouveau sur Ctrl+C pour quitter."
 
-#: src/iac_code/ui/repl.py:395
+#: src/iac_code/ui/repl.py:399
 msgid "Interrupted."
 msgstr "Interrompu."
 
-#: src/iac_code/ui/repl.py:432
+#: src/iac_code/ui/repl.py:436
 msgid "Goodbye!"
 msgstr "Au revoir !"
 
-#: src/iac_code/ui/repl.py:433
+#: src/iac_code/ui/repl.py:437
 msgid "Resume this session with:"
 msgstr "Pour reprendre cette session :"
 
-#: src/iac_code/ui/repl.py:458
+#: src/iac_code/ui/repl.py:462
 msgid "Update now"
 msgstr "Mettre à jour maintenant"
 
-#: src/iac_code/ui/repl.py:460
+#: src/iac_code/ui/repl.py:464
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "Exécute la commande de mise à jour affichée et quitte en cas de succès."
 
-#: src/iac_code/ui/repl.py:463
+#: src/iac_code/ui/repl.py:467
 msgid "Skip"
 msgstr "Ignorer"
 
-#: src/iac_code/ui/repl.py:465
+#: src/iac_code/ui/repl.py:469
 msgid "Continue with the current version for this session."
 msgstr "Continuer avec la version actuelle pour cette session."
 
-#: src/iac_code/ui/repl.py:468
+#: src/iac_code/ui/repl.py:472
 msgid "Skip until next version"
 msgstr "Ignorer jusqu’à la prochaine version"
 
-#: src/iac_code/ui/repl.py:470
+#: src/iac_code/ui/repl.py:474
 msgid "Hide this update until a newer version is available."
 msgstr ""
 "Masquer cette mise à jour jusqu’à ce qu’une version plus récente soit "
 "disponible."
 
-#: src/iac_code/ui/repl.py:489 src/iac_code/ui/repl.py:501
+#: src/iac_code/ui/repl.py:493 src/iac_code/ui/repl.py:505
 msgid "Update command failed. Continuing with the current version."
 msgstr "La commande de mise à jour a échoué. La version actuelle sera conservée."
 
-#: src/iac_code/ui/repl.py:494
+#: src/iac_code/ui/repl.py:498
 msgid "Update completed. Restart iac-code to continue."
 msgstr "Mise à jour terminée. Redémarrez iac-code pour continuer."
 
-#: src/iac_code/ui/repl.py:532
+#: src/iac_code/ui/repl.py:536
 msgid "No image in clipboard."
 msgstr "Aucune image dans le presse-papiers."
 
-#: src/iac_code/ui/repl.py:718
+#: src/iac_code/ui/repl.py:722
 msgid "Usage: !<shell command>"
 msgstr "Utilisation : !<commande shell>"
 
-#: src/iac_code/ui/repl.py:723
+#: src/iac_code/ui/repl.py:727
 msgid "Shell command support is unavailable."
 msgstr "La prise en charge des commandes shell n'est pas disponible."
 
-#: src/iac_code/ui/repl.py:787
+#: src/iac_code/ui/repl.py:791
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr ""
 "Compétence inconnue : ${name}. Tapez / pour lister les commandes et les "
 "compétences."
 
-#: src/iac_code/ui/repl.py:789
+#: src/iac_code/ui/repl.py:793
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available commands.Commande "
 "inconnue : /{name}. Saisissez /help pour la liste des commandes."
 
-#: src/iac_code/ui/repl.py:794
+#: src/iac_code/ui/repl.py:798
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ n'invoque que des compétences. Utilisez plutôt /{name}."
 
-#: src/iac_code/ui/repl.py:816 src/iac_code/ui/repl.py:861
+#: src/iac_code/ui/repl.py:820 src/iac_code/ui/repl.py:865
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Erreur de commande : {error}"
 
-#: src/iac_code/ui/repl.py:823
+#: src/iac_code/ui/repl.py:827
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "Aucun gestionnaire pour la commande : {name}"
 
-#: src/iac_code/ui/repl.py:1128
+#: src/iac_code/ui/repl.py:1132
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Session introuvable : {session_id}"
 
-#: src/iac_code/ui/repl.py:1147
+#: src/iac_code/ui/repl.py:1151
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2077,19 +2157,19 @@ msgstr ""
 "Pour la reprendre, exécutez :\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1186
+#: src/iac_code/ui/repl.py:1252
 msgid "This conversation is from a different directory."
 msgstr "Cette conversation provient d’un autre répertoire."
 
-#: src/iac_code/ui/repl.py:1188
+#: src/iac_code/ui/repl.py:1254
 msgid "To resume, run:"
 msgstr "Pour reprendre, exécutez :"
 
-#: src/iac_code/ui/repl.py:1193
+#: src/iac_code/ui/repl.py:1259
 msgid "(Command copied to clipboard)"
 msgstr "(Commande copiée dans le presse-papiers)"
 
-#: src/iac_code/ui/repl.py:1350
+#: src/iac_code/ui/repl.py:1416
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
@@ -2098,12 +2178,12 @@ msgstr ""
 "Le modèle actuel {model} ne prend pas en charge l’entrée d’image. "
 "Utilisez /model pour passer à un modèle compatible vision."
 
-#: src/iac_code/ui/repl.py:1359
+#: src/iac_code/ui/repl.py:1425
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "Erreur d’image : {err}"
 
-#: src/iac_code/ui/repl.py:1376
+#: src/iac_code/ui/repl.py:1442
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -2354,4 +2434,7 @@ msgstr ""
 
 #~ msgid "  Option 2 - npmmirror (China-friendly mirror):"
 #~ msgstr "  Option 2 - npmmirror (miroir pour la Chine) :"
+
+#~ msgid "Cache create"
+#~ msgstr "Création du cache"
 
