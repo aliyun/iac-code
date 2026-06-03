@@ -631,6 +631,8 @@ class TestCloudAuthFlow:
         assert _aliyun_credential_flow() is _BACK
 
     def test_oauth_escape_cancel_event_uses_cbreak_mode_to_preserve_output_newlines(self, monkeypatch):
+        termios = pytest.importorskip("termios")
+        tty = pytest.importorskip("tty")
         calls: list[tuple] = []
 
         class FakeStdin:
@@ -656,10 +658,10 @@ class TestCloudAuthFlow:
         monkeypatch.setattr("iac_code.commands.auth._IS_WIN32", False)
         monkeypatch.setattr("iac_code.commands.auth.sys.stdin", FakeStdin())
         monkeypatch.setattr("iac_code.commands.auth.threading.Thread", FakeThread)
-        monkeypatch.setattr("termios.tcgetattr", lambda fd: calls.append(("tcgetattr", fd)) or "old-settings")
-        monkeypatch.setattr("termios.tcsetattr", lambda fd, when, settings: calls.append(("tcsetattr", fd, settings)))
-        monkeypatch.setattr("tty.setraw", fail_setraw)
-        monkeypatch.setattr("tty.setcbreak", lambda fd: calls.append(("setcbreak", fd)))
+        monkeypatch.setattr(termios, "tcgetattr", lambda fd: calls.append(("tcgetattr", fd)) or "old-settings")
+        monkeypatch.setattr(termios, "tcsetattr", lambda fd, when, settings: calls.append(("tcsetattr", fd, settings)))
+        monkeypatch.setattr(tty, "setraw", fail_setraw)
+        monkeypatch.setattr(tty, "setcbreak", lambda fd: calls.append(("setcbreak", fd)))
 
         with _oauth_escape_cancel_event():
             calls.append(("body",))

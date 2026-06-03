@@ -13,6 +13,7 @@ import pytest
 
 from iac_code.services.update_checker import PendingUpdate
 from iac_code.ui.components.select import SelectLayout
+from iac_code.utils.project_paths import format_resume_command
 
 
 @pytest.fixture(autouse=True)
@@ -411,8 +412,10 @@ def test_resolve_session_id_continue_cross_project_raises_with_hint():
         get_latest_session_anywhere=Mock(return_value=("/elsewhere/repo", "latest-id"))
     )
 
-    with pytest.raises(ValueError, match=r"cd /elsewhere/repo && iac-code --resume latest-id"):
+    with pytest.raises(ValueError) as exc_info:
         repl._resolve_session_id(True)
+
+    assert format_resume_command("/elsewhere/repo", "latest-id") in str(exc_info.value)
 
 
 def test_cross_project_message_uses_windows_resume_command(monkeypatch):
@@ -480,9 +483,11 @@ def test_resume_str_cross_project_raises_with_hint(mock_mm, mock_ss, mock_pm):
                 entry=make_session_entry("some-id", "/elsewhere/repo"),
             ),
         ),
-        pytest.raises(ValueError, match=r"cd /elsewhere/repo && iac-code --resume some-id"),
+        pytest.raises(ValueError) as exc_info,
     ):
         InlineREPL(model="test-model", resume_session_id="some-id")
+
+    assert format_resume_command("/elsewhere/repo", "some-id") in str(exc_info.value)
 
 
 def test_resolve_session_id_accepts_current_project_name():
@@ -531,8 +536,8 @@ def test_resolve_session_id_ambiguous_name_raises_candidates():
     assert "Multiple sessions match" in message
     assert "abc123" in message
     assert "def456" in message
-    assert "cd /repo && iac-code --resume abc123" in message
-    assert "cd /elsewhere/repo && iac-code --resume def456" in message
+    assert format_resume_command("/repo", "abc123") in message
+    assert format_resume_command("/elsewhere/repo", "def456") in message
 
 
 def test_printed_session_name_resume_command_resolves_to_session_id():
