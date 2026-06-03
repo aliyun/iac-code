@@ -200,6 +200,79 @@ async def test_run_once_routes_normal_chat_unchanged():
     repl._handle_chat.assert_awaited_once_with("hello")
 
 
+@pytest.mark.asyncio
+async def test_handle_command_reports_disabled_skill():
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = SimpleNamespace(parse=Mock(return_value=("Disabled", [])), get=Mock(return_value=None))
+    repl._disabled_skill_commands = {"disabled": object()}
+    repl._agent_loop = SimpleNamespace(context_manager=SimpleNamespace(get_messages=Mock(return_value=[])))
+    repl._command_log = []
+    repl.renderer = SimpleNamespace(print_system_message=Mock())
+
+    await repl._handle_command("$Disabled")
+
+    repl.renderer.print_system_message.assert_called_once()
+    message = repl.renderer.print_system_message.call_args.args[0]
+    assert "disabled" in message.lower()
+    assert "/skills" in message
+
+
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_init_does_not_register_disabled_project_skill(mock_mm, mock_ss, mock_pm, monkeypatch):
+    from iac_code.skills.frontmatter import SkillFrontmatter
+    from iac_code.skills.skill_definition import SkillDefinition
+    from iac_code.types.skill_source import SkillSource
+    from iac_code.ui.repl import InlineREPL
+
+    project_skill = SkillDefinition(
+        name="project-skill",
+        description="Project skill",
+        frontmatter=SkillFrontmatter(description="Project skill"),
+        content="Body",
+        source=SkillSource.PROJECT,
+    )
+    monkeypatch.setattr("iac_code.skills.discovery.discover_all_skills", lambda cwd: [project_skill])
+    monkeypatch.setattr("iac_code.skills.settings.load_disabled_skills", lambda: {"project-skill"})
+
+    repl = InlineREPL(model="test-model")
+
+    assert repl.command_registry.get("project-skill") is None
+    assert "project-skill" in repl._disabled_skill_commands
+
+
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_refresh_skills_updates_agent_loop_auto_trigger_skills(mock_mm, mock_ss, mock_pm, monkeypatch):
+    from iac_code.skills.frontmatter import SkillFrontmatter
+    from iac_code.skills.skill_definition import SkillDefinition
+    from iac_code.types.skill_source import SkillSource
+    from iac_code.ui.repl import InlineREPL
+
+    disabled: set[str] = set()
+    project_skill = SkillDefinition(
+        name="project-skill",
+        description="Project skill",
+        frontmatter=SkillFrontmatter(description="Project skill", auto_trigger={"script": "auto_trigger.py"}),
+        content="Body",
+        source=SkillSource.PROJECT,
+    )
+    monkeypatch.setattr("iac_code.skills.discovery.discover_all_skills", lambda cwd: [project_skill])
+    monkeypatch.setattr("iac_code.skills.settings.load_disabled_skills", lambda: disabled)
+
+    repl = InlineREPL(model="test-model")
+    assert any(command.name == "project-skill" for command in repl._agent_loop._auto_trigger_skills)
+
+    disabled.add("project-skill")
+    repl.refresh_skills()
+
+    assert all(command.name != "project-skill" for command in repl._agent_loop._auto_trigger_skills)
+
+
 @patch("iac_code.ui.repl.ProviderManager")
 @patch("iac_code.ui.repl.SessionStorage")
 @patch("iac_code.ui.repl.MemoryManager")

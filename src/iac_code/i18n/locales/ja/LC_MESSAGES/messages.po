@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-02 20:13+0800\n"
+"POT-Creation-Date: 2026-06-02 20:45+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: ja\n"
@@ -106,8 +106,8 @@ msgstr "使用方法：/debug [on|off]"
 msgid "Memory manager is unavailable."
 msgstr "メモリマネージャーを利用できません。"
 
-#: src/iac_code/agent/agent_loop.py:409 src/iac_code/agent/agent_loop.py:424
-#: src/iac_code/ui/repl.py:761 src/iac_code/ui/repl.py:775
+#: src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428
+#: src/iac_code/ui/repl.py:793 src/iac_code/ui/repl.py:807
 msgid "Permission denied."
 msgstr "権限が拒否されました。"
 
@@ -587,59 +587,63 @@ msgstr "永続化された A2A ルート用のディレクトリ"
 msgid "Save the provided routes as a route snapshot"
 msgstr "指定されたルートをルートスナップショットとして保存します"
 
-#: src/iac_code/commands/__init__.py:24
+#: src/iac_code/commands/__init__.py:25
 msgid "Show available commands"
 msgstr "利用可能なコマンドを表示します"
 
-#: src/iac_code/commands/__init__.py:33
+#: src/iac_code/commands/__init__.py:34
 msgid "Clear conversation history"
 msgstr "会話履歴をクリアします"
 
-#: src/iac_code/commands/__init__.py:41
+#: src/iac_code/commands/__init__.py:42
 msgid "Show or switch model"
 msgstr "モデルを表示または切り替えます"
 
-#: src/iac_code/commands/__init__.py:50
+#: src/iac_code/commands/__init__.py:51
 msgid "Show or switch thinking effort"
 msgstr "思考の負荷（effort）を表示または切り替えます"
 
-#: src/iac_code/commands/__init__.py:59
+#: src/iac_code/commands/__init__.py:60
 msgid "Compact conversation context"
 msgstr "会話コンテキストを圧縮します"
 
-#: src/iac_code/commands/__init__.py:61
+#: src/iac_code/commands/__init__.py:62
 msgid "Compacting conversation"
 msgstr "会話を圧縮しています"
 
-#: src/iac_code/commands/__init__.py:68
+#: src/iac_code/commands/__init__.py:69
 msgid "Exit the application"
 msgstr "アプリケーションを終了します"
 
-#: src/iac_code/commands/__init__.py:77
+#: src/iac_code/commands/__init__.py:78
 msgid "Authenticate with LLM provider"
 msgstr "LLM プロバイダーで認証を行います"
 
-#: src/iac_code/commands/__init__.py:86
+#: src/iac_code/commands/__init__.py:87
 msgid "Toggle debug logging"
 msgstr "デバッグログのオン／オフを切り替えます"
 
-#: src/iac_code/commands/__init__.py:95
+#: src/iac_code/commands/__init__.py:96
 msgid "View and manage persistent memories"
 msgstr "永続メモリを表示および管理"
 
-#: src/iac_code/commands/__init__.py:97
+#: src/iac_code/commands/__init__.py:98
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<名前>|search <検索語>|delete <名前>|help]"
 
-#: src/iac_code/commands/__init__.py:104
+#: src/iac_code/commands/__init__.py:105
 msgid "Resume a previous session"
 msgstr "以前のセッションを再開します"
 
-#: src/iac_code/commands/__init__.py:106
+#: src/iac_code/commands/__init__.py:107
 msgid "[conversation id or search term]"
 msgstr "[会話 ID または検索語]"
 
-#: src/iac_code/commands/__init__.py:113
+#: src/iac_code/commands/__init__.py:114
+msgid "Manage skills"
+msgstr "スキルを管理"
+
+#: src/iac_code/commands/__init__.py:122
 msgid "Show current session status"
 msgstr "現在のセッション状態を表示"
 
@@ -822,7 +826,7 @@ msgid "Credential"
 msgstr "クレデンシャル"
 
 #: src/iac_code/commands/auth.py:1074 src/iac_code/commands/auth.py:1190
-#: src/iac_code/commands/auth.py:1295 src/iac_code/commands/status.py:33
+#: src/iac_code/commands/auth.py:1295 src/iac_code/commands/status.py:36
 #: src/iac_code/ui/renderer.py:455
 msgid "Region"
 msgstr "リージョン"
@@ -1032,81 +1036,93 @@ msgstr "セッションが見つかりません：{arg}"
 msgid "Resume cancelled"
 msgstr "resume をキャンセルしました"
 
-#: src/iac_code/commands/status.py:16
+#: src/iac_code/commands/skills.py:14
+msgid "Skills management is only available in interactive mode."
+msgstr "スキル管理は対話モードでのみ使用できます。"
+
+#: src/iac_code/commands/skills.py:25
+msgid "Skills update cancelled"
+msgstr "スキル更新をキャンセルしました"
+
+#: src/iac_code/commands/skills.py:29
+msgid "Skills updated"
+msgstr "スキルを更新しました"
+
+#: src/iac_code/commands/status.py:19
 msgid "Status command requires a context."
 msgstr "status コマンドにはコンテキストが必要です。"
 
-#: src/iac_code/commands/status.py:19
+#: src/iac_code/commands/status.py:22
 msgid "Status command requires a REPL context."
 msgstr "status コマンドには REPL コンテキストが必要です。"
 
-#: src/iac_code/commands/status.py:21
+#: src/iac_code/commands/status.py:24
 msgid "Status is only available in interactive mode."
 msgstr "status は対話モードでのみ利用できます。"
 
-#: src/iac_code/commands/status.py:30 src/iac_code/ui/banner.py:138
+#: src/iac_code/commands/status.py:33 src/iac_code/ui/banner.py:138
 msgid "Session"
 msgstr "セッション"
 
-#: src/iac_code/commands/status.py:31
+#: src/iac_code/commands/status.py:34
 msgid "Provider"
 msgstr "プロバイダー"
 
-#: src/iac_code/commands/status.py:31 src/iac_code/commands/status.py:32
-#: src/iac_code/commands/status.py:33
+#: src/iac_code/commands/status.py:34 src/iac_code/commands/status.py:35
+#: src/iac_code/commands/status.py:36
 msgid "not configured"
 msgstr "未設定"
 
-#: src/iac_code/commands/status.py:32
+#: src/iac_code/commands/status.py:35
 msgid "Model"
 msgstr "モデル"
 
-#: src/iac_code/commands/status.py:34
+#: src/iac_code/commands/status.py:37
 msgid "CWD"
 msgstr "現在のディレクトリ"
 
-#: src/iac_code/commands/status.py:38
+#: src/iac_code/commands/status.py:41
 msgid "API Token Usage (recorded):"
 msgstr "API トークン使用量（記録済み）："
 
-#: src/iac_code/commands/status.py:41
+#: src/iac_code/commands/status.py:44
 msgid "Input"
 msgstr "入力"
 
-#: src/iac_code/commands/status.py:42
+#: src/iac_code/commands/status.py:45
 msgid "Output"
 msgstr "出力"
 
-#: src/iac_code/commands/status.py:43
+#: src/iac_code/commands/status.py:46
 msgid "Cache read"
 msgstr "キャッシュ読み取り"
 
-#: src/iac_code/commands/status.py:44
+#: src/iac_code/commands/status.py:47
 msgid "Total"
 msgstr "合計"
 
-#: src/iac_code/commands/status.py:47
+#: src/iac_code/commands/status.py:50
 msgid "No recorded API usage for this session yet."
 msgstr "このセッションにはまだ記録済みの API 使用量がありません。"
 
-#: src/iac_code/commands/status.py:51
+#: src/iac_code/commands/status.py:54
 msgid "Turns"
 msgstr "ターン"
 
-#: src/iac_code/commands/status.py:52
+#: src/iac_code/commands/status.py:55
 msgid "Context"
 msgstr "コンテキスト"
 
-#: src/iac_code/commands/status.py:54
+#: src/iac_code/commands/status.py:57
 msgid "Session Status"
 msgstr "セッション状態"
 
-#: src/iac_code/commands/status.py:68
+#: src/iac_code/commands/status.py:73
 #, python-brace-format
 msgid "{session_id} (resumed)"
 msgstr "{session_id}（再開済み）"
 
-#: src/iac_code/commands/status.py:76
+#: src/iac_code/commands/status.py:81
 #, python-brace-format
 msgid "{percent} used ({total} / {window})"
 msgstr "{percent} 使用済み（{total} / {window}）"
@@ -1291,14 +1307,24 @@ msgstr "無効な --permission-mode {!r} です。有効な値: {}"
 msgid "Allow {}?"
 msgstr "{} を許可しますか？"
 
-#: src/iac_code/skills/skill_tool.py:130
+#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:823
+#, python-brace-format
+msgid "Skill '{name}' is disabled. Run /skills to enable it."
+msgstr "スキル「{name}」は無効です。有効にするには /skills を実行してください。"
+
+#: src/iac_code/skills/skill_tool.py:137
 #, python-brace-format
 msgid "Skill '{name}' loaded (inline)."
 msgstr "スキル '{name}' を読み込みました（インライン）。"
 
-#: src/iac_code/skills/skill_tool.py:214
+#: src/iac_code/skills/skill_tool.py:221
 msgid "Skill"
 msgstr "スキル"
+
+#: src/iac_code/skills/skill_tool.py:245
+#, python-brace-format
+msgid "Skill disabled: {name}"
+msgstr "スキルが無効です: {name}"
 
 #: src/iac_code/skills/bundled/simplify.py:25
 msgid ""
@@ -1995,99 +2021,99 @@ msgstr "いいえ、常に \"{rule}\" を拒否（このセッション）"
 msgid "No, always reject this tool"
 msgstr "いいえ、このツールは常に拒否"
 
-#: src/iac_code/ui/repl.py:374
+#: src/iac_code/ui/repl.py:406
 msgid "Press Ctrl+C again to exit."
 msgstr "終了するには Ctrl+C をもう一度押してください。"
 
-#: src/iac_code/ui/repl.py:399
+#: src/iac_code/ui/repl.py:431
 msgid "Interrupted."
 msgstr "中断しました。"
 
-#: src/iac_code/ui/repl.py:436
+#: src/iac_code/ui/repl.py:468
 msgid "Goodbye!"
 msgstr "さようなら。"
 
-#: src/iac_code/ui/repl.py:437
+#: src/iac_code/ui/repl.py:469
 msgid "Resume this session with:"
 msgstr "このセッションを再開するには次を実行してください："
 
-#: src/iac_code/ui/repl.py:462
+#: src/iac_code/ui/repl.py:494
 msgid "Update now"
 msgstr "今すぐ更新"
 
-#: src/iac_code/ui/repl.py:464
+#: src/iac_code/ui/repl.py:496
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "表示された更新コマンドを実行し、成功したら終了します。"
 
-#: src/iac_code/ui/repl.py:467
+#: src/iac_code/ui/repl.py:499
 msgid "Skip"
 msgstr "スキップ"
 
-#: src/iac_code/ui/repl.py:469
+#: src/iac_code/ui/repl.py:501
 msgid "Continue with the current version for this session."
 msgstr "このセッションでは現在のバージョンを使い続けます。"
 
-#: src/iac_code/ui/repl.py:472
+#: src/iac_code/ui/repl.py:504
 msgid "Skip until next version"
 msgstr "次のバージョンまでスキップ"
 
-#: src/iac_code/ui/repl.py:474
+#: src/iac_code/ui/repl.py:506
 msgid "Hide this update until a newer version is available."
 msgstr "より新しいバージョンが利用可能になるまで、この更新を非表示にします。"
 
-#: src/iac_code/ui/repl.py:493 src/iac_code/ui/repl.py:505
+#: src/iac_code/ui/repl.py:525 src/iac_code/ui/repl.py:537
 msgid "Update command failed. Continuing with the current version."
 msgstr "更新コマンドに失敗しました。現在のバージョンで続行します。"
 
-#: src/iac_code/ui/repl.py:498
+#: src/iac_code/ui/repl.py:530
 msgid "Update completed. Restart iac-code to continue."
 msgstr "更新が完了しました。続行するには iac-code を再起動してください。"
 
-#: src/iac_code/ui/repl.py:536
+#: src/iac_code/ui/repl.py:568
 msgid "No image in clipboard."
 msgstr "クリップボードに画像がありません。"
 
-#: src/iac_code/ui/repl.py:722
+#: src/iac_code/ui/repl.py:754
 msgid "Usage: !<shell command>"
 msgstr "使用方法: !<shell command>"
 
-#: src/iac_code/ui/repl.py:727
+#: src/iac_code/ui/repl.py:759
 msgid "Shell command support is unavailable."
 msgstr "シェルコマンドのサポートは利用できません。"
 
-#: src/iac_code/ui/repl.py:791
+#: src/iac_code/ui/repl.py:826
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr "不明なスキル: ${name}。/ を入力するとコマンドとスキルを一覧表示します。"
 
-#: src/iac_code/ui/repl.py:793
+#: src/iac_code/ui/repl.py:828
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available "
 "commands.不明なコマンドです：/{name}。利用可能なコマンドは /help を入力してください。"
 
-#: src/iac_code/ui/repl.py:798
+#: src/iac_code/ui/repl.py:833
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ はスキルのみを呼び出します。代わりに /{name} を使用してください。"
 
-#: src/iac_code/ui/repl.py:820 src/iac_code/ui/repl.py:865
+#: src/iac_code/ui/repl.py:855 src/iac_code/ui/repl.py:900
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "コマンドエラー：{error}"
 
-#: src/iac_code/ui/repl.py:827
+#: src/iac_code/ui/repl.py:862
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "ハンドラーがないコマンドです：{name}"
 
-#: src/iac_code/ui/repl.py:1132
+#: src/iac_code/ui/repl.py:1167
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "セッションが見つかりません：{session_id}"
 
-#: src/iac_code/ui/repl.py:1151
+#: src/iac_code/ui/repl.py:1186
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2098,31 +2124,31 @@ msgstr ""
 "再開するには次を実行してください：\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1252
+#: src/iac_code/ui/repl.py:1287
 msgid "This conversation is from a different directory."
 msgstr "この会話は別のディレクトリ由来です。"
 
-#: src/iac_code/ui/repl.py:1254
+#: src/iac_code/ui/repl.py:1289
 msgid "To resume, run:"
 msgstr "再開するには次を実行してください："
 
-#: src/iac_code/ui/repl.py:1259
+#: src/iac_code/ui/repl.py:1294
 msgid "(Command copied to clipboard)"
 msgstr "（コマンドをクリップボードにコピーしました）"
 
-#: src/iac_code/ui/repl.py:1416
+#: src/iac_code/ui/repl.py:1451
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
 "to a vision-capable model."
 msgstr "現在のモデル {model} は画像入力をサポートしていません。/model を使用してビジョン対応モデルに切り替えてください。"
 
-#: src/iac_code/ui/repl.py:1425
+#: src/iac_code/ui/repl.py:1460
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "画像エラー：{err}"
 
-#: src/iac_code/ui/repl.py:1442
+#: src/iac_code/ui/repl.py:1477
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -2301,6 +2327,89 @@ msgstr "{n} 時間{s}前"
 msgid "{n} day{s} ago"
 msgstr "{n} 日{s}前"
 
+#: src/iac_code/ui/dialogs/skills_picker.py:52
+msgid "Search skills..."
+msgstr "スキルを検索..."
+
+#: src/iac_code/ui/dialogs/skills_picker.py:159
+msgid "Skills"
+msgstr "スキル"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:161
+#, python-brace-format
+msgid "{current} of {total}"
+msgstr "{total} 件中 {current}"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:165
+#, python-brace-format
+msgid ""
+"{count} skills - Space to toggle, Enter to save, Tab to sort, Esc to "
+"cancel"
+msgstr "{count} 個のスキル - Space で切り替え、Enter で保存、Tab で並べ替え、Esc でキャンセル"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:171
+#, python-brace-format
+msgid "Sort: {mode}"
+msgstr "並べ替え: {mode}"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:176
+msgid "No skills found"
+msgstr "スキルが見つかりません"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:245
+msgid "Bundled skills cannot be disabled."
+msgstr "バンドルスキルは無効にできません。"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:259
+msgid "on"
+msgstr "有効"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:259
+msgid "off"
+msgstr "無効"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:265
+msgid "locked"
+msgstr "ロック済み"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:268
+msgid "matched description"
+msgstr "説明に一致"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:277
+msgid "source"
+msgstr "提供元"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:279
+msgid "size"
+msgstr "サイズ"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:280
+msgid "name"
+msgstr "名前"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:285
+msgid "bundled"
+msgstr "バンドル"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:287
+msgid "project"
+msgstr "プロジェクト"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:289
+msgid "user"
+msgstr "ユーザー"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:296
+#, python-brace-format
+msgid "~{count}k tokens"
+msgstr "約{count}kトークン"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:297
+#, python-brace-format
+msgid "~{count} tokens"
+msgstr "約{count}トークン"
+
 #: src/iac_code/ui/suggestions/command_provider.py:79
 msgid "Search saved memories"
 msgstr "保存済みメモリを検索"
@@ -2384,4 +2493,10 @@ msgstr "  オプション 2 - github.com にアクセスできない場合は、
 
 #~ msgid "Cache create"
 #~ msgstr "キャッシュ作成"
+
+#~ msgid ""
+#~ "{count} skills - Space to toggle, "
+#~ "Enter to save, / to search, t "
+#~ "to sort, Esc to cancel"
+#~ msgstr "{count} 個のスキル - Space で切り替え、Enter で保存、/ で検索、t で並べ替え、Esc でキャンセル"
 

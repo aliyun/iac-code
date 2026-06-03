@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: iac-code 0.3.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-02 20:13+0800\n"
+"POT-Creation-Date: 2026-06-02 20:45+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
 "Last-Translator: \n"
 "Language: fr\n"
@@ -112,8 +112,8 @@ msgstr "Utilisation : /debug [on|off]"
 msgid "Memory manager is unavailable."
 msgstr "Le gestionnaire de mémoire est indisponible."
 
-#: src/iac_code/agent/agent_loop.py:409 src/iac_code/agent/agent_loop.py:424
-#: src/iac_code/ui/repl.py:761 src/iac_code/ui/repl.py:775
+#: src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428
+#: src/iac_code/ui/repl.py:793 src/iac_code/ui/repl.py:807
 msgid "Permission denied."
 msgstr "Permission refusée."
 
@@ -611,59 +611,63 @@ msgstr "Répertoire pour les routes A2A persistées"
 msgid "Save the provided routes as a route snapshot"
 msgstr "Enregistre les routes fournies sous forme d'instantané de routes"
 
-#: src/iac_code/commands/__init__.py:24
+#: src/iac_code/commands/__init__.py:25
 msgid "Show available commands"
 msgstr "Afficher les commandes disponibles"
 
-#: src/iac_code/commands/__init__.py:33
+#: src/iac_code/commands/__init__.py:34
 msgid "Clear conversation history"
 msgstr "Effacer l’historique de conversation"
 
-#: src/iac_code/commands/__init__.py:41
+#: src/iac_code/commands/__init__.py:42
 msgid "Show or switch model"
 msgstr "Afficher ou changer de modèle"
 
-#: src/iac_code/commands/__init__.py:50
+#: src/iac_code/commands/__init__.py:51
 msgid "Show or switch thinking effort"
 msgstr "Afficher ou modifier l’effort de raisonnement"
 
-#: src/iac_code/commands/__init__.py:59
+#: src/iac_code/commands/__init__.py:60
 msgid "Compact conversation context"
 msgstr "Compacter le contexte de conversation"
 
-#: src/iac_code/commands/__init__.py:61
+#: src/iac_code/commands/__init__.py:62
 msgid "Compacting conversation"
 msgstr "Compactage de la conversation"
 
-#: src/iac_code/commands/__init__.py:68
+#: src/iac_code/commands/__init__.py:69
 msgid "Exit the application"
 msgstr "Quitter l’application"
 
-#: src/iac_code/commands/__init__.py:77
+#: src/iac_code/commands/__init__.py:78
 msgid "Authenticate with LLM provider"
 msgstr "S’authentifier auprès du fournisseur LLM"
 
-#: src/iac_code/commands/__init__.py:86
+#: src/iac_code/commands/__init__.py:87
 msgid "Toggle debug logging"
 msgstr "Activer ou désactiver la journalisation debug"
 
-#: src/iac_code/commands/__init__.py:95
+#: src/iac_code/commands/__init__.py:96
 msgid "View and manage persistent memories"
 msgstr "Afficher et gérer les mémoires persistantes"
 
-#: src/iac_code/commands/__init__.py:97
+#: src/iac_code/commands/__init__.py:98
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<nom>|search <requête>|delete <nom>|help]"
 
-#: src/iac_code/commands/__init__.py:104
+#: src/iac_code/commands/__init__.py:105
 msgid "Resume a previous session"
 msgstr "Reprendre une session précédente"
 
-#: src/iac_code/commands/__init__.py:106
+#: src/iac_code/commands/__init__.py:107
 msgid "[conversation id or search term]"
 msgstr "[identifiant de conversation ou terme de recherche]"
 
-#: src/iac_code/commands/__init__.py:113
+#: src/iac_code/commands/__init__.py:114
+msgid "Manage skills"
+msgstr "Gérer les compétences"
+
+#: src/iac_code/commands/__init__.py:122
 msgid "Show current session status"
 msgstr "Afficher l’état actuel de la session"
 
@@ -846,7 +850,7 @@ msgid "Credential"
 msgstr "Identifiants"
 
 #: src/iac_code/commands/auth.py:1074 src/iac_code/commands/auth.py:1190
-#: src/iac_code/commands/auth.py:1295 src/iac_code/commands/status.py:33
+#: src/iac_code/commands/auth.py:1295 src/iac_code/commands/status.py:36
 #: src/iac_code/ui/renderer.py:455
 msgid "Region"
 msgstr "Région"
@@ -1060,81 +1064,93 @@ msgstr "Session introuvable : {arg}"
 msgid "Resume cancelled"
 msgstr "Reprise annulée"
 
-#: src/iac_code/commands/status.py:16
+#: src/iac_code/commands/skills.py:14
+msgid "Skills management is only available in interactive mode."
+msgstr "La gestion des compétences n'est disponible qu'en mode interactif."
+
+#: src/iac_code/commands/skills.py:25
+msgid "Skills update cancelled"
+msgstr "Mise à jour des compétences annulée"
+
+#: src/iac_code/commands/skills.py:29
+msgid "Skills updated"
+msgstr "Compétences mises à jour"
+
+#: src/iac_code/commands/status.py:19
 msgid "Status command requires a context."
 msgstr "La commande status nécessite un contexte."
 
-#: src/iac_code/commands/status.py:19
+#: src/iac_code/commands/status.py:22
 msgid "Status command requires a REPL context."
 msgstr "La commande status nécessite un contexte REPL."
 
-#: src/iac_code/commands/status.py:21
+#: src/iac_code/commands/status.py:24
 msgid "Status is only available in interactive mode."
 msgstr "status n’est disponible qu’en mode interactif."
 
-#: src/iac_code/commands/status.py:30 src/iac_code/ui/banner.py:138
+#: src/iac_code/commands/status.py:33 src/iac_code/ui/banner.py:138
 msgid "Session"
 msgstr "Session"
 
-#: src/iac_code/commands/status.py:31
+#: src/iac_code/commands/status.py:34
 msgid "Provider"
 msgstr "Fournisseur"
 
-#: src/iac_code/commands/status.py:31 src/iac_code/commands/status.py:32
-#: src/iac_code/commands/status.py:33
+#: src/iac_code/commands/status.py:34 src/iac_code/commands/status.py:35
+#: src/iac_code/commands/status.py:36
 msgid "not configured"
 msgstr "non configuré"
 
-#: src/iac_code/commands/status.py:32
+#: src/iac_code/commands/status.py:35
 msgid "Model"
 msgstr "Modèle"
 
-#: src/iac_code/commands/status.py:34
+#: src/iac_code/commands/status.py:37
 msgid "CWD"
 msgstr "Répertoire courant"
 
-#: src/iac_code/commands/status.py:38
+#: src/iac_code/commands/status.py:41
 msgid "API Token Usage (recorded):"
 msgstr "Utilisation des tokens API (enregistrée) :"
 
-#: src/iac_code/commands/status.py:41
+#: src/iac_code/commands/status.py:44
 msgid "Input"
 msgstr "Entrée"
 
-#: src/iac_code/commands/status.py:42
+#: src/iac_code/commands/status.py:45
 msgid "Output"
 msgstr "Sortie"
 
-#: src/iac_code/commands/status.py:43
+#: src/iac_code/commands/status.py:46
 msgid "Cache read"
 msgstr "Lecture du cache"
 
-#: src/iac_code/commands/status.py:44
+#: src/iac_code/commands/status.py:47
 msgid "Total"
 msgstr "Total"
 
-#: src/iac_code/commands/status.py:47
+#: src/iac_code/commands/status.py:50
 msgid "No recorded API usage for this session yet."
 msgstr "Aucune utilisation d’API enregistrée pour cette session pour le moment."
 
-#: src/iac_code/commands/status.py:51
+#: src/iac_code/commands/status.py:54
 msgid "Turns"
 msgstr "Tours"
 
-#: src/iac_code/commands/status.py:52
+#: src/iac_code/commands/status.py:55
 msgid "Context"
 msgstr "Contexte"
 
-#: src/iac_code/commands/status.py:54
+#: src/iac_code/commands/status.py:57
 msgid "Session Status"
 msgstr "État de la session"
 
-#: src/iac_code/commands/status.py:68
+#: src/iac_code/commands/status.py:73
 #, python-brace-format
 msgid "{session_id} (resumed)"
 msgstr "{session_id} (reprise)"
 
-#: src/iac_code/commands/status.py:76
+#: src/iac_code/commands/status.py:81
 #, python-brace-format
 msgid "{percent} used ({total} / {window})"
 msgstr "{percent} utilisé ({total} / {window})"
@@ -1326,14 +1342,24 @@ msgstr "--permission-mode invalide : {!r}. Valeurs valides : {}"
 msgid "Allow {}?"
 msgstr "Autoriser {} ?"
 
-#: src/iac_code/skills/skill_tool.py:130
+#: src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py:823
+#, python-brace-format
+msgid "Skill '{name}' is disabled. Run /skills to enable it."
+msgstr "La compétence « {name} » est désactivée. Exécutez /skills pour l'activer."
+
+#: src/iac_code/skills/skill_tool.py:137
 #, python-brace-format
 msgid "Skill '{name}' loaded (inline)."
 msgstr "Skill « {name} » chargé (inline)."
 
-#: src/iac_code/skills/skill_tool.py:214
+#: src/iac_code/skills/skill_tool.py:221
 msgid "Skill"
 msgstr "Skill"
+
+#: src/iac_code/skills/skill_tool.py:245
+#, python-brace-format
+msgid "Skill disabled: {name}"
+msgstr "Compétence désactivée : {name}"
 
 #: src/iac_code/skills/bundled/simplify.py:25
 msgid ""
@@ -2050,103 +2076,103 @@ msgstr "Non, toujours refuser \"{rule}\" (cette session)"
 msgid "No, always reject this tool"
 msgstr "Non, toujours refuser cet outil"
 
-#: src/iac_code/ui/repl.py:374
+#: src/iac_code/ui/repl.py:406
 msgid "Press Ctrl+C again to exit."
 msgstr "Appuyez de nouveau sur Ctrl+C pour quitter."
 
-#: src/iac_code/ui/repl.py:399
+#: src/iac_code/ui/repl.py:431
 msgid "Interrupted."
 msgstr "Interrompu."
 
-#: src/iac_code/ui/repl.py:436
+#: src/iac_code/ui/repl.py:468
 msgid "Goodbye!"
 msgstr "Au revoir !"
 
-#: src/iac_code/ui/repl.py:437
+#: src/iac_code/ui/repl.py:469
 msgid "Resume this session with:"
 msgstr "Pour reprendre cette session :"
 
-#: src/iac_code/ui/repl.py:462
+#: src/iac_code/ui/repl.py:494
 msgid "Update now"
 msgstr "Mettre à jour maintenant"
 
-#: src/iac_code/ui/repl.py:464
+#: src/iac_code/ui/repl.py:496
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "Exécute la commande de mise à jour affichée et quitte en cas de succès."
 
-#: src/iac_code/ui/repl.py:467
+#: src/iac_code/ui/repl.py:499
 msgid "Skip"
 msgstr "Ignorer"
 
-#: src/iac_code/ui/repl.py:469
+#: src/iac_code/ui/repl.py:501
 msgid "Continue with the current version for this session."
 msgstr "Continuer avec la version actuelle pour cette session."
 
-#: src/iac_code/ui/repl.py:472
+#: src/iac_code/ui/repl.py:504
 msgid "Skip until next version"
 msgstr "Ignorer jusqu’à la prochaine version"
 
-#: src/iac_code/ui/repl.py:474
+#: src/iac_code/ui/repl.py:506
 msgid "Hide this update until a newer version is available."
 msgstr ""
 "Masquer cette mise à jour jusqu’à ce qu’une version plus récente soit "
 "disponible."
 
-#: src/iac_code/ui/repl.py:493 src/iac_code/ui/repl.py:505
+#: src/iac_code/ui/repl.py:525 src/iac_code/ui/repl.py:537
 msgid "Update command failed. Continuing with the current version."
 msgstr "La commande de mise à jour a échoué. La version actuelle sera conservée."
 
-#: src/iac_code/ui/repl.py:498
+#: src/iac_code/ui/repl.py:530
 msgid "Update completed. Restart iac-code to continue."
 msgstr "Mise à jour terminée. Redémarrez iac-code pour continuer."
 
-#: src/iac_code/ui/repl.py:536
+#: src/iac_code/ui/repl.py:568
 msgid "No image in clipboard."
 msgstr "Aucune image dans le presse-papiers."
 
-#: src/iac_code/ui/repl.py:722
+#: src/iac_code/ui/repl.py:754
 msgid "Usage: !<shell command>"
 msgstr "Utilisation : !<commande shell>"
 
-#: src/iac_code/ui/repl.py:727
+#: src/iac_code/ui/repl.py:759
 msgid "Shell command support is unavailable."
 msgstr "La prise en charge des commandes shell n'est pas disponible."
 
-#: src/iac_code/ui/repl.py:791
+#: src/iac_code/ui/repl.py:826
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr ""
 "Compétence inconnue : ${name}. Tapez / pour lister les commandes et les "
 "compétences."
 
-#: src/iac_code/ui/repl.py:793
+#: src/iac_code/ui/repl.py:828
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
 "Unknown command: /{name}. Type /help for available commands.Commande "
 "inconnue : /{name}. Saisissez /help pour la liste des commandes."
 
-#: src/iac_code/ui/repl.py:798
+#: src/iac_code/ui/repl.py:833
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ n'invoque que des compétences. Utilisez plutôt /{name}."
 
-#: src/iac_code/ui/repl.py:820 src/iac_code/ui/repl.py:865
+#: src/iac_code/ui/repl.py:855 src/iac_code/ui/repl.py:900
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Erreur de commande : {error}"
 
-#: src/iac_code/ui/repl.py:827
+#: src/iac_code/ui/repl.py:862
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "Aucun gestionnaire pour la commande : {name}"
 
-#: src/iac_code/ui/repl.py:1132
+#: src/iac_code/ui/repl.py:1167
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Session introuvable : {session_id}"
 
-#: src/iac_code/ui/repl.py:1151
+#: src/iac_code/ui/repl.py:1186
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2157,19 +2183,19 @@ msgstr ""
 "Pour la reprendre, exécutez :\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py:1252
+#: src/iac_code/ui/repl.py:1287
 msgid "This conversation is from a different directory."
 msgstr "Cette conversation provient d’un autre répertoire."
 
-#: src/iac_code/ui/repl.py:1254
+#: src/iac_code/ui/repl.py:1289
 msgid "To resume, run:"
 msgstr "Pour reprendre, exécutez :"
 
-#: src/iac_code/ui/repl.py:1259
+#: src/iac_code/ui/repl.py:1294
 msgid "(Command copied to clipboard)"
 msgstr "(Commande copiée dans le presse-papiers)"
 
-#: src/iac_code/ui/repl.py:1416
+#: src/iac_code/ui/repl.py:1451
 #, python-brace-format
 msgid ""
 "Current model {model} does not support image input. Use /model to switch "
@@ -2178,12 +2204,12 @@ msgstr ""
 "Le modèle actuel {model} ne prend pas en charge l’entrée d’image. "
 "Utilisez /model pour passer à un modèle compatible vision."
 
-#: src/iac_code/ui/repl.py:1425
+#: src/iac_code/ui/repl.py:1460
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "Erreur d’image : {err}"
 
-#: src/iac_code/ui/repl.py:1442
+#: src/iac_code/ui/repl.py:1477
 msgid ""
 "Failed to persist image to cache; it will only exist in memory for this "
 "turn."
@@ -2364,6 +2390,91 @@ msgstr "il y a {n} heure{s}"
 msgid "{n} day{s} ago"
 msgstr "il y a {n} jour{s}"
 
+#: src/iac_code/ui/dialogs/skills_picker.py:52
+msgid "Search skills..."
+msgstr "Rechercher des compétences..."
+
+#: src/iac_code/ui/dialogs/skills_picker.py:159
+msgid "Skills"
+msgstr "Compétences"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:161
+#, python-brace-format
+msgid "{current} of {total}"
+msgstr "{current} sur {total}"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:165
+#, python-brace-format
+msgid ""
+"{count} skills - Space to toggle, Enter to save, Tab to sort, Esc to "
+"cancel"
+msgstr ""
+"{count} compétences - Espace pour activer/désactiver, Entrée pour "
+"enregistrer, Tab pour trier, Échap pour annuler"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:171
+#, python-brace-format
+msgid "Sort: {mode}"
+msgstr "Tri : {mode}"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:176
+msgid "No skills found"
+msgstr "Aucune compétence trouvée"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:245
+msgid "Bundled skills cannot be disabled."
+msgstr "Les compétences intégrées ne peuvent pas être désactivées."
+
+#: src/iac_code/ui/dialogs/skills_picker.py:259
+msgid "on"
+msgstr "activée"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:259
+msgid "off"
+msgstr "désactivée"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:265
+msgid "locked"
+msgstr "verrouillée"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:268
+msgid "matched description"
+msgstr "correspond à la description"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:277
+msgid "source"
+msgstr "source"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:279
+msgid "size"
+msgstr "taille"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:280
+msgid "name"
+msgstr "nom"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:285
+msgid "bundled"
+msgstr "intégrée"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:287
+msgid "project"
+msgstr "projet"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:289
+msgid "user"
+msgstr "utilisateur"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:296
+#, python-brace-format
+msgid "~{count}k tokens"
+msgstr "~{count}k jetons"
+
+#: src/iac_code/ui/dialogs/skills_picker.py:297
+#, python-brace-format
+msgid "~{count} tokens"
+msgstr "~{count} jetons"
+
 #: src/iac_code/ui/suggestions/command_provider.py:79
 msgid "Search saved memories"
 msgstr "Rechercher dans les mémoires enregistrées"
@@ -2437,4 +2548,14 @@ msgstr ""
 
 #~ msgid "Cache create"
 #~ msgstr "Création du cache"
+
+#~ msgid ""
+#~ "{count} skills - Space to toggle, "
+#~ "Enter to save, / to search, t "
+#~ "to sort, Esc to cancel"
+#~ msgstr ""
+#~ "{count} compétences - Espace pour "
+#~ "activer/désactiver, Entrée pour enregistrer, /"
+#~ " pour rechercher, t pour trier, Échap"
+#~ " pour annuler"
 

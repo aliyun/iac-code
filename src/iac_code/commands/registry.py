@@ -127,6 +127,12 @@ class CommandRegistry:
         for alias in command.aliases:
             self._commands[alias] = command
 
+    def clear_prompt_commands(self) -> None:
+        """Remove all skill-backed commands while preserving local commands."""
+        for name, command in list(self._commands.items()):
+            if isinstance(command, PromptCommand):
+                del self._commands[name]
+
     def get(self, name: str) -> Command | None:
         """Get command by name or alias."""
         return self._commands.get(name)

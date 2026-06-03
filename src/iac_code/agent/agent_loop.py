@@ -117,6 +117,10 @@ class AgentLoop:
             self.system_prompt = system_prompt
             self.context_manager.set_system_prompt(system_prompt)
 
+    def set_auto_trigger_skills(self, skill_commands: list[Any] | None) -> None:
+        """Refresh skills considered for automatic trigger injection."""
+        self._auto_trigger_skills = list(skill_commands or [])
+
     def _get_tool_definitions(self):
         """Convert tool registry to provider ToolDefinition format."""
         from iac_code.providers.base import ToolDefinition

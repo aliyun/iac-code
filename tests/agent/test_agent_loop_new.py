@@ -60,6 +60,22 @@ class TestAgentLoopInit:
         assert defs[0].name == "read_file"
         assert defs[0].description == "Read file"
 
+    def test_set_auto_trigger_skills_refreshes_candidates(self, mock_provider, mock_registry):
+        old_command = SimpleNamespace(name="old-skill")
+        new_command = SimpleNamespace(name="new-skill")
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            auto_trigger_skills=[old_command],
+        )
+        loop._auto_loaded_skills.add("old-skill")
+
+        loop.set_auto_trigger_skills([new_command])
+
+        assert loop._auto_trigger_skills == [new_command]
+        assert loop._auto_loaded_skills == {"old-skill"}
+
     def test_get_provider_messages_converts_strings_and_blocks(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         loop.context_manager = MagicMock()

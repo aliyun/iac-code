@@ -44,6 +44,7 @@ from iac_code.services.update_checker import (
     start_background_update_check,
     suppress_version,
 )
+from iac_code.skills.settings import normalize_skill_name
 from iac_code.state import AppStateStore
 from iac_code.state.app_state import AppState
 from iac_code.tasks.notification_queue import NotificationQueue
@@ -167,45 +168,10 @@ class InlineREPL:
         self.tool_registry.register(TaskGetTool(self._task_manager))
         self.tool_registry.register(TaskStopTool(self._task_manager))
 
-        # === Skill system initialization ===
-        from iac_code.skills.bundled import init_bundled_skills
-        from iac_code.skills.discovery import discover_all_skills, skill_to_command
-        from iac_code.skills.listing import build_skill_listing
-        from iac_code.skills.skill_tool import SkillTool
-
-        # 1. Initialize bundled skills (once)
-        init_bundled_skills()
-
-        # 2. Discover all skills and register to unified CommandRegistry
         cwd = os.getcwd()
-        all_skills = discover_all_skills(cwd)
-        for skill in all_skills:
-            cmd = skill_to_command(skill)
-            existing = self.command_registry.get(cmd.name)
-            if existing is not None and not isinstance(existing, PromptCommand):
-                logger.warning(
-                    "Skill '%s' (source=%s) skipped: conflicts with built-in command",
-                    cmd.name,
-                    cmd.source,
-                )
-                continue
-            self.command_registry.register(cmd)
-
-        # 3. Register SkillTool
-        self.tool_registry.register(
-            SkillTool(
-                command_registry=self.command_registry,
-                session_id=self._session_id,
-                cwd=cwd,
-                provider_manager=self._provider_manager,
-                tool_registry=self.tool_registry,
-                system_prompt=build_system_prompt(cwd=cwd, memory_content=memory_content),
-            )
-        )
-
-        # 4. Generate skill listing for system prompt
+        self._memory_content = memory_content
+        self.refresh_skills()
         skill_commands = self.command_registry.get_model_invocable_skills()
-        self._skill_listing = build_skill_listing(skill_commands)
 
         from iac_code.services.permissions.loader import load_permission_context
 
@@ -278,6 +244,72 @@ class InlineREPL:
     # ------------------------------------------------------------------
     # Public entry-point
     # ------------------------------------------------------------------
+
+    @property
+    def skill_management_items(self):
+        """Return all discovered skills with management state."""
+        return getattr(self, "_skill_management_items", [])
+
+    @property
+    def locked_skill_names(self):
+        """Return skill names that cannot be disabled."""
+        return getattr(self, "_locked_skill_names", set())
+
+    def refresh_skills(self) -> None:
+        """Rediscover skills and refresh enabled/disabled skill state."""
+        from iac_code.skills.bundled import init_bundled_skills
+        from iac_code.skills.discovery import discover_all_skills
+        from iac_code.skills.listing import build_skill_listing
+        from iac_code.skills.management import build_skill_management_state
+        from iac_code.skills.settings import load_disabled_skills
+        from iac_code.skills.skill_tool import SkillTool
+
+        init_bundled_skills()
+        cwd = os.getcwd()
+        all_skills = discover_all_skills(cwd)
+        state = build_skill_management_state(all_skills, load_disabled_skills())
+        self._skill_management_items = state.items
+        self._disabled_skill_commands = state.disabled_commands
+        self._locked_skill_names = state.locked_skill_names
+
+        self.command_registry.clear_prompt_commands()
+        for cmd in state.enabled_commands:
+            existing = self.command_registry.get(cmd.name)
+            if existing is not None and not isinstance(existing, PromptCommand):
+                logger.warning(
+                    "Skill '%s' (source=%s) skipped: conflicts with built-in command",
+                    cmd.name,
+                    cmd.source,
+                )
+                continue
+            self.command_registry.register(cmd)
+
+        memory_content = getattr(self, "_memory_content", "")
+        self.tool_registry.register(
+            SkillTool(
+                command_registry=self.command_registry,
+                disabled_skills=self._disabled_skill_commands,
+                session_id=self._session_id,
+                cwd=cwd,
+                provider_manager=self._provider_manager,
+                tool_registry=self.tool_registry,
+                system_prompt=build_system_prompt(cwd=cwd, memory_content=memory_content),
+            )
+        )
+
+        skill_commands = self.command_registry.get_model_invocable_skills()
+        self._skill_listing = build_skill_listing(skill_commands)
+
+        if hasattr(self, "_agent_loop"):
+            self._agent_loop.set_auto_trigger_skills(skill_commands)
+            self._agent_loop.set_provider(
+                self._provider_manager,
+                system_prompt=build_system_prompt(
+                    cwd=cwd,
+                    memory_content=memory_content,
+                    skill_listing=self._skill_listing,
+                ),
+            )
 
     async def run(self, initial_prompt: str | None = None) -> None:
         """Run the REPL until the user exits.
@@ -787,6 +819,9 @@ class InlineREPL:
             self.renderer.print_system_message(message, style="red")
 
         if cmd is None:
+            if is_skill_trigger and normalize_skill_name(name) in getattr(self, "_disabled_skill_commands", {}):
+                _emit_error(_("Skill '{name}' is disabled. Run /skills to enable it.").format(name=name))
+                return
             if is_skill_trigger:
                 _emit_error(_("Unknown skill: ${name}. Type / to list commands and skills.").format(name=name))
             else:

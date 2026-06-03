@@ -11,6 +11,7 @@ from iac_code.commands.memory import memory_command
 from iac_code.commands.model import model_command
 from iac_code.commands.registry import Command, CommandRegistry, LocalCommand, PromptCommand
 from iac_code.commands.resume import resume_command
+from iac_code.commands.skills import skills_command
 from iac_code.commands.status import status_command
 from iac_code.i18n import _
 
@@ -104,6 +105,14 @@ def create_default_registry() -> CommandRegistry:
             description=_("Resume a previous session"),
             handler=resume_command,
             arg_hint=_("[conversation id or search term]"),
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="skills",
+            description=_("Manage skills"),
+            handler=skills_command,
             history_mode="session",
         )
     )
