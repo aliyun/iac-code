@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from iac_code.memory.memory_tools import ReadMemoryTool, WriteMemoryTool
@@ -27,6 +29,14 @@ class FakeMemoryManager:
 
     def get_index_content(self):
         return self.index_content
+
+
+def test_memory_tools_execute_parameters_are_keyword_only():
+    for tool_cls in (ReadMemoryTool, WriteMemoryTool):
+        signature = inspect.signature(tool_cls.execute)
+
+        assert signature.parameters["tool_input"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["context"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 @pytest.mark.asyncio

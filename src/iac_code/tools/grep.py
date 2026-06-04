@@ -7,6 +7,7 @@ import fnmatch
 import os
 import re
 import shutil
+from functools import lru_cache
 from typing import Any
 
 from iac_code.i18n import _
@@ -17,6 +18,79 @@ from iac_code.utils.platform import normalize_user_path
 def _is_rg_available() -> bool:
     """Check whether ripgrep (rg) is available on the system PATH."""
     return shutil.which("rg") is not None
+
+
+def _normalize_glob_path(path: str) -> str:
+    """Normalize paths for rg-style glob matching."""
+    normalized = path.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _matches_path_glob(relative_path: str, glob_pattern: str) -> bool:
+    """Match a relative path against the subset of rg glob semantics used by the tool."""
+    normalized_path = _normalize_glob_path(relative_path)
+    normalized_pattern = _normalize_glob_path(glob_pattern)
+
+    if "/" not in normalized_pattern:
+        return fnmatch.fnmatchcase(normalized_path.rsplit("/", 1)[-1], normalized_pattern)
+
+    path_parts = tuple(part for part in normalized_path.split("/") if part)
+    pattern_parts = tuple(part for part in normalized_pattern.split("/") if part)
+
+    @lru_cache(maxsize=None)
+    def match(pattern_index: int, path_index: int) -> bool:
+        if pattern_index == len(pattern_parts):
+            return path_index == len(path_parts)
+
+        pattern_part = pattern_parts[pattern_index]
+        if pattern_part == "**":
+            return match(pattern_index + 1, path_index) or (
+                path_index < len(path_parts) and match(pattern_index, path_index + 1)
+            )
+
+        return (
+            path_index < len(path_parts)
+            and fnmatch.fnmatchcase(path_parts[path_index], pattern_part)
+            and match(pattern_index + 1, path_index + 1)
+        )
+
+    return match(0, 0)
+
+
+def _glob_uses_path_segments(glob_pattern: str) -> bool:
+    return "/" in _normalize_glob_path(glob_pattern)
+
+
+def _absolutize_rg_path(root: str, rg_path: str) -> str:
+    if os.path.isabs(rg_path):
+        return rg_path
+    if rg_path in {".", ""}:
+        return root
+    normalized = rg_path.replace("\\", os.sep).replace("/", os.sep)
+    if normalized.startswith(f".{os.sep}"):
+        normalized = normalized[2:]
+    return os.path.join(root, normalized)
+
+
+def _absolutize_rg_output(stdout: str, root: str, *, output_mode: str) -> str:
+    if not stdout:
+        return stdout
+
+    lines: list[str] = []
+    for line in stdout.splitlines():
+        if output_mode == "content":
+            filename, sep, rest = line.partition(":")
+            if sep:
+                lines.append(f"{_absolutize_rg_path(root, filename)}:{rest}")
+            else:
+                lines.append(line)
+        else:
+            lines.append(_absolutize_rg_path(root, line))
+
+    trailing_newline = "\n" if stdout.endswith("\n") else ""
+    return "\n".join(lines) + trailing_newline
 
 
 async def _run_rg(
@@ -30,6 +104,14 @@ async def _run_rg(
 ) -> tuple[int, str, str]:
     """Run ripgrep and return (returncode, stdout, stderr)."""
     cmd: list[str] = ["rg"]
+    cwd: str | None = None
+    search_path = path
+    absolutize_output = False
+
+    if glob and os.path.isdir(path) and _glob_uses_path_segments(glob):
+        cwd = path
+        search_path = "."
+        absolutize_output = True
 
     if case_insensitive:
         cmd.append("--ignore-case")
@@ -49,17 +131,22 @@ async def _run_rg(
 
     cmd.append("--")
     cmd.append(pattern)
-    cmd.append(path)
+    cmd.append(search_path)
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
     )
     stdout_bytes, stderr_bytes = await proc.communicate()
+    stdout = stdout_bytes.decode(errors="replace")
+    if absolutize_output:
+        stdout = _absolutize_rg_output(stdout, path, output_mode=output_mode)
+
     return (
         proc.returncode or 0,
-        stdout_bytes.decode(errors="replace"),
+        stdout,
         stderr_bytes.decode(errors="replace"),
     )
 
@@ -89,9 +176,10 @@ def _python_grep(
         for filename in sorted(filenames):
             if files_matched >= max_results:
                 break
-            if glob and not fnmatch.fnmatch(filename, glob):
-                continue
             filepath = os.path.join(dirpath, filename)
+            relative_path = os.path.relpath(filepath, path)
+            if glob and not _matches_path_glob(relative_path, glob):
+                continue
             try:
                 with open(filepath, encoding="utf-8", errors="replace") as fh:
                     lines = fh.readlines()

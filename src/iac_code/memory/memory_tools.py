@@ -32,7 +32,7 @@ class ReadMemoryTool(Tool):
             },
         }
 
-    async def execute(self, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+    async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         name = tool_input.get("name")
         if name:
             mem = self._manager.load(name)
@@ -77,7 +77,7 @@ class WriteMemoryTool(Tool):
             "required": ["name", "content", "memory_type", "description"],
         }
 
-    async def execute(self, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+    async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         try:
             self._manager.save(
                 name=tool_input["name"],

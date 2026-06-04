@@ -61,11 +61,14 @@ class ListFilesTool(Tool):
         lines = []
         for entry in entries:
             full_path = os.path.join(path, entry)
-            if os.path.isdir(full_path):
-                lines.append(f"  {entry}/")
-            else:
-                size = os.path.getsize(full_path)
-                lines.append(f"  {entry} ({_format_size(size)})")
+            try:
+                if os.path.isdir(full_path):
+                    lines.append(f"  {entry}/")
+                else:
+                    size = os.path.getsize(full_path)
+                    lines.append(f"  {entry} ({_format_size(size)})")
+            except OSError:
+                continue
 
         result = f"Directory: {path}\n\n" + "\n".join(lines)
         return ToolResult.success(result)
