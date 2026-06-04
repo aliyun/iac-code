@@ -127,6 +127,7 @@ def check_for_updates_once(
     now: float | None = None,
     python_executable: str | None = None,
     python_version: str | None = None,
+    force: bool = False,
 ) -> UpdateState:
     from iac_code import __release_date__, __version__
 
@@ -135,10 +136,14 @@ def check_for_updates_once(
     checked_at = time.time() if now is None else now
     build_release_date = __release_date__ if release_date is None else release_date
 
-    if not build_release_date.strip():
+    if not force and not build_release_date.strip():
         return state
     last_successful_check_at = state.last_successful_check_at
-    if last_successful_check_at is not None and checked_at - last_successful_check_at < CHECK_THROTTLE_SECONDS:
+    if (
+        not force
+        and last_successful_check_at is not None
+        and checked_at - last_successful_check_at < CHECK_THROTTLE_SECONDS
+    ):
         return state
 
     installed_version = current_version or __version__

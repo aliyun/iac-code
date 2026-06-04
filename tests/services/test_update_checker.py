@@ -508,6 +508,40 @@ def test_successful_check_within_two_hours_is_throttled(monkeypatch, tmp_path):
     assert http_client.urls == []
 
 
+def test_force_check_ignores_throttle_for_manual_update(monkeypatch, tmp_path):
+    path = tmp_path / "update-state.yml"
+    path.write_text(yaml.safe_dump({"last_successful_check_at": 1000.0}), encoding="utf-8")
+    http_client = FakeHTTPClient(
+        _json_response("https://pypi.org/pypi/iac-code/json", {"releases": {"0.4.0": [{}], "0.3.0": [{}]}}),
+        _json_response(
+            "https://api.github.com/repos/aliyun/iac-code/releases/latest",
+            {"html_url": "https://github.com/aliyun/iac-code/releases/tag/v0.4.0"},
+        ),
+    )
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("pip subprocess must not run")
+
+    monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
+
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=8199.0,
+        python_executable="/python",
+        force=True,
+    )
+
+    assert state.pending is not None
+    assert state.pending.version == "0.4.0"
+    assert state.last_successful_check_at == 8199.0
+    assert http_client.urls == [
+        "https://pypi.org/pypi/iac-code/json",
+        "https://api.github.com/repos/aliyun/iac-code/releases/latest",
+    ]
+
+
 def test_failed_check_does_not_update_last_successful_check_at(monkeypatch, tmp_path):
     path = tmp_path / "update-state.yml"
     http_client = FakeHTTPClient(
@@ -658,6 +692,40 @@ def test_local_development_build_skips_detection(monkeypatch, tmp_path):
     assert state == UpdateState()
     assert load_update_state(path) == UpdateState()
     assert http_client.urls == []
+
+
+def test_force_check_runs_for_manual_update_from_local_development_build(monkeypatch, tmp_path):
+    path = tmp_path / "update-state.yml"
+    http_client = FakeHTTPClient(
+        _json_response("https://pypi.org/pypi/iac-code/json", {"releases": {"0.4.0": [{}], "0.3.0": [{}]}}),
+        _json_response(
+            "https://api.github.com/repos/aliyun/iac-code/releases/latest",
+            {"html_url": "https://github.com/aliyun/iac-code/releases/tag/v0.4.0"},
+        ),
+    )
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("pip subprocess must not run")
+
+    monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
+
+    state = check_for_updates_once(
+        path=path,
+        current_version="0.3.0",
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+        release_date="",
+        force=True,
+    )
+
+    assert state.pending is not None
+    assert state.pending.version == "0.4.0"
+    assert state.last_successful_check_at == 1000.0
+    assert http_client.urls == [
+        "https://pypi.org/pypi/iac-code/json",
+        "https://api.github.com/repos/aliyun/iac-code/releases/latest",
+    ]
 
 
 def test_newer_existing_pending_is_preserved_when_detector_races(monkeypatch, tmp_path):
