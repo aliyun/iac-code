@@ -3,12 +3,14 @@
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 from iac_code.commands.model import (
     _get_active_provider,
     _get_active_provider_models,
     model_command,
 )
+from iac_code.config import get_provider_config, get_settings_path
 
 
 @pytest.mark.asyncio
@@ -40,7 +42,7 @@ class TestModelLocked:
     async def test_model_not_locked_when_local(self, monkeypatch):
         monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
         monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
-        monkeypatch.setattr("iac_code.commands.model.save_active_provider_config", lambda p, m: None)
+        monkeypatch.setattr("iac_code.commands.model.save_active_provider_config", lambda p, m, api_base=None: None)
         store = MagicMock()
         context = MagicMock(store=store)
         result = await model_command(context=context, args=["claude-opus-4-6"])
@@ -58,6 +60,28 @@ def fake_provider():
         "models": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
         "default_model": "claude-sonnet-4-6",
     }
+
+
+@pytest.fixture
+def isolated_config_dir(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.delenv("IAC_CODE_API_KEY", raising=False)
+    monkeypatch.delenv("IAC_CODE_PROVIDER", raising=False)
+    monkeypatch.delenv("IAC_CODE_MODEL", raising=False)
+    monkeypatch.delenv("IAC_CODE_BASE_URL", raising=False)
+    return config_dir
+
+
+def _write_settings(data: dict) -> None:
+    settings_path = get_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _write_credentials(config_dir, data: dict) -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / ".credentials.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
 class TestGetActiveProvider:
@@ -95,7 +119,7 @@ class TestModelCommand:
         monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr(
             "iac_code.commands.model.save_active_provider_config",
-            lambda p, m: calls.append((p["key_name"], m)),
+            lambda p, m, api_base=None: calls.append((p["key_name"], m)),
         )
         store = MagicMock()
         context = MagicMock(store=store)
@@ -105,6 +129,96 @@ class TestModelCommand:
         assert "claude-opus-4-6" in result
         assert calls == [("anthropic", "claude-opus-4-6")]
         store.set_state.assert_called_with(model="claude-opus-4-6")
+
+    async def test_explicit_args_logs_custom_base_url_from_active_provider_settings(self, monkeypatch):
+        events = []
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
+        monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
+        monkeypatch.setattr(
+            "iac_code.commands.model._load_yaml",
+            lambda path: {
+                "activeProvider": "anthropic",
+                "providers": {
+                    "anthropic": {
+                        "apiBase": "https://proxy.example.com/v1",
+                    }
+                },
+            },
+        )
+        monkeypatch.setattr("iac_code.commands.model.save_active_provider_config", lambda p, m, api_base=None: None)
+        monkeypatch.setattr("iac_code.commands.model.log_event", lambda name, payload: events.append((name, payload)))
+        store = MagicMock()
+        context = MagicMock(store=store)
+
+        result = await model_command(context=context, args=["claude-opus-4-6"])
+
+        assert "claude-opus-4-6" in result
+        assert events
+        assert events[-1][1]["has_custom_base_url"] is True
+        assert events[-1][1]["custom_base_url_host_kind"] == "other"
+
+    async def test_explicit_args_does_not_log_default_base_url_as_custom(self, monkeypatch):
+        events = []
+        provider = {
+            "name": "Custom",
+            "display_name": "Custom",
+            "key_name": "custom",
+            "api_base": "https://default.example.com/v1",
+            "models": ["custom-model"],
+            "default_model": "custom-model",
+        }
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
+        monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "custom")
+        monkeypatch.setattr("iac_code.commands.model._get_active_provider", lambda: provider)
+        monkeypatch.setattr(
+            "iac_code.commands.model._load_yaml",
+            lambda path: {
+                "activeProvider": "custom",
+                "providers": {
+                    "custom": {
+                        "apiBase": "https://default.example.com/v1",
+                    }
+                },
+            },
+        )
+        monkeypatch.setattr("iac_code.commands.model.save_active_provider_config", lambda p, m, api_base=None: None)
+        monkeypatch.setattr("iac_code.commands.model.log_event", lambda name, payload: events.append((name, payload)))
+        store = MagicMock()
+        context = MagicMock(store=store)
+
+        result = await model_command(context=context, args=["custom-model"])
+
+        assert "custom-model" in result
+        assert events
+        assert events[-1][1]["has_custom_base_url"] is False
+        assert events[-1][1]["custom_base_url_host_kind"] == ""
+
+    async def test_explicit_args_preserves_custom_api_base_in_settings(self, isolated_config_dir, monkeypatch):
+        custom_api_base = "https://proxy.example.com/compatible-mode/v1"
+        _write_settings(
+            {
+                "activeProvider": "dashscope",
+                "providers": {
+                    "dashscope": {
+                        "name": "DashScope",
+                        "model": "qwen3.7-max",
+                        "apiBase": custom_api_base,
+                    }
+                },
+            }
+        )
+        monkeypatch.setattr("iac_code.commands.model.log_event", lambda name, payload: None)
+
+        store = MagicMock()
+        context = MagicMock(store=store)
+
+        result = await model_command(context=context, args=["qwen3.6-plus"])
+
+        provider_config = get_provider_config("dashscope")
+        assert "qwen3.6-plus" in result
+        assert provider_config["model"] == "qwen3.6-plus"
+        assert provider_config["apiBase"] == custom_api_base
+        store.set_state.assert_called_with(model="qwen3.6-plus")
 
     async def test_no_context_no_console_returns_current(self, monkeypatch):
         monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
@@ -156,7 +270,7 @@ class TestModelCommand:
         saved = []
         monkeypatch.setattr(
             "iac_code.commands.model.save_active_provider_config",
-            lambda p, m: saved.append((p["key_name"], m)),
+            lambda p, m, api_base=None: saved.append((p["key_name"], m)),
         )
 
         store = MagicMock()
@@ -167,3 +281,72 @@ class TestModelCommand:
         result = await model_command(context=context)
         assert "claude-opus-4-6" in result
         assert saved == [("anthropic", "claude-opus-4-6")]
+
+    async def test_interactive_select_logs_custom_base_url_from_active_provider_settings(self, monkeypatch):
+        events = []
+        monkeypatch.setattr("iac_code.commands.model.get_llm_source", lambda: "local")
+        monkeypatch.setattr("iac_code.commands.model.get_configured_providers", lambda: ["anthropic"])
+        monkeypatch.setattr("iac_code.commands.model.get_active_provider_key", lambda: "anthropic")
+        monkeypatch.setattr(
+            "iac_code.commands.model._load_yaml",
+            lambda path: {
+                "activeProvider": "anthropic",
+                "providers": {
+                    "anthropic": {
+                        "apiBase": "https://proxy.example.com/v1",
+                    }
+                },
+            },
+        )
+        monkeypatch.setattr(
+            "iac_code.commands.model.select_model_interactive",
+            lambda models, current_model, provider_display_name: "claude-opus-4-6",
+        )
+        monkeypatch.setattr("iac_code.commands.model.save_active_provider_config", lambda p, m, api_base=None: None)
+        monkeypatch.setattr("iac_code.commands.model.log_event", lambda name, payload: events.append((name, payload)))
+
+        store = MagicMock()
+        store.get_state.return_value = MagicMock(model="claude-sonnet-4-6")
+        context = MagicMock(store=store)
+        context.console = MagicMock()
+
+        result = await model_command(context=context)
+
+        assert "claude-opus-4-6" in result
+        assert events
+        assert events[-1][1]["has_custom_base_url"] is True
+        assert events[-1][1]["custom_base_url_host_kind"] == "other"
+
+    async def test_interactive_select_preserves_custom_api_base_in_settings(self, isolated_config_dir, monkeypatch):
+        custom_api_base = "https://proxy.example.com/compatible-mode/v1"
+        _write_settings(
+            {
+                "activeProvider": "dashscope",
+                "providers": {
+                    "dashscope": {
+                        "name": "DashScope",
+                        "model": "qwen3.7-max",
+                        "apiBase": custom_api_base,
+                    }
+                },
+            }
+        )
+        _write_credentials(isolated_config_dir, {"dashscope": "fake-api-key"})
+        monkeypatch.setattr(
+            "iac_code.commands.model.select_model_interactive",
+            lambda models, current_model, provider_display_name: "qwen3.6-plus",
+        )
+        monkeypatch.setattr("iac_code.commands.model.log_event", lambda name, payload: None)
+
+        store = MagicMock()
+        store.get_state.return_value = MagicMock(model="qwen3.7-max")
+        context = MagicMock(store=store)
+        context.console = MagicMock()
+
+        result = await model_command(context=context)
+
+        provider_config = get_provider_config("dashscope")
+        assert "qwen3.6-plus" in result
+        assert provider_config["model"] == "qwen3.6-plus"
+        assert provider_config["apiBase"] == custom_api_base
+        store.set_state.assert_called_with(model="qwen3.6-plus")

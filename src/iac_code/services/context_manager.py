@@ -54,6 +54,8 @@ class ContextManager:
         self._token_counter = TokenCounter(model=model)
         self._config = get_context_window_config(model)
         self._system_prompt_tokens = self._token_counter.count_text(system_prompt)
+        self._tool_definitions: list[Any] = []
+        self._tool_definition_tokens = 0
 
     @property
     def system_prompt(self) -> str:
@@ -80,6 +82,7 @@ class ContextManager:
         self._token_counter = TokenCounter(model=model)
         self._config = get_context_window_config(model)
         self._system_prompt_tokens = self._token_counter.count_text(self._system_prompt)
+        self._tool_definition_tokens = self._token_counter.count_tool_definitions(self._tool_definitions)
         for msg in self._conversation.messages:
             msg.token_count = self._token_counter.count_message(msg.to_api_format())
 
@@ -89,6 +92,11 @@ class ContextManager:
             return
         self._system_prompt = system_prompt
         self._system_prompt_tokens = self._token_counter.count_text(system_prompt)
+
+    def set_tool_definitions(self, tool_definitions: list[Any]) -> None:
+        """Cache provider tool definitions and their current token footprint."""
+        self._tool_definitions = list(tool_definitions)
+        self._tool_definition_tokens = self._token_counter.count_tool_definitions(self._tool_definitions)
 
     def add_user_message(self, content: str | list[ContentBlock]) -> Message:
         msg = self._conversation.add_user_message(content)
@@ -128,7 +136,7 @@ class ContextManager:
         return self._conversation.to_api_messages()
 
     def get_total_tokens(self) -> int:
-        return self._system_prompt_tokens + self._conversation.get_total_tokens()
+        return self._system_prompt_tokens + self._tool_definition_tokens + self._conversation.get_total_tokens()
 
     def get_usage(self) -> dict[str, Any]:
         """Return detailed token usage breakdown by category."""
@@ -145,9 +153,16 @@ class ContextManager:
             elif msg.role == "assistant":
                 assistant_tokens += msg.token_count
 
-        total = self._system_prompt_tokens + user_tokens + assistant_tokens + tool_result_tokens
+        total = (
+            self._system_prompt_tokens
+            + self._tool_definition_tokens
+            + user_tokens
+            + assistant_tokens
+            + tool_result_tokens
+        )
         return {
             "system_prompt_tokens": self._system_prompt_tokens,
+            "tool_definition_tokens": self._tool_definition_tokens,
             "user_message_tokens": user_tokens,
             "assistant_message_tokens": assistant_tokens,
             "tool_result_tokens": tool_result_tokens,

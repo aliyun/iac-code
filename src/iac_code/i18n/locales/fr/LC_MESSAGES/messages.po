@@ -137,8 +137,9 @@ msgstr "La session porte déjà le nom {name}"
 msgid "Renamed session to {name}"
 msgstr "Session renommée en {name}"
 
-#: src/iac_code/agent/agent_loop.py src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:428
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:813 src/iac_code/ui/repl.py:827
+#: src/iac_code/agent/agent_loop.py src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:421
+#: src/iac_code/agent/agent_loop.py:428 src/iac_code/agent/agent_loop.py:436 src/iac_code/ui/repl.py
+#: src/iac_code/ui/repl.py:813 src/iac_code/ui/repl.py:827
 msgid "Permission denied."
 msgstr "Permission refusée."
 
@@ -578,10 +579,12 @@ msgid "AI-powered infrastructure orchestration tool"
 msgstr "Outil d’orchestration d’infrastructure assisté par IA"
 
 #: src/iac_code/cli/main.py src/iac_code/cli/main.py:97 src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:55
+#: src/iac_code/i18n/__init__.py:66
 msgid "Install completion for the current shell."
 msgstr "Installer la complétion pour le shell actuel."
 
 #: src/iac_code/cli/main.py src/iac_code/cli/main.py:105 src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:56
+#: src/iac_code/i18n/__init__.py:67
 msgid "Show completion for the current shell, to copy it or customize the installation."
 msgstr "Afficher la complétion pour le shell actuel afin de la copier ou de personnaliser l’installation."
 
@@ -1059,7 +1062,8 @@ msgid "Effort switched to: {effort}"
 msgstr "Effort de raisonnement défini sur : {effort}"
 
 #: src/iac_code/commands/effort.py src/iac_code/commands/effort.py:54 src/iac_code/commands/model.py
-#: src/iac_code/commands/model.py:95 src/iac_code/commands/model.py:99
+#: src/iac_code/commands/model.py:95 src/iac_code/commands/model.py:99 src/iac_code/commands/model.py:113
+#: src/iac_code/commands/model.py:117
 msgid "No configured providers. Run /auth first."
 msgstr "Aucun fournisseur configuré. Exécutez d’abord /auth."
 
@@ -1117,24 +1121,25 @@ msgstr "Mémoire '{name}' introuvable."
 msgid "Memory '{name}' deleted."
 msgstr "Mémoire '{name}' supprimée."
 
-#: src/iac_code/commands/model.py src/iac_code/commands/model.py:57
+#: src/iac_code/commands/model.py src/iac_code/commands/model.py:57 src/iac_code/commands/model.py:78
 #, python-brace-format
 msgid "Model is managed by '{source}'. To change model, modify it in {source} or switch provider via /auth."
 msgstr ""
 "Le modèle est géré par '{source}'. Pour changer le modèle, modifiez-le dans {source} ou changez de fournisseur via "
 "/auth."
 
-#: src/iac_code/commands/model.py src/iac_code/commands/model.py:88 src/iac_code/commands/model.py:143
+#: src/iac_code/commands/model.py src/iac_code/commands/model.py:88 src/iac_code/commands/model.py:106
+#: src/iac_code/commands/model.py:143 src/iac_code/commands/model.py:158
 #, python-brace-format
 msgid "Model switched to: {model}"
 msgstr "Modèle défini sur : {model}"
 
-#: src/iac_code/commands/model.py src/iac_code/commands/model.py:92
+#: src/iac_code/commands/model.py src/iac_code/commands/model.py:92 src/iac_code/commands/model.py:110
 #, python-brace-format
 msgid "Current model: {model}"
 msgstr "Modèle actuel : {model}"
 
-#: src/iac_code/commands/model.py src/iac_code/commands/model.py:118
+#: src/iac_code/commands/model.py src/iac_code/commands/model.py:118 src/iac_code/commands/model.py:136
 #, python-brace-format
 msgid "Kept model as {model}"
 msgstr "Modèle conservé : {model}"
@@ -1267,41 +1272,41 @@ msgid "Invalid IAC_CODE_PROVIDER value: {!r}. Valid values (case-insensitive): {
 msgstr "Valeur IAC_CODE_PROVIDER invalide : {!r}. Valeurs valides (insensible à la casse) : {}"
 
 # Typer/Click built-in strings
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:51
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:51 src/iac_code/i18n/__init__.py:62
 msgid "Options"
 msgstr "Options"
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:52
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:52 src/iac_code/i18n/__init__.py:63
 msgid "Commands"
 msgstr "Commandes"
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:53
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:53 src/iac_code/i18n/__init__.py:64
 msgid "Arguments"
 msgstr "Arguments"
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:54
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:54 src/iac_code/i18n/__init__.py:65
 msgid "Show this message and exit."
 msgstr "Afficher ce message et quitter."
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:57
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:57 src/iac_code/i18n/__init__.py:68
 #, python-brace-format
 msgid "default: {default}"
 msgstr "par défaut : {default}"
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:58
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:58 src/iac_code/i18n/__init__.py:69
 msgid "required"
 msgstr "obligatoire"
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:59
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:59 src/iac_code/i18n/__init__.py:70
 #, python-brace-format
 msgid "env var: {var}"
 msgstr "variable d’environnement : {var}"
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:60
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:60 src/iac_code/i18n/__init__.py:71
 msgid "(dynamic)"
 msgstr "(dynamique)"
 
-#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:61
+#: src/iac_code/i18n/__init__.py src/iac_code/i18n/__init__.py:61 src/iac_code/i18n/__init__.py:72
 msgid "Aborted!"
 msgstr "Interrompu !"
 
@@ -2689,6 +2694,41 @@ msgstr "  Option 1 - winget (nécessite l'accès à github.com) :"
 #: src/iac_code/utils/platform.py src/iac_code/utils/platform.py:52
 msgid "  Option 2 - if you cannot reach github.com, run this to install via npmmirror:"
 msgstr "  Option 2 - si vous ne pouvez pas accéder à github.com, exécutez ceci pour installer via npmmirror :"
+
+#: src/iac_code/ui/dialogs/resume_picker.py:569
+#, python-brace-format
+msgid "{n} more line"
+msgid_plural "{n} more lines"
+msgstr[0] "{n} ligne supplémentaire"
+msgstr[1] "{n} lignes supplémentaires"
+
+#: src/iac_code/ui/dialogs/resume_picker.py:583
+#, python-brace-format
+msgid "{n} message"
+msgid_plural "{n} messages"
+msgstr[0] "{n} message"
+msgstr[1] "{n} messages"
+
+#: src/iac_code/ui/dialogs/resume_picker.py:748
+#, python-brace-format
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "il y a {n} minute"
+msgstr[1] "il y a {n} minutes"
+
+#: src/iac_code/ui/dialogs/resume_picker.py:751
+#, python-brace-format
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "il y a {n} heure"
+msgstr[1] "il y a {n} heures"
+
+#: src/iac_code/ui/dialogs/resume_picker.py:753
+#, python-brace-format
+msgid "{n} day ago"
+msgid_plural "{n} days ago"
+msgstr[0] "il y a {n} jour"
+msgstr[1] "il y a {n} jours"
 
 #~ msgid "DashScope Token Plan"
 #~ msgstr "DashScope Token Plan"

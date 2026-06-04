@@ -27,7 +27,7 @@ from rich.console import Console, Group, RenderableType
 from rich.text import Text
 
 from iac_code.agent.message import Message, ToolResultBlock
-from iac_code.i18n import _
+from iac_code.i18n import _, ngettext
 from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.ui.components.fuzzy_picker import fuzzy_match
 from iac_code.ui.components.search_box import SearchBox
@@ -566,7 +566,7 @@ class ResumePicker:
             text = Text(style="dim")
             text.append(arrow, style="bold dim")
             text.append(" ")
-            text.append(_("{n} more line{s}").format(n=count, s="" if count == 1 else "s"))
+            text.append(ngettext("{n} more line", "{n} more lines", count).format(n=count))
         lines = self._capture_lines(text, width)
         return lines[0] if lines else ""
 
@@ -580,7 +580,7 @@ class ResumePicker:
             meta.append(" · ")
             meta.append(entry.git_branch)
         meta.append(" · ")
-        meta.append(_("{n} message{s}").format(n=msg_count, s="" if msg_count == 1 else "s"))
+        meta.append(ngettext("{n} message", "{n} messages", msg_count).format(n=msg_count))
         meta.append(" · ")
         meta.append(_format_size(entry.size_bytes))
         return Group(title, meta, Text(""))
@@ -745,12 +745,12 @@ def _format_relative_time(mtime: float) -> str:
         return _("just now")
     minutes = seconds // 60
     if minutes < 60:
-        return _("{n} minute{s} ago").format(n=minutes, s="" if minutes == 1 else "s")
+        return ngettext("{n} minute ago", "{n} minutes ago", minutes).format(n=minutes)
     hours = minutes // 60
     if hours < 24:
-        return _("{n} hour{s} ago").format(n=hours, s="" if hours == 1 else "s")
+        return ngettext("{n} hour ago", "{n} hours ago", hours).format(n=hours)
     days = hours // 24
-    return _("{n} day{s} ago").format(n=days, s="" if days == 1 else "s")
+    return ngettext("{n} day ago", "{n} days ago", days).format(n=days)
 
 
 def _format_size(size_bytes: int) -> str:

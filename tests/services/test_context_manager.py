@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.services.context_manager import ContextManager, get_context_window_config
 
@@ -59,12 +61,52 @@ class TestContextManager:
         cm.add_user_message("Hello")
         usage = cm.get_usage()
         assert "system_prompt_tokens" in usage
+        assert "tool_definition_tokens" in usage
         assert "user_message_tokens" in usage
         assert "assistant_message_tokens" in usage
         assert "tool_result_tokens" in usage
         assert "total_tokens" in usage
         assert "context_window" in usage
         assert "usage_percent" in usage
+
+    def test_tool_definitions_count_toward_total_and_usage(self):
+        cm = ContextManager(system_prompt="You are helpful.", model="qwen")
+        base_total = cm.get_total_tokens()
+        tool = SimpleNamespace(
+            name="create_stack",
+            description="Create a ROS stack",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "template": {"type": "string", "description": "Template body"},
+                },
+            },
+        )
+
+        cm.set_tool_definitions([tool])
+
+        usage = cm.get_usage()
+        assert usage["tool_definition_tokens"] > 0
+        assert cm.get_total_tokens() == base_total + usage["tool_definition_tokens"]
+        assert usage["total_tokens"] == cm.get_total_tokens()
+        assert usage["usage_percent"] > 0
+
+    def test_set_tool_definitions_copies_input_list(self):
+        cm = ContextManager(system_prompt="You are helpful.", model="qwen")
+        tool = SimpleNamespace(name="read_file", description="Read file", input_schema={"type": "object"})
+        tools = [tool]
+
+        cm.set_tool_definitions(tools)
+        before = cm.get_usage()["tool_definition_tokens"]
+        tools.append(
+            SimpleNamespace(
+                name="write_file",
+                description="Write a much larger file",
+                input_schema={"type": "object", "properties": {"content": {"type": "string"}}},
+            )
+        )
+
+        assert cm.get_usage()["tool_definition_tokens"] == before
 
 
 class TestSegmentedCompaction:
@@ -193,3 +235,26 @@ class TestSetModel:
         after = cm._system_prompt_tokens
         assert after > before
         assert cm.system_prompt == "a much longer system prompt " * 20
+
+    def test_set_model_recomputes_tool_definition_tokens(self, monkeypatch):
+        class FakeTokenCounter:
+            def __init__(self, model=""):
+                self.model = model
+
+            def count_text(self, text):
+                return len(text)
+
+            def count_message(self, message):
+                return 1
+
+            def count_tool_definitions(self, tools):
+                return 10 if self.model == "qwen" else 30
+
+        monkeypatch.setattr("iac_code.services.context_manager.TokenCounter", FakeTokenCounter)
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cm.set_tool_definitions([SimpleNamespace(name="read_file", description="Read file", input_schema={})])
+        assert cm.get_usage()["tool_definition_tokens"] == 10
+
+        cm.set_model("claude-opus-4-7")
+
+        assert cm.get_usage()["tool_definition_tokens"] == 30

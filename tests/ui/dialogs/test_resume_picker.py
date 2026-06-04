@@ -491,6 +491,84 @@ class TestFormatHelpers:
         now = time.time()
         assert "minute" in _format_relative_time(now - 120)
 
+    def test_format_relative_time_uses_i18n_ngettext(self, monkeypatch):
+        calls = []
+
+        def fake_ngettext(singular: str, plural: str, n: int) -> str:
+            calls.append((singular, plural, n))
+            return "{n} translated unit"
+
+        monkeypatch.setattr("iac_code.ui.dialogs.resume_picker.ngettext", fake_ngettext)
+        now = time.time()
+
+        assert _format_relative_time(now - 120) == "2 translated unit"
+        assert calls == [("{n} minute ago", "{n} minutes ago", 2)]
+
+    def test_format_relative_time_uses_i18n_ngettext_for_hours(self, monkeypatch):
+        calls = []
+
+        def fake_ngettext(singular: str, plural: str, n: int) -> str:
+            calls.append((singular, plural, n))
+            return "{n} translated hour"
+
+        monkeypatch.setattr("iac_code.ui.dialogs.resume_picker.ngettext", fake_ngettext)
+        now = time.time()
+
+        assert _format_relative_time(now - 7200) == "2 translated hour"
+        assert calls == [("{n} hour ago", "{n} hours ago", 2)]
+
+    def test_format_relative_time_uses_i18n_ngettext_for_days(self, monkeypatch):
+        calls = []
+
+        def fake_ngettext(singular: str, plural: str, n: int) -> str:
+            calls.append((singular, plural, n))
+            return "{n} translated day"
+
+        monkeypatch.setattr("iac_code.ui.dialogs.resume_picker.ngettext", fake_ngettext)
+        now = time.time()
+
+        assert _format_relative_time(now - 172800) == "2 translated day"
+        assert calls == [("{n} day ago", "{n} days ago", 2)]
+
+    def test_preview_scroll_marker_uses_i18n_ngettext(self, two_session_index, monkeypatch):
+        calls = []
+
+        def fake_ngettext(singular: str, plural: str, n: int) -> str:
+            calls.append((singular, plural, n))
+            return "{n} translated line"
+
+        monkeypatch.setattr("iac_code.ui.dialogs.resume_picker.ngettext", fake_ngettext)
+        with patch("iac_code.ui.dialogs.resume_picker.get_git_branch", return_value="main"):
+            picker = ResumePicker(
+                index=two_session_index,
+                current_cwd="/proj/a",
+                current_session_id=None,
+            )
+
+        assert "3 translated line" in picker._render_scroll_marker("up", 3, 80)
+        assert calls == [("{n} more line", "{n} more lines", 3)]
+
+    def test_preview_header_uses_i18n_ngettext_for_message_count(self, two_session_index, monkeypatch):
+        calls = []
+
+        def fake_ngettext(singular: str, plural: str, n: int) -> str:
+            calls.append((singular, plural, n))
+            return "{n} translated message"
+
+        monkeypatch.setattr("iac_code.ui.dialogs.resume_picker.ngettext", fake_ngettext)
+        with patch("iac_code.ui.dialogs.resume_picker.get_git_branch", return_value="main"):
+            picker = ResumePicker(
+                index=two_session_index,
+                current_cwd="/proj/a",
+                current_session_id=None,
+            )
+        entry = _entry()
+
+        rendered = "\n".join(picker._capture_lines(picker._build_preview_header(entry, 2), 80))
+
+        assert "2 translated message" in rendered
+        assert calls == [("{n} message", "{n} messages", 2)]
+
     def test_format_relative_time_just_now(self):
         assert _format_relative_time(time.time()) in ("just now",)
 

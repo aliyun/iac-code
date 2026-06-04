@@ -5,7 +5,7 @@ import pytest
 from rich.cells import cell_len
 from rich.console import Console
 
-from iac_code.commands.status import status_command
+from iac_code.commands.status import _format_compact, status_command
 from iac_code.i18n import setup_i18n
 
 
@@ -34,6 +34,16 @@ def _cell_index_before(rendered: str, value: str) -> int:
         if value in line:
             return cell_len(line.split(value, 1)[0])
     raise AssertionError(f"{value!r} not found in rendered output")
+
+
+def test_format_compact_uses_decimal_precision_for_thousands() -> None:
+    assert _format_compact(999) == "999"
+    assert _format_compact(1000) == "1k"
+    assert _format_compact(1500) == "1.5k"
+    assert _format_compact(9999) == "10k"
+    assert _format_compact(58_000) == "58k"
+    assert _format_compact(1_000_000) == "1M"
+    assert _format_compact(1_500_000) == "1.5M"
 
 
 @pytest.mark.asyncio

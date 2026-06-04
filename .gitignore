@@ -53,6 +53,7 @@ cover/
 # Translations
 *.mo
 *.pot
+!src/iac_code/i18n/messages.pot
 
 # Django stuff:
 *.log

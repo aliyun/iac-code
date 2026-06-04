@@ -7,6 +7,9 @@ import sys
 
 from iac_code.ui.suggestions.types import CompletionToken, SuggestionItem, SuggestionProvider
 
+MAX_HISTORY_SUGGESTIONS = 100
+HistoryCacheKey = tuple[str, int, int]
+
 
 def _detect_history_path() -> str | None:
     """Detect the shell history file path from the SHELL environment variable."""
@@ -81,8 +84,37 @@ class ShellHistoryProvider(SuggestionProvider):
 
     trigger = "!"
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_suggestions: int = MAX_HISTORY_SUGGESTIONS) -> None:
         self._history_path: str | None = _detect_history_path()
+        self._cache_key: HistoryCacheKey | None = None
+        self._cache_entries: list[str] = []
+        self._max_suggestions = max_suggestions
+
+    def _current_cache_key(self) -> HistoryCacheKey | None:
+        """Return the cache key for the current history file."""
+        if not self._history_path:
+            return None
+
+        try:
+            stat = os.stat(self._history_path)
+        except OSError:
+            return None
+
+        return (self._history_path, stat.st_mtime_ns, stat.st_size)
+
+    def _entries(self) -> list[str]:
+        """Return cached history entries, refreshing when the file changes."""
+        cache_key = self._current_cache_key()
+        if cache_key is None:
+            self._cache_key = None
+            self._cache_entries = []
+            return []
+
+        if cache_key != self._cache_key:
+            self._cache_key = cache_key
+            self._cache_entries = _read_history(cache_key[0])
+
+        return self._cache_entries
 
     def provide(self, token: CompletionToken) -> list[SuggestionItem]:
         """Return shell history suggestions matching the query."""
@@ -92,7 +124,7 @@ class ShellHistoryProvider(SuggestionProvider):
         # Strip the leading "!" to get the query
         query = token.text[1:] if token.text.startswith("!") else token.text
 
-        entries = _read_history(self._history_path)
+        entries = self._entries()
 
         # Substring match, dedup, most recent first
         seen: set[str] = set()
@@ -100,6 +132,8 @@ class ShellHistoryProvider(SuggestionProvider):
 
         # Iterate in reverse so most recent entries come first
         for entry in reversed(entries):
+            if len(matched) >= self._max_suggestions:
+                break
             if entry in seen:
                 continue
             if query.lower() in entry.lower():
