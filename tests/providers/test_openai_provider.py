@@ -367,6 +367,18 @@ class TestOpenAIComplete:
         with pytest.raises(RuntimeError, match="invalid response"):
             await provider.complete(messages=[Message.user("x")], system="")
 
+    async def test_empty_choices_raises_runtime_error(self):
+        response = ns(id="x", choices=[], usage=None)
+        client = FakeOpenAIClient(create_response=response, base_url="https://api.example.com")
+        provider = OpenAIProvider(
+            model="gpt-4.1",
+            base_url="https://api.example.com",
+            client=client,
+        )
+
+        with pytest.raises(RuntimeError, match="invalid response.*choices"):
+            await provider.complete(messages=[Message.user("x")], system="")
+
 
 @pytest.mark.asyncio
 class TestOpenAICacheMetrics:

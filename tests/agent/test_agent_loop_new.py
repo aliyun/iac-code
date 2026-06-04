@@ -275,6 +275,22 @@ class TestAgentLoopStreaming:
         assert loop.get_session_usage().has_recorded_usage is False
         assert not store.path_for("/tmp/status-project", "zero-session").exists()
 
+    async def test_abnormal_provider_stream_emits_stream_error_end(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="partial")
+
+        mock_provider.stream = fake_stream
+
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        assert any(isinstance(e, TextDeltaEvent) and e.text == "partial" for e in events)
+        assert isinstance(events[-1], MessageEndEvent)
+        assert events[-1].stop_reason == "stream_error"
+        assert events[-1].usage == Usage()
+
     async def test_replace_session_reloads_usage_totals(self, mock_provider, mock_registry, tmp_path):
         from iac_code.services.session_usage import SessionUsageStore
 
