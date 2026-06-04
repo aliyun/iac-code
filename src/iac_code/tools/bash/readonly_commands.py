@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import TYPE_CHECKING
+
+from iac_code.tools.bash.argv_safety import basename, dangerous_readonly_argument, pip_like_base, sed_inplace_edit
 
 if TYPE_CHECKING:
     from iac_code.tools.bash.command_parser import SimpleCommand
@@ -104,21 +105,6 @@ _RE_GIT_STASH_LIST = re.compile(r"\bgit\b.*\bstash\b.*\blist\b")
 _RE_GIT_CONFIG_GET = re.compile(r"\bgit\b.*\bconfig\b.*(?:--get\b|--list\b|\s-l\b)")
 
 
-def _basename(argv0: str) -> str:
-    return os.path.basename(argv0)
-
-
-def _sed_inplace_edit(argv: list[str]) -> bool:
-    for arg in argv[1:]:
-        if arg.startswith("--in-place"):
-            return True
-        if arg == "-i":
-            return True
-        if len(arg) > 2 and arg.startswith("-i") and arg[2] in "./":
-            return True
-    return False
-
-
 def _skip_git_global_options(argv: list[str], start: int) -> int:
     i = start
     while i < len(argv):
@@ -156,17 +142,13 @@ def _is_git_readonly(argv: list[str]) -> bool:
     return sub in _GIT_READONLY_SUBCOMMANDS
 
 
-def _pip_like_base(base: str) -> bool:
-    return base == "pip" or base.startswith("pip")
-
-
 def _is_package_manager_readonly(argv: list[str]) -> bool:
     if len(argv) < 2:
         return False
-    base = _basename(argv[0])
+    base = basename(argv[0])
     verb = argv[1]
 
-    if _pip_like_base(base) and verb in _PIP_READONLY_VERBS:
+    if pip_like_base(base) and verb in _PIP_READONLY_VERBS:
         return True
 
     if base == "uv" and len(argv) >= 3 and argv[1] == "pip" and argv[2] in _PIP_READONLY_VERBS:
@@ -211,7 +193,7 @@ def is_command_readonly(cmd: SimpleCommand) -> bool:
     if argv[-1] in {"--version", "-V"}:
         return True
 
-    base = _basename(argv[0])
+    base = basename(argv[0])
 
     if base == "command" and "-v" in argv[1:]:
         return True
@@ -219,7 +201,10 @@ def is_command_readonly(cmd: SimpleCommand) -> bool:
     if _regex_git_readonly(cmd.text):
         return True
 
-    if base == "sed" and _sed_inplace_edit(argv):
+    if base == "sed" and sed_inplace_edit(argv):
+        return False
+
+    if dangerous_readonly_argument(argv) is not None:
         return False
 
     if base == "git" and _is_git_readonly(argv):

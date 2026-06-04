@@ -345,6 +345,49 @@ def test_swap_session_refreshes_session_name_and_renders_banner():
     repl.console.print.assert_called_once_with("banner")
 
 
+def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tmp_path):
+    from iac_code.state.app_state import AppState
+    from iac_code.types.permissions import ToolPermissionContext
+    from iac_code.ui.repl import InlineREPL
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    old_roots = [
+        str(tmp_path / "config" / "tool-results" / "old"),
+        str(tmp_path / "config" / "image-cache" / "old"),
+    ]
+    custom_root = "/custom/trusted"
+    permission_context = ToolPermissionContext(
+        cwd=str(tmp_path),
+        trusted_read_directories=[*old_roots, custom_root],
+    )
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = str(tmp_path)
+    repl._session_id = "old"
+    repl._session_storage = SimpleNamespace(
+        load=Mock(return_value=[]),
+        repair_interrupted=Mock(return_value=[]),
+    )
+    repl._agent_loop = SimpleNamespace(replace_session=Mock())
+    repl._load_current_session_name = Mock(return_value=None)
+    repl.store = SimpleNamespace(
+        get_state=Mock(
+            return_value=AppState(model="test-model", cwd=str(tmp_path), permission_context=permission_context)
+        )
+    )
+    repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
+    repl.renderer = SimpleNamespace(replay_history=Mock())
+
+    repl.swap_session("new")
+
+    roots = permission_context.trusted_read_directories
+    assert old_roots[0] not in roots
+    assert old_roots[1] not in roots
+    assert str(tmp_path / "config" / "tool-results" / "new") in roots
+    assert str(tmp_path / "config" / "image-cache" / "new") in roots
+    assert custom_root in roots
+
+
 def test_print_exit_text_uses_session_name_and_prints_session_id():
     from rich.text import Text
 

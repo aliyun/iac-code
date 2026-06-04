@@ -118,6 +118,39 @@ class TestCompoundCommandBug:
         r = await bash_tool_has_permission("ls && pwd && cat file.txt", ctx)
         assert r.behavior == "allow"
 
+    @pytest.mark.parametrize(
+        ("command", "allow_rule"),
+        [
+            ("cd /etc && grep root passwd", "bash(grep:*)"),
+            ("cd /etc && sed -n 1p passwd", "bash(sed:*)"),
+            ("cd /etc && find . -name passwd", "bash(find:*)"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_cd_with_relative_read_paths_asks_before_broad_allow(self, command, allow_rule):
+        ctx = _ctx(cwd="/project", allow={"session": [allow_rule]})
+        r = await bash_tool_has_permission(command, ctx)
+        assert r.behavior == "ask"
+        assert r.reason is not None
+        assert r.reason.type == "path_constraint"
+
+    @pytest.mark.parametrize(
+        ("command", "allow_rules"),
+        [
+            ("cd /etc && rg root", ["bash(cd:*)", "bash(rg:*)"]),
+            ("cd /etc && fd passwd", ["bash(cd:*)", "bash(fd:*)"]),
+            ("cd /etc && find", ["bash(cd:*)", "bash(find:*)"]),
+            ("cd /etc && find passwd", ["bash(cd:*)", "bash(find:*)"]),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_cd_with_implicit_read_roots_asks_before_broad_allow(self, command, allow_rules):
+        ctx = _ctx(cwd="/project", allow={"session": allow_rules})
+        r = await bash_tool_has_permission(command, ctx)
+        assert r.behavior == "ask"
+        assert r.reason is not None
+        assert r.reason.type == "path_constraint"
+
 
 class TestSingleCommandPermission:
     """Verify single non-readonly commands always ask in DEFAULT mode."""
@@ -246,11 +279,10 @@ class TestSessionRulePropagation:
 
 
 class TestTooComplexWithSessionRules:
-    """Bug regression: too_complex commands must respect allow/deny rules.
+    """too_complex commands must keep ask sticky across allow rules.
 
-    Previously, `echo $(whoami)` was classified as too_complex and returned `ask`
-    before any rule matching. Session allow rules for `echo:*` were never consulted,
-    causing an infinite prompt loop when the user selected "always allow echo:*".
+    Deny rules still take precedence, but allow rules cannot auto-approve commands
+    that the parser could not safely analyze.
     """
 
     @pytest.mark.asyncio
@@ -261,11 +293,13 @@ class TestTooComplexWithSessionRules:
         assert r.behavior == "ask"
 
     @pytest.mark.asyncio
-    async def test_too_complex_with_allow_rule_allows(self):
-        """echo $(whoami) with allow rule `echo:*` should allow."""
+    async def test_too_complex_with_allow_rule_asks(self):
+        """echo $(whoami) with allow rule `echo:*` should still ask."""
         ctx = _ctx(allow={"session": ["bash(echo:*)"]})
         r = await bash_tool_has_permission("echo $(whoami)", ctx)
-        assert r.behavior == "allow"
+        assert r.behavior == "ask"
+        assert r.reason is not None
+        assert r.reason.type in {"complex_command", "too_complex"}
 
     @pytest.mark.asyncio
     async def test_too_complex_deny_rule_still_denies(self):
@@ -285,15 +319,17 @@ class TestTooComplexWithSessionRules:
         assert r.behavior == "deny"
 
     @pytest.mark.asyncio
-    async def test_eval_with_allow_rule_allows(self):
-        """eval (dangerous builtin, too_complex) with matching allow rule should allow."""
+    async def test_eval_with_allow_rule_asks(self):
+        """eval (dangerous builtin, too_complex) with matching allow rule should still ask."""
         ctx = _ctx(allow={"session": ["bash(eval:*)"]})
         r = await bash_tool_has_permission("eval 'ls'", ctx)
-        assert r.behavior == "allow"
+        assert r.behavior == "ask"
+        assert r.reason is not None
+        assert r.reason.type in {"complex_command", "too_complex"}
 
     @pytest.mark.asyncio
-    async def test_session_rule_after_rejection_allows_next_call(self):
-        """Simulate: reject once → add session rule → next call allowed."""
+    async def test_session_rule_after_rejection_still_asks_next_call(self):
+        """Simulate: reject once, add session rule, next opaque command still asks."""
         from iac_code.services.permissions.storage import apply_session_rule
 
         ctx = _ctx()
@@ -305,7 +341,9 @@ class TestTooComplexWithSessionRules:
         new_ctx = apply_session_rule(ctx, "allow", sug)
 
         r2 = await bash_tool_has_permission("echo $(whoami)", new_ctx)
-        assert r2.behavior == "allow"
+        assert r2.behavior == "ask"
+        assert r2.reason is not None
+        assert r2.reason.type in {"complex_command", "too_complex"}
 
 
 class TestPipelineSuggestionsPreserved:

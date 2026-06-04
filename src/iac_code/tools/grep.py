@@ -7,11 +7,14 @@ import fnmatch
 import os
 import re
 import shutil
+import sys
 from functools import lru_cache
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.path_safety import check_read_path
+from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
 
@@ -93,6 +96,21 @@ def _absolutize_rg_output(stdout: str, root: str, *, output_mode: str) -> str:
     return "\n".join(lines) + trailing_newline
 
 
+def _normalize_real_path(path: str) -> str:
+    normalized = os.path.realpath(path).replace("\\", "/")
+    if sys.platform in {"win32", "darwin"}:
+        return normalized.lower()
+    return normalized
+
+
+def _path_is_under_real_root(path: str, root: str) -> bool:
+    path_r = _normalize_real_path(path)
+    root_r = _normalize_real_path(root)
+    if path_r == root_r:
+        return True
+    return path_r.startswith(root_r.rstrip("/") + "/")
+
+
 async def _run_rg(
     pattern: str,
     path: str,
@@ -169,6 +187,7 @@ def _python_grep(
 
     results: list[str] = []
     files_matched = 0
+    search_root = os.path.realpath(path)
 
     for dirpath, _dirnames, filenames in os.walk(path):
         if files_matched >= max_results:
@@ -179,6 +198,8 @@ def _python_grep(
             filepath = os.path.join(dirpath, filename)
             relative_path = os.path.relpath(filepath, path)
             if glob and not _matches_path_glob(relative_path, glob):
+                continue
+            if not _path_is_under_real_root(filepath, search_root):
                 continue
             try:
                 with open(filepath, encoding="utf-8", errors="replace") as fh:
@@ -306,6 +327,20 @@ class GrepTool(Tool):
             output = "\n".join(lines[:max_results])
 
         return ToolResult.success(output)
+
+    async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        if not isinstance(context, ToolPermissionContext):
+            return await super().check_permissions(input, context)
+
+        decision = check_read_path(
+            input.get("path", context.cwd),
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+            trusted_read_directories=context.trusted_read_directories,
+        )
+        if decision.behavior == "allow":
+            return PermissionResult(behavior="allow")
+        return decision.to_permission_result()
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):

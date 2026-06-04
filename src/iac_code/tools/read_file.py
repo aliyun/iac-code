@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import codecs
 import os
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.utils.platform import normalize_user_path
+from iac_code.tools.path_safety import check_read_path, resolve_candidate
+from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
+
+MAX_READ_BYTES = 10 * 1024 * 1024
+MAX_READ_LINES = 50_000
+
+
+def _resolve_input_path(path: str, cwd: str) -> str:
+    return resolve_candidate(path, cwd)
 
 
 class ReadFileTool(Tool):
@@ -44,22 +53,44 @@ class ReadFileTool(Tool):
             "required": ["path"],
         }
 
+    @property
+    def supports_blanket_allow(self) -> bool:
+        return False
+
     def normalize_input(self, tool_input: dict[str, Any]) -> None:
         if "file_path" in tool_input and "path" not in tool_input:
             tool_input["path"] = tool_input.pop("file_path")
 
+    async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        if not isinstance(context, ToolPermissionContext):
+            return await super().check_permissions(input, context)
+
+        path = input.get("path") or input.get("file_path")
+        if not path:
+            message = _("Read file path is required.")
+            return PermissionResult(
+                behavior="ask",
+                message=message,
+                reason=PermissionDecisionReason(type="path_constraint", detail=message),
+            )
+
+        decision = check_read_path(
+            path,
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+            trusted_read_directories=context.trusted_read_directories,
+        )
+        if decision.behavior == "allow":
+            return PermissionResult(behavior="allow")
+        return decision.to_permission_result()
+
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        path = normalize_user_path(tool_input["path"])
+        path = _resolve_input_path(tool_input["path"], context.cwd)
         start_line = tool_input.get("start_line")
         end_line = tool_input.get("end_line")
 
-        # Resolve relative paths
-        if not os.path.isabs(path):
-            path = os.path.join(context.cwd, path)
-
         try:
-            with open(path, encoding="utf-8") as f:
-                lines = f.readlines()
+            selected_lines, total_lines, truncated = self._read_limited_lines(path, start_line, end_line)
         except FileNotFoundError:
             return ToolResult.error(f"File not found: {path}")
         except PermissionError:
@@ -69,28 +100,77 @@ class ReadFileTool(Tool):
         except Exception as e:
             return ToolResult.error(f"Error reading file: {e}")
 
-        total_lines = len(lines)
-
         # Apply line range if specified
         if start_line is not None or end_line is not None:
-            start = (start_line or 1) - 1  # Convert to 0-based
-            end = end_line or total_lines
-            start = max(0, start)
-            end = min(total_lines, end)
-            selected = lines[start:end]
+            start = max(1, start_line or 1)
+            end = min(total_lines, end_line or total_lines)
             # Add line numbers
-            numbered = [f"{i + start + 1:>6}\t{line}" for i, line in enumerate(selected)]
+            numbered = [f"{line_number:>6}\t{line}" for line_number, line in selected_lines]
             content = "".join(numbered)
-            return ToolResult.success(f"File: {path} (lines {start + 1}-{end} of {total_lines})\n\n{content}")
+            suffix = ", truncated" if truncated else ""
+            return ToolResult.success(f"File: {path} (lines {start}-{end} of {total_lines}{suffix})\n\n{content}")
 
         # Return full file
         if total_lines > 0:
-            numbered = [f"{i + 1:>6}\t{line}" for i, line in enumerate(lines)]
+            numbered = [f"{line_number:>6}\t{line}" for line_number, line in selected_lines]
             content = "".join(numbered)
         else:
             content = "(empty file)"
 
-        return ToolResult.success(f"File: {path} ({total_lines} lines)\n\n{content}")
+        suffix = ", truncated" if truncated else ""
+        return ToolResult.success(f"File: {path} ({total_lines} lines{suffix})\n\n{content}")
+
+    def _read_limited_lines(
+        self,
+        path: str,
+        start_line: int | None,
+        end_line: int | None,
+    ) -> tuple[list[tuple[int, str]], int, bool]:
+        selected: list[tuple[int, str]] = []
+        total_lines = 0
+        bytes_read = 0
+        truncated = False
+        start = max(1, start_line or 1)
+        decoder = codecs.getincrementaldecoder("utf-8")()
+
+        with open(path, "rb") as f:
+            while True:
+                if total_lines >= MAX_READ_LINES:
+                    truncated = bool(f.read(1))
+                    break
+
+                remaining_bytes = MAX_READ_BYTES - bytes_read
+                if remaining_bytes <= 0:
+                    truncated = bool(f.read(1))
+                    break
+
+                raw_line = f.readline(remaining_bytes + 1)
+                if not raw_line:
+                    break
+
+                if len(raw_line) > remaining_bytes:
+                    raw_line = raw_line[:remaining_bytes]
+                    truncated = True
+
+                bytes_read += len(raw_line)
+                total_lines += 1
+                line = decoder.decode(raw_line, final=False)
+                if total_lines >= start and (end_line is None or total_lines <= end_line):
+                    selected.append((total_lines, line))
+
+                if truncated:
+                    break
+
+            if not truncated:
+                remainder = decoder.decode(b"", final=True)
+                if remainder and total_lines >= start and (end_line is None or total_lines <= end_line):
+                    if selected and selected[-1][0] == total_lines:
+                        line_number, line = selected[-1]
+                        selected[-1] = (line_number, line + remainder)
+                    else:
+                        selected.append((total_lines, remainder))
+
+        return selected, total_lines, truncated
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):

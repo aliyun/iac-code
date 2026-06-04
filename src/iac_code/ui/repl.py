@@ -183,6 +183,7 @@ class InlineREPL:
         skill_commands = self.command_registry.get_model_invocable_skills()
 
         from iac_code.services.permissions.loader import load_permission_context
+        from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 
         permission_context = load_permission_context(
             self._original_cwd,
@@ -190,6 +191,7 @@ class InlineREPL:
             cli_disallowed=cli_disallowed_tools,
             cli_mode=cli_permission_mode,
         )
+        permission_context.trusted_read_directories.extend(build_session_trusted_read_directories(self._session_id))
         self.store.set_state(permission_context=permission_context)
 
         agent_tool = self.tool_registry.get("agent")
@@ -1359,6 +1361,9 @@ class InlineREPL:
 
     def swap_session(self, new_session_id: str) -> None:
         """Replace the active session in-place (same project only)."""
+        from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
+
+        old_session_id = self._session_id
         new_messages = self._session_storage.load(self._original_cwd, new_session_id)
         new_messages = self._session_storage.repair_interrupted(new_messages)
         self._agent_loop.replace_session(new_session_id, new_messages or None)
@@ -1366,10 +1371,18 @@ class InlineREPL:
         self._was_resumed = True
         self._session_name = self._load_current_session_name()
 
+        state = self.store.get_state()
+        permission_context = state.permission_context
+        if permission_context is not None:
+            old_roots = set(build_session_trusted_read_directories(old_session_id))
+            permission_context.trusted_read_directories = [
+                root for root in permission_context.trusted_read_directories if root not in old_roots
+            ]
+            permission_context.trusted_read_directories.extend(build_session_trusted_read_directories(new_session_id))
+
         # Clear screen + scrollback, redraw banner, replay history.
         self.console.file.write("\033[H\033[2J\033[3J")
         self.console.file.flush()
-        state = self.store.get_state()
         self.console.print(
             render_welcome_banner(
                 state.model,

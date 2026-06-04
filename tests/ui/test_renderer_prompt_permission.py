@@ -331,6 +331,28 @@ class TestSupportsBlanketAllow:
         assert store.get_state().always_allow_rules["bash"] == "always_deny"
 
     @pytest.mark.asyncio
+    async def test_read_file_no_suggestions_hides_always_allow(self):
+        from iac_code.tools.read_file import ReadFileTool
+
+        store = AppStateStore()
+        tool = ReadFileTool()
+        renderer = _make_renderer(store, tool=tool)
+        event = _make_event("read_file")
+
+        captured_options = {}
+
+        def capture_select_init(self, *, options, **kwargs):
+            captured_options["values"] = [o.value for o in options]
+            self._options = options
+            self._default_value = kwargs.get("default_value")
+
+        with patch("iac_code.ui.components.select.Select.__init__", capture_select_init):
+            with _patch_select("reject_once"):
+                await renderer.prompt_permission(event)
+
+        assert "always_allow" not in captured_options["values"]
+
+    @pytest.mark.asyncio
     async def test_normal_tool_no_suggestions_shows_always_allow(self):
         """Normal tool (supports_blanket_allow=True) without suggestions should show always_allow."""
         store = AppStateStore()

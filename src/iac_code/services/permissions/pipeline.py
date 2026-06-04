@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool
-from iac_code.types.permissions import PermissionMode, PermissionResult, ToolPermissionContext
+from iac_code.types.permissions import PermissionDecisionReason, PermissionMode, PermissionResult, ToolPermissionContext
+
+_STICKY_ASK_REASONS = frozenset(
+    {
+        "safety_check",
+        "path_constraint",
+        "dangerous_readonly_argument",
+        "complex_command",
+        "parse_error",
+        "too_complex",
+    }
+)
 
 
 def _get_tool_rule(tool_name: str, rules_by_source: dict[str, list[str]]) -> str | None:
@@ -18,6 +29,10 @@ def _get_tool_rule(tool_name: str, rules_by_source: dict[str, list[str]]) -> str
 
 def _is_safety_check_ask(result: PermissionResult) -> bool:
     return result.behavior == "ask" and result.reason is not None and result.reason.type == "safety_check"
+
+
+def _is_sticky_ask(result: PermissionResult) -> bool:
+    return result.behavior == "ask" and result.reason is not None and result.reason.type in _STICKY_ASK_REASONS
 
 
 async def check_tool_permission(
@@ -42,10 +57,25 @@ async def check_tool_permission(
     if result.behavior == "ask" and tool_level_ask:
         return result
 
+    if result.behavior == "allow" and tool_level_ask:
+        detail = _("matched ask rule(s): {}").format(tool.name)
+        return PermissionResult(
+            behavior="ask",
+            message=detail,
+            reason=PermissionDecisionReason(type="rule", detail=detail),
+        )
+
     if context.mode == PermissionMode.BYPASS_PERMISSIONS and not _is_safety_check_ask(result):
         return PermissionResult(behavior="allow")
 
-    if _get_tool_rule(tool.name, context.allow_rules) is not None and result.behavior in ("passthrough", "ask"):
+    if _is_sticky_ask(result):
+        return result
+
+    if (
+        _get_tool_rule(tool.name, context.allow_rules) is not None
+        and result.behavior in ("passthrough", "ask")
+        and tool.supports_blanket_allow
+    ):
         return PermissionResult(behavior="allow")
 
     if result.behavior == "passthrough":

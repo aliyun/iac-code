@@ -168,4 +168,5 @@ def load_permission_context(
         deny_rules=deny_rules,
         ask_rules=ask_rules,
         additional_directories=additional_directories,
+        trusted_read_directories=[],
     )

@@ -276,9 +276,10 @@ class TestCompoundCommandScenarios:
         assert _has_permission_request(events), "Compound with redirect + non-readonly must prompt"
 
     @pytest.mark.asyncio
-    async def test_all_readonly_compound_no_prompt(self):
+    async def test_all_readonly_compound_no_prompt(self, tmp_path):
         """ls && pwd && cat should NOT prompt (all readonly)."""
-        provider = FakeProvider([_bash_turn("t1", "ls && pwd && cat /etc/hosts"), _text_turn("done")])
+        (tmp_path / "file.txt").write_text("ok", encoding="utf-8")
+        provider = FakeProvider([_bash_turn("t1", "ls && pwd && cat file.txt"), _text_turn("done")])
         registry = ToolRegistry()
         registry.register_default_tools()
         loop = AgentLoop(
@@ -286,7 +287,7 @@ class TestCompoundCommandScenarios:
             system_prompt="test",
             tool_registry=registry,
             max_turns=2,
-            permission_context=_ctx(),
+            permission_context=_ctx(cwd=str(tmp_path)),
         )
         events = await _collect_events(loop, "show info")
         assert not _has_permission_request(events), "All-readonly compound should auto-allow"
@@ -435,11 +436,11 @@ class TestDenyRuleScenarios:
 
 
 class TestTooComplexSessionRuleScenario:
-    """Bug regression: session allow rules must work for too_complex commands."""
+    """Session allow rules must not bypass too_complex permission requests."""
 
     @pytest.mark.asyncio
-    async def test_echo_whoami_with_session_rule_auto_allows(self):
-        """echo $(whoami) is too_complex. After adding session rule echo:*, it should auto-allow."""
+    async def test_echo_whoami_with_session_rule_still_requests_permission(self):
+        """echo $(whoami) is too_complex, so echo:* must not auto-allow it."""
         from iac_code.services.permissions.storage import apply_session_rule
 
         ctx_holder = [_ctx()]
@@ -457,11 +458,11 @@ class TestTooComplexSessionRuleScenario:
             permission_context_getter=lambda: ctx_holder[0],
         )
         events = await _collect_events(loop, "echo whoami")
-        assert not _has_permission_request(events), "Session allow rule should skip prompt for too_complex"
+        assert _has_permission_request(events), "Session allow rule must not skip prompt for too_complex"
 
     @pytest.mark.asyncio
-    async def test_eval_with_session_rule_auto_allows(self):
-        """eval 'ls' is too_complex. After adding session rule eval:*, it should auto-allow."""
+    async def test_eval_with_session_rule_still_requests_permission(self):
+        """eval 'ls' is too_complex, so eval:* must not auto-allow it."""
         from iac_code.services.permissions.storage import apply_session_rule
 
         ctx_holder = [_ctx()]
@@ -479,7 +480,7 @@ class TestTooComplexSessionRuleScenario:
             permission_context_getter=lambda: ctx_holder[0],
         )
         events = await _collect_events(loop, "eval ls")
-        assert not _has_permission_request(events), "Session allow rule should skip prompt for eval"
+        assert _has_permission_request(events), "Session allow rule must not skip prompt for eval"
 
     @pytest.mark.asyncio
     async def test_pipeline_result_has_suggestions(self):

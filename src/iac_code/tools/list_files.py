@@ -7,6 +7,8 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.path_safety import check_read_path
+from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
 
@@ -72,6 +74,20 @@ class ListFilesTool(Tool):
 
         result = f"Directory: {path}\n\n" + "\n".join(lines)
         return ToolResult.success(result)
+
+    async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        if not isinstance(context, ToolPermissionContext):
+            return await super().check_permissions(input, context)
+
+        decision = check_read_path(
+            input.get("path", context.cwd),
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+            trusted_read_directories=context.trusted_read_directories,
+        )
+        if decision.behavior == "allow":
+            return PermissionResult(behavior="allow")
+        return decision.to_permission_result()
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):

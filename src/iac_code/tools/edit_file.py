@@ -7,6 +7,8 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.path_safety import check_write_path
+from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
 
@@ -50,6 +52,28 @@ class EditFileTool(Tool):
     def normalize_input(self, tool_input: dict[str, Any]) -> None:
         if "file_path" in tool_input and "path" not in tool_input:
             tool_input["path"] = tool_input.pop("file_path")
+
+    async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        if not isinstance(context, ToolPermissionContext):
+            return await super().check_permissions(input, context)
+
+        path = input.get("path") or input.get("file_path")
+        if not path:
+            detail = _("edit file path is required")
+            return PermissionResult(
+                behavior="ask",
+                message=detail,
+                reason=PermissionDecisionReason(type="path_constraint", detail=detail),
+            )
+
+        decision = check_write_path(
+            path,
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+        )
+        if decision.behavior == "ask":
+            return decision.to_permission_result()
+        return await super().check_permissions(input, context)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         path = normalize_user_path(tool_input["path"])

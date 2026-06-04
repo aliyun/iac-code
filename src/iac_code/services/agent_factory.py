@@ -146,6 +146,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     )
 
     from iac_code.services.permissions.loader import load_permission_context
+    from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 
     permission_context = load_permission_context(
         cwd,
@@ -153,6 +154,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         cli_disallowed=options.cli_disallowed_tools,
         cli_mode=options.cli_permission_mode,
     )
+    permission_context.trusted_read_directories.extend(build_session_trusted_read_directories(session_id))
 
     if hasattr(tool_registry, "get"):
         agent_tool = tool_registry.get("agent")

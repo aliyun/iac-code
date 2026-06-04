@@ -113,6 +113,17 @@ def make_repl(
     return repl
 
 
+def test_shell_escape_permission_context_supports_trusted_read_directories(tmp_path):
+    trusted = str(tmp_path / "config" / "tool-results" / "session-1")
+    permission_context = ToolPermissionContext(cwd=str(tmp_path), trusted_read_directories=[trusted])
+    tool = FakeBashTool(ToolResult.success("unused"))
+
+    repl = make_repl(tool, str(tmp_path), permission_context=permission_context)
+    permission_context = repl.store.get_state().permission_context
+
+    assert permission_context.trusted_read_directories == [trusted]
+
+
 @pytest.mark.asyncio
 async def test_shell_escape_executes_registered_bash_tool(tmp_path):
     tool = FakeBashTool(ToolResult.success("STDOUT:\nhello\nExit code: 0"))

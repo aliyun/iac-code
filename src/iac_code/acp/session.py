@@ -157,6 +157,20 @@ _PREFIX_ALLOW_RULE = "allow_rule:"
 _PREFIX_DENY_RULE = "deny_rule:"
 
 
+def _tool_supports_blanket_allow(agent_loop, tool_name: str) -> bool:
+    """Return False only when the registered tool explicitly disables blanket allow."""
+    registry = getattr(agent_loop, "tool_registry", None)
+    get_tool = getattr(registry, "get", None)
+    if get_tool is None:
+        return True
+
+    tool = get_tool(tool_name)
+    if tool is None:
+        return True
+
+    return bool(getattr(tool, "supports_blanket_allow", True))
+
+
 class ACPSession:
     def __init__(
         self,
@@ -457,7 +471,7 @@ class ACPSession:
                     kind="allow_always",
                 )
             )
-        else:
+        elif _tool_supports_blanket_allow(self.agent_loop, tool_name):
             options.append(
                 acp.schema.PermissionOption(
                     option_id=_OPTION_ALLOW_ALWAYS,
