@@ -351,6 +351,15 @@ class OpenAIProvider(Provider):
                     "(e.g. {base_url}/v1)."
                 ).format(base_url=base_url)
             )
+        if not response.choices:
+            base_url = str(self._base_url or self._client.base_url).rstrip("/")
+            message = _(
+                "API returned an invalid response. Please check that your "
+                "API Base URL is correct (current: {base_url}). "
+                "Many OpenAI-compatible endpoints require a /v1 suffix "
+                "(e.g. {base_url}/v1)."
+            ).format(base_url=base_url)
+            raise RuntimeError(message + " Response choices were empty.")
         choice = response.choices[0]
         message = choice.message
 

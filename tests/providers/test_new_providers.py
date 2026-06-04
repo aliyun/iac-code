@@ -55,6 +55,30 @@ class TestNewProviderImports:
         assert p.get_model_name() == "test"
         assert p._PROVIDER_KEY == "openrouter"
 
+    def test_openrouter_provider_creates_one_client(self, monkeypatch):
+        calls = []
+
+        class FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+                self.base_url = kwargs.get("base_url") or "https://fake.openai.local"
+
+        monkeypatch.setattr("iac_code.providers.openai_provider.AsyncOpenAI", FakeAsyncOpenAI)
+        monkeypatch.setattr("iac_code.providers.openrouter_provider.AsyncOpenAI", FakeAsyncOpenAI, raising=False)
+
+        from iac_code.providers.openrouter_provider import OpenRouterProvider
+
+        p = OpenRouterProvider(model="test", api_key="key", base_url="https://openrouter.ai/api/v1")
+
+        assert p.get_model_name() == "test"
+        assert len(calls) == 1
+        assert calls[0]["api_key"] == "key"
+        assert calls[0]["base_url"] == "https://openrouter.ai/api/v1"
+        assert calls[0]["default_headers"] == {
+            "HTTP-Referer": "https://github.com/aliyun/iac-code",
+            "X-Title": "iac-code",
+        }
+
     def test_azure_openai_provider(self):
         from iac_code.providers.azure_openai_provider import AzureOpenAIProvider
 

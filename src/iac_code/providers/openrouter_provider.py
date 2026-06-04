@@ -23,18 +23,21 @@ class OpenRouterProvider(OpenAIProvider):
         provider_key: str = "openrouter",
         **kwargs: Any,
     ) -> None:
+        client = kwargs.pop("client", None)
+        if client is None:
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/aliyun/iac-code",
+                    "X-Title": "iac-code",
+                },
+            )
         super().__init__(
             model=model,
             api_key=api_key,
             base_url=base_url,
+            client=client,
             effort=effort,
-        )
-        self._PROVIDER_KEY = provider_key
-        self._client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            default_headers={
-                "HTTP-Referer": "https://github.com/aliyun/iac-code",
-                "X-Title": "iac-code",
-            },
+            provider_key=provider_key,
         )

@@ -329,6 +329,7 @@ class AgentLoop:
 
                 if not message_ended:
                     step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "error")
+                    yield MessageEndEvent(stop_reason="stream_error", usage=Usage())
                     break
 
                 # Build assistant message for context
