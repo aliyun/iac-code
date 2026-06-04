@@ -137,25 +137,26 @@ msgstr "Sessão renomeada para {name}"
 
 #: src/iac_code/agent/agent_loop.py src/iac_code/agent/agent_loop.py:413 src/iac_code/agent/agent_loop.py:421
 #: src/iac_code/agent/agent_loop.py:428 src/iac_code/agent/agent_loop.py:436 src/iac_code/ui/repl.py
-#: src/iac_code/ui/repl.py:813 src/iac_code/ui/repl.py:827
+#: src/iac_code/ui/repl.py:813 src/iac_code/ui/repl.py:815 src/iac_code/ui/repl.py:827 src/iac_code/ui/repl.py:829
 msgid "Permission denied."
 msgstr "Permissão negada."
 
-#: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:266
+#: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:266 src/iac_code/agent/agent_tool.py:288
 #, python-brace-format
 msgid "Done ({tool_count} tool uses · {token_display} tokens)"
 msgstr "Concluído ({tool_count} usos de ferramenta · {token_display} tokens)"
 
-#: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:276
+#: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:276 src/iac_code/agent/agent_tool.py:298
 msgid "Explore"
 msgstr "Explorar"
 
-#: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:277
+#: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:277 src/iac_code/agent/agent_tool.py:299
 msgid "Plan"
 msgstr "Planejar"
 
 #: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:278 src/iac_code/agent/agent_tool.py:279
-#: src/iac_code/agent/agent_tool.py:280
+#: src/iac_code/agent/agent_tool.py:280 src/iac_code/agent/agent_tool.py:300 src/iac_code/agent/agent_tool.py:301
+#: src/iac_code/agent/agent_tool.py:302
 msgid "Agent"
 msgstr "Agent"
 
@@ -690,7 +691,8 @@ msgstr "Mostrar o status atual da sessão"
 #: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:536
 #: src/iac_code/commands/auth.py:538 src/iac_code/commands/auth.py:570 src/iac_code/commands/auth.py:577
 #: src/iac_code/commands/auth.py:612 src/iac_code/commands/auth.py:619 src/iac_code/commands/auth.py:640
-#: src/iac_code/commands/auth.py:1117 src/iac_code/commands/auth.py:1443 src/iac_code/commands/auth.py:1551
+#: src/iac_code/commands/auth.py:1117 src/iac_code/commands/auth.py:1443 src/iac_code/commands/auth.py:1445
+#: src/iac_code/commands/auth.py:1551 src/iac_code/commands/auth.py:1553
 msgid "Back"
 msgstr "Voltar"
 
@@ -742,7 +744,7 @@ msgstr "Selecionar tipo de configuração"
 
 #: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:825 src/iac_code/commands/auth.py:981
 #: src/iac_code/commands/auth.py:997 src/iac_code/commands/auth.py:1076 src/iac_code/commands/auth.py:1490
-#: src/iac_code/commands/auth.py:1531
+#: src/iac_code/commands/auth.py:1492 src/iac_code/commands/auth.py:1531 src/iac_code/commands/auth.py:1533
 msgid "Auth cancelled"
 msgstr "Autenticação cancelada"
 
@@ -906,37 +908,37 @@ msgstr "Escolha o tipo de site"
 msgid "Alibaba Cloud OAuth login failed: {error}"
 msgstr "Falha no login OAuth da Alibaba Cloud: {error}"
 
-#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1418
+#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1418 src/iac_code/commands/auth.py:1420
 msgid "Configured: Alibaba Cloud OAuth credentials saved"
 msgstr "Configurado: credenciais OAuth da Alibaba Cloud salvas"
 
-#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1430
+#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1430 src/iac_code/commands/auth.py:1432
 msgid "Configure Alibaba Cloud credentials"
 msgstr "Configurar credenciais da Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1443
+#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1443 src/iac_code/commands/auth.py:1445
 msgid "Reconfigure credential"
 msgstr "Reconfigurar credencial"
 
-#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1456
+#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1456 src/iac_code/commands/auth.py:1458
 msgid "Select credential type"
 msgstr "Selecionar tipo de credencial"
 
-#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1512
+#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1512 src/iac_code/commands/auth.py:1514
 msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
 msgstr "Configurado: credenciais da Alibaba Cloud salvas em ~/.iac-code"
 
-#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1519
+#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1519 src/iac_code/commands/auth.py:1521
 msgid "Configure Alibaba Cloud region"
 msgstr "Configurar região da Alibaba Cloud"
 
-#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1545
+#: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1545 src/iac_code/commands/auth.py:1547
 msgid "Configured: Alibaba Cloud region saved to ~/.iac-code"
 msgstr "Configurado: região da Alibaba Cloud salva em ~/.iac-code"
 
 #: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:1084 src/iac_code/commands/auth.py:1199
-#: src/iac_code/commands/auth.py:1527 src/iac_code/commands/status.py src/iac_code/commands/status.py:36
-#: src/iac_code/ui/renderer.py src/iac_code/ui/renderer.py:455
+#: src/iac_code/commands/auth.py:1527 src/iac_code/commands/auth.py:1529 src/iac_code/commands/status.py
+#: src/iac_code/commands/status.py:36 src/iac_code/ui/renderer.py src/iac_code/ui/renderer.py:455
 msgid "Region"
 msgstr "Região"
 
@@ -983,7 +985,8 @@ msgstr "OpenRouter"
 #: src/iac_code/commands/auth.py src/iac_code/commands/auth.py:390 src/iac_code/commands/auth.py:538
 #: src/iac_code/commands/auth.py:570 src/iac_code/commands/auth.py:577 src/iac_code/commands/auth.py:612
 #: src/iac_code/commands/auth.py:619 src/iac_code/commands/auth.py:640 src/iac_code/commands/auth.py:1117
-#: src/iac_code/commands/auth.py:1551 src/iac_code/ui/core/prompt_input.py src/iac_code/ui/core/prompt_input.py:557
+#: src/iac_code/commands/auth.py:1551 src/iac_code/commands/auth.py:1553 src/iac_code/ui/core/prompt_input.py
+#: src/iac_code/ui/core/prompt_input.py:557
 msgid "Confirm"
 msgstr "Confirmar"
 
@@ -1254,7 +1257,7 @@ msgstr "{percent} usado ({total} / {window})"
 msgid "Session"
 msgstr "Sessão"
 
-#: src/iac_code/config.py src/iac_code/config.py:164
+#: src/iac_code/config.py src/iac_code/config.py:164 src/iac_code/config.py:165
 #, python-brace-format
 msgid "Invalid IAC_CODE_PROVIDER value: {!r}. Valid values (case-insensitive): {}"
 msgstr "Valor inválido de IAC_CODE_PROVIDER: {!r}. Valores válidos (sem diferenciar maiúsculas de minúsculas): {}"
@@ -1415,8 +1418,8 @@ msgid "Invalid --permission-mode {!r}. Valid values: {}"
 msgstr "--permission-mode inválido {!r}. Valores válidos: {}"
 
 #: src/iac_code/services/permissions/pipeline.py src/iac_code/services/permissions/pipeline.py:54
-#: src/iac_code/tools/base.py src/iac_code/tools/base.py:199 src/iac_code/tools/bash/bash_tool.py
-#: src/iac_code/tools/bash/bash_tool.py:175
+#: src/iac_code/services/permissions/pipeline.py:84 src/iac_code/tools/base.py src/iac_code/tools/base.py:199
+#: src/iac_code/tools/bash/bash_tool.py src/iac_code/tools/bash/bash_tool.py:175
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "Permitir {}?"
@@ -1426,10 +1429,12 @@ msgid "Alibaba Cloud OAuth site is missing."
 msgstr "O site OAuth da Alibaba Cloud está ausente."
 
 #: src/iac_code/services/providers/aliyun.py src/iac_code/services/providers/aliyun.py:150
+#: src/iac_code/services/providers/aliyun.py:152
 msgid "Alibaba Cloud OAuth refresh token is missing."
 msgstr "O token de atualização OAuth da Alibaba Cloud está ausente."
 
 #: src/iac_code/services/providers/aliyun.py src/iac_code/services/providers/aliyun.py:158
+#: src/iac_code/services/providers/aliyun.py:160
 msgid "Alibaba Cloud OAuth access token is missing."
 msgstr "O token de acesso OAuth da Alibaba Cloud está ausente."
 
@@ -1476,24 +1481,29 @@ msgid "OAuth login cancelled."
 msgstr "Login OAuth cancelado."
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:278
+#: src/iac_code/services/providers/aliyun_oauth.py:280
 msgid "Open in your browser:"
 msgstr "Abrir no navegador:"
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:299
+#: src/iac_code/services/providers/aliyun_oauth.py:304
 msgid "Waiting for browser authorization"
 msgstr "Aguardando autorização do navegador"
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:300
+#: src/iac_code/services/providers/aliyun_oauth.py:305
 msgid "1. The browser may show official-cli; this is the Alibaba Cloud official CLI OAuth application."
 msgstr "1. O navegador pode mostrar official-cli; este é o aplicativo OAuth oficial da CLI da Alibaba Cloud."
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:302
+#: src/iac_code/services/providers/aliyun_oauth.py:307
 msgid "2. If assignment is required, assign the RAM user or RAM role that is signed in. User groups are not supported."
 msgstr ""
 "2. Se a atribuição for necessária, atribua o usuário RAM ou a função RAM que está conectada. Grupos de usuários não "
 "são compatíveis."
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:306
+#: src/iac_code/services/providers/aliyun_oauth.py:311
 msgid ""
 "3. After assignment, close the old authorization page and run OAuth Login (Browser) again. If it still fails, sign "
 "out of Alibaba Cloud and sign in again."
@@ -1502,16 +1512,19 @@ msgstr ""
 "falhar, saia da Alibaba Cloud e entre novamente."
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:310
+#: src/iac_code/services/providers/aliyun_oauth.py:315
 msgid "4. STS credentials refresh when possible until Alibaba Cloud expires them. If refresh fails, run /auth again."
 msgstr ""
 "4. As credenciais STS são atualizadas quando possível até expirarem na Alibaba Cloud. Se a atualização falhar, "
 "execute /auth novamente."
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:313
+#: src/iac_code/services/providers/aliyun_oauth.py:318
 msgid "Press Esc to cancel while waiting."
 msgstr "Pressione Esc para cancelar a espera."
 
 #: src/iac_code/services/providers/aliyun_oauth.py src/iac_code/services/providers/aliyun_oauth.py:321
+#: src/iac_code/services/providers/aliyun_oauth.py:326
 msgid ""
 "Timed out waiting for OAuth callback. If Alibaba Cloud asked you to assign the official-cli application, assign it to"
 " the exact RAM user or RAM role currently signed in. User groups are not supported. Then close the old authorization "
@@ -1566,7 +1579,7 @@ msgid "Skill disabled: {name}"
 msgstr "Habilidade desativada: {name}"
 
 #: src/iac_code/skills/skill_tool.py src/iac_code/skills/skill_tool.py:85 src/iac_code/ui/repl.py
-#: src/iac_code/ui/repl.py:842
+#: src/iac_code/ui/repl.py:842 src/iac_code/ui/repl.py:844
 #, python-brace-format
 msgid "Skill '{name}' is disabled. Run /skills to enable it."
 msgstr "A habilidade '{name}' está desativada. Execute /skills para ativá-la."
@@ -1608,27 +1621,31 @@ msgid "unsupported shell construct"
 msgstr "Construção de shell não suportada"
 
 #: src/iac_code/tools/bash/path_validation.py src/iac_code/tools/bash/path_validation.py:111
+#: src/iac_code/tools/bash/path_validation.py:188
 #, python-brace-format
 msgid "path outside allowed directories: {}"
 msgstr "Caminho fora dos diretórios permitidos: {}"
 
-#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:135
+#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:125
+#: src/iac_code/tools/bash/permissions.py:135
 #, python-brace-format
 msgid "matched deny rule(s): {}"
 msgstr "Regra(s) de negação correspondente(s): {}"
 
-#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:142
+#: src/iac_code/services/permissions/pipeline.py:61 src/iac_code/tools/bash/permissions.py
+#: src/iac_code/tools/bash/permissions.py:132 src/iac_code/tools/bash/permissions.py:142
 #, python-brace-format
 msgid "matched ask rule(s): {}"
 msgstr "Regra(s) de consulta correspondente(s): {}"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:154
-#: src/iac_code/tools/bash/permissions.py:220
+#: src/iac_code/tools/bash/permissions.py:171 src/iac_code/tools/bash/permissions.py:220
 #, python-brace-format
 msgid "matched allow rule(s): {}"
 msgstr "Regra(s) de permissão correspondente(s): {}"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:162
+#: src/iac_code/tools/bash/permissions.py:163
 msgid "complex command requires confirmation"
 msgstr "Comando complexo requer confirmação"
 
@@ -1645,28 +1662,34 @@ msgstr "O comando não passou nas verificações básicas de segurança"
 msgid "matched deny rule(s) on full command: {}"
 msgstr "Regra(s) de negação para o comando completo: {}"
 
-#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:227
+#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:220
+#: src/iac_code/tools/bash/permissions.py:227
 msgid "command too complex to analyze"
 msgstr "Comando complexo demais para analisar"
 
-#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:229
+#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:222
+#: src/iac_code/tools/bash/permissions.py:229
 msgid "could not parse command"
 msgstr "Não foi possível analisar o comando"
 
-#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:245
+#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:238
+#: src/iac_code/tools/bash/permissions.py:245
 #, python-brace-format
 msgid "too many subcommands (>{})"
 msgstr "Muitos subcomandos (>{})"
 
-#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:258
+#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:251
+#: src/iac_code/tools/bash/permissions.py:258
 msgid "multiple cd commands in compound command"
 msgstr "Múltiplos comandos cd em comando composto"
 
-#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:271
+#: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:264
+#: src/iac_code/tools/bash/permissions.py:271
 msgid "cd combined with git in compound command"
 msgstr "cd combinado com git em comando composto"
 
-#: src/iac_code/tools/bash/safety_checks.py src/iac_code/tools/bash/safety_checks.py:151
+#: src/iac_code/tools/bash/safety_checks.py src/iac_code/tools/bash/safety_checks.py:108
+#: src/iac_code/tools/bash/safety_checks.py:151
 #, python-brace-format
 msgid "operation touches a sensitive path: {}"
 msgstr "A operação afeta um caminho sensível: {}"
@@ -1799,6 +1822,7 @@ msgid "Template structure validation found the following issues, please fix and 
 msgstr "A validação da estrutura do modelo encontrou os seguintes problemas, por favor corrija e tente novamente:"
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack.py src/iac_code/tools/cloud/aliyun/ros_stack.py:143
+#: src/iac_code/tools/cloud/aliyun/ros_stack.py:185
 msgid "ROS Stack"
 msgstr "ROS Stack"
 
@@ -1970,158 +1994,161 @@ msgstr "Importação concluída"
 msgid "IMPORT_FAILED"
 msgstr "Falha na importação"
 
-#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:116
+#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:116 src/iac_code/tools/edit_file.py:140
 msgid "Edit"
 msgstr "Editar"
 
-#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:118
+#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:118 src/iac_code/tools/edit_file.py:142
 msgid "Create"
 msgstr "Criar"
 
-#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:119
+#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:119 src/iac_code/tools/edit_file.py:143
 msgid "Update"
 msgstr "Atualizar"
 
-#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:126
+#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:126 src/iac_code/tools/edit_file.py:150
 #, python-brace-format
 msgid "Editing {path}"
 msgstr "Editando {path}"
 
-#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:127
+#: src/iac_code/tools/edit_file.py src/iac_code/tools/edit_file.py:127 src/iac_code/tools/edit_file.py:151
 msgid "Editing file..."
 msgstr "Editando arquivo..."
 
-#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:100
+#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:100 src/iac_code/tools/glob.py:156
 #, python-brace-format
 msgid "Searching {pattern}"
 msgstr "Buscando {pattern}"
 
-#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:101
+#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:101 src/iac_code/tools/glob.py:157
 msgid "Searching files..."
 msgstr "Buscando arquivos..."
 
-#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:86 src/iac_code/tools/grep.py src/iac_code/tools/grep.py:237
+#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:86 src/iac_code/tools/glob.py:142 src/iac_code/tools/grep.py
+#: src/iac_code/tools/grep.py:237 src/iac_code/tools/grep.py:360
 msgid "Found 0 files"
 msgstr "0 arquivos encontrados"
 
-#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:89 src/iac_code/tools/grep.py src/iac_code/tools/grep.py:240
+#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:89 src/iac_code/tools/glob.py:145 src/iac_code/tools/grep.py
+#: src/iac_code/tools/grep.py:240 src/iac_code/tools/grep.py:363
 #, python-brace-format
 msgid "Found {count} files"
 msgstr "{count} arquivos encontrados"
 
-#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:95 src/iac_code/tools/grep.py src/iac_code/tools/grep.py:246
+#: src/iac_code/tools/glob.py src/iac_code/tools/glob.py:95 src/iac_code/tools/glob.py:151 src/iac_code/tools/grep.py
+#: src/iac_code/tools/grep.py:246 src/iac_code/tools/grep.py:369
 msgid "Search"
 msgstr "Buscar"
 
-#: src/iac_code/tools/grep.py src/iac_code/tools/grep.py:251
+#: src/iac_code/tools/grep.py src/iac_code/tools/grep.py:251 src/iac_code/tools/grep.py:374
 #, python-brace-format
 msgid "Searching for {pattern}"
 msgstr "Buscando por {pattern}"
 
-#: src/iac_code/tools/grep.py src/iac_code/tools/grep.py:252
+#: src/iac_code/tools/grep.py src/iac_code/tools/grep.py:252 src/iac_code/tools/grep.py:375
 msgid "Searching content..."
 msgstr "Buscando no conteúdo..."
 
-#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:82
+#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:82 src/iac_code/tools/list_files.py:101
 #, python-brace-format
 msgid "Found {count} items"
 msgstr "{count} itens encontrados"
 
-#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:88
+#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:88 src/iac_code/tools/list_files.py:107
 msgid "List"
 msgstr "Listar"
 
-#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:92
+#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:92 src/iac_code/tools/list_files.py:111
 #, python-brace-format
 msgid "Listing {path}"
 msgstr "Listando {path}"
 
-#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:93
+#: src/iac_code/tools/list_files.py src/iac_code/tools/list_files.py:93 src/iac_code/tools/list_files.py:112
 msgid "Listing files..."
 msgstr "Listando arquivos..."
 
-#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:117
+#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:117 src/iac_code/tools/read_file.py:197
 #, python-brace-format
 msgid "Read {total} lines"
 msgstr "{total} linhas lidas"
 
-#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:120
+#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:120 src/iac_code/tools/read_file.py:200
 msgid "Read"
 msgstr "Ler"
 
-#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:127
+#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:127 src/iac_code/tools/read_file.py:207
 #, python-brace-format
 msgid "Reading {path}"
 msgstr "Lendo {path}"
 
-#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:128
+#: src/iac_code/tools/read_file.py src/iac_code/tools/read_file.py:128 src/iac_code/tools/read_file.py:208
 msgid "Reading file..."
 msgstr "Lendo arquivo..."
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:94
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:94 src/iac_code/tools/web_fetch.py:106
 msgid "URL cannot be empty."
 msgstr "A URL não pode estar vazia."
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:100
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:100 src/iac_code/tools/web_fetch.py:112
 #, python-brace-format
 msgid "Invalid URL: missing scheme (e.g. http:// or https://). Got: {url}"
 msgstr ""
 "Invalid URL: missing scheme (e.g. http:// or https://). Got: {url}URL inválida: esquema ausente (ex.: http:// ou "
 "https://). Recebido: {url}"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:103
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:103 src/iac_code/tools/web_fetch.py:115
 #, python-brace-format
 msgid "Invalid URL: missing host/netloc. Got: {url}"
 msgstr "URL inválida: host ausente. Recebido: {url}"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:129
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:129 src/iac_code/tools/web_fetch.py:177
 #, python-brace-format
 msgid "HTTP error {status}: {url}"
 msgstr "Erro HTTP {status}: {url}"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:131
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:131 src/iac_code/tools/web_fetch.py:179
 #, python-brace-format
 msgid "Failed to fetch {url}: {error}"
 msgstr "Falha ao obter {url}: {error}"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:133
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:133 src/iac_code/tools/web_fetch.py:181
 #, python-brace-format
 msgid "Unexpected error fetching {url}: {error}"
 msgstr "Erro inesperado ao obter {url}: {error}"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:147
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:147 src/iac_code/tools/web_fetch.py:195
 #, python-brace-format
 msgid "Fetched {chars} chars, {lines} lines"
 msgstr "Obtidos {chars} caracteres, {lines} linhas"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:159
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:159 src/iac_code/tools/web_fetch.py:207
 msgid "Fetch"
 msgstr "Fetch"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:165
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:165 src/iac_code/tools/web_fetch.py:213
 #, python-brace-format
 msgid "Fetching {url}"
 msgstr "Obtendo {url}"
 
-#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:166
+#: src/iac_code/tools/web_fetch.py src/iac_code/tools/web_fetch.py:166 src/iac_code/tools/web_fetch.py:214
 msgid "Fetching web page..."
 msgstr "Obtendo página web..."
 
-#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:67
+#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:67 src/iac_code/tools/write_file.py:91
 #, python-brace-format
 msgid "Successfully wrote {lines} lines to {path}"
 msgstr "{lines} linhas gravadas com sucesso em {path}"
 
-#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:81
+#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:81 src/iac_code/tools/write_file.py:105
 msgid "Write"
 msgstr "Gravar"
 
-#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:88
+#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:88 src/iac_code/tools/write_file.py:112
 #, python-brace-format
 msgid "Writing {path}"
 msgstr "Gravando {path}"
 
-#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:89
+#: src/iac_code/tools/write_file.py src/iac_code/tools/write_file.py:89 src/iac_code/tools/write_file.py:113
 msgid "Writing file..."
 msgstr "Gravando arquivo..."
 
@@ -2473,109 +2500,112 @@ msgstr "Não, sempre negar \"{rule}\" (esta sessão)"
 msgid "No, always reject this tool"
 msgstr "Não, sempre rejeitar esta ferramenta"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:424
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:424 src/iac_code/ui/repl.py:426
 msgid "Press Ctrl+C again to exit."
 msgstr "Pressione Ctrl+C novamente para sair."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:449
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:449 src/iac_code/ui/repl.py:451
 msgid "Interrupted."
 msgstr "Interrompido."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:508
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:508 src/iac_code/ui/repl.py:510
 msgid "Update now"
 msgstr "Atualizar agora"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:510
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:510 src/iac_code/ui/repl.py:512
 msgid "Run the shown update command and exit when it succeeds."
 msgstr "Executa o comando de atualização mostrado e sai quando ele for concluído com sucesso."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:513
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:513 src/iac_code/ui/repl.py:515
 msgid "Skip"
 msgstr "Ignorar"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:515
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:515 src/iac_code/ui/repl.py:517
 msgid "Continue with the current version for this session."
 msgstr "Continuar com a versão atual nesta sessão."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:518
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:518 src/iac_code/ui/repl.py:520
 msgid "Skip until next version"
 msgstr "Ignorar até a próxima versão"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:520
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:520 src/iac_code/ui/repl.py:522
 msgid "Hide this update until a newer version is available."
 msgstr "Ocultar esta atualização até que uma versão mais nova esteja disponível."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:539 src/iac_code/ui/repl.py:551
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:539 src/iac_code/ui/repl.py:541 src/iac_code/ui/repl.py:551
+#: src/iac_code/ui/repl.py:553
 msgid "Update command failed. Continuing with the current version."
 msgstr "O comando de atualização falhou. Continuando com a versão atual."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:544
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:544 src/iac_code/ui/repl.py:546
 msgid "Update completed. Restart iac-code to continue."
 msgstr "Atualização concluída. Reinicie o iac-code para continuar."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:582
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:582 src/iac_code/ui/repl.py:584
 msgid "No image in clipboard."
 msgstr "Nenhuma imagem na área de transferência."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:768
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:768 src/iac_code/ui/repl.py:770
 msgid "Usage: !<shell command>"
 msgstr "Uso: !<comando shell>"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:775
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:775 src/iac_code/ui/repl.py:777
 msgid "Shell command support is unavailable."
 msgstr "O suporte a comandos shell não está disponível."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:845
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:845 src/iac_code/ui/repl.py:847
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr "Habilidade desconhecida: ${name}. Digite / para listar comandos e habilidades."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:847
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:847 src/iac_code/ui/repl.py:849
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr "Comando desconhecido: /{name}. Digite /help para ver os comandos."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:852
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:852 src/iac_code/ui/repl.py:854
 #, python-brace-format
 msgid "$ only invokes skills. Use /{name} instead."
 msgstr "$ invoca apenas habilidades. Use /{name} em vez disso."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:874 src/iac_code/ui/repl.py:922
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:874 src/iac_code/ui/repl.py:876 src/iac_code/ui/repl.py:922
+#: src/iac_code/ui/repl.py:924
 #, python-brace-format
 msgid "Command error: {error}"
 msgstr "Erro de comando: {error}"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:881
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:881 src/iac_code/ui/repl.py:883
 #, python-brace-format
 msgid "Command has no handler: {name}"
 msgstr "Comando sem tratador: {name}"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1156
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1156 src/iac_code/ui/repl.py:1158
 msgid "Goodbye!"
 msgstr "Até logo!"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1157
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1157 src/iac_code/ui/repl.py:1159
 msgid "Resume this session with:"
 msgstr "Para retomar esta sessão, execute:"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1160
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1160 src/iac_code/ui/repl.py:1162
 msgid "Session ID"
 msgstr "ID da sessão"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1210 src/iac_code/ui/repl.py:1214
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1210 src/iac_code/ui/repl.py:1212 src/iac_code/ui/repl.py:1214
+#: src/iac_code/ui/repl.py:1216
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Sessão não encontrada: {session_id}"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1263
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1263 src/iac_code/ui/repl.py:1265
 msgid "Session name: "
 msgstr "Nome da sessão: "
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1269
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1269 src/iac_code/ui/repl.py:1271
 msgid "Session name cannot be empty."
 msgstr "O nome da sessão não pode estar vazio."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1279
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1279 src/iac_code/ui/repl.py:1281
 #, python-brace-format
 msgid ""
 "This session belongs to a different directory.\n"
@@ -2586,33 +2616,33 @@ msgstr ""
 "Para retomar, execute:\n"
 "  {cmd}"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1283
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1283 src/iac_code/ui/repl.py:1285
 msgid "Multiple sessions match. Resume one by ID:"
 msgstr "Várias sessões correspondem. Retome uma por ID:"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1396
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1396 src/iac_code/ui/repl.py:1409
 msgid "This conversation is from a different directory."
 msgstr "Esta conversa é de outro diretório."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1398
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1398 src/iac_code/ui/repl.py:1411
 msgid "To resume, run:"
 msgstr "Para retomar, execute:"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1403
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1403 src/iac_code/ui/repl.py:1416
 msgid "(Command copied to clipboard)"
 msgstr "(Comando copiado para a área de transferência)"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1560
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1560 src/iac_code/ui/repl.py:1573
 #, python-brace-format
 msgid "Current model {model} does not support image input. Use /model to switch to a vision-capable model."
 msgstr "O modelo atual {model} não suporta entrada de imagem. Use /model para alternar para um modelo com capacidade de visão."
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1569
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1569 src/iac_code/ui/repl.py:1582
 #, python-brace-format
 msgid "Image error: {err}"
 msgstr "Erro de imagem: {err}"
 
-#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1586
+#: src/iac_code/ui/repl.py src/iac_code/ui/repl.py:1586 src/iac_code/ui/repl.py:1599
 msgid "Failed to persist image to cache; it will only exist in memory for this turn."
 msgstr "Falha ao persistir a imagem no cache; ela só existirá na memória durante este turno."
 
@@ -2714,6 +2744,46 @@ msgid "{n} day ago"
 msgid_plural "{n} days ago"
 msgstr[0] "há {n} dia"
 msgstr[1] "há {n} dias"
+
+#: src/iac_code/tools/edit_file.py:62
+msgid "edit file path is required"
+msgstr "O caminho do arquivo a editar é obrigatório"
+
+#: src/iac_code/tools/glob.py:101 src/iac_code/tools/glob.py:110
+msgid "glob pattern outside allowed directories"
+msgstr "O padrão glob está fora dos diretórios permitidos"
+
+#: src/iac_code/tools/read_file.py:70
+msgid "Read file path is required."
+msgstr "O caminho do arquivo a ler é obrigatório."
+
+#: src/iac_code/tools/write_file.py:58
+msgid "write file path is required"
+msgstr "O caminho do arquivo a escrever é obrigatório"
+
+#: src/iac_code/tools/bash/path_validation.py:179
+#, python-brace-format
+msgid "path uses shell expansion: {}"
+msgstr "O caminho usa expansão do shell: {}"
+
+#: src/iac_code/tools/bash/path_validation.py:209
+msgid "read path after cd requires confirmation: current directory"
+msgstr "O caminho de leitura após cd requer confirmação: diretório atual"
+
+#: src/iac_code/tools/bash/path_validation.py:220
+#, python-brace-format
+msgid "read path after cd requires confirmation: {}"
+msgstr "O caminho de leitura após cd requer confirmação: {}"
+
+#: src/iac_code/tools/bash/path_validation.py:229
+#, python-brace-format
+msgid "read path uses shell expansion: {}"
+msgstr "O caminho de leitura usa expansão do shell: {}"
+
+#: src/iac_code/tools/bash/permissions.py:145
+#, python-brace-format
+msgid "dangerous readonly argument requires confirmation: {}"
+msgstr "O argumento perigoso somente leitura requer confirmação: {}"
 
 #~ msgid "DashScope Token Plan"
 #~ msgstr "DashScope Token Plan"
