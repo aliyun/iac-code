@@ -52,9 +52,9 @@ LOCALES := zh es fr de ja pt
 VERSION := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' src/iac_code/__init__.py)
 
 translate: ## Extract, update and compile translations
-	@uv run pybabel extract -F babel.cfg --project=iac-code --version=$(VERSION) -o src/iac_code/i18n/messages.pot . > /dev/null 2>&1 && echo "Extract: OK" || (echo "Extract: FAILED"; exit 1)
+	@uv run pybabel extract -F babel.cfg --add-location=file --project=iac-code --version=$(VERSION) -o src/iac_code/i18n/messages.pot . > /dev/null 2>&1 && echo "Extract: OK" || (echo "Extract: FAILED"; exit 1)
 	@for lang in $(LOCALES); do \
-		uv run pybabel update -i src/iac_code/i18n/messages.pot -d src/iac_code/i18n/locales -l $$lang > /dev/null 2>&1 && echo "Update  $$lang: OK" || (echo "Update  $$lang: FAILED"; exit 1); \
+		uv run pybabel update --ignore-pot-creation-date -i src/iac_code/i18n/messages.pot -d src/iac_code/i18n/locales -l $$lang > /dev/null 2>&1 && echo "Update  $$lang: OK" || (echo "Update  $$lang: FAILED"; exit 1); \
 	done
 	@for lang in $(LOCALES); do \
 		perl -i -pe 's/^"Project-Id-Version: .*/"Project-Id-Version: iac-code $(VERSION)\\n"/' src/iac_code/i18n/locales/$$lang/LC_MESSAGES/messages.po; \

@@ -28,6 +28,10 @@ completion_init()
 # this works regardless of where it's called relative to `import typer` / click.
 setup_i18n()
 
+# Import subcommands with Typer parameter help after i18n setup, because Typer
+# captures custom option help text when the function signature is defined.
+from iac_code.cli.update import update as _update_command  # noqa: E402
+
 app = typer.Typer(
     name="iac-code",
     help=_("AI-powered infrastructure orchestration tool"),
@@ -53,6 +57,8 @@ if sys.platform == "win32":
         name="install-git-bash",
         help=_("Install Git for Windows via the npmmirror mirror (Windows only)."),
     )(_install_git_bash)
+
+app.command(name="update", help=_("Update iac-code to the latest version."))(_update_command)
 
 
 @a2a_client_app.callback()

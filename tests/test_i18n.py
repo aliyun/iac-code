@@ -103,6 +103,29 @@ def test_pot_file_exists():
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_translation_source_references_do_not_include_line_numbers():
+    """Avoid noisy PO churn from line-number-only source changes."""
+    catalog_files = [POT_FILE, *LOCALES_DIR.glob("*/LC_MESSAGES/messages.po")]
+    references_with_line_numbers = []
+
+    for catalog_file in catalog_files:
+        for line_number, line in enumerate(catalog_file.read_text(encoding="utf-8").splitlines(), start=1):
+            has_line_number = any(reference.rsplit(":", 1)[-1].isdigit() for reference in line.split()[1:])
+            if line.startswith("#:") and has_line_number:
+                references_with_line_numbers.append(f"{catalog_file.relative_to(PROJECT_ROOT)}:{line_number}: {line}")
+
+    displayed_references = references_with_line_numbers[:20]
+    if len(references_with_line_numbers) > len(displayed_references):
+        displayed_references.append(f"... and {len(references_with_line_numbers) - len(displayed_references)} more")
+
+    assert not references_with_line_numbers, (
+        "Translation catalogs should use file-only source references. "
+        "Run: uv run pybabel extract -F babel.cfg --add-location=file -o src/iac_code/i18n/messages.pot .\n"
+        + "\n".join(displayed_references)
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
 def test_pot_is_up_to_date():
     """Verify .pot file is in sync with source code _() calls."""
     with tempfile.NamedTemporaryFile(suffix=".pot", delete=False) as tmp:
@@ -110,7 +133,7 @@ def test_pot_is_up_to_date():
 
     try:
         subprocess.run(
-            ["uv", "run", "pybabel", "extract", "-F", "babel.cfg", "-o", tmp_path, "."],
+            ["uv", "run", "pybabel", "extract", "-F", "babel.cfg", "--add-location=file", "-o", tmp_path, "."],
             cwd=str(PROJECT_ROOT),
             check=True,
             capture_output=True,
@@ -137,7 +160,8 @@ def test_pot_is_up_to_date():
         if errors:
             pytest.fail(
                 "messages.pot is out of date. Run: "
-                "uv run pybabel extract -F babel.cfg -o src/iac_code/i18n/messages.pot .\n" + "\n".join(errors)
+                "uv run pybabel extract -F babel.cfg --add-location=file "
+                "-o src/iac_code/i18n/messages.pot .\n" + "\n".join(errors)
             )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
