@@ -108,6 +108,18 @@ def _command_base(cmd: SimpleCommand) -> str | None:
     return os.path.basename(cmd.argv[0])
 
 
+def _dangerous_arg_label(arg: str) -> str:
+    if arg == "sed in-place edit":
+        return _("sed in-place edit")
+    if arg == "sed script file":
+        return _("sed script file")
+    if arg == "sed shell execution":
+        return _("sed shell execution")
+    if arg == "sed file write":
+        return _("sed file write")
+    return arg
+
+
 def bash_tool_check_permission(
     cmd: SimpleCommand,
     context: ToolPermissionContext,
@@ -142,7 +154,7 @@ def bash_tool_check_permission(
 
     dangerous_arg = dangerous_readonly_argument(cmd.argv)
     if dangerous_arg is not None:
-        detail = _("dangerous readonly argument requires confirmation: {}").format(dangerous_arg)
+        detail = _("dangerous readonly argument requires confirmation: {}").format(_dangerous_arg_label(dangerous_arg))
         return PermissionResult(
             behavior="ask",
             message=detail,

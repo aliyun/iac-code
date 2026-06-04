@@ -26,14 +26,44 @@ class OriginalBash(Tool):
     def input_schema(self) -> dict:
         return {"type": "object", "properties": {"command": {"type": "string"}}}
 
+    def user_facing_name(self, input: dict | None = None) -> str:
+        return "Original Bash"
+
+    def get_activity_description(self, input: dict | None = None) -> str:
+        return "Original activity"
+
+    def get_tool_use_summary(self, input: dict | None = None) -> str:
+        return "Original summary"
+
+    def render_tool_use_message(self, input: dict, *, verbose: bool = False) -> str:
+        return "Original use verbose={}".format(verbose)
+
+    def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str:
+        return "Original result error={} verbose={} output={}".format(is_error, verbose, output)
+
+    def render_tool_use_error_message(self, error: str) -> str:
+        return "Original use error: {}".format(error)
+
+    def streaming_preview_fields(self) -> list[str]:
+        return ["command"]
+
     def is_read_only(self, input: dict | None = None) -> bool:
         return False
+
+    def is_concurrency_safe(self, tool_input: dict) -> bool:
+        return True
 
     def is_destructive(self, input: dict | None = None) -> bool:
         return True
 
     async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
         return ToolResult.success("local")
+
+
+class NoBlanketBash(OriginalBash):
+    @property
+    def supports_blanket_allow(self) -> bool:
+        return False
 
 
 class FakeConn:
@@ -102,13 +132,15 @@ async def test_terminal_command_nonzero_exit_code() -> None:
 
 
 @pytest.mark.asyncio
-async def test_terminal_command_killed_by_signal() -> None:
+async def test_terminal_command_killed_by_signal(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.acp.tools._", lambda message: "i18n:" + message, raising=False)
     conn = FakeConn(signal="SIGKILL", output="partial")
     tool = ACPTerminalBashTool(OriginalBash(), conn, "s1")
 
     result = await tool.execute(tool_input={"command": "sleep 999"}, context=ToolContext(cwd="/tmp"))
 
     assert result.is_error is True
+    assert result.content.startswith("i18n:Command terminated by signal")
     assert "SIGKILL" in result.content
     assert conn.released is True
 
@@ -136,14 +168,15 @@ async def test_terminal_creation_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_terminal_missing_command() -> None:
+async def test_terminal_missing_command(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.acp.tools._", lambda message: "i18n:" + message, raising=False)
     conn = FakeConn()
     tool = ACPTerminalBashTool(OriginalBash(), conn, "s1")
 
     result = await tool.execute(tool_input={}, context=ToolContext(cwd="/tmp"))
 
     assert result.is_error is True
-    assert "required" in result.content.lower()
+    assert result.content == "i18n:Bash command is required."
 
 
 # ---------------------------------------------------------------------------
@@ -201,8 +234,31 @@ def test_terminal_tool_proxy_attributes() -> None:
     assert tool.description == original.description
     assert tool.input_schema == original.input_schema
     assert tool.timeout == original.timeout
+    assert tool.supports_blanket_allow == original.supports_blanket_allow
+    assert tool.user_facing_name({"command": "ls"}) == original.user_facing_name({"command": "ls"})
+    assert tool.get_activity_description({"command": "ls"}) == original.get_activity_description({"command": "ls"})
+    assert tool.get_tool_use_summary({"command": "ls"}) == original.get_tool_use_summary({"command": "ls"})
+    assert tool.render_tool_use_message({"command": "ls"}, verbose=True) == original.render_tool_use_message(
+        {"command": "ls"},
+        verbose=True,
+    )
+    assert tool.render_tool_result_message("out", is_error=True, verbose=True) == original.render_tool_result_message(
+        "out",
+        is_error=True,
+        verbose=True,
+    )
+    assert tool.render_tool_use_error_message("bad") == original.render_tool_use_error_message("bad")
+    assert tool.streaming_preview_fields() == original.streaming_preview_fields()
     assert tool.is_read_only() == original.is_read_only()
+    assert tool.is_concurrency_safe({"command": "ls"}) == original.is_concurrency_safe({"command": "ls"})
     assert tool.is_destructive() == original.is_destructive()
+
+
+def test_terminal_tool_proxies_disabled_blanket_allow() -> None:
+    original = NoBlanketBash()
+    tool = ACPTerminalBashTool(original, FakeConn(), "s1")
+
+    assert tool.supports_blanket_allow is False
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +342,9 @@ async def test_terminal_cancel_triggers_kill() -> None:
 
 
 @pytest.mark.asyncio
-async def test_terminal_timeout_kills_and_returns_error() -> None:
+async def test_terminal_timeout_kills_and_returns_error(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.acp.tools._", lambda message: "i18n:" + message, raising=False)
+
     class SlowConn(FakeConn):
         async def wait_for_terminal_exit(self, **kwargs):
             await asyncio.sleep(10)  # will time out
@@ -301,6 +359,7 @@ async def test_terminal_timeout_kills_and_returns_error() -> None:
     )
 
     assert result.is_error is True
+    assert result.content.startswith("i18n:Command timed out after")
     assert "timed out" in result.content
     assert "0.1" in result.content
     assert conn.killed is True
@@ -382,8 +441,9 @@ async def test_terminal_tool_check_permissions_delegates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_terminal_output_exit_status_overrides() -> None:
+async def test_terminal_output_exit_status_overrides(monkeypatch) -> None:
     """When output.exit_status is set, it overrides the wait_for_terminal_exit status."""
+    monkeypatch.setattr("iac_code.acp.tools._", lambda message: "i18n:" + message, raising=False)
 
     class ConnWithOutputExitStatus(FakeConn):
         async def terminal_output(self, **kwargs):
@@ -399,6 +459,7 @@ async def test_terminal_output_exit_status_overrides() -> None:
     result = await tool.execute(tool_input={"command": "fail"}, context=ToolContext(cwd="/tmp"))
 
     assert result.is_error is True
+    assert result.content.startswith("i18n:Command failed with exit code")
     assert "exit code 42" in result.content
     assert conn.released is True
 

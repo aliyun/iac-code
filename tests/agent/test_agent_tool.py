@@ -30,19 +30,69 @@ class TestAgentToolMetadata:
     def test_schema_has_run_in_background(self, agent_tool):
         assert "run_in_background" in agent_tool.input_schema["properties"]
 
+    def test_description_uses_i18n(self, agent_tool, monkeypatch):
+        monkeypatch.setattr(
+            "iac_code.agent.agent_tool._",
+            lambda message: {
+                "Launch a sub-agent to handle complex tasks.\n\nAvailable agent types:\n{agent_list}": (
+                    "launch:{agent_list}"
+                ),
+            }.get(message, message),
+        )
+        monkeypatch.setattr("iac_code.agent.agent_types._", lambda message: "type:" + message)
+
+        description = agent_tool.description
+
+        assert description.startswith("launch:")
+        assert "type:Use for complex" in description
+        assert "type:Use to quickly find files" in description
+        assert "type:Use to plan implementation strategy" in description
+
+    def test_input_schema_descriptions_use_i18n(self, agent_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
+
+        properties = agent_tool.input_schema["properties"]
+
+        assert properties["prompt"]["description"] == "i18n:The task for the sub-agent to perform."
+        assert properties["description"]["description"] == "i18n:Short (3-5 word) description of the task."
+        assert properties["subagent_type"]["description"] == "i18n:The type of specialized agent to use."
+        assert properties["run_in_background"]["description"] == "i18n:Run agent in background, parent continues."
+
     def test_is_concurrency_safe(self, agent_tool):
         assert agent_tool.is_concurrency_safe({}) is True
 
-    def test_user_facing_name(self, agent_tool):
+    def test_user_facing_name(self, agent_tool, monkeypatch):
         assert agent_tool.user_facing_name() == "Agent"
+        monkeypatch.setattr(
+            "iac_code.agent.agent_tool._",
+            lambda message: {
+                "Explore": "i18n:Explore",
+                "Plan": "i18n:Plan",
+                "Agent": "i18n:Agent",
+            }.get(message, message),
+        )
 
-    def test_activity_description(self, agent_tool):
+        assert agent_tool.user_facing_name({"subagent_type": "explore"}) == "i18n:Explore"
+        assert agent_tool.user_facing_name({"subagent_type": "plan"}) == "i18n:Plan"
+        assert agent_tool.user_facing_name({"subagent_type": "general-purpose"}) == "i18n:Agent"
+        assert agent_tool.user_facing_name(None) == "i18n:Agent"
+
+    def test_activity_description(self, agent_tool, monkeypatch):
         assert agent_tool.get_activity_description({"description": "search tree"}) == "Running agent: search tree"
+        monkeypatch.setattr(
+            "iac_code.agent.agent_tool._",
+            lambda message: {
+                "Running agent: {description}": "run:{description}",
+                "sub-agent": "SUB",
+            }.get(message, message),
+        )
+        assert agent_tool.get_activity_description({}) == "run:SUB"
         assert agent_tool.get_activity_description(None) is None
 
-    def test_render_tool_result_error(self, agent_tool):
+    def test_render_tool_result_error(self, agent_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
         msg = agent_tool.render_tool_result_message("boom happened", is_error=True)
-        assert msg == "Agent error: boom happened"
+        assert msg == "i18n:Agent error: boom happened"
 
     def test_render_tool_result_without_stats_returns_none(self, agent_tool):
         assert agent_tool.render_tool_result_message("plain output") is None
@@ -50,9 +100,13 @@ class TestAgentToolMetadata:
 
 @pytest.mark.asyncio
 class TestRunSubAgent:
-    async def test_unknown_agent_type_raises(self):
-        with pytest.raises(ValueError, match="Unknown agent type"):
+    async def test_unknown_agent_type_raises(self, monkeypatch):
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
+
+        with pytest.raises(ValueError) as exc_info:
             await run_sub_agent(prompt="x", agent_type="missing")
+
+        assert str(exc_info.value) == "i18n:Unknown agent type: missing"
 
     async def test_collects_text_progress_and_event_queue(self, monkeypatch):
         async def fake_stream(_prompt):
@@ -128,13 +182,14 @@ class TestRunSubAgent:
 
 @pytest.mark.asyncio
 class TestAgentToolExecution:
-    async def test_unknown_agent_type(self, agent_tool):
+    async def test_unknown_agent_type(self, agent_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
         result = await agent_tool.execute(
             tool_input={"prompt": "x", "description": "x", "subagent_type": "nonexistent"},
             context=ToolContext(),
         )
         assert result.is_error is True
-        assert "Unknown agent type" in result.content
+        assert result.content == "i18n:Unknown agent type: 'nonexistent'"
 
     async def test_sync_execution(self, agent_tool):
         with patch(
@@ -149,7 +204,8 @@ class TestAgentToolExecution:
             assert result.is_error is False
             assert "Done" in result.content
 
-    async def test_background_execution(self):
+    async def test_background_execution(self, monkeypatch):
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
         tm = TaskManager()
         tool = AgentTool(task_manager=tm)
         with patch(
@@ -161,6 +217,7 @@ class TestAgentToolExecution:
                 tool_input={"prompt": "task", "description": "bg", "run_in_background": True},
                 context=ToolContext(),
             )
+            assert result.content.startswith("i18n:Background agent launched")
             assert "task_id" in result.content
             assert len(tm.list_all()) == 1
 
@@ -230,7 +287,8 @@ class TestAgentToolExecution:
         assert run_sub_agent.await_args.kwargs["event_queue"] is queue
         assert await queue.get() is None
 
-    async def test_execute_closes_context_event_queue_on_failure(self):
+    async def test_execute_closes_context_event_queue_on_failure(self, monkeypatch):
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
         tool = AgentTool()
         queue = asyncio.Queue()
 
@@ -241,35 +299,106 @@ class TestAgentToolExecution:
             )
 
         assert result.is_error is True
-        assert "boom" in result.content
+        assert result.content == "i18n:Sub-agent failed: boom"
         assert await queue.get() is None
 
-    async def test_run_background_success_updates_task_manager_and_notifications(self):
+    @pytest.mark.parametrize(("tool_count", "expected_message"), [(1, "one:1"), (2, "many:2")])
+    async def test_run_background_success_updates_task_manager_and_notifications(
+        self, monkeypatch, tool_count, expected_message
+    ):
         task_manager = MagicMock()
         notifications = MagicMock()
         tool = AgentTool(task_manager=task_manager, notification_queue=notifications)
+        monkeypatch.setattr(
+            "iac_code.agent.agent_tool.ngettext",
+            lambda singular, plural, n: "one:{tool_count}" if n == 1 else "many:{tool_count}",
+        )
 
         with patch(
             "iac_code.agent.agent_tool.run_sub_agent",
             new_callable=AsyncMock,
-            return_value=("background done", AgentProgress(tool_use_count=3, token_count=450)),
+            return_value=("background done", AgentProgress(tool_use_count=tool_count, token_count=450)),
         ):
             await tool._run_background("task-1", "prompt", "general-purpose", ToolContext(cwd="/tmp"))
 
         task_manager.complete.assert_called_once_with("task-1", result="background done")
-        task_manager.update_progress.assert_called_once_with("task-1", tool_use_count=3, token_count=450)
-        notifications.enqueue.assert_called_once()
+        task_manager.update_progress.assert_called_once_with("task-1", tool_use_count=tool_count, token_count=450)
+        notifications.enqueue.assert_called_once_with(task_id="task-1", message=expected_message)
 
-    async def test_run_background_failure_marks_task_failed(self):
+    async def test_run_background_failure_marks_task_failed(self, monkeypatch):
         task_manager = MagicMock()
         notifications = MagicMock()
         tool = AgentTool(task_manager=task_manager, notification_queue=notifications)
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
 
         with patch("iac_code.agent.agent_tool.run_sub_agent", new_callable=AsyncMock, side_effect=RuntimeError("bad")):
             await tool._run_background("task-1", "prompt", "general-purpose", ToolContext(cwd="/tmp"))
 
         task_manager.fail.assert_called_once_with("task-1", error="bad")
-        notifications.enqueue.assert_called_once()
+        notifications.enqueue.assert_called_once_with(task_id="task-1", message="i18n:Agent failed: bad")
+
+    async def test_run_background_base_exception_marks_task_failed_and_reraises(self, monkeypatch):
+        class FatalAgentError(BaseException):
+            pass
+
+        task_manager = MagicMock()
+        notifications = MagicMock()
+        tool = AgentTool(task_manager=task_manager, notification_queue=notifications)
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
+
+        with patch(
+            "iac_code.agent.agent_tool.run_sub_agent",
+            new_callable=AsyncMock,
+            side_effect=FatalAgentError("fatal"),
+        ):
+            with pytest.raises(FatalAgentError, match="fatal"):
+                await tool._run_background("task-1", "prompt", "general-purpose", ToolContext(cwd="/tmp"))
+
+        task_manager.fail.assert_called_once_with("task-1", error="FatalAgentError: fatal")
+        notifications.enqueue.assert_called_once_with(
+            task_id="task-1",
+            message="i18n:Agent failed: FatalAgentError: fatal",
+        )
+
+    async def test_run_background_keyboard_interrupt_marks_failed_and_reraises(self, monkeypatch):
+        task_manager = MagicMock()
+        notifications = MagicMock()
+        tool = AgentTool(task_manager=task_manager, notification_queue=notifications)
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
+
+        with patch(
+            "iac_code.agent.agent_tool.run_sub_agent",
+            new_callable=AsyncMock,
+            side_effect=KeyboardInterrupt("stop"),
+        ):
+            with pytest.raises(KeyboardInterrupt, match="stop"):
+                await tool._run_background("task-1", "prompt", "general-purpose", ToolContext(cwd="/tmp"))
+
+        task_manager.fail.assert_called_once_with("task-1", error="KeyboardInterrupt: stop")
+        notifications.enqueue.assert_called_once_with(
+            task_id="task-1",
+            message="i18n:Agent failed: KeyboardInterrupt: stop",
+        )
+
+    async def test_run_background_system_exit_marks_failed_with_type_and_reraises(self, monkeypatch):
+        task_manager = MagicMock()
+        notifications = MagicMock()
+        tool = AgentTool(task_manager=task_manager, notification_queue=notifications)
+        monkeypatch.setattr("iac_code.agent.agent_tool._", lambda message: "i18n:" + message)
+
+        with patch(
+            "iac_code.agent.agent_tool.run_sub_agent",
+            new_callable=AsyncMock,
+            side_effect=SystemExit(0),
+        ):
+            with pytest.raises(SystemExit):
+                await tool._run_background("task-1", "prompt", "general-purpose", ToolContext(cwd="/tmp"))
+
+        task_manager.fail.assert_called_once_with("task-1", error="SystemExit: 0")
+        notifications.enqueue.assert_called_once_with(
+            task_id="task-1",
+            message="i18n:Agent failed: SystemExit: 0",
+        )
 
     async def test_background_execution_attaches_task_handle(self):
         tm = TaskManager()

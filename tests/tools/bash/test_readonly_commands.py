@@ -2,6 +2,7 @@ import shlex
 
 import pytest
 
+from iac_code.tools.bash.argv_safety import extract_read_paths
 from iac_code.tools.bash.command_parser import SimpleCommand
 from iac_code.tools.bash.readonly_commands import is_command_readonly
 
@@ -120,6 +121,28 @@ class TestNotReadonly:
             "sed '1!e echo marker' file.txt",
             "sed '/foo/!e echo marker' file.txt",
             "sed 's/.*/echo marker/e' file.txt",
+            "sed 's/a/echo marker/2e' file.txt",
+            "sed 's/a/echo marker/g2e' file.txt",
+            "sed 'e;' file.txt",
+            "sed '1{e;}' file.txt",
+            "sed '1{e echo marker;}' file.txt",
+            "sed '1~2e echo marker' file.txt",
+            "sed '1,+2e echo marker' file.txt",
+            "sed '\\#foo#w/tmp/out' file.txt",
+            "sed '/foo/Iw/tmp/out' file.txt",
+            "sed '\\%foo%e echo marker' file.txt",
+            "sed '/foo/Ie echo marker' file.txt",
+            "sed '\\afooaw/tmp/out' file.txt",
+            "sed '\\1foo1e echo marker' file.txt",
+            "sed '\\ foo w/tmp/out' file.txt",
+            "sed -Ees/a/b/w/tmp/out file.txt",
+            "sed -nes/a/b/e file.txt",
+            "sed 'w /tmp/out' file.txt",
+            "sed '1w /tmp/out' file.txt",
+            "sed 's/a/b/w /tmp/out' file.txt",
+            "sed 's1foo1bar1w /tmp/out' file.txt",
+            "sed 's foo bar w /tmp/out' file.txt",
+            "sed 's1foo1echo marker1e' file.txt",
         ],
     )
     def test_dangerous_readonly_arguments_are_not_readonly(self, cmd):
@@ -131,11 +154,39 @@ class TestNotReadonly:
             "find . -name '*.py'",
             "fd pattern src",
             "rg needle src",
+            "sed 'a\\\nwarning' file.txt",
+            "sed '1{a\\\nwarning\n}' file.txt",
+            "sed 'a \\\nwarning' file.txt",
+            "sed 'a\\\nfirst\\\nwarning' file.txt",
+            "sed '# s/a/b/w /tmp/out' file.txt",
+            "sed 'p;# s/a/b/w /tmp/out' file.txt",
+            "sed -n '\\#s/a/b/w#p' file.txt",
+            "sed -n '/s\\/a\\/b\\/w/p' file.txt",
+            "sed ':we' file.txt",
+            "sed 'b we' file.txt",
+            "sed 't we' file.txt",
+            "sed 'T we' file.txt",
+            "sed 'r wfile' file.txt",
+            "sed 'R wfile' file.txt",
             "sort file.txt",
         ],
     )
     def test_safe_readonly_arguments_remain_readonly(self, cmd):
         assert _readonly(cmd) is True
+
+    @pytest.mark.parametrize(
+        ("cmd", "expected_path"),
+        [
+            ("sed 'r C:/Users/me/.ssh/id_rsa' file.txt", "C:/Users/me/.ssh/id_rsa"),
+            (
+                r"sed 'R C:\Users\me\AppData\Local\Microsoft\Credentials\data' file.txt",
+                r"C:\Users\me\AppData\Local\Microsoft\Credentials\data",
+            ),
+            ("sed 'r /c/Users/me/.ssh/id_rsa' file.txt", "/c/Users/me/.ssh/id_rsa"),
+        ],
+    )
+    def test_sed_script_read_paths_preserve_windows_path_forms(self, cmd, expected_path):
+        assert expected_path in extract_read_paths(shlex.split(cmd))
 
     @pytest.mark.parametrize("cmd", ["pip list", "pip3 list", "pip3.11 list"])
     def test_pip_like_base_readonly(self, cmd):

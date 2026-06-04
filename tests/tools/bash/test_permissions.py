@@ -75,6 +75,28 @@ class TestBashToolHasPermission:
             "sed -frun.sed file.txt",
             "sed -n '1e echo marker' file.txt",
             "sed 's/.*/echo marker/e' file.txt",
+            "sed 's/a/echo marker/2e' file.txt",
+            "sed 's/a/echo marker/g2e' file.txt",
+            "sed 'e;' file.txt",
+            "sed '1{e;}' file.txt",
+            "sed '1{e echo marker;}' file.txt",
+            "sed '1~2e echo marker' file.txt",
+            "sed '1,+2e echo marker' file.txt",
+            "sed '\\#foo#w/tmp/out' file.txt",
+            "sed '/foo/Iw/tmp/out' file.txt",
+            "sed '\\%foo%e echo marker' file.txt",
+            "sed '/foo/Ie echo marker' file.txt",
+            "sed '\\afooaw/tmp/out' file.txt",
+            "sed '\\1foo1e echo marker' file.txt",
+            "sed '\\ foo w/tmp/out' file.txt",
+            "sed -Ees/a/b/w/tmp/out file.txt",
+            "sed -nes/a/b/e file.txt",
+            "sed 'w /tmp/out' file.txt",
+            "sed '1w /tmp/out' file.txt",
+            "sed 's/a/b/w /tmp/out' file.txt",
+            "sed 's1foo1bar1w /tmp/out' file.txt",
+            "sed 's foo bar w /tmp/out' file.txt",
+            "sed 's1foo1echo marker1e' file.txt",
             "rg --pre cat needle .",
             "rg --pre=cat needle .",
             "sort --compress-program sh file.txt",
@@ -90,6 +112,21 @@ class TestBashToolHasPermission:
         assert r.behavior == "ask"
         assert r.reason is not None
         assert r.reason.type == "dangerous_readonly_argument"
+
+    @pytest.mark.asyncio
+    async def test_sed_file_write_reason_detail_translates_synthetic_reason(self, monkeypatch):
+        def fake_gettext(message):
+            if message == "sed file write":
+                return "i18n:sed file write"
+            return message
+
+        monkeypatch.setattr("iac_code.tools.bash.permissions._", fake_gettext)
+
+        r = await bash_tool_has_permission("sed 'w /tmp/out' file.txt", _ctx())
+
+        assert r.behavior == "ask"
+        assert r.reason is not None
+        assert "i18n:sed file write" in r.reason.detail
 
     @pytest.mark.parametrize("cmd", ["find . -delete", "rg --pre cat needle ."])
     @pytest.mark.asyncio
@@ -130,6 +167,30 @@ class TestBashToolHasPermission:
         assert r.behavior == "ask"
         assert r.reason is not None
         assert r.reason.type in {"path_constraint", "safety_check"}
+
+    @pytest.mark.parametrize("cmd", ["sed -Ees/a/b/ /etc/passwd", "sed -nes/a/b/ /etc/passwd"])
+    @pytest.mark.asyncio
+    async def test_sed_grouped_expression_options_preserve_read_path_constraints(self, cmd, tmp_path):
+        r = await bash_tool_has_permission(cmd, _ctx(cwd=str(tmp_path)))
+        assert r.behavior == "ask"
+        assert r.reason is not None
+        assert r.reason.type == "path_constraint"
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "sed 'r /etc/passwd' file.txt",
+            "sed 'R /etc/passwd' file.txt",
+            "sed -e 'p' -e 'r /etc/passwd' file.txt",
+            "sed -- 'r /etc/passwd' file.txt",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_sed_script_read_paths_outside_cwd_ask(self, cmd, tmp_path):
+        r = await bash_tool_has_permission(cmd, _ctx(cwd=str(tmp_path)))
+        assert r.behavior == "ask"
+        assert r.reason is not None
+        assert r.reason.type == "path_constraint"
 
     @pytest.mark.asyncio
     async def test_input_redirect_read_path_overrides_broad_allow_rule(self, tmp_path):

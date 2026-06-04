@@ -181,13 +181,11 @@ _READ_PATH_VALUE_FLAGS_BY_COMMAND = {
     "jq": frozenset({"-f", "--from-file"}),
     "yq": frozenset({"-f", "--from-file"}),
 }
-_SED_E_COMMAND_RE = re.compile(
-    r"(?:^|[;\n])\s*"
-    r"(?:(?:\d+|\$|/[^/\n]*(?:\\.[^/\n]*)*/)\s*)?"
-    r"(?:,\s*(?:\d+|\$|/[^/\n]*(?:\\.[^/\n]*)*/)\s*)?"
-    r"!?\s*"
-    r"e(?:\s|$)"
-)
+_SED_HORIZONTAL_SPACE = " \t\r\f\v"
+_SED_COMMAND_BOUNDARIES = ";\n{}"
+_SED_ADDRESS_MODIFIERS = "IM"
+_SED_BOUNDARY_ARGUMENT_COMMANDS = frozenset({":", "b", "t", "T", "q", "Q", "l"})
+_SED_READ_FILE_COMMANDS = frozenset({"r", "R"})
 
 
 def basename(argv0: str) -> str:
@@ -227,6 +225,10 @@ def sed_inplace_edit(argv: list[str]) -> bool:
 
 def sed_executes_shell(argv: list[str]) -> bool:
     return any(_sed_script_executes_shell(script) for script in _sed_script_args(argv))
+
+
+def sed_writes_file(argv: list[str]) -> bool:
+    return any(_sed_script_writes_file(script) for script in _sed_script_args(argv))
 
 
 def sed_uses_script_file(argv: list[str]) -> bool:
@@ -280,6 +282,8 @@ def dangerous_readonly_argument(argv: list[str]) -> str | None:
             return "sed script file"
         if sed_executes_shell(argv):
             return "sed shell execution"
+        if sed_writes_file(argv):
+            return "sed file write"
         return None
 
     if base == "rg":
@@ -549,6 +553,7 @@ def _sed_read_paths(argv: list[str]) -> list[str]:
     script_from_option = False
     positionals: list[str] = []
     paths: list[str] = []
+    script_read_paths: list[str] = []
     flags_with_value = _flags_with_value_for("sed")
     i = 1
     while i < len(argv):
@@ -559,6 +564,7 @@ def _sed_read_paths(argv: list[str]) -> list[str]:
 
         if arg.startswith("--expression="):
             script_from_option = True
+            script_read_paths.extend(_sed_script_read_paths(arg.split("=", 1)[1]))
             i += 1
             continue
         if arg.startswith("--file="):
@@ -574,6 +580,8 @@ def _sed_read_paths(argv: list[str]) -> list[str]:
 
         if arg in {"-e", "--expression"}:
             script_from_option = True
+            if i + 1 < len(argv):
+                script_read_paths.extend(_sed_script_read_paths(argv[i + 1]))
             i += 2
             continue
         if arg in {"-f", "--file"}:
@@ -584,6 +592,13 @@ def _sed_read_paths(argv: list[str]) -> list[str]:
             continue
         if arg.startswith("-e") and len(arg) > 2:
             script_from_option = True
+            script_read_paths.extend(_sed_script_read_paths(arg[2:]))
+            i += 1
+            continue
+        attached_script = _sed_attached_short_expression(arg)
+        if attached_script is not None:
+            script_from_option = True
+            script_read_paths.extend(_sed_script_read_paths(attached_script))
             i += 1
             continue
         if arg.startswith("-f") and len(arg) > 2:
@@ -607,7 +622,10 @@ def _sed_read_paths(argv: list[str]) -> list[str]:
         positionals.append(arg)
         i += 1
 
-    return paths + (positionals if script_from_option else positionals[1:])
+    if not script_from_option and positionals:
+        script_read_paths.extend(_sed_script_read_paths(positionals[0]))
+
+    return paths + script_read_paths + (positionals if script_from_option else positionals[1:])
 
 
 def _jq_read_paths(argv: list[str], base: str) -> list[str]:
@@ -738,6 +756,12 @@ def _sed_script_args(argv: list[str]) -> list[str]:
             scripts.append(arg[2:])
             i += 1
             continue
+        attached_script = _sed_attached_short_expression(arg)
+        if attached_script is not None:
+            has_script_option = True
+            scripts.append(attached_script)
+            i += 1
+            continue
 
         if arg in {"-f", "--file"}:
             has_script_option = True
@@ -759,31 +783,318 @@ def _sed_script_args(argv: list[str]) -> list[str]:
     return scripts
 
 
+def _sed_attached_short_expression(arg: str) -> str | None:
+    if not arg.startswith("-") or arg.startswith("--") or len(arg) <= 2:
+        return None
+    option_body = arg[1:]
+    expression_index = option_body.find("e")
+    if expression_index == -1 or expression_index == len(option_body) - 1:
+        return None
+    file_index = option_body.find("f")
+    if file_index != -1 and file_index < expression_index:
+        return None
+    return option_body[expression_index + 1 :]
+
+
 def _sed_script_executes_shell(script: str) -> bool:
-    return bool(_SED_E_COMMAND_RE.search(script) or _sed_substitute_has_exec_flag(script))
+    return _sed_script_has_danger(script, "e")
 
 
-def _sed_substitute_has_exec_flag(script: str) -> bool:
-    for i, char in enumerate(script):
-        if char != "s" or i + 1 >= len(script):
+def _sed_script_writes_file(script: str) -> bool:
+    return _sed_script_has_danger(script, "w")
+
+
+def _sed_script_has_danger(script: str, danger: str) -> bool:
+    i = 0
+    while i < len(script):
+        i = _sed_next_command_start(script, i)
+        if i >= len(script):
+            return False
+
+        command_index = _sed_skip_command_prefix(script, i)
+        if command_index >= len(script):
+            return False
+
+        command = script[command_index]
+        if command in _SED_COMMAND_BOUNDARIES:
+            i = command_index + 1
             continue
-        delimiter = script[i + 1]
-        if delimiter.isalnum() or delimiter.isspace() or delimiter == "\\":
+        if command == "#":
+            i = _sed_skip_to_line_end(script, command_index)
             continue
-        pattern_end = _skip_to_unescaped_delimiter(script, i + 2, delimiter)
-        if pattern_end is None:
+        if command == "e":
+            if danger == "e":
+                return True
+            i = _sed_skip_to_command_boundary(script, command_index + 1)
             continue
-        replacement_end = _skip_to_unescaped_delimiter(script, pattern_end + 1, delimiter)
-        if replacement_end is None:
+        if command in {"w", "W"}:
+            if danger == "w":
+                return True
+            i = _sed_skip_to_command_boundary(script, command_index + 1)
             continue
-        flags = []
-        j = replacement_end + 1
-        while j < len(script) and script[j].isalpha():
-            flags.append(script[j])
-            j += 1
-        if "e" in flags:
-            return True
+        if command in _SED_READ_FILE_COMMANDS:
+            i = _sed_skip_to_line_end(script, command_index + 1)
+            continue
+        if command == "s":
+            has_flag, next_index = _sed_substitute_has_flag_at(script, command_index, danger)
+            if has_flag:
+                return True
+            i = next_index
+            continue
+        if command in {"a", "i", "c"}:
+            i = _sed_skip_text_command(script, command_index)
+            continue
+        if command == "y":
+            i = _sed_skip_delimited_command(script, command_index)
+            continue
+        if command in _SED_BOUNDARY_ARGUMENT_COMMANDS:
+            i = _sed_skip_to_command_boundary(script, command_index + 1)
+            continue
+
+        i = command_index + 1
+
     return False
+
+
+def _sed_script_read_paths(script: str) -> list[str]:
+    paths: list[str] = []
+    i = 0
+    while i < len(script):
+        i = _sed_next_command_start(script, i)
+        if i >= len(script):
+            return paths
+
+        command_index = _sed_skip_command_prefix(script, i)
+        if command_index >= len(script):
+            return paths
+
+        command = script[command_index]
+        if command in _SED_COMMAND_BOUNDARIES:
+            i = command_index + 1
+            continue
+        if command == "#":
+            i = _sed_skip_to_line_end(script, command_index)
+            continue
+        if command in _SED_READ_FILE_COMMANDS:
+            read_path, i = _sed_read_file_argument(script, command_index)
+            if read_path and read_path != "-":
+                paths.append(read_path)
+            continue
+        if command in {"e", "w", "W"}:
+            i = _sed_skip_to_command_boundary(script, command_index + 1)
+            continue
+        if command == "s":
+            i = _sed_skip_substitute_command(script, command_index)
+            continue
+        if command in {"a", "i", "c"}:
+            i = _sed_skip_text_command(script, command_index)
+            continue
+        if command == "y":
+            i = _sed_skip_delimited_command(script, command_index)
+            continue
+        if command in _SED_BOUNDARY_ARGUMENT_COMMANDS:
+            i = _sed_skip_to_command_boundary(script, command_index + 1)
+            continue
+
+        i = command_index + 1
+
+    return paths
+
+
+def _sed_next_command_start(script: str, start: int) -> int:
+    i = start
+    while i < len(script):
+        if script[i] in _SED_HORIZONTAL_SPACE or script[i] in _SED_COMMAND_BOUNDARIES:
+            i += 1
+            continue
+        return i
+    return i
+
+
+def _sed_skip_command_prefix(script: str, start: int) -> int:
+    i = _sed_skip_horizontal_space(script, start)
+    first_address_end = _sed_skip_address(script, i)
+    if first_address_end is not None:
+        i = _sed_skip_horizontal_space(script, first_address_end)
+        if i < len(script) and script[i] == ",":
+            second_start = _sed_skip_horizontal_space(script, i + 1)
+            second_address_end = _sed_skip_address(script, second_start)
+            i = _sed_skip_horizontal_space(script, second_address_end or second_start)
+        if i < len(script) and script[i] == "!":
+            i = _sed_skip_horizontal_space(script, i + 1)
+        return i
+
+    if i < len(script) and script[i] == "!":
+        return _sed_skip_horizontal_space(script, i + 1)
+    return i
+
+
+def _sed_skip_horizontal_space(script: str, start: int) -> int:
+    i = start
+    while i < len(script) and script[i] in _SED_HORIZONTAL_SPACE:
+        i += 1
+    return i
+
+
+def _sed_skip_address(script: str, start: int) -> int | None:
+    if start >= len(script):
+        return None
+
+    char = script[start]
+    if char.isdigit():
+        i = start
+        while i < len(script) and script[i].isdigit():
+            i += 1
+        if i < len(script) and script[i] == "~":
+            step_start = i + 1
+            while i + 1 < len(script) and script[i + 1].isdigit():
+                i += 1
+            if i + 1 == step_start:
+                return step_start - 1
+            return i + 1
+        return i
+    if char == "$":
+        return start + 1
+    if char in {"+", "~"}:
+        i = start + 1
+        if i >= len(script) or not script[i].isdigit():
+            return None
+        while i < len(script) and script[i].isdigit():
+            i += 1
+        return i
+    if char == "/":
+        end = _skip_to_unescaped_delimiter(script, start + 1, char)
+        if end is None:
+            return None
+        return _sed_skip_address_modifiers(script, end + 1)
+    if char == "\\" and start + 1 < len(script) and script[start + 1] != "\n":
+        delimiter = script[start + 1]
+        if delimiter == "\\":
+            return None
+        end = _skip_to_unescaped_delimiter(script, start + 2, delimiter)
+        if end is None:
+            return None
+        return _sed_skip_address_modifiers(script, end + 1)
+
+    return None
+
+
+def _sed_skip_address_modifiers(script: str, start: int) -> int:
+    i = start
+    while i < len(script) and script[i] in _SED_ADDRESS_MODIFIERS:
+        i += 1
+    return i
+
+
+def _sed_substitute_has_flag_at(script: str, command_index: int, flag: str) -> tuple[bool, int]:
+    if command_index + 1 >= len(script):
+        return False, command_index + 1
+
+    delimiter = script[command_index + 1]
+    if delimiter == "\\" or delimiter == "\n":
+        return False, command_index + 1
+
+    pattern_end = _skip_to_unescaped_delimiter(script, command_index + 2, delimiter)
+    if pattern_end is None:
+        return False, _sed_skip_to_command_boundary(script, command_index + 1)
+
+    replacement_end = _skip_to_unescaped_delimiter(script, pattern_end + 1, delimiter)
+    if replacement_end is None:
+        return False, _sed_skip_to_command_boundary(script, pattern_end + 1)
+
+    i = replacement_end + 1
+    while i < len(script) and script[i] not in _SED_COMMAND_BOUNDARIES and script[i] not in _SED_HORIZONTAL_SPACE:
+        if script[i] == flag:
+            return True, i + 1
+        i += 1
+
+    return False, _sed_skip_to_command_boundary(script, i)
+
+
+def _sed_skip_substitute_command(script: str, command_index: int) -> int:
+    return _sed_substitute_has_flag_at(script, command_index, "\0")[1]
+
+
+def _sed_read_file_argument(script: str, command_index: int) -> tuple[str, int]:
+    start = _sed_skip_horizontal_space(script, command_index + 1)
+    line_end = _sed_find_line_end(script, start)
+    return script[start:line_end].strip(), _sed_after_line_end(script, line_end)
+
+
+def _sed_skip_text_command(script: str, command_index: int) -> int:
+    i = command_index + 1
+    while i < len(script) and script[i] in _SED_HORIZONTAL_SPACE:
+        i += 1
+
+    line_end = _sed_find_line_end(script, i)
+    uses_literal_lines = i < len(script) and script[i] == "\\" and _sed_only_horizontal_space(script, i + 1, line_end)
+    i = _sed_after_line_end(script, line_end)
+    if not uses_literal_lines:
+        return i
+
+    while i < len(script):
+        line_start = i
+        line_end = _sed_find_line_end(script, line_start)
+        continues = _sed_line_ends_with_unescaped_backslash(script, line_start, line_end)
+        i = _sed_after_line_end(script, line_end)
+        if not continues:
+            break
+
+    return i
+
+
+def _sed_skip_delimited_command(script: str, command_index: int) -> int:
+    if command_index + 1 >= len(script):
+        return command_index + 1
+
+    delimiter = script[command_index + 1]
+    if delimiter == "\\" or delimiter == "\n":
+        return command_index + 1
+
+    first_end = _skip_to_unescaped_delimiter(script, command_index + 2, delimiter)
+    if first_end is None:
+        return _sed_skip_to_command_boundary(script, command_index + 1)
+
+    second_end = _skip_to_unescaped_delimiter(script, first_end + 1, delimiter)
+    if second_end is None:
+        return _sed_skip_to_command_boundary(script, first_end + 1)
+
+    return second_end + 1
+
+
+def _sed_skip_to_command_boundary(script: str, start: int) -> int:
+    i = start
+    while i < len(script) and script[i] not in _SED_COMMAND_BOUNDARIES:
+        i += 1
+    return i
+
+
+def _sed_skip_to_line_end(script: str, start: int) -> int:
+    return _sed_after_line_end(script, _sed_find_line_end(script, start))
+
+
+def _sed_find_line_end(script: str, start: int) -> int:
+    newline = script.find("\n", start)
+    return len(script) if newline == -1 else newline
+
+
+def _sed_after_line_end(script: str, line_end: int) -> int:
+    if line_end < len(script) and script[line_end] == "\n":
+        return line_end + 1
+    return line_end
+
+
+def _sed_only_horizontal_space(script: str, start: int, end: int) -> bool:
+    return all(char in _SED_HORIZONTAL_SPACE for char in script[start:end])
+
+
+def _sed_line_ends_with_unescaped_backslash(script: str, start: int, end: int) -> bool:
+    count = 0
+    i = end - 1
+    while i >= start and script[i] == "\\":
+        count += 1
+        i -= 1
+    return count % 2 == 1
 
 
 def _skip_to_unescaped_delimiter(text: str, start: int, delimiter: str) -> int | None:

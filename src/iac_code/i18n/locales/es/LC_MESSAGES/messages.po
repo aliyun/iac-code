@@ -146,6 +146,7 @@ msgid "Permission denied."
 msgstr "Permiso denegado."
 
 #: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:266 src/iac_code/agent/agent_tool.py:288
+#: src/iac_code/agent/agent_tool.py:322
 #, python-brace-format
 msgid "Done ({tool_count} tool uses · {token_display} tokens)"
 msgstr ""
@@ -153,16 +154,19 @@ msgstr ""
 " tokens)"
 
 #: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:276 src/iac_code/agent/agent_tool.py:298
+#: src/iac_code/agent/agent_tool.py:332
 msgid "Explore"
 msgstr "Explorar"
 
 #: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:277 src/iac_code/agent/agent_tool.py:299
+#: src/iac_code/agent/agent_tool.py:333
 msgid "Plan"
 msgstr "Plan"
 
 #: src/iac_code/agent/agent_tool.py src/iac_code/agent/agent_tool.py:278 src/iac_code/agent/agent_tool.py:279
 #: src/iac_code/agent/agent_tool.py:280 src/iac_code/agent/agent_tool.py:300 src/iac_code/agent/agent_tool.py:301
-#: src/iac_code/agent/agent_tool.py:302
+#: src/iac_code/agent/agent_tool.py:302 src/iac_code/agent/agent_tool.py:334 src/iac_code/agent/agent_tool.py:335
+#: src/iac_code/agent/agent_tool.py:336
 msgid "Agent"
 msgstr "Agente"
 
@@ -1637,25 +1641,27 @@ msgid "path outside allowed directories: {}"
 msgstr "Ruta fuera de los directorios permitidos: {}"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:125
-#: src/iac_code/tools/bash/permissions.py:135
+#: src/iac_code/tools/bash/permissions.py:135 src/iac_code/tools/bash/permissions.py:137
 #, python-brace-format
 msgid "matched deny rule(s): {}"
 msgstr "Regla(s) de denegación coincidente(s): {}"
 
 #: src/iac_code/services/permissions/pipeline.py:61 src/iac_code/tools/bash/permissions.py
 #: src/iac_code/tools/bash/permissions.py:132 src/iac_code/tools/bash/permissions.py:142
+#: src/iac_code/tools/bash/permissions.py:144
 #, python-brace-format
 msgid "matched ask rule(s): {}"
 msgstr "Regla(s) de consulta coincidente(s): {}"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:154
-#: src/iac_code/tools/bash/permissions.py:171 src/iac_code/tools/bash/permissions.py:220
+#: src/iac_code/tools/bash/permissions.py:171 src/iac_code/tools/bash/permissions.py:185
+#: src/iac_code/tools/bash/permissions.py:220
 #, python-brace-format
 msgid "matched allow rule(s): {}"
 msgstr "Regla(s) de permiso coincidente(s): {}"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:162
-#: src/iac_code/tools/bash/permissions.py:163
+#: src/iac_code/tools/bash/permissions.py:163 src/iac_code/tools/bash/permissions.py:177
 msgid "complex command requires confirmation"
 msgstr "El comando complejo requiere confirmación"
 
@@ -1664,37 +1670,39 @@ msgid "sed in-place edit requires confirmation"
 msgstr "La edición sed in situ requiere confirmación"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:194
+#: src/iac_code/tools/bash/permissions.py:208
 msgid "command failed basic safety checks"
 msgstr "El comando no pasó las comprobaciones básicas de seguridad"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:210
+#: src/iac_code/tools/bash/permissions.py:224
 #, python-brace-format
 msgid "matched deny rule(s) on full command: {}"
 msgstr "Regla(s) de denegación del comando completo: {}"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:220
-#: src/iac_code/tools/bash/permissions.py:227
+#: src/iac_code/tools/bash/permissions.py:227 src/iac_code/tools/bash/permissions.py:234
 msgid "command too complex to analyze"
 msgstr "Comando demasiado complejo para analizar"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:222
-#: src/iac_code/tools/bash/permissions.py:229
+#: src/iac_code/tools/bash/permissions.py:229 src/iac_code/tools/bash/permissions.py:236
 msgid "could not parse command"
 msgstr "No se pudo analizar el comando"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:238
-#: src/iac_code/tools/bash/permissions.py:245
+#: src/iac_code/tools/bash/permissions.py:245 src/iac_code/tools/bash/permissions.py:252
 #, python-brace-format
 msgid "too many subcommands (>{})"
 msgstr "Demasiados subcomandos (>{})"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:251
-#: src/iac_code/tools/bash/permissions.py:258
+#: src/iac_code/tools/bash/permissions.py:258 src/iac_code/tools/bash/permissions.py:265
 msgid "multiple cd commands in compound command"
 msgstr "Múltiples comandos cd en comando compuesto"
 
 #: src/iac_code/tools/bash/permissions.py src/iac_code/tools/bash/permissions.py:264
-#: src/iac_code/tools/bash/permissions.py:271
+#: src/iac_code/tools/bash/permissions.py:271 src/iac_code/tools/bash/permissions.py:278
 msgid "cd combined with git in compound command"
 msgstr "cd combinado con git en comando compuesto"
 
@@ -2792,10 +2800,151 @@ msgstr "La ruta de lectura después de cd requiere confirmación: {}"
 msgid "read path uses shell expansion: {}"
 msgstr "La ruta de lectura usa expansión de shell: {}"
 
-#: src/iac_code/tools/bash/permissions.py:145
+#: src/iac_code/tools/bash/permissions.py:145 src/iac_code/tools/bash/permissions.py:157
 #, python-brace-format
 msgid "dangerous readonly argument requires confirmation: {}"
 msgstr "El argumento peligroso de solo lectura requiere confirmación: {}"
+
+#: src/iac_code/acp/tools.py:76
+msgid "Bash command is required."
+msgstr "Se requiere un comando Bash."
+
+#: src/iac_code/acp/tools.py:106
+#, python-brace-format
+msgid "Command timed out after {timeout} seconds"
+msgstr "El comando agotó el tiempo de espera tras {timeout} segundos"
+
+#: src/iac_code/acp/tools.py:117
+#, python-brace-format
+msgid "Command terminated by signal: {signal}"
+msgstr "El comando terminó por señal: {signal}"
+
+#: src/iac_code/acp/tools.py:123
+#, python-brace-format
+msgid "Command failed with exit code {exit_code}"
+msgstr "El comando falló con código de salida {exit_code}"
+
+#: src/iac_code/agent/agent_tool.py:57
+#, python-brace-format
+msgid "Unknown agent type: {agent_type}"
+msgstr "Tipo de agente desconocido: {agent_type}"
+
+#: src/iac_code/agent/agent_tool.py:70
+#, python-brace-format
+msgid "Running {agent_type} agent"
+msgstr "Ejecutando agente {agent_type}"
+
+#: src/iac_code/agent/agent_tool.py:152
+#, python-brace-format
+msgid ""
+"Launch a sub-agent to handle complex tasks.\n"
+"\n"
+"Available agent types:\n"
+"{agent_list}"
+msgstr ""
+"Ejecuta un subagente para manejar tareas complejas.\n"
+"\n"
+"Tipos de agente disponibles:\n"
+"{agent_list}"
+
+#: src/iac_code/agent/agent_tool.py:164
+msgid "The task for the sub-agent to perform."
+msgstr "La tarea que debe realizar el subagente."
+
+#: src/iac_code/agent/agent_tool.py:168
+msgid "Short (3-5 word) description of the task."
+msgstr "Descripción breve (3-5 palabras) de la tarea."
+
+#: src/iac_code/agent/agent_tool.py:173
+msgid "The type of specialized agent to use."
+msgstr "El tipo de agente especializado que se usará."
+
+#: src/iac_code/agent/agent_tool.py:177
+msgid "Run agent in background, parent continues."
+msgstr "Ejecutar el agente en segundo plano; el proceso principal continúa."
+
+#: src/iac_code/agent/agent_tool.py:191
+#, python-brace-format
+msgid "Unknown agent type: '{agent_type}'"
+msgstr "Tipo de agente desconocido: '{agent_type}'"
+
+#: src/iac_code/agent/agent_tool.py:195
+msgid "Sub-agent task"
+msgstr "Tarea de subagente"
+
+#: src/iac_code/agent/agent_tool.py:206
+#, python-brace-format
+msgid "Background agent launched (task_id: {task_id}, type: {agent_type})"
+msgstr "Agente en segundo plano iniciado (task_id: {task_id}, tipo: {agent_type})"
+
+#: src/iac_code/agent/agent_tool.py:231
+#, python-brace-format
+msgid "Sub-agent failed: {error}"
+msgstr "Subagente falló: {error}"
+
+#: src/iac_code/agent/agent_tool.py:267
+#, python-brace-format
+msgid "Agent completed: {tool_count} tool call"
+msgid_plural "Agent completed: {tool_count} tool calls"
+msgstr[0] "Agente completado: {tool_count} llamada de herramienta"
+msgstr[1] "Agente completado: {tool_count} llamadas de herramienta"
+
+#: src/iac_code/agent/agent_tool.py:279
+msgid "Agent stopped"
+msgstr "Agente detenido"
+
+#: src/iac_code/agent/agent_tool.py:288 src/iac_code/agent/agent_tool.py:296
+#, python-brace-format
+msgid "Agent failed: {error}"
+msgstr "Agente falló: {error}"
+
+#: src/iac_code/agent/agent_tool.py:311
+#, python-brace-format
+msgid "Agent error: {error}"
+msgstr "Error del agente: {error}"
+
+#: src/iac_code/agent/agent_tool.py:341
+#, python-brace-format
+msgid "Running agent: {description}"
+msgstr "Ejecutando agente: {description}"
+
+#: src/iac_code/agent/agent_tool.py:341
+msgid "sub-agent"
+msgstr "subagente"
+
+#: src/iac_code/agent/agent_types.py:55
+msgid "Use for complex, multi-step tasks that require research, code changes, or coordinating multiple operations."
+msgstr ""
+"Úsalo para tareas complejas de varios pasos que requieren investigación, cambios de código o coordinar varias "
+"operaciones."
+
+#: src/iac_code/agent/agent_types.py:65
+msgid "Use to quickly find files, search code, or answer questions about the codebase. Read-only; cannot modify files."
+msgstr ""
+"Úsalo para encontrar archivos rápidamente, buscar en el código o responder preguntas sobre la base de código. Solo "
+"lectura; no puede modificar archivos."
+
+#: src/iac_code/agent/agent_types.py:75
+msgid "Use to plan implementation strategy, review architecture, or design solutions. Read-only, no execution."
+msgstr ""
+"Úsalo para planificar la estrategia de implementación, revisar la arquitectura o diseñar soluciones. Solo lectura, "
+"sin ejecución."
+
+#: src/iac_code/tools/bash/permissions.py:113
+msgid "sed in-place edit"
+msgstr "edición in situ de sed"
+
+#: src/iac_code/tools/bash/permissions.py:115
+msgid "sed script file"
+msgstr "archivo de script sed"
+
+#: src/iac_code/tools/bash/permissions.py:117
+msgid "sed shell execution"
+msgstr "ejecución de shell por sed"
+
+#: src/iac_code/tools/bash/permissions.py:119
+msgid "sed file write"
+msgstr "escritura de archivo por sed"
 
 #~ msgid "toggle preview"
 #~ msgstr "alternar vista previa"
