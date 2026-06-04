@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 from iac_code.i18n import _
-from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
+from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 
 # Default LLM model used when no model is saved in settings
 DEFAULT_MODEL = "qwen3.7-max"
@@ -51,7 +51,8 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def _save_yaml(path: Path, data: dict[str, Any]) -> None:
     """Write *data* to a YAML file, creating parent directories as needed."""
     ensure_private_dir(path.parent)
-    path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+    content = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+    atomic_write_text(path, content)
     ensure_private_file(path)
 
 

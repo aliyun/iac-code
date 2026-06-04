@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -21,6 +22,24 @@ def safe_replace(src: str, dst: str) -> None:
             if attempt == 2:
                 raise
             time.sleep(0.1 * (attempt + 1))
+
+
+def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    """Atomically replace *path* with text content."""
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as file:
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        safe_replace(str(temp_path), str(path))
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def restrict_file_permissions(path: Path, *, directory: bool) -> None:

@@ -46,6 +46,14 @@ class TestFieldExtraction:
         # Decoded value preserves the tail since closing quote is missing
         assert extract_first_json_string_field(chunk, "text") == "hello world wit"
 
+    def test_extract_truncated_preserves_literal_backslash_n_in_fallback(self):
+        chunk = '{"text":"literal \\\\n tail \\'
+        assert extract_first_json_string_field(chunk, "text") == "literal \\n tail \\"
+
+    def test_extract_truncated_decodes_real_newline_escape_in_fallback(self):
+        chunk = '{"text":"line1\\nline2\\'
+        assert extract_first_json_string_field(chunk, "text") == "line1\nline2\\"
+
 
 # ---------------------------------------------------------------------------
 # read_lite_metadata

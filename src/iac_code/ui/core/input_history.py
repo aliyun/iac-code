@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from iac_code.utils.file_security import ensure_private_file
+from iac_code.utils.file_security import atomic_write_text, ensure_private_file
 
 _HISTORY_FORMAT = "iac-code-input-history-v1"
 
@@ -65,10 +65,10 @@ class InputHistory:
 
     def _save(self) -> None:
         """Persist only non-session-only entries to the history file."""
-        with open(self._file, "w", encoding="utf-8") as f:
-            for i, entry in enumerate(self._entries):
-                if i not in self._session_only:
-                    f.write(self._encode_entry(entry) + "\n")
+        lines = [
+            self._encode_entry(entry) + "\n" for i, entry in enumerate(self._entries) if i not in self._session_only
+        ]
+        atomic_write_text(Path(self._file), "".join(lines))
         ensure_private_file(Path(self._file))
 
     # ------------------------------------------------------------------
