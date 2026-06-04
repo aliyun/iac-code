@@ -351,7 +351,9 @@ ToolCallStart (status=in_progress)
 | 选项 ID | 含义 |
 |-----------|---------|
 | `allow_once` | 允许本次调用 |
-| `allow_always` | 允许本会话中该工具的所有后续调用 |
+| `allow_always` | 当工具支持整工具永久允许时，允许本会话中该工具的所有后续调用；`bash` 默认不提供 |
+| `allow_rule:<rules>` | 允许本会话中匹配建议规则的后续调用 |
+| `deny_rule:<rules>` | 拒绝本会话中匹配建议规则的后续调用 |
 | `reject_once` | 拒绝本次调用 |
 | `reject_always` | 拒绝本会话中该工具的所有后续调用 |
 

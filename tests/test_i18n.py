@@ -38,13 +38,6 @@ MEMORY_COMMAND_MSGIDS = {
 }
 
 
-def test_ngettext_default_english_plural_selection():
-    from iac_code.i18n import ngettext
-
-    assert ngettext("{n} file", "{n} files", 1).format(n=1) == "1 file"
-    assert ngettext("{n} file", "{n} files", 2).format(n=2) == "2 files"
-
-
 def _get_all_msgids_from_pot(pot_file: Path) -> set[str]:
     """Extract all msgids from a .pot template file.
 

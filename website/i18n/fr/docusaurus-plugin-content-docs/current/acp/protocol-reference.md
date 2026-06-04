@@ -351,7 +351,9 @@ Le serveur envoie un callback `request_permission` avec :
 | Identifiant d'option | Signification |
 |-----------|---------|
 | `allow_once` | Autoriser cette invocation spécifique |
-| `allow_always` | Autoriser tous les appels futurs de cet outil dans cette session |
+| `allow_always` | Autoriser tous les appels futurs de cet outil dans cette session lorsque l'outil prend en charge l'autorisation globale ; non proposé par défaut pour `bash` |
+| `allow_rule:<rules>` | Autoriser les futurs appels correspondant aux règles suggérées dans cette session |
+| `deny_rule:<rules>` | Refuser les futurs appels correspondant aux règles suggérées dans cette session |
 | `reject_once` | Refuser cette invocation spécifique |
 | `reject_always` | Refuser tous les appels futurs de cet outil dans cette session |
 
