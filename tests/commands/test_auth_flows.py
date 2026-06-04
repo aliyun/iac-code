@@ -461,13 +461,20 @@ class TestCloudAuthFlow:
                 return options.index("China")
             return None
 
+        oauth_clients = []
+
         class FakeOAuthClient:
             def __init__(self, site):
                 self.site = site
+                self.closed = False
+                oauth_clients.append(self)
 
             def exchange_access_token_for_sts(self, access_token):
                 assert access_token == "access-token"
                 return OAuthStsCredentials("tmp-ak", "tmp-sk", "tmp-sts", 1798794000)
+
+            def close(self):
+                self.closed = True
 
         def fake_browser_oauth_flow(site_type, oauth_client=None, cancel_event=None):
             assert site_type == "CN"
@@ -489,6 +496,8 @@ class TestCloudAuthFlow:
         result = _aliyun_credential_flow()
 
         assert result == "Configured: Alibaba Cloud OAuth credentials saved"
+        assert len(oauth_clients) == 1
+        assert oauth_clients[0].closed is True
         credential = saved["credential"]
         assert credential.mode == "OAuth"
         assert credential.region_id == "cn-hangzhou"
@@ -529,13 +538,20 @@ class TestCloudAuthFlow:
                 return options.index("International")
             return None
 
+        oauth_clients = []
+
         class FakeOAuthClient:
             def __init__(self, site):
                 self.site = site
+                self.closed = False
+                oauth_clients.append(self)
 
             def exchange_access_token_for_sts(self, access_token):
                 assert access_token == "access-token"
                 return OAuthStsCredentials("tmp-ak", "tmp-sk", "tmp-sts", 1798794000)
+
+            def close(self):
+                self.closed = True
 
         def fake_browser_oauth_flow(site_type, oauth_client=None, cancel_event=None):
             assert site_type == "INTL"
@@ -556,6 +572,8 @@ class TestCloudAuthFlow:
 
         _aliyun_credential_flow()
 
+        assert len(oauth_clients) == 1
+        assert oauth_clients[0].closed is True
         assert saved["credential"].region_id == "cn-shanghai"
         assert saved["credential"].oauth_site_type == "INTL"
 
@@ -580,6 +598,17 @@ class TestCloudAuthFlow:
                 return options.index("China")
             return None
 
+        oauth_clients = []
+
+        class FakeOAuthClient:
+            def __init__(self, site):
+                self.site = site
+                self.closed = False
+                oauth_clients.append(self)
+
+            def close(self):
+                self.closed = True
+
         def fail_oauth(site_type, oauth_client=None, cancel_event=None):
             assert site_type == "CN"
             assert oauth_client is not None
@@ -587,6 +616,7 @@ class TestCloudAuthFlow:
             raise AliyunOAuthError("No available callback port")
 
         monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeOAuthClient)
         monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.run_browser_oauth_flow", fail_oauth)
         monkeypatch.setattr(
             "iac_code.services.providers.aliyun.AliyunCredentials.save",
@@ -596,6 +626,8 @@ class TestCloudAuthFlow:
         result = _aliyun_credential_flow()
 
         assert result == "Alibaba Cloud OAuth login failed: No available callback port"
+        assert len(oauth_clients) == 1
+        assert oauth_clients[0].closed is True
         assert saved == {}
 
     def test_aliyun_credential_flow_oauth_cancel_returns_to_mode_selection(self, monkeypatch):
@@ -620,15 +652,29 @@ class TestCloudAuthFlow:
                 return options.index("China")
             return None
 
+        oauth_clients = []
+
+        class FakeOAuthClient:
+            def __init__(self, site):
+                self.site = site
+                self.closed = False
+                oauth_clients.append(self)
+
+            def close(self):
+                self.closed = True
+
         def cancel_oauth(site_type, oauth_client=None, cancel_event=None):
             assert site_type == "CN"
             assert cancel_event is not None
             raise AliyunOAuthCancelledError("OAuth login cancelled.")
 
         monkeypatch.setattr("iac_code.commands.auth._select", fake_select)
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeOAuthClient)
         monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.run_browser_oauth_flow", cancel_oauth)
 
         assert _aliyun_credential_flow() is _BACK
+        assert len(oauth_clients) == 1
+        assert oauth_clients[0].closed is True
 
     def test_oauth_escape_cancel_event_uses_cbreak_mode_to_preserve_output_newlines(self, monkeypatch):
         termios = pytest.importorskip("termios")

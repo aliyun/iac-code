@@ -1,3 +1,5 @@
+import pytest
+
 from iac_code.tools.cloud.types import InstanceStatus, ResourceStatus, StackStatus
 
 
@@ -25,6 +27,34 @@ class TestStackStatus:
 
     def test_is_success_failed(self):
         assert self._make("CREATE_FAILED").is_success is False
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            "CREATE_COMPLETE",
+            "UPDATE_COMPLETE",
+            "IMPORT_CREATE_COMPLETE",
+            "IMPORT_UPDATE_COMPLETE",
+            "CHECK_COMPLETE",
+        ],
+    )
+    def test_is_success_for_success_statuses(self, status: str) -> None:
+        assert self._make(status).is_success is True
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            "CREATE_FAILED",
+            "UPDATE_FAILED",
+            "DELETE_COMPLETE",
+            "CREATE_ROLLBACK_COMPLETE",
+            "ROLLBACK_COMPLETE",
+            "IMPORT_CREATE_ROLLBACK_COMPLETE",
+            "IMPORT_UPDATE_ROLLBACK_COMPLETE",
+        ],
+    )
+    def test_is_success_false_for_non_success_statuses(self, status: str) -> None:
+        assert self._make(status).is_success is False
 
 
 class TestResourceStatus:

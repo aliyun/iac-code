@@ -457,6 +457,77 @@ class TestAliyunCredentialsLoadFromAliyunCli:
         assert cred.mode == "RamRoleArn"
         assert cred.ram_role_arn == "acs:ram::123:role/test"
 
+    def test_load_from_aliyun_cli_skips_malformed_profiles_before_default(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config = {
+            "current": "default",
+            "profiles": [
+                {"mode": "AK", "access_key_id": "missing-name"},
+                "not-a-profile",
+                None,
+                {
+                    "name": "default",
+                    "mode": "AK",
+                    "access_key_id": "default-id",
+                    "access_key_secret": "default-secret",
+                    "region_id": "cn-beijing",
+                },
+            ],
+        }
+        config_file.write_text(json.dumps(config))
+
+        cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
+
+        assert cred is not None
+        assert cred.access_key_id == "default-id"
+        assert cred.access_key_secret == "default-secret"
+        assert cred.region_id == "cn-beijing"
+
+    @pytest.mark.parametrize(
+        "profiles",
+        [
+            [{"mode": "AK", "access_key_id": "missing-name"}],
+            ["not-a-profile"],
+            {"default": {"mode": "AK", "access_key_id": "not-a-list"}},
+        ],
+    )
+    def test_load_from_aliyun_cli_returns_none_without_valid_default_profile(self, tmp_path, profiles):
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({"current": "default", "profiles": profiles}))
+
+        cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
+
+        assert cred is None
+
+    @pytest.mark.parametrize(
+        "field_name",
+        [
+            "sts_expiration",
+            "oauth_access_token_expire",
+            "oauth_refresh_token_expire",
+        ],
+    )
+    def test_load_from_aliyun_cli_returns_none_for_malformed_numeric_default_profile(self, tmp_path, field_name):
+        config_file = tmp_path / "config.json"
+        profile = {
+            "name": "default",
+            "mode": "OAuth",
+            "access_key_id": "id",
+            "access_key_secret": "secret",
+            "region_id": "cn-hangzhou",
+            field_name: "not-an-int",
+        }
+        config_file.write_text(json.dumps({"current": "default", "profiles": [profile]}))
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_SECRET", None)
+            os.environ.pop("ALIBABA_CLOUD_REGION_ID", None)
+            os.environ.pop("ALIBABA_CLOUD_SECURITY_TOKEN", None)
+
+            assert AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file)) is None
+            assert AliyunCredentials.load(config_path=str(config_file)) is None
+
 
 class TestAliyunCredentialsLoadFromIacCode:
     def test_load_from_iac_code_config(self, tmp_path):
@@ -870,6 +941,104 @@ class TestAliyunCredentialsOAuthRefresh:
 
         with pytest.raises(AliyunOAuthReloginRequired, match="/auth"):
             AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=object(), now=1000)
+
+    def test_refresh_oauth_closes_internally_created_client(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="access",
+            oauth_refresh_token="refresh",
+            oauth_access_token_expire=2000,
+            sts_expiration=900,
+        )
+        clients = []
+
+        class FakeClient:
+            def __init__(self, site):
+                self.site = site
+                self.closed = False
+                clients.append(self)
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "access"
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+            def close(self):
+                self.closed = True
+
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeClient)
+        monkeypatch.setattr(AliyunCredentials, "save", lambda credential: None)
+
+        AliyunCredentials.refresh_oauth_if_needed(cred, now=1000)
+
+        assert len(clients) == 1
+        assert clients[0].closed is True
+
+    def test_refresh_oauth_leaves_supplied_client_open(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="access",
+            oauth_refresh_token="refresh",
+            oauth_access_token_expire=2000,
+            sts_expiration=900,
+        )
+
+        class FakeClient:
+            closed = False
+
+            def exchange_access_token_for_sts(self, access_token):
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+            def close(self):
+                self.closed = True
+
+        client = FakeClient()
+        monkeypatch.setattr(AliyunCredentials, "save", lambda credential: None)
+
+        AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=client, now=1000)
+
+        assert client.closed is False
+
+    def test_refresh_oauth_uses_falsey_supplied_client_without_closing_it(self, monkeypatch):
+        cred = AliyunCredential(
+            mode="OAuth",
+            oauth_site_type="CN",
+            oauth_access_token="access",
+            oauth_refresh_token="refresh",
+            oauth_access_token_expire=2000,
+            sts_expiration=900,
+        )
+        saved: list[AliyunCredential] = []
+
+        class FalseyClient:
+            closed = False
+            exchanged = False
+
+            def __bool__(self):
+                return False
+
+            def exchange_access_token_for_sts(self, access_token):
+                assert access_token == "access"
+                self.exchanged = True
+                return OAuthStsCredentials("new-ak", "new-sk", "new-sts", 2500)
+
+            def close(self):
+                self.closed = True
+
+        def fail_internal_client(site):
+            raise AssertionError("internal OAuth client should not be constructed")
+
+        client = FalseyClient()
+        monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", fail_internal_client)
+        monkeypatch.setattr(AliyunCredentials, "save", saved.append)
+
+        refreshed = AliyunCredentials.refresh_oauth_if_needed(cred, oauth_client=client, now=1000)
+
+        assert refreshed is cred
+        assert saved == [cred]
+        assert client.exchanged is True
+        assert client.closed is False
 
     def test_refresh_oauth_returns_non_oauth_credentials_without_network(self, monkeypatch):
         cred = AliyunCredential(

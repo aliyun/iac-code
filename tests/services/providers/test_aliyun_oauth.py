@@ -305,6 +305,216 @@ def test_run_browser_oauth_flow_continues_when_browser_open_raises():
     assert token.access_token == "fake-access"
 
 
+def test_run_browser_oauth_flow_closes_internally_created_client_on_success(monkeypatch):
+    clients = []
+
+    class FakeServer:
+        redirect_uri = "http://127.0.0.1:12345/cli/callback"
+
+        def start(self, expected_state: str) -> None:
+            pass
+
+        def wait_for_code(self) -> str:
+            return "auth-code"
+
+        def close(self) -> None:
+            pass
+
+    class FakeClient:
+        def __init__(self, site):
+            self.closed = False
+            clients.append(self)
+
+        def exchange_code_for_token(self, **kwargs) -> OAuthToken:
+            return OAuthToken("fake-access", "fake-refresh", 4600)
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeClient)
+
+    token = run_browser_oauth_flow(
+        "CN",
+        browser_opener=lambda url: True,
+        callback_server_factory=FakeServer,
+        writer=lambda line: None,
+    )
+
+    assert token.access_token == "fake-access"
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+
+@pytest.mark.parametrize("error_cls", [AliyunOAuthError, AliyunOAuthCancelledError])
+def test_run_browser_oauth_flow_closes_internally_created_client_on_error(monkeypatch, error_cls):
+    clients = []
+
+    class FakeServer:
+        redirect_uri = "http://127.0.0.1:12345/cli/callback"
+
+        def start(self, expected_state: str) -> None:
+            pass
+
+        def wait_for_code(self) -> str:
+            raise error_cls("flow failed")
+
+        def close(self) -> None:
+            pass
+
+    class FakeClient:
+        def __init__(self, site):
+            self.closed = False
+            clients.append(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeClient)
+
+    with pytest.raises(error_cls):
+        run_browser_oauth_flow(
+            "CN",
+            browser_opener=lambda url: True,
+            callback_server_factory=FakeServer,
+            writer=lambda line: None,
+        )
+
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+
+def test_run_browser_oauth_flow_closes_internally_created_client_when_server_factory_raises(monkeypatch):
+    clients = []
+
+    class FakeClient:
+        def __init__(self, site):
+            self.closed = False
+            clients.append(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    def failing_server_factory():
+        raise RuntimeError("callback setup failed")
+
+    monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", FakeClient)
+
+    with pytest.raises(RuntimeError, match="callback setup failed"):
+        run_browser_oauth_flow(
+            "CN",
+            callback_server_factory=failing_server_factory,
+            writer=lambda line: None,
+        )
+
+    assert len(clients) == 1
+    assert clients[0].closed is True
+
+
+def test_run_browser_oauth_flow_leaves_injected_client_open_when_server_factory_raises():
+    class FakeClient:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    def failing_server_factory():
+        raise RuntimeError("callback setup failed")
+
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="callback setup failed"):
+        run_browser_oauth_flow(
+            "CN",
+            oauth_client=client,
+            callback_server_factory=failing_server_factory,
+            writer=lambda line: None,
+        )
+
+    assert client.closed is False
+
+
+def test_run_browser_oauth_flow_leaves_injected_client_open():
+    class FakeServer:
+        redirect_uri = "http://127.0.0.1:12345/cli/callback"
+
+        def start(self, expected_state: str) -> None:
+            pass
+
+        def wait_for_code(self) -> str:
+            return "auth-code"
+
+        def close(self) -> None:
+            pass
+
+    class FakeClient:
+        closed = False
+
+        def exchange_code_for_token(self, **kwargs) -> OAuthToken:
+            return OAuthToken("fake-access", "fake-refresh", 4600)
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FakeClient()
+
+    run_browser_oauth_flow(
+        "CN",
+        oauth_client=client,
+        browser_opener=lambda url: True,
+        callback_server_factory=FakeServer,
+        writer=lambda line: None,
+    )
+
+    assert client.closed is False
+
+
+def test_run_browser_oauth_flow_uses_falsey_injected_client_without_closing_it(monkeypatch):
+    class FakeServer:
+        redirect_uri = "http://127.0.0.1:12345/cli/callback"
+
+        def start(self, expected_state: str) -> None:
+            pass
+
+        def wait_for_code(self) -> str:
+            return "auth-code"
+
+        def close(self) -> None:
+            pass
+
+    class FalseyClient:
+        closed = False
+        exchanged = False
+
+        def __bool__(self):
+            return False
+
+        def exchange_code_for_token(self, **kwargs) -> OAuthToken:
+            assert kwargs["code"] == "auth-code"
+            self.exchanged = True
+            return OAuthToken("fake-access", "fake-refresh", 4600)
+
+        def close(self) -> None:
+            self.closed = True
+
+    def fail_internal_client(site):
+        raise AssertionError("internal OAuth client should not be constructed")
+
+    client = FalseyClient()
+    monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.AliyunOAuthClient", fail_internal_client)
+
+    token = run_browser_oauth_flow(
+        "CN",
+        oauth_client=client,
+        browser_opener=lambda url: True,
+        callback_server_factory=FakeServer,
+        writer=lambda line: None,
+    )
+
+    assert token.access_token == "fake-access"
+    assert client.exchanged is True
+    assert client.closed is False
+
+
 def test_parse_sts_exchange_response_accepts_camel_case():
     credentials = parse_sts_exchange_response(
         {
@@ -384,6 +594,56 @@ def test_exchange_code_for_token_posts_authorization_code_form():
         "redirect_uri": ["http://127.0.0.1:12345/cli/callback"],
         "code_verifier": ["fake-verifier"],
     }
+
+
+def test_oauth_client_close_only_closes_internally_owned_http_client():
+    owned_client = AliyunOAuthClient(get_oauth_site("CN"))
+
+    owned_client.close()
+    owned_client.close()
+
+    assert owned_client.http_client.is_closed is True
+
+    external_http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+    try:
+        external_client = AliyunOAuthClient(get_oauth_site("CN"), http_client=external_http_client)
+
+        external_client.close()
+
+        assert external_http_client.is_closed is False
+    finally:
+        external_http_client.close()
+
+
+def test_oauth_client_uses_falsey_injected_http_client_without_closing_it(monkeypatch):
+    class FalseyHttpClient:
+        closed = False
+
+        def __bool__(self):
+            return False
+
+        def close(self) -> None:
+            self.closed = True
+
+    def fail_internal_http_client(*args, **kwargs):
+        raise AssertionError("internal httpx client should not be constructed")
+
+    http_client = FalseyHttpClient()
+    monkeypatch.setattr("iac_code.services.providers.aliyun_oauth.httpx.Client", fail_internal_http_client)
+
+    client = AliyunOAuthClient(get_oauth_site("CN"), http_client=http_client)
+
+    assert client.http_client is http_client
+    client.close()
+    assert http_client.closed is False
+
+
+def test_oauth_client_context_manager_closes_owned_http_client():
+    with AliyunOAuthClient(get_oauth_site("CN")) as client:
+        http_client = client.http_client
+        assert http_client.is_closed is False
+
+    assert http_client.is_closed is True
 
 
 def test_refresh_access_token_preserves_existing_refresh_token_when_response_omits_it():

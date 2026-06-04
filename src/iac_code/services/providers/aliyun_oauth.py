@@ -264,13 +264,15 @@ def run_browser_oauth_flow(
     now: int | None = None,
 ) -> OAuthToken:
     site = get_oauth_site(site_type)
-    client = oauth_client or AliyunOAuthClient(site)
-    server = callback_server_factory() if callback_server_factory is not None else OAuthCallbackServer()
-    state = generate_state()
-    code_verifier = generate_code_verifier()
-    code_challenge = generate_code_challenge(code_verifier)
+    owns_client = oauth_client is None
+    client = AliyunOAuthClient(site) if oauth_client is None else oauth_client
+    server: Any | None = None
 
     try:
+        server = callback_server_factory() if callback_server_factory is not None else OAuthCallbackServer()
+        state = generate_state()
+        code_verifier = generate_code_verifier()
+        code_challenge = generate_code_challenge(code_verifier)
         server.start(state)
         url = build_authorization_url(site, server.redirect_uri, state, code_challenge)
         for line in oauth_browser_login_guidance():
@@ -290,7 +292,10 @@ def run_browser_oauth_flow(
             now=now,
         )
     finally:
-        server.close()
+        if server is not None:
+            server.close()
+        if owns_client:
+            client.close()
 
 
 def oauth_browser_login_guidance() -> list[str]:
@@ -362,7 +367,18 @@ def parse_sts_exchange_response(data: dict[str, Any]) -> OAuthStsCredentials:
 class AliyunOAuthClient:
     def __init__(self, site: AliyunOAuthSite, http_client: httpx.Client | None = None) -> None:
         self.site = site
-        self.http_client = http_client or httpx.Client(timeout=30.0)
+        self._owns_http_client = http_client is None
+        self.http_client = httpx.Client(timeout=30.0) if http_client is None else http_client
+
+    def __enter__(self) -> "AliyunOAuthClient":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._owns_http_client:
+            self.http_client.close()
 
     def exchange_code_for_token(
         self,
