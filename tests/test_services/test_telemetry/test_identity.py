@@ -139,6 +139,63 @@ def test_context_override_prefix_idempotent(settings_path):
         assert identity.get_session_id() == already_prefixed
 
 
+def test_user_id_override_takes_precedence(settings_path):
+    from iac_code.services.telemetry.identity import use_user_id
+
+    identity = Identity(settings_path)
+    original = identity.get_user_id()
+    with use_user_id("custom-user-abc"):
+        assert identity.get_user_id() == "custom-user-abc"
+    assert identity.get_user_id() == original
+
+
+def test_user_id_override_no_prefix_added(settings_path):
+    from iac_code.services.telemetry.identity import use_user_id
+
+    identity = Identity(settings_path)
+    with use_user_id("raw-value-123"):
+        assert identity.get_user_id() == "raw-value-123"
+
+
+def test_user_id_override_rejects_empty_string(settings_path):
+    from iac_code.services.telemetry.identity import use_user_id
+
+    with pytest.raises(ValueError, match="user_id must be a non-empty string"):
+        with use_user_id(""):
+            pass
+
+
+def test_user_id_override_isolated_between_async_tasks(settings_path):
+    import asyncio
+
+    from iac_code.services.telemetry.identity import use_user_id
+
+    identity = Identity(settings_path)
+
+    async def under_override(uid: str, started: asyncio.Event, release: asyncio.Event) -> str:
+        with use_user_id(uid):
+            started.set()
+            await release.wait()
+            return identity.get_user_id()
+
+    async def main() -> tuple[str, str, str]:
+        started_a = asyncio.Event()
+        started_b = asyncio.Event()
+        release = asyncio.Event()
+        task_a = asyncio.create_task(under_override("user-a", started_a, release))
+        task_b = asyncio.create_task(under_override("user-b", started_b, release))
+        await started_a.wait()
+        await started_b.wait()
+        outside = identity.get_user_id()
+        release.set()
+        return outside, await task_a, await task_b
+
+    outside, a, b = asyncio.run(main())
+    assert outside.startswith(USER_ID_PREFIX)
+    assert a == "user-a"
+    assert b == "user-b"
+
+
 def test_context_override_isolated_between_async_tasks(settings_path):
     import asyncio
 
