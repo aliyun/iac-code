@@ -10,6 +10,7 @@ is re-rendered on toggle.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import os
 import sys
@@ -42,6 +43,7 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
+    QueuedInputSubmittedEvent,
     StackInstancesProgressEvent,
     StackProgressEvent,
     StreamEvent,
@@ -57,6 +59,7 @@ from iac_code.types.stream_events import (
     Usage,
 )
 from iac_code.ui.components.select import OptionType, Select, SelectLayout, TextOption
+from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.spinner import ShimmerSpinner
 from iac_code.utils.json_utils import extract_partial_string_fields
 
@@ -190,6 +193,91 @@ class RenderedTurn:
     text: str = ""  # For user turns, the raw input text
 
 
+@dataclass
+class StreamingOutputResult:
+    """Result from one streamed assistant turn."""
+
+    elapsed: float
+    queued_inputs: list[str] = field(default_factory=list)
+    draft_input: str = ""
+    interrupted: bool = False
+
+
+class StreamingInputBuffer:
+    """Minimal line buffer used while an assistant response is streaming."""
+
+    def __init__(self) -> None:
+        self._chars: list[str] = []
+        self._queued_inputs: list[str] = []
+        self.interrupted = False
+
+    @property
+    def text(self) -> str:
+        return "".join(self._chars)
+
+    @property
+    def queued_inputs(self) -> list[str]:
+        return list(self._queued_inputs)
+
+    def drain_queued_inputs(self, predicate: Callable[[str], bool] | None = None) -> list[str]:
+        """Remove and return queued inputs matching *predicate*.
+
+        Non-matching inputs stay queued so slash/local commands can be handled by
+        the REPL after the active assistant turn exits.
+        """
+        if predicate is None:
+            drained = list(self._queued_inputs)
+            self._queued_inputs.clear()
+            return drained
+
+        drained: list[str] = []
+        remaining: list[str] = []
+        for value in self._queued_inputs:
+            if predicate(value):
+                drained.append(value)
+            else:
+                remaining.append(value)
+        self._queued_inputs = remaining
+        return drained
+
+    def handle_key(self, event: KeyEvent) -> str | None:
+        """Apply a key event.
+
+        Returns ``"queued"``, ``"interrupt"``, ``"changed"``, or ``None``.
+        """
+        if event.key == "escape":
+            self._queue_current()
+            self.interrupted = True
+            return "interrupt"
+
+        if event.key == "enter":
+            return "queued" if self._queue_current() else None
+
+        if event.key == "backspace":
+            if self._chars:
+                self._chars.pop()
+                return "changed"
+            return None
+
+        if event.ctrl:
+            return None
+
+        char = event.char
+        if char and char.isprintable():
+            self._chars.append(char)
+            return "changed"
+        return None
+
+    def _queue_current(self) -> bool:
+        text = self.text
+        if not text.strip():
+            self._chars.clear()
+            return False
+        self._queued_inputs.append(text)
+        self._chars.clear()
+        return True
+
+
 class Renderer:
     """Bridge between stream events and terminal output."""
 
@@ -215,6 +303,7 @@ class Renderer:
         # shared LRU cache at AppState.always_allow_rules. None in pure-unit
         # contexts where no session state is wired up.
         self._app_state_store = app_state_store
+        self._streaming_input: StreamingInputBuffer | None = None
 
     # ── Footer (shown inside Live during streaming) ─────────────────
 
@@ -222,11 +311,30 @@ class Renderer:
         """Build the persistent footer: separator + disabled input + status."""
         status_text = self._status_callback() if self._status_callback else ""
         status = Text(status_text, style="dim", justify="right")
-        return Group(
-            Rule(style="dim"),
-            Text("❯ ", style="dim"),
-            status,
-        )
+        parts: list[Any] = [Rule(style="dim")]
+
+        if self._streaming_input is not None and self._streaming_input.queued_inputs:
+            header = Text()
+            header.append(_("Messages to be submitted after next tool call"))
+            header.append(" (", style="dim")
+            header.append(_("press esc to interrupt and send immediately"), style="dim")
+            header.append(")", style="dim")
+            parts.append(header)
+            for queued_input in self._streaming_input.queued_inputs:
+                line = Text()
+                line.append("↳ ", style="dim")
+                line.append(queued_input, style="dim")
+                parts.append(line)
+
+        prompt = Text()
+        if self._streaming_input is not None:
+            prompt.append("❯ ", style="bold cyan")
+            if self._streaming_input.text:
+                prompt.append(self._streaming_input.text)
+        else:
+            prompt.append("❯ ", style="dim")
+        parts.extend([prompt, status])
+        return Group(*parts)
 
     def _with_footer(self, content) -> Group:
         """Wrap content with the persistent footer below it."""
@@ -727,7 +835,8 @@ class Renderer:
         self,
         events: AsyncGenerator[StreamEvent, None],
         permission_handler: Callable[[PermissionRequestEvent], Awaitable[bool]],
-    ) -> float:
+        streaming_input: StreamingInputBuffer | None = None,
+    ) -> StreamingOutputResult:
         """Consume the event stream and render everything."""
         self._last_streaming_errors = []
         self.console.print()  # blank line between user input and agent response
@@ -741,6 +850,10 @@ class Renderer:
         thinking_start_time: float | None = None
         segments: list[_Segment] = []
         turn_start_time: float = time.monotonic()
+        input_buffer = streaming_input or StreamingInputBuffer()
+        previous_streaming_input = self._streaming_input
+        self._streaming_input = input_buffer
+        streaming_task = asyncio.current_task()
 
         # Save terminal settings before any background task modifies them
         # so we can unconditionally restore on exit.
@@ -765,6 +878,26 @@ class Renderer:
                     segments, spinner, text_buffer, task_spinner, thinking_buffer=thinking_buffer
                 )
                 live.update(self._with_footer(content))
+
+        def _request_interrupt() -> None:
+            if streaming_task is not None and not streaming_task.done():
+                streaming_task.cancel()
+
+        def _new_key_task() -> asyncio.Task:
+            if live is None:
+                raise RuntimeError("Cannot listen for streaming input before Live starts")
+            return asyncio.create_task(
+                self._key_listener(
+                    live,
+                    segments,
+                    spinner,
+                    lambda: text_buffer,
+                    _rebuild_after_transcript,
+                    streaming_input=input_buffer,
+                    on_input_changed=_update_live,
+                    on_interrupt=_request_interrupt,
+                )
+            )
 
         def _ensure_live():
             nonlocal live
@@ -860,15 +993,7 @@ class Renderer:
                 # would swallow Ctrl+O until the next MessageStart or
                 # ToolUseStart rebuilt it.
                 if live is not None and (key_task is None or key_task.done()):
-                    key_task = asyncio.create_task(
-                        self._key_listener(
-                            live,
-                            segments,
-                            spinner,
-                            lambda: text_buffer,
-                            _rebuild_after_transcript,
-                        )
-                    )
+                    key_task = _new_key_task()
 
                 # ── Message start ───────────────────────────────
                 if isinstance(event, MessageStartEvent):
@@ -889,15 +1014,7 @@ class Renderer:
                             )
                         )
                     if key_task is None or key_task.done():
-                        key_task = asyncio.create_task(
-                            self._key_listener(
-                                live,
-                                segments,
-                                spinner,
-                                lambda: text_buffer,
-                                _rebuild_after_transcript,
-                            )
-                        )
+                        key_task = _new_key_task()
 
                 # ── Thinking delta ─────────────────────────────
                 elif isinstance(event, ThinkingDeltaEvent):
@@ -960,15 +1077,7 @@ class Renderer:
                                 )
                             )
                             if key_task is None or key_task.done():
-                                key_task = asyncio.create_task(
-                                    self._key_listener(
-                                        live,
-                                        segments,
-                                        spinner,
-                                        lambda: text_buffer,
-                                        _rebuild_after_transcript,
-                                    )
-                                )
+                                key_task = _new_key_task()
 
                     _update_live()
 
@@ -1018,15 +1127,7 @@ class Renderer:
                         )
                     )
                     if key_task is None or key_task.done():
-                        key_task = asyncio.create_task(
-                            self._key_listener(
-                                live,
-                                segments,
-                                spinner,
-                                lambda: text_buffer,
-                                _rebuild_after_transcript,
-                            )
-                        )
+                        key_task = _new_key_task()
 
                 # ── Tool input delta ────────────────────────────
                 elif isinstance(event, ToolInputDeltaEvent):
@@ -1213,6 +1314,26 @@ class Renderer:
                         notice.append(f" (error: {event.error})", style="red")
                     self.console.print(notice)
 
+                # ── Queued user input submitted mid-turn ─────────────
+                elif isinstance(event, QueuedInputSubmittedEvent):
+                    await self._stop_refresh(refresh_task)
+                    refresh_task = None
+                    await self._stop_refresh(key_task)
+                    key_task = None
+                    if live:
+                        self._quiet_stop_live(live)
+                        live = None
+                    spinner = None
+                    if segments or text_buffer:
+                        self._print_segments_to_scrollback(segments, text_buffer)
+                        segments.clear()
+                        text_buffer = ""
+                        tool_records.clear()
+                    self._text_flushed = False
+                    self.print_user_message(event.text)
+                    self.record_user_turn(event.text)
+                    self.console.print()
+
                 # ── Error ──────────────────────────────────────
                 elif isinstance(event, ErrorEvent):
                     self._last_streaming_errors.append(event.error)
@@ -1259,6 +1380,7 @@ class Renderer:
                     # DON'T break — there may be more events after tool execution
 
         except (asyncio.CancelledError, KeyboardInterrupt):
+            input_buffer.interrupted = True
             self.console.print(Text(_("Operation cancelled."), style="yellow"))
         except Exception as e:
             error_msg = str(e)
@@ -1305,8 +1427,14 @@ class Renderer:
                 self.console.print()  # blank line before completion
                 verb = random_completion_verb()
                 self.console.print(Text(f"✻ {verb} {_format_elapsed(elapsed)}", style="dim italic"))
+            self._streaming_input = previous_streaming_input
 
-        return elapsed
+        return StreamingOutputResult(
+            elapsed=elapsed,
+            queued_inputs=input_buffer.queued_inputs,
+            draft_input=input_buffer.text,
+            interrupted=input_buffer.interrupted,
+        )
 
     # ── Permission prompting ────────────────────────────────────────
 
@@ -1584,6 +1712,60 @@ class Renderer:
         except asyncio.CancelledError:
             pass
 
+    @staticmethod
+    async def _read_streaming_key_event(first_byte: int, queue: asyncio.Queue[int]) -> KeyEvent | None:
+        """Convert bytes from the streaming key listener into a small KeyEvent subset."""
+        if first_byte == 0x1B:
+            with contextlib.suppress(asyncio.TimeoutError):
+                second = await asyncio.wait_for(queue.get(), timeout=0.05)
+                if second == ord("["):
+                    # Ignore CSI sequences (arrows, bracketed-paste markers, focus events).
+                    for _ in range(16):
+                        with contextlib.suppress(asyncio.TimeoutError):
+                            b = await asyncio.wait_for(queue.get(), timeout=0.01)
+                            if 0x40 <= b <= 0x7E:
+                                break
+                            continue
+                        break
+                    return None
+                if 32 <= second <= 126:
+                    char = chr(second)
+                    return KeyEvent(key=char, char=char, alt=True)
+                return None
+            return KeyEvent(key="escape", char="\x1b")
+
+        if first_byte in (10, 13):
+            return KeyEvent(key="enter", char=chr(first_byte))
+        if first_byte == 9:
+            return KeyEvent(key="tab", char="\t")
+        if first_byte in (8, 127):
+            return KeyEvent(key="backspace", char=chr(first_byte))
+        if 1 <= first_byte <= 26:
+            letter = chr(ord("a") + first_byte - 1)
+            return KeyEvent(key=letter, char=chr(first_byte), ctrl=True)
+        if 32 <= first_byte <= 126:
+            char = chr(first_byte)
+            return KeyEvent(key=char, char=char, shift=char.isupper())
+        if first_byte >= 0x80:
+            if first_byte < 0xC0:
+                return None
+            if first_byte < 0xE0:
+                remaining = 1
+            elif first_byte < 0xF0:
+                remaining = 2
+            else:
+                remaining = 3
+            data = bytes([first_byte])
+            for _ in range(remaining):
+                try:
+                    data += bytes([await asyncio.wait_for(queue.get(), timeout=0.05)])
+                except asyncio.TimeoutError:
+                    return None
+            with contextlib.suppress(UnicodeDecodeError):
+                char = data.decode("utf-8")
+                return KeyEvent(key=char, char=char)
+        return None
+
     async def _key_listener(
         self,
         live: Live,
@@ -1591,8 +1773,12 @@ class Renderer:
         spinner: ShimmerSpinner | None,
         get_text: Callable[[], str],
         on_transcript_done: Callable[[], Awaitable[None]] | None = None,
+        *,
+        streaming_input: StreamingInputBuffer | None = None,
+        on_input_changed: Callable[[], None] | None = None,
+        on_interrupt: Callable[[], None] | None = None,
     ) -> None:
-        """Background task: listen for Ctrl+O to toggle verbose mode.
+        """Background task: listen for streaming keys.
 
         Uses loop.add_reader for proper asyncio integration on Unix (clears
         IEXTEN to prevent macOS from intercepting Ctrl+O as VDISCARD).
@@ -1644,10 +1830,24 @@ class Renderer:
             show_transcript_after = False
             while True:
                 ch = await queue.get()
-                if ch == 0x0F:  # Ctrl+O — break out and open transcript view
+                event = await self._read_streaming_key_event(ch, queue)
+                if event is None:
+                    continue
+                if event.ctrl and event.key == "o":  # Ctrl+O — break out and open transcript view
                     show_transcript_after = True
                     break
-                if ch == 0x1B:  # Escape — interrupt
+                if streaming_input is None:
+                    if event.key == "escape":
+                        break
+                    continue
+                outcome = streaming_input.handle_key(event)
+                if outcome is None:
+                    continue
+                if on_input_changed is not None:
+                    on_input_changed()
+                if outcome == "interrupt":
+                    if on_interrupt is not None:
+                        on_interrupt()
                     break
         except asyncio.CancelledError:
             return

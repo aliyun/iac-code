@@ -4,6 +4,7 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
+    QueuedInputSubmittedEvent,
     StreamEvent,
     TaskNotificationEvent,
     TextDeltaEvent,
@@ -76,6 +77,11 @@ class TestStreamEventTypes:
         )
         assert event.type == "task_notification"
 
+    def test_queued_input_submitted(self):
+        event = QueuedInputSubmittedEvent(text="new instruction")
+        assert event.type == "queued_input_submitted"
+        assert event.text == "new instruction"
+
     def test_stream_event_union_covers_all(self):
         events: list[StreamEvent] = [
             MessageStartEvent(message_id="m1"),
@@ -91,5 +97,6 @@ class TestStreamEventTypes:
             PermissionRequestEvent(tool_name="bash", tool_input={}, tool_use_id="t1"),
             CompactionEvent(),
             TaskNotificationEvent(task_id="t1", description="x", status="completed"),
+            QueuedInputSubmittedEvent(text="queued"),
         ]
-        assert len(events) == 13
+        assert len(events) == 14

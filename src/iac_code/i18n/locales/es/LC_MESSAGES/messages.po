@@ -2399,6 +2399,14 @@ msgid "Log file"
 msgstr "Archivo de registro"
 
 #: src/iac_code/ui/renderer.py
+msgid "Messages to be submitted after next tool call"
+msgstr "Mensajes que se enviarán después de la próxima llamada a herramienta"
+
+#: src/iac_code/ui/renderer.py
+msgid "press esc to interrupt and send immediately"
+msgstr "pulsa esc para interrumpir y enviar inmediatamente"
+
+#: src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "Razonamiento durante {seconds:.1f} s"

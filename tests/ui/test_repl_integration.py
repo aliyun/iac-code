@@ -219,6 +219,52 @@ async def test_run_once_routes_normal_chat_unchanged():
 
 
 @pytest.mark.asyncio
+async def test_handle_chat_returns_queued_inputs_from_streaming_renderer():
+    from iac_code.ui.renderer import StreamingOutputResult
+    from iac_code.ui.repl import InlineREPL
+
+    async def events():
+        if False:
+            yield None
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = SimpleNamespace(set_state=Mock())
+    repl.renderer = SimpleNamespace(
+        record_user_turn=Mock(),
+        run_streaming_output=AsyncMock(return_value=StreamingOutputResult(elapsed=0.2, queued_inputs=["next turn"])),
+        prompt_permission=AsyncMock(),
+        _last_streaming_errors=[],
+    )
+    repl._agent_loop = SimpleNamespace(
+        run_streaming=Mock(return_value=events()),
+        stamp_last_turn_elapsed=Mock(),
+        context_manager=SimpleNamespace(get_messages=Mock(return_value=[])),
+    )
+    repl._streaming_error_log = []
+
+    queued_inputs = await repl._handle_chat("first turn")
+
+    assert queued_inputs == ["next turn"]
+    args, kwargs = repl._agent_loop.run_streaming.call_args
+    assert args == ("first turn",)
+    assert callable(kwargs["queued_input_provider"])
+    _, renderer_kwargs = repl.renderer.run_streaming_output.call_args
+    assert renderer_kwargs["streaming_input"] is not None
+    repl.renderer.record_user_turn.assert_called_once_with("first turn")
+
+
+def test_normalize_streaming_output_result_includes_draft_input():
+    from iac_code.ui.renderer import StreamingOutputResult
+    from iac_code.ui.repl import InlineREPL
+
+    result = InlineREPL._normalize_streaming_output_result(
+        StreamingOutputResult(elapsed=0.2, queued_inputs=["next"], draft_input="half typed")
+    )
+
+    assert result == (0.2, ["next"], "half typed")
+
+
+@pytest.mark.asyncio
 async def test_handle_command_reports_disabled_skill():
     from iac_code.ui.repl import InlineREPL
 

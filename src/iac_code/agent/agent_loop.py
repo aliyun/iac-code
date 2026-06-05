@@ -6,7 +6,7 @@ import asyncio
 import os
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -23,6 +23,7 @@ from iac_code.types.stream_events import (
     CompactionEvent,
     MessageEndEvent,
     PermissionRequestEvent,
+    QueuedInputSubmittedEvent,
     StackInstancesProgressEvent,
     StackProgressEvent,
     StreamEvent,
@@ -186,7 +187,11 @@ class AgentLoop:
                 final_text += event.text
         return final_text
 
-    async def run_streaming(self, user_input: str | list[ContentBlock]) -> AsyncGenerator[StreamEvent, None]:
+    async def run_streaming(
+        self,
+        user_input: str | list[ContentBlock],
+        queued_input_provider: Callable[[], list[str]] | None = None,
+    ) -> AsyncGenerator[StreamEvent, None]:
         """Streaming execution yielding fine-grained StreamEvents.
 
         Flow:
@@ -256,7 +261,10 @@ class AgentLoop:
                         git_branch=self._current_git_branch,
                     )
                 try:
-                    async for event in self._run_streaming_inner(user_input):
+                    async for event in self._run_streaming_inner(
+                        user_input,
+                        queued_input_provider=queued_input_provider,
+                    ):
                         if isinstance(event, TextDeltaEvent) and not first_token_received:
                             first_token_received = True
                             ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
@@ -280,7 +288,11 @@ class AgentLoop:
                         serialize_output_messages("".join(final_text_chunks), final_stop_reason),
                     )
 
-    async def _run_streaming_inner(self, user_input: str | list[ContentBlock]) -> AsyncGenerator[StreamEvent, None]:
+    async def _run_streaming_inner(
+        self,
+        user_input: str | list[ContentBlock],
+        queued_input_provider: Callable[[], list[str]] | None = None,
+    ) -> AsyncGenerator[StreamEvent, None]:
         """Inner streaming loop (called from run_streaming inside the ENTRY span)."""
         from iac_code.services.telemetry import start_span
         from iac_code.services.telemetry.names import GenAiAttr, GenAiOperationName, GenAiSpanKind, Spans
@@ -460,8 +472,13 @@ class AgentLoop:
 
                             denied_content: list[ContentBlock] = list(denied_blocks)
                             self._session_storage.append(
-                                self._cwd, self._session_id, Message(role="user", content=denied_content)
+                                self._cwd,
+                                self._session_id,
+                                Message(role="user", content=denied_content),
+                                git_branch=self._current_git_branch,
                             )
+                        async for event in self._submit_queued_inputs_after_tool_call(queued_input_provider):
+                            yield event
                     continue
 
                 requests = allowed_requests
@@ -558,8 +575,34 @@ class AgentLoop:
                             self.context_manager.add_raw_message(msg)
                     if result.context_modifier is not None:
                         self._apply_context_modifier(result.context_modifier)
+
+                async for event in self._submit_queued_inputs_after_tool_call(queued_input_provider):
+                    yield event
         else:
             yield MessageEndEvent(stop_reason="max_turns", usage=Usage())
+
+    async def _submit_queued_inputs_after_tool_call(
+        self,
+        queued_input_provider: Callable[[], list[str]] | None,
+    ) -> AsyncGenerator[QueuedInputSubmittedEvent, None]:
+        if queued_input_provider is None:
+            return
+
+        queued_inputs = queued_input_provider()
+        for raw_input in queued_inputs:
+            text = raw_input.strip()
+            if not text:
+                continue
+            await self._apply_auto_triggers(text)
+            message = self.context_manager.add_user_message(text)
+            if self._session_storage:
+                self._session_storage.append(
+                    self._cwd,
+                    self._session_id,
+                    message,
+                    git_branch=self._current_git_branch,
+                )
+            yield QueuedInputSubmittedEvent(text=text)
 
     async def _apply_auto_triggers(self, user_input: str | list[ContentBlock]) -> None:
         if not self._auto_trigger_skills:

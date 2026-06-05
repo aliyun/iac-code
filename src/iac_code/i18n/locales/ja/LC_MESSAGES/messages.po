@@ -2333,6 +2333,14 @@ msgid "Log file"
 msgstr "ログファイル"
 
 #: src/iac_code/ui/renderer.py
+msgid "Messages to be submitted after next tool call"
+msgstr "次のツール呼び出し後に送信されるメッセージ"
+
+#: src/iac_code/ui/renderer.py
+msgid "press esc to interrupt and send immediately"
+msgstr "esc で中断してすぐに送信"
+
+#: src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "{seconds:.1f} 秒考えました"
