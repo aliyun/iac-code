@@ -52,7 +52,7 @@ from iac_code.state.app_state import AppState
 from iac_code.tasks.notification_queue import NotificationQueue
 from iac_code.tasks.task_state import TaskManager
 from iac_code.tools.base import ToolRegistry
-from iac_code.ui.banner import render_update_notice, render_update_prompt_header, render_welcome_banner
+from iac_code.ui.banner import render_update_prompt_header, render_welcome_banner
 from iac_code.ui.components.select import Select, SelectLayout, TextOption
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.ui.core.prompt_input import PromptInput, PromptInputResult
@@ -339,10 +339,8 @@ class InlineREPL:
         # Capture session start time for duration calculation
         self._started_monotonic = time.monotonic()
 
-        startup_update = self._handle_startup_update()
+        self._handle_startup_update()
         state = self.store.get_state()
-        if startup_update is not None:
-            self.console.print(render_update_notice(startup_update))
         self.console.print(
             render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
         )
