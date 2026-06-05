@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import uuid
@@ -27,7 +28,7 @@ from iac_code.a2a.types import (
 )
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.session_storage import SessionStorage
-from iac_code.services.telemetry import use_session_id
+from iac_code.services.telemetry import use_session_id, use_user_id
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -87,6 +88,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 getattr(context, "message", None), "metadata", None
             )
             cwd = self._resolve_cwd(metadata)
+            user_id = self._resolve_user_id(metadata)
             prompt = self._prompt_from_context(context, cwd=cwd)
         except Exception as exc:
             if _is_retryable_executor_error(exc):
@@ -222,7 +224,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                     context_id=context_id,
                     state=TaskState.TASK_STATE_WORKING,
                 )
-                with use_session_id(ctx.session_id):
+                user_id_ctx = use_user_id(user_id) if user_id else contextlib.nullcontext()
+                with use_session_id(ctx.session_id), user_id_ctx:
                     async for event in runtime.agent_loop.run_streaming(prompt):
                         text_chunk = await publish_stream_event(
                             event_queue,
@@ -347,6 +350,19 @@ class IacCodeA2AExecutor(AgentExecutor):
         else:
             resolved_cwd.mkdir(parents=True, exist_ok=True)
         return str(resolved_cwd)
+
+    def _resolve_user_id(self, metadata: Any | None) -> str | None:
+        if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+            metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+        if not isinstance(metadata, Mapping):
+            return None
+        raw_iac_meta = metadata.get("iac_code")
+        if not isinstance(raw_iac_meta, Mapping):
+            return None
+        raw_user_id = raw_iac_meta.get("user_id")
+        if isinstance(raw_user_id, str) and raw_user_id.strip():
+            return raw_user_id.strip()
+        return None
 
     def _prompt_from_context(self, context: RequestContext, *, cwd: str) -> str:
         message = getattr(context, "message", None)

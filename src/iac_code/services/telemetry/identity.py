@@ -31,6 +31,13 @@ _session_id_override: contextvars.ContextVar[str | None] = contextvars.ContextVa
     "iac_code_telemetry_session_id_override", default=None
 )
 
+# Per-async-context override for user id. Set via use_user_id; when present,
+# Identity.get_user_id returns this instead of the process-level value.
+# Enables a2a servers to report per-task user ids in telemetry.
+_user_id_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "iac_code_telemetry_user_id_override", default=None
+)
+
 
 @contextmanager
 def use_session_id(session_id: str) -> Iterator[None]:
@@ -43,6 +50,18 @@ def use_session_id(session_id: str) -> Iterator[None]:
         yield
     finally:
         _session_id_override.reset(token)
+
+
+@contextmanager
+def use_user_id(user_id: str) -> Iterator[None]:
+    """Override the telemetry user id for the current async context."""
+    if not user_id:
+        raise ValueError("user_id must be a non-empty string")
+    token = _user_id_override.set(user_id)
+    try:
+        yield
+    finally:
+        _user_id_override.reset(token)
 
 
 class Identity:
@@ -59,7 +78,14 @@ class Identity:
         self._was_first_run = False
 
     def get_user_id(self) -> str:
-        """Return the persistent user.id; generate + persist on first miss."""
+        """Return the persistent user.id; generate + persist on first miss.
+
+        Honors an active ``use_user_id`` override so a2a servers can report
+        per-task user ids in telemetry without mutating process state.
+        """
+        override = _user_id_override.get()
+        if override is not None:
+            return override
         if self._user_id is not None:
             return self._user_id
         settings = _load_yaml(self._settings_path)

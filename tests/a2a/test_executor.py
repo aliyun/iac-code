@@ -759,3 +759,110 @@ async def test_executor_swallows_flush_errors(monkeypatch: pytest.MonkeyPatch, t
         FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
         FakeEventQueue(),
     )
+
+
+class TestResolveUserId:
+    def _make_executor(self) -> IacCodeA2AExecutor:
+        store = A2ATaskStore(metrics=NoOpA2AMetrics())
+        return IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    def test_extracts_user_id_from_iac_code_metadata(self) -> None:
+        executor = self._make_executor()
+        result = executor._resolve_user_id({"iac_code": {"user_id": "custom-user-123"}})
+        assert result == "custom-user-123"
+
+    def test_returns_none_when_no_metadata(self) -> None:
+        executor = self._make_executor()
+        assert executor._resolve_user_id(None) is None
+
+    def test_returns_none_when_empty_metadata(self) -> None:
+        executor = self._make_executor()
+        assert executor._resolve_user_id({}) is None
+
+    def test_returns_none_when_no_iac_code_key(self) -> None:
+        executor = self._make_executor()
+        assert executor._resolve_user_id({"other": "value"}) is None
+
+    def test_returns_none_when_no_user_id_key(self) -> None:
+        executor = self._make_executor()
+        assert executor._resolve_user_id({"iac_code": {"cwd": "/tmp"}}) is None
+
+    def test_returns_none_for_empty_string(self) -> None:
+        executor = self._make_executor()
+        assert executor._resolve_user_id({"iac_code": {"user_id": ""}}) is None
+
+    def test_returns_none_for_whitespace_only(self) -> None:
+        executor = self._make_executor()
+        assert executor._resolve_user_id({"iac_code": {"user_id": "   "}}) is None
+
+    def test_strips_whitespace(self) -> None:
+        executor = self._make_executor()
+        result = executor._resolve_user_id({"iac_code": {"user_id": "  user-abc  "}})
+        assert result == "user-abc"
+
+    def test_passes_through_non_prefixed_value(self) -> None:
+        executor = self._make_executor()
+        result = executor._resolve_user_id({"iac_code": {"user_id": "raw-value"}})
+        assert result == "raw-value"
+
+    def test_returns_none_for_non_string_value(self) -> None:
+        executor = self._make_executor()
+        assert executor._resolve_user_id({"iac_code": {"user_id": 12345}}) is None
+
+
+@pytest.mark.asyncio
+async def test_executor_applies_user_id_to_telemetry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from iac_code.services.telemetry.identity import _user_id_override
+
+    captured_user_ids: list[str | None] = []
+
+    original_run_streaming = FakeAgentLoop.run_streaming
+
+    async def capturing_run_streaming(self, prompt):
+        captured_user_ids.append(_user_id_override.get())
+        async for event in original_run_streaming(self, prompt):
+            yield event
+
+    monkeypatch.setattr(FakeAgentLoop, "run_streaming", capturing_run_streaming)
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="sess-uid")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path), "user_id": "client-user-xyz"}})
+
+    await executor.execute(context, queue)
+
+    assert captured_user_ids == ["client-user-xyz"]
+
+
+@pytest.mark.asyncio
+async def test_executor_no_user_id_override_when_not_specified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from iac_code.services.telemetry.identity import _user_id_override
+
+    captured_user_ids: list[str | None] = []
+
+    original_run_streaming = FakeAgentLoop.run_streaming
+
+    async def capturing_run_streaming(self, prompt):
+        captured_user_ids.append(_user_id_override.get())
+        async for event in original_run_streaming(self, prompt):
+            yield event
+
+    monkeypatch.setattr(FakeAgentLoop, "run_streaming", capturing_run_streaming)
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="sess-no-uid")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
+
+    await executor.execute(context, queue)
+
+    assert captured_user_ids == [None]
