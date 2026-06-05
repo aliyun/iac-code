@@ -979,3 +979,35 @@ def test_run_reads_pending_update_then_renders_banner_then_starts_background(moc
         "render_welcome_banner",
         "start_background_update_check",
     ]
+
+
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_run_does_not_render_second_update_notice_after_startup_prompt(mock_mm, mock_ss, mock_pm):
+    import asyncio
+    from io import StringIO
+    from unittest.mock import AsyncMock
+
+    from rich.console import Console
+    from rich.text import Text
+
+    from iac_code.ui.repl import ExitREPLError, InlineREPL
+
+    update = make_pending_update()
+    repl = InlineREPL(model="test-model")
+    output = StringIO()
+    repl.console = Console(file=output, force_terminal=False, width=120)
+    repl._prompt_input.get_input = AsyncMock(side_effect=ExitREPLError())
+
+    with (
+        patch("iac_code.ui.repl.get_pending_update", return_value=update),
+        patch("iac_code.ui.repl.render_welcome_banner", return_value=Text("welcome")),
+        patch("iac_code.ui.repl.Select") as select,
+        patch("iac_code.ui.repl.start_background_housekeeping"),
+        patch("iac_code.ui.repl.start_background_update_check"),
+    ):
+        select.return_value.run.return_value = "skip"
+        asyncio.run(repl.run())
+
+    assert output.getvalue().count("Update available!") == 1
