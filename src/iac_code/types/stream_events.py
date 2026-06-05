@@ -154,6 +154,14 @@ class TaskNotificationEvent:
 
 
 @dataclass
+class QueuedInputSubmittedEvent:
+    """A user prompt queued during streaming was submitted mid-turn."""
+
+    text: str
+    type: Literal["queued_input_submitted"] = "queued_input_submitted"
+
+
+@dataclass
 class SubAgentToolEvent:
     """A sub-agent's internal tool activity — forwarded to parent Renderer."""
 
@@ -222,6 +230,7 @@ StreamEvent = Union[
     PermissionRequestEvent,
     CompactionEvent,
     TaskNotificationEvent,
+    QueuedInputSubmittedEvent,
     SubAgentToolEvent,
     StackProgressEvent,
     StackInstancesProgressEvent,

@@ -9,9 +9,11 @@ from rich.console import Console
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.stream_events import StackInstancesProgressEvent, StackProgressEvent
+from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.renderer import (
     RenderedTurn,
     Renderer,
+    StreamingInputBuffer,
     _CropTop,
     _DashMarkdown,
     _Segment,
@@ -122,6 +124,45 @@ class TestRendererHelpers:
             RenderedTurn(role="user", text="hello", timestamp=renderer.message_history[0].timestamp)
         ]
 
+    def test_build_footer_shows_full_queued_message_section(self):
+        renderer = make_renderer()
+        buffer = StreamingInputBuffer()
+        for char in "你好":
+            buffer.handle_key(KeyEvent(key=char, char=char))
+        buffer.handle_key(KeyEvent(key="enter", char="\n"))
+        renderer._streaming_input = buffer
+
+        renderer.console.print(renderer._build_footer())
+        output = renderer.console.file.getvalue()
+
+        assert "Messages to be submitted after next tool call" in output
+        assert "press esc to interrupt" in output
+        assert "send" in output
+        assert "immediately" in output
+        assert "↳ 你好" in output
+        assert "↵ 1" not in output
+
+    def test_build_footer_uses_i18n_for_queued_message_section(self, monkeypatch):
+        import iac_code.ui.renderer as renderer_mod
+
+        translations = {
+            "Messages to be submitted after next tool call": "下次工具调用后要提交的消息",
+            "press esc to interrupt and send immediately": "按 esc 中断并立即发送",
+        }
+        monkeypatch.setattr(renderer_mod, "_", lambda message: translations.get(message, message))
+        renderer = make_renderer()
+        buffer = StreamingInputBuffer()
+        for char in "你好":
+            buffer.handle_key(KeyEvent(key=char, char=char))
+        buffer.handle_key(KeyEvent(key="enter", char="\n"))
+        renderer._streaming_input = buffer
+
+        renderer.console.print(renderer._build_footer())
+        output = renderer.console.file.getvalue()
+
+        assert "下次工具调用后要提交的消息" in output
+        assert "按 esc 中断并立即发送" in output
+
     def test_any_segment_has_verbose_content(self):
         renderer = make_renderer()
         segments = [
@@ -227,6 +268,54 @@ class TestRendererHelpers:
         output = renderer.console.file.getvalue()
         assert "Allow this action?" in output
         assert "detail" in output
+
+
+class TestStreamingInputBuffer:
+    def test_enter_queues_current_buffer_and_clears_prompt(self):
+        buffer = StreamingInputBuffer()
+
+        for char in "next turn":
+            buffer.handle_key(KeyEvent(key=char, char=char))
+        outcome = buffer.handle_key(KeyEvent(key="enter", char="\n"))
+
+        assert outcome == "queued"
+        assert buffer.queued_inputs == ["next turn"]
+        assert buffer.text == ""
+
+    def test_escape_interrupts_and_queues_unsubmitted_buffer(self):
+        buffer = StreamingInputBuffer()
+
+        for char in "redirect":
+            buffer.handle_key(KeyEvent(key=char, char=char))
+        outcome = buffer.handle_key(KeyEvent(key="escape", char="\x1b"))
+
+        assert outcome == "interrupt"
+        assert buffer.interrupted is True
+        assert buffer.queued_inputs == ["redirect"]
+
+    def test_escape_interrupts_without_duplicating_existing_queue(self):
+        buffer = StreamingInputBuffer()
+
+        for char in "queued":
+            buffer.handle_key(KeyEvent(key=char, char=char))
+        buffer.handle_key(KeyEvent(key="enter", char="\n"))
+        outcome = buffer.handle_key(KeyEvent(key="escape", char="\x1b"))
+
+        assert outcome == "interrupt"
+        assert buffer.interrupted is True
+        assert buffer.queued_inputs == ["queued"]
+
+    def test_drain_queued_inputs_keeps_non_matching_items(self):
+        buffer = StreamingInputBuffer()
+        for text in ("prompt", "/help", "second"):
+            for char in text:
+                buffer.handle_key(KeyEvent(key=char, char=char))
+            buffer.handle_key(KeyEvent(key="enter", char="\n"))
+
+        drained = buffer.drain_queued_inputs(lambda value: not value.startswith("/"))
+
+        assert drained == ["prompt", "second"]
+        assert buffer.queued_inputs == ["/help"]
 
 
 class TestStreamingHeaderPreview:

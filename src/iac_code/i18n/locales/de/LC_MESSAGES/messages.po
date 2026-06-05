@@ -2396,6 +2396,14 @@ msgid "Log file"
 msgstr "Protokolldatei"
 
 #: src/iac_code/ui/renderer.py
+msgid "Messages to be submitted after next tool call"
+msgstr "Nachrichten, die nach dem nächsten Werkzeugaufruf gesendet werden"
+
+#: src/iac_code/ui/renderer.py
+msgid "press esc to interrupt and send immediately"
+msgstr "Esc drücken, um zu unterbrechen und sofort zu senden"
+
+#: src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "Nachgedacht für {seconds:.1f}s"

@@ -2307,6 +2307,14 @@ msgid "Log file"
 msgstr "日志文件"
 
 #: src/iac_code/ui/renderer.py
+msgid "Messages to be submitted after next tool call"
+msgstr "下次工具调用后要提交的消息"
+
+#: src/iac_code/ui/renderer.py
+msgid "press esc to interrupt and send immediately"
+msgstr "按 esc 中断并立即发送"
+
+#: src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "Thought for {seconds:.1f}s"
 msgstr "思考完成（耗时 {seconds:.1f}s）"

@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -10,6 +10,7 @@ from iac_code.types.stream_events import (
     CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
+    QueuedInputSubmittedEvent,
     TextDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -259,6 +260,70 @@ class TestAgentLoopStreaming:
         assert totals.output_tokens == 8
         assert totals.recorded_events == 2
         assert store.load("/tmp/status-project", "multi-call-session").total_tokens == 25
+
+    async def test_queued_input_is_submitted_after_tool_results_before_next_model_call(
+        self, mock_provider, mock_registry
+    ):
+        call_messages = []
+        call_count = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal call_count
+            call_count += 1
+            call_messages.append(messages)
+            if call_count == 1:
+                yield MessageStartEvent(message_id="m1")
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
+                yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+
+            yield MessageStartEvent(message_id="m2")
+            yield TextDeltaEvent(text="handled queued input")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        drained = False
+
+        def queued_input_provider():
+            nonlocal drained
+            if drained:
+                return []
+            drained = True
+            return ["你好"]
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(content="file contents")
+        loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="raw result", is_error=False)])
+
+        events = [e async for e in loop.run_streaming("Hi", queued_input_provider=queued_input_provider)]
+
+        assert call_count == 2
+        assert any(isinstance(e, QueuedInputSubmittedEvent) and e.text == "你好" for e in events)
+        second_call = call_messages[1]
+        assert [message.role for message in second_call] == ["user", "assistant", "user", "user"]
+        assert second_call[0].content == "Hi"
+        assert second_call[2].content[0].type == "tool_result"
+        assert second_call[3].content == "你好"
+
+    async def test_queued_input_provider_is_not_drained_without_tool_call(self, mock_provider, mock_registry):
+        queued_input_provider = Mock(return_value=["should wait"])
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="done")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        events = [e async for e in loop.run_streaming("Hi", queued_input_provider=queued_input_provider)]
+
+        assert not any(isinstance(e, QueuedInputSubmittedEvent) for e in events)
+        queued_input_provider.assert_not_called()
+        user_texts = [message.get_text() for message in loop.context_manager.get_messages() if message.role == "user"]
+        assert user_texts == ["Hi"]
 
     async def test_does_not_record_zero_message_end_usage(self, mock_provider, mock_registry, tmp_path):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):

@@ -598,7 +598,7 @@ class PromptInput:
     # Public async entry-point
     # ------------------------------------------------------------------
 
-    async def get_input(self, prompt: str = "❯ ") -> Optional[str]:
+    async def get_input(self, prompt: str = "❯ ", *, initial_text: str = "") -> Optional[str]:
         """Prompt the user for input and return it.
 
         Runs the blocking input loop directly in the main thread because
@@ -609,21 +609,21 @@ class PromptInput:
         Returns the entered string, or None if the user pressed Ctrl+C or
         Ctrl+D.
         """
-        return self._input_loop(prompt)
+        return self._input_loop(prompt, initial_text=initial_text)
 
-    def _input_loop(self, prompt: str) -> Optional[str]:
+    def _input_loop(self, prompt: str, *, initial_text: str = "") -> Optional[str]:
         """Blocking input loop with inline rendering."""
         from iac_code.ui.core.raw_input import RawInputCapture
 
         # Reset state
-        self._buffer = []
-        self._cursor = 0
+        self._buffer = list(initial_text)
+        self._cursor = len(self._buffer)
         self._pasted_contents = {}
         self._next_paste_id = 1
         self._submitted = False
         self._cancelled = False
         self._esc_pressed = False
-        self._text_changed = False
+        self._text_changed = bool(initial_text)
         self._pending_action = None
         self._clipboard_has_image = False
         self._prompt = prompt
@@ -632,8 +632,10 @@ class PromptInput:
         self._prev_cursor_physical_row = 0
 
         # Initial render (just prompt)
-        sys.stdout.write(f"{_COLOR_BOLD}{_COLOR_CYAN}{prompt}{_COLOR_RESET}")
-        sys.stdout.flush()
+        if self._text_changed:
+            self._update_suggestions_sync()
+            self._text_changed = False
+        self._render()
 
         while not self._submitted and not self._cancelled:
             with RawInputCapture() as cap:

@@ -602,6 +602,33 @@ class TestPromptInputLoop:
         inp = make_input()
         assert inp._input_loop("❯ ") == ""
 
+    def test_input_loop_uses_initial_text(self, monkeypatch):
+        import iac_code.ui.core.prompt_input as prompt_mod
+
+        events = iter([_key("enter")])
+
+        class FakeCapture:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read_key(self):
+                return next(events)
+
+        out = StringIO()
+        monkeypatch.setattr(prompt_mod, "sys", SimpleNamespace(stdout=out))
+        monkeypatch.setattr(
+            prompt_mod.shutil,
+            "get_terminal_size",
+            lambda *args, **kwargs: os.terminal_size((40, 24)),
+        )
+        monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+        inp = make_input()
+        assert inp._input_loop("❯ ", initial_text="draft") == "draft"
+
     def test_input_loop_runs_pending_action_outside_raw_mode(self, monkeypatch):
         import iac_code.ui.core.prompt_input as prompt_mod
 

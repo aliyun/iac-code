@@ -21,7 +21,7 @@ import sys
 import time
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 from rich.console import Console
@@ -57,7 +57,7 @@ from iac_code.ui.components.select import Select, SelectLayout, TextOption
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.ui.core.prompt_input import PromptInput, PromptInputResult
 from iac_code.ui.keybindings.manager import KeyBinding, KeybindingManager
-from iac_code.ui.renderer import Renderer
+from iac_code.ui.renderer import Renderer, StreamingInputBuffer
 from iac_code.ui.suggestions.aggregator import SuggestionAggregator
 from iac_code.ui.suggestions.command_provider import CommandProvider
 from iac_code.ui.suggestions.directory_provider import DirectoryProvider
@@ -391,6 +391,8 @@ class InlineREPL:
 
         first_turn = True
         last_ctrl_c_time: float = 0.0
+        queued_inputs: list[str] = []
+        draft_input = ""
 
         try:
             while True:
@@ -409,12 +411,16 @@ class InlineREPL:
                     first_turn = False
 
                     # Use initial_prompt for the first turn if provided
-                    if initial_prompt is not None:
+                    if queued_inputs:
+                        user_input = queued_inputs.pop(0)
+                        self.renderer.print_user_message(user_input)
+                    elif initial_prompt is not None:
                         user_input = initial_prompt
                         initial_prompt = None
                         self.console.print(f"[bold cyan]❯[/bold cyan] {user_input}")
                     else:
-                        user_input = await self._prompt_input.get_input()
+                        user_input = await self._prompt_input.get_input(initial_text=draft_input)
+                        draft_input = ""
                     if user_input is None:  # Ctrl+C with empty input
                         now = time.monotonic()
                         if now - last_ctrl_c_time < 1.5:
@@ -434,7 +440,10 @@ class InlineREPL:
 
                     if self.command_registry.is_command(user_input):
                         self._record_command_history(user_input)
-                        await self._handle_command(user_input)
+                        queued_inputs.extend(await self._handle_command(user_input))
+                        new_draft = self._consume_streaming_draft_input()
+                        if new_draft:
+                            draft_input = new_draft
                         self._clear_cancel_state()
                         continue
                     self._history.append(user_input)
@@ -442,7 +451,10 @@ class InlineREPL:
                     chat_input: PromptInputResult | str
                     result = self._prompt_input.make_result()
                     chat_input = result if result.pasted_contents else user_input
-                    await self._handle_chat(chat_input)
+                    queued_inputs.extend(await self._handle_chat(chat_input))
+                    new_draft = self._consume_streaming_draft_input()
+                    if new_draft:
+                        draft_input = new_draft
                     self._clear_cancel_state()
                 except (KeyboardInterrupt, asyncio.CancelledError):
                     self._clear_cancel_state()
@@ -827,7 +839,7 @@ class InlineREPL:
             self.renderer.print_system_message(_("Permission denied."), style="red")
         return allowed
 
-    async def _handle_command(self, user_input: str) -> None:
+    async def _handle_command(self, user_input: str) -> list[str]:
         """Dispatch a slash command and print the result."""
         is_skill_trigger = user_input.startswith("$")
         name, args = self.command_registry.parse(user_input)
@@ -840,17 +852,17 @@ class InlineREPL:
         if cmd is None:
             if is_skill_trigger and normalize_skill_name(name) in getattr(self, "_disabled_skill_commands", {}):
                 _emit_error(_("Skill '{name}' is disabled. Run /skills to enable it.").format(name=name))
-                return
+                return []
             if is_skill_trigger:
                 _emit_error(_("Unknown skill: ${name}. Type / to list commands and skills.").format(name=name))
             else:
                 _emit_error(_("Unknown command: /{name}. Type /help for available commands.").format(name=name))
-            return
+            return []
 
         # The "$" trigger invokes skills only; reject built-in commands with a clear hint.
         if is_skill_trigger and not isinstance(cmd, PromptCommand):
             _emit_error(_("$ only invokes skills. Use /{name} instead.").format(name=name))
-            return
+            return []
 
         if isinstance(cmd, PromptCommand):
             # Skill command: process via unified path
@@ -860,7 +872,7 @@ class InlineREPL:
             try:
                 result = await process_prompt_command(cmd, args_str)
                 if result.is_fork:
-                    await self._handle_chat(result.prompt_content)
+                    return await self._handle_chat(result.prompt_content)
                 else:
                     # Inline mode: inject messages and continue agent loop
                     for msg in result.new_messages:
@@ -868,12 +880,13 @@ class InlineREPL:
                     if result.context_modifier:
                         self._agent_loop._apply_context_modifier(result.context_modifier)
                     # Stream the agent's response to the injected skill prompt
-                    await self._handle_chat_continue()
+                    return await self._handle_chat_continue()
             except Exception as exc:
                 self.renderer.print_system_message(
                     _("Command error: {error}").format(error=exc),
                     style="red",
                 )
+            return []
         elif isinstance(cmd, LocalCommand):
             context = CommandContext(console=self.console, store=self.store, repl=self)
             if cmd.handler is None:
@@ -881,7 +894,7 @@ class InlineREPL:
                     _("Command has no handler: {name}").format(name=cmd.name),
                     style="red",
                 )
-                return
+                return []
             from iac_code.config import get_active_provider_key
 
             prev_model = self.store.get_state().model
@@ -922,12 +935,39 @@ class InlineREPL:
                     _("Command error: {error}").format(error=exc),
                     style="red",
                 )
+        return []
 
     def _message_count(self) -> int:
         try:
             return len(self._agent_loop.context_manager.get_messages())
         except Exception:
             return 0
+
+    @staticmethod
+    def _normalize_streaming_output_result(result: object) -> tuple[float, list[str], str]:
+        """Return ``(elapsed, queued_inputs, draft_input)`` from the renderer result.
+
+        Older tests and light-weight fakes may still return the pre-queueing
+        float elapsed value. Keep accepting that shape at this boundary.
+        """
+        elapsed = cast(Any, getattr(result, "elapsed", result))
+        queued_inputs = cast(Any, getattr(result, "queued_inputs", []))
+        draft_input = cast(Any, getattr(result, "draft_input", ""))
+        return float(elapsed), list(queued_inputs), str(draft_input)
+
+    def _consume_streaming_draft_input(self) -> str:
+        draft = getattr(self, "_streaming_draft_input", "")
+        self._streaming_draft_input = ""
+        return draft
+
+    def _should_submit_mid_turn(self, value: str) -> bool:
+        stripped = value.strip()
+        if not stripped or stripped.startswith("!"):
+            return False
+        try:
+            return not self.command_registry.is_command(stripped)
+        except Exception:
+            return True
 
     def _record_command_log(self, user_input: str, result: str, *, is_error: bool) -> None:
         if hasattr(self, "_command_log"):
@@ -988,7 +1028,7 @@ class InlineREPL:
     # Chat handling
     # ------------------------------------------------------------------
 
-    async def _handle_chat_continue(self) -> None:
+    async def _handle_chat_continue(self) -> list[str]:
         """Continue the agent loop after injecting messages (e.g., skill prompt).
 
         Unlike _handle_chat, this doesn't add a new user message — the messages
@@ -996,21 +1036,29 @@ class InlineREPL:
         """
         self.store.set_state(is_busy=True)
         try:
-            events = self._agent_loop.run_streaming("")
-            elapsed = await self.renderer.run_streaming_output(
+            streaming_input = StreamingInputBuffer()
+            events = self._agent_loop.run_streaming(
+                "",
+                queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+            )
+            result = await self.renderer.run_streaming_output(
                 events,
                 permission_handler=self.renderer.prompt_permission,
+                streaming_input=streaming_input,
             )
+            elapsed, queued_inputs, draft_input = self._normalize_streaming_output_result(result)
+            self._streaming_draft_input = draft_input
             if elapsed >= 1.0:
                 self._agent_loop.stamp_last_turn_elapsed(elapsed)
             if self.renderer._last_streaming_errors:
                 msg_count = len(self._agent_loop.context_manager.get_messages())
                 for err in self.renderer._last_streaming_errors:
                     self._streaming_error_log.append((err, msg_count))
+            return queued_inputs
         finally:
             self.store.set_state(is_busy=False)
 
-    async def _handle_chat(self, user_input: PromptInputResult | str) -> None:
+    async def _handle_chat(self, user_input: PromptInputResult | str) -> list[str]:
         """Send the user message to the agent loop and stream output."""
         from iac_code.agent.message import ContentBlock, ImageBlock
         from iac_code.utils.image.processor import process_user_input
@@ -1032,17 +1080,25 @@ class InlineREPL:
         self.store.set_state(is_busy=True)
         self.renderer.record_user_turn(record_text)
         try:
-            events = self._agent_loop.run_streaming(payload)
-            elapsed = await self.renderer.run_streaming_output(
+            streaming_input = StreamingInputBuffer()
+            events = self._agent_loop.run_streaming(
+                payload,
+                queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+            )
+            result = await self.renderer.run_streaming_output(
                 events,
                 permission_handler=self.renderer.prompt_permission,
+                streaming_input=streaming_input,
             )
+            elapsed, queued_inputs, draft_input = self._normalize_streaming_output_result(result)
+            self._streaming_draft_input = draft_input
             if elapsed >= 1.0:
                 self._agent_loop.stamp_last_turn_elapsed(elapsed)
             if self.renderer._last_streaming_errors:
                 msg_count = len(self._agent_loop.context_manager.get_messages())
                 for err in self.renderer._last_streaming_errors:
                     self._streaming_error_log.append((err, msg_count))
+            return queued_inputs
         finally:
             self.store.set_state(is_busy=False)
 
