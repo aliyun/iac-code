@@ -189,7 +189,7 @@ class TestReadFileTool:
     async def test_read_file_byte_limit_does_not_split_utf8_character(self, tmp_path, read_file_tool, monkeypatch):
         monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_BYTES", 3)
         test_file = tmp_path / "unicode.txt"
-        test_file.write_text("ééé\n")
+        test_file.write_text("ééé\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
