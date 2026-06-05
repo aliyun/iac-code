@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from iac_code.agent.message import RECALLED_MEMORY_MARKER
 from iac_code.agent.system_prompt import split_by_dynamic_boundary
 from iac_code.providers.base import Message
 from iac_code.providers.openai_provider import OpenAIProvider
@@ -16,6 +17,8 @@ DASHSCOPE_TOKEN_PLAN_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com
 # Prefix-matched against the model name.  Extend when new models are added.
 # Ref: https://help.aliyun.com/zh/model-studio/context-cache
 _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
+    "qwen3.7-max",
+    "qwen3.7-plus",
     "qwen3-coder-plus",
     "qwen3-coder-flash",
     "qwen3.5-plus",
@@ -25,6 +28,8 @@ _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
     "qwen3.6-flash",
     "qwen-flash",
 )
+
+_RECALLED_MEMORY_REMINDER_PREFIX = f"<system-reminder>\n{RECALLED_MEMORY_MARKER}:"
 
 
 class DashScopeProvider(OpenAIProvider):
@@ -64,10 +69,12 @@ class DashScopeProvider(OpenAIProvider):
         self,
         messages: list[Message],
         system: str,
+        cache_policy: str = "default",
     ) -> list[dict[str, Any]]:
         api_messages: list[dict[str, Any]] = []
+        explicit_cache_enabled = cache_policy != "no_explicit_cache" and self._supports_explicit_cache()
         if system:
-            if self._supports_explicit_cache():
+            if explicit_cache_enabled:
                 static_part, dynamic_part = split_by_dynamic_boundary(system)
                 content_blocks: list[dict[str, Any]] = [
                     {"type": "text", "text": static_part, "cache_control": {"type": "ephemeral"}},
@@ -79,7 +86,7 @@ class DashScopeProvider(OpenAIProvider):
                 api_messages.append({"role": "system", "content": system})
         api_messages.extend(self._convert_messages(messages))
 
-        if self._supports_explicit_cache():
+        if explicit_cache_enabled:
             self._mark_last_user_message_cacheable(api_messages)
 
         return api_messages
@@ -97,6 +104,8 @@ class DashScopeProvider(OpenAIProvider):
             if msg.get("role") != "user":
                 continue
             content = msg.get("content")
+            if _is_recalled_memory_reminder(content):
+                continue
             if isinstance(content, str):
                 msg["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
             elif isinstance(content, list):
@@ -116,3 +125,13 @@ class DashScopeProvider(OpenAIProvider):
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}
         return {"extra_body": {"enable_thinking": True}}
+
+
+def _is_recalled_memory_reminder(content: Any) -> bool:
+    if isinstance(content, str):
+        return content.startswith(_RECALLED_MEMORY_REMINDER_PREFIX)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and str(block.get("text") or "").startswith(_RECALLED_MEMORY_REMINDER_PREFIX):
+                return True
+    return False

@@ -131,7 +131,6 @@ def _build_system_section() -> str:
 
 
 def _build_environment_section(cwd: str) -> str:
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     os_info = f"{platform.system()} {platform.release()}"
     if sys.platform == "win32":
         shell = "git-bash"
@@ -154,12 +153,16 @@ def _build_environment_section(cwd: str) -> str:
         f"- Platform: {platform.system()} {platform.machine()}",
         f"- OS Version: {os_info}",
         f"- Shell: {shell}",
-        f"- Current time: {now}",
         f"- Git repository: {is_git_repo}",
     ]
     if git_branch:
         lines.append(f"- Git branch: {git_branch}")
     return "\n".join(lines)
+
+
+def _build_current_time_section(current_time: str | None = None) -> str:
+    now = current_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return "# Current Time\n" + f"- Current time: {now}"
 
 
 def _build_tools_section() -> str:
@@ -205,9 +208,18 @@ def _build_actions_section() -> str:
 
 
 def _build_project_instructions(cwd: str) -> str:
+    from iac_code import __release_date__
+
+    if not __release_date__.strip():
+        return ""
+
     instructions: list[str] = []
     search_names = ["AGENTS.md", ".iac-code/AGENTS.md"]
-    current = cwd
+    current = os.path.abspath(cwd)
+    from iac_code.utils.project_paths import find_git_worktree_root
+
+    git_root = find_git_worktree_root(current)
+    stop_at = os.path.normcase(os.path.normpath(str(git_root))) if git_root is not None else ""
     while True:
         for name in search_names:
             path = os.path.join(current, name)
@@ -219,6 +231,9 @@ def _build_project_instructions(cwd: str) -> str:
                         instructions.append(f"# Project Instructions (from {path})\n{content}")
                 except (OSError, UnicodeDecodeError):
                     pass
+        current_normalized = os.path.normcase(os.path.normpath(current))
+        if stop_at and current_normalized == stop_at:
+            break
         parent = os.path.dirname(current)
         if parent == current:
             break
@@ -232,6 +247,23 @@ def _build_memory_section(memory_content: str) -> str:
     if not memory_content:
         return ""
     return f"# Memory\n{memory_content}"
+
+
+def _build_memory_context_section(memory_context: object) -> str:
+    parts: list[str] = []
+    instruction_memory = str(getattr(memory_context, "instruction_memory_content", "") or "").strip()
+    memory_index = str(getattr(memory_context, "memory_index_content", "") or "").strip()
+    memory_mechanics = str(getattr(memory_context, "memory_mechanics_content", "") or "").strip()
+
+    if instruction_memory:
+        parts.append(f"## Instruction Memory\n{instruction_memory}")
+    if memory_index:
+        parts.append(f"## Project Memory Index\n{memory_index}")
+    if memory_mechanics:
+        parts.append(f"## Memory Mechanics\n{memory_mechanics}")
+    if not parts:
+        return ""
+    return "# Memory\n" + "\n\n".join(parts)
 
 
 def _build_cloud_config_section() -> str:
@@ -270,6 +302,8 @@ def build_system_prompt(
     cwd: str | None = None,
     memory_content: str = "",
     skill_listing: str = "",
+    memory_context: object | None = None,
+    current_time: str | None = None,
 ) -> str:
     """Build complete system prompt from all sections."""
     cwd = cwd or os.getcwd()
@@ -282,6 +316,12 @@ def build_system_prompt(
     builder.add_cached_section("tools", _build_tools_section, priority=85, is_static=True)
     builder.add_cached_section("doing_tasks", _build_doing_tasks_section, priority=80, is_static=True)
     builder.add_cached_section("actions", _build_actions_section, priority=75, is_static=True)
+    builder.add_uncached_section(
+        "current_time",
+        lambda: _build_current_time_section(current_time),
+        priority=72,
+        is_static=False,
+    )
 
     project_instructions = _build_project_instructions(cwd)
     if project_instructions:
@@ -301,7 +341,14 @@ def build_system_prompt(
             is_static=False,
         )
 
-    if memory_content:
+    if memory_context is not None and _build_memory_context_section(memory_context):
+        builder.add_cached_section(
+            "memory",
+            lambda: _build_memory_context_section(memory_context),
+            priority=60,
+            is_static=False,
+        )
+    elif memory_content:
         builder.add_cached_section(
             "memory",
             lambda: _build_memory_section(memory_content),

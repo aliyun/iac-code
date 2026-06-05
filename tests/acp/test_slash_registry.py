@@ -49,6 +49,7 @@ async def test_unsupported_command_returns_rejection(registry: ACPSlashRegistry)
     result = await registry.execute("/help", agent_loop=None)
     assert "not supported" in result or "不支持" in result
     assert "/clear" in result or "clear" in result
+    assert "/memory-folder" not in result
 
 
 @pytest.mark.asyncio
@@ -200,7 +201,7 @@ async def test_debug_invalid_arg(registry: ACPSlashRegistry) -> None:
 
 
 # ---------------------------------------------------------------------------
-# execute — /memory
+# execute — /memory-folder
 # ---------------------------------------------------------------------------
 
 
@@ -241,7 +242,7 @@ class _MemoryManager:
 
 @pytest.mark.asyncio
 async def test_memory_without_manager_returns_unavailable(registry: ACPSlashRegistry) -> None:
-    result = await registry.execute("/memory", agent_loop=None)
+    result = await registry.execute("/memory-folder", agent_loop=None)
     assert result == "Memory manager is unavailable."
 
 
@@ -249,10 +250,12 @@ async def test_memory_without_manager_returns_unavailable(registry: ACPSlashRegi
 async def test_memory_list_view_search_delete(registry: ACPSlashRegistry) -> None:
     memory_manager = _MemoryManager()
 
-    listed = await registry.execute("/memory", agent_loop=None, memory_manager=memory_manager)
-    viewed = await registry.execute("/memory user-role", agent_loop=None, memory_manager=memory_manager)
-    searched = await registry.execute("/memory search integration", agent_loop=None, memory_manager=memory_manager)
-    deleted = await registry.execute("/memory delete user-role", agent_loop=None, memory_manager=memory_manager)
+    listed = await registry.execute("/memory-folder", agent_loop=None, memory_manager=memory_manager)
+    viewed = await registry.execute("/memory-folder user-role", agent_loop=None, memory_manager=memory_manager)
+    searched = await registry.execute(
+        "/memory-folder search integration", agent_loop=None, memory_manager=memory_manager
+    )
+    deleted = await registry.execute("/memory-folder delete user-role", agent_loop=None, memory_manager=memory_manager)
 
     assert "Saved memories:" in listed
     assert viewed == "[user] Role\n\nSenior engineer"
@@ -265,15 +268,15 @@ async def test_memory_list_view_search_delete(registry: ACPSlashRegistry) -> Non
 async def test_memory_help_missing_invalid_name_and_unknown_usage(registry: ACPSlashRegistry) -> None:
     memory_manager = _MemoryManager()
 
-    helped = await registry.execute("/memory help", agent_loop=None, memory_manager=memory_manager)
-    missing = await registry.execute("/memory missing", agent_loop=None, memory_manager=memory_manager)
-    invalid = await registry.execute("/memory ../escape", agent_loop=None, memory_manager=memory_manager)
-    unknown = await registry.execute("/memory remove user-role", agent_loop=None, memory_manager=memory_manager)
+    helped = await registry.execute("/memory-folder help", agent_loop=None, memory_manager=memory_manager)
+    missing = await registry.execute("/memory-folder missing", agent_loop=None, memory_manager=memory_manager)
+    invalid = await registry.execute("/memory-folder ../escape", agent_loop=None, memory_manager=memory_manager)
+    unknown = await registry.execute("/memory-folder remove user-role", agent_loop=None, memory_manager=memory_manager)
 
-    assert helped == "Usage: /memory [<name>|search <query>|delete <name>|help]"
+    assert helped == "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
     assert missing == "Memory 'missing' not found."
     assert invalid == "Invalid memory name: '../escape'"
-    assert unknown == "Usage: /memory [<name>|search <query>|delete <name>|help]"
+    assert unknown == "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
 
 
 # ---------------------------------------------------------------------------

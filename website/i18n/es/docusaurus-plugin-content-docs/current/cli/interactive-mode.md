@@ -27,7 +27,7 @@ Create a VPC, two ECS instances, and a security group that allows SSH from my of
 
 ## Comandos
 
-Escribe `/` para descubrir los comandos slash disponibles. Entre los comandos operativos habituales están `/status` para el estado de la sesión actual, `/skills` para gestionar habilidades, `/memory` para las memorias guardadas, `/rename` para nombrar la sesión activa y `/resume` para cambiar de sesión.
+Escribe `/` para descubrir los comandos slash disponibles. Entre los comandos operativos habituales están `/status` para el estado de la sesión actual, `/skills` para gestionar habilidades, `/memory` para los archivos de memoria de proyecto y usuario, `/rename` para nombrar la sesión activa y `/resume` para cambiar de sesión.
 
 Escribe `$` para descubrir e invocar solo habilidades.
 

@@ -28,9 +28,27 @@ Arquivos comuns:
 | `.credentials.yml` | Credenciais LLM |
 | `.cloud-credentials.yml` | Credenciais do provedor de nuvem |
 | `settings.yml` | Provedor selecionado, modelo e configurações relacionadas |
+| `IAC-CODE.md` | Memória do usuário carregada como instruções persistentes |
 | history files | Histórico de entrada para fluxos de trabalho interativos |
 
 Evite fazer commit ou compartilhar arquivos deste diretório porque eles podem conter segredos ou preferências locais.
+
+## Arquivos de memória
+
+O IaC Code tem dois locais públicos de memória:
+
+| Local | Finalidade |
+|---|---|
+| `<project-root>/IAC-CODE.md` | Memória do projeto. Pode ser commitada quando as instruções forem úteis para todas as pessoas que trabalham no projeto. |
+| `<config-dir>/IAC-CODE.md` | Memória do usuário. Segue `IAC_CODE_CONFIG_DIR` e é privada para o usuário local. |
+
+Os arquivos de tópicos de auto-memory do projeto são armazenados em:
+
+```text
+<config-dir>/projects/<project-key>/memory/
+```
+
+`MEMORY.md` nessa pasta é o índice de tópicos. Quando auto-memory está ativada, o IaC Code pode usar uma side call para selecionar arquivos de tópicos relevantes e adicioná-los como contexto oculto da conversa.
 
 ## Configurações do projeto
 

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console as RichConsole
 
-from iac_code.agent.message import Message
+from iac_code.agent.message import Message, create_recalled_memory_message
 from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.services.session_storage import SessionStorage
 from iac_code.ui.core.key_event import KeyEvent
@@ -106,6 +106,25 @@ class TestResumePickerLoad:
             )
 
         assert [entry.session_id for entry in p._all_entries] == ["candidate-a", "candidate-b"]
+
+    def test_fallback_preview_hides_recalled_memory_messages(self):
+        buffer = io.StringIO()
+        console = RichConsole(file=buffer, force_terminal=True, width=80, color_system=None)
+
+        ResumePicker._fallback_render(
+            console,
+            [
+                Message(role="user", content="visible question"),
+                create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
+                Message(role="assistant", content="visible answer"),
+            ],
+        )
+
+        output = buffer.getvalue()
+        assert "visible question" in output
+        assert "visible answer" in output
+        assert "Prefer ROS YAML" not in output
+        assert "Relevant persistent memories" not in output
 
     def test_supplied_entries_are_not_reloaded_when_toggling_all_projects(self):
         index = MagicMock()

@@ -28,9 +28,27 @@ CLI 参数 > 环境变量 > 配置文件
 | `.credentials.yml` | LLM 凭证 |
 | `.cloud-credentials.yml` | 云厂商凭证 |
 | `settings.yml` | 已选择的提供商、模型和相关设置 |
+| `IAC-CODE.md` | 作为持久指令加载的用户记忆 |
 | history files | 交互式工作流的输入历史 |
 
 避免提交或分享该目录中的文件，因为它们可能包含密钥或本地偏好。
+
+## 记忆文件
+
+IaC Code 有两个公开的记忆位置：
+
+| 位置 | 用途 |
+|---|---|
+| `<project-root>/IAC-CODE.md` | 项目记忆。当这些指令对项目协作者都有用时，可以提交到版本库。 |
+| `<config-dir>/IAC-CODE.md` | 用户记忆。它跟随 `IAC_CODE_CONFIG_DIR`，只属于本地用户。 |
+
+项目 auto-memory topic 文件存放在：
+
+```text
+<config-dir>/projects/<project-key>/memory/
+```
+
+该文件夹中的 `MEMORY.md` 是 topic 索引。auto-memory 开启时，IaC Code 可能通过 side call 选择相关 topic 文件，并把它们作为隐藏会话上下文加入对话。
 
 ## 项目级设置
 

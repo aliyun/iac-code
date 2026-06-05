@@ -120,35 +120,40 @@ class TestCommandProvider:
         assert len(clear_items) == 1
         assert clear_items[0].arg_hint is None
 
-    def test_memory_second_item_suggests_actions_and_memory_names(self, memory_provider):
-        """/memory<space> → subcommands plus saved memory names."""
-        token = make_token("/memory ")
+    def test_memory_folder_second_item_suggests_actions_and_memory_names(self, memory_provider):
+        """/memory-folder<space> -> subcommands plus saved memory names."""
+        token = make_token("/memory-folder ")
         items = memory_provider.provide(token)
 
         names = {item.display_text for item in items}
         assert {"search", "delete", "help", "user-role", "feedback-testing"}.issubset(names)
-        assert [item.completion for item in items if item.display_text == "search"] == ["/memory search "]
-        assert [item.completion for item in items if item.display_text == "user-role"] == ["/memory user-role"]
+        assert [item.completion for item in items if item.display_text == "search"] == ["/memory-folder search "]
+        assert [item.completion for item in items if item.display_text == "user-role"] == ["/memory-folder user-role"]
 
-    def test_memory_second_item_filters_action_prefix(self, memory_provider):
-        """/memory d → delete action suggestion."""
-        token = make_token("/memory d")
+    def test_memory_folder_second_item_filters_action_prefix(self, memory_provider):
+        """/memory-folder d -> delete action suggestion."""
+        token = make_token("/memory-folder d")
         items = memory_provider.provide(token)
 
         assert [item.display_text for item in items] == ["delete"]
-        assert items[0].completion == "/memory delete "
+        assert items[0].completion == "/memory-folder delete "
 
-    def test_memory_delete_suggests_memory_names(self, memory_provider):
-        """/memory delete<space> → saved memory name suggestions."""
-        token = make_token("/memory delete ")
+    def test_memory_folder_delete_suggests_memory_names(self, memory_provider):
+        """/memory-folder delete<space> -> saved memory name suggestions."""
+        token = make_token("/memory-folder delete ")
         items = memory_provider.provide(token)
 
         names = [item.display_text for item in items]
         assert names == ["feedback-testing", "user-role"]
-        assert items[0].completion == "/memory delete feedback-testing"
+        assert items[0].completion == "/memory-folder delete feedback-testing"
         assert all(item.id.startswith("cmd:memory:") for item in items)
 
-    def test_memory_search_query_has_no_argument_suggestions(self, memory_provider):
-        """/memory search<space> leaves free-form search input alone."""
-        token = make_token("/memory search ")
+    def test_memory_folder_search_query_has_no_argument_suggestions(self, memory_provider):
+        """/memory-folder search<space> leaves free-form search input alone."""
+        token = make_token("/memory-folder search ")
+        assert memory_provider.provide(token) == []
+
+    def test_visible_memory_command_has_no_legacy_argument_suggestions(self, memory_provider):
+        token = make_token("/memory ")
+
         assert memory_provider.provide(token) == []

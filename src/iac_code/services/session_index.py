@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, read_session_metadata
 from iac_code.utils.project_paths import (
     get_project_dir,
@@ -156,6 +157,18 @@ def read_head_and_tail(path: Path, size: int | None = None) -> tuple[str, str]:
 _USER_ROLE_PATTERNS = (re.compile(r'"role"\s*:\s*"user"'),)
 
 
+def _is_recalled_memory_text(text: str | None) -> bool:
+    return bool(text and RECALLED_MEMORY_MARKER in text)
+
+
+def _is_recalled_memory_row(obj: dict) -> bool:
+    metadata = obj.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("type") == RECALLED_MEMORY_METADATA_TYPE:
+        return True
+    content = obj.get("content")
+    return isinstance(content, str) and _is_recalled_memory_text(content)
+
+
 def _extract_first_user_text(head: str) -> str | None:
     """Find the first user message's text in a head chunk.
 
@@ -173,6 +186,8 @@ def _extract_first_user_text(head: str) -> str | None:
         except json.JSONDecodeError:
             continue
         if not isinstance(obj, dict) or obj.get("role") != "user":
+            continue
+        if _is_recalled_memory_row(obj):
             continue
         content = obj.get("content")
         if isinstance(content, str) and content.strip():
@@ -212,6 +227,8 @@ def read_lite_metadata(path: Path) -> LiteMetadata:
         head, "git_branch"
     )
     last_prompt = extract_last_json_string_field(tail, "last_prompt")
+    if _is_recalled_memory_text(last_prompt):
+        last_prompt = None
     first_prompt = _extract_first_user_text(head)
     return LiteMetadata(
         cwd=cwd,

@@ -53,6 +53,31 @@ class ImageBlock(BaseModel):
 # Union type for all content blocks
 ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | ImageBlock
 
+RECALLED_MEMORY_METADATA_TYPE = "recalled_memory"
+RECALLED_MEMORY_MARKER = "Relevant persistent memories recalled for this conversation"
+
+
+def _normalize_recalled_memory_filenames(filenames: list[str]) -> list[str]:
+    """Normalize recalled memory filenames while preserving first-seen order."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for filename in filenames:
+        name = filename.strip()
+        if not name or "/" in name or "\\" in name:
+            continue
+        if not name.endswith(".md"):
+            name = f"{name}.md"
+        if name in seen:
+            continue
+        normalized.append(name)
+        seen.add(name)
+    return normalized
+
+
+def format_recalled_memory_message(content: str) -> str:
+    """Format recalled memory content as a hidden system reminder."""
+    return "<system-reminder>\n{}:\n\n{}\n</system-reminder>".format(RECALLED_MEMORY_MARKER, content.strip())
+
 
 class Message(BaseModel):
     """A single message in the conversation."""
@@ -61,6 +86,7 @@ class Message(BaseModel):
     content: str | list[ContentBlock]
     token_count: int = 0
     elapsed_seconds: float = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def get_text(self) -> str:
         """Extract text content from the message."""
@@ -119,6 +145,38 @@ class Message(BaseModel):
             elif isinstance(block, ImageBlock):
                 content_list.append({"type": "image", "media_type": block.media_type, "data": block.data})
         return {"role": self.role, "content": content_list}
+
+
+def create_recalled_memory_message(content: str, selected_files: list[str]) -> Message:
+    """Create a hidden user message containing automatically recalled memories."""
+    files = _normalize_recalled_memory_filenames(selected_files)
+    return Message(
+        role="user",
+        content=format_recalled_memory_message(content),
+        metadata={
+            "type": RECALLED_MEMORY_METADATA_TYPE,
+            "source": "auto_memory",
+            "selected_files": files,
+        },
+    )
+
+
+def is_recalled_memory_message(message: Message) -> bool:
+    """Return True when a message was generated for recalled memory context."""
+    return message.metadata.get("type") == RECALLED_MEMORY_METADATA_TYPE
+
+
+def get_recalled_memory_files(message: Message) -> list[str]:
+    """Return normalized selected files for recalled-memory messages."""
+    if not is_recalled_memory_message(message):
+        return []
+
+    selected_files = message.metadata.get("selected_files")
+    if not isinstance(selected_files, list):
+        return []
+
+    filenames = [filename for filename in selected_files if isinstance(filename, str)]
+    return _normalize_recalled_memory_filenames(filenames)
 
 
 class Conversation(BaseModel):

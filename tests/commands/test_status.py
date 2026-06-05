@@ -139,6 +139,156 @@ async def test_status_prints_no_recorded_usage_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_status_hides_memory_recall_usage_outside_debug(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.utils.log.is_debug_enabled", lambda: False)
+    console = MagicMock()
+    repl = MagicMock()
+    repl.get_status_snapshot.return_value = {
+        "session_id": "memory",
+        "resumed": False,
+        "provider": "dashscope",
+        "model": "qwen",
+        "region": "cn-beijing",
+        "cwd": "/tmp/status-project",
+        "api_usage": _usage(),
+        "turn_count": 1,
+        "max_turns": 100,
+        "context_usage": {
+            "total_tokens": 1000,
+            "context_window": 128000,
+            "usage_percent": 1.0,
+        },
+        "memory_recall": {
+            "total_side_queries": 3,
+            "successful_side_queries": 2,
+            "failed_side_queries": 1,
+            "cancelled_side_queries": 0,
+            "last_status": "success",
+            "last_duration_ms": 412,
+            "last_selected_files": ["project-deadline.md"],
+            "last_side_query_status": "success",
+            "last_side_query_duration_ms": 411,
+            "last_side_query_selected_files": ["project-deadline.md"],
+            "total_usage": {
+                "input_tokens": 1234,
+                "output_tokens": 56,
+                "cache_read_input_tokens": 78,
+                "cache_creation_input_tokens": 9,
+                "total_tokens": 1290,
+                "recorded_events": 3,
+                "has_recorded_usage": True,
+            },
+            "last_usage": {
+                "input_tokens": 321,
+                "output_tokens": 6,
+                "cache_read_input_tokens": 7,
+                "cache_creation_input_tokens": 0,
+                "total_tokens": 327,
+                "recorded_events": 1,
+                "has_recorded_usage": True,
+            },
+            "last_prompt_preview": "User query:\ndeadline",
+            "last_response_preview": '{"files":["project-deadline.md"]}',
+            "last_prompt_chars": 20,
+            "last_response_chars": 32,
+        },
+    }
+    context = MagicMock(console=console, repl=repl)
+
+    await status_command(context=context)
+
+    rendered = _render_text(console.print.call_args.args[0])
+    assert "Memory Recall" not in rendered
+    assert "Side call usage" not in rendered
+    assert "Last usage" not in rendered
+    assert "Turns" in rendered
+    assert "User query:" not in rendered
+    assert '{"files":["project-deadline.md"]}' not in rendered
+
+
+@pytest.mark.asyncio
+async def test_status_prints_memory_recall_metrics_in_debug(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.utils.log.is_debug_enabled", lambda: True)
+    console = MagicMock()
+    repl = MagicMock()
+    repl.get_status_snapshot.return_value = {
+        "session_id": "memory",
+        "resumed": False,
+        "provider": "dashscope",
+        "model": "qwen",
+        "region": "cn-beijing",
+        "cwd": "/tmp/status-project",
+        "api_usage": _usage(),
+        "turn_count": 1,
+        "max_turns": 100,
+        "context_usage": {
+            "total_tokens": 1000,
+            "context_window": 128000,
+            "usage_percent": 1.0,
+        },
+        "memory_recall": {
+            "total_side_queries": 3,
+            "successful_side_queries": 2,
+            "failed_side_queries": 1,
+            "cancelled_side_queries": 1,
+            "total_selected_files": 4,
+            "last_duration_ms": 412,
+            "last_status": "skipped",
+            "last_selected_files": [],
+            "last_side_query_duration_ms": 411,
+            "last_side_query_status": "success",
+            "last_side_query_selected_files": ["project-deadline.md", "feedback-testing.md"],
+            "total_usage": {
+                "input_tokens": 1234,
+                "output_tokens": 56,
+                "cache_read_input_tokens": 78,
+                "cache_creation_input_tokens": 9,
+                "total_tokens": 1290,
+                "recorded_events": 3,
+                "has_recorded_usage": True,
+            },
+            "last_usage": {
+                "input_tokens": 321,
+                "output_tokens": 6,
+                "cache_read_input_tokens": 7,
+                "cache_creation_input_tokens": 0,
+                "total_tokens": 327,
+                "recorded_events": 1,
+                "has_recorded_usage": True,
+            },
+            "last_prompt_preview": (
+                "User query:\ndeadline\n\nAvailable memory topic files:\n- filename: project-deadline.md"
+            ),
+            "last_response_preview": '{"files":["project-deadline.md"]}',
+            "last_prompt_chars": 93,
+            "last_response_chars": 32,
+        },
+    }
+    context = MagicMock(console=console, repl=repl)
+
+    await status_command(context=context)
+
+    rendered = _render_text(console.print.call_args.args[0])
+    assert "Memory Recall" in rendered
+    assert "3 total, 2 success, 1 failed, 1 cancelled" in rendered
+    assert "Last attempt" in rendered
+    assert "skipped in 412 ms, 0 files selected" in rendered
+    assert "Last side call" in rendered
+    assert "success in 411 ms, 2 files selected" in rendered
+    assert "project-deadline.md, feedback-testing.md" in rendered
+    assert "Side call usage" in rendered
+    assert "3 records, input 1,234, output 56, cache read 78, total 1,290" in rendered
+    assert "Last usage" in rendered
+    assert "input 321, output 6, cache read 7, total 327" in rendered
+    assert "recent input" not in rendered.lower()
+    assert "recent output" not in rendered.lower()
+    assert "Last input" not in rendered
+    assert "User query:" not in rendered
+    assert "Last output" not in rendered
+    assert '{"files":["project-deadline.md"]}' not in rendered
+
+
+@pytest.mark.asyncio
 async def test_status_uses_compiled_translations(monkeypatch) -> None:
     monkeypatch.setenv("LANGUAGE", "zh")
     setup_i18n()

@@ -138,6 +138,9 @@ class AgentTool(Tool):
         self._system_prompt = system_prompt
         self._permission_context = permission_context
 
+    def set_system_prompt(self, system_prompt: str) -> None:
+        self._system_prompt = system_prompt
+
     @property
     def name(self) -> str:
         return "agent"

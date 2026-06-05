@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from iac_code.agent.message import Message, TextBlock, ToolResultBlock
+from iac_code.agent.message import Message, TextBlock, ToolResultBlock, create_recalled_memory_message
 from iac_code.services.session_index import (
     SessionIndex,
     extract_first_json_string_field,
@@ -80,6 +80,28 @@ class TestLiteMetadata:
         meta = read_lite_metadata(storage.session_path(cwd, "sy"))
         assert meta.last_prompt == "what user did last"
 
+    def test_recalled_memory_last_prompt_meta_is_ignored(self, storage):
+        cwd = "/proj/m"
+        storage.append(cwd, "sm", Message(role="user", content="real prompt"), git_branch=None)
+        storage.append_meta(
+            cwd,
+            "sm",
+            {
+                "type": "last-prompt",
+                "last_prompt": (
+                    "<system-reminder>\n"
+                    "Relevant persistent memories recalled for this conversation:\n\n"
+                    "hidden\n"
+                    "</system-reminder>"
+                ),
+            },
+        )
+
+        meta = read_lite_metadata(storage.session_path(cwd, "sm"))
+
+        assert meta.last_prompt is None
+        assert meta.first_prompt == "real prompt"
+
     def test_skips_tool_result_only_user_messages(self, storage):
         cwd = "/proj/z"
         # First user message is just a tool_result (e.g. session created via fork) —
@@ -93,6 +115,20 @@ class TestLiteMetadata:
         storage.append(cwd, "sz", Message(role="assistant", content=[TextBlock(text="hi")]), git_branch=None)
         storage.append(cwd, "sz", Message(role="user", content="real prompt"), git_branch=None)
         meta = read_lite_metadata(storage.session_path(cwd, "sz"))
+        assert meta.first_prompt == "real prompt"
+
+    def test_skips_recalled_memory_user_messages(self, storage):
+        cwd = "/proj/r"
+        storage.append(
+            cwd,
+            "sr",
+            create_recalled_memory_message("# Recalled Memory\nhidden prompt", ["topic.md"]),
+            git_branch=None,
+        )
+        storage.append(cwd, "sr", Message(role="user", content="real prompt"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "sr"))
+
         assert meta.first_prompt == "real prompt"
 
 

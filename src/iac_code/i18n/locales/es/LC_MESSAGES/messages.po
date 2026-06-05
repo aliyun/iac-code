@@ -820,12 +820,20 @@ msgid "Toggle debug logging"
 msgstr "Activar o desactivar el registro de depuración"
 
 #: src/iac_code/commands/__init__.py
+msgid "Edit IAC-CODE memory files"
+msgstr "Editar archivos de memoria de IAC-CODE"
+
+#: src/iac_code/commands/__init__.py
 msgid "View and manage persistent memories"
 msgstr "Ver y administrar memorias persistentes"
 
 #: src/iac_code/commands/__init__.py
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<nombre>|search <consulta>|delete <nombre>|help]"
+
+#: src/iac_code/commands/__init__.py
+msgid "Export current prompt snapshot"
+msgstr "Exportar instantánea del prompt actual"
 
 #: src/iac_code/commands/__init__.py
 msgid "Resume a previous session"
@@ -838,6 +846,10 @@ msgstr "[id de conversación o término de búsqueda]"
 #: src/iac_code/commands/__init__.py
 msgid "Rename the current session"
 msgstr "Renombrar la sesión actual"
+
+#: src/iac_code/commands/__init__.py
+msgid "<name>"
+msgstr "<nombre>"
 
 #: src/iac_code/commands/__init__.py
 msgid "Manage skills"
@@ -1223,14 +1235,14 @@ msgid "Exit"
 msgstr "Salir"
 
 #: src/iac_code/commands/memory.py
-msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
-msgstr "Uso: /memory [<nombre>|search <consulta>|delete <nombre>|help]"
+msgid "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
+msgstr "Uso: /memory-folder [<nombre>|search <consulta>|delete <nombre>|help]"
 
 #: src/iac_code/commands/memory.py
 msgid "Saved memories:"
 msgstr "Memorias guardadas:"
 
-#: src/iac_code/commands/memory.py
+#: src/iac_code/commands/memory.py src/iac_code/memory/memory_tools.py
 msgid "No memories saved yet."
 msgstr "Todavía no hay memorias guardadas."
 
@@ -1242,7 +1254,7 @@ msgstr "Memorias coincidentes:"
 msgid "No matching memories."
 msgstr "No hay memorias coincidentes."
 
-#: src/iac_code/commands/memory.py
+#: src/iac_code/commands/memory.py src/iac_code/memory/memory_tools.py
 #, python-brace-format
 msgid "Memory '{name}' not found."
 msgstr "No se encontró la memoria '{name}'."
@@ -1251,6 +1263,41 @@ msgstr "No se encontró la memoria '{name}'."
 #, python-brace-format
 msgid "Memory '{name}' deleted."
 msgstr "Memoria '{name}' eliminada."
+
+#: src/iac_code/commands/memory.py
+msgid "Memory runtime is unavailable."
+msgstr "El runtime de memoria no está disponible."
+
+#: src/iac_code/commands/memory.py src/iac_code/ui/dialogs/memory.py
+msgid "Project memory"
+msgstr "Memoria del proyecto"
+
+#: src/iac_code/commands/memory.py
+msgid "project memory"
+msgstr "memoria del proyecto"
+
+#: src/iac_code/commands/memory.py src/iac_code/ui/dialogs/memory.py
+msgid "User memory"
+msgstr "Memoria de usuario"
+
+#: src/iac_code/commands/memory.py
+msgid "user memory"
+msgstr "memoria de usuario"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Failed to open memory: {error}"
+msgstr "Error al abrir la memoria: {error}"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "No changes made to {scope}: {path}"
+msgstr "Sin cambios en {scope}: {path}"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Saved {scope}: {path}"
+msgstr "{scope} guardada: {path}"
 
 #: src/iac_code/commands/model.py
 #, python-brace-format
@@ -1275,6 +1322,286 @@ msgstr "Modelo actual: {model}"
 #, python-brace-format
 msgid "Kept model as {model}"
 msgstr "Se mantiene el modelo como {model}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt command requires a REPL context."
+msgstr "El comando prompt requiere un contexto REPL."
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Failed to export prompt: {error}"
+msgstr "Error al exportar el prompt: {error}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid ""
+"Prompt exported: {path}\n"
+"Failed to open it automatically: {error}"
+msgstr ""
+"Prompt exportado: {path}\n"
+"No se pudo abrir automáticamente: {error}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Prompt exported and opened: {path}"
+msgstr "Prompt exportado y abierto: {path}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt export is only available in interactive mode."
+msgstr "La exportación del prompt solo está disponible en modo interactivo."
+
+#: src/iac_code/commands/prompt.py
+msgid "Last main-model request"
+msgstr "Última solicitud al modelo principal"
+
+#: src/iac_code/commands/prompt.py
+msgid "Current runtime state"
+msgstr "Estado actual en ejecución"
+
+#: src/iac_code/commands/prompt.py
+msgid "Generated"
+msgstr "Generado"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+#: src/iac_code/ui/banner.py
+msgid "Session"
+msgstr "Sesión"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "Provider"
+msgstr "Proveedor"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "Model"
+msgstr "Modelo"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "CWD"
+msgstr "Directorio actual"
+
+#: src/iac_code/commands/prompt.py
+msgid "Source"
+msgstr "Fuente"
+
+#: src/iac_code/commands/prompt.py
+msgid "Raw Full System Prompt"
+msgstr "Prompt de sistema completo sin procesar"
+
+#: src/iac_code/commands/prompt.py
+msgid "System prompt is empty."
+msgstr "El prompt de sistema está vacío."
+
+#: src/iac_code/commands/prompt.py
+msgid "No provider messages yet."
+msgstr "Aún no hay mensajes del proveedor."
+
+#: src/iac_code/commands/prompt.py
+msgid "No tools are currently registered."
+msgstr "No hay herramientas registradas actualmente."
+
+#: src/iac_code/commands/prompt.py
+msgid "IAC-CODE Prompt Snapshot"
+msgstr "Instantánea del prompt de IAC-CODE"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt Snapshot"
+msgstr "Instantánea del prompt"
+
+#: src/iac_code/commands/prompt.py
+msgid ""
+"A local diagnostic view of the current main-model prompt state. This "
+"export does not trigger memory recall."
+msgstr ""
+"Vista local de diagnóstico del estado actual del prompt del modelo "
+"principal. Esta exportación no activa la recuperación de memoria."
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt snapshot sections"
+msgstr "Secciones de la instantánea del prompt"
+
+#: src/iac_code/commands/prompt.py
+msgid "ALL"
+msgstr "TODO"
+
+#: src/iac_code/commands/prompt.py
+msgid "System Prompt"
+msgstr "Prompt de sistema"
+
+#: src/iac_code/commands/prompt.py
+msgid "Provider Messages"
+msgstr "Mensajes del proveedor"
+
+#: src/iac_code/commands/prompt.py
+msgid "Tools"
+msgstr "Herramientas"
+
+#: src/iac_code/commands/prompt.py
+msgid "Instruction Memory"
+msgstr "Memoria de instrucciones"
+
+#: src/iac_code/commands/prompt.py
+msgid "Project Memory Index"
+msgstr "Índice de memoria del proyecto"
+
+#: src/iac_code/commands/prompt.py
+msgid "Memory Mechanics"
+msgstr "Mecánica de memoria"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "<omitted {count} chars>"
+msgstr "<{count} caracteres omitidos>"
+
+#: src/iac_code/commands/prompt.py
+msgid "Preamble"
+msgstr "Preámbulo"
+
+#: src/iac_code/commands/prompt.py
+msgid "Dynamic Prompt"
+msgstr "Prompt dinámico"
+
+#: src/iac_code/commands/prompt.py
+msgid "Section"
+msgstr "Sección"
+
+#: src/iac_code/commands/prompt.py
+msgid "Present in Provider Messages as a hidden conversation <system-reminder>."
+msgstr ""
+"Presente en Mensajes del proveedor como una conversación oculta <system-"
+"reminder>."
+
+#: src/iac_code/commands/prompt.py
+msgid "Not present in this snapshot."
+msgstr "No está presente en esta instantánea."
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Source: {source}"
+msgstr "Fuente: {source}"
+
+#: src/iac_code/commands/prompt.py
+msgid "1. System Prompt"
+msgstr "1. Prompt de sistema"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: system"
+msgstr "   Campo del proveedor: system"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: System Prompt tab"
+msgstr "   Detalles: pestaña Prompt de sistema"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Sections: {count}"
+msgstr "   Secciones: {count}"
+
+#: src/iac_code/commands/prompt.py
+msgid "2. Provider Messages"
+msgstr "2. Mensajes del proveedor"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: messages"
+msgstr "   Campo del proveedor: messages"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: Provider Messages tab"
+msgstr "   Detalles: pestaña Mensajes del proveedor"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Messages: {count}"
+msgstr "   Mensajes: {count}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Recalled memory: {status}"
+msgstr "   Memoria recuperada: {status}"
+
+#: src/iac_code/commands/prompt.py
+msgid "3. Tools"
+msgstr "3. Herramientas"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: tools"
+msgstr "   Campo del proveedor: tools"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: Tools tab"
+msgstr "   Detalles: pestaña Herramientas"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Tools: {count}"
+msgstr "   Herramientas: {count}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Provider system parameter. This is sent before provider messages."
+msgstr ""
+"Parámetro system del proveedor. Se envía antes de los mensajes del "
+"proveedor."
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} sections"
+msgstr "{count} secciones"
+
+#: src/iac_code/commands/prompt.py
+msgid ""
+"Conversation messages in send order. Hidden conversation recalled memory "
+"appears here."
+msgstr ""
+"Mensajes de conversación en el orden de envío. La memoria recuperada "
+"oculta aparece aquí."
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} messages; recalled memory {status}"
+msgstr "{count} mensajes; memoria recuperada {status}"
+
+#: src/iac_code/commands/prompt.py
+msgid "present"
+msgstr "presente"
+
+#: src/iac_code/commands/prompt.py
+msgid "not present"
+msgstr "no presente"
+
+#: src/iac_code/commands/prompt.py
+msgid "Tool definitions available to the main model for this request."
+msgstr ""
+"Definiciones de herramientas disponibles para el modelo principal en esta"
+" solicitud."
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} tools"
+msgstr "{count} herramientas"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt Assembly Order"
+msgstr "Orden de ensamblaje del prompt"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Open {tab_label}"
+msgstr "Abrir {tab_label}"
+
+#: src/iac_code/commands/prompt.py
+msgid "message"
+msgstr "mensaje"
+
+#: src/iac_code/commands/prompt.py
+msgid "recalled memory"
+msgstr "memoria recuperada"
+
+#: src/iac_code/commands/prompt.py
+msgid "Input schema"
+msgstr "Esquema de entrada"
+
+#: src/iac_code/commands/prompt.py
+msgid "tool"
+msgstr "herramienta"
 
 #: src/iac_code/commands/rename.py
 msgid "Rename is only available in interactive mode."
@@ -1332,25 +1659,9 @@ msgstr "El comando status requiere un contexto REPL."
 msgid "Status is only available in interactive mode."
 msgstr "status solo está disponible en modo interactivo."
 
-#: src/iac_code/commands/status.py src/iac_code/ui/banner.py
-msgid "Session"
-msgstr "Sesión"
-
-#: src/iac_code/commands/status.py
-msgid "Provider"
-msgstr "Proveedor"
-
 #: src/iac_code/commands/status.py
 msgid "not configured"
 msgstr "no configurado"
-
-#: src/iac_code/commands/status.py
-msgid "Model"
-msgstr "Modelo"
-
-#: src/iac_code/commands/status.py
-msgid "CWD"
-msgstr "Directorio actual"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -1387,6 +1698,66 @@ msgstr "Contexto"
 #: src/iac_code/commands/status.py
 msgid "Session Status"
 msgstr "Estado de la sesión"
+
+#: src/iac_code/commands/status.py
+msgid "Memory Recall"
+msgstr "Recuperacion de memoria"
+
+#: src/iac_code/commands/status.py
+msgid "Side queries"
+msgstr "Consultas laterales"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{total} total, {success} success, {failed} failed, {cancelled} cancelled"
+msgstr ""
+"{total} en total, {success} correctas, {failed} fallidas, {cancelled} "
+"canceladas"
+
+#: src/iac_code/commands/status.py
+msgid "Last attempt"
+msgstr "Ultimo intento"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{status} in {duration} ms, {count} files selected"
+msgstr "{status} en {duration} ms, {count} archivos seleccionados"
+
+#: src/iac_code/commands/status.py
+msgid "Last side call"
+msgstr "Ultima llamada lateral"
+
+#: src/iac_code/commands/status.py
+msgid "Last files"
+msgstr "Archivos recientes"
+
+#: src/iac_code/commands/status.py
+msgid "Side call usage"
+msgstr "Uso de llamada lateral"
+
+#: src/iac_code/commands/status.py
+msgid "Last usage"
+msgstr "Ultimo uso"
+
+#: src/iac_code/commands/status.py
+msgid "No token usage reported"
+msgstr "No se informó uso de tokens"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid ""
+"{events} records, input {input}, output {output}, cache read "
+"{cache_read}, total {total}"
+msgstr ""
+"{events} registros, entrada {input}, salida {output}, lectura de cache "
+"{cache_read}, total {total}"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "input {input}, output {output}, cache read {cache_read}, total {total}"
+msgstr ""
+"entrada {input}, salida {output}, lectura de cache {cache_read}, total "
+"{total}"
 
 #: src/iac_code/commands/status.py
 #, python-brace-format
@@ -1436,6 +1807,40 @@ msgstr "(dinámico)"
 #: src/iac_code/i18n/__init__.py
 msgid "Aborted!"
 msgstr "¡Operación cancelada!"
+
+#: src/iac_code/memory/memory_tools.py
+msgid ""
+"Read persistent memories. Omit name to list all, or provide name to read "
+"specific memory."
+msgstr ""
+"Lee memorias persistentes. Omite name para listarlas todas o proporciona "
+"name para leer una memoria específica."
+
+#: src/iac_code/memory/memory_tools.py
+msgid "Memory name to read. Omit to list all."
+msgstr "Nombre de la memoria que se va a leer. Omítelo para listar todas."
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid ""
+"Save a persistent memory. Use when the user explicitly asks you to "
+"remember or preserve information. Choose a concise, stable name, an "
+"appropriate type, a short description, and the useful content to keep. "
+"Types: {types}."
+msgstr ""
+"Guarda una memoria persistente. Úsalo cuando el usuario pida "
+"explícitamente recordar o conservar información. Elige un nombre conciso "
+"y estable, un tipo adecuado, una descripción breve y el contenido útil "
+"que se debe conservar. Tipos: {types}."
+
+#: src/iac_code/memory/memory_tools.py
+msgid "Auto-memory is off."
+msgstr "La memoria automática está desactivada."
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid "Memory '{name}' saved."
+msgstr "Memoria '{name}' guardada."
 
 #: src/iac_code/providers/manager.py
 #, python-brace-format
@@ -2733,6 +3138,49 @@ msgstr "No hay historial de conversación"
 msgid "Message Preview"
 msgstr "Vista previa del mensaje"
 
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Memory"
+msgstr "Memoria"
+
+#: src/iac_code/ui/dialogs/memory.py
+#, python-brace-format
+msgid "Auto-memory: {state}"
+msgstr "Memoria automática: {state}"
+
+#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
+msgid "on"
+msgstr "activada"
+
+#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
+msgid "off"
+msgstr "desactivada"
+
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Enter to confirm · Esc to cancel"
+msgstr "Enter para confirmar · Esc para cancelar"
+
+#: src/iac_code/ui/dialogs/memory.py
+#, python-brace-format
+msgid "Saved in {path}"
+msgstr "Guardado en {path}"
+
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Open auto-memory folder"
+msgstr "Abrir carpeta de memoria automatica"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+msgid "INSERT"
+msgstr "INSERTAR"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+msgid "NORMAL"
+msgstr "NORMAL"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+#, python-brace-format
+msgid "{status}   :wq save · :q! discard"
+msgstr "{status}   :wq guardar · :q! descartar"
+
 #: src/iac_code/ui/dialogs/quick_open.py
 msgid "Open File"
 msgstr "Abrir archivo"
@@ -2874,14 +3322,6 @@ msgstr "No se encontraron habilidades"
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "Bundled skills cannot be disabled."
 msgstr "Las habilidades integradas no se pueden deshabilitar."
-
-#: src/iac_code/ui/dialogs/skills_picker.py
-msgid "on"
-msgstr "activada"
-
-#: src/iac_code/ui/dialogs/skills_picker.py
-msgid "off"
-msgstr "desactivada"
 
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "locked"

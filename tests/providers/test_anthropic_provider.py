@@ -17,6 +17,44 @@ class TestAnthropicProvider:
         assert api[0]["role"] == "user"
         assert api[0]["content"] == "Hello"
 
+    def test_convert_messages_merges_consecutive_user_messages(self):
+        from iac_code.agent.message import create_recalled_memory_message
+
+        p = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
+        recalled_memory = create_recalled_memory_message("# Recalled Memory\nUse YAML", ["ros.md"])
+        msgs = [
+            Message.user("real user prompt"),
+            Message(role="user", content=recalled_memory.content),
+        ]
+
+        api = p._convert_messages(msgs)
+
+        assert len(api) == 1
+        assert api[0]["role"] == "user"
+        assert api[0]["content"].startswith("real user prompt\n\n")
+        assert "Relevant persistent memories" in api[0]["content"]
+
+    def test_convert_messages_merges_consecutive_mixed_content_messages(self):
+        p = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
+        msgs = [
+            Message.user("tool result follows"),
+            Message.tool_result(tool_use_id="t1", content="done", is_error=False),
+            Message.assistant_text("first answer"),
+            Message.assistant_text("second answer"),
+        ]
+
+        api = p._convert_messages(msgs)
+
+        assert [message["role"] for message in api] == ["user", "assistant"]
+        assert api[0]["content"] == [
+            {"type": "text", "text": "tool result follows"},
+            {"type": "tool_result", "tool_use_id": "t1", "content": "done"},
+        ]
+        assert api[1]["content"] == [
+            {"type": "text", "text": "first answer"},
+            {"type": "text", "text": "second answer"},
+        ]
+
     def test_convert_messages_tool_result(self):
         p = AnthropicProvider(model="claude-sonnet-4-6", api_key="test")
         msgs = [Message.tool_result(tool_use_id="t1", content="output", is_error=False)]

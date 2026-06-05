@@ -120,6 +120,19 @@ class TestSegmentedCompaction:
         assert "User message 0" in prompt
         assert "User message 5" not in prompt
 
+    def test_build_compaction_prompt_excludes_recalled_memory_messages(self):
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cm.add_recalled_memory_message("# Recalled Memory\nhidden memory body", ["hidden-topic.md"])
+        for i in range(6):
+            cm.add_user_message(f"User message {i}")
+            cm.add_assistant_message([TextBlock(text=f"Assistant response {i}")])
+
+        prompt = cm.build_compaction_prompt()
+
+        assert "User message 0" in prompt
+        assert "hidden memory body" not in prompt
+        assert "hidden-topic.md" not in prompt
+
     def test_apply_compaction_preserves_recent(self):
         cm = ContextManager(system_prompt="sys", model="qwen")
         for i in range(6):
@@ -258,3 +271,30 @@ class TestSetModel:
         cm.set_model("claude-opus-4-7")
 
         assert cm.get_usage()["tool_definition_tokens"] == 30
+
+
+def test_add_recalled_memory_message_tracks_surfaced_files():
+    cm = ContextManager(system_prompt="sys", model="qwen")
+
+    msg = cm.add_recalled_memory_message(
+        "# Recalled Memory\nUse YAML for ROS templates",
+        ["ros-yaml.md"],
+    )
+
+    assert msg.role == "user"
+    assert msg.metadata["type"] == "recalled_memory"
+    assert cm.get_surfaced_memory_files() == {"ros-yaml.md"}
+    assert "Use YAML for ROS templates" in cm.get_api_messages()[0]["content"]
+
+
+def test_compaction_surfaced_files_come_from_retained_metadata_only():
+    cm = ContextManager(system_prompt="sys", model="qwen")
+    cm.add_recalled_memory_message("# Recalled Memory\nOld memory", ["old.md"])
+    for i in range(6):
+        cm.add_user_message(f"User message {i}")
+        cm.add_assistant_message(f"Assistant response {i}")
+    cm.add_recalled_memory_message("# Recalled Memory\nRecent memory", ["recent.md"])
+
+    cm.apply_compaction("Summary mentions old.md and recent.md")
+
+    assert cm.get_surfaced_memory_files() == {"recent.md"}

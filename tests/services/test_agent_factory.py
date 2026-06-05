@@ -3,6 +3,10 @@ from __future__ import annotations
 from iac_code.services.agent_factory import AgentFactoryOptions, AgentRuntime, create_agent_runtime
 
 
+def _current_time_line(prompt: str) -> str:
+    return next(line for line in prompt.splitlines() if line.startswith("- Current time: "))
+
+
 def test_create_agent_runtime_uses_supplied_session_id(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
@@ -148,3 +152,76 @@ def test_create_agent_runtime_respects_disabled_skills(tmp_path, monkeypatch) ->
     skill_tool = runtime.tool_registry.get("skill")
     assert skill_tool is not None
     assert "disabled-skill" in skill_tool._disabled_skills
+
+
+def test_create_agent_runtime_uses_project_memory_context(tmp_path, monkeypatch) -> None:
+    from iac_code.memory.memory_manager import MemoryManager
+    from iac_code.memory.project_memory import get_project_memory_dir
+
+    project = tmp_path / "project"
+    project.mkdir()
+    config_dir = tmp_path / "config"
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    (config_dir).mkdir()
+    (config_dir / "IAC-CODE.md").write_text("User memory instruction\n", encoding="utf-8")
+    (project / "IAC-CODE.md").write_text("Project memory instruction\n", encoding="utf-8")
+    topic_manager = MemoryManager(memory_dir=str(get_project_memory_dir(str(project))))
+    topic_manager.save(
+        "topic-a",
+        "Topic body should not be always injected",
+        memory_type="project",
+        description="Topic A",
+    )
+
+    runtime = create_agent_runtime(AgentFactoryOptions(model="qwen3.6-plus", session_id="memory-runtime"))
+
+    assert runtime.memory_manager._memory_dir == get_project_memory_dir(str(project))
+    assert runtime.agent_loop._memory_recall_service is not None
+    assert "User memory instruction" in runtime.agent_loop.system_prompt
+    assert "Project memory instruction" in runtime.agent_loop.system_prompt
+    assert "topic-a.md" in runtime.agent_loop.system_prompt
+    assert "Topic body should not be always injected" not in runtime.agent_loop.system_prompt
+
+
+def test_create_agent_runtime_exposes_legacy_memory_manager_for_hidden_command(tmp_path, monkeypatch) -> None:
+    from iac_code.config import get_config_dir
+    from iac_code.memory.project_memory import get_project_memory_dir
+
+    project = tmp_path / "project"
+    project.mkdir()
+    config_dir = tmp_path / "config"
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    runtime = create_agent_runtime(AgentFactoryOptions(model="qwen3.6-plus", session_id="memory-runtime"))
+
+    assert runtime.memory_manager._memory_dir == get_project_memory_dir(str(project))
+    assert runtime.legacy_memory_manager._memory_dir == get_config_dir() / "memory"
+
+
+def test_system_prompt_refresher_reuses_runtime_current_time(tmp_path, monkeypatch) -> None:
+    from datetime import datetime as real_datetime
+
+    from iac_code.agent import system_prompt
+
+    class FakeDateTime:
+        calls = 0
+
+        @classmethod
+        def now(cls):
+            cls.calls += 1
+            return real_datetime(2026, 6, 5, 10, cls.calls, 0)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(system_prompt, "datetime", FakeDateTime)
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(model="qwen3.7-max", session_id="time-stable", cwd=str(tmp_path))
+    )
+
+    initial_line = _current_time_line(runtime.agent_loop.system_prompt)
+    refreshed_line = _current_time_line(runtime.agent_loop._system_prompt_refresher())
+
+    assert refreshed_line == initial_line

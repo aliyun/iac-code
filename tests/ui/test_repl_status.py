@@ -1,9 +1,13 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from iac_code.agent.message import Message, ToolResultBlock
+from iac_code.agent.message import Message, ToolResultBlock, create_recalled_memory_message
 from iac_code.state.app_state import AppState, AppStateStore
 from iac_code.ui.repl import InlineREPL
+
+
+def _current_time_line(prompt: str) -> str:
+    return next(line for line in prompt.splitlines() if line.startswith("- Current time: "))
 
 
 def test_count_user_turns_ignores_tool_result_messages() -> None:
@@ -11,6 +15,17 @@ def test_count_user_turns_ignores_tool_result_messages() -> None:
         Message(role="user", content="first"),
         Message(role="assistant", content="answer"),
         Message(role="user", content=[ToolResultBlock(tool_use_id="t1", content="tool", is_error=False)]),
+        Message(role="user", content="second"),
+    ]
+
+    assert InlineREPL._count_user_turns(messages) == 2
+
+
+def test_count_user_turns_ignores_recalled_memory_messages() -> None:
+    messages = [
+        Message(role="user", content="first"),
+        create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
+        Message(role="assistant", content="answer"),
         Message(role="user", content="second"),
     ]
 
@@ -42,6 +57,15 @@ def test_status_snapshot_uses_agent_loop_and_original_cwd(monkeypatch) -> None:
         "context_window": 128000,
         "usage_percent": 45.3125,
     }
+    repl._agent_loop.get_memory_recall_stats.return_value = {
+        "total_side_queries": 1,
+        "successful_side_queries": 1,
+        "failed_side_queries": 0,
+        "total_selected_files": 2,
+        "last_duration_ms": 50,
+        "last_status": "success",
+        "last_selected_files": ["topic.md"],
+    }
     repl._agent_loop.context_manager.get_messages.return_value = [
         Message(role="user", content="first"),
         Message(role="assistant", content="answer"),
@@ -65,6 +89,7 @@ def test_status_snapshot_uses_agent_loop_and_original_cwd(monkeypatch) -> None:
     assert snapshot["max_turns"] == 100
     assert snapshot["api_usage"].total_tokens == 18
     assert snapshot["context_usage"]["usage_percent"] == 45.3125
+    assert snapshot["memory_recall"]["last_selected_files"] == ["topic.md"]
 
 
 def test_status_snapshot_uses_runtime_provider_manager(monkeypatch) -> None:
@@ -84,6 +109,7 @@ def test_status_snapshot_uses_runtime_provider_manager(monkeypatch) -> None:
         has_recorded_usage=False,
     )
     repl._agent_loop.get_context_usage.return_value = {}
+    repl._agent_loop.get_memory_recall_stats.return_value = {"last_status": "skipped"}
     repl._agent_loop.context_manager.get_messages.return_value = []
 
     monkeypatch.setattr("iac_code.ui.repl.get_active_provider_key", lambda: "openai")
@@ -96,3 +122,30 @@ def test_status_snapshot_uses_runtime_provider_manager(monkeypatch) -> None:
 
     assert snapshot["provider"] == "Runtime Provider"
     assert snapshot["model"] == "runtime-model"
+
+
+def test_current_system_prompt_uses_repl_runtime_current_time(tmp_path, monkeypatch) -> None:
+    from datetime import datetime as real_datetime
+
+    from iac_code.agent import system_prompt
+
+    class FakeDateTime:
+        calls = 0
+
+        @classmethod
+        def now(cls):
+            cls.calls += 1
+            return real_datetime(2026, 6, 5, 10, cls.calls, 0)
+
+    repl = object.__new__(InlineREPL)
+    repl._memory_runtime = SimpleNamespace(build_memory_context=lambda: None)
+    repl._skill_listing = ""
+    repl._runtime_current_time = "2026-06-05 10:00:00"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(system_prompt, "datetime", FakeDateTime)
+
+    first = repl._build_current_system_prompt()
+    second = repl._build_current_system_prompt()
+
+    assert first == second
+    assert _current_time_line(first) == "- Current time: 2026-06-05 10:00:00"

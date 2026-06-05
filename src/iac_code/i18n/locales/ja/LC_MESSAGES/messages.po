@@ -786,12 +786,20 @@ msgid "Toggle debug logging"
 msgstr "デバッグログのオン／オフを切り替えます"
 
 #: src/iac_code/commands/__init__.py
+msgid "Edit IAC-CODE memory files"
+msgstr "IAC-CODEメモリファイルを編集"
+
+#: src/iac_code/commands/__init__.py
 msgid "View and manage persistent memories"
 msgstr "永続メモリを表示および管理"
 
 #: src/iac_code/commands/__init__.py
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<名前>|search <検索語>|delete <名前>|help]"
+
+#: src/iac_code/commands/__init__.py
+msgid "Export current prompt snapshot"
+msgstr "現在のプロンプトスナップショットをエクスポート"
 
 #: src/iac_code/commands/__init__.py
 msgid "Resume a previous session"
@@ -804,6 +812,10 @@ msgstr "[会話 ID または検索語]"
 #: src/iac_code/commands/__init__.py
 msgid "Rename the current session"
 msgstr "現在のセッション名を変更"
+
+#: src/iac_code/commands/__init__.py
+msgid "<name>"
+msgstr "<名前>"
 
 #: src/iac_code/commands/__init__.py
 msgid "Manage skills"
@@ -1191,14 +1203,14 @@ msgid "Exit"
 msgstr "終了"
 
 #: src/iac_code/commands/memory.py
-msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
-msgstr "使用法: /memory [<名前>|search <検索語>|delete <名前>|help]"
+msgid "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
+msgstr "使い方: /memory-folder [<名前>|search <検索語>|delete <名前>|help]"
 
 #: src/iac_code/commands/memory.py
 msgid "Saved memories:"
 msgstr "保存済みメモリ:"
 
-#: src/iac_code/commands/memory.py
+#: src/iac_code/commands/memory.py src/iac_code/memory/memory_tools.py
 msgid "No memories saved yet."
 msgstr "保存済みメモリはまだありません。"
 
@@ -1210,7 +1222,7 @@ msgstr "一致するメモリ:"
 msgid "No matching memories."
 msgstr "一致するメモリはありません。"
 
-#: src/iac_code/commands/memory.py
+#: src/iac_code/commands/memory.py src/iac_code/memory/memory_tools.py
 #, python-brace-format
 msgid "Memory '{name}' not found."
 msgstr "メモリ '{name}' が見つかりません。"
@@ -1219,6 +1231,41 @@ msgstr "メモリ '{name}' が見つかりません。"
 #, python-brace-format
 msgid "Memory '{name}' deleted."
 msgstr "メモリ '{name}' を削除しました。"
+
+#: src/iac_code/commands/memory.py
+msgid "Memory runtime is unavailable."
+msgstr "メモリランタイムを利用できません。"
+
+#: src/iac_code/commands/memory.py src/iac_code/ui/dialogs/memory.py
+msgid "Project memory"
+msgstr "プロジェクトメモリ"
+
+#: src/iac_code/commands/memory.py
+msgid "project memory"
+msgstr "プロジェクトメモリ"
+
+#: src/iac_code/commands/memory.py src/iac_code/ui/dialogs/memory.py
+msgid "User memory"
+msgstr "ユーザーメモリ"
+
+#: src/iac_code/commands/memory.py
+msgid "user memory"
+msgstr "ユーザーメモリ"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Failed to open memory: {error}"
+msgstr "メモリを開けませんでした: {error}"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "No changes made to {scope}: {path}"
+msgstr "{scope} に変更はありません: {path}"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Saved {scope}: {path}"
+msgstr "{scope} を保存しました: {path}"
 
 #: src/iac_code/commands/model.py
 #, python-brace-format
@@ -1243,6 +1290,276 @@ msgstr "現在のモデル：{model}"
 #, python-brace-format
 msgid "Kept model as {model}"
 msgstr "モデルを {model} のままにしました"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt command requires a REPL context."
+msgstr "prompt コマンドには REPL コンテキストが必要です。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Failed to export prompt: {error}"
+msgstr "prompt のエクスポートに失敗しました: {error}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid ""
+"Prompt exported: {path}\n"
+"Failed to open it automatically: {error}"
+msgstr ""
+"プロンプトをエクスポートしました: {path}\n"
+"自動的に開けませんでした: {error}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Prompt exported and opened: {path}"
+msgstr "プロンプトをエクスポートして開きました: {path}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt export is only available in interactive mode."
+msgstr "prompt のエクスポートは対話モードでのみ利用できます。"
+
+#: src/iac_code/commands/prompt.py
+msgid "Last main-model request"
+msgstr "直近のメインモデルリクエスト"
+
+#: src/iac_code/commands/prompt.py
+msgid "Current runtime state"
+msgstr "現在の実行時状態"
+
+#: src/iac_code/commands/prompt.py
+msgid "Generated"
+msgstr "生成日時"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+#: src/iac_code/ui/banner.py
+msgid "Session"
+msgstr "セッション"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "Provider"
+msgstr "プロバイダー"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "Model"
+msgstr "モデル"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "CWD"
+msgstr "現在のディレクトリ"
+
+#: src/iac_code/commands/prompt.py
+msgid "Source"
+msgstr "ソース"
+
+#: src/iac_code/commands/prompt.py
+msgid "Raw Full System Prompt"
+msgstr "完全な生のシステムプロンプト"
+
+#: src/iac_code/commands/prompt.py
+msgid "System prompt is empty."
+msgstr "システムプロンプトは空です。"
+
+#: src/iac_code/commands/prompt.py
+msgid "No provider messages yet."
+msgstr "プロバイダーメッセージはまだありません。"
+
+#: src/iac_code/commands/prompt.py
+msgid "No tools are currently registered."
+msgstr "現在登録されているツールはありません。"
+
+#: src/iac_code/commands/prompt.py
+msgid "IAC-CODE Prompt Snapshot"
+msgstr "IAC-CODE プロンプトスナップショット"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt Snapshot"
+msgstr "プロンプトスナップショット"
+
+#: src/iac_code/commands/prompt.py
+msgid ""
+"A local diagnostic view of the current main-model prompt state. This "
+"export does not trigger memory recall."
+msgstr "現在のメインモデルプロンプト状態を確認するためのローカル診断ビューです。このエクスポートはメモリ呼び出しを実行しません。"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt snapshot sections"
+msgstr "プロンプトスナップショットのセクション"
+
+#: src/iac_code/commands/prompt.py
+msgid "ALL"
+msgstr "すべて"
+
+#: src/iac_code/commands/prompt.py
+msgid "System Prompt"
+msgstr "システムプロンプト"
+
+#: src/iac_code/commands/prompt.py
+msgid "Provider Messages"
+msgstr "プロバイダーメッセージ"
+
+#: src/iac_code/commands/prompt.py
+msgid "Tools"
+msgstr "ツール"
+
+#: src/iac_code/commands/prompt.py
+msgid "Instruction Memory"
+msgstr "指示メモリ"
+
+#: src/iac_code/commands/prompt.py
+msgid "Project Memory Index"
+msgstr "プロジェクトメモリ索引"
+
+#: src/iac_code/commands/prompt.py
+msgid "Memory Mechanics"
+msgstr "メモリの仕組み"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "<omitted {count} chars>"
+msgstr "<{count} 文字を省略>"
+
+#: src/iac_code/commands/prompt.py
+msgid "Preamble"
+msgstr "前文"
+
+#: src/iac_code/commands/prompt.py
+msgid "Dynamic Prompt"
+msgstr "動的プロンプト"
+
+#: src/iac_code/commands/prompt.py
+msgid "Section"
+msgstr "セクション"
+
+#: src/iac_code/commands/prompt.py
+msgid "Present in Provider Messages as a hidden conversation <system-reminder>."
+msgstr "非表示の会話 <system-reminder> としてプロバイダーメッセージに存在します。"
+
+#: src/iac_code/commands/prompt.py
+msgid "Not present in this snapshot."
+msgstr "このスナップショットには存在しません。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Source: {source}"
+msgstr "ソース: {source}"
+
+#: src/iac_code/commands/prompt.py
+msgid "1. System Prompt"
+msgstr "1. システムプロンプト"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: system"
+msgstr "   プロバイダーフィールド: system"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: System Prompt tab"
+msgstr "   詳細: システムプロンプトタブ"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Sections: {count}"
+msgstr "   セクション: {count}"
+
+#: src/iac_code/commands/prompt.py
+msgid "2. Provider Messages"
+msgstr "2. プロバイダーメッセージ"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: messages"
+msgstr "   プロバイダーフィールド: messages"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: Provider Messages tab"
+msgstr "   詳細: プロバイダーメッセージタブ"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Messages: {count}"
+msgstr "   メッセージ: {count}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Recalled memory: {status}"
+msgstr "   呼び出されたメモリ: {status}"
+
+#: src/iac_code/commands/prompt.py
+msgid "3. Tools"
+msgstr "3. ツール"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: tools"
+msgstr "   プロバイダーフィールド: tools"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: Tools tab"
+msgstr "   詳細: ツールタブ"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Tools: {count}"
+msgstr "   ツール: {count}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Provider system parameter. This is sent before provider messages."
+msgstr "プロバイダーの system パラメーターです。プロバイダーメッセージより前に送信されます。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} sections"
+msgstr "{count} セクション"
+
+#: src/iac_code/commands/prompt.py
+msgid ""
+"Conversation messages in send order. Hidden conversation recalled memory "
+"appears here."
+msgstr "送信順の会話メッセージです。非表示の会話内で呼び出されたメモリはここに表示されます。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} messages; recalled memory {status}"
+msgstr "{count} 件のメッセージ; 呼び出されたメモリは{status}"
+
+#: src/iac_code/commands/prompt.py
+msgid "present"
+msgstr "存在します"
+
+#: src/iac_code/commands/prompt.py
+msgid "not present"
+msgstr "存在しません"
+
+#: src/iac_code/commands/prompt.py
+msgid "Tool definitions available to the main model for this request."
+msgstr "このリクエストでメインモデルが利用できるツール定義です。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} tools"
+msgstr "{count} 個のツール"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt Assembly Order"
+msgstr "プロンプトの組み立て順序"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Open {tab_label}"
+msgstr "{tab_label} を開く"
+
+#: src/iac_code/commands/prompt.py
+msgid "message"
+msgstr "メッセージ"
+
+#: src/iac_code/commands/prompt.py
+msgid "recalled memory"
+msgstr "呼び出されたメモリ"
+
+#: src/iac_code/commands/prompt.py
+msgid "Input schema"
+msgstr "入力スキーマ"
+
+#: src/iac_code/commands/prompt.py
+msgid "tool"
+msgstr "ツール"
 
 #: src/iac_code/commands/rename.py
 msgid "Rename is only available in interactive mode."
@@ -1298,25 +1615,9 @@ msgstr "status コマンドには REPL コンテキストが必要です。"
 msgid "Status is only available in interactive mode."
 msgstr "status は対話モードでのみ利用できます。"
 
-#: src/iac_code/commands/status.py src/iac_code/ui/banner.py
-msgid "Session"
-msgstr "セッション"
-
-#: src/iac_code/commands/status.py
-msgid "Provider"
-msgstr "プロバイダー"
-
 #: src/iac_code/commands/status.py
 msgid "not configured"
 msgstr "未設定"
-
-#: src/iac_code/commands/status.py
-msgid "Model"
-msgstr "モデル"
-
-#: src/iac_code/commands/status.py
-msgid "CWD"
-msgstr "現在のディレクトリ"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -1353,6 +1654,60 @@ msgstr "コンテキスト"
 #: src/iac_code/commands/status.py
 msgid "Session Status"
 msgstr "セッション状態"
+
+#: src/iac_code/commands/status.py
+msgid "Memory Recall"
+msgstr "メモリ呼び出し"
+
+#: src/iac_code/commands/status.py
+msgid "Side queries"
+msgstr "サイドクエリ"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{total} total, {success} success, {failed} failed, {cancelled} cancelled"
+msgstr "合計 {total}、成功 {success}、失敗 {failed}、キャンセル {cancelled}"
+
+#: src/iac_code/commands/status.py
+msgid "Last attempt"
+msgstr "直近の試行"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{status} in {duration} ms, {count} files selected"
+msgstr "{status}、{duration} ms、{count} 個のファイルを選択"
+
+#: src/iac_code/commands/status.py
+msgid "Last side call"
+msgstr "直近のサイド呼び出し"
+
+#: src/iac_code/commands/status.py
+msgid "Last files"
+msgstr "最近のファイル"
+
+#: src/iac_code/commands/status.py
+msgid "Side call usage"
+msgstr "サイド呼び出しの使用量"
+
+#: src/iac_code/commands/status.py
+msgid "Last usage"
+msgstr "直近の使用量"
+
+#: src/iac_code/commands/status.py
+msgid "No token usage reported"
+msgstr "token 使用量は報告されていません"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid ""
+"{events} records, input {input}, output {output}, cache read "
+"{cache_read}, total {total}"
+msgstr "{events} 件の記録、入力 {input}、出力 {output}、キャッシュ読み取り {cache_read}、合計 {total}"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "input {input}, output {output}, cache read {cache_read}, total {total}"
+msgstr "入力 {input}、出力 {output}、キャッシュ読み取り {cache_read}、合計 {total}"
 
 #: src/iac_code/commands/status.py
 #, python-brace-format
@@ -1402,6 +1757,36 @@ msgstr "（動的）"
 #: src/iac_code/i18n/__init__.py
 msgid "Aborted!"
 msgstr "中断しました。"
+
+#: src/iac_code/memory/memory_tools.py
+msgid ""
+"Read persistent memories. Omit name to list all, or provide name to read "
+"specific memory."
+msgstr "永続メモリを読み取ります。すべてを一覧表示するには name を省略し、特定のメモリを読むには name を指定します。"
+
+#: src/iac_code/memory/memory_tools.py
+msgid "Memory name to read. Omit to list all."
+msgstr "読み取るメモリ名。すべてを一覧表示するには省略します。"
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid ""
+"Save a persistent memory. Use when the user explicitly asks you to "
+"remember or preserve information. Choose a concise, stable name, an "
+"appropriate type, a short description, and the useful content to keep. "
+"Types: {types}."
+msgstr ""
+"永続メモリを保存します。ユーザーが情報を記憶または保持するよう明示的に依頼した場合に使用します。簡潔で安定した名前、適切な種類、短い説明、保持する有用な内容を選んでください。種類:"
+" {types}。"
+
+#: src/iac_code/memory/memory_tools.py
+msgid "Auto-memory is off."
+msgstr "自動メモリはオフです。"
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid "Memory '{name}' saved."
+msgstr "メモリ '{name}' を保存しました。"
 
 #: src/iac_code/providers/manager.py
 #, python-brace-format
@@ -2656,6 +3041,49 @@ msgstr "会話履歴がありません"
 msgid "Message Preview"
 msgstr "メッセージのプレビュー"
 
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Memory"
+msgstr "メモリ"
+
+#: src/iac_code/ui/dialogs/memory.py
+#, python-brace-format
+msgid "Auto-memory: {state}"
+msgstr "自動メモリ: {state}"
+
+#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
+msgid "on"
+msgstr "有効"
+
+#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
+msgid "off"
+msgstr "無効"
+
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Enter to confirm · Esc to cancel"
+msgstr "Enter で確定 · Esc でキャンセル"
+
+#: src/iac_code/ui/dialogs/memory.py
+#, python-brace-format
+msgid "Saved in {path}"
+msgstr "{path} に保存済み"
+
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Open auto-memory folder"
+msgstr "自動メモリフォルダを開く"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+msgid "INSERT"
+msgstr "挿入"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+msgid "NORMAL"
+msgstr "通常"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+#, python-brace-format
+msgid "{status}   :wq save · :q! discard"
+msgstr "{status}   :wq 保存 · :q! 破棄"
+
 #: src/iac_code/ui/dialogs/quick_open.py
 msgid "Open File"
 msgstr "ファイルを開く"
@@ -2790,14 +3218,6 @@ msgstr "スキルが見つかりません"
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "Bundled skills cannot be disabled."
 msgstr "バンドルスキルは無効にできません。"
-
-#: src/iac_code/ui/dialogs/skills_picker.py
-msgid "on"
-msgstr "有効"
-
-#: src/iac_code/ui/dialogs/skills_picker.py
-msgid "off"
-msgstr "無効"
 
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "locked"

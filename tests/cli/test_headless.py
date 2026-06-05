@@ -674,9 +674,26 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
     class FakeMemoryManager:
         def __init__(self, *, memory_dir):
             captured["memory_dir"] = memory_dir
+            captured.setdefault("memory_dirs", []).append(memory_dir)
 
         def get_prompt_content(self):
             return "memory prompt"
+
+    class FakeProjectMemoryRuntime:
+        def __init__(self, cwd):
+            captured["project_memory_cwd"] = cwd
+            self.memory_manager = FakeMemoryManager(memory_dir=str(fake_session_dir / "projects" / "fake" / "memory"))
+
+        def build_memory_context(self):
+            context = SimpleNamespace(instruction_memory_content="memory prompt")
+            captured["memory_context"] = context
+            return context
+
+    class FakeMemoryRecallService:
+        def __init__(self, *, memory_manager, provider_manager):
+            self.memory_manager = memory_manager
+            self.provider_manager = provider_manager
+            captured["memory_recall_service"] = self
 
     class FakeTaskManager:
         pass
@@ -741,6 +758,8 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
     monkeypatch.setattr("iac_code.services.cloud_credentials.CloudCredentials", FakeCloudCredentials)
     monkeypatch.setattr("iac_code.services.session_storage.SessionStorage", FakeSessionStorage)
     monkeypatch.setattr("iac_code.memory.memory_manager.MemoryManager", FakeMemoryManager)
+    monkeypatch.setattr("iac_code.memory.project_memory.ProjectMemoryRuntime", FakeProjectMemoryRuntime)
+    monkeypatch.setattr("iac_code.memory.recall.MemoryRecallService", FakeMemoryRecallService)
     monkeypatch.setattr("iac_code.memory.memory_tools.ReadMemoryTool", FakeReadMemoryTool)
     monkeypatch.setattr("iac_code.memory.memory_tools.WriteMemoryTool", FakeWriteMemoryTool)
     monkeypatch.setattr("iac_code.tasks.task_state.TaskManager", FakeTaskManager)
@@ -766,7 +785,7 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
     monkeypatch.setattr("iac_code.skills.listing.build_skill_listing", lambda skill_commands: "skill listing")
     monkeypatch.setattr(
         "iac_code.agent.system_prompt.build_system_prompt",
-        lambda **kwargs: f"prompt:{kwargs.get('cwd')}:{kwargs.get('memory_content')}:{kwargs.get('skill_listing')}",
+        lambda **kwargs: f"prompt:{kwargs.get('cwd')}:{kwargs.get('memory_context')}:{kwargs.get('skill_listing')}",
     )
     monkeypatch.setattr("os.getcwd", lambda: "/worktree")
     monkeypatch.setattr("uuid.uuid4", lambda: SimpleNamespace(__str__=lambda self: "12345678-aaaa"))
@@ -801,11 +820,14 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
     # default projects_dir from get_config_dir(), so we just assert the
     # storage was instantiated rather than checking a specific path.
     assert "projects_dir" in captured
-    assert captured["memory_dir"] == str(Path("/tmp/iac-config/memory"))
+    assert captured["project_memory_cwd"] == "/worktree"
+    assert str(Path("/tmp/iac-config/projects/fake/memory")) in captured["memory_dirs"]
+    assert str(Path("/tmp/iac-config/memory")) in captured["memory_dirs"]
     assert any(getattr(tool, "kind", "") == "agent" for tool in fake_registry.registered)
     assert any(getattr(tool, "kind", "") == "skill" for tool in fake_registry.registered)
     assert captured["agent_loop_kwargs"]["max_turns"] == 100
     assert captured["agent_loop_kwargs"]["session_storage"] is not None
+    assert captured["agent_loop_kwargs"]["memory_recall_service"] is captured["memory_recall_service"]
     assert fake_command_registry.registered == []
 
 

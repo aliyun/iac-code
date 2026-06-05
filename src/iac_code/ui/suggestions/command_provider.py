@@ -8,6 +8,8 @@ from iac_code.commands.registry import CommandRegistry, LocalCommand
 from iac_code.i18n import _
 from iac_code.ui.suggestions.types import CompletionToken, SuggestionItem, SuggestionProvider
 
+MEMORY_FOLDER_COMMAND = "memory-folder"
+
 
 class CommandProvider(SuggestionProvider):
     """Provides slash-command suggestions from a CommandRegistry."""
@@ -25,6 +27,8 @@ class CommandProvider(SuggestionProvider):
 
         if self._is_memory_argument_query(query):
             return self._memory_argument_suggestions(query)
+        if query.startswith("memory") and len(query) > len("memory") and query[len("memory")].isspace():
+            return []
 
         matches = self._registry.fuzzy_search(query)
 
@@ -51,10 +55,14 @@ class CommandProvider(SuggestionProvider):
 
     @staticmethod
     def _is_memory_argument_query(query: str) -> bool:
-        return query.startswith("memory") and len(query) > len("memory") and query[len("memory")].isspace()
+        return (
+            query.startswith(MEMORY_FOLDER_COMMAND)
+            and len(query) > len(MEMORY_FOLDER_COMMAND)
+            and query[len(MEMORY_FOLDER_COMMAND)].isspace()
+        )
 
     def _memory_argument_suggestions(self, query: str) -> list[SuggestionItem]:
-        arg_text = query[len("memory") :].lstrip()
+        arg_text = query[len(MEMORY_FOLDER_COMMAND) :].lstrip()
         has_trailing_space = bool(arg_text) and arg_text[-1].isspace()
         parts = arg_text.split()
 
@@ -64,7 +72,7 @@ class CommandProvider(SuggestionProvider):
         action = parts[0].lower()
         if action == "delete" and (has_trailing_space or len(parts) > 1):
             prefix = parts[1] if len(parts) > 1 else ""
-            return self._memory_name_suggestions(prefix, command_prefix="/memory delete ")
+            return self._memory_name_suggestions(prefix, command_prefix="/memory-folder delete ")
 
         if action == "search" and has_trailing_space:
             return []
@@ -76,11 +84,11 @@ class CommandProvider(SuggestionProvider):
 
     def _memory_first_argument_suggestions(self, prefix: str) -> list[SuggestionItem]:
         suggestions = [
-            self._memory_action_item("search", _("Search saved memories"), "/memory search ", prefix),
-            self._memory_action_item("delete", _("Delete a saved memory"), "/memory delete ", prefix),
-            self._memory_action_item("help", _("Show memory command help"), "/memory help", prefix),
+            self._memory_action_item("search", _("Search saved memories"), "/memory-folder search ", prefix),
+            self._memory_action_item("delete", _("Delete a saved memory"), "/memory-folder delete ", prefix),
+            self._memory_action_item("help", _("Show memory command help"), "/memory-folder help", prefix),
         ]
-        suggestions.extend(self._memory_name_suggestions(prefix, command_prefix="/memory "))
+        suggestions.extend(self._memory_name_suggestions(prefix, command_prefix="/memory-folder "))
         return [item for item in suggestions if item is not None]
 
     def _memory_action_item(

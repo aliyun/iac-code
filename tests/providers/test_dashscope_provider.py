@@ -148,6 +148,11 @@ class TestDashScopeExplicitCache:
         p = DashScopeProvider(model=prefix, api_key="k")
         assert p._supports_explicit_cache()
 
+    @pytest.mark.parametrize("model", ["qwen3.7-max", "qwen3.7-plus"])
+    def test_qwen37_models_support_explicit_cache(self, model):
+        p = DashScopeProvider(model=model, api_key="k")
+        assert p._supports_explicit_cache()
+
     def test_unsupported_model_returns_false(self):
         p = DashScopeProvider(model="kimi-k2.6", api_key="k")
         assert not p._supports_explicit_cache()
@@ -197,6 +202,14 @@ class TestDashScopeExplicitCache:
         api = p._build_api_messages([Message.user("hi")], "")
         assert api[0]["role"] == "user"
 
+    def test_no_explicit_cache_policy_leaves_messages_plain(self):
+        p = DashScopeProvider(model="qwen3.5-plus", api_key="k")
+        system = f"STATIC\n\n{DYNAMIC_BOUNDARY}\n\nDYNAMIC"
+        api = p._build_api_messages([Message.user("hi")], system, cache_policy="no_explicit_cache")
+
+        assert api[0] == {"role": "system", "content": system}
+        assert api[1] == {"role": "user", "content": "hi"}
+
     def test_last_user_message_gets_cache_control(self):
         """Supported model: last user message is wrapped with cache_control."""
         p = DashScopeProvider(model="qwen3.5-plus", api_key="k")
@@ -227,6 +240,34 @@ class TestDashScopeExplicitCache:
 
         user_msg = api[-1]
         assert user_msg["content"] == "hello"
+
+    def test_recalled_memory_reminder_does_not_steal_user_cache_control(self):
+        """Provider-only recalled memory should not become the cache prefix marker."""
+        p = DashScopeProvider(model="qwen3.5-plus", api_key="k")
+        msgs = [
+            Message.user("actual user question"),
+            Message.user(
+                "<system-reminder>\n"
+                "Relevant persistent memories recalled for this conversation:\n\n"
+                "# Recalled Memory\n"
+                "Prefer ROS YAML.\n"
+                "</system-reminder>"
+            ),
+        ]
+
+        api = p._build_api_messages(msgs, "sys")
+
+        actual_user = api[1]
+        reminder = api[2]
+        assert actual_user["content"][0]["text"] == "actual user question"
+        assert actual_user["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert reminder["content"] == (
+            "<system-reminder>\n"
+            "Relevant persistent memories recalled for this conversation:\n\n"
+            "# Recalled Memory\n"
+            "Prefer ROS YAML.\n"
+            "</system-reminder>"
+        )
 
 
 @pytest.mark.asyncio

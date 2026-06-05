@@ -44,6 +44,9 @@ class SkillTool(Tool):
             self._normalize_name(name): command for name, command in (disabled_skills or {}).items()
         }
 
+    def set_system_prompt(self, system_prompt: str) -> None:
+        self._system_prompt = system_prompt
+
     @property
     def name(self) -> str:
         return "skill"

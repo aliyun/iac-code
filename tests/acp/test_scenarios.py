@@ -49,7 +49,14 @@ from iac_code.acp.server import ACPServer
 from iac_code.acp.session import ACPSession, _history_message_to_updates
 from iac_code.acp.state import ToolCallState, TurnState
 from iac_code.acp.tools import ACPTerminalBashTool
-from iac_code.agent.message import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+from iac_code.agent.message import (
+    Message,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    create_recalled_memory_message,
+)
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.types.stream_events import (
     MessageEndEvent,
@@ -264,6 +271,9 @@ def test_a4_history_message_to_updates_all_types() -> None:
     updates = _history_message_to_updates(user_text)
     assert len(updates) == 1
     assert updates[0].session_update == "user_message_chunk"
+
+    recalled_memory = create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"])
+    assert _history_message_to_updates(recalled_memory) == []
 
     asst_text = Message(role="assistant", content=[TextBlock(text="reply")])
     updates = _history_message_to_updates(asst_text)
@@ -1363,10 +1373,12 @@ async def test_pushed_commands_match_registry(monkeypatch: pytest.MonkeyPatch) -
     pushed_names = {cmd.name for cmd in cmd_updates[0].available_commands}
 
     from iac_code.acp.slash_registry import ACP_SUPPORTED_COMMANDS
+    from iac_code.commands import create_default_registry
 
-    expected_names = set(ACP_SUPPORTED_COMMANDS)
+    expected_names = {cmd.name for cmd in create_default_registry().get_all() if cmd.name in ACP_SUPPORTED_COMMANDS}
 
     assert pushed_names == expected_names, f"Mismatch: pushed={pushed_names}, expected={expected_names}"
+    assert "memory-folder" not in pushed_names
 
 
 @pytest.mark.asyncio
