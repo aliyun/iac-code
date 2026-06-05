@@ -44,6 +44,15 @@ _STACK_STATUS_STRINGS = [
 ]
 
 
+SUCCESS_STACK_STATUSES = {
+    "CREATE_COMPLETE",
+    "UPDATE_COMPLETE",
+    "IMPORT_CREATE_COMPLETE",
+    "IMPORT_UPDATE_COMPLETE",
+    "CHECK_COMPLETE",
+}
+
+
 def translate_status(status: str) -> str:
     """Translate a stack/resource status code to localized display text."""
     return _(status)
@@ -63,7 +72,7 @@ class StackStatus:
 
     @property
     def is_success(self) -> bool:
-        return self.status.endswith("_COMPLETE")
+        return self.status in SUCCESS_STACK_STATUSES
 
 
 @dataclass

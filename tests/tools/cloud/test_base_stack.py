@@ -64,6 +64,78 @@ class MockCloudStack(BaseCloudStack):
         ]
 
 
+class MockDeleteCloudStack(MockCloudStack):
+    @property
+    def supported_actions(self) -> list[str]:
+        return ["DeleteStack"]
+
+    async def get_stack_status(self, stack_id: str, region: str) -> StackStatus:
+        return StackStatus(
+            stack_id=stack_id,
+            stack_name="test-stack",
+            status="DELETE_COMPLETE",
+            status_reason="Deleted",
+            progress_percentage=100,
+        )
+
+    def is_action_success(self, action: str, status: StackStatus) -> bool:
+        return action == "DeleteStack" and status.status == "DELETE_COMPLETE"
+
+
+class HookCapturingCloudStack(MockCloudStack):
+    def __init__(self) -> None:
+        super().__init__()
+        self.terminal_hook_call: dict | None = None
+        self.polling_cancelled_hook_call: dict | None = None
+
+    def on_terminal_status(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        status: StackStatus,
+        resources: list[ResourceStatus],
+        elapsed_seconds: int,
+    ) -> None:
+        self.terminal_hook_call = {
+            "action": action,
+            "params": params,
+            "region": region,
+            "status": status,
+            "resources": resources,
+            "elapsed_seconds": elapsed_seconds,
+        }
+
+    def on_polling_cancelled(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        stack_id: str,
+        elapsed_seconds: int,
+    ) -> None:
+        self.polling_cancelled_hook_call = {
+            "action": action,
+            "params": params,
+            "region": region,
+            "stack_id": stack_id,
+            "elapsed_seconds": elapsed_seconds,
+        }
+
+
+class RaisingTerminalHookCloudStack(MockCloudStack):
+    def on_terminal_status(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        status: StackStatus,
+        resources: list[ResourceStatus],
+        elapsed_seconds: int,
+    ) -> None:
+        raise RuntimeError("hook failed")
+
+
 @pytest.fixture
 def stack() -> MockCloudStack:
     return MockCloudStack()
@@ -192,6 +264,43 @@ class TestBaseCloudStackExecute:
         assert "[GetStackResources] resources failed" in result.content
 
     @pytest.mark.asyncio
+    async def test_execute_terminal_status_still_runs_hook_when_resources_error(self) -> None:
+        stack = HookCapturingCloudStack()
+        stack._target_polls = 1
+
+        async def fail_resources(stack_id: str, region: str) -> list[ResourceStatus]:
+            raise RuntimeError("resources failed")
+
+        stack.get_stack_resources = fail_resources  # type: ignore[method-assign]
+        result = await stack.execute(tool_input={"action": "CreateStack", "params": {}}, context=ToolContext())
+        assert result.is_error is False
+        assert stack.terminal_hook_call is not None
+        assert stack.terminal_hook_call["status"].status == "CREATE_COMPLETE"
+        assert stack.terminal_hook_call["resources"] == []
+
+    @pytest.mark.asyncio
+    async def test_execute_respects_instance_poll_interval_override(self) -> None:
+        stack = MockCloudStack()
+        stack.poll_interval = 0.25
+
+        async def stop_after_sleep(stack_id: str, region: str) -> StackStatus:
+            raise RuntimeError("stop")
+
+        stack.get_stack_status = stop_after_sleep  # type: ignore[method-assign]
+
+        sleep_calls: list[float] = []
+
+        async def record_sleep(delay: float) -> None:
+            sleep_calls.append(delay)
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr("iac_code.tools.cloud.base_stack.asyncio.sleep", record_sleep)
+            result = await stack.execute(tool_input={"action": "CreateStack", "params": {}}, context=ToolContext())
+
+        assert result.is_error is True
+        assert sleep_calls == [0.25]
+
+    @pytest.mark.asyncio
     async def test_execute_terminal_failure_returns_error(self, stack: MockCloudStack) -> None:
         async def failed_status(stack_id: str, region: str) -> StackStatus:
             return StackStatus(
@@ -208,6 +317,83 @@ class TestBaseCloudStackExecute:
         data = json.loads(result.content)
         assert data["status"] == "CREATE_FAILED"
         assert data["is_success"] is False
+
+    @pytest.mark.asyncio
+    async def test_execute_terminal_rollback_returns_error(self, stack: MockCloudStack) -> None:
+        async def rollback_status(stack_id: str, region: str) -> StackStatus:
+            return StackStatus(
+                stack_id=stack_id,
+                stack_name="test-stack",
+                status="CREATE_ROLLBACK_COMPLETE",
+                status_reason="Rolled back",
+                progress_percentage=100,
+            )
+
+        stack.get_stack_status = rollback_status  # type: ignore[method-assign]
+        result = await stack.execute(tool_input={"action": "CreateStack", "params": {}}, context=ToolContext())
+        assert result.is_error is True
+        data = json.loads(result.content)
+        assert data["status"] == "CREATE_ROLLBACK_COMPLETE"
+        assert data["is_success"] is False
+
+    @pytest.mark.asyncio
+    async def test_execute_delete_complete_can_be_action_success(self) -> None:
+        stack = MockDeleteCloudStack()
+        result = await stack.execute(tool_input={"action": "DeleteStack", "params": {}}, context=ToolContext())
+        assert result.is_error is False
+        data = json.loads(result.content)
+        assert data["status"] == "DELETE_COMPLETE"
+        assert data["is_success"] is True
+
+    @pytest.mark.asyncio
+    async def test_execute_calls_terminal_status_hook_with_terminal_context(self) -> None:
+        stack = HookCapturingCloudStack()
+        params = {"StackName": "test"}
+        result = await stack.execute(
+            tool_input={"action": "CreateStack", "params": params, "region_id": "cn-hangzhou"},
+            context=ToolContext(),
+        )
+        assert result.is_error is False
+        assert stack.terminal_hook_call is not None
+        assert stack.terminal_hook_call["action"] == "CreateStack"
+        assert stack.terminal_hook_call["params"] is params
+        assert stack.terminal_hook_call["region"] == "cn-hangzhou"
+        assert stack.terminal_hook_call["status"].status == "CREATE_COMPLETE"
+        assert stack.terminal_hook_call["resources"][0].name == "MyResource"
+        assert stack.terminal_hook_call["elapsed_seconds"] == json.loads(result.content)["elapsed_seconds"]
+
+    @pytest.mark.asyncio
+    async def test_execute_terminal_status_hook_failure_does_not_flip_result(self) -> None:
+        stack = RaisingTerminalHookCloudStack()
+        result = await stack.execute(tool_input={"action": "CreateStack", "params": {}}, context=ToolContext())
+        assert result.is_error is False
+        data = json.loads(result.content)
+        assert data["status"] == "CREATE_COMPLETE"
+        assert data["is_success"] is True
+
+    @pytest.mark.asyncio
+    async def test_execute_calls_polling_cancelled_hook_and_reraises(self) -> None:
+        stack = HookCapturingCloudStack()
+        params = {"StackName": "test"}
+
+        async def cancelled_status(stack_id: str, region: str) -> StackStatus:
+            raise asyncio.CancelledError
+
+        stack.get_stack_status = cancelled_status  # type: ignore[method-assign]
+
+        with pytest.raises(asyncio.CancelledError):
+            await stack.execute(
+                tool_input={"action": "CreateStack", "params": params, "region_id": "cn-hangzhou"},
+                context=ToolContext(),
+            )
+
+        assert stack.polling_cancelled_hook_call == {
+            "action": "CreateStack",
+            "params": params,
+            "region": "cn-hangzhou",
+            "stack_id": "stack-id-123",
+            "elapsed_seconds": 0,
+        }
 
 
 class MockCloudStackWithDefaultRegion(MockCloudStack):

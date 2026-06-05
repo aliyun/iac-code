@@ -225,6 +225,30 @@ class TestYamlHelpers:
         content = yaml.safe_load(path.read_text())
         assert content == {"key": "value", "num": 42}
 
+    def test_save_yaml_delegates_to_atomic_write_text(self, monkeypatch, tmp_path):
+        """_save_yaml writes serialized YAML through the atomic text helper."""
+        import yaml
+
+        from iac_code import config
+
+        path = tmp_path / "private" / "settings.yml"
+        calls = []
+
+        def fake_atomic_write_text(path_arg, content, *, encoding="utf-8"):
+            calls.append((path_arg, content, encoding))
+            path_arg.write_text(content, encoding=encoding)
+
+        monkeypatch.setattr(config, "atomic_write_text", fake_atomic_write_text)
+
+        config._save_yaml(path, {"key": "value", "num": 42})
+
+        assert len(calls) == 1
+        written_path, content, encoding = calls[0]
+        assert written_path == path
+        assert encoding == "utf-8"
+        assert yaml.safe_load(content) == {"key": "value", "num": 42}
+        assert yaml.safe_load(path.read_text(encoding="utf-8")) == {"key": "value", "num": 42}
+
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes are not meaningful on Windows")
     def test_save_yaml_writes_owner_only_file(self, tmp_path):
         """_save_yaml restricts parent directory and written file."""

@@ -6,12 +6,22 @@ import asyncio
 import re
 import shlex
 import sys
+from dataclasses import dataclass
+from typing import Literal
 
 from iac_code.skills.skill_definition import SkillContext, SkillDefinition
 
 # Shell command matching patterns
 BLOCK_PATTERN = re.compile(r"```!\s*\n?([\s\S]*?)\n?```")
 INLINE_PATTERN = re.compile(r"(?:^|\s)!`([^`]+)`")
+
+SegmentKind = Literal["text", "inline_shell", "block_shell"]
+
+
+@dataclass(frozen=True)
+class PromptSegment:
+    kind: SegmentKind
+    content: str
 
 
 async def render_skill_prompt(
@@ -20,24 +30,113 @@ async def render_skill_prompt(
     context: SkillContext,
 ) -> str:
     """Complete rendering pipeline for a skill prompt."""
-    content = skill.content
-
-    # Step 1: Base directory prefix
+    segments: list[PromptSegment] = []
     if skill.skill_root:
-        content = f"Base directory for this skill: {skill.skill_root}\n\n{content}"
+        segments.append(PromptSegment("text", f"Base directory for this skill: {skill.skill_root}\n\n"))
+    segments.extend(parse_prompt_segments(skill.content))
 
-    # Step 2: Argument substitution
-    content = substitute_arguments(
-        content, args, append_if_no_placeholder=True, argument_names=skill.frontmatter.arguments
+    return await render_prompt_segments(
+        segments,
+        args,
+        context=context,
+        argument_names=skill.frontmatter.arguments,
+        append_if_no_placeholder=True,
     )
 
-    # Step 3: Built-in variable substitution
+
+def contains_shell_commands(content: str) -> bool:
+    """Return True when content contains renderer shell syntax."""
+    return any(segment.kind != "text" for segment in parse_prompt_segments(content))
+
+
+def parse_prompt_segments(content: str) -> list[PromptSegment]:
+    """Split original skill content into text and executable shell segments."""
+    matches: list[tuple[int, int, SegmentKind, str]] = []
+    block_spans: list[tuple[int, int]] = []
+
+    for match in BLOCK_PATTERN.finditer(content):
+        block_spans.append((match.start(), match.end()))
+        matches.append((match.start(), match.end(), "block_shell", match.group(1).strip()))
+
+    for match in INLINE_PATTERN.finditer(content):
+        if any(start <= match.start() < end for start, end in block_spans):
+            continue
+        matches.append((match.start(), match.end(), "inline_shell", match.group(1).strip()))
+
+    matches.sort(key=lambda item: item[0])
+
+    segments: list[PromptSegment] = []
+    last_end = 0
+    for start, end, kind, shell_content in matches:
+        if start < last_end:
+            continue
+        if start > last_end:
+            segments.append(PromptSegment("text", content[last_end:start]))
+        segments.append(PromptSegment(kind, shell_content))
+        last_end = end
+
+    if last_end < len(content):
+        segments.append(PromptSegment("text", content[last_end:]))
+
+    return segments
+
+
+async def render_prompt_segments(
+    segments: list[PromptSegment],
+    args: str,
+    *,
+    context: SkillContext,
+    argument_names: list[str] | None = None,
+    append_if_no_placeholder: bool = False,
+) -> str:
+    """Render pre-parsed prompt segments without treating rendered text as shell syntax."""
+    rendered_parts: list[str] = []
+    text_placeholder_used = False
+
+    for segment in segments:
+        if segment.kind == "text":
+            rendered_text, used = render_text_segment(
+                segment.content,
+                args,
+                context=context,
+                argument_names=argument_names,
+            )
+            text_placeholder_used = text_placeholder_used or used
+            rendered_parts.append(rendered_text)
+            continue
+
+        command = render_builtin_variables(segment.content, context)
+        output = await _run_shell(command, cwd=context.cwd)
+        rendered_parts.append(output.strip() if segment.kind == "inline_shell" else output)
+
+    rendered = "".join(rendered_parts)
+    if args and append_if_no_placeholder and not text_placeholder_used:
+        rendered += f"\n\nARGUMENTS: {args}"
+    return rendered
+
+
+def render_text_segment(
+    content: str,
+    args: str,
+    *,
+    context: SkillContext,
+    argument_names: list[str] | None = None,
+) -> tuple[str, bool]:
+    """Render arguments and built-in variables in a non-shell text segment."""
+    rendered = substitute_arguments(
+        content,
+        args,
+        append_if_no_placeholder=False,
+        argument_names=argument_names,
+    )
+    used = rendered != content
+    return render_builtin_variables(rendered, context), used
+
+
+def render_builtin_variables(content: str, context: SkillContext) -> str:
+    """Render built-in variables that are not supplied by skill arguments."""
     content = content.replace("${SKILL_DIR}", context.skill_dir or "")
     content = content.replace("${SESSION_ID}", context.session_id or "")
-
-    # Step 4: Shell command execution
-    content = await execute_shell_commands(content, cwd=context.cwd)
-
     return content
 
 
@@ -105,29 +204,19 @@ def _parse_arguments(args: str) -> list[str]:
 
 
 async def execute_shell_commands(content: str, *, cwd: str = "") -> str:
-    """Execute inline shell commands in skill content and replace with output.
+    """Execute renderer shell commands from original content and replace with output.
 
     Two syntaxes:
     - Inline: !`command`  -> replaced with stdout (trimmed)
     - Block:  ```!\\ncommand\\n```  -> replaced with stdout
     """
-
-    async def _replace_block(match: re.Match) -> str:
-        cmd = match.group(1).strip()
-        return await _run_shell(cmd, cwd=cwd)
-
-    async def _replace_inline(match: re.Match) -> str:
-        cmd = match.group(1).strip()
-        output = await _run_shell(cmd, cwd=cwd)
-        return output.strip()
-
-    # Replace block commands
-    content = await _replace_async(content, BLOCK_PATTERN, _replace_block)
-
-    # Replace inline commands
-    content = await _replace_async(content, INLINE_PATTERN, _replace_inline)
-
-    return content
+    context = SkillContext(cwd=cwd)
+    return await render_prompt_segments(
+        parse_prompt_segments(content),
+        "",
+        context=context,
+        append_if_no_placeholder=False,
+    )
 
 
 async def _run_shell(cmd: str, *, cwd: str = "", timeout: float = 30.0) -> str:

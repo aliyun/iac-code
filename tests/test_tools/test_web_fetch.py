@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
+import httpx
 import pytest
 
+import iac_code.tools.web_fetch as web_fetch_module
 from iac_code.tools.base import ToolContext
 from iac_code.tools.web_fetch import WebFetchTool, _extract_text_from_html
 
@@ -20,6 +22,63 @@ def web_fetch_tool():
 def context():
     """Create a default ToolContext."""
     return ToolContext()
+
+
+class AsyncByteStream:
+    """Minimal async response stream for web_fetch tests."""
+
+    def __init__(
+        self,
+        chunks: list[bytes],
+        *,
+        headers: dict[str, str] | None = None,
+        encoding: str | None = "utf-8",
+        status_error: httpx.HTTPStatusError | None = None,
+    ):
+        self.chunks = chunks
+        self.headers = headers or {}
+        self.encoding = encoding
+        self.status_error = status_error
+        self.consumed = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def raise_for_status(self):
+        if self.status_error:
+            raise self.status_error
+
+    async def aiter_bytes(self):
+        for chunk in self.chunks:
+            self.consumed += 1
+            yield chunk
+
+
+class AsyncClientStreamOnly:
+    """AsyncClient stand-in that only exposes stream()."""
+
+    def __init__(
+        self,
+        stream: AsyncByteStream | None = None,
+        *,
+        stream_error: httpx.HTTPError | None = None,
+    ):
+        self._stream = stream
+        self._stream_error = stream_error
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def stream(self, method: str, url: str):
+        if self._stream_error:
+            raise self._stream_error
+        return self._stream
 
 
 class TestExtractTextFromHtml:
@@ -137,15 +196,12 @@ class TestWebFetchToolExecution:
     @pytest.mark.asyncio
     async def test_fetches_html_content_and_strips_tags(self, web_fetch_tool, context):
         html_response = "<html><body><h1>Hello</h1><p>World content</p></body></html>"
-        mock_response = MagicMock()
-        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_response.text = html_response
-        mock_response.raise_for_status = MagicMock()
+        stream = AsyncByteStream(
+            [html_response.encode()],
+            headers={"content-type": "text/html; charset=utf-8"},
+        )
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client = AsyncClientStreamOnly(stream)
 
         with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
             result = await web_fetch_tool.execute(
@@ -161,15 +217,12 @@ class TestWebFetchToolExecution:
     @pytest.mark.asyncio
     async def test_fetches_plain_text_content(self, web_fetch_tool, context):
         text_response = "This is plain text content."
-        mock_response = MagicMock()
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = text_response
-        mock_response.raise_for_status = MagicMock()
+        stream = AsyncByteStream(
+            [text_response.encode()],
+            headers={"content-type": "text/plain"},
+        )
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client = AsyncClientStreamOnly(stream)
 
         with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
             result = await web_fetch_tool.execute(
@@ -183,15 +236,12 @@ class TestWebFetchToolExecution:
     @pytest.mark.asyncio
     async def test_truncates_to_max_length(self, web_fetch_tool, context):
         long_content = "A" * 100000
-        mock_response = MagicMock()
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = long_content
-        mock_response.raise_for_status = MagicMock()
+        stream = AsyncByteStream(
+            [long_content.encode()],
+            headers={"content-type": "text/plain"},
+        )
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client = AsyncClientStreamOnly(stream)
 
         max_length = 1000
         with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
@@ -205,12 +255,7 @@ class TestWebFetchToolExecution:
 
     @pytest.mark.asyncio
     async def test_http_error_returns_error(self, web_fetch_tool, context):
-        import httpx
-
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.get = AsyncMock(side_effect=httpx.HTTPError("Connection failed"))
+        mock_client = AsyncClientStreamOnly(stream_error=httpx.HTTPError("Connection failed"))
 
         with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
             result = await web_fetch_tool.execute(
@@ -224,15 +269,12 @@ class TestWebFetchToolExecution:
     async def test_default_max_length_is_50000(self, web_fetch_tool, context):
         # Content longer than default 50000
         long_content = "B" * 60000
-        mock_response = MagicMock()
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.text = long_content
-        mock_response.raise_for_status = MagicMock()
+        stream = AsyncByteStream(
+            [long_content.encode()],
+            headers={"content-type": "text/plain"},
+        )
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client = AsyncClientStreamOnly(stream)
 
         with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
             result = await web_fetch_tool.execute(
@@ -242,6 +284,145 @@ class TestWebFetchToolExecution:
 
         assert result.is_error is False
         assert len(result.content) <= 50000
+
+    @pytest.mark.asyncio
+    async def test_streaming_stops_at_download_byte_cap(self, web_fetch_tool, context, monkeypatch):
+        monkeypatch.setattr(web_fetch_module, "MAX_DOWNLOAD_BYTES", 5)
+        stream = AsyncByteStream(
+            [b"abc", b"def", b"ghi"],
+            headers={"content-type": "text/plain"},
+        )
+
+        mock_client = AsyncClientStreamOnly(stream)
+
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
+            result = await web_fetch_tool.execute(
+                tool_input={"url": "https://example.com"},
+                context=context,
+            )
+
+        assert result.is_error is False
+        assert result.content == "abcde\n\n[truncated]"
+        assert stream.consumed == 2
+
+    @pytest.mark.asyncio
+    async def test_streaming_exact_download_byte_cap_is_not_truncated(self, web_fetch_tool, context, monkeypatch):
+        monkeypatch.setattr(web_fetch_module, "MAX_DOWNLOAD_BYTES", 5)
+        stream = AsyncByteStream(
+            [b"abcde"],
+            headers={"content-type": "text/plain"},
+        )
+
+        mock_client = AsyncClientStreamOnly(stream)
+
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
+            result = await web_fetch_tool.execute(
+                tool_input={"url": "https://example.com"},
+                context=context,
+            )
+
+        assert result.is_error is False
+        assert result.content == "abcde"
+
+    @pytest.mark.asyncio
+    async def test_streaming_exact_cap_then_more_without_content_length_is_truncated(
+        self, web_fetch_tool, context, monkeypatch
+    ):
+        monkeypatch.setattr(web_fetch_module, "MAX_DOWNLOAD_BYTES", 5)
+        stream = AsyncByteStream(
+            [b"abcde", b"f"],
+            headers={"content-type": "text/plain"},
+        )
+
+        mock_client = AsyncClientStreamOnly(stream)
+
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
+            result = await web_fetch_tool.execute(
+                tool_input={"url": "https://example.com"},
+                context=context,
+            )
+
+        assert result.is_error is False
+        assert result.content == "abcde\n\n[truncated]"
+        assert stream.consumed == 2
+
+    @pytest.mark.asyncio
+    async def test_streaming_exact_cap_with_larger_content_length_is_truncated(
+        self, web_fetch_tool, context, monkeypatch
+    ):
+        monkeypatch.setattr(web_fetch_module, "MAX_DOWNLOAD_BYTES", 5)
+        stream = AsyncByteStream(
+            [b"abcde"],
+            headers={"content-length": "6", "content-type": "text/plain"},
+        )
+
+        mock_client = AsyncClientStreamOnly(stream)
+
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
+            result = await web_fetch_tool.execute(
+                tool_input={"url": "https://example.com"},
+                context=context,
+            )
+
+        assert result.is_error is False
+        assert result.content == "abcde\n\n[truncated]"
+
+    @pytest.mark.asyncio
+    async def test_download_cap_marker_respects_max_length(self, web_fetch_tool, context, monkeypatch):
+        monkeypatch.setattr(web_fetch_module, "MAX_DOWNLOAD_BYTES", 5)
+        stream = AsyncByteStream(
+            [b"abc", b"def"],
+            headers={"content-type": "text/plain"},
+        )
+
+        mock_client = AsyncClientStreamOnly(stream)
+
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
+            result = await web_fetch_tool.execute(
+                tool_input={"url": "https://example.com", "max_length": 5},
+                context=context,
+            )
+
+        assert result.is_error is False
+        assert len(result.content) <= 5
+
+    @pytest.mark.asyncio
+    async def test_max_length_zero_returns_empty_content(self, web_fetch_tool, context, monkeypatch):
+        monkeypatch.setattr(web_fetch_module, "MAX_DOWNLOAD_BYTES", 5)
+        stream = AsyncByteStream(
+            [b"abc", b"def"],
+            headers={"content-type": "text/plain"},
+        )
+
+        mock_client = AsyncClientStreamOnly(stream)
+
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
+            result = await web_fetch_tool.execute(
+                tool_input={"url": "https://example.com", "max_length": 0},
+                context=context,
+            )
+
+        assert result.is_error is False
+        assert len(result.content) == 0
+
+    @pytest.mark.asyncio
+    async def test_streaming_html_still_strips_tags(self, web_fetch_tool, context):
+        stream = AsyncByteStream(
+            [b"<html><body><p>Hello</p><script>bad()</script></body></html>"],
+            headers={"content-type": "text/html; charset=utf-8"},
+        )
+
+        mock_client = AsyncClientStreamOnly(stream)
+
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=mock_client):
+            result = await web_fetch_tool.execute(
+                tool_input={"url": "https://example.com"},
+                context=context,
+            )
+
+        assert result.is_error is False
+        assert "Hello" in result.content
+        assert "bad" not in result.content
 
 
 class TestWebFetchToolUI:

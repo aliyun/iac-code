@@ -18,6 +18,7 @@ from iac_code.acp.session import (
     _PREFIX_DENY_RULE,
     ACPSession,
 )
+from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.permissions import PermissionRuleValue, ToolPermissionContext
 from iac_code.types.stream_events import MessageEndEvent, PermissionRequestEvent, TextDeltaEvent, Usage
 
@@ -32,6 +33,8 @@ class FakePermissionResult:
 class _FakeLoop:
     def __init__(self, permission_context=None):
         self._permission_context = permission_context
+        self.tool_registry = MagicMock()
+        self.tool_registry.get.return_value = None
 
     async def run_streaming(self, prompt: str):
         yield TextDeltaEvent(text="ok")
@@ -121,6 +124,21 @@ async def test_options_fallback_to_tool_level_without_suggestions():
     # Rule-level options should NOT be present
     assert not any(oid.startswith(_PREFIX_ALLOW_RULE) for oid in option_ids)
     assert not any(oid.startswith(_PREFIX_DENY_RULE) for oid in option_ids)
+
+
+@pytest.mark.asyncio
+async def test_read_file_without_suggestions_omits_allow_always():
+    """read_file path prompts should not offer blanket future allow."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    loop = _FakeLoop()
+    loop.tool_registry.get.return_value = ReadFileTool()
+    session = ACPSession("s1", loop, conn)
+    event = _make_event(tool_name="read_file", tool_input={"path": "/tmp/outside.txt"}, suggestions=None)
+
+    await session._request_permission(event)
+
+    option_ids = [opt.option_id for opt in conn.last_options]
+    assert _OPTION_ALLOW_ALWAYS not in option_ids
 
 
 # ---------------------------------------------------------------------------

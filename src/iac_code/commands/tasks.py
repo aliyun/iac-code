@@ -37,5 +37,6 @@ class TasksCommand:
         task = self._manager.get(task_id)
         if not task:
             return f"Task '{task_id}' not found."
-        self._manager.stop(task_id)
+        if not self._manager.stop(task_id):
+            return f"Task '{task_id}' already {task.status.value}."
         return f"Task '{task_id}' stopped."

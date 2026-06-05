@@ -2,6 +2,7 @@
 
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -203,6 +204,34 @@ class TestInputHistory:
         assert "/auth" not in results2
         results3 = h2.search("persisted")
         assert "persisted" in results3
+
+    def test_save_delegates_to_atomic_write_text(self, monkeypatch, tmp_path):
+        from iac_code.ui.core import input_history
+
+        history_file = tmp_path / "history.txt"
+        calls = []
+
+        def fake_atomic_write_text(path_arg, content, *, encoding="utf-8"):
+            calls.append((Path(path_arg), content, encoding))
+            Path(path_arg).write_text(content, encoding=encoding)
+
+        monkeypatch.setattr(input_history, "atomic_write_text", fake_atomic_write_text)
+
+        h = InputHistory(str(history_file))
+        h.append("persisted")
+        h.append("/auth login", persist=False)
+
+        assert len(calls) == 1
+        written_path, content, encoding = calls[0]
+        assert written_path == history_file
+        assert encoding == "utf-8"
+        lines = content.splitlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0]) == {
+            "format": "iac-code-input-history-v1",
+            "text": "persisted",
+        }
+        assert InputHistory(str(history_file)).entries() == ["persisted"]
 
     def test_reset_navigation(self, tmp_path):
         history_file = str(tmp_path / "history.txt")

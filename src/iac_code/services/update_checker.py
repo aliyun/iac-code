@@ -569,4 +569,4 @@ def _is_newer_version(version: str, current_version: str) -> bool:
     try:
         return Version(version) > Version(current_version)
     except InvalidVersion:
-        return version > current_version
+        return False

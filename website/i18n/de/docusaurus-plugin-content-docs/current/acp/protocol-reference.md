@@ -351,7 +351,9 @@ Der Server sendet einen `request_permission`-Callback mit:
 | Options-ID | Bedeutung |
 |-----------|---------|
 | `allow_once` | Diesen spezifischen Aufruf erlauben |
-| `allow_always` | Alle zukuenftigen Aufrufe dieses Tools in dieser Sitzung erlauben |
+| `allow_always` | Alle zukuenftigen Aufrufe dieses Tools in dieser Sitzung erlauben, wenn das Tool blanket allow unterstuetzt; fuer `bash` standardmaessig nicht angeboten |
+| `allow_rule:<rules>` | Zukuenftige Aufrufe erlauben, die den vorgeschlagenen Regeln in dieser Sitzung entsprechen |
+| `deny_rule:<rules>` | Zukuenftige Aufrufe verweigern, die den vorgeschlagenen Regeln in dieser Sitzung entsprechen |
 | `reject_once` | Diesen spezifischen Aufruf verweigern |
 | `reject_always` | Alle zukuenftigen Aufrufe dieses Tools in dieser Sitzung verweigern |
 

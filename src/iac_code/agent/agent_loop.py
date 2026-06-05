@@ -94,6 +94,7 @@ class AgentLoop:
             model_name = provider_manager.get_model_name()
 
         self.context_manager = ContextManager(system_prompt=system_prompt, model=model_name)
+        self._sync_tool_definitions()
         if resume_messages:
             self.context_manager.load_messages(resume_messages)
         self._tool_executor = ToolExecutor(registry=tool_registry)
@@ -116,6 +117,7 @@ class AgentLoop:
         if system_prompt is not None:
             self.system_prompt = system_prompt
             self.context_manager.set_system_prompt(system_prompt)
+        self._sync_tool_definitions()
 
     def set_auto_trigger_skills(self, skill_commands: list[Any] | None) -> None:
         """Refresh skills considered for automatic trigger injection."""
@@ -135,6 +137,12 @@ class AgentLoop:
                 )
             )
         return tools
+
+    def _sync_tool_definitions(self):
+        """Refresh context token accounting from the current tool registry."""
+        tool_definitions = self._get_tool_definitions()
+        self.context_manager.set_tool_definitions(tool_definitions)
+        return tool_definitions
 
     def _get_provider_messages(self):
         """Convert context manager messages to provider Message format."""
@@ -277,9 +285,9 @@ class AgentLoop:
         from iac_code.services.telemetry import start_span
         from iac_code.services.telemetry.names import GenAiAttr, GenAiOperationName, GenAiSpanKind, Spans
 
-        tool_definitions = self._get_tool_definitions()
-
         for _turn in range(self._max_turns):
+            tool_definitions = self._sync_tool_definitions()
+
             # Auto-compact if needed
             if self.context_manager.needs_compaction():
                 compact_event = await self._auto_compact()
@@ -303,7 +311,7 @@ class AgentLoop:
                 async for event in self._provider_manager.stream(
                     messages=self._get_provider_messages(),
                     system=self.system_prompt,
-                    tools=tool_definitions if self.tool_registry.list_tools() else None,
+                    tools=tool_definitions if tool_definitions else None,
                 ):
                     yield event  # Forward all provider events to UI
 

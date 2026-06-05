@@ -103,6 +103,10 @@ class TestToolPermissionContext:
         assert ctx.ask_rules == {}
         assert ctx.additional_directories == []
 
+    def test_trusted_read_directories_default_empty(self):
+        ctx = ToolPermissionContext(cwd="/tmp")
+        assert ctx.trusted_read_directories == []
+
     def test_with_rules(self) -> None:
         ctx = ToolPermissionContext(
             mode=PermissionMode.DEFAULT,

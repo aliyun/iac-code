@@ -4,6 +4,7 @@ import pytest
 
 from iac_code.tools.base import ToolContext
 from iac_code.tools.read_file import ReadFileTool
+from iac_code.types.permissions import ToolPermissionContext
 
 
 @pytest.fixture
@@ -20,6 +21,9 @@ class TestReadFileTool:
         assert read_file_tool.name == "read_file"
         assert "read" in read_file_tool.description.lower()
         assert read_file_tool.input_schema["required"] == ["path"]
+
+    def test_supports_blanket_allow_is_false(self, read_file_tool):
+        assert read_file_tool.supports_blanket_allow is False
 
     @pytest.mark.asyncio
     async def test_read_normal_file(self, tmp_path, read_file_tool):
@@ -155,13 +159,98 @@ class TestReadFileTool:
         assert "Line 3" not in result.content
 
     @pytest.mark.asyncio
+    async def test_read_file_truncates_at_max_lines(self, tmp_path, read_file_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_LINES", 3)
+        test_file = tmp_path / "long.txt"
+        test_file.write_text("one\ntwo\nthree\nfour\nfive\n")
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
+
+        assert result.is_error is False
+        assert "truncated" in result.content.lower()
+        assert "three" in result.content
+        assert "four" not in result.content
+
+    @pytest.mark.asyncio
+    async def test_read_file_truncates_at_max_bytes(self, tmp_path, read_file_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_BYTES", 8)
+        test_file = tmp_path / "long.txt"
+        test_file.write_text("12345\n67890\n")
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
+
+        assert result.is_error is False
+        assert "truncated" in result.content.lower()
+        assert "12345" in result.content
+
+    @pytest.mark.asyncio
+    async def test_read_file_byte_limit_does_not_split_utf8_character(self, tmp_path, read_file_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_BYTES", 3)
+        test_file = tmp_path / "unicode.txt"
+        test_file.write_text("ééé\n", encoding="utf-8")
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
+
+        assert result.is_error is False
+        assert "truncated" in result.content.lower()
+        assert "é" in result.content
+        assert "binary" not in result.content.lower()
+
+    @pytest.mark.asyncio
+    async def test_read_file_streaming_does_not_preload_whole_file(self, tmp_path, read_file_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_LINES", 1)
+        target = tmp_path / "stream.txt"
+        target.write_text("unused")
+
+        class NoPreloadFile:
+            def __init__(self):
+                self.readline_calls = 0
+                self.read_calls = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def readlines(self):
+                raise AssertionError("readlines should not be used")
+
+            def read(self, size=-1):
+                self.read_calls += 1
+                if size == -1:
+                    raise AssertionError("unbounded read should not be used")
+                return b"x"
+
+            def readline(self, size=-1):
+                self.readline_calls += 1
+                if self.readline_calls > 1:
+                    raise AssertionError("reader continued after line cap")
+                return b"one\n"
+
+        fake_file = NoPreloadFile()
+        monkeypatch.setattr("builtins.open", lambda *args, **kwargs: fake_file)
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await read_file_tool.execute(tool_input={"path": str(target)}, context=context)
+
+        assert result.is_error is False
+        assert "one" in result.content
+        assert "truncated" in result.content.lower()
+        assert fake_file.readline_calls == 1
+        assert fake_file.read_calls == 1
+
+    @pytest.mark.asyncio
     async def test_windows_posix_path_conversion(self, tmp_path, read_file_tool, monkeypatch):
         target = tmp_path / "msys_path.txt"
         target.write_text("hello", encoding="utf-8")
         from unittest.mock import MagicMock
 
         monkeypatch.setattr(
-            "iac_code.tools.read_file.normalize_user_path",
+            "iac_code.tools.path_safety.normalize_user_path",
             MagicMock(side_effect=lambda raw: raw),
         )
         from iac_code.tools.base import ToolContext
@@ -172,9 +261,122 @@ class TestReadFileTool:
             context=context,
         )
         assert result.is_error is False
-        from iac_code.tools.read_file import normalize_user_path
+        from iac_code.tools.path_safety import normalize_user_path
 
         normalize_user_path.assert_called_once_with(str(target))
+
+
+class TestReadFilePermissions:
+    @pytest.mark.asyncio
+    async def test_project_file_allowed(self, tmp_path, read_file_tool):
+        project = tmp_path / "project"
+        project.mkdir()
+        target = project / "main.tf"
+        target.write_text("resource x")
+
+        result = await read_file_tool.check_permissions(
+            {"path": str(target)},
+            ToolPermissionContext(cwd=str(project)),
+        )
+
+        assert result.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_outside_project_file_asks_with_path_constraint(self, tmp_path, read_file_tool):
+        project = tmp_path / "project"
+        outside = tmp_path / "outside"
+        project.mkdir()
+        outside.mkdir()
+        target = outside / "secret.txt"
+        target.write_text("nope")
+
+        result = await read_file_tool.check_permissions(
+            {"path": str(target)},
+            ToolPermissionContext(cwd=str(project)),
+        )
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "path_constraint"
+
+    @pytest.mark.asyncio
+    async def test_sensitive_project_file_asks_with_safety_check(self, tmp_path, read_file_tool):
+        project = tmp_path / "project"
+        project.mkdir()
+        target = project / ".env"
+        target.write_text("TOKEN=fake")
+
+        result = await read_file_tool.check_permissions(
+            {"path": str(target)},
+            ToolPermissionContext(cwd=str(project)),
+        )
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "safety_check"
+
+    @pytest.mark.asyncio
+    async def test_trusted_read_directory_allowed(self, tmp_path, read_file_tool):
+        project = tmp_path / "project"
+        trusted = tmp_path / "trusted"
+        project.mkdir()
+        trusted.mkdir()
+        target = trusted / ".env"
+        target.write_text("TOKEN=fake")
+
+        result = await read_file_tool.check_permissions(
+            {"path": str(target)},
+            ToolPermissionContext(cwd=str(project), trusted_read_directories=[str(trusted)]),
+        )
+
+        assert result.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_file_path_alias_allowed(self, tmp_path, read_file_tool):
+        project = tmp_path / "project"
+        project.mkdir()
+        target = project / "main.tf"
+        target.write_text("resource x")
+
+        result = await read_file_tool.check_permissions(
+            {"file_path": str(target)},
+            ToolPermissionContext(cwd=str(project)),
+        )
+
+        assert result.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_empty_path_asks(self, read_file_tool):
+        result = await read_file_tool.check_permissions(
+            {"path": ""},
+            ToolPermissionContext(cwd="/tmp"),
+        )
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "path_constraint"
+
+    @pytest.mark.asyncio
+    async def test_additional_directory_allowed(self, tmp_path, read_file_tool):
+        project = tmp_path / "project"
+        shared = tmp_path / "shared"
+        project.mkdir()
+        shared.mkdir()
+        target = shared / "vars.tf"
+        target.write_text("variable x")
+
+        result = await read_file_tool.check_permissions(
+            {"path": str(target)},
+            ToolPermissionContext(cwd=str(project), additional_directories=[str(shared)]),
+        )
+
+        assert result.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_non_permission_context_falls_back_to_read_only_allow(self, read_file_tool):
+        result = await read_file_tool.check_permissions({"path": "/outside"}, context={})
+
+        assert result.behavior == "allow"
 
 
 class TestReadFileErrors:

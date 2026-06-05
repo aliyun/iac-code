@@ -71,6 +71,7 @@ class ToolPermissionContext:
     deny_rules: dict[str, list[str]] = field(default_factory=dict)
     ask_rules: dict[str, list[str]] = field(default_factory=dict)
     additional_directories: list[str] = field(default_factory=list)
+    trusted_read_directories: list[str] = field(default_factory=list)
 
 
 PermissionDecision = Literal["always_allow", "always_deny"]

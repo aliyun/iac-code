@@ -43,6 +43,24 @@ def test_create_agent_runtime_different_session_ids(tmp_path, monkeypatch) -> No
     assert rt1.session_id != rt2.session_id
 
 
+def test_create_agent_runtime_adds_session_trusted_read_directories(tmp_path, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+
+    from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id="session-42",
+            cwd=str(tmp_path),
+        )
+    )
+
+    roots = runtime.agent_loop._permission_context.trusted_read_directories
+    assert str(tmp_path / "config" / "tool-results" / "session-42") in roots
+    assert str(tmp_path / "config" / "image-cache" / "session-42") in roots
+
+
 def test_create_agent_runtime_all_fields_populated(tmp_path, monkeypatch) -> None:
     """All AgentRuntime fields should be non-None."""
     monkeypatch.chdir(tmp_path)

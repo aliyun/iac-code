@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from iac_code.ui.suggestions import shell_history_provider as shell_history_module
 from iac_code.ui.suggestions.shell_history_provider import (
     ShellHistoryProvider,
     _detect_history_path,
@@ -117,6 +118,58 @@ class TestShellHistoryProvider:
         displays = {item.display_text for item in items}
         assert "git status" in displays
         assert "git diff" in displays
+
+    def test_reuses_cached_history_when_file_unchanged(self, tmp_path, monkeypatch):
+        history_file = tmp_path / ".bash_history"
+        history_file.write_text("git status\ngit diff\n", encoding="utf-8")
+        calls: list[str] = []
+
+        def fake_read_history(path: str) -> list[str]:
+            calls.append(path)
+            return ["git status", "git diff"]
+
+        monkeypatch.setattr(shell_history_module, "_read_history", fake_read_history)
+        provider = ShellHistoryProvider()
+        provider._history_path = str(history_file)
+
+        first = provider.provide(make_token("!git"))
+        second = provider.provide(make_token("!git s"))
+
+        assert [item.display_text for item in first] == ["git diff", "git status"]
+        assert [item.display_text for item in second] == ["git status"]
+        assert calls == [str(history_file)]
+
+    def test_refreshes_cached_history_when_file_changes(self, tmp_path, monkeypatch):
+        history_file = tmp_path / ".bash_history"
+        history_file.write_text("git status\n", encoding="utf-8")
+        reads = [["git status"], ["git status", "git push"]]
+
+        def fake_read_history(path: str) -> list[str]:
+            return reads.pop(0)
+
+        monkeypatch.setattr(shell_history_module, "_read_history", fake_read_history)
+        provider = ShellHistoryProvider()
+        provider._history_path = str(history_file)
+
+        assert [item.display_text for item in provider.provide(make_token("!git"))] == ["git status"]
+        history_file.write_text("git status\ngit push\n", encoding="utf-8")
+
+        assert [item.display_text for item in provider.provide(make_token("!git"))] == ["git push", "git status"]
+
+    def test_limits_returned_history_suggestions(self, tmp_path, monkeypatch):
+        history_file = tmp_path / ".bash_history"
+        history_file.write_text("\n".join(f"git command {i}" for i in range(10)), encoding="utf-8")
+        monkeypatch.setattr(
+            shell_history_module,
+            "_read_history",
+            lambda path: [f"git command {i}" for i in range(10)],
+        )
+        provider = ShellHistoryProvider(max_suggestions=3)
+        provider._history_path = str(history_file)
+
+        items = provider.provide(make_token("!git"))
+
+        assert [item.display_text for item in items] == ["git command 9", "git command 8", "git command 7"]
 
 
 class TestShellHistoryHelpers:

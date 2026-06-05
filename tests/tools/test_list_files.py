@@ -167,6 +167,23 @@ class TestListFilesTool:
         assert alpha_pos < middle_pos < zebra_pos
 
     @pytest.mark.asyncio
+    async def test_skips_broken_symlink(self, tmp_path, list_files_tool):
+        """Test that broken symlinks do not crash directory listing."""
+        (tmp_path / "ok.txt").write_text("content")
+        broken = tmp_path / "broken-link"
+        try:
+            broken.symlink_to(tmp_path / "missing-target")
+        except (OSError, NotImplementedError) as e:
+            pytest.skip(f"Cannot create symlink on this platform: {e}")
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await list_files_tool.execute(tool_input={"path": str(tmp_path)}, context=context)
+
+        assert result.is_error is False
+        assert "ok.txt" in result.content
+        assert "broken-link" not in result.content
+
+    @pytest.mark.asyncio
     async def test_windows_posix_path_conversion(self, tmp_path, list_files_tool, monkeypatch):
         from unittest.mock import MagicMock
 

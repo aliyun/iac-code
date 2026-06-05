@@ -3,7 +3,7 @@
 import asyncio
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
@@ -12,6 +12,7 @@ from iac_code.skills.renderer import (
     _parse_arguments,
     _replace_async,
     _run_shell,
+    contains_shell_commands,
     execute_shell_commands,
     render_skill_prompt,
     substitute_arguments,
@@ -92,6 +93,16 @@ class TestExecuteShellCommands:
         assert isinstance(result, str)
 
 
+class TestShellDetection:
+    def test_contains_shell_commands_detects_inline_and_block(self):
+        assert contains_shell_commands("Run !`echo hi`")
+        assert contains_shell_commands("```!\necho hi\n```")
+
+    def test_contains_shell_commands_ignores_plain_text(self):
+        assert not contains_shell_commands("Plain $ARGUMENTS and $PATH")
+        assert not contains_shell_commands("```python\nprint('not shell')\n```")
+
+
 class TestRendererPipeline:
     @pytest.mark.asyncio
     async def test_render_skill_prompt_applies_root_args_variables_and_shell(self, monkeypatch):
@@ -106,17 +117,16 @@ class TestRendererPipeline:
         context = SkillContext(cwd="/tmp/work", skill_dir="/tmp/skill-root", session_id="session-1")
 
         shell_mock = AsyncMock(return_value="rendered shell output")
-        monkeypatch.setattr("iac_code.skills.renderer.execute_shell_commands", shell_mock)
+        monkeypatch.setattr("iac_code.skills.renderer._run_shell", shell_mock)
 
         result = await render_skill_prompt(skill, "world", context)
 
-        shell_mock.assert_awaited_once()
-        shell_input = shell_mock.await_args.args[0]
-        assert shell_input.startswith("Base directory for this skill: /tmp/skill-root")
-        assert "Target: world" in shell_input
-        assert "Dir=/tmp/skill-root" in shell_input
-        assert "Session=session-1" in shell_input
-        assert result == "rendered shell output"
+        shell_mock.assert_awaited_once_with("echo done", cwd="/tmp/work")
+        assert result.startswith("Base directory for this skill: /tmp/skill-root")
+        assert "Target: world" in result
+        assert "Dir=/tmp/skill-root" in result
+        assert "Session=session-1" in result
+        assert result.endswith("rendered shell output")
 
     def test_parse_arguments_falls_back_on_invalid_quotes(self):
         assert _parse_arguments('"unterminated quote') == ['"unterminated', "quote"]
@@ -165,3 +175,100 @@ class TestRendererPipeline:
         )
 
         assert result == "a<one> b<two>"
+
+    @pytest.mark.asyncio
+    async def test_argument_rendered_shell_block_stays_text(self, monkeypatch):
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=SkillFrontmatter(description="demo"),
+            content="User input:\n$ARGUMENTS",
+            source=SkillSource.PROJECT,
+        )
+        context = SkillContext(cwd="/tmp/work")
+        run_mock = AsyncMock(return_value="unexpected")
+        monkeypatch.setattr("iac_code.skills.renderer._run_shell", run_mock)
+
+        result = await render_skill_prompt(skill, "```!\necho pwned\n```", context)
+
+        assert "```!\necho pwned\n```" in result
+        run_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_argument_rendered_inline_shell_stays_text(self, monkeypatch):
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=SkillFrontmatter(description="demo"),
+            content="User input: $ARGUMENTS",
+            source=SkillSource.PROJECT,
+        )
+        context = SkillContext(cwd="/tmp/work")
+        run_mock = AsyncMock(return_value="unexpected")
+        monkeypatch.setattr("iac_code.skills.renderer._run_shell", run_mock)
+
+        result = await render_skill_prompt(skill, "!`echo pwned`", context)
+
+        assert result == "User input: !`echo pwned`"
+        run_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_shell_segment_does_not_substitute_skill_arguments(self, monkeypatch):
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=SkillFrontmatter(description="demo", arguments=["name"]),
+            content='```!\necho "$ARGUMENTS" "$0" "$name"\n```',
+            source=SkillSource.PROJECT,
+        )
+        context = SkillContext(cwd="/tmp/work")
+        run_mock = AsyncMock(return_value="shell output\n")
+        monkeypatch.setattr("iac_code.skills.renderer._run_shell", run_mock)
+
+        result = await render_skill_prompt(skill, "danger; echo injected", context)
+
+        assert result == "shell output\n\n\nARGUMENTS: danger; echo injected"
+        run_mock.assert_awaited_once_with('echo "$ARGUMENTS" "$0" "$name"', cwd="/tmp/work")
+
+    @pytest.mark.asyncio
+    async def test_shell_segment_substitutes_builtin_variables_only(self, monkeypatch):
+        skill = SkillDefinition(
+            name="demo",
+            description="demo",
+            frontmatter=SkillFrontmatter(description="demo"),
+            content='```!\nprintf "${SKILL_DIR} ${SESSION_ID} $ARGUMENTS"\n```',
+            source=SkillSource.PROJECT,
+        )
+        context = SkillContext(cwd="/tmp/work", skill_dir="/tmp/skill-root", session_id="session-1")
+        run_mock = AsyncMock(return_value="shell output\n")
+        monkeypatch.setattr("iac_code.skills.renderer._run_shell", run_mock)
+
+        await render_skill_prompt(skill, "danger", context)
+
+        run_mock.assert_awaited_once_with('printf "/tmp/skill-root session-1 $ARGUMENTS"', cwd="/tmp/work")
+
+    @pytest.mark.asyncio
+    async def test_shell_output_is_not_rescanned_for_inline_shell(self, monkeypatch):
+        content = "```!\nprintf '!`echo second`'\n```"
+        run_mock = AsyncMock(return_value="!`echo second`")
+        monkeypatch.setattr("iac_code.skills.renderer._run_shell", run_mock)
+
+        result = await execute_shell_commands(content)
+
+        assert result == "!`echo second`"
+        run_mock.assert_awaited_once_with("printf '!`echo second`'", cwd="")
+
+    @pytest.mark.asyncio
+    async def test_multiple_original_shell_segments_execute_in_order(self, monkeypatch):
+        content = "a !`one` b\n```!\ntwo\n```\nc !`three`"
+        run_mock = AsyncMock(side_effect=["ONE\n", "TWO\n", "THREE\n"])
+        monkeypatch.setattr("iac_code.skills.renderer._run_shell", run_mock)
+
+        result = await execute_shell_commands(content, cwd="/tmp/work")
+
+        assert result == "aONE b\nTWO\n\ncTHREE"
+        assert run_mock.await_args_list == [
+            call("one", cwd="/tmp/work"),
+            call("two", cwd="/tmp/work"),
+            call("three", cwd="/tmp/work"),
+        ]

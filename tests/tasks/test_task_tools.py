@@ -83,6 +83,15 @@ class TestTaskTools:
         assert result.is_error is False
         assert task_manager.get(tasks[0].id).status.value == "stopped"
 
+    async def test_task_stop_completed_task_reports_current_status(self, task_manager):
+        task = task_manager.list_all()[0]
+        task_manager.complete(task.id, "done")
+        tool = TaskStopTool(task_manager)
+        result = await tool.execute(tool_input={"task_id": task.id}, context=ToolContext())
+        assert result.is_error is False
+        assert "already completed" in result.content.lower()
+        assert task_manager.get(task.id).status.value == "completed"
+
     async def test_task_stop_nonexistent(self, task_manager):
         tool = TaskStopTool(task_manager)
         result = await tool.execute(tool_input={"task_id": "missing"}, context=ToolContext())

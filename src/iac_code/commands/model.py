@@ -42,6 +42,27 @@ def _get_active_provider_models() -> list[str]:
     return []
 
 
+def _get_active_provider_api_base(settings: dict, provider: LLMProvider | dict | None = None) -> str | None:
+    active = settings.get("activeProvider")
+    if not isinstance(active, str) or not active.strip():
+        return None
+    providers = settings.get("providers")
+    if not isinstance(providers, dict):
+        return None
+    provider_settings = providers.get(active)
+    if not isinstance(provider_settings, dict):
+        return None
+    api_base = provider_settings.get("apiBase")
+    if not isinstance(api_base, str) or not api_base.strip():
+        return None
+    api_base = api_base.strip()
+    if provider is not None:
+        provider_api_base = provider.get("api_base")
+        if isinstance(provider_api_base, str) and provider_api_base.strip() == api_base:
+            return None
+    return api_base
+
+
 async def model_command(context: "CommandContext | None" = None, args: list[str] | None = None, **kwargs) -> str | None:
     """Switch or display current model."""
     llm_source = get_llm_source()
@@ -66,12 +87,9 @@ async def model_command(context: "CommandContext | None" = None, args: list[str]
         if provider:
             # Get current custom base URL if any
             settings = _load_yaml(get_settings_path())
-            active = settings.get("activeProvider")
-            custom_base_url = None
-            if isinstance(active, dict):
-                custom_base_url = active.get("apiBase")
+            custom_base_url = _get_active_provider_api_base(settings, provider)
 
-            save_active_provider_config(provider, new_model)
+            save_active_provider_config(provider, new_model, api_base=custom_base_url)
 
             # Log telemetry event
             log_event(
@@ -121,12 +139,9 @@ async def model_command(context: "CommandContext | None" = None, args: list[str]
 
     # Get current custom base URL if any
     settings = _load_yaml(get_settings_path())
-    active = settings.get("activeProvider")
-    custom_base_url = None
-    if isinstance(active, dict):
-        custom_base_url = active.get("apiBase")
+    custom_base_url = _get_active_provider_api_base(settings, provider)
 
-    save_active_provider_config(provider, new_model)
+    save_active_provider_config(provider, new_model, api_base=custom_base_url)
 
     # Log telemetry event
     log_event(

@@ -89,10 +89,16 @@ def _format_int(value: int) -> str:
     return f"{int(value):,}"
 
 
+def _format_decimal_suffix(value: int, divisor: int, suffix: str) -> str:
+    amount = value / divisor
+    formatted = f"{amount:.1f}".rstrip("0").rstrip(".")
+    return f"{formatted}{suffix}"
+
+
 def _format_compact(value: int) -> str:
     value = int(value)
     if value >= 1_000_000:
-        return f"{value / 1_000_000:.1f}M"
+        return _format_decimal_suffix(value, 1_000_000, "M")
     if value >= 1_000:
-        return f"{value // 1000}k"
+        return _format_decimal_suffix(value, 1_000, "k")
     return str(value)

@@ -99,3 +99,13 @@ class TestLoadPermissionContext:
         (project_dir / "settings.yml").write_text(yaml.dump({"permissions": {"deny": ["bash(curl *)"]}}))
         ctx = load_permission_context(str(tmp_path))
         assert "bash(curl *)" in ctx.deny_rules.get("project_settings", [])
+
+
+def test_load_permission_context_initializes_trusted_read_directories(tmp_path, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+
+    from iac_code.services.permissions.loader import load_permission_context
+
+    ctx = load_permission_context(str(tmp_path))
+
+    assert ctx.trusted_read_directories == []

@@ -200,6 +200,14 @@ class TestSkillTool:
         assert SkillTool._has_only_safe_properties(tool_skill) is False
         assert SkillTool._has_only_safe_properties(shell_skill) is False
 
+    def test_has_only_safe_properties_uses_renderer_shell_detection(self):
+        multiline_shell = SimpleNamespace(
+            frontmatter=SimpleNamespace(allowed_tools=[]),
+            content="Before\n```!\necho hello\n```\nAfter",
+        )
+
+        assert SkillTool._has_only_safe_properties(multiline_shell) is False
+
 
 class TestSkillToolPermissions:
     @pytest.mark.asyncio

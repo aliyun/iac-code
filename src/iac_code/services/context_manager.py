@@ -7,7 +7,7 @@ from typing import Any
 
 from loguru import logger
 
-from iac_code.agent.message import ContentBlock, Conversation, Message, ToolResultBlock
+from iac_code.agent.message import ContentBlock, Conversation, Message, ToolResultBlock, ToolUseBlock
 from iac_code.services.token_counter import TokenCounter
 
 
@@ -54,6 +54,8 @@ class ContextManager:
         self._token_counter = TokenCounter(model=model)
         self._config = get_context_window_config(model)
         self._system_prompt_tokens = self._token_counter.count_text(system_prompt)
+        self._tool_definitions: list[Any] = []
+        self._tool_definition_tokens = 0
 
     @property
     def system_prompt(self) -> str:
@@ -80,6 +82,7 @@ class ContextManager:
         self._token_counter = TokenCounter(model=model)
         self._config = get_context_window_config(model)
         self._system_prompt_tokens = self._token_counter.count_text(self._system_prompt)
+        self._tool_definition_tokens = self._token_counter.count_tool_definitions(self._tool_definitions)
         for msg in self._conversation.messages:
             msg.token_count = self._token_counter.count_message(msg.to_api_format())
 
@@ -89,6 +92,11 @@ class ContextManager:
             return
         self._system_prompt = system_prompt
         self._system_prompt_tokens = self._token_counter.count_text(system_prompt)
+
+    def set_tool_definitions(self, tool_definitions: list[Any]) -> None:
+        """Cache provider tool definitions and their current token footprint."""
+        self._tool_definitions = list(tool_definitions)
+        self._tool_definition_tokens = self._token_counter.count_tool_definitions(self._tool_definitions)
 
     def add_user_message(self, content: str | list[ContentBlock]) -> Message:
         msg = self._conversation.add_user_message(content)
@@ -128,7 +136,7 @@ class ContextManager:
         return self._conversation.to_api_messages()
 
     def get_total_tokens(self) -> int:
-        return self._system_prompt_tokens + self._conversation.get_total_tokens()
+        return self._system_prompt_tokens + self._tool_definition_tokens + self._conversation.get_total_tokens()
 
     def get_usage(self) -> dict[str, Any]:
         """Return detailed token usage breakdown by category."""
@@ -145,9 +153,16 @@ class ContextManager:
             elif msg.role == "assistant":
                 assistant_tokens += msg.token_count
 
-        total = self._system_prompt_tokens + user_tokens + assistant_tokens + tool_result_tokens
+        total = (
+            self._system_prompt_tokens
+            + self._tool_definition_tokens
+            + user_tokens
+            + assistant_tokens
+            + tool_result_tokens
+        )
         return {
             "system_prompt_tokens": self._system_prompt_tokens,
+            "tool_definition_tokens": self._tool_definition_tokens,
             "user_message_tokens": user_tokens,
             "assistant_message_tokens": assistant_tokens,
             "tool_result_tokens": tool_result_tokens,
@@ -162,6 +177,38 @@ class ContextManager:
         threshold = self._config.context_window * self._config.compact_threshold
         return total > threshold
 
+    @staticmethod
+    def _tool_use_ids(message: Message) -> set[str]:
+        if isinstance(message.content, str):
+            return set()
+        return {block.id for block in message.content if isinstance(block, ToolUseBlock)}
+
+    @staticmethod
+    def _tool_result_ids(message: Message) -> set[str]:
+        if isinstance(message.content, str):
+            return set()
+        return {block.tool_use_id for block in message.content if isinstance(block, ToolResultBlock)}
+
+    @classmethod
+    def _find_safe_compaction_split(cls, messages: list[Message], split_point: int) -> int:
+        split_point = max(0, min(split_point, len(messages)))
+        while split_point > 0:
+            old_tool_uses: dict[str, int] = {}
+            old_tool_results: set[str] = set()
+
+            for index, message in enumerate(messages[:split_point]):
+                for tool_use_id in cls._tool_use_ids(message):
+                    old_tool_uses.setdefault(tool_use_id, index)
+                old_tool_results.update(cls._tool_result_ids(message))
+
+            unpaired_tool_uses = set(old_tool_uses) - old_tool_results
+            if not unpaired_tool_uses:
+                return split_point
+
+            split_point = min(old_tool_uses[tool_use_id] for tool_use_id in unpaired_tool_uses)
+
+        return split_point
+
     def _split_messages_for_compaction(self) -> tuple[list[Message], list[Message]]:
         """Split messages into [old_messages, recent_messages].
 
@@ -175,6 +222,7 @@ class ContextManager:
             return [], messages
 
         split_point = len(messages) - preserve_count
+        split_point = self._find_safe_compaction_split(messages, split_point)
         return messages[:split_point], messages[split_point:]
 
     def build_compaction_prompt(self) -> str:

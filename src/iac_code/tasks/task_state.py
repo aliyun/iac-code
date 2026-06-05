@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class TaskStatus(str, Enum):
@@ -25,6 +27,7 @@ class TaskInfo:
     error: str | None = None
     tool_use_count: int = 0
     token_count: int = 0
+    background_task: asyncio.Task[Any] | None = field(default=None, repr=False, compare=False)
 
 
 class TaskManager:
@@ -41,20 +44,32 @@ class TaskManager:
 
     def complete(self, task_id: str, result: str) -> None:
         task = self._tasks.get(task_id)
-        if task:
+        if task and task.status != TaskStatus.STOPPED:
             task.status = TaskStatus.COMPLETED
             task.result = result
+            task.background_task = None
 
     def fail(self, task_id: str, error: str) -> None:
         task = self._tasks.get(task_id)
-        if task:
+        if task and task.status != TaskStatus.STOPPED:
             task.status = TaskStatus.FAILED
             task.error = error
+            task.background_task = None
 
-    def stop(self, task_id: str) -> None:
+    def stop(self, task_id: str) -> bool:
+        task = self._tasks.get(task_id)
+        if task and task.status == TaskStatus.RUNNING:
+            task.status = TaskStatus.STOPPED
+            if task.background_task is not None and not task.background_task.done():
+                task.background_task.cancel()
+            task.background_task = None
+            return True
+        return False
+
+    def attach_task(self, task_id: str, background_task: asyncio.Task[Any]) -> None:
         task = self._tasks.get(task_id)
         if task:
-            task.status = TaskStatus.STOPPED
+            task.background_task = background_task
 
     def update_progress(self, task_id: str, tool_use_count: int = 0, token_count: int = 0) -> None:
         task = self._tasks.get(task_id)

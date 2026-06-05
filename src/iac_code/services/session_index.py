@@ -62,7 +62,32 @@ def _decode_json_string(raw: str) -> str:
     try:
         return json.loads(f'"{raw}"')
     except json.JSONDecodeError:
-        return raw.replace(r"\n", "\n").replace(r"\t", "\t").replace(r"\"", '"').replace(r"\\", "\\")
+        decoded: list[str] = []
+        i = 0
+        while i < len(raw):
+            ch = raw[i]
+            if ch != "\\":
+                decoded.append(ch)
+                i += 1
+                continue
+            if i + 1 >= len(raw):
+                decoded.append(ch)
+                i += 1
+                continue
+            escaped = raw[i + 1]
+            if escaped == "n":
+                decoded.append("\n")
+            elif escaped == "t":
+                decoded.append("\t")
+            elif escaped == '"':
+                decoded.append('"')
+            elif escaped == "\\":
+                decoded.append("\\")
+            else:
+                decoded.append("\\")
+                decoded.append(escaped)
+            i += 2
+        return "".join(decoded)
 
 
 def _scan_string_field(chunk: str, field: str, *, last: bool) -> str | None:

@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.path_safety import check_read_path
+from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
+
+
+def _glob_pattern_may_escape_root(pattern: str) -> bool:
+    normalized = normalize_user_path(pattern).replace("\\", "/")
+    return os.path.isabs(normalized) or any(part == ".." for part in normalized.split("/"))
+
+
+def _search_root(path: str, cwd: str) -> Path:
+    root = Path(normalize_user_path(path))
+    if not root.is_absolute():
+        root = Path(cwd) / root
+    return root
 
 
 class GlobTool(Tool):
@@ -68,6 +83,47 @@ class GlobTool(Tool):
         # Return relative paths
         relative_paths = [str(p.relative_to(search_root)) for p in matches]
         return ToolResult.success("\n".join(relative_paths))
+
+    async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        if not isinstance(context, ToolPermissionContext):
+            return await super().check_permissions(input, context)
+
+        path = input.get("path", context.cwd)
+        decision = check_read_path(
+            path,
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+            trusted_read_directories=context.trusted_read_directories,
+        )
+        if decision.behavior == "allow":
+            pattern = input.get("pattern", "")
+            if _glob_pattern_may_escape_root(pattern):
+                detail = _("glob pattern outside allowed directories")
+                return PermissionResult(
+                    behavior="ask",
+                    message=detail,
+                    reason=PermissionDecisionReason(type="path_constraint", detail=detail),
+                )
+            try:
+                matches = [p for p in _search_root(path, context.cwd).glob(pattern) if p.is_file()]
+            except Exception:
+                detail = _("glob pattern outside allowed directories")
+                return PermissionResult(
+                    behavior="ask",
+                    message=detail,
+                    reason=PermissionDecisionReason(type="path_constraint", detail=detail),
+                )
+            for match in matches:
+                match_decision = check_read_path(
+                    str(match),
+                    cwd=context.cwd,
+                    additional_directories=context.additional_directories,
+                    trusted_read_directories=context.trusted_read_directories,
+                )
+                if match_decision.behavior == "ask":
+                    return match_decision.to_permission_result()
+            return PermissionResult(behavior="allow")
+        return decision.to_permission_result()
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):

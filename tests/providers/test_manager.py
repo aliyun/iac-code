@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -5,6 +6,10 @@ import pytest
 from iac_code.providers.base import Message, NonStreamingResponse
 from iac_code.providers.manager import ProviderManager, _detect_provider_name, create_provider
 from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent, Usage
+
+
+async def _collect_stream_events(stream):
+    return [event async for event in stream]
 
 
 class TestCreateProvider:
@@ -262,6 +267,214 @@ class TestProviderManagerStreaming:
         assert "RateLimitError" in err.error
         assert "slow down" in err.error
 
+    async def test_stream_idle_timeout_recovers_with_non_streaming_fallback(self):
+        class HangingStreamProvider:
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                await asyncio.sleep(999)
+                yield MessageEndEvent(stop_reason="never", usage=Usage())
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                return NonStreamingResponse(
+                    message_id="fallback-after-timeout",
+                    text="recovered",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=3, output_tokens=4),
+                )
+
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            stream_idle_timeout=0.01,
+        )
+        mgr._provider = HangingStreamProvider()
+
+        events = await asyncio.wait_for(
+            _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys")),
+            timeout=0.5,
+        )
+
+        assert [event.type for event in events] == ["message_start", "text_delta", "message_end"]
+        assert events[0].message_id == "fallback-after-timeout"
+        assert events[1].text == "recovered"
+
+    async def test_stream_idle_timeout_after_partial_message_yields_tombstone_then_fallback(self):
+        class HangingAfterStartProvider:
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                yield MessageStartEvent(message_id="partial-message")
+                await asyncio.sleep(999)
+                yield MessageEndEvent(stop_reason="never", usage=Usage())
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                return NonStreamingResponse(
+                    message_id="fallback-after-partial-timeout",
+                    text="recovered",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=3, output_tokens=4),
+                )
+
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            stream_idle_timeout=0.01,
+        )
+        mgr._provider = HangingAfterStartProvider()
+
+        events = await asyncio.wait_for(
+            _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys")),
+            timeout=0.5,
+        )
+
+        assert [event.type for event in events] == [
+            "message_start",
+            "tombstone",
+            "message_start",
+            "text_delta",
+            "message_end",
+        ]
+        assert events[0].message_id == "partial-message"
+        assert events[1].message_id == "partial-message"
+        assert events[2].message_id == "fallback-after-partial-timeout"
+        assert events[3].text == "recovered"
+
+    async def test_stream_cancelled_error_propagates_without_fallback(self):
+        class CancellingStreamProvider:
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                yield MessageStartEvent(message_id="partial-before-cancel")
+                raise asyncio.CancelledError()
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise AssertionError("cancellation must not call non-streaming fallback")
+
+        mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        mgr._provider = CancellingStreamProvider()
+
+        with pytest.raises(asyncio.CancelledError):
+            await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+    async def test_stream_fallback_records_fallback_response_model_without_mutating_state(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+        from iac_code.services.telemetry.names import Events, GenAiAttr
+        from iac_code.services.telemetry.sanitize import sanitize_model_name
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class PrimaryProvider:
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                yield MessageStartEvent(message_id="primary-stream")
+                raise ConnectionError("stream died")
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise Status503Error("primary complete outage")
+
+        class FallbackProvider:
+            def get_model_name(self) -> str:
+                return "claude-haiku-4-5-20251001"
+
+            async def stream(self, messages, system, tools=None, max_tokens=8192):
+                raise AssertionError("stream fallback should use non-streaming complete")
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                return NonStreamingResponse(
+                    message_id="fallback-response",
+                    text="fallback text",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=5, output_tokens=6),
+                )
+
+        class RecordingSpan:
+            def __init__(self):
+                self.attributes = {}
+
+            def set_attribute(self, key, value):
+                self.attributes[key] = value
+
+        class RecordingSpanContext:
+            def __init__(self, span):
+                self.span = span
+
+            def __enter__(self):
+                return self.span
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        span = RecordingSpan()
+        telemetry_events = []
+
+        monkeypatch.setattr(
+            "iac_code.providers.manager.create_provider",
+            lambda model, credentials, *, base_url=None, provider_key_override=None: (
+                FallbackProvider() if model == "claude-haiku-4-5-20251001" else PrimaryProvider()
+            ),
+        )
+        monkeypatch.setattr(
+            "iac_code.providers.manager.start_span",
+            lambda name, attrs=None: RecordingSpanContext(span),
+        )
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        events = await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+        success_event = next(attrs for name, attrs in telemetry_events if name == Events.API_REQUEST_SUCCEEDED)
+        assert [event.type for event in events] == [
+            "message_start",
+            "tombstone",
+            "message_start",
+            "text_delta",
+            "message_end",
+        ]
+        assert span.attributes[GenAiAttr.RESPONSE_MODEL] == "claude-haiku-4-5-20251001"
+        assert success_event["provider"] == "fallback"
+        assert success_event["model"] == sanitize_model_name("claude-haiku-4-5-20251001")
+        assert mgr.get_model_name() == "claude-sonnet-4-6"
+
+    async def test_qwenpaw_config_error_yields_error_event_instead_of_system_exit(self, monkeypatch):
+        from iac_code.services.qwenpaw_source import QwenPawError
+
+        monkeypatch.setattr(
+            "iac_code.config._get_env_overrides",
+            lambda: {"api_key": None, "model": None, "base_url": None, "provider_key": None},
+        )
+        monkeypatch.setattr("iac_code.config.get_llm_source", lambda: "qwenpaw")
+        monkeypatch.setattr(
+            "iac_code.services.qwenpaw_source.load_from_qwenpaw",
+            lambda: (_ for _ in ()).throw(QwenPawError("bad qwenpaw config")),
+        )
+
+        mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+
+        events = await _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys"))
+
+        assert len(events) == 1
+        assert events[0].type == "error"
+        assert "bad qwenpaw config" in events[0].error
+        assert events[0].is_retryable is False
+
 
 @pytest.mark.asyncio
 class TestProviderManagerCompleteRetry:
@@ -335,6 +548,121 @@ class TestProviderManagerCompleteRetry:
         # ValueError has no status_code and isn't ConnectionError/TimeoutError/OSError,
         # so it should NOT be retried.
         assert mock_provider.complete.call_count == 1
+
+    async def test_fallback_success_does_not_mutate_manager_state(self, monkeypatch):
+        from iac_code.providers.retry import RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class FakeProvider:
+            def __init__(self, model: str, *, fail: bool = False):
+                self.model = model
+                self.fail = fail
+
+            def get_model_name(self) -> str:
+                return self.model
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                if self.fail:
+                    raise Status503Error("temporary outage")
+                return NonStreamingResponse(
+                    message_id="fallback-response",
+                    text="fallback ok",
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=1, output_tokens=2),
+                )
+
+        created_models: list[str] = []
+
+        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+            created_models.append(model)
+            return FakeProvider(model, fail=model == "claude-sonnet-4-6")
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+        original_provider = mgr._provider
+
+        response = await mgr.complete(messages=[Message.user("hi")], system="")
+
+        assert response.text == "fallback ok"
+        assert created_models == ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+        assert mgr.get_model_name() == "claude-sonnet-4-6"
+        assert mgr._provider is original_provider
+
+    async def test_fallback_provider_creation_failure_preserves_original_error(self, monkeypatch):
+        from iac_code.providers.retry import RetryableError, RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class PrimaryProvider:
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise Status503Error("primary temporary outage")
+
+        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+            if model == "claude-sonnet-4-6":
+                return PrimaryProvider()
+            raise RuntimeError("fallback provider unavailable")
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        with pytest.raises(RetryableError, match="primary temporary outage"):
+            await mgr.complete(messages=[Message.user("hi")], system="")
+
+    async def test_fallback_complete_failure_preserves_original_error(self, monkeypatch):
+        from iac_code.providers.retry import RetryableError, RetryConfig
+
+        class Status503Error(Exception):
+            status_code = 503
+
+        class PrimaryProvider:
+            def get_model_name(self) -> str:
+                return "claude-sonnet-4-6"
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise Status503Error("primary temporary outage")
+
+        class FallbackProvider:
+            def get_model_name(self) -> str:
+                return "claude-haiku-4-5-20251001"
+
+            async def complete(self, messages, system, tools=None, max_tokens=8192):
+                raise RuntimeError("fallback complete failed")
+
+        created_models: list[str] = []
+
+        def fake_create_provider(model, credentials, *, base_url=None, provider_key_override=None):
+            created_models.append(model)
+            if model == "claude-sonnet-4-6":
+                return PrimaryProvider()
+            return FallbackProvider()
+
+        monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
+        mgr = ProviderManager(
+            model="claude-sonnet-4-6",
+            credentials={"anthropic": "k"},
+            retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
+        )
+
+        with pytest.raises(RetryableError, match="primary temporary outage") as exc_info:
+            await mgr.complete(messages=[Message.user("hi")], system="")
+
+        assert "fallback complete failed" not in str(exc_info.value)
+        assert created_models == ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
 
 
 class TestModelPrefixAutoMapping:

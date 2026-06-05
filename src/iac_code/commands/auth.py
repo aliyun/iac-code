@@ -1400,6 +1400,8 @@ def _aliyun_oauth_login_flow(existing_cred: "AliyunCredential | None") -> str | 
         return _BACK
     except AliyunOAuthError as exc:
         return _("Alibaba Cloud OAuth login failed: {error}").format(error=str(exc))
+    finally:
+        client.close()
 
     credential = AliyunCredential(
         mode="OAuth",

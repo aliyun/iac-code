@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from pathlib import Path
@@ -48,6 +49,35 @@ SUPPORTED_ACTIONS = [
     "DeleteStack",
 ]
 
+_CREATE_TERMINAL_STATUSES = {
+    "CREATE_COMPLETE",
+    "CREATE_FAILED",
+    "CREATE_ROLLBACK_COMPLETE",
+    "CREATE_ROLLBACK_FAILED",
+    "IMPORT_CREATE_COMPLETE",
+    "IMPORT_CREATE_FAILED",
+    "IMPORT_CREATE_ROLLBACK_COMPLETE",
+    "IMPORT_CREATE_ROLLBACK_FAILED",
+}
+
+_UPDATE_TERMINAL_STATUSES = {
+    "UPDATE_COMPLETE",
+    "UPDATE_FAILED",
+    "ROLLBACK_COMPLETE",
+    "ROLLBACK_FAILED",
+    "IMPORT_UPDATE_COMPLETE",
+    "IMPORT_UPDATE_FAILED",
+    "IMPORT_UPDATE_ROLLBACK_COMPLETE",
+    "IMPORT_UPDATE_ROLLBACK_FAILED",
+}
+
+_DELETE_TERMINAL_STATUSES = {
+    "DELETE_COMPLETE",
+    "DELETE_FAILED",
+}
+
+logger = logging.getLogger(__name__)
+
 
 def _parse_template(template_body: str) -> dict | None:
     """Try YAML first (with ROS tag support), then JSON. Return None if unparseable."""
@@ -81,7 +111,14 @@ def _extract_ros_resource_types(template_data: dict) -> list[str]:
     resources = template_data.get("Resources", {})
     if not isinstance(resources, dict):
         return []
-    return [v.get("Type", "") for v in resources.values() if isinstance(v, dict) and v.get("Type")]
+    types: list[str] = []
+    for resource in resources.values():
+        if not isinstance(resource, dict):
+            continue
+        rtype = resource.get("Type")
+        if isinstance(rtype, str) and rtype:
+            types.append(rtype)
+    return types
 
 
 def _extract_terraform_resource_types(template_data: dict) -> list[str]:
@@ -108,6 +145,11 @@ def _extract_resource_types(template_body: str) -> tuple[Literal["ros", "terrafo
     if kind == "terraform":
         return ("terraform", _extract_terraform_resource_types(data))
     return ("ros", _extract_ros_resource_types(data))
+
+
+def _template_body_for_telemetry(params: dict) -> str:
+    template_body = params.get("TemplateBody", "")
+    return template_body if isinstance(template_body, str) else ""
 
 
 def _count_by_type(types: list[str]) -> dict[str, int]:
@@ -141,6 +183,216 @@ class RosStack(BaseCloudStack):
 
     def user_facing_name(self, input: dict | None = None) -> str:
         return _("ROS Stack")
+
+    def is_action_terminal(self, action: str, status: StackStatus) -> bool:
+        if action in {"CreateStack", "ContinueCreateStack"}:
+            return status.status in _CREATE_TERMINAL_STATUSES
+        if action == "UpdateStack":
+            return status.status in _UPDATE_TERMINAL_STATUSES
+        if action == "DeleteStack":
+            return status.status in _DELETE_TERMINAL_STATUSES
+        return super().is_action_terminal(action, status)
+
+    def is_action_success(self, action: str, status: StackStatus) -> bool:
+        if action == "DeleteStack":
+            return status.status == "DELETE_COMPLETE"
+        return super().is_action_success(action, status)
+
+    def _log_event_best_effort(self, event_name: str, metadata: dict[str, Any]) -> None:
+        try:
+            log_event(event_name, metadata)
+        except Exception as exc:
+            logger.debug("Failed to emit ROS telemetry event %s: %s", event_name, exc)
+
+    def _add_metric_best_effort(self, name: str, value: int, attrs: dict[str, Any]) -> None:
+        try:
+            add_metric(name, value, attrs)
+        except Exception as exc:
+            logger.debug("Failed to emit ROS telemetry metric %s: %s", name, exc)
+
+    def _deployment_telemetry_contexts(self) -> dict[tuple[str, str], dict[str, Any]]:
+        contexts = getattr(self, "_ros_deployment_telemetry_contexts", None)
+        if contexts is None:
+            contexts = {}
+            self._ros_deployment_telemetry_contexts = contexts
+        return contexts
+
+    def _store_deployment_telemetry_context(
+        self,
+        stack_id: str,
+        *,
+        action: str,
+        iac_kind: str,
+        region: str,
+        started_at: float,
+        resource_count_total: int,
+        resource_types: list[str],
+        resource_type_counts: list[int],
+        terraform_providers: list[str],
+    ) -> None:
+        if not stack_id:
+            return
+        self._deployment_telemetry_contexts()[(stack_id, action)] = {
+            "action": action,
+            "iac_kind": iac_kind,
+            "region": region,
+            "started_at": started_at,
+            "resource_count_total": resource_count_total,
+            "resource_count_bucket": bucket_resource_count(resource_count_total),
+            "resource_types": resource_types,
+            "resource_type_counts": resource_type_counts,
+            "terraform_providers": terraform_providers,
+        }
+
+    def on_terminal_status(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        status: StackStatus,
+        resources: list[ResourceStatus],
+        elapsed_seconds: int,
+    ) -> None:
+        if action not in {"CreateStack", "UpdateStack"}:
+            return
+        context = self._deployment_telemetry_contexts().pop((status.stack_id, action), None)
+        if context is None:
+            return
+        context_action = context.get("action")
+        if context_action not in {"CreateStack", "UpdateStack"}:
+            return
+
+        kind = context["iac_kind"]
+        duration_ms = int((time.monotonic() - context["started_at"]) * 1000)
+        resource_count_total = context["resource_count_total"]
+        resource_count_bucket = context["resource_count_bucket"]
+
+        if status.is_success:
+            self._log_event_best_effort(
+                Events.DEPLOYMENT_SUCCEEDED,
+                {
+                    "iac_kind": kind,
+                    "region": context["region"],
+                    "duration_ms": duration_ms,
+                    "resource_count_total": resource_count_total,
+                    "stack_status": status.status,
+                },
+            )
+            self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "success"})
+            self._add_metric_best_effort(
+                Metrics.DEPLOYMENT_DURATION,
+                duration_ms,
+                {
+                    "kind": kind,
+                    "outcome": "success",
+                    "resource_count_bucket": resource_count_bucket,
+                },
+            )
+            for rtype, count in zip(context["resource_types"], context["resource_type_counts"]):
+                self._add_metric_best_effort(
+                    Metrics.RESOURCE_TYPE_OBSERVED_COUNT,
+                    count,
+                    {
+                        "kind": kind,
+                        "resource_type": rtype,
+                        "phase": "deploy",
+                    },
+                )
+            if kind == "terraform":
+                for prov in context["terraform_providers"]:
+                    self._add_metric_best_effort(
+                        Metrics.TERRAFORM_PROVIDER_OBSERVED_COUNT,
+                        1,
+                        {
+                            "provider": prov,
+                            "phase": "deploy",
+                        },
+                    )
+            return
+
+        sanitized_reason = sanitize_error_message(status.status_reason)
+        self._log_event_best_effort(
+            Events.DEPLOYMENT_FAILED,
+            {
+                "iac_kind": kind,
+                "region": context["region"],
+                "duration_ms": duration_ms,
+                "resource_count_total": resource_count_total,
+                "stack_status": status.status,
+                "status_reason": sanitized_reason,
+                "error_code": status.status,
+                "error_category": "other",
+                "http_status": 0,
+                "error_message": sanitized_reason,
+            },
+        )
+        self._add_metric_best_effort(
+            Metrics.DEPLOYMENT_COUNT,
+            1,
+            {
+                "kind": kind,
+                "outcome": "fail",
+                "error_category": "other",
+            },
+        )
+        self._add_metric_best_effort(
+            Metrics.DEPLOYMENT_DURATION,
+            duration_ms,
+            {
+                "kind": kind,
+                "outcome": "fail",
+                "resource_count_bucket": resource_count_bucket,
+            },
+        )
+
+    def on_polling_error(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        stack_id: str,
+        error_stage: str,
+        error: Exception,
+    ) -> None:
+        try:
+            if action in {"CreateStack", "UpdateStack"}:
+                self._deployment_telemetry_contexts().pop((stack_id, action), None)
+        except Exception as exc:
+            logger.debug("Failed to clean ROS deployment telemetry context: %s", exc)
+
+    def on_polling_cancelled(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        stack_id: str,
+        elapsed_seconds: int,
+    ) -> None:
+        if action not in {"CreateStack", "UpdateStack"}:
+            return
+
+        context = self._deployment_telemetry_contexts().pop((stack_id, action), None)
+        if context is None:
+            return
+        context_action = context.get("action")
+        if context_action not in {"CreateStack", "UpdateStack"}:
+            return
+
+        kind = context["iac_kind"]
+        duration_ms = int((time.monotonic() - context["started_at"]) * 1000)
+        if duration_ms < 0:
+            duration_ms = elapsed_seconds * 1000
+
+        self._log_event_best_effort(
+            Events.DEPLOYMENT_CANCELLED,
+            {
+                "iac_kind": kind,
+                "region": context["region"],
+                "duration_ms": duration_ms,
+                "reason": "user_cancel",
+            },
+        )
+        self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
 
     def _get_default_region(self) -> str:
         credentials = CloudCredentials()
@@ -186,7 +438,7 @@ class RosStack(BaseCloudStack):
             return await self._handle_update_stack(client, params, region)
         elif action == "ContinueCreateStack":
             request = ros_models.ContinueCreateStackRequest().from_map(params)
-            response = client.continue_create_stack(request)
+            response = await asyncio.to_thread(client.continue_create_stack, request)
             return response.body.stack_id
         elif action == "DeleteStack":
             return await self._handle_delete_stack(client, params, region)
@@ -194,7 +446,7 @@ class RosStack(BaseCloudStack):
 
     async def _handle_create_stack(self, client: Any, params: dict, region: str) -> str:
         """CreateStack with telemetry for template generation and deployment."""
-        template_body = params.get("TemplateBody", "")
+        template_body = _template_body_for_telemetry(params)
 
         # Extract IaC kind and resource types
         kind, resource_types_raw = _extract_resource_types(template_body)
@@ -226,8 +478,8 @@ class RosStack(BaseCloudStack):
         if kind == "terraform":
             template_generated_payload["terraform_providers"] = tf_providers
 
-        log_event(Events.TEMPLATE_GENERATED, template_generated_payload)
-        add_metric(
+        self._log_event_best_effort(Events.TEMPLATE_GENERATED, template_generated_payload)
+        self._add_metric_best_effort(
             Metrics.TEMPLATE_GENERATED_COUNT,
             1,
             {
@@ -237,7 +489,7 @@ class RosStack(BaseCloudStack):
             },
         )
         for rtype, count in zip(safe_types, counts):
-            add_metric(
+            self._add_metric_best_effort(
                 Metrics.RESOURCE_TYPE_OBSERVED_COUNT,
                 count,
                 {
@@ -248,7 +500,7 @@ class RosStack(BaseCloudStack):
             )
         if kind == "terraform":
             for prov in tf_providers:
-                add_metric(
+                self._add_metric_best_effort(
                     Metrics.TERRAFORM_PROVIDER_OBSERVED_COUNT,
                     1,
                     {
@@ -269,57 +521,28 @@ class RosStack(BaseCloudStack):
         if kind == "terraform":
             deployment_started_payload["terraform_providers"] = tf_providers
 
-        log_event(Events.DEPLOYMENT_STARTED, deployment_started_payload)
+        self._log_event_best_effort(Events.DEPLOYMENT_STARTED, deployment_started_payload)
 
         started = time.monotonic()
         try:
             request = ros_models.CreateStackRequest().from_map(params)
-            response = client.create_stack(request)
-            duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
-                Events.DEPLOYMENT_SUCCEEDED,
-                {
-                    "iac_kind": kind,
-                    "region": region,
-                    "duration_ms": duration_ms,
-                    "resource_count_total": total,
-                    "stack_status": "CREATE_COMPLETE",
-                },
+            response = await asyncio.to_thread(client.create_stack, request)
+            stack_id = response.body.stack_id
+            self._store_deployment_telemetry_context(
+                stack_id,
+                action="CreateStack",
+                iac_kind=kind,
+                region=region,
+                started_at=started,
+                resource_count_total=total,
+                resource_types=safe_types[:50],
+                resource_type_counts=counts[:50],
+                terraform_providers=tf_providers,
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "success"})
-            add_metric(
-                Metrics.DEPLOYMENT_DURATION,
-                duration_ms,
-                {
-                    "kind": kind,
-                    "outcome": "success",
-                    "resource_count_bucket": bucket_resource_count(total),
-                },
-            )
-            for rtype, count in zip(safe_types, counts):
-                add_metric(
-                    Metrics.RESOURCE_TYPE_OBSERVED_COUNT,
-                    count,
-                    {
-                        "kind": kind,
-                        "resource_type": rtype,
-                        "phase": "deploy",
-                    },
-                )
-            if kind == "terraform":
-                for prov in tf_providers:
-                    add_metric(
-                        Metrics.TERRAFORM_PROVIDER_OBSERVED_COUNT,
-                        1,
-                        {
-                            "provider": prov,
-                            "phase": "deploy",
-                        },
-                    )
-            return response.body.stack_id
+            return stack_id
         except (KeyboardInterrupt, asyncio.CancelledError):
             duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_CANCELLED,
                 {
                     "iac_kind": kind,
@@ -328,11 +551,11 @@ class RosStack(BaseCloudStack):
                     "reason": "user_cancel",
                 },
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
+            self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
             raise
         except TimeoutError:
             duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_CANCELLED,
                 {
                     "iac_kind": kind,
@@ -341,12 +564,12 @@ class RosStack(BaseCloudStack):
                     "reason": "timeout",
                 },
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
+            self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
             raise
         except Exception as e:
             duration_ms = int((time.monotonic() - started) * 1000)
             error_category = _classify_ros_error(e)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_FAILED,
                 {
                     "iac_kind": kind,
@@ -359,7 +582,7 @@ class RosStack(BaseCloudStack):
                     "error_message": sanitize_error_message(str(e)),
                 },
             )
-            add_metric(
+            self._add_metric_best_effort(
                 Metrics.DEPLOYMENT_COUNT,
                 1,
                 {
@@ -368,7 +591,7 @@ class RosStack(BaseCloudStack):
                     "error_category": error_category,
                 },
             )
-            add_metric(
+            self._add_metric_best_effort(
                 Metrics.DEPLOYMENT_DURATION,
                 duration_ms,
                 {
@@ -381,7 +604,7 @@ class RosStack(BaseCloudStack):
 
     async def _handle_update_stack(self, client: Any, params: dict, region: str) -> str:
         """UpdateStack with telemetry for deployment events."""
-        template_body = params.get("TemplateBody", "")
+        template_body = _template_body_for_telemetry(params)
 
         # Extract IaC kind and resource types
         kind, resource_types_raw = _extract_resource_types(template_body)
@@ -407,57 +630,28 @@ class RosStack(BaseCloudStack):
         if kind == "terraform":
             deployment_started_payload["terraform_providers"] = tf_providers
 
-        log_event(Events.DEPLOYMENT_STARTED, deployment_started_payload)
+        self._log_event_best_effort(Events.DEPLOYMENT_STARTED, deployment_started_payload)
 
         started = time.monotonic()
         try:
             request = ros_models.UpdateStackRequest().from_map(params)
-            response = client.update_stack(request)
-            duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
-                Events.DEPLOYMENT_SUCCEEDED,
-                {
-                    "iac_kind": kind,
-                    "region": region,
-                    "duration_ms": duration_ms,
-                    "resource_count_total": total,
-                    "stack_status": "UPDATE_COMPLETE",
-                },
+            response = await asyncio.to_thread(client.update_stack, request)
+            stack_id = response.body.stack_id
+            self._store_deployment_telemetry_context(
+                stack_id,
+                action="UpdateStack",
+                iac_kind=kind,
+                region=region,
+                started_at=started,
+                resource_count_total=total,
+                resource_types=safe_types[:50],
+                resource_type_counts=counts[:50],
+                terraform_providers=tf_providers,
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "success"})
-            add_metric(
-                Metrics.DEPLOYMENT_DURATION,
-                duration_ms,
-                {
-                    "kind": kind,
-                    "outcome": "success",
-                    "resource_count_bucket": bucket_resource_count(total),
-                },
-            )
-            for rtype, count in zip(safe_types, counts):
-                add_metric(
-                    Metrics.RESOURCE_TYPE_OBSERVED_COUNT,
-                    count,
-                    {
-                        "kind": kind,
-                        "resource_type": rtype,
-                        "phase": "deploy",
-                    },
-                )
-            if kind == "terraform":
-                for prov in tf_providers:
-                    add_metric(
-                        Metrics.TERRAFORM_PROVIDER_OBSERVED_COUNT,
-                        1,
-                        {
-                            "provider": prov,
-                            "phase": "deploy",
-                        },
-                    )
-            return response.body.stack_id
+            return stack_id
         except (KeyboardInterrupt, asyncio.CancelledError):
             duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_CANCELLED,
                 {
                     "iac_kind": kind,
@@ -466,11 +660,11 @@ class RosStack(BaseCloudStack):
                     "reason": "user_cancel",
                 },
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
+            self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
             raise
         except TimeoutError:
             duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_CANCELLED,
                 {
                     "iac_kind": kind,
@@ -479,12 +673,12 @@ class RosStack(BaseCloudStack):
                     "reason": "timeout",
                 },
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
+            self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
             raise
         except Exception as e:
             duration_ms = int((time.monotonic() - started) * 1000)
             error_category = _classify_ros_error(e)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_FAILED,
                 {
                     "iac_kind": kind,
@@ -497,7 +691,7 @@ class RosStack(BaseCloudStack):
                     "error_message": sanitize_error_message(str(e)),
                 },
             )
-            add_metric(
+            self._add_metric_best_effort(
                 Metrics.DEPLOYMENT_COUNT,
                 1,
                 {
@@ -506,7 +700,7 @@ class RosStack(BaseCloudStack):
                     "error_category": error_category,
                 },
             )
-            add_metric(
+            self._add_metric_best_effort(
                 Metrics.DEPLOYMENT_DURATION,
                 duration_ms,
                 {
@@ -518,7 +712,7 @@ class RosStack(BaseCloudStack):
             raise
 
     async def _handle_delete_stack(self, client: Any, params: dict, region: str) -> str:
-        """DeleteStack with telemetry (succeeded/failed/cancelled, no started event)."""
+        """DeleteStack with request failure/cancellation telemetry, no started or terminal success event."""
         stack_id = params.get("StackId", "")
 
         # DeleteStack: no template available, use "ros" as conservative default for kind
@@ -527,31 +721,11 @@ class RosStack(BaseCloudStack):
         started = time.monotonic()
         try:
             request = ros_models.DeleteStackRequest().from_map(params)
-            client.delete_stack(request)
-            duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
-                Events.DEPLOYMENT_SUCCEEDED,
-                {
-                    "iac_kind": kind,
-                    "region": region,
-                    "duration_ms": duration_ms,
-                    "stack_status": "DELETE_COMPLETE",
-                },
-            )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "success"})
-            add_metric(
-                Metrics.DEPLOYMENT_DURATION,
-                duration_ms,
-                {
-                    "kind": kind,
-                    "outcome": "success",
-                    "resource_count_bucket": "0",  # Unknown resource count
-                },
-            )
+            await asyncio.to_thread(client.delete_stack, request)
             return stack_id
         except (KeyboardInterrupt, asyncio.CancelledError):
             duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_CANCELLED,
                 {
                     "iac_kind": kind,
@@ -560,11 +734,11 @@ class RosStack(BaseCloudStack):
                     "reason": "user_cancel",
                 },
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
+            self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
             raise
         except TimeoutError:
             duration_ms = int((time.monotonic() - started) * 1000)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_CANCELLED,
                 {
                     "iac_kind": kind,
@@ -573,12 +747,12 @@ class RosStack(BaseCloudStack):
                     "reason": "timeout",
                 },
             )
-            add_metric(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
+            self._add_metric_best_effort(Metrics.DEPLOYMENT_COUNT, 1, {"kind": kind, "outcome": "cancel"})
             raise
         except Exception as e:
             duration_ms = int((time.monotonic() - started) * 1000)
             error_category = _classify_ros_error(e)
-            log_event(
+            self._log_event_best_effort(
                 Events.DEPLOYMENT_FAILED,
                 {
                     "iac_kind": kind,
@@ -590,7 +764,7 @@ class RosStack(BaseCloudStack):
                     "error_message": sanitize_error_message(str(e)),
                 },
             )
-            add_metric(
+            self._add_metric_best_effort(
                 Metrics.DEPLOYMENT_COUNT,
                 1,
                 {
@@ -599,7 +773,7 @@ class RosStack(BaseCloudStack):
                     "error_category": error_category,
                 },
             )
-            add_metric(
+            self._add_metric_best_effort(
                 Metrics.DEPLOYMENT_DURATION,
                 duration_ms,
                 {
@@ -615,7 +789,7 @@ class RosStack(BaseCloudStack):
         request = ros_models.GetStackRequest(
             stack_id=stack_id, region_id=region, show_resource_progress="PercentageOnly"
         )
-        response = client.get_stack(request)
+        response = await asyncio.to_thread(client.get_stack, request)
         data = response.body.to_map()
         return StackStatus(
             stack_id=data.get("StackId", stack_id),
@@ -628,7 +802,7 @@ class RosStack(BaseCloudStack):
     async def get_stack_resources(self, stack_id: str, region: str) -> list[ResourceStatus]:
         client = self._get_client(region)
         request = ros_models.ListStackResourcesRequest(stack_id=stack_id, region_id=region)
-        response = client.list_stack_resources(request)
+        response = await asyncio.to_thread(client.list_stack_resources, request)
         data = response.body.to_map()
         resources = []
         for r in data.get("Resources", []):

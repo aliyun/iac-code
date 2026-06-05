@@ -143,28 +143,33 @@ class AliyunCredentials:
         if not credential.oauth_site_type:
             raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth site is missing."))
 
-        client = oauth_client or AliyunOAuthClient(get_oauth_site(credential.oauth_site_type))
+        owns_client = oauth_client is None
+        client = AliyunOAuthClient(get_oauth_site(credential.oauth_site_type)) if oauth_client is None else oauth_client
 
-        if is_epoch_expired(credential.oauth_access_token_expire, current, ACCESS_TOKEN_SKEW_SECONDS):
-            if not credential.oauth_refresh_token:
-                raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing."))
-            token = client.refresh_access_token(credential.oauth_refresh_token, now=current)
-            credential.oauth_access_token = token.access_token
-            credential.oauth_refresh_token = token.refresh_token
-            credential.oauth_access_token_expire = token.access_token_expire
-            credential.oauth_refresh_token_expire = token.refresh_token_expire
+        try:
+            if is_epoch_expired(credential.oauth_access_token_expire, current, ACCESS_TOKEN_SKEW_SECONDS):
+                if not credential.oauth_refresh_token:
+                    raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing."))
+                token = client.refresh_access_token(credential.oauth_refresh_token, now=current)
+                credential.oauth_access_token = token.access_token
+                credential.oauth_refresh_token = token.refresh_token
+                credential.oauth_access_token_expire = token.access_token_expire
+                credential.oauth_refresh_token_expire = token.refresh_token_expire
 
-        if not credential.oauth_access_token:
-            raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth access token is missing."))
+            if not credential.oauth_access_token:
+                raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth access token is missing."))
 
-        sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
-        credential.access_key_id = sts.access_key_id
-        credential.access_key_secret = sts.access_key_secret
-        credential.sts_token = sts.sts_token
-        credential.sts_expiration = sts.sts_expiration
+            sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
+            credential.access_key_id = sts.access_key_id
+            credential.access_key_secret = sts.access_key_secret
+            credential.sts_token = sts.sts_token
+            credential.sts_expiration = sts.sts_expiration
 
-        AliyunCredentials.save(credential)
-        return credential
+            AliyunCredentials.save(credential)
+            return credential
+        finally:
+            if owns_client:
+                client.close()
 
     @staticmethod
     def _load_from_iac_code_config() -> AliyunCredential | None:
@@ -206,26 +211,44 @@ class AliyunCredentials:
         except (json.JSONDecodeError, OSError):
             return None
 
-        profiles = {p["name"]: p for p in data.get("profiles", [])}
+        if not isinstance(data, dict):
+            return None
+
+        raw_profiles = data.get("profiles", [])
+        if not isinstance(raw_profiles, list):
+            return None
+
+        profiles = {
+            profile["name"]: profile
+            for profile in raw_profiles
+            if isinstance(profile, dict) and isinstance(profile.get("name"), str)
+        }
         profile = profiles.get("default")
         if not profile:
             return None
 
         mode = profile.get("mode", "AK")
+        try:
+            sts_expiration = int(profile.get("sts_expiration") or 0)
+            oauth_access_token_expire = int(profile.get("oauth_access_token_expire") or 0)
+            oauth_refresh_token_expire = int(profile.get("oauth_refresh_token_expire") or 0)
+        except (TypeError, ValueError):
+            return None
+
         return AliyunCredential(
             mode=mode,
             access_key_id=profile.get("access_key_id", ""),
             access_key_secret=profile.get("access_key_secret", ""),
             region_id=profile.get("region_id", DEFAULT_REGION),
             sts_token=profile.get("sts_token", ""),
-            sts_expiration=int(profile.get("sts_expiration") or 0),
+            sts_expiration=sts_expiration,
             ram_role_arn=profile.get("ram_role_arn", ""),
             ram_session_name=profile.get("ram_session_name", ""),
             oauth_site_type=profile.get("oauth_site_type", ""),
             oauth_access_token=profile.get("oauth_access_token", ""),
             oauth_refresh_token=profile.get("oauth_refresh_token", ""),
-            oauth_access_token_expire=int(profile.get("oauth_access_token_expire") or 0),
-            oauth_refresh_token_expire=int(profile.get("oauth_refresh_token_expire") or 0),
+            oauth_access_token_expire=oauth_access_token_expire,
+            oauth_refresh_token_expire=oauth_refresh_token_expire,
         )
 
     @staticmethod

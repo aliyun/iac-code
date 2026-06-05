@@ -613,6 +613,11 @@ def test_failed_check_is_retried_on_next_startup(monkeypatch, tmp_path):
     ]
 
 
+def test_invalid_versions_are_not_compared_lexicographically():
+    assert update_checker._is_newer_version("9.0.0-local", "10.0.0-local") is False
+    assert update_checker._is_newer_version("10.0.0-local", "9.0.0-local") is False
+
+
 def test_prerelease_installed_version_accepts_newer_prerelease_target(monkeypatch, tmp_path):
     path = tmp_path / "update-state.yml"
     http_client = FakeHTTPClient(

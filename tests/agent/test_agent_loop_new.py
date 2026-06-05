@@ -60,6 +60,15 @@ class TestAgentLoopInit:
         assert defs[0].name == "read_file"
         assert defs[0].description == "Read file"
 
+    def test_init_syncs_tool_definitions_to_context_usage(self, mock_provider):
+        tool = SimpleNamespace(name="read_file", description="Read file", input_schema={"type": "object"})
+        registry = MagicMock()
+        registry.list_tools.return_value = [tool]
+
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=registry)
+
+        assert loop.context_manager.get_usage()["tool_definition_tokens"] > 0
+
     def test_set_auto_trigger_skills_refreshes_candidates(self, mock_provider, mock_registry):
         old_command = SimpleNamespace(name="old-skill")
         new_command = SimpleNamespace(name="new-skill")
@@ -455,6 +464,39 @@ class TestAgentLoopStreaming:
         events = [e async for e in loop.run_streaming("Hi")]
 
         assert not any(isinstance(e, MessageEndEvent) and e.stop_reason == "max_turns" for e in events)
+
+    async def test_streaming_refreshes_tool_definitions_before_compaction_and_provider(self, mock_provider):
+        runtime_tool = SimpleNamespace(
+            name="read_file",
+            description="Read file",
+            input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+        registry = MagicMock()
+        registry.list_tools.side_effect = [[], [runtime_tool]]
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            assert tools is not None
+            assert [tool.name for tool in tools] == ["read_file"]
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="Hello!")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=registry)
+        seen_tool_tokens = []
+        original_needs_compaction = loop.context_manager.needs_compaction
+
+        def spy_needs_compaction():
+            seen_tool_tokens.append(loop.context_manager.get_usage()["tool_definition_tokens"])
+            return original_needs_compaction()
+
+        loop.context_manager.needs_compaction = spy_needs_compaction
+
+        await loop.run("Hi")
+
+        assert seen_tool_tokens and seen_tool_tokens[0] > 0
+        assert loop.context_manager.get_usage()["tool_definition_tokens"] == seen_tool_tokens[0]
+        assert registry.list_tools.call_count == 2
 
     async def test_auto_trigger_injects_skill_before_provider_call(self, mock_provider, mock_registry):
         from iac_code.commands.registry import PromptCommand
@@ -886,3 +928,16 @@ class TestAgentLoopSetProvider:
 
         assert loop.system_prompt == "kept"
         assert loop.context_manager.system_prompt == "kept"
+
+    def test_set_provider_resyncs_tool_definitions(self, mock_provider, mock_registry):
+        tool = SimpleNamespace(name="read_file", description="Read file", input_schema={"type": "object"})
+        mock_registry.list_tools.return_value = [tool]
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop.context_manager = MagicMock()
+
+        new_provider = MagicMock()
+        new_provider.get_model_name.return_value = "claude-opus-4-7"
+        loop.set_provider(new_provider)
+
+        loop.context_manager.set_model.assert_called_once_with("claude-opus-4-7")
+        loop.context_manager.set_tool_definitions.assert_called_once()

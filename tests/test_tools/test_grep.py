@@ -228,6 +228,27 @@ class TestGrepTool:
         assert result.is_error is False
         assert "No matches" in result.content
 
+    @pytest.mark.asyncio
+    async def test_python_fallback_skips_symlinked_file_outside_search_root(self, tmp_path, grep_tool, monkeypatch):
+        """Python fallback should not follow an in-root symlink to an outside file."""
+        outside = tmp_path / "outside"
+        project = tmp_path / "project"
+        outside.mkdir()
+        project.mkdir()
+        (outside / "secret.txt").write_text("outside needle\n")
+        (project / "link.txt").symlink_to(outside / "secret.txt")
+
+        monkeypatch.setattr("iac_code.tools.grep._is_rg_available", lambda: False)
+
+        context = ToolContext(cwd=str(project))
+        result = await grep_tool.execute(
+            tool_input={"pattern": "needle", "path": str(project), "output_mode": "content"},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert result.content == "No matches"
+
     # UI rendering tests
     def test_render_tool_use_message(self, grep_tool):
         """Test render_tool_use_message returns a renderable."""

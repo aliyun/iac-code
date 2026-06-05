@@ -351,7 +351,9 @@ The server sends a `request_permission` callback with:
 | Option ID | Meaning |
 |-----------|---------|
 | `allow_once` | Allow this specific invocation |
-| `allow_always` | Allow all future calls of this tool in this session |
+| `allow_always` | Allow all future calls of this tool in this session when the tool supports blanket allow; not offered for `bash` by default |
+| `allow_rule:<rules>` | Allow future calls matching the suggested rule(s) in this session |
+| `deny_rule:<rules>` | Deny future calls matching the suggested rule(s) in this session |
 | `reject_once` | Deny this specific invocation |
 | `reject_always` | Deny all future calls of this tool in this session |
 

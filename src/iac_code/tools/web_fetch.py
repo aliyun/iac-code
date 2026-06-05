@@ -12,6 +12,9 @@ import httpx
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 
+MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
+TRUNCATION_MARKER = "\n\n[truncated]"
+
 
 def _extract_text_from_html(html: str) -> str:
     """Extract plain text from HTML by removing tags and decoding entities.
@@ -51,6 +54,15 @@ def _extract_text_from_html(html: str) -> str:
     text = re.sub(r"\n\s*\n+", "\n", text)
 
     return text.strip()
+
+
+def _parse_content_length(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 class WebFetchTool(Tool):
@@ -110,17 +122,53 @@ class WebFetchTool(Tool):
                 follow_redirects=True,
                 headers=headers,
             ) as client:
-                response = await client.get(url)
-                response.raise_for_status()
+                downloaded = bytearray()
+                download_truncated = False
+
+                async with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    content_length = _parse_content_length(response.headers.get("content-length"))
+
+                    byte_iter = response.aiter_bytes().__aiter__()
+                    while True:
+                        remaining_bytes = MAX_DOWNLOAD_BYTES - len(downloaded)
+                        if remaining_bytes <= 0:
+                            if content_length is not None:
+                                download_truncated = content_length > MAX_DOWNLOAD_BYTES
+                                break
+                            try:
+                                await byte_iter.__anext__()
+                            except StopAsyncIteration:
+                                break
+                            download_truncated = True
+                            break
+
+                        try:
+                            chunk = await byte_iter.__anext__()
+                        except StopAsyncIteration:
+                            break
+
+                        if len(chunk) > remaining_bytes:
+                            downloaded.extend(chunk[:remaining_bytes])
+                            download_truncated = True
+                            break
+
+                        downloaded.extend(chunk)
+                        if len(downloaded) >= MAX_DOWNLOAD_BYTES:
+                            continue
 
                 content_type = response.headers.get("content-type", "")
-                text = response.text
+                text = bytes(downloaded).decode(response.encoding or "utf-8", errors="replace")
 
-                if "text/html" in content_type:
+                if "text/html" in content_type.lower():
                     text = _extract_text_from_html(text)
 
-                # Truncate to max_length
-                if len(text) > max_length:
+                if max_length <= 0:
+                    text = ""
+                elif download_truncated and max_length >= len(TRUNCATION_MARKER):
+                    available_length = max_length - len(TRUNCATION_MARKER)
+                    text = text[:available_length] + TRUNCATION_MARKER
+                elif len(text) > max_length:
                     text = text[:max_length]
 
                 return ToolResult.success(text)

@@ -36,6 +36,13 @@ class TestTasksCommand:
         assert "stopped" in output.lower()
         assert task_manager.get(running_id).status == TaskStatus.STOPPED
 
+    def test_stop_completed_task_reports_current_status(self, task_manager):
+        completed_id = task_manager.list_all()[1].id
+        cmd = TasksCommand(task_manager)
+        output = cmd.execute(f"stop {completed_id}")
+        assert "already completed" in output.lower()
+        assert task_manager.get(completed_id).status == TaskStatus.COMPLETED
+
     def test_stop_nonexistent(self, task_manager):
         cmd = TasksCommand(task_manager)
         output = cmd.execute("stop nonexistent")

@@ -138,9 +138,106 @@ msgstr "セッション名はすでに {name} です"
 msgid "Renamed session to {name}"
 msgstr "セッション名を {name} に変更しました"
 
+#: src/iac_code/acp/tools.py
+msgid "Bash command is required."
+msgstr "Bash コマンドが必要です。"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command timed out after {timeout} seconds"
+msgstr "コマンドが {timeout} 秒後にタイムアウトしました"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command terminated by signal: {signal}"
+msgstr "コマンドはシグナルで終了しました: {signal}"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command failed with exit code {exit_code}"
+msgstr "コマンドは終了コード {exit_code} で失敗しました"
+
 #: src/iac_code/agent/agent_loop.py src/iac_code/ui/repl.py
 msgid "Permission denied."
 msgstr "権限が拒否されました。"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: {agent_type}"
+msgstr "不明なエージェントタイプ: {agent_type}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running {agent_type} agent"
+msgstr "{agent_type} エージェントを実行中"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid ""
+"Launch a sub-agent to handle complex tasks.\n"
+"\n"
+"Available agent types:\n"
+"{agent_list}"
+msgstr ""
+"複雑なタスクを処理するサブエージェントを起動します。\n"
+"\n"
+"利用可能なエージェントタイプ:\n"
+"{agent_list}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The task for the sub-agent to perform."
+msgstr "サブエージェントが実行するタスク。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Short (3-5 word) description of the task."
+msgstr "タスクの短い（3-5 語）説明。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The type of specialized agent to use."
+msgstr "使用する専用エージェントの種類。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Run agent in background, parent continues."
+msgstr "エージェントをバックグラウンドで実行し、親は続行します。"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: '{agent_type}'"
+msgstr "不明なエージェントタイプ: '{agent_type}'"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Sub-agent task"
+msgstr "サブエージェントタスク"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Background agent launched (task_id: {task_id}, type: {agent_type})"
+msgstr "バックグラウンドエージェントを起動しました (task_id: {task_id}, type: {agent_type})"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Sub-agent failed: {error}"
+msgstr "サブエージェント失敗: {error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent completed: {tool_count} tool call"
+msgid_plural "Agent completed: {tool_count} tool calls"
+msgstr[0] "エージェント完了: ツール呼び出し {tool_count} 回"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Agent stopped"
+msgstr "エージェントを停止しました"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent failed: {error}"
+msgstr "エージェント失敗: {error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent error: {error}"
+msgstr "エージェントエラー: {error}"
 
 #: src/iac_code/agent/agent_tool.py
 #, python-brace-format
@@ -158,6 +255,33 @@ msgstr "計画"
 #: src/iac_code/agent/agent_tool.py
 msgid "Agent"
 msgstr "エージェント"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running agent: {description}"
+msgstr "エージェント実行中: {description}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "sub-agent"
+msgstr "サブエージェント"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use for complex, multi-step tasks that require research, code changes, or"
+" coordinating multiple operations."
+msgstr "調査、コード変更、または複数操作の調整が必要な複雑な複数ステップのタスクに使用します。"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to quickly find files, search code, or answer questions about the "
+"codebase. Read-only; cannot modify files."
+msgstr "ファイルの素早い検索、コード検索、またはコードベースに関する質問への回答に使用します。読み取り専用で、ファイルは変更できません。"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to plan implementation strategy, review architecture, or design "
+"solutions. Read-only, no execution."
+msgstr "実装戦略の計画、アーキテクチャのレビュー、または解決策の設計に使用します。読み取り専用で、実行はしません。"
 
 #: src/iac_code/cli/headless.py
 #, python-brace-format
@@ -1424,6 +1548,12 @@ msgstr "このプロジェクトにはセッション名がすでに存在しま
 msgid "Invalid --permission-mode {!r}. Valid values: {}"
 msgstr "無効な --permission-mode {!r} です。有効な値: {}"
 
+#: src/iac_code/services/permissions/pipeline.py
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched ask rule(s): {}"
+msgstr "一致した確認ルール: {}"
+
 #: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
 #: src/iac_code/tools/bash/bash_tool.py
 #, python-brace-format
@@ -1566,6 +1696,10 @@ msgid ""
 msgstr "変更されたコードの再利用性、品質、効率を確認し、見つかった問題を修正してください。"
 
 #: src/iac_code/tools/edit_file.py
+msgid "edit file path is required"
+msgstr "編集するファイルのパスが必要です"
+
+#: src/iac_code/tools/edit_file.py
 msgid "Edit"
 msgstr "編集"
 
@@ -1585,6 +1719,10 @@ msgstr "{path} を編集中"
 #: src/iac_code/tools/edit_file.py
 msgid "Editing file..."
 msgstr "ファイルを編集中…"
+
+#: src/iac_code/tools/glob.py
+msgid "glob pattern outside allowed directories"
+msgstr "glob パターンが許可されたディレクトリの外にあります"
 
 #: src/iac_code/tools/glob.py src/iac_code/tools/grep.py
 msgid "Found 0 files"
@@ -1634,6 +1772,10 @@ msgstr "{path} を一覧表示中"
 #: src/iac_code/tools/list_files.py
 msgid "Listing files..."
 msgstr "ファイルを一覧表示しています…"
+
+#: src/iac_code/tools/read_file.py
+msgid "Read file path is required."
+msgstr "読み取るファイルのパスが必要です。"
 
 #: src/iac_code/tools/read_file.py
 #, python-brace-format
@@ -1703,6 +1845,10 @@ msgid "Fetching web page..."
 msgstr "ウェブページを取得しています…"
 
 #: src/iac_code/tools/write_file.py
+msgid "write file path is required"
+msgstr "書き込むファイルのパスが必要です"
+
+#: src/iac_code/tools/write_file.py
 #, python-brace-format
 msgid "Successfully wrote {lines} lines to {path}"
 msgstr "{path} へ {lines} 行の書き込みに成功しました"
@@ -1758,8 +1904,43 @@ msgstr "サポートされていないシェル構文"
 
 #: src/iac_code/tools/bash/path_validation.py
 #, python-brace-format
+msgid "path uses shell expansion: {}"
+msgstr "パスでシェル展開が使われています: {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
 msgid "path outside allowed directories: {}"
 msgstr "許可されたディレクトリの外のパス: {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+msgid "read path after cd requires confirmation: current directory"
+msgstr "cd 後の読み取りパスには確認が必要です: 現在のディレクトリ"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path after cd requires confirmation: {}"
+msgstr "cd 後の読み取りパスには確認が必要です: {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path uses shell expansion: {}"
+msgstr "読み取りパスでシェル展開が使われています: {}"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed in-place edit"
+msgstr "sed のインプレース編集"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed script file"
+msgstr "sed スクリプトファイル"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed shell execution"
+msgstr "sed によるシェル実行"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed file write"
+msgstr "sed によるファイル書き込み"
 
 #: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
@@ -1768,21 +1949,17 @@ msgstr "一致した拒否ルール: {}"
 
 #: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
-msgid "matched ask rule(s): {}"
-msgstr "一致した確認ルール: {}"
-
-#: src/iac_code/tools/bash/permissions.py
-#, python-brace-format
-msgid "matched allow rule(s): {}"
-msgstr "一致した許可ルール: {}"
+msgid "dangerous readonly argument requires confirmation: {}"
+msgstr "危険な読み取り専用引数には確認が必要です: {}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "complex command requires confirmation"
 msgstr "複雑なコマンドは確認が必要です"
 
 #: src/iac_code/tools/bash/permissions.py
-msgid "sed in-place edit requires confirmation"
-msgstr "sed のインプレース編集には確認が必要です"
+#, python-brace-format
+msgid "matched allow rule(s): {}"
+msgstr "一致した許可ルール: {}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "command failed basic safety checks"
@@ -2525,13 +2702,15 @@ msgstr "キャンセル"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} more line{s}"
-msgstr "あと {n} 行{s}"
+msgid "{n} more line"
+msgid_plural "{n} more lines"
+msgstr[0] "あと {n} 行"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} message{s}"
-msgstr "{n} 件のメッセージ{s}"
+msgid "{n} message"
+msgid_plural "{n} messages"
+msgstr[0] "{n} 件のメッセージ"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 msgid "resume"
@@ -2555,18 +2734,21 @@ msgstr "たった今"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} minute{s} ago"
-msgstr "{n} 分{s}前"
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "{n} 分前"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} hour{s} ago"
-msgstr "{n} 時間{s}前"
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "{n} 時間前"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} day{s} ago"
-msgstr "{n} 日{s}前"
+msgid "{n} day ago"
+msgid_plural "{n} days ago"
+msgstr[0] "{n} 日前"
 
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "Search skills..."
@@ -2743,4 +2925,22 @@ msgstr "  オプション 2 - github.com にアクセスできない場合は、
 
 #~ msgid "Resume a session by ID"
 #~ msgstr "ID でセッションを再開する"
+
+#~ msgid "sed in-place edit requires confirmation"
+#~ msgstr "sed のインプレース編集には確認が必要です"
+
+#~ msgid "{n} more line{s}"
+#~ msgstr "あと {n} 行{s}"
+
+#~ msgid "{n} message{s}"
+#~ msgstr "{n} 件のメッセージ{s}"
+
+#~ msgid "{n} minute{s} ago"
+#~ msgstr "{n} 分{s}前"
+
+#~ msgid "{n} hour{s} ago"
+#~ msgstr "{n} 時間{s}前"
+
+#~ msgid "{n} day{s} ago"
+#~ msgstr "{n} 日{s}前"
 

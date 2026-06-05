@@ -144,9 +144,107 @@ msgstr "La session porte déjà le nom {name}"
 msgid "Renamed session to {name}"
 msgstr "Session renommée en {name}"
 
+#: src/iac_code/acp/tools.py
+msgid "Bash command is required."
+msgstr "Une commande Bash est requise."
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command timed out after {timeout} seconds"
+msgstr "La commande a expiré après {timeout} secondes"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command terminated by signal: {signal}"
+msgstr "Commande terminée par le signal : {signal}"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command failed with exit code {exit_code}"
+msgstr "La commande a échoué avec le code de sortie {exit_code}"
+
 #: src/iac_code/agent/agent_loop.py src/iac_code/ui/repl.py
 msgid "Permission denied."
 msgstr "Permission refusée."
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: {agent_type}"
+msgstr "Type d’agent inconnu : {agent_type}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running {agent_type} agent"
+msgstr "Exécution de l’agent {agent_type}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid ""
+"Launch a sub-agent to handle complex tasks.\n"
+"\n"
+"Available agent types:\n"
+"{agent_list}"
+msgstr ""
+"Lance un sous-agent pour traiter les tâches complexes.\n"
+"\n"
+"Types d’agent disponibles :\n"
+"{agent_list}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The task for the sub-agent to perform."
+msgstr "La tâche que le sous-agent doit effectuer."
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Short (3-5 word) description of the task."
+msgstr "Description courte (3 à 5 mots) de la tâche."
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The type of specialized agent to use."
+msgstr "Le type d’agent spécialisé à utiliser."
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Run agent in background, parent continues."
+msgstr "Exécuter l’agent en arrière-plan; le parent continue."
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: '{agent_type}'"
+msgstr "Type d’agent inconnu : '{agent_type}'"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Sub-agent task"
+msgstr "Tâche du sous-agent"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Background agent launched (task_id: {task_id}, type: {agent_type})"
+msgstr "Agent en arrière-plan lancé (task_id : {task_id}, type : {agent_type})"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Sub-agent failed: {error}"
+msgstr "Échec du sous-agent : {error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent completed: {tool_count} tool call"
+msgid_plural "Agent completed: {tool_count} tool calls"
+msgstr[0] "Agent terminé : {tool_count} appel d’outil"
+msgstr[1] "Agent terminé : {tool_count} appels d’outil"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Agent stopped"
+msgstr "Agent arrêté"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent failed: {error}"
+msgstr "Échec de l’agent : {error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent error: {error}"
+msgstr "Erreur de l’agent : {error}"
 
 #: src/iac_code/agent/agent_tool.py
 #, python-brace-format
@@ -164,6 +262,41 @@ msgstr "Plan"
 #: src/iac_code/agent/agent_tool.py
 msgid "Agent"
 msgstr "Agent"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running agent: {description}"
+msgstr "Agent en cours d’exécution : {description}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "sub-agent"
+msgstr "sous-agent"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use for complex, multi-step tasks that require research, code changes, or"
+" coordinating multiple operations."
+msgstr ""
+"À utiliser pour les tâches complexes en plusieurs étapes qui nécessitent "
+"de la recherche, des changements de code ou la coordination de plusieurs "
+"opérations."
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to quickly find files, search code, or answer questions about the "
+"codebase. Read-only; cannot modify files."
+msgstr ""
+"À utiliser pour trouver rapidement des fichiers, rechercher dans le code "
+"ou répondre à des questions sur la base de code. Lecture seule; ne peut "
+"pas modifier les fichiers."
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to plan implementation strategy, review architecture, or design "
+"solutions. Read-only, no execution."
+msgstr ""
+"À utiliser pour planifier la stratégie d’implémentation, revoir "
+"l’architecture ou concevoir des solutions. Lecture seule, sans exécution."
 
 #: src/iac_code/cli/headless.py
 #, python-brace-format
@@ -1459,6 +1592,12 @@ msgstr "Le nom de session existe déjà dans ce projet : {name}"
 msgid "Invalid --permission-mode {!r}. Valid values: {}"
 msgstr "--permission-mode invalide : {!r}. Valeurs valides : {}"
 
+#: src/iac_code/services/permissions/pipeline.py
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched ask rule(s): {}"
+msgstr "Règle(s) de demande correspondante(s) : {}"
+
 #: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
 #: src/iac_code/tools/bash/bash_tool.py
 #, python-brace-format
@@ -1611,6 +1750,10 @@ msgstr ""
 "l’efficacité, puis corriger les problèmes détectés."
 
 #: src/iac_code/tools/edit_file.py
+msgid "edit file path is required"
+msgstr "Le chemin du fichier à modifier est requis"
+
+#: src/iac_code/tools/edit_file.py
 msgid "Edit"
 msgstr "Modifier"
 
@@ -1630,6 +1773,10 @@ msgstr "Édition de {path}"
 #: src/iac_code/tools/edit_file.py
 msgid "Editing file..."
 msgstr "Édition du fichier…"
+
+#: src/iac_code/tools/glob.py
+msgid "glob pattern outside allowed directories"
+msgstr "Le motif glob est en dehors des répertoires autorisés"
 
 #: src/iac_code/tools/glob.py src/iac_code/tools/grep.py
 msgid "Found 0 files"
@@ -1679,6 +1826,10 @@ msgstr "Listage de {path}"
 #: src/iac_code/tools/list_files.py
 msgid "Listing files..."
 msgstr "Listage des fichiers…"
+
+#: src/iac_code/tools/read_file.py
+msgid "Read file path is required."
+msgstr "Le chemin du fichier à lire est requis."
 
 #: src/iac_code/tools/read_file.py
 #, python-brace-format
@@ -1749,6 +1900,10 @@ msgid "Fetching web page..."
 msgstr "Récupération de la page web…"
 
 #: src/iac_code/tools/write_file.py
+msgid "write file path is required"
+msgstr "Le chemin du fichier à écrire est requis"
+
+#: src/iac_code/tools/write_file.py
 #, python-brace-format
 msgid "Successfully wrote {lines} lines to {path}"
 msgstr "{lines} lignes écrites avec succès dans {path}"
@@ -1804,8 +1959,45 @@ msgstr "Construction shell non prise en charge"
 
 #: src/iac_code/tools/bash/path_validation.py
 #, python-brace-format
+msgid "path uses shell expansion: {}"
+msgstr "Le chemin utilise une expansion du shell : {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
 msgid "path outside allowed directories: {}"
 msgstr "Chemin en dehors des répertoires autorisés : {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+msgid "read path after cd requires confirmation: current directory"
+msgstr ""
+"Le chemin de lecture après cd nécessite une confirmation : répertoire "
+"courant"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path after cd requires confirmation: {}"
+msgstr "Le chemin de lecture après cd nécessite une confirmation : {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path uses shell expansion: {}"
+msgstr "Le chemin de lecture utilise une expansion du shell : {}"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed in-place edit"
+msgstr "édition sur place par sed"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed script file"
+msgstr "fichier de script sed"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed shell execution"
+msgstr "exécution shell par sed"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed file write"
+msgstr "écriture de fichier par sed"
 
 #: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
@@ -1814,21 +2006,17 @@ msgstr "Règle(s) de refus correspondante(s) : {}"
 
 #: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
-msgid "matched ask rule(s): {}"
-msgstr "Règle(s) de demande correspondante(s) : {}"
-
-#: src/iac_code/tools/bash/permissions.py
-#, python-brace-format
-msgid "matched allow rule(s): {}"
-msgstr "Règle(s) d'autorisation correspondante(s) : {}"
+msgid "dangerous readonly argument requires confirmation: {}"
+msgstr "L'argument dangereux en lecture seule nécessite une confirmation : {}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "complex command requires confirmation"
 msgstr "La commande complexe nécessite une confirmation"
 
 #: src/iac_code/tools/bash/permissions.py
-msgid "sed in-place edit requires confirmation"
-msgstr "L'édition sed sur place nécessite une confirmation"
+#, python-brace-format
+msgid "matched allow rule(s): {}"
+msgstr "Règle(s) d'autorisation correspondante(s) : {}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "command failed basic safety checks"
@@ -2596,13 +2784,17 @@ msgstr "annuler"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} more line{s}"
-msgstr "{n} ligne{s} supplémentaire{s}"
+msgid "{n} more line"
+msgid_plural "{n} more lines"
+msgstr[0] "{n} ligne supplémentaire"
+msgstr[1] "{n} lignes supplémentaires"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} message{s}"
-msgstr "{n} message{s}"
+msgid "{n} message"
+msgid_plural "{n} messages"
+msgstr[0] "{n} message"
+msgstr[1] "{n} messages"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 msgid "resume"
@@ -2626,18 +2818,24 @@ msgstr "à l’instant"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} minute{s} ago"
-msgstr "il y a {n} minute{s}"
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "il y a {n} minute"
+msgstr[1] "il y a {n} minutes"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} hour{s} ago"
-msgstr "il y a {n} heure{s}"
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "il y a {n} heure"
+msgstr[1] "il y a {n} heures"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} day{s} ago"
-msgstr "il y a {n} jour{s}"
+msgid "{n} day ago"
+msgid_plural "{n} days ago"
+msgstr[0] "il y a {n} jour"
+msgstr[1] "il y a {n} jours"
 
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "Search skills..."
@@ -2810,4 +3008,22 @@ msgstr ""
 
 #~ msgid "Resume a session by ID"
 #~ msgstr "Reprendre une session par identifiant"
+
+#~ msgid "sed in-place edit requires confirmation"
+#~ msgstr "L'édition sed sur place nécessite une confirmation"
+
+#~ msgid "{n} more line{s}"
+#~ msgstr "{n} ligne{s} supplémentaire{s}"
+
+#~ msgid "{n} message{s}"
+#~ msgstr "{n} message{s}"
+
+#~ msgid "{n} minute{s} ago"
+#~ msgstr "il y a {n} minute{s}"
+
+#~ msgid "{n} hour{s} ago"
+#~ msgstr "il y a {n} heure{s}"
+
+#~ msgid "{n} day{s} ago"
+#~ msgstr "il y a {n} jour{s}"
 

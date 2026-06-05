@@ -163,6 +163,33 @@ class TestToolExecutor:
         assert results[0].is_error is True
         assert "timed out" in results[0].content
 
+    async def test_event_queue_is_passed_only_through_context(self):
+        class QueueAwareTool(FakeReadTool):
+            def __init__(self):
+                self._event_queue = None
+                self.seen_context_queues = {}
+
+            async def execute(self, *, tool_input, context):
+                self.seen_context_queues[tool_input["name"]] = context.event_queue
+                return ToolResult.success(tool_input["name"])
+
+        tool = QueueAwareTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        first_queue = asyncio.Queue()
+        second_queue = asyncio.Queue()
+        calls = [
+            ToolCallRequest(id="a", name="read", input={"name": "first"}, event_queue=first_queue),
+            ToolCallRequest(id="b", name="read", input={"name": "second"}, event_queue=second_queue),
+        ]
+
+        results = await executor.execute_batch(calls, ToolContext())
+
+        assert [result.content for result in results] == ["first", "second"]
+        assert tool.seen_context_queues == {"first": first_queue, "second": second_queue}
+        assert tool._event_queue is None
+
 
 class FakeStrictTool(Tool):
     @property

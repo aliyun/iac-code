@@ -24,7 +24,13 @@ def _default_gettext(message: str) -> str:
     return message
 
 
+def _default_ngettext(singular: str, plural: str, n: int) -> str:
+    """Default pass-through plural translation function before setup."""
+    return singular if n == 1 else plural
+
+
 _gettext_func: Callable[[str], str] = _default_gettext
+_ngettext_func: Callable[[str, str, int], str] = _default_ngettext
 _current_language: str = DEFAULT_LANGUAGE
 
 
@@ -42,6 +48,11 @@ def _(message: str) -> str:
         The translated message string.
     """
     return _gettext_func(message)
+
+
+def ngettext(singular: str, plural: str, n: int) -> str:
+    """Translate singular/plural message strings based on count."""
+    return _ngettext_func(singular, plural, n)
 
 
 # Typer/Click built-in strings that need translation
@@ -133,7 +144,7 @@ def setup_i18n() -> None:
     import time) can still resolve translations at call time. This avoids any
     reliance on import ordering or monkey-patching of the `gettext` module.
     """
-    global _gettext_func, _current_language
+    global _gettext_func, _ngettext_func, _current_language
 
     lang = _detect_language()
     _current_language = lang
@@ -158,6 +169,7 @@ def setup_i18n() -> None:
 
     # Update the mutable reference for our own `_()` calls.
     _gettext_func = translation.gettext
+    _ngettext_func = translation.ngettext
 
     # Bind the text domain so that `gettext.gettext(msg)` -> `dgettext('messages', msg)`
     # resolves via this localedir. This is the key mechanism that lets Click's

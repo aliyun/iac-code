@@ -37,6 +37,15 @@ def test_windows_multi_component_paths_match():
     assert mod._path_hits_sensitive("C:\\Users\\me\\AppData\\Local\\Microsoft\\Credentials\\data")
 
 
+def test_windows_sensitive_paths_match_case_insensitively():
+    """Windows sensitive paths match regardless of candidate path casing."""
+    with patch("sys.platform", "win32"):
+        importlib.reload(mod)
+
+    assert mod._path_hits_sensitive("C:\\Users\\me\\NTUSER.DAT")
+    assert mod._path_hits_sensitive("C:\\Users\\me\\appdata\\local\\microsoft\\credentials\\data")
+
+
 def test_unix_sensitive_paths_no_windows_entries():
     """On non-Windows, SENSITIVE_PATHS does not include Windows entries."""
     with patch("sys.platform", "linux"):

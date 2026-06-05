@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from iac_code.i18n import _
+
 if TYPE_CHECKING:
     from iac_code.tools.base import ToolRegistry
 
@@ -49,9 +51,9 @@ def get_builtin_agents() -> list[AgentDefinition]:
     return [
         AgentDefinition(
             agent_type="general-purpose",
-            when_to_use=(
-                "Use for complex, multi-step tasks that require research, "
-                "code changes, or coordinating multiple operations."
+            when_to_use=_(
+                "Use for complex, multi-step tasks that require research, code changes, "
+                "or coordinating multiple operations."
             ),
             tools=["*"],
             disallowed_tools=["agent"],
@@ -59,9 +61,9 @@ def get_builtin_agents() -> list[AgentDefinition]:
         ),
         AgentDefinition(
             agent_type="explore",
-            when_to_use=(
-                "Use to quickly find files, search code, or answer questions "
-                "about the codebase. Read-only — cannot modify files."
+            when_to_use=_(
+                "Use to quickly find files, search code, or answer questions about the codebase. "
+                "Read-only; cannot modify files."
             ),
             tools=["read_file", "glob", "grep", "list_files", "bash"],
             disallowed_tools=["write_file", "edit_file", "agent"],
@@ -69,9 +71,9 @@ def get_builtin_agents() -> list[AgentDefinition]:
         ),
         AgentDefinition(
             agent_type="plan",
-            when_to_use=(
-                "Use to plan implementation strategy, review architecture, "
-                "or design solutions. Read-only, no execution."
+            when_to_use=_(
+                "Use to plan implementation strategy, review architecture, or design solutions. "
+                "Read-only, no execution."
             ),
             tools=["read_file", "glob", "grep", "list_files"],
             disallowed_tools=["bash", "write_file", "edit_file", "agent"],

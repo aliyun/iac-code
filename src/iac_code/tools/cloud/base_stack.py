@@ -149,6 +149,44 @@ class BaseCloudStack(Tool):
         display = f"{action} {region}" if region else action
         return _("Running {action}...").format(action=display)
 
+    def is_action_success(self, action: str, status: StackStatus) -> bool:
+        return status.is_success
+
+    def is_action_terminal(self, action: str, status: StackStatus) -> bool:
+        return status.is_terminal
+
+    def on_terminal_status(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        status: StackStatus,
+        resources: list[ResourceStatus],
+        elapsed_seconds: int,
+    ) -> None:
+        return None
+
+    def on_polling_error(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        stack_id: str,
+        error_stage: str,
+        error: Exception,
+    ) -> None:
+        return None
+
+    def on_polling_cancelled(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        stack_id: str,
+        elapsed_seconds: int,
+    ) -> None:
+        return None
+
     @staticmethod
     def _clean_error_message(msg: str) -> str:
         """Strip raw API response data from error messages."""
@@ -188,55 +226,79 @@ class BaseCloudStack(Tool):
 
         start_time = time.monotonic()
 
-        while True:
-            await asyncio.sleep(self._poll_interval)
+        try:
+            while True:
+                await asyncio.sleep(self._poll_interval)
 
-            try:
-                status = await self.get_stack_status(stack_id, region)
-            except Exception as e:
-                return ToolResult.error(f"[GetStackStatus] {e}")
+                try:
+                    status = await self.get_stack_status(stack_id, region)
+                except Exception as e:
+                    try:
+                        self.on_polling_error(action, params, region, stack_id, "status", e)
+                    except Exception:
+                        pass
+                    return ToolResult.error(f"[GetStackStatus] {e}")
 
-            try:
-                resources = await self.get_stack_resources(stack_id, region)
-            except Exception as e:
-                return ToolResult.error(f"[GetStackResources] {e}")
+                try:
+                    resources = await self.get_stack_resources(stack_id, region)
+                except Exception as e:
+                    if self.is_action_terminal(action, status):
+                        resources = []
+                    else:
+                        try:
+                            self.on_polling_error(action, params, region, stack_id, "resources", e)
+                        except Exception:
+                            pass
+                        return ToolResult.error(f"[GetStackResources] {e}")
 
+                elapsed = int(time.monotonic() - start_time)
+
+                if context.event_queue is not None:
+                    event = StackProgressEvent(
+                        stack_id=status.stack_id,
+                        stack_name=status.stack_name,
+                        status=status.status,
+                        progress_percentage=status.progress_percentage,
+                        resources=[
+                            {
+                                "name": r.name,
+                                "resource_type": r.resource_type,
+                                "status": r.status,
+                                "status_reason": r.status_reason,
+                            }
+                            for r in resources
+                        ],
+                        elapsed_seconds=elapsed,
+                    )
+                    await context.event_queue.put(event)
+
+                if self.is_action_terminal(action, status):
+                    action_success = self.is_action_success(action, status)
+                    result_data = {
+                        "stack_id": status.stack_id,
+                        "stack_name": status.stack_name,
+                        "status": status.status,
+                        "status_reason": status.status_reason,
+                        "progress_percentage": status.progress_percentage,
+                        "elapsed_seconds": elapsed,
+                        "is_success": action_success,
+                    }
+                    try:
+                        self.on_terminal_status(action, params, region, status, resources, elapsed)
+                    except Exception:
+                        pass
+                    if action_success:
+                        return ToolResult.success(json.dumps(result_data, ensure_ascii=False, indent=2))
+                    else:
+                        return ToolResult.error(json.dumps(result_data, ensure_ascii=False, indent=2))
+        except (KeyboardInterrupt, asyncio.CancelledError):
             elapsed = int(time.monotonic() - start_time)
-
-            if context.event_queue is not None:
-                event = StackProgressEvent(
-                    stack_id=status.stack_id,
-                    stack_name=status.stack_name,
-                    status=status.status,
-                    progress_percentage=status.progress_percentage,
-                    resources=[
-                        {
-                            "name": r.name,
-                            "resource_type": r.resource_type,
-                            "status": r.status,
-                            "status_reason": r.status_reason,
-                        }
-                        for r in resources
-                    ],
-                    elapsed_seconds=elapsed,
-                )
-                await context.event_queue.put(event)
-
-            if status.is_terminal:
-                result_data = {
-                    "stack_id": status.stack_id,
-                    "stack_name": status.stack_name,
-                    "status": status.status,
-                    "status_reason": status.status_reason,
-                    "progress_percentage": status.progress_percentage,
-                    "elapsed_seconds": elapsed,
-                    "is_success": status.is_success,
-                }
-                if status.is_success:
-                    return ToolResult.success(json.dumps(result_data, ensure_ascii=False, indent=2))
-                else:
-                    return ToolResult.error(json.dumps(result_data, ensure_ascii=False, indent=2))
+            try:
+                self.on_polling_cancelled(action, params, region, stack_id, elapsed)
+            except Exception:
+                pass
+            raise
 
     @property
-    def _poll_interval(self) -> int:
-        return self.__class__.poll_interval
+    def _poll_interval(self) -> float:
+        return self.poll_interval

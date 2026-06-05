@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 
 from iac_code.i18n import _
+from iac_code.tools.bash.argv_safety import dangerous_readonly_argument
 from iac_code.tools.bash.command_parser import ParseResult, SimpleCommand, parse_command
 from iac_code.tools.bash.mode_validation import check_permission_mode
-from iac_code.tools.bash.path_validation import check_path_constraints
+from iac_code.tools.bash.path_validation import check_path_constraints, check_read_path_constraints
 from iac_code.tools.bash.readonly_commands import is_command_readonly
 from iac_code.tools.bash.rule_matching import find_matching_rules, normalize_command
 from iac_code.tools.bash.safety_checks import check_command_safety, check_safety
@@ -85,6 +86,8 @@ def _with_suggestions_if_needed(
 ) -> PermissionResult:
     if result.suggestions:
         return result
+    if result.reason is not None and result.reason.type == "dangerous_readonly_argument":
+        return result
     if commands:
         sug = _generate_suggestions(commands, sub_results=sub_results)
     else:
@@ -105,15 +108,16 @@ def _command_base(cmd: SimpleCommand) -> str | None:
     return os.path.basename(cmd.argv[0])
 
 
-def _sed_inplace_edit(argv: list[str]) -> bool:
-    for arg in argv[1:]:
-        if arg.startswith("--in-place"):
-            return True
-        if arg == "-i":
-            return True
-        if len(arg) > 2 and arg.startswith("-i") and arg[2] in "./":
-            return True
-    return False
+def _dangerous_arg_label(arg: str) -> str:
+    if arg == "sed in-place edit":
+        return _("sed in-place edit")
+    if arg == "sed script file":
+        return _("sed script file")
+    if arg == "sed shell execution":
+        return _("sed shell execution")
+    if arg == "sed file write":
+        return _("sed file write")
+    return arg
 
 
 def bash_tool_check_permission(
@@ -121,8 +125,6 @@ def bash_tool_check_permission(
     context: ToolPermissionContext,
     compound_has_cd: bool = False,
 ) -> PermissionResult:
-    del compound_has_cd  # reserved for compound cwd handling; kept for API stability
-
     if not cmd.argv:
         return PermissionResult(behavior="passthrough")
 
@@ -150,13 +152,24 @@ def bash_tool_check_permission(
     if path_res.behavior != "passthrough":
         return path_res
 
-    if matched["allow"]:
-        detail = _("matched allow rule(s): {}").format(", ".join(matched["allow"]))
+    dangerous_arg = dangerous_readonly_argument(cmd.argv)
+    if dangerous_arg is not None:
+        detail = _("dangerous readonly argument requires confirmation: {}").format(_dangerous_arg_label(dangerous_arg))
         return PermissionResult(
-            behavior="allow",
+            behavior="ask",
             message=detail,
-            reason=PermissionDecisionReason(type="rule", detail=detail),
+            reason=PermissionDecisionReason(type="dangerous_readonly_argument", detail=detail),
         )
+
+    read_path_res = check_read_path_constraints(
+        cmd,
+        context.cwd,
+        context.additional_directories,
+        context.trusted_read_directories,
+        compound_has_cd=compound_has_cd,
+    )
+    if read_path_res.behavior != "passthrough":
+        return read_path_res
 
     if cmd.is_complex:
         detail = _("complex command requires confirmation")
@@ -166,13 +179,12 @@ def bash_tool_check_permission(
             reason=PermissionDecisionReason(type="complex_command", detail=detail),
         )
 
-    base = cmd.argv[0] if cmd.argv else ""
-    if os.path.basename(base) == "sed" and _sed_inplace_edit(cmd.argv):
-        detail = _("sed in-place edit requires confirmation")
+    if matched["allow"]:
+        detail = _("matched allow rule(s): {}").format(", ".join(matched["allow"]))
         return PermissionResult(
-            behavior="ask",
+            behavior="allow",
             message=detail,
-            reason=PermissionDecisionReason(type="sed_inplace", detail=detail),
+            reason=PermissionDecisionReason(type="rule", detail=detail),
         )
 
     mode_res = check_permission_mode(cmd, context.mode)
@@ -216,13 +228,6 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
 
     parsed: ParseResult = parse_command(command)
     if parsed.kind in ("too_complex", "parse_error"):
-        if full_matches["allow"]:
-            detail = _("matched allow rule(s): {}").format(", ".join(full_matches["allow"]))
-            return PermissionResult(
-                behavior="allow",
-                message=detail,
-                reason=PermissionDecisionReason(type="rule", detail=detail),
-            )
         if parsed.kind == "too_complex":
             kind_label = _("command too complex to analyze")
         else:

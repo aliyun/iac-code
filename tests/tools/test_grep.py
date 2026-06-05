@@ -3,7 +3,7 @@
 import pytest
 
 from iac_code.tools.base import ToolContext
-from iac_code.tools.grep import GrepTool, _python_grep
+from iac_code.tools.grep import GrepTool, _is_rg_available, _python_grep
 
 
 @pytest.fixture
@@ -36,6 +36,46 @@ class TestPythonGrep:
         out = _python_grep("hit", str(tmp_path), glob="*.py")
         assert "a.py" in out
         assert "a.txt" not in out
+
+    def test_glob_filter_matches_relative_paths(self, tmp_path):
+        src = tmp_path / "src"
+        package = src / "pkg"
+        package.mkdir(parents=True)
+        (src / "app.py").write_text("hit\n")
+        (package / "nested.py").write_text("hit\n")
+        (tmp_path / "app.py").write_text("hit\n")
+
+        out = _python_grep("hit", str(tmp_path), glob="src/**/*.py")
+
+        assert str(src / "app.py") in out
+        assert str(package / "nested.py") in out
+        assert str(tmp_path / "app.py") not in out
+
+    def test_glob_filter_single_star_does_not_cross_directories(self, tmp_path):
+        src = tmp_path / "src"
+        package = src / "pkg"
+        package.mkdir(parents=True)
+        (src / "app.py").write_text("hit\n")
+        (package / "nested.py").write_text("hit\n")
+
+        out = _python_grep("hit", str(tmp_path), glob="src/*.py")
+
+        assert str(src / "app.py") in out
+        assert str(package / "nested.py") not in out
+
+    def test_glob_filter_normalizes_windows_separators(self, tmp_path, monkeypatch):
+        package = tmp_path / "src" / "pkg"
+        package.mkdir(parents=True)
+        (package / "app.py").write_text("hit\n")
+
+        monkeypatch.setattr(
+            "iac_code.tools.grep.os.path.relpath",
+            lambda _filepath, _path: "src\\pkg\\app.py",
+        )
+
+        out = _python_grep("hit", str(tmp_path), glob="src/**/*.py")
+
+        assert str(package / "app.py") in out
 
     def test_invalid_regex_returns_error_message(self, tmp_path):
         out = _python_grep("[unclosed", str(tmp_path))
@@ -108,6 +148,28 @@ class TestGrepExecute:
         from iac_code.tools.grep import normalize_user_path
 
         normalize_user_path.assert_called_once_with(str(tmp_path))
+
+    async def test_path_glob_with_rg_matches_relative_paths(self, tool, tmp_path):
+        if not _is_rg_available():
+            pytest.skip("rg is not available")
+
+        src = tmp_path / "src"
+        package = src / "pkg"
+        package.mkdir(parents=True)
+        (src / "app.py").write_text("hit\n")
+        (package / "nested.py").write_text("hit\n")
+        (tmp_path / "app.py").write_text("hit\n")
+
+        context = ToolContext(cwd=str(tmp_path))
+        result = await tool.execute(
+            tool_input={"pattern": "hit", "path": str(tmp_path), "glob": "src/**/*.py"},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert str(src / "app.py") in result.content
+        assert str(package / "nested.py") in result.content
+        assert str(tmp_path / "app.py") not in result.content
 
 
 class TestGrepRendering:

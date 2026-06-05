@@ -134,9 +134,106 @@ msgstr "会话已命名为 {name}"
 msgid "Renamed session to {name}"
 msgstr "已将会话重命名为 {name}"
 
+#: src/iac_code/acp/tools.py
+msgid "Bash command is required."
+msgstr "需要提供 Bash 命令。"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command timed out after {timeout} seconds"
+msgstr "命令在 {timeout} 秒后超时"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command terminated by signal: {signal}"
+msgstr "命令被信号终止：{signal}"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command failed with exit code {exit_code}"
+msgstr "命令失败，退出码为 {exit_code}"
+
 #: src/iac_code/agent/agent_loop.py src/iac_code/ui/repl.py
 msgid "Permission denied."
 msgstr "权限被拒绝。"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: {agent_type}"
+msgstr "未知智能体类型：{agent_type}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running {agent_type} agent"
+msgstr "正在运行 {agent_type} 智能体"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid ""
+"Launch a sub-agent to handle complex tasks.\n"
+"\n"
+"Available agent types:\n"
+"{agent_list}"
+msgstr ""
+"启动子智能体来处理复杂任务。\n"
+"\n"
+"可用的智能体类型：\n"
+"{agent_list}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The task for the sub-agent to perform."
+msgstr "子智能体要执行的任务。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Short (3-5 word) description of the task."
+msgstr "任务的简短（3-5 个词）描述。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The type of specialized agent to use."
+msgstr "要使用的专用智能体类型。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Run agent in background, parent continues."
+msgstr "在后台运行智能体，父任务继续执行。"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: '{agent_type}'"
+msgstr "未知智能体类型：'{agent_type}'"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Sub-agent task"
+msgstr "子智能体任务"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Background agent launched (task_id: {task_id}, type: {agent_type})"
+msgstr "后台智能体已启动（task_id: {task_id}, type: {agent_type}）"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Sub-agent failed: {error}"
+msgstr "子智能体失败：{error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent completed: {tool_count} tool call"
+msgid_plural "Agent completed: {tool_count} tool calls"
+msgstr[0] "智能体已完成：{tool_count} 次工具调用"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Agent stopped"
+msgstr "智能体已停止"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent failed: {error}"
+msgstr "智能体失败：{error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent error: {error}"
+msgstr "智能体错误：{error}"
 
 #: src/iac_code/agent/agent_tool.py
 #, python-brace-format
@@ -154,6 +251,33 @@ msgstr "规划"
 #: src/iac_code/agent/agent_tool.py
 msgid "Agent"
 msgstr "智能体"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running agent: {description}"
+msgstr "正在运行智能体：{description}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "sub-agent"
+msgstr "子智能体"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use for complex, multi-step tasks that require research, code changes, or"
+" coordinating multiple operations."
+msgstr "用于需要研究、代码修改或协调多个操作的复杂多步骤任务。"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to quickly find files, search code, or answer questions about the "
+"codebase. Read-only; cannot modify files."
+msgstr "用于快速查找文件、搜索代码或回答关于代码库的问题。只读；不能修改文件。"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to plan implementation strategy, review architecture, or design "
+"solutions. Read-only, no execution."
+msgstr "用于规划实现策略、审查架构或设计解决方案。只读，不执行命令。"
 
 #: src/iac_code/cli/headless.py
 #, python-brace-format
@@ -1409,6 +1533,12 @@ msgstr "此项目中已存在会话名称：{name}"
 msgid "Invalid --permission-mode {!r}. Valid values: {}"
 msgstr "无效的 --permission-mode {!r}。有效值：{}"
 
+#: src/iac_code/services/permissions/pipeline.py
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched ask rule(s): {}"
+msgstr "匹配到询问规则：{}"
+
 #: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
 #: src/iac_code/tools/bash/bash_tool.py
 #, python-brace-format
@@ -1544,6 +1674,10 @@ msgid ""
 msgstr "审查变更的代码的可复用性、质量和效率，然后修复发现的问题。"
 
 #: src/iac_code/tools/edit_file.py
+msgid "edit file path is required"
+msgstr "需要提供编辑文件路径"
+
+#: src/iac_code/tools/edit_file.py
 msgid "Edit"
 msgstr "编辑"
 
@@ -1563,6 +1697,10 @@ msgstr "正在编辑 {path}"
 #: src/iac_code/tools/edit_file.py
 msgid "Editing file..."
 msgstr "正在编辑文件..."
+
+#: src/iac_code/tools/glob.py
+msgid "glob pattern outside allowed directories"
+msgstr "glob 模式超出允许的目录范围"
 
 #: src/iac_code/tools/glob.py src/iac_code/tools/grep.py
 msgid "Found 0 files"
@@ -1612,6 +1750,10 @@ msgstr "正在列出 {path}"
 #: src/iac_code/tools/list_files.py
 msgid "Listing files..."
 msgstr "正在列出文件..."
+
+#: src/iac_code/tools/read_file.py
+msgid "Read file path is required."
+msgstr "需要提供读取文件路径。"
 
 #: src/iac_code/tools/read_file.py
 #, python-brace-format
@@ -1679,6 +1821,10 @@ msgid "Fetching web page..."
 msgstr "正在获取网页..."
 
 #: src/iac_code/tools/write_file.py
+msgid "write file path is required"
+msgstr "需要提供写入文件路径"
+
+#: src/iac_code/tools/write_file.py
 #, python-brace-format
 msgid "Successfully wrote {lines} lines to {path}"
 msgstr "成功写入 {lines} 行到 {path}"
@@ -1734,8 +1880,43 @@ msgstr "不支持的 Shell 语法结构"
 
 #: src/iac_code/tools/bash/path_validation.py
 #, python-brace-format
+msgid "path uses shell expansion: {}"
+msgstr "路径使用了 shell 展开：{}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
 msgid "path outside allowed directories: {}"
 msgstr "路径不在允许的目录范围内：{}"
+
+#: src/iac_code/tools/bash/path_validation.py
+msgid "read path after cd requires confirmation: current directory"
+msgstr "cd 后读取当前目录需要确认"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path after cd requires confirmation: {}"
+msgstr "cd 后读取路径需要确认：{}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path uses shell expansion: {}"
+msgstr "读取路径使用了 shell 展开：{}"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed in-place edit"
+msgstr "sed 原地编辑"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed script file"
+msgstr "sed 脚本文件"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed shell execution"
+msgstr "sed shell 执行"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed file write"
+msgstr "sed 文件写入"
 
 #: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
@@ -1744,21 +1925,17 @@ msgstr "匹配到拒绝规则：{}"
 
 #: src/iac_code/tools/bash/permissions.py
 #, python-brace-format
-msgid "matched ask rule(s): {}"
-msgstr "匹配到询问规则：{}"
-
-#: src/iac_code/tools/bash/permissions.py
-#, python-brace-format
-msgid "matched allow rule(s): {}"
-msgstr "匹配到允许规则：{}"
+msgid "dangerous readonly argument requires confirmation: {}"
+msgstr "危险的只读参数需要确认：{}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "complex command requires confirmation"
 msgstr "复杂命令需要确认"
 
 #: src/iac_code/tools/bash/permissions.py
-msgid "sed in-place edit requires confirmation"
-msgstr "sed 原地编辑需要确认"
+#, python-brace-format
+msgid "matched allow rule(s): {}"
+msgstr "匹配到允许规则：{}"
 
 #: src/iac_code/tools/bash/permissions.py
 msgid "command failed basic safety checks"
@@ -2497,13 +2674,15 @@ msgstr "取消"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} more line{s}"
-msgstr "还有 {n} 行"
+msgid "{n} more line"
+msgid_plural "{n} more lines"
+msgstr[0] "还有 {n} 行"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} message{s}"
-msgstr "{n} 条消息"
+msgid "{n} message"
+msgid_plural "{n} messages"
+msgstr[0] "{n} 条消息"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 msgid "resume"
@@ -2527,18 +2706,21 @@ msgstr "刚刚"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} minute{s} ago"
-msgstr "{n} 分钟前"
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "{n} 分钟前"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} hour{s} ago"
-msgstr "{n} 小时前"
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "{n} 小时前"
 
 #: src/iac_code/ui/dialogs/resume_picker.py
 #, python-brace-format
-msgid "{n} day{s} ago"
-msgstr "{n} 天前"
+msgid "{n} day ago"
+msgid_plural "{n} days ago"
+msgstr[0] "{n} 天前"
 
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "Search skills..."
@@ -2713,4 +2895,22 @@ msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 np
 
 #~ msgid "Resume a session by ID"
 #~ msgstr "通过 ID 恢复会话"
+
+#~ msgid "sed in-place edit requires confirmation"
+#~ msgstr "sed 原地编辑需要确认"
+
+#~ msgid "{n} more line{s}"
+#~ msgstr "还有 {n} 行"
+
+#~ msgid "{n} message{s}"
+#~ msgstr "{n} 条消息"
+
+#~ msgid "{n} minute{s} ago"
+#~ msgstr "{n} 分钟前"
+
+#~ msgid "{n} hour{s} ago"
+#~ msgstr "{n} 小时前"
+
+#~ msgid "{n} day{s} ago"
+#~ msgstr "{n} 天前"
 
