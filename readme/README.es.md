@@ -2,7 +2,7 @@
   <img src="../website/static/img/logo-with-front.png" alt="iac-code" width="200">
 </p>
 <p align="center">
-  <em>Asistente de Infraestructura como Código (IaC) impulsado por IA que genera y gestiona plantillas de orquestación de recursos de Alibaba Cloud (ROS / Terraform) mediante interacción en lenguaje natural.</em>
+  <em>Asistente de Infraestructura como Código (IaC) impulsado por IA que genera y gestiona plantillas de infraestructura cloud mediante interacción en lenguaje natural. Actualmente admite flujos de trabajo de Alibaba Cloud ROS y Terraform.</em>
 </p>
 <p align="center">
   <a href="https://github.com/aliyun/iac-code/actions/workflows/test.yml"><img src="https://github.com/aliyun/iac-code/actions/workflows/test.yml/badge.svg" alt="Test"></a>

@@ -2,7 +2,7 @@
   <img src="../website/static/img/logo-with-front.png" alt="iac-code" width="200">
 </p>
 <p align="center">
-  <em>KI-gestützter Infrastructure-as-Code-Assistent (IaC), der Alibaba Cloud Ressourcen-Orchestrierungsvorlagen (ROS / Terraform) durch natürlichsprachliche Interaktion generiert und verwaltet.</em>
+  <em>KI-gestuetzter Infrastructure-as-Code-Assistent (IaC), der Cloud-Infrastrukturvorlagen durch natuerlichsprachliche Interaktion generiert und verwaltet. Unterstuetzt derzeit Alibaba Cloud ROS- und Terraform-Workflows.</em>
 </p>
 <p align="center">
   <a href="https://github.com/aliyun/iac-code/actions/workflows/test.yml"><img src="https://github.com/aliyun/iac-code/actions/workflows/test.yml/badge.svg" alt="Test"></a>

@@ -2,7 +2,7 @@
   <img src="../website/static/img/logo-with-front.png" alt="iac-code" width="200">
 </p>
 <p align="center">
-  <em>AI 驱动的基础设施即代码助手，通过自然语言交互生成和管理阿里云资源编排模板（ROS / Terraform）。</em>
+  <em>面向云基础设施的 AI 基础设施即代码助手，通过自然语言交互生成和管理基础设施模板。目前支持阿里云 ROS 与 Terraform 工作流。</em>
 </p>
 <p align="center">
   <a href="https://github.com/aliyun/iac-code/actions/workflows/test.yml"><img src="https://github.com/aliyun/iac-code/actions/workflows/test.yml/badge.svg" alt="Test"></a>

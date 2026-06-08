@@ -6,7 +6,7 @@ description: What IaC Code does and where to start.
 
 # Overview
 
-IaC Code is an AI-powered Infrastructure as Code assistant for Alibaba Cloud. It helps cloud resource users and operators generate, deploy, and manage ROS and Terraform templates through a terminal workflow.
+IaC Code is an AI-powered Infrastructure as Code assistant for cloud infrastructure. It helps cloud resource users and operators generate, deploy, and manage infrastructure templates through a terminal workflow. The architecture is designed for multi-cloud workflows; the current release supports Alibaba Cloud ROS and Terraform workflows.
 
 Core capabilities:
 
