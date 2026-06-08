@@ -23,6 +23,7 @@ class A2APushSecretKeyring:
         self._env_managed = False
         self._active_key_id = ""
         self._keys: dict[str, str] = {}
+        self._created_at: dict[str, int] = {}
 
     @property
     def active_key_id(self) -> str:
@@ -55,6 +56,7 @@ class A2APushSecretKeyring:
         if key_id in self._keys:
             raise A2APushSecretError(f"A2A push secret encryption key already exists: {key_id}")
         self._keys[key_id] = Fernet.generate_key().decode("ascii")
+        self._created_at[key_id] = int(time.time())
         self._active_key_id = key_id
         self._write()
         return key_id
@@ -74,6 +76,7 @@ class A2APushSecretKeyring:
             return
         self._active_key_id = _new_key_id()
         self._keys = {self._active_key_id: Fernet.generate_key().decode("ascii")}
+        self._created_at = {self._active_key_id: int(time.time())}
         self._loaded = True
         self._write()
 
@@ -86,6 +89,11 @@ class A2APushSecretKeyring:
             for item in keys
             if isinstance(item, dict) and item.get("id") and item.get("fernetKey")
         }
+        self._created_at = {
+            str(item["id"]): int(item["createdAt"])
+            for item in keys
+            if isinstance(item, dict) and item.get("id") and item.get("createdAt") is not None
+        }
         self._active_key_id = str(data.get("activeKeyId") or "")
         if not self._active_key_id or self._active_key_id not in self._keys:
             raise A2APushSecretError("A2A push secret keyring does not contain its active key")
@@ -96,7 +104,7 @@ class A2APushSecretKeyring:
         data = {
             "activeKeyId": self._active_key_id,
             "keys": [
-                {"id": key_id, "fernetKey": key, "createdAt": int(time.time())}
+                {"id": key_id, "fernetKey": key, "createdAt": self._created_at.get(key_id, int(time.time()))}
                 for key_id, key in sorted(self._keys.items())
             ],
         }

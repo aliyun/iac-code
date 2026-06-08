@@ -214,6 +214,48 @@ async def test_push_config_store_key_rotation_keeps_old_configs_readable(tmp_pat
     assert new_key_id in raw_new
 
 
+def test_push_secret_keyring_preserves_created_at_on_rotate(tmp_path) -> None:
+    keyring_path = tmp_path / "keys.json"
+    keyring = A2APushSecretKeyring(keyring_path)
+
+    # Trigger initial key creation
+    _ = keyring.active_key_id
+    first_key_id = keyring.active_key_id
+
+    # Read persisted data and verify initial createdAt
+    raw = json.loads(keyring_path.read_text(encoding="utf-8"))
+    original_created_at = raw["keys"][0]["createdAt"]
+    assert original_created_at > 0
+
+    # Rotate to add a new key - should NOT overwrite existing createdAt
+    new_key_id = keyring.rotate()
+
+    raw_after = json.loads(keyring_path.read_text(encoding="utf-8"))
+    keys_by_id = {k["id"]: k for k in raw_after["keys"]}
+    assert keys_by_id[first_key_id]["createdAt"] == original_created_at
+    assert keys_by_id[new_key_id]["createdAt"] >= original_created_at
+
+
+def test_push_secret_keyring_preserves_created_at_across_reload(tmp_path) -> None:
+    keyring_path = tmp_path / "keys.json"
+    keyring = A2APushSecretKeyring(keyring_path)
+
+    # Trigger initial key creation
+    _ = keyring.active_key_id
+    first_key_id = keyring.active_key_id
+
+    raw = json.loads(keyring_path.read_text(encoding="utf-8"))
+    original_created_at = raw["keys"][0]["createdAt"]
+
+    # Load a fresh keyring from disk, rotate, and verify createdAt is preserved
+    keyring2 = A2APushSecretKeyring(keyring_path)
+    keyring2.rotate()
+
+    raw_after = json.loads(keyring_path.read_text(encoding="utf-8"))
+    keys_by_id = {k["id"]: k for k in raw_after["keys"]}
+    assert keys_by_id[first_key_id]["createdAt"] == original_created_at
+
+
 def test_push_secret_keyring_can_use_env_managed_keys(monkeypatch, tmp_path) -> None:
     key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv(
