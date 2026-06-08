@@ -101,6 +101,7 @@ def test_ensure_project_instruction_file_returns_path_without_creating_empty_fil
     project = tmp_path / "project"
     project.mkdir()
     project.chmod(0o755)
+    original_mode = stat.S_IMODE(project.stat().st_mode)
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
     runtime = mod.ProjectMemoryRuntime(str(project))
 
@@ -108,7 +109,7 @@ def test_ensure_project_instruction_file_returns_path_without_creating_empty_fil
 
     assert created == project / "AGENTS.md"
     assert not created.exists()
-    assert stat.S_IMODE(project.stat().st_mode) == 0o755
+    assert stat.S_IMODE(project.stat().st_mode) == original_mode
 
 
 def test_auto_memory_enabled_defaults_to_true_and_persists(tmp_path, monkeypatch):

@@ -223,7 +223,7 @@ class MemoryRecallService:
             response_text = str(getattr(response, "text", ""))
             selected_files = self._parse_selected_files(response_text, manifest)
             selected_files = self._filter_unsuppressed_files(selected_files)
-        except TimeoutError:
+        except (asyncio.TimeoutError, TimeoutError):
             self._stats.failed_side_queries += 1
             self._record("timeout", started, selected_files=[], prompt=prompt, response=response_text, side_query=True)
             return MemoryRecallResult(status="timeout")
