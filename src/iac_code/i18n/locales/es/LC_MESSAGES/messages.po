@@ -820,8 +820,8 @@ msgid "Toggle debug logging"
 msgstr "Activar o desactivar el registro de depuración"
 
 #: src/iac_code/commands/__init__.py
-msgid "Edit IAC-CODE memory files"
-msgstr "Editar archivos de memoria de IAC-CODE"
+msgid "Edit memory files"
+msgstr "Editar archivos de memoria"
 
 #: src/iac_code/commands/__init__.py
 msgid "View and manage persistent memories"

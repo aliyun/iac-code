@@ -149,7 +149,7 @@ def test_default_registry_exposes_new_memory_and_hides_memory_folder():
     memory_folder = registry.get("memory-folder")
 
     assert memory is not None
-    assert memory.description == "Edit IAC-CODE memory files"
+    assert memory.description == "Edit memory files"
     assert memory.hidden is False
     assert memory.arg_hint is None
     assert memory_folder is not None
