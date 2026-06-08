@@ -18,7 +18,14 @@ from iac_code.acp.slash_registry import ACPSlashRegistry
 from iac_code.acp.state import TurnState
 from iac_code.acp.tools import ACPTerminalBashTool
 from iac_code.acp.types import ACPContentBlock
-from iac_code.agent.message import Message, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+from iac_code.agent.message import (
+    Message,
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    is_recalled_memory_message,
+)
 from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
 from iac_code.types.permissions import PermissionDecision
@@ -64,6 +71,9 @@ def _history_message_to_updates(msg: Message) -> list[Any]:
       ``ToolCallProgress``.
     * **user** tool-result blocks are emitted as completed ``ToolCallProgress``.
     """
+    if is_recalled_memory_message(msg):
+        return []
+
     updates: list[Any] = []
     content = msg.content
 

@@ -7,8 +7,9 @@ from iac_code.commands.debug import debug_command
 from iac_code.commands.effort import effort_command
 from iac_code.commands.exit import exit_command
 from iac_code.commands.help import help_command
-from iac_code.commands.memory import memory_command
+from iac_code.commands.memory import memory_command, memory_folder_command
 from iac_code.commands.model import model_command
+from iac_code.commands.prompt import prompt_command
 from iac_code.commands.registry import Command, CommandRegistry, CommandResult, LocalCommand, PromptCommand
 from iac_code.commands.rename import rename_command
 from iac_code.commands.resume import resume_command
@@ -94,9 +95,27 @@ def create_default_registry() -> CommandRegistry:
     registry.register(
         LocalCommand(
             name="memory",
-            description=_("View and manage persistent memories"),
+            description=_("Edit IAC-CODE memory files"),
             handler=memory_command,
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="memory-folder",
+            description=_("View and manage persistent memories"),
+            handler=memory_folder_command,
             arg_hint=_("[<name>|search <query>|delete <name>|help]"),
+            hidden=True,
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="prompt",
+            description=_("Export current prompt snapshot"),
+            handler=prompt_command,
+            hidden=True,
             history_mode="session",
         )
     )
@@ -114,7 +133,7 @@ def create_default_registry() -> CommandRegistry:
             name="rename",
             description=_("Rename the current session"),
             handler=rename_command,
-            arg_hint="<name>",
+            arg_hint=_("<name>"),
             history_mode="session",
         )
     )

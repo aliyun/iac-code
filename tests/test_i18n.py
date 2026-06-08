@@ -21,7 +21,7 @@ POT_FILE = I18N_DIR / "messages.pot"
 LOCALES_DIR = I18N_DIR / "locales"
 
 MEMORY_COMMAND_MSGIDS = {
-    "Usage: /memory [<name>|search <query>|delete <name>|help]",
+    "Usage: /memory-folder [<name>|search <query>|delete <name>|help]",
     "Saved memories:",
     "No memories saved yet.",
     "Matching memories:",

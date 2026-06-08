@@ -55,6 +55,10 @@ def make_session_entry(session_id: str, cwd: str, name: str | None = None):
     )
 
 
+def _current_time_line(prompt: str) -> str:
+    return next(line for line in prompt.splitlines() if line.startswith("- Current time: "))
+
+
 class TestREPLProviderIntegration:
     @patch("iac_code.ui.repl.ProviderManager")
     @patch("iac_code.ui.repl.SessionStorage")
@@ -115,6 +119,37 @@ def test_new_session_id_is_full_uuid(mock_mm, mock_ss, mock_pm):
 
     repl = InlineREPL(model="test-model")
     assert UUID4_RE.match(repl.session_id), f"expected UUID4, got {repl.session_id!r}"
+
+
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_repl_init_reuses_runtime_current_time_for_refresher(mock_mm, mock_ss, mock_pm, tmp_path, monkeypatch):
+    from datetime import datetime as real_datetime
+
+    from iac_code.agent import system_prompt
+    from iac_code.ui import repl as repl_module
+    from iac_code.ui.repl import InlineREPL
+
+    class FakeDateTime:
+        calls = 0
+
+        @classmethod
+        def now(cls):
+            cls.calls += 1
+            return real_datetime(2026, 6, 5, 10, cls.calls, 0)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(system_prompt, "datetime", FakeDateTime)
+    monkeypatch.setattr(repl_module, "datetime", FakeDateTime, raising=False)
+
+    repl = InlineREPL(model="qwen3.7-max")
+
+    initial_line = _current_time_line(repl._agent_loop.system_prompt)
+    refreshed_line = _current_time_line(repl._build_current_system_prompt())
+
+    assert refreshed_line == initial_line
 
 
 def test_insert_text_delegates_to_prompt_input():
@@ -432,6 +467,53 @@ def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tm
     assert str(tmp_path / "config" / "tool-results" / "new") in roots
     assert str(tmp_path / "config" / "image-cache" / "new") in roots
     assert custom_root in roots
+
+
+def test_extract_last_user_text_skips_recalled_memory_message():
+    from iac_code.agent.message import Message, create_recalled_memory_message
+    from iac_code.ui.repl import InlineREPL
+
+    text = InlineREPL._extract_last_user_text(
+        [
+            Message(role="user", content="real prompt"),
+            Message(role="assistant", content="answer"),
+            create_recalled_memory_message("# Recalled Memory\nhidden prompt", ["topic.md"]),
+        ]
+    )
+
+    assert text == "real prompt"
+
+
+def test_history_search_messages_skips_recalled_memory_messages_and_leaked_entries():
+    from iac_code.agent.message import RECALLED_MEMORY_MARKER, Message, create_recalled_memory_message
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._history = SimpleNamespace(
+        entries=Mock(
+            return_value=[
+                "normal history",
+                f"<system-reminder>\n{RECALLED_MEMORY_MARKER}:\n\nhidden\n</system-reminder>",
+            ]
+        )
+    )
+    repl._agent_loop = SimpleNamespace(
+        context_manager=SimpleNamespace(
+            get_messages=Mock(
+                return_value=[
+                    create_recalled_memory_message("# Recalled Memory\nhidden context", ["topic.md"]),
+                    Message(role="user", content="context prompt"),
+                ]
+            )
+        )
+    )
+
+    messages = repl._history_search_messages()
+
+    assert messages == [
+        {"role": "user", "content": "normal history"},
+        {"role": "user", "content": "context prompt"},
+    ]
 
 
 def test_print_exit_text_uses_session_name_and_prints_session_id():

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
+from iac_code.agent.message import Message, create_recalled_memory_message
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.stream_events import StackInstancesProgressEvent, StackProgressEvent
@@ -162,6 +163,23 @@ class TestRendererHelpers:
 
         assert "下次工具调用后要提交的消息" in output
         assert "按 esc 中断并立即发送" in output
+
+    def test_replay_history_hides_recalled_memory_messages(self):
+        renderer = make_renderer()
+
+        renderer.replay_history(
+            [
+                Message(role="user", content="visible question"),
+                create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
+                Message(role="assistant", content="visible answer"),
+            ]
+        )
+
+        output = renderer.console.file.getvalue()
+        assert "visible question" in output
+        assert "visible answer" in output
+        assert "Prefer ROS YAML" not in output
+        assert "Relevant persistent memories" not in output
 
     def test_any_segment_has_verbose_content(self):
         renderer = make_renderer()

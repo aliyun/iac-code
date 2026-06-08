@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 
@@ -27,6 +28,7 @@ class AgentRuntime:
     command_registry: Any
     task_manager: Any
     memory_manager: Any
+    legacy_memory_manager: Any
 
 
 def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
@@ -40,6 +42,8 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     from iac_code.config import get_config_dir, load_credentials
     from iac_code.memory.memory_manager import MemoryManager
     from iac_code.memory.memory_tools import ReadMemoryTool, WriteMemoryTool
+    from iac_code.memory.project_memory import ProjectMemoryRuntime
+    from iac_code.memory.recall import MemoryRecallService
     from iac_code.providers.manager import ProviderManager
     from iac_code.services.cloud_credentials import CloudCredentials
     from iac_code.services.session_storage import SessionStorage
@@ -57,6 +61,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
 
     cwd = options.cwd or os.getcwd()
     session_id = options.session_id or str(uuid.uuid4())[:8]
+    runtime_current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     credentials = load_credentials(model=options.model)
 
@@ -101,8 +106,10 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
 
     session_storage = SessionStorage()
 
-    memory_manager = MemoryManager(memory_dir=str(get_config_dir() / "memory"))
-    memory_content = memory_manager.get_prompt_content()
+    memory_runtime = ProjectMemoryRuntime(cwd)
+    memory_manager = memory_runtime.memory_manager
+    legacy_memory_manager = MemoryManager(memory_dir=str(get_config_dir() / "memory"))
+    memory_recall_service = MemoryRecallService(memory_manager=memory_manager, provider_manager=provider_manager)
     tool_registry.register(ReadMemoryTool(memory_manager))
     tool_registry.register(WriteMemoryTool(memory_manager))
 
@@ -112,7 +119,15 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     tool_registry.register(TaskStopTool(task_manager))
 
     notification_queue = NotificationQueue()
-    base_system_prompt = build_system_prompt(cwd=cwd, memory_content=memory_content)
+
+    def build_base_system_prompt() -> str:
+        return build_system_prompt(
+            cwd=cwd,
+            memory_context=memory_runtime.build_memory_context(),
+            current_time=runtime_current_time,
+        )
+
+    base_system_prompt = build_base_system_prompt()
     tool_registry.register(
         AgentTool(
             task_manager=task_manager,
@@ -162,9 +177,18 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             setattr(agent_tool, "_permission_context", permission_context)
 
     skill_listing = build_skill_listing(command_registry.get_model_invocable_skills())
+
+    def build_agent_system_prompt() -> str:
+        return build_system_prompt(
+            cwd=cwd,
+            memory_context=memory_runtime.build_memory_context(),
+            skill_listing=skill_listing,
+            current_time=runtime_current_time,
+        )
+
     agent_loop = AgentLoop(
         provider_manager=provider_manager,
-        system_prompt=build_system_prompt(cwd=cwd, memory_content=memory_content, skill_listing=skill_listing),
+        system_prompt=build_agent_system_prompt(),
         tool_registry=tool_registry,
         session_storage=session_storage,
         session_id=session_id,
@@ -173,6 +197,8 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         cwd=cwd,
         permission_context=permission_context,
         auto_trigger_skills=command_registry.get_model_invocable_skills(),
+        memory_recall_service=memory_recall_service,
+        system_prompt_refresher=build_agent_system_prompt,
     )
 
     return AgentRuntime(
@@ -183,4 +209,5 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         command_registry=command_registry,
         task_manager=task_manager,
         memory_manager=memory_manager,
+        legacy_memory_manager=legacy_memory_manager,
     )

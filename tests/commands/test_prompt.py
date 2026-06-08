@@ -1,0 +1,168 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from iac_code.commands import create_default_registry
+from iac_code.commands import prompt as prompt_module
+from iac_code.providers.base import ContentBlock, Message, ToolDefinition
+
+
+class _FakeAgentLoop:
+    system_prompt = "# Stale\nold"
+    session_id = "session-123"
+
+    def _get_provider_messages(self):
+        return [
+            Message.user("hello from user"),
+            Message(
+                role="assistant",
+                content=[
+                    ContentBlock(type="text", text="assistant text"),
+                    ContentBlock(type="tool_use", tool_use_id="toolu_1", name="read_file", input={"path": "a.py"}),
+                ],
+            ),
+        ]
+
+    def _get_tool_definitions(self):
+        return [
+            ToolDefinition(
+                name="read_file",
+                description="Read a file",
+                input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+            )
+        ]
+
+
+class _FakeAgentLoopWithLastRequest(_FakeAgentLoop):
+    def _get_provider_messages(self):
+        return [Message.user("current runtime message")]
+
+    def get_last_provider_request_snapshot(self):
+        return {
+            "system_prompt": "# Sent System\nactual sent system",
+            "provider_messages": [
+                Message.user("actual user question"),
+                Message.user(
+                    "<system-reminder>\n"
+                    "Relevant persistent memories recalled for this conversation:\n\n"
+                    "# Recalled Memory\n"
+                    "Prefer ROS YAML.\n"
+                    "</system-reminder>"
+                ),
+            ],
+            "tools": self._get_tool_definitions(),
+        }
+
+
+def test_default_registry_hides_prompt_command():
+    registry = create_default_registry()
+
+    command = registry.get("prompt")
+
+    assert command is not None
+    assert command.hidden is True
+    assert "prompt" not in {cmd.name for cmd in registry.get_all()}
+    assert "prompt" not in registry.get_completions("p")
+
+
+def test_prompt_html_uses_tabs_without_memory_tab():
+    html = prompt_module.render_prompt_html(
+        {
+            "metadata": {"session_id": "abc"},
+            "system_prompt": "# Memory\nProject memory index",
+            "system_sections": [{"title": "Memory", "content": "# Memory\nProject memory index", "zone": "dynamic"}],
+            "provider_messages": [{"role": "user", "content": "hello"}],
+            "tools": [{"name": "read_file", "description": "Read", "input_schema": {"type": "object"}}],
+        }
+    )
+
+    assert 'role="tablist"' in html
+    assert 'data-tab-target="all"' in html
+    assert 'data-tab-target="system"' in html
+    assert 'data-tab-target="messages"' in html
+    assert 'data-tab-target="tools"' in html
+    assert 'data-tab-target="memory"' not in html
+    assert "<h2>Memory</h2>" not in html
+    assert "Prompt Assembly Order" in html
+    assert "1. System Prompt" in html
+    assert "2. Provider Messages" in html
+    assert "3. Tools" in html
+    assert "Project memory index" in html
+
+
+def test_prompt_snapshot_prefers_last_provider_request_with_recalled_memory():
+    repl = SimpleNamespace(
+        _agent_loop=_FakeAgentLoopWithLastRequest(),
+        get_status_snapshot=lambda: {"session_id": "session-123"},
+    )
+
+    snapshot = prompt_module.build_prompt_snapshot(repl)
+    html = prompt_module.render_prompt_html(snapshot)
+
+    assert snapshot["metadata"]["source"] == "Last main-model request"
+    assert "actual sent system" in html
+    assert "actual user question" in html
+    assert "Relevant persistent memories recalled for this conversation" in html
+    assert "Prefer ROS YAML." in html
+    assert "current runtime message" not in html
+    assert "recalled memory" in html
+    assert "provider-only" not in html
+    assert "hidden conversation" in html
+
+
+@pytest.mark.asyncio
+async def test_prompt_command_exports_html_and_opens(tmp_path, monkeypatch):
+    opened: list[object] = []
+    monkeypatch.setattr(prompt_module, "_open_path", lambda path: opened.append(path))
+
+    repl = SimpleNamespace(
+        _agent_loop=_FakeAgentLoop(),
+        _memory_context=SimpleNamespace(
+            instruction_memory_content="Project instruction memory",
+            memory_index_content="ros-yaml.md - ROS YAML preference",
+            memory_mechanics_content="Use read_memory for full topic files.",
+        ),
+        _build_current_system_prompt=lambda: (
+            "Identity preamble\n\n"
+            "# System Rules\n"
+            "Follow the rules.\n\n"
+            "--- DYNAMIC_BOUNDARY ---\n\n"
+            "# Environment\n"
+            "- Working directory: `/tmp/project`"
+        ),
+        get_status_snapshot=lambda: {
+            "session_id": "session-123",
+            "provider": "DashScope",
+            "model": "qwen3.7-max",
+            "cwd": "/tmp/project",
+        },
+    )
+    context = SimpleNamespace(repl=repl)
+
+    result = await prompt_module.prompt_command(context=context, output_dir=tmp_path)
+
+    assert result is not None
+    assert "Prompt exported and opened" in result
+    assert len(opened) == 1
+    html_path = opened[0]
+    assert html_path.parent == tmp_path
+    assert html_path.suffix == ".html"
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "Prompt Snapshot" in html
+    assert "System Prompt" in html
+    assert "System Rules" in html
+    assert "Provider Messages" in html
+    assert "hello from user" in html
+    assert "assistant text" in html
+    assert "Tools" in html
+    assert "read_file" in html
+    assert "qwen3.7-max" in html
+
+
+@pytest.mark.asyncio
+async def test_prompt_command_requires_repl_context():
+    result = await prompt_module.prompt_command(context=MagicMock(repl=None))
+
+    assert "REPL context" in result

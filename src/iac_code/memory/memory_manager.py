@@ -79,6 +79,14 @@ class MemoryManager:
                 memories.append(mem)
         return memories
 
+    def list_memory_metadata(self) -> list[dict[str, Any]]:
+        memories = []
+        for path in self._iter_memory_files():
+            mem = self._load_memory_metadata(path)
+            if mem:
+                memories.append(mem)
+        return memories
+
     def search(self, query: str) -> list[dict[str, Any]]:
         needle = query.strip().casefold()
         if not needle:
@@ -163,6 +171,22 @@ class MemoryManager:
             return self._parse_memory_file(path.read_text(encoding="utf-8"))
         except OSError:
             return None
+
+    def _load_memory_metadata(self, path: Path) -> dict[str, Any] | None:
+        result: dict[str, Any] = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                if not f.readline().startswith("---"):
+                    return None
+                for line in f:
+                    if line.strip() == "---":
+                        return result
+                    if ":" in line:
+                        key, value = line.split(":", 1)
+                        result[key.strip()] = value.strip()
+        except OSError:
+            return None
+        return None
 
     @staticmethod
     def _parse_memory_file(text: str) -> dict[str, Any]:

@@ -778,12 +778,20 @@ msgid "Toggle debug logging"
 msgstr "切换调试日志开关"
 
 #: src/iac_code/commands/__init__.py
+msgid "Edit IAC-CODE memory files"
+msgstr "编辑 IAC-CODE 记忆文件"
+
+#: src/iac_code/commands/__init__.py
 msgid "View and manage persistent memories"
 msgstr "查看和管理持久记忆"
 
 #: src/iac_code/commands/__init__.py
 msgid "[<name>|search <query>|delete <name>|help]"
 msgstr "[<名称>|search <查询>|delete <名称>|help]"
+
+#: src/iac_code/commands/__init__.py
+msgid "Export current prompt snapshot"
+msgstr "导出当前 prompt 快照"
 
 #: src/iac_code/commands/__init__.py
 msgid "Resume a previous session"
@@ -796,6 +804,10 @@ msgstr "[会话 ID 或搜索词]"
 #: src/iac_code/commands/__init__.py
 msgid "Rename the current session"
 msgstr "重命名当前会话"
+
+#: src/iac_code/commands/__init__.py
+msgid "<name>"
+msgstr "<名称>"
 
 #: src/iac_code/commands/__init__.py
 msgid "Manage skills"
@@ -1181,14 +1193,14 @@ msgid "Exit"
 msgstr "退出"
 
 #: src/iac_code/commands/memory.py
-msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
-msgstr "用法：/memory [<名称>|search <查询>|delete <名称>|help]"
+msgid "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
+msgstr "用法：/memory-folder [<名称>|search <查询>|delete <名称>|help]"
 
 #: src/iac_code/commands/memory.py
 msgid "Saved memories:"
 msgstr "已保存的记忆："
 
-#: src/iac_code/commands/memory.py
+#: src/iac_code/commands/memory.py src/iac_code/memory/memory_tools.py
 msgid "No memories saved yet."
 msgstr "尚未保存任何记忆。"
 
@@ -1200,7 +1212,7 @@ msgstr "匹配的记忆："
 msgid "No matching memories."
 msgstr "没有匹配的记忆。"
 
-#: src/iac_code/commands/memory.py
+#: src/iac_code/commands/memory.py src/iac_code/memory/memory_tools.py
 #, python-brace-format
 msgid "Memory '{name}' not found."
 msgstr "未找到记忆 '{name}'。"
@@ -1209,6 +1221,41 @@ msgstr "未找到记忆 '{name}'。"
 #, python-brace-format
 msgid "Memory '{name}' deleted."
 msgstr "记忆 '{name}' 已删除。"
+
+#: src/iac_code/commands/memory.py
+msgid "Memory runtime is unavailable."
+msgstr "记忆运行时不可用。"
+
+#: src/iac_code/commands/memory.py src/iac_code/ui/dialogs/memory.py
+msgid "Project memory"
+msgstr "项目记忆"
+
+#: src/iac_code/commands/memory.py
+msgid "project memory"
+msgstr "项目记忆"
+
+#: src/iac_code/commands/memory.py src/iac_code/ui/dialogs/memory.py
+msgid "User memory"
+msgstr "用户记忆"
+
+#: src/iac_code/commands/memory.py
+msgid "user memory"
+msgstr "用户记忆"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Failed to open memory: {error}"
+msgstr "打开记忆失败：{error}"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "No changes made to {scope}: {path}"
+msgstr "{scope}没有变更：{path}"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Saved {scope}: {path}"
+msgstr "已保存{scope}：{path}"
 
 #: src/iac_code/commands/model.py
 #, python-brace-format
@@ -1231,6 +1278,272 @@ msgstr "当前模型：{model}"
 #, python-brace-format
 msgid "Kept model as {model}"
 msgstr "保持模型为 {model}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt command requires a REPL context."
+msgstr "prompt 命令需要 REPL 上下文。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Failed to export prompt: {error}"
+msgstr "导出 prompt 失败：{error}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid ""
+"Prompt exported: {path}\n"
+"Failed to open it automatically: {error}"
+msgstr ""
+"prompt 已导出：{path}\n"
+"无法自动打开：{error}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Prompt exported and opened: {path}"
+msgstr "prompt 已导出并打开：{path}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt export is only available in interactive mode."
+msgstr "prompt 导出仅在交互模式下可用。"
+
+#: src/iac_code/commands/prompt.py
+msgid "Last main-model request"
+msgstr "最近一次主模型请求"
+
+#: src/iac_code/commands/prompt.py
+msgid "Current runtime state"
+msgstr "当前运行时状态"
+
+#: src/iac_code/commands/prompt.py
+msgid "Generated"
+msgstr "生成时间"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+#: src/iac_code/ui/banner.py
+msgid "Session"
+msgstr "会话"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "Provider"
+msgstr "提供商"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "Model"
+msgstr "模型"
+
+#: src/iac_code/commands/prompt.py src/iac_code/commands/status.py
+msgid "CWD"
+msgstr "当前目录"
+
+#: src/iac_code/commands/prompt.py
+msgid "Source"
+msgstr "来源"
+
+#: src/iac_code/commands/prompt.py
+msgid "Raw Full System Prompt"
+msgstr "完整原始系统提示词"
+
+#: src/iac_code/commands/prompt.py
+msgid "System prompt is empty."
+msgstr "系统提示词为空。"
+
+#: src/iac_code/commands/prompt.py
+msgid "No provider messages yet."
+msgstr "暂无提供商消息。"
+
+#: src/iac_code/commands/prompt.py
+msgid "No tools are currently registered."
+msgstr "当前未注册任何工具。"
+
+#: src/iac_code/commands/prompt.py
+msgid "IAC-CODE Prompt Snapshot"
+msgstr "IAC-CODE Prompt 快照"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt Snapshot"
+msgstr "Prompt 快照"
+
+#: src/iac_code/commands/prompt.py
+msgid ""
+"A local diagnostic view of the current main-model prompt state. This "
+"export does not trigger memory recall."
+msgstr "当前主模型 prompt 状态的本地诊断视图。此导出不会触发记忆召回。"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt snapshot sections"
+msgstr "Prompt 快照分区"
+
+#: src/iac_code/commands/prompt.py
+msgid "ALL"
+msgstr "全部"
+
+#: src/iac_code/commands/prompt.py
+msgid "System Prompt"
+msgstr "系统提示词"
+
+#: src/iac_code/commands/prompt.py
+msgid "Provider Messages"
+msgstr "提供商消息"
+
+#: src/iac_code/commands/prompt.py
+msgid "Tools"
+msgstr "工具"
+
+#: src/iac_code/commands/prompt.py
+msgid "Instruction Memory"
+msgstr "指令记忆"
+
+#: src/iac_code/commands/prompt.py
+msgid "Memory Mechanics"
+msgstr "记忆机制"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "<omitted {count} chars>"
+msgstr "<已省略 {count} 个字符>"
+
+#: src/iac_code/commands/prompt.py
+msgid "Preamble"
+msgstr "前言"
+
+#: src/iac_code/commands/prompt.py
+msgid "Dynamic Prompt"
+msgstr "动态提示词"
+
+#: src/iac_code/commands/prompt.py
+msgid "Section"
+msgstr "分区"
+
+#: src/iac_code/commands/prompt.py
+msgid "Present in Provider Messages as a hidden conversation <system-reminder>."
+msgstr "作为隐藏对话 <system-reminder> 存在于提供商消息中。"
+
+#: src/iac_code/commands/prompt.py
+msgid "Not present in this snapshot."
+msgstr "此快照中不存在。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Source: {source}"
+msgstr "来源：{source}"
+
+#: src/iac_code/commands/prompt.py
+msgid "1. System Prompt"
+msgstr "1. 系统提示词"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: system"
+msgstr "   提供商字段：system"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: System Prompt tab"
+msgstr "   详情：系统提示词标签页"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Sections: {count}"
+msgstr "   分区：{count}"
+
+#: src/iac_code/commands/prompt.py
+msgid "2. Provider Messages"
+msgstr "2. 提供商消息"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: messages"
+msgstr "   提供商字段：messages"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: Provider Messages tab"
+msgstr "   详情：提供商消息标签页"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Messages: {count}"
+msgstr "   消息：{count}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Recalled memory: {status}"
+msgstr "   已召回记忆：{status}"
+
+#: src/iac_code/commands/prompt.py
+msgid "3. Tools"
+msgstr "3. 工具"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Provider field: tools"
+msgstr "   提供商字段：tools"
+
+#: src/iac_code/commands/prompt.py
+msgid "   Details: Tools tab"
+msgstr "   详情：工具标签页"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Tools: {count}"
+msgstr "   工具：{count}"
+
+#: src/iac_code/commands/prompt.py
+msgid "Provider system parameter. This is sent before provider messages."
+msgstr "提供商 system 参数。它会在提供商消息之前发送。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} sections"
+msgstr "{count} 个分区"
+
+#: src/iac_code/commands/prompt.py
+msgid ""
+"Conversation messages in send order. Hidden conversation recalled memory "
+"appears here."
+msgstr "按发送顺序排列的对话消息。隐藏的对话召回记忆会显示在这里。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} messages; recalled memory {status}"
+msgstr "{count} 条消息；召回记忆{status}"
+
+#: src/iac_code/commands/prompt.py
+msgid "present"
+msgstr "存在"
+
+#: src/iac_code/commands/prompt.py
+msgid "not present"
+msgstr "不存在"
+
+#: src/iac_code/commands/prompt.py
+msgid "Tool definitions available to the main model for this request."
+msgstr "本次请求中主模型可用的工具定义。"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} tools"
+msgstr "{count} 个工具"
+
+#: src/iac_code/commands/prompt.py
+msgid "Prompt Assembly Order"
+msgstr "Prompt 组装顺序"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Open {tab_label}"
+msgstr "打开{tab_label}"
+
+#: src/iac_code/commands/prompt.py
+msgid "message"
+msgstr "消息"
+
+#: src/iac_code/commands/prompt.py
+msgid "recalled memory"
+msgstr "已召回记忆"
+
+#: src/iac_code/commands/prompt.py
+msgid "Input schema"
+msgstr "输入 schema"
+
+#: src/iac_code/commands/prompt.py
+msgid "tool"
+msgstr "工具"
 
 #: src/iac_code/commands/rename.py
 msgid "Rename is only available in interactive mode."
@@ -1286,25 +1599,9 @@ msgstr "status 命令需要 REPL 上下文。"
 msgid "Status is only available in interactive mode."
 msgstr "status 仅在交互模式下可用。"
 
-#: src/iac_code/commands/status.py src/iac_code/ui/banner.py
-msgid "Session"
-msgstr "会话"
-
-#: src/iac_code/commands/status.py
-msgid "Provider"
-msgstr "提供商"
-
 #: src/iac_code/commands/status.py
 msgid "not configured"
 msgstr "未配置"
-
-#: src/iac_code/commands/status.py
-msgid "Model"
-msgstr "模型"
-
-#: src/iac_code/commands/status.py
-msgid "CWD"
-msgstr "当前目录"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -1341,6 +1638,65 @@ msgstr "上下文"
 #: src/iac_code/commands/status.py
 msgid "Session Status"
 msgstr "会话状态"
+
+#: src/iac_code/commands/status.py
+msgid "Memory Recall"
+msgstr "记忆召回"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{total} total, {success} success, {failed} failed, {cancelled} cancelled"
+msgstr "{total} 次总计，{success} 次成功，{failed} 次失败，{cancelled} 次取消"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{summary}, {in_flight} in progress"
+msgstr "{summary}，{in_flight} 个进行中"
+
+#: src/iac_code/commands/status.py
+msgid "Side queries"
+msgstr "旁路查询"
+
+#: src/iac_code/commands/status.py
+msgid "Last attempt"
+msgstr "最近尝试"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{status} in {duration} ms, {count} files selected"
+msgstr "{status}，耗时 {duration} 毫秒，选择 {count} 个文件"
+
+#: src/iac_code/commands/status.py
+msgid "Last side call"
+msgstr "最近旁路"
+
+#: src/iac_code/commands/status.py
+msgid "Last files"
+msgstr "最近文件"
+
+#: src/iac_code/commands/status.py
+msgid "Side call usage"
+msgstr "旁路消耗"
+
+#: src/iac_code/commands/status.py
+msgid "Last usage"
+msgstr "最近消耗"
+
+#: src/iac_code/commands/status.py
+msgid "No token usage reported"
+msgstr "未报告 token 用量"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid ""
+"{events} records, input {input}, output {output}, cache read "
+"{cache_read}, total {total}"
+msgstr "{events} 次记录，输入 {input}，输出 {output}，缓存读取 {cache_read}，总计 {total}"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "input {input}, output {output}, cache read {cache_read}, total {total}"
+msgstr "输入 {input}，输出 {output}，缓存读取 {cache_read}，总计 {total}"
 
 #: src/iac_code/commands/status.py
 #, python-brace-format
@@ -1390,6 +1746,34 @@ msgstr "(动态)"
 #: src/iac_code/i18n/__init__.py
 msgid "Aborted!"
 msgstr "已中止！"
+
+#: src/iac_code/memory/memory_tools.py
+msgid ""
+"Read persistent memories. Omit name to list all, or provide name to read "
+"specific memory."
+msgstr "读取持久记忆。省略 name 可列出全部，提供 name 可读取指定记忆。"
+
+#: src/iac_code/memory/memory_tools.py
+msgid "Memory name to read. Omit to list all."
+msgstr "要读取的记忆名称。省略则列出全部。"
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid ""
+"Save a persistent memory. Use when the user explicitly asks you to "
+"remember or preserve information. Choose a concise, stable name, an "
+"appropriate type, a short description, and the useful content to keep. "
+"Types: {types}."
+msgstr "保存一条持久记忆。当用户明确要求记住或保留信息时使用。选择简洁稳定的名称、合适的类型、简短描述以及需要保留的有用内容。类型：{types}。"
+
+#: src/iac_code/memory/memory_tools.py
+msgid "Auto-memory is off."
+msgstr "自动记忆已关闭。"
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid "Memory '{name}' saved."
+msgstr "记忆 '{name}' 已保存。"
 
 #: src/iac_code/providers/manager.py
 #, python-brace-format
@@ -2628,6 +3012,49 @@ msgstr "没有对话历史"
 msgid "Message Preview"
 msgstr "消息预览"
 
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Memory"
+msgstr "记忆"
+
+#: src/iac_code/ui/dialogs/memory.py
+#, python-brace-format
+msgid "Auto-memory: {state}"
+msgstr "自动记忆：{state}"
+
+#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
+msgid "on"
+msgstr "启用"
+
+#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
+msgid "off"
+msgstr "禁用"
+
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Enter to confirm · Esc to cancel"
+msgstr "Enter 确认 · Esc 取消"
+
+#: src/iac_code/ui/dialogs/memory.py
+#, python-brace-format
+msgid "Saved in {path}"
+msgstr "保存在 {path}"
+
+#: src/iac_code/ui/dialogs/memory.py
+msgid "Open auto-memory folder"
+msgstr "打开自动记忆文件夹"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+msgid "INSERT"
+msgstr "插入"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+msgid "NORMAL"
+msgstr "普通"
+
+#: src/iac_code/ui/dialogs/memory_editor.py
+#, python-brace-format
+msgid "{status}   :wq save · :q! discard"
+msgstr "{status}   :wq 保存 · :q! 放弃"
+
 #: src/iac_code/ui/dialogs/quick_open.py
 msgid "Open File"
 msgstr "打开文件"
@@ -2762,14 +3189,6 @@ msgstr "未找到技能"
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "Bundled skills cannot be disabled."
 msgstr "内置技能不能被禁用。"
-
-#: src/iac_code/ui/dialogs/skills_picker.py
-msgid "on"
-msgstr "启用"
-
-#: src/iac_code/ui/dialogs/skills_picker.py
-msgid "off"
-msgstr "禁用"
 
 #: src/iac_code/ui/dialogs/skills_picker.py
 msgid "locked"
@@ -2921,4 +3340,7 @@ msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 np
 
 #~ msgid "{n} day{s} ago"
 #~ msgstr "{n} 天前"
+
+#~ msgid "Project Memory Index"
+#~ msgstr "项目记忆索引"
 

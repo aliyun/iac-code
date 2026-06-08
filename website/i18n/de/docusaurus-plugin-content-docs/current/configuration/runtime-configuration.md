@@ -28,9 +28,29 @@ Häufige Dateien:
 | `.credentials.yml` | LLM-Anmeldedaten |
 | `.cloud-credentials.yml` | Cloud-Anbieter-Anmeldedaten |
 | `settings.yml` | Ausgewählter Anbieter, Modell und zugehörige Einstellungen |
+| `AGENTS.md` | Benutzerspeicher, der als dauerhafte Anweisungen geladen wird |
 | Verlaufsdateien | Eingabeverlauf für interaktive Workflows |
 
 Vermeiden Sie es, Dateien aus diesem Verzeichnis zu committen oder zu teilen, da sie Geheimnisse oder lokale Einstellungen enthalten können.
+
+## Speicherdateien
+
+IaC Code hat zwei öffentliche Speicherorte:
+
+| Speicherort | Zweck |
+|---|---|
+| `<project-root>/AGENTS.md` | Projektspeicher. Er kann committet werden, wenn die Anweisungen für alle Personen nützlich sind, die am Projekt arbeiten. |
+| `<config-dir>/AGENTS.md` | Benutzerspeicher. Er folgt `IAC_CODE_CONFIG_DIR` und ist privat für den lokalen Benutzer. |
+
+Setzen Sie `IAC_CODE_INSTRUCTION_MEMORY_FILE`, um einen anderen Dateinamen für den Anweisungsspeicher zu verwenden, zum Beispiel `IAC-CODE.md`.
+
+Projektbezogene auto-memory-Themendateien werden hier gespeichert:
+
+```text
+<config-dir>/projects/<project-key>/memory/
+```
+
+`MEMORY.md` in diesem Ordner ist der Themenindex, den auto-memory-Side-Calls verwenden. Er wird nicht als dauerhafter Kontext geladen. Wenn auto-memory aktiviert ist, kann IaC Code relevante Themendateien auswählen und sie als versteckten Unterhaltungskontext hinzufügen.
 
 ## Projekteinstellungen
 

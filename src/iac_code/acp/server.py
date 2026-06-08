@@ -31,6 +31,10 @@ CLEANUP_INTERVAL = 300  # 5 minutes
 logger = logging.getLogger(__name__)
 
 
+def _runtime_command_memory_manager(runtime: object) -> object | None:
+    return getattr(runtime, "legacy_memory_manager", None) or getattr(runtime, "memory_manager", None)
+
+
 class ACPServer:
     def __init__(self) -> None:
         self.conn: acp.Client | None = None
@@ -161,7 +165,7 @@ class ACPServer:
             self.conn,
             mcp_configs=mcp_configs,
             metrics=self.metrics,
-            memory_manager=getattr(runtime, "memory_manager", None),
+            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[session.id] = session
         self.metrics.record_session_created()
@@ -303,7 +307,7 @@ class ACPServer:
             self.conn,
             mcp_configs=mcp_configs,
             metrics=self.metrics,
-            memory_manager=getattr(runtime, "memory_manager", None),
+            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[session_id] = session
         self.metrics.record_session_created()
@@ -372,7 +376,7 @@ class ACPServer:
             self.conn,
             mcp_configs=mcp_configs,
             metrics=self.metrics,
-            memory_manager=getattr(runtime, "memory_manager", None),
+            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[new_session_id] = session
         self.metrics.record_session_created()
@@ -482,7 +486,7 @@ class ACPServer:
             self.conn,
             mcp_configs=mcp_configs,
             metrics=self.metrics,
-            memory_manager=getattr(runtime, "memory_manager", None),
+            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[resolved_session_id] = session
         self.metrics.record_session_created()

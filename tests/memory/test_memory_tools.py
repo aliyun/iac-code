@@ -112,6 +112,24 @@ class TestWriteMemoryTool:
             }
         ]
 
+    async def test_write_memory_returns_error_when_auto_memory_is_disabled(self):
+        manager = FakeMemoryManager()
+        tool = WriteMemoryTool(manager, is_enabled=lambda: False)
+
+        result = await tool.execute(
+            tool_input={
+                "name": "role",
+                "content": "Senior engineer",
+                "memory_type": "user",
+                "description": "Role",
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error is True
+        assert result.content == "Auto-memory is off."
+        assert manager.saved == []
+
     async def test_write_memory_returns_error_when_save_fails(self):
         class FailingManager(FakeMemoryManager):
             def save(self, *, name, content, memory_type, description):

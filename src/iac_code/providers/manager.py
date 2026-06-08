@@ -435,9 +435,21 @@ class ProviderManager:
         )
 
     async def complete(
-        self, messages: list[Message], system: str, tools: list[ToolDefinition] | None = None, max_tokens: int = 8192
+        self,
+        messages: list[Message],
+        system: str,
+        tools: list[ToolDefinition] | None = None,
+        max_tokens: int = 8192,
+        cache_policy: str = "default",
     ) -> NonStreamingResponse:
-        return await self._complete_with_retry(messages, system, tools, max_tokens, is_fallback=False)
+        return await self._complete_with_retry(
+            messages,
+            system,
+            tools,
+            max_tokens,
+            is_fallback=False,
+            cache_policy=cache_policy,
+        )
 
     async def _complete_with_retry(
         self,
@@ -448,6 +460,7 @@ class ProviderManager:
         is_fallback=False,
         provider_override: Provider | None = None,
         model_override: str | None = None,
+        cache_policy: str = "default",
     ) -> NonStreamingResponse:
         result = await self._complete_with_retry_result(
             messages,
@@ -457,6 +470,7 @@ class ProviderManager:
             is_fallback=is_fallback,
             provider_override=provider_override,
             model_override=model_override,
+            cache_policy=cache_policy,
         )
         return result.response
 
@@ -469,6 +483,7 @@ class ProviderManager:
         is_fallback=False,
         provider_override: Provider | None = None,
         model_override: str | None = None,
+        cache_policy: str = "default",
     ) -> _CompletionResult:
         provider = provider_override or self._ensure_provider()
         model = model_override or self._model
@@ -488,7 +503,8 @@ class ProviderManager:
 
         async def operation():
             try:
-                response = await provider.complete(messages, system, tools, max_tokens)
+                kwargs = {"cache_policy": cache_policy} if cache_policy != "default" else {}
+                response = await provider.complete(messages, system, tools, max_tokens, **kwargs)
                 return _CompletionResult(response=response, model=model, provider_name=provider_name)
             except Exception as e:
                 status = getattr(e, "status_code", None) or getattr(e, "status", None)
@@ -527,6 +543,7 @@ class ProviderManager:
                             is_fallback=True,
                             provider_override=fallback_provider,
                             model_override=fallback,
+                            cache_policy=cache_policy,
                         )
                     except Exception:
                         raise original_exc from None

@@ -29,6 +29,7 @@ from iac_code.acp.server import (
     SESSION_IDLE_TIMEOUT,
     ACPServer,
     _convert_mcp_servers,
+    _runtime_command_memory_manager,
 )
 from iac_code.acp.session import ACPSession
 from iac_code.agent.message import Message
@@ -75,6 +76,16 @@ class FakeRuntime:
         self.session_id = session_id
         self.agent_loop = FakeLoop()
         self.tool_registry = None
+
+
+def test_runtime_command_memory_manager_prefers_legacy_manager() -> None:
+    legacy = object()
+    project = object()
+
+    runtime = type("Runtime", (), {"legacy_memory_manager": legacy, "memory_manager": project})()
+
+    assert _runtime_command_memory_manager(runtime) is legacy
+    assert _runtime_command_memory_manager(type("Runtime", (), {"memory_manager": project})()) is project
 
 
 def _patch_server(monkeypatch, session_id: str = "test-session") -> None:

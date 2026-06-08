@@ -107,6 +107,7 @@ class Provider(ABC):
         system: str,
         tools: list[ToolDefinition] | None = None,
         max_tokens: int = 8192,
+        cache_policy: str = "default",
     ) -> NonStreamingResponse: ...
 
     @abstractmethod

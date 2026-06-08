@@ -20,11 +20,22 @@ Text after the command name is passed as arguments. In the table below, `<arg>` 
 | `/effort [level]` | Show or change thinking effort for the active model when the selected model supports effort control. With a level, it applies the requested value if valid for the model. Without a level, it opens an interactive picker in the REPL, or prints the current effort in non-interactive contexts. |
 | `/exit` | Exit the interactive REPL. Aliases: `/quit`, `/q`. |
 | `/help` | Show available commands and common keyboard shortcuts inside the REPL. Alias: `/?`. |
-| `/memory [<name>\|search <query>\|delete <name>\|help]` | List, view, search, or delete saved memories. Natural-language memory creation is still handled by the assistant through the memory tool when you ask it to remember something. |
+| `/memory` | Open the memory selector. Edit project or user `AGENTS.md` files, toggle auto-memory, and open the project auto-memory folder when auto-memory is on. |
 | `/model [model_name]` | Show or switch the active model. With `model_name`, it switches directly to that model for the active provider. Without an argument, it opens an interactive model picker when a provider is configured, or prints the current model when no console UI is available. |
 | `/rename <name>` | Name the current session. Names appear in the welcome banner, exit hint, and `/resume` picker, and can be used with `/resume` or `--resume` when they uniquely identify a session. |
 | `/resume [session id\|unique id prefix\|unique session name]` | Resume a previous session. With an argument, IaC Code resolves it as an exact session ID, unique ID prefix, or unique session name. Without an argument, it opens the interactive session picker. Cross-project sessions print a `cd ... && iac-code --resume <id>` command instead of hot-swapping the current project. |
 | `/skills` | Open the skill management picker. Search skills, sort by name/source/size, and enable or disable user and project skills. Bundled skills remain locked on. |
-| `/status` | Show current session ID, provider, model, Alibaba Cloud region, working directory, recorded API token usage, turn count, and context utilization. |
+| `/status` | Show current session ID, provider, model, Alibaba Cloud region, working directory, recorded API token usage, turn count, and context utilization. In debug mode, it also shows memory recall side-call counts and token usage. |
 
 The exact command list can change between releases. Use `/help` or type `/` in the REPL to inspect the commands available in your installed version.
+
+## Memory
+
+Use `/memory` to edit the memory files IaC Code loads into the conversation:
+
+- Project memory is saved in `AGENTS.md` at the project root by default.
+- User memory is saved in `AGENTS.md` in the runtime configuration directory, `~/.iac-code/` by default.
+- Set `IAC_CODE_INSTRUCTION_MEMORY_FILE` to use another filename, for example `IAC-CODE.md`.
+- The editor is a compact Vim-like full-screen editor. Use `i`, `a`, or `o` to enter insert mode, `Esc` to return to normal mode, `:wq` to save, and `:q!` to discard.
+- The `Auto-memory` row can be toggled with `Enter`. When auto-memory is on, IaC Code can recall relevant project topic memories as hidden conversation context.
+- The auto-memory folder option appears only when auto-memory is on.

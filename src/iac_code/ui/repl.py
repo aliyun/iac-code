@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from types import ModuleType
 from typing import Any, cast
 
@@ -33,6 +34,8 @@ from iac_code.commands.registry import CommandResult, LocalCommand, PromptComman
 from iac_code.config import get_active_provider_key, get_config_dir, get_history_path, load_credentials
 from iac_code.i18n import _
 from iac_code.memory.memory_manager import MemoryManager
+from iac_code.memory.project_memory import ProjectMemoryRuntime
+from iac_code.memory.recall import MemoryRecallService
 from iac_code.providers.manager import ProviderManager
 from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.services.session_index import SessionIndex
@@ -116,6 +119,7 @@ class InlineREPL:
         # `cd` mid-session via Bash, but those changes must not relocate the
         # session file or split it across two project dirs.
         self._original_cwd = os.getcwd()
+        self._runtime_current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.store = AppStateStore(initial_state=AppState(model=model))
         self.command_registry = create_default_registry()
         self.tool_registry = ToolRegistry()
@@ -151,23 +155,31 @@ class InlineREPL:
         self._command_log: list[tuple[str, str, int, bool]] = []
         self._streaming_error_log: list[tuple[str, int]] = []
 
-        memory_dir = str(get_config_dir() / "memory")
-        self._memory_manager = MemoryManager(memory_dir=memory_dir)
+        legacy_memory_dir = str(get_config_dir() / "memory")
+        self._legacy_memory_manager = MemoryManager(memory_dir=legacy_memory_dir)
+        self._memory_runtime = ProjectMemoryRuntime(self._original_cwd)
+        self._memory_manager = self._memory_runtime.memory_manager
+        self._memory_recall_service = MemoryRecallService(
+            memory_manager=self._memory_manager,
+            provider_manager=self._provider_manager,
+        )
 
         # Register new tools
         from iac_code.agent.agent_tool import AgentTool
         from iac_code.memory.memory_tools import ReadMemoryTool, WriteMemoryTool
         from iac_code.tasks.task_tools import TaskGetTool, TaskListTool, TaskStopTool
 
-        memory_content = ""
-        if hasattr(self, "_memory_manager") and self._memory_manager:
-            memory_content = self._memory_manager.get_prompt_content()
+        memory_context = self._refresh_memory_context()
         self.tool_registry.register(
             AgentTool(
                 task_manager=self._task_manager,
                 provider_manager=self._provider_manager,
                 tool_registry=self.tool_registry,
-                system_prompt=build_system_prompt(cwd=os.getcwd(), memory_content=memory_content),
+                system_prompt=build_system_prompt(
+                    cwd=os.getcwd(),
+                    memory_context=memory_context,
+                    current_time=self._runtime_current_time,
+                ),
                 notification_queue=self._notification_queue,
             )
         )
@@ -178,7 +190,6 @@ class InlineREPL:
         self.tool_registry.register(TaskStopTool(self._task_manager))
 
         cwd = os.getcwd()
-        self._memory_content = memory_content
         self.refresh_skills()
         skill_commands = self.command_registry.get_model_invocable_skills()
 
@@ -201,7 +212,10 @@ class InlineREPL:
         self._agent_loop = AgentLoop(
             provider_manager=self._provider_manager,
             system_prompt=build_system_prompt(
-                cwd=cwd, memory_content=memory_content, skill_listing=self._skill_listing
+                cwd=cwd,
+                memory_context=memory_context,
+                skill_listing=self._skill_listing,
+                current_time=self._runtime_current_time,
             ),
             tool_registry=self.tool_registry,
             session_storage=self._session_storage,
@@ -211,6 +225,8 @@ class InlineREPL:
             permission_context=permission_context,
             permission_context_getter=lambda: self.store.get_state().permission_context,
             auto_trigger_skills=skill_commands,
+            memory_recall_service=self._memory_recall_service,
+            system_prompt_refresher=self._build_current_system_prompt,
         )
         self.renderer = Renderer(
             self.console,
@@ -229,7 +245,7 @@ class InlineREPL:
         cwd = os.getcwd()
         self._suggestion_aggregator = SuggestionAggregator(
             [
-                CommandProvider(self.command_registry, memory_manager=self._memory_manager),
+                CommandProvider(self.command_registry, memory_manager=self._legacy_memory_manager),
                 SkillProvider(self.command_registry),
                 FileProvider(cwd),
                 DirectoryProvider(cwd),
@@ -273,6 +289,28 @@ class InlineREPL:
 
         register_cloud_tools(self.tool_registry, CloudCredentials())
 
+    def _refresh_memory_context(self):
+        runtime = getattr(self, "_memory_runtime", None)
+        if runtime is None:
+            return getattr(self, "_memory_context", None)
+        self._memory_context = runtime.build_memory_context()
+        return self._memory_context
+
+    def _build_current_system_prompt(self) -> str:
+        return build_system_prompt(
+            cwd=os.getcwd(),
+            memory_context=self._refresh_memory_context(),
+            skill_listing=getattr(self, "_skill_listing", ""),
+            current_time=getattr(self, "_runtime_current_time", None),
+        )
+
+    def _refresh_system_prompt(self) -> str:
+        system_prompt = self._build_current_system_prompt()
+        agent_loop = getattr(self, "_agent_loop", None)
+        if agent_loop is not None:
+            agent_loop.set_provider(self._provider_manager, system_prompt=system_prompt)
+        return system_prompt
+
     def refresh_skills(self) -> None:
         """Rediscover skills and refresh enabled/disabled skill state."""
         from iac_code.skills.bundled import init_bundled_skills
@@ -302,7 +340,7 @@ class InlineREPL:
                 continue
             self.command_registry.register(cmd)
 
-        memory_content = getattr(self, "_memory_content", "")
+        memory_context = self._refresh_memory_context()
         self.tool_registry.register(
             SkillTool(
                 command_registry=self.command_registry,
@@ -311,7 +349,11 @@ class InlineREPL:
                 cwd=cwd,
                 provider_manager=self._provider_manager,
                 tool_registry=self.tool_registry,
-                system_prompt=build_system_prompt(cwd=cwd, memory_content=memory_content),
+                system_prompt=build_system_prompt(
+                    cwd=cwd,
+                    memory_context=memory_context,
+                    current_time=self._runtime_current_time,
+                ),
             )
         )
 
@@ -320,14 +362,7 @@ class InlineREPL:
 
         if hasattr(self, "_agent_loop"):
             self._agent_loop.set_auto_trigger_skills(skill_commands)
-            self._agent_loop.set_provider(
-                self._provider_manager,
-                system_prompt=build_system_prompt(
-                    cwd=cwd,
-                    memory_content=memory_content,
-                    skill_listing=self._skill_listing,
-                ),
-            )
+            self._agent_loop.set_provider(self._provider_manager, system_prompt=self._build_current_system_prompt())
 
     async def run(self, initial_prompt: str | None = None) -> None:
         """Run the REPL until the user exits.
@@ -696,12 +731,16 @@ class InlineREPL:
 
     def _history_search_messages(self) -> list[dict[str, str]]:
         """Build searchable user-history rows from prompt history and conversation context."""
+        from iac_code.agent.message import RECALLED_MEMORY_MARKER, is_recalled_memory_message
+
         entries: list[str] = []
         seen: set[str] = set()
 
         def add_text(text: str) -> None:
             cleaned = text.strip()
             if not cleaned or cleaned in seen:
+                return
+            if RECALLED_MEMORY_MARKER in cleaned:
                 return
             seen.add(cleaned)
             entries.append(cleaned)
@@ -720,6 +759,8 @@ class InlineREPL:
             context_messages = []
         for msg in context_messages:
             if getattr(msg, "role", None) != "user":
+                continue
+            if is_recalled_memory_message(msg):
                 continue
             get_text = getattr(msg, "get_text", None)
             if callable(get_text):
@@ -1176,14 +1217,7 @@ class InlineREPL:
             provider_key_override=self._provider_key_override,
             base_url_override=self._base_url_override,
         )
-        memory_content = ""
-        if hasattr(self, "_memory_manager") and self._memory_manager:
-            memory_content = self._memory_manager.get_prompt_content()
-        skill_listing = getattr(self, "_skill_listing", "")
-        new_system_prompt = build_system_prompt(
-            cwd=os.getcwd(), memory_content=memory_content, skill_listing=skill_listing
-        )
-        self._agent_loop.set_provider(self._provider_manager, system_prompt=new_system_prompt)
+        self._refresh_system_prompt()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1360,6 +1394,9 @@ class InlineREPL:
             "turn_count": self._count_user_turns(messages),
             "max_turns": self._agent_loop.max_turns,
             "context_usage": self._agent_loop.get_context_usage(),
+            "memory_recall": self._agent_loop.get_memory_recall_stats()
+            if hasattr(self._agent_loop, "get_memory_recall_stats")
+            else {},
         }
 
     def _status_provider_display(self) -> str:
@@ -1397,11 +1434,13 @@ class InlineREPL:
 
     @staticmethod
     def _count_user_turns(messages: list) -> int:
-        from iac_code.agent.message import ToolResultBlock
+        from iac_code.agent.message import ToolResultBlock, is_recalled_memory_message
 
         turns = 0
         for message in messages:
             if getattr(message, "role", None) != "user":
+                continue
+            if is_recalled_memory_message(message):
                 continue
             content = getattr(message, "content", "")
             if isinstance(content, list) and any(isinstance(block, ToolResultBlock) for block in content):
@@ -1525,14 +1564,16 @@ class InlineREPL:
     @staticmethod
     def _extract_last_user_text(messages: list) -> str:
         """Walk messages from newest to oldest, return first plain user text."""
-        from iac_code.agent.message import TextBlock
+        from iac_code.agent.message import RECALLED_MEMORY_MARKER, TextBlock, is_recalled_memory_message
 
         for msg in reversed(messages):
             if msg.role != "user":
                 continue
+            if is_recalled_memory_message(msg):
+                continue
             content = msg.content
             if isinstance(content, str):
-                if content.strip():
+                if content.strip() and RECALLED_MEMORY_MARKER not in content:
                     return content
                 continue
             if isinstance(content, list):

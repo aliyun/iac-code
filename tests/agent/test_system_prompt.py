@@ -1,4 +1,5 @@
 import tempfile
+from datetime import datetime as real_datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -111,6 +112,107 @@ class TestBuildSystemPrompt:
         lines = prompt.split("\n")
         memory_lines = [line for line in lines if line.strip().startswith("# Memory")]
         assert len(memory_lines) == 0
+
+    def test_explicit_memory_context_excludes_auto_memory_index(self):
+        from iac_code.memory.project_memory import MemoryContext
+
+        context = MemoryContext(
+            instruction_memory_content="User instruction\nProject instruction",
+            memory_index_content="- [topic-a](topic-a.md) - Topic A",
+            memory_mechanics_content="Use read_memory and write_memory for topic files.",
+        )
+
+        prompt = build_system_prompt(cwd=_TMP, memory_context=context)
+
+        assert "User instruction" in prompt
+        assert "Project instruction" in prompt
+        assert "topic-a.md" not in prompt
+        assert "Project Memory Index" not in prompt
+        assert "read_memory" in prompt
+        assert "Topic body should not be always injected" not in prompt
+
+    def test_project_instructions_stop_at_git_worktree_root(self, tmp_path: Path):
+        parent = tmp_path / "repo"
+        worktree = parent / ".worktrees" / "feature"
+        cwd = worktree / "src"
+        cwd.mkdir(parents=True)
+        (parent / "AGENTS.md").write_text("parent instructions", encoding="utf-8")
+        (worktree / "AGENTS.md").write_text("worktree instructions", encoding="utf-8")
+        (worktree / ".git").write_text("gitdir: ../../.git/worktrees/feature\n", encoding="utf-8")
+
+        prompt = build_system_prompt(cwd=str(cwd))
+
+        assert "worktree instructions" in prompt
+        assert "parent instructions" not in prompt
+
+    def test_project_instructions_loaded_for_local_build(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr("iac_code.__release_date__", "")
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        (cwd / ".git").mkdir()
+        (cwd / "AGENTS.md").write_text("local build instructions", encoding="utf-8")
+
+        prompt = build_system_prompt(cwd=str(cwd))
+
+        assert "local build instructions" in prompt
+        assert "# Project Instructions" in prompt
+
+    def test_project_instructions_not_duplicated_when_memory_context_supplies_them(self, tmp_path: Path):
+        from iac_code.memory.project_memory import MemoryContext
+
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        (cwd / ".git").mkdir()
+        (cwd / "AGENTS.md").write_text("project instructions", encoding="utf-8")
+
+        prompt = build_system_prompt(
+            cwd=str(cwd),
+            memory_context=MemoryContext(instruction_memory_content="## Project AGENTS.md\nproject instructions"),
+        )
+
+        assert prompt.count("project instructions") == 1
+
+    def test_volatile_current_time_stays_out_of_static_cache_prefix(self, monkeypatch):
+        from iac_code.agent import system_prompt
+
+        class FakeDateTime:
+            calls = 0
+
+            @classmethod
+            def now(cls):
+                cls.calls += 1
+                return real_datetime(2026, 6, 5, 10, cls.calls, 0)
+
+        monkeypatch.setattr(system_prompt, "datetime", FakeDateTime)
+
+        first_static, first_dynamic = split_by_dynamic_boundary(build_system_prompt(cwd=_TMP))
+        second_static, second_dynamic = split_by_dynamic_boundary(build_system_prompt(cwd=_TMP))
+
+        # Current time is a volatile runtime fact, so it must not invalidate the
+        # static cache prefix even when build_system_prompt() is called directly.
+        assert first_static == second_static
+        assert "Current time:" not in first_static
+        assert "- Current time: 2026-06-05 10:01:00" in first_dynamic
+        assert "- Current time: 2026-06-05 10:02:00" in second_dynamic
+
+    def test_current_time_override_keeps_full_prompt_stable_when_clock_changes(self, monkeypatch):
+        from iac_code.agent import system_prompt
+
+        class FakeDateTime:
+            calls = 0
+
+            @classmethod
+            def now(cls):
+                cls.calls += 1
+                return real_datetime(2026, 6, 5, 10, cls.calls, 0)
+
+        monkeypatch.setattr(system_prompt, "datetime", FakeDateTime)
+
+        first = build_system_prompt(cwd=_TMP, current_time="2026-06-05 10:00:00")
+        second = build_system_prompt(cwd=_TMP, current_time="2026-06-05 10:00:00")
+
+        assert first == second
+        assert "- Current time: 2026-06-05 10:00:00" in first
 
 
 class TestSplitByDynamicBoundary:

@@ -185,6 +185,7 @@ class OpenAIProvider(Provider):
         self,
         messages: list[Message],
         system: str,
+        cache_policy: str = "default",
     ) -> list[dict[str, Any]]:
         """Build the ``messages`` list sent to the OpenAI Chat API.
 
@@ -325,8 +326,9 @@ class OpenAIProvider(Provider):
         system: str,
         tools: list[ToolDefinition] | None = None,
         max_tokens: int = 8192,
+        cache_policy: str = "default",
     ) -> NonStreamingResponse:
-        api_messages = self._build_api_messages(messages, system)
+        api_messages = self._build_api_messages(messages, system, cache_policy=cache_policy)
 
         kwargs: dict[str, Any] = {
             "model": self._model,

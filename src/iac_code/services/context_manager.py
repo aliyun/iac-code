@@ -7,7 +7,16 @@ from typing import Any
 
 from loguru import logger
 
-from iac_code.agent.message import ContentBlock, Conversation, Message, ToolResultBlock, ToolUseBlock
+from iac_code.agent.message import (
+    ContentBlock,
+    Conversation,
+    Message,
+    ToolResultBlock,
+    ToolUseBlock,
+    create_recalled_memory_message,
+    get_recalled_memory_files,
+    is_recalled_memory_message,
+)
 from iac_code.services.token_counter import TokenCounter
 
 
@@ -113,6 +122,12 @@ class ContextManager:
         msg.token_count = self._token_counter.count_message(msg.to_api_format())
         return msg
 
+    def add_recalled_memory_message(self, content: str, selected_files: list[str]) -> Message:
+        msg = create_recalled_memory_message(content, selected_files)
+        self._conversation.messages.append(msg)
+        msg.token_count = self._token_counter.count_message(msg.to_api_format())
+        return msg
+
     def add_raw_message(self, raw_msg: dict[str, Any]) -> Message:
         """Add a raw message dict (e.g. from ToolResult.new_messages) to the conversation."""
         role = raw_msg.get("role", "user")
@@ -134,6 +149,12 @@ class ContextManager:
 
     def get_api_messages(self) -> list[dict[str, Any]]:
         return self._conversation.to_api_messages()
+
+    def get_surfaced_memory_files(self) -> set[str]:
+        files: set[str] = set()
+        for msg in self._conversation.messages:
+            files.update(get_recalled_memory_files(msg))
+        return files
 
     def get_total_tokens(self) -> int:
         return self._system_prompt_tokens + self._tool_definition_tokens + self._conversation.get_total_tokens()
@@ -233,10 +254,14 @@ class ContextManager:
 
         conversation_text = []
         for msg in old_messages:
+            if is_recalled_memory_message(msg):
+                continue
             role = msg.role.upper()
             text = msg.get_text()
             if text:
                 conversation_text.append(f"{role}: {text}")
+        if not conversation_text:
+            return ""
 
         joined = "\n".join(conversation_text)
         return (

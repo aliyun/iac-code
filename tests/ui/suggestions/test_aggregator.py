@@ -168,14 +168,14 @@ class TestSuggestionAggregator:
         assert text == "/debug "
 
     def test_memory_argument_ghost_text(self, memory_aggregator):
-        """/memory d → ghost text completes the delete action."""
-        memory_aggregator.update("/memory d", 9)
+        """/memory-folder d -> ghost text completes the delete action."""
+        memory_aggregator.update("/memory-folder d", 16)
         assert memory_aggregator.ghost_text == "elete "
 
     def test_accept_memory_argument_suggestion_replaces_command_span(self, memory_aggregator):
-        """/memory delete<space> suggestion replaces the full slash command token."""
-        text = "/memory delete "
+        """/memory-folder delete<space> suggestion replaces the full slash command token."""
+        text = "/memory-folder delete "
         memory_aggregator.update(text, len(text))
         result = memory_aggregator.accept_selected()
 
-        assert result == ("/memory delete user-role", 0, len(text))
+        assert result == ("/memory-folder delete user-role", 0, len(text))

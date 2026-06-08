@@ -3,7 +3,14 @@ import sys
 
 import pytest
 
-from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from iac_code.agent.message import (
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    create_recalled_memory_message,
+    get_recalled_memory_files,
+)
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.session_usage import SessionUsageStore
@@ -168,6 +175,18 @@ def test_new_session_uses_directory_format(storage):
     assert (session_dir / SESSION_JSONL_FILENAME).exists()
     assert not legacy_path.exists()
     assert storage.load(CWD, "dir-session") == [Message(role="user", content="hi")]
+
+
+def test_recalled_memory_metadata_round_trips(tmp_path):
+    storage = SessionStorage(projects_dir=tmp_path)
+    msg = create_recalled_memory_message("# Recalled Memory\nUse YAML", ["ros-yaml.md"])
+
+    storage.append("/tmp/project", "session-1", msg)
+    loaded = storage.load("/tmp/project", "session-1")
+
+    assert len(loaded) == 1
+    assert get_recalled_memory_files(loaded[0]) == ["ros-yaml.md"]
+    assert "Use YAML" in loaded[0].get_text()
 
 
 def test_existing_legacy_session_stays_legacy_until_rename(storage):

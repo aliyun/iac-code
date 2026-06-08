@@ -27,7 +27,7 @@ Create a VPC, two ECS instances, and a security group that allows SSH from my of
 
 ## Befehle
 
-Tippen Sie `/`, um verfügbare Slash-Befehle zu entdecken. Zu den häufigen Betriebsbefehlen gehören `/status` für den aktuellen Sitzungszustand, `/skills` für die Skill-Verwaltung, `/memory` für gespeicherte Erinnerungen, `/rename` zum Benennen der aktiven Sitzung und `/resume` zum Wechseln zwischen Sitzungen.
+Tippen Sie `/`, um verfügbare Slash-Befehle zu entdecken. Zu den häufigen Betriebsbefehlen gehören `/status` für den aktuellen Sitzungszustand, `/skills` für die Skill-Verwaltung, `/memory` für Projekt- und Benutzerspeicherdateien, `/rename` zum Benennen der aktiven Sitzung und `/resume` zum Wechseln zwischen Sitzungen.
 
 Tippen Sie `$`, um ausschließlich Skills zu entdecken und aufzurufen.
 

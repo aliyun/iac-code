@@ -198,11 +198,11 @@ class _SessionMemoryManager:
 
 
 @pytest.mark.asyncio
-async def test_acp_session_slash_memory_uses_session_memory_manager() -> None:
+async def test_acp_session_slash_memory_folder_uses_session_memory_manager() -> None:
     conn = _RecordingFakeConn()
     session = ACPSession("s-memory", _RecordingFakeLoop(), conn, memory_manager=_SessionMemoryManager())
 
-    response = await session.prompt([acp.schema.TextContentBlock(type="text", text="/memory")])
+    response = await session.prompt([acp.schema.TextContentBlock(type="text", text="/memory-folder")])
 
     assert response.stop_reason == "end_turn"
     assert conn.updates[0][0] == "s-memory"

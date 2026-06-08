@@ -67,6 +67,24 @@ class TestCommandRegistrySkillExtensions:
         names = {c.name for c in all_cmds}
         assert names == {"help", "simplify"}
 
+    def test_hidden_local_command_is_exact_only(self):
+        registry = CommandRegistry()
+        registry.register(LocalCommand(name="memory", description="Edit memory", handler=dummy_handler))
+        registry.register(
+            LocalCommand(
+                name="memory-folder",
+                description="Legacy memory folder",
+                handler=dummy_handler,
+                hidden=True,
+            )
+        )
+
+        assert registry.get("memory-folder") is not None
+        assert "memory-folder" not in {cmd.name for cmd in registry.get_all()}
+        assert "memory-folder" not in registry.get_completions("memory")
+        assert all(match.command.name != "memory-folder" for match in registry.fuzzy_search("memory-folder"))
+        assert registry.get_best_prefix_match("memory-f") is None
+
     def test_skill_is_skill_property(self):
         cmd = _make_skill_command("test")
         assert cmd.is_skill is True

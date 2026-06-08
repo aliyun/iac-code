@@ -1633,11 +1633,13 @@ class Renderer:
 
     def replay_history(self, messages: list) -> None:
         """Replay saved Message objects to scrollback with 1:1 visual fidelity."""
-        from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock
+        from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock, is_recalled_memory_message
 
         # Build a lookup of tool_use_id → ToolResultBlock from all user messages
         tool_results: dict[str, ToolResultBlock] = {}
         for msg in messages:
+            if is_recalled_memory_message(msg):
+                continue
             if msg.role == "user" and isinstance(msg.content, list):
                 for block in msg.content:
                     if isinstance(block, ToolResultBlock):
@@ -1645,6 +1647,8 @@ class Renderer:
 
         first_turn = True
         for msg in messages:
+            if is_recalled_memory_message(msg):
+                continue
             if msg.role == "user":
                 is_tool_result_only = isinstance(msg.content, list) and all(
                     isinstance(b, ToolResultBlock) for b in msg.content

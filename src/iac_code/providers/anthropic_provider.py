@@ -179,6 +179,7 @@ class AnthropicProvider(Provider):
         system: str,
         tools: list[ToolDefinition] | None = None,
         max_tokens: int = 8192,
+        cache_policy: str = "default",
     ) -> NonStreamingResponse:
         kwargs = self._build_kwargs(messages, system, tools, max_tokens)
         response = await self._client.messages.create(**kwargs)
@@ -236,16 +237,35 @@ class AnthropicProvider(Provider):
         """Convert internal ``Message`` list to Anthropic API format."""
         result: list[dict[str, Any]] = []
         for msg in messages:
-            if isinstance(msg.content, str):
-                result.append({"role": msg.role, "content": msg.content})
-            elif isinstance(msg.content, list):
-                blocks: list[dict[str, Any]] = []
-                for block in msg.content:
-                    blocks.append(self._convert_content_block(block))
-                result.append({"role": msg.role, "content": blocks})
+            converted = {"role": msg.role, "content": self._convert_message_content(msg.content)}
+            if result and result[-1]["role"] == converted["role"]:
+                result[-1]["content"] = self._merge_message_content(result[-1]["content"], converted["content"])
             else:
-                result.append({"role": msg.role, "content": msg.content})
+                result.append(converted)
         return result
+
+    def _convert_message_content(self, content: Any) -> Any:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return [self._convert_content_block(block) for block in content]
+        return content
+
+    @classmethod
+    def _merge_message_content(cls, left: Any, right: Any) -> str | list[dict[str, Any]]:
+        if isinstance(left, str) and isinstance(right, str):
+            if left and right:
+                return f"{left}\n\n{right}"
+            return left or right
+        return [*cls._content_to_blocks(left), *cls._content_to_blocks(right)]
+
+    @staticmethod
+    def _content_to_blocks(content: Any) -> list[dict[str, Any]]:
+        if isinstance(content, list):
+            return content
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}]
+        return [{"type": "text", "text": str(content)}]
 
     @staticmethod
     def _convert_content_block(block: ContentBlock) -> dict[str, Any]:

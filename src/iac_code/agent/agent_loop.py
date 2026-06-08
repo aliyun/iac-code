@@ -53,6 +53,57 @@ class CompactResult:
     preserve_recent_turns: int = 0
 
 
+def _user_input_to_text(user_input: str | list[ContentBlock]) -> str:
+    if isinstance(user_input, str):
+        return user_input
+    parts: list[str] = []
+    for block in user_input:
+        if getattr(block, "type", None) == "text":
+            parts.append(getattr(block, "text", "") or "")
+    return " ".join(part for part in parts if part)
+
+
+def _normalize_memory_filename(filename: Any) -> str:
+    name = str(filename).strip()
+    if not name:
+        return ""
+    if not name.endswith(".md"):
+        name = f"{name}.md"
+    return name
+
+
+def _filter_recalled_memory_content(content: str, selected_files: list[str]) -> str:
+    keep = [_normalize_memory_filename(filename) for filename in selected_files]
+    keep = [filename for filename in keep if filename]
+    if not keep:
+        return ""
+
+    lines = content.splitlines()
+    sections: dict[str, list[str]] = {}
+    current_filename = ""
+    current_lines: list[str] = []
+    for line in lines:
+        if line.startswith("## "):
+            if current_filename:
+                sections[current_filename] = current_lines
+            current_filename = _normalize_memory_filename(line[3:].strip())
+            current_lines = [line]
+            continue
+        if current_filename:
+            current_lines.append(line)
+    if current_filename:
+        sections[current_filename] = current_lines
+
+    kept_sections = [sections[filename] for filename in keep if filename in sections]
+    if len(kept_sections) != len(keep):
+        return ""
+
+    parts = ["# Recalled Memory"]
+    for section in kept_sections:
+        parts.append("\n".join(section).strip())
+    return "\n\n".join(part for part in parts if part)
+
+
 class AgentLoop:
     """The main agent execution loop.
 
@@ -74,6 +125,8 @@ class AgentLoop:
         permission_context: Any = None,  # ToolPermissionContext
         permission_context_getter: Any = None,  # Callable[[], ToolPermissionContext | None]
         auto_trigger_skills: list[Any] | None = None,
+        memory_recall_service: Any = None,
+        system_prompt_refresher: Callable[[], str] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -89,6 +142,13 @@ class AgentLoop:
         self._auto_trigger_skills = auto_trigger_skills or []
         self._auto_loaded_skills: set[str] = set()
         self._current_git_branch: str | None = None
+        self._memory_recall_service = memory_recall_service
+        self._recorded_memory_prefetch_ids: set[int] = set()
+        self._pending_memory_prefetches: list[Any] = []
+        self._memory_recall_generation = 0
+        self._memory_recall_active_turns = 0
+        self._last_provider_request_snapshot: dict[str, Any] | None = None
+        self._system_prompt_refresher = system_prompt_refresher
 
         model_name = ""
         if hasattr(provider_manager, "get_model_name"):
@@ -98,6 +158,7 @@ class AgentLoop:
         self._sync_tool_definitions()
         if resume_messages:
             self.context_manager.load_messages(resume_messages)
+        self._sync_recall_suppression_from_context()
         self._tool_executor = ToolExecutor(registry=tool_registry)
         from iac_code.config import get_config_dir
 
@@ -118,30 +179,304 @@ class AgentLoop:
         if system_prompt is not None:
             self.system_prompt = system_prompt
             self.context_manager.set_system_prompt(system_prompt)
-        self._sync_tool_definitions()
+        self._sync_tool_definitions(system_prompt=self.system_prompt if system_prompt is not None else None)
 
     def set_auto_trigger_skills(self, skill_commands: list[Any] | None) -> None:
         """Refresh skills considered for automatic trigger injection."""
         self._auto_trigger_skills = list(skill_commands or [])
 
-    def _get_tool_definitions(self):
+    def get_memory_recall_stats(self) -> dict[str, Any]:
+        if self._memory_recall_service is None:
+            return {
+                "total_side_queries": 0,
+                "in_flight_side_queries": 0,
+                "successful_side_queries": 0,
+                "failed_side_queries": 0,
+                "cancelled_side_queries": 0,
+                "total_selected_files": 0,
+                "last_duration_ms": 0,
+                "last_status": "skipped",
+                "last_selected_files": [],
+                "last_side_query_duration_ms": 0,
+                "last_side_query_status": "skipped",
+                "last_side_query_selected_files": [],
+                "last_prompt_preview": "",
+                "last_response_preview": "",
+                "last_prompt_chars": 0,
+                "last_response_chars": 0,
+                "total_usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "total_tokens": 0,
+                    "recorded_events": 0,
+                    "has_recorded_usage": False,
+                },
+                "last_usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "total_tokens": 0,
+                    "recorded_events": 0,
+                    "has_recorded_usage": False,
+                },
+            }
+        get_snapshot = getattr(self._memory_recall_service, "get_stats_snapshot", None)
+        if not callable(get_snapshot):
+            return {}
+        return dict(get_snapshot())
+
+    def get_last_provider_request_snapshot(self) -> dict[str, Any]:
+        if self._last_provider_request_snapshot is None:
+            return {}
+        return {
+            "system_prompt": self._last_provider_request_snapshot.get("system_prompt", ""),
+            "provider_messages": list(self._last_provider_request_snapshot.get("provider_messages") or []),
+            "tools": list(self._last_provider_request_snapshot.get("tools") or []),
+        }
+
+    def _start_memory_prefetch_for_turn(self, user_input: str | list[ContentBlock]) -> Any:
+        if self._memory_recall_service is None:
+            return None
+        query = _user_input_to_text(user_input).strip()
+        if not query:
+            return None
+        self._sync_recall_suppression_from_context()
+        start_prefetch = getattr(self._memory_recall_service, "start_prefetch", None)
+        if callable(start_prefetch):
+            prefetch = start_prefetch(query)
+        else:
+            recall = getattr(self._memory_recall_service, "recall", None)
+            if not callable(recall):
+                return None
+            from iac_code.memory.recall import MemoryRecallPrefetch
+
+            prefetch = MemoryRecallPrefetch(asyncio.create_task(recall(query)))
+        if prefetch is not None:
+            self._pending_memory_prefetches.append(prefetch)
+            add_done_callback = getattr(prefetch, "add_done_callback", None)
+            if callable(add_done_callback):
+                session_id = self._session_id
+                generation = self._memory_recall_generation
+                add_done_callback(
+                    lambda task, handle=prefetch, sid=session_id, gen=generation: self._handle_memory_prefetch_done(
+                        handle,
+                        task,
+                        session_id=sid,
+                        generation=gen,
+                    )
+                )
+        return prefetch
+
+    def _cancel_pending_memory_prefetches(self) -> None:
+        for prefetch in list(self._pending_memory_prefetches):
+            done = getattr(prefetch, "done", None)
+            cancel = getattr(prefetch, "cancel", None)
+            if callable(done) and callable(cancel) and not done():
+                cancel()
+        self._pending_memory_prefetches.clear()
+        self._recorded_memory_prefetch_ids.clear()
+
+    def _sync_recall_suppression_from_context(self) -> None:
+        if self._memory_recall_service is None:
+            return
+        mark_files_surfaced = getattr(self._memory_recall_service, "mark_files_surfaced", None)
+        if callable(mark_files_surfaced):
+            mark_files_surfaced(self.context_manager.get_surfaced_memory_files())
+
+    def _persist_context_messages(self) -> None:
+        if not self._session_storage:
+            return
+        self._session_storage.save(
+            self._cwd,
+            self._session_id,
+            self.context_manager.get_messages(),
+            git_branch=self._current_git_branch,
+        )
+
+    def _inject_recalled_memory_result(self, result: Any) -> bool:
+        content = str(getattr(result, "content", "") or "").strip()
+        selected_files = list(getattr(result, "selected_files", None) or [])
+        if not content or not selected_files:
+            return False
+        selected_names = {_normalize_memory_filename(filename) for filename in selected_files}
+        selected_names.discard("")
+        if not selected_names:
+            return False
+        suppressed: set[str] = set()
+        get_suppressed_files = getattr(self._memory_recall_service, "get_suppressed_files", None)
+        if callable(get_suppressed_files):
+            suppressed = {_normalize_memory_filename(filename) for filename in get_suppressed_files()}
+            suppressed.discard("")
+        surfaced = {
+            _normalize_memory_filename(filename) for filename in self.context_manager.get_surfaced_memory_files()
+        }
+        surfaced.discard("")
+        suppressed |= surfaced
+        injectable_files = [
+            filename
+            for filename in selected_files
+            if (normalized := _normalize_memory_filename(filename)) and normalized not in suppressed
+        ]
+        if not injectable_files:
+            return False
+        if len(injectable_files) != len(selected_files):
+            content = _filter_recalled_memory_content(content, injectable_files)
+            if not content:
+                return False
+        msg = self.context_manager.add_recalled_memory_message(content, injectable_files)
+        if self._session_storage:
+            self._session_storage.append(
+                self._cwd,
+                self._session_id,
+                msg,
+                git_branch=self._current_git_branch,
+            )
+        self._mark_recalled_files_surfaced(injectable_files)
+        return True
+
+    async def _consume_ready_memory_prefetches(self, prefetch: Any | None = None) -> None:
+        await asyncio.sleep(0)
+        for item in list(self._pending_memory_prefetches):
+            if prefetch is not None and item is not prefetch:
+                continue
+            done = getattr(item, "done", None)
+            if not callable(done) or not done():
+                continue
+            self._pending_memory_prefetches = [
+                pending for pending in self._pending_memory_prefetches if pending is not item
+            ]
+            try:
+                result = item.result()
+            except asyncio.CancelledError:
+                self._forget_memory_prefetch(item)
+                continue
+            except Exception as exc:
+                logger.debug("Memory recall prefetch failed: {}", exc)
+                self._forget_memory_prefetch(item)
+                continue
+            self._record_memory_recall_result_usage_once(item, result)
+            self._inject_recalled_memory_result(result)
+            self._forget_memory_prefetch(item)
+
+    def _mark_recalled_files_surfaced(self, selected_files: list[str]) -> None:
+        if self._memory_recall_service is None:
+            return
+        mark_files_surfaced = getattr(self._memory_recall_service, "mark_files_surfaced", None)
+        if not callable(mark_files_surfaced):
+            return
+        if selected_files:
+            mark_files_surfaced(selected_files)
+
+    def _handle_memory_prefetch_done(
+        self,
+        prefetch: Any,
+        task: asyncio.Task,
+        *,
+        session_id: str | None = None,
+        generation: int | None = None,
+    ) -> None:
+        if not any(item is prefetch for item in self._pending_memory_prefetches):
+            return
+        if session_id is not None and session_id != self._session_id:
+            self._pending_memory_prefetches = [item for item in self._pending_memory_prefetches if item is not prefetch]
+            self._forget_memory_prefetch(prefetch)
+            return
+        if generation is not None and generation != self._memory_recall_generation:
+            self._pending_memory_prefetches = [item for item in self._pending_memory_prefetches if item is not prefetch]
+            self._forget_memory_prefetch(prefetch)
+            return
+        try:
+            result = task.result()
+        except asyncio.CancelledError:
+            self._pending_memory_prefetches = [item for item in self._pending_memory_prefetches if item is not prefetch]
+            self._forget_memory_prefetch(prefetch)
+            return
+        except Exception as exc:
+            logger.debug("Memory recall prefetch usage unavailable: {}", exc)
+            self._pending_memory_prefetches = [item for item in self._pending_memory_prefetches if item is not prefetch]
+            self._forget_memory_prefetch(prefetch)
+            return
+        self._record_memory_recall_result_usage_once(prefetch, result)
+        if self._memory_recall_active_turns > 0:
+            return
+        self._pending_memory_prefetches = [item for item in self._pending_memory_prefetches if item is not prefetch]
+        self._inject_recalled_memory_result(result)
+        self._forget_memory_prefetch(prefetch)
+
+    def _record_memory_recall_result_usage_once(self, prefetch: Any, result: Any) -> None:
+        prefetch_id = id(prefetch)
+        if prefetch_id in self._recorded_memory_prefetch_ids:
+            return
+        self._recorded_memory_prefetch_ids.add(prefetch_id)
+        self._record_response_usage(result)
+
+    def _forget_memory_prefetch(self, prefetch: Any) -> None:
+        self._recorded_memory_prefetch_ids.discard(id(prefetch))
+
+    def _refresh_system_prompt(self) -> None:
+        if self._system_prompt_refresher is None:
+            return
+        try:
+            system_prompt = self._system_prompt_refresher()
+        except Exception as exc:
+            logger.debug("Failed to refresh system prompt: {}", exc)
+            return
+        if not isinstance(system_prompt, str) or system_prompt == self.system_prompt:
+            return
+        self.system_prompt = system_prompt
+        self.context_manager.set_system_prompt(system_prompt)
+
+    def _sync_tool_system_prompt(self, system_prompt: str, tools: list[Any] | None = None) -> None:
+        if tools is None:
+            try:
+                tools = list(self.tool_registry.list_tools())
+            except Exception as exc:
+                logger.debug("Failed to list tools while syncing system prompt: {}", exc)
+                return
+        for tool in tools:
+            setter = getattr(tool, "set_system_prompt", None)
+            if not callable(setter):
+                continue
+            try:
+                setter(system_prompt)
+            except Exception as exc:
+                logger.debug("Failed to sync system prompt to tool {}: {}", getattr(tool, "name", ""), exc)
+
+    def _system_prompt_for_current_turn(self) -> str:
+        return self.system_prompt
+
+    def _prepare_provider_system_prompt(self) -> str:
+        self._refresh_system_prompt()
+        system_prompt = self._system_prompt_for_current_turn()
+        self.context_manager.set_system_prompt(system_prompt)
+        return system_prompt
+
+    def _get_tool_definitions(self, tools: list[Any] | None = None):
         """Convert tool registry to provider ToolDefinition format."""
         from iac_code.providers.base import ToolDefinition
 
-        tools = []
-        for tool in self.tool_registry.list_tools():
-            tools.append(
+        if tools is None:
+            tools = list(self.tool_registry.list_tools())
+        tool_definitions = []
+        for tool in tools:
+            tool_definitions.append(
                 ToolDefinition(
                     name=tool.name,
                     description=tool.description,
                     input_schema=tool.input_schema,
                 )
             )
-        return tools
+        return tool_definitions
 
-    def _sync_tool_definitions(self):
+    def _sync_tool_definitions(self, system_prompt: str | None = None):
         """Refresh context token accounting from the current tool registry."""
-        tool_definitions = self._get_tool_definitions()
+        tools = list(self.tool_registry.list_tools())
+        if system_prompt is not None:
+            self._sync_tool_system_prompt(system_prompt, tools=tools)
+        tool_definitions = self._get_tool_definitions(tools)
         self.context_manager.set_tool_definitions(tool_definitions)
         return tool_definitions
 
@@ -244,6 +579,9 @@ class AgentLoop:
             first_token_received = False
             final_text_chunks: list[str] = []
             final_stop_reason = "stop"
+            memory_prefetch = None
+            turn_cancelled = False
+            self._memory_recall_active_turns += 1
             try:
                 # Refresh the git branch once per turn — branch may change
                 # between turns (user runs git checkout via Bash tool), but
@@ -260,10 +598,12 @@ class AgentLoop:
                         Message(role="user", content=user_input),
                         git_branch=self._current_git_branch,
                     )
+                memory_prefetch = self._start_memory_prefetch_for_turn(user_input)
                 try:
                     async for event in self._run_streaming_inner(
                         user_input,
                         queued_input_provider=queued_input_provider,
+                        memory_prefetch=memory_prefetch,
                     ):
                         if isinstance(event, TextDeltaEvent) and not first_token_received:
                             first_token_received = True
@@ -277,9 +617,16 @@ class AgentLoop:
                             self._record_session_usage(event.usage)
                         yield event
                 except asyncio.CancelledError:
+                    turn_cancelled = True
+                    self._memory_recall_generation += 1
+                    self._cancel_pending_memory_prefetches()
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
             finally:
+                self._memory_recall_active_turns = max(0, self._memory_recall_active_turns - 1)
+                if not turn_cancelled:
+                    await self._consume_ready_memory_prefetches()
+                self.context_manager.set_system_prompt(self.system_prompt)
                 elapsed = time.monotonic() - interaction_started
                 add_metric(Metrics.ACTIVE_TIME_TOTAL, int(elapsed), {})
                 if should_capture_content_on_span() and final_text_chunks:
@@ -291,14 +638,18 @@ class AgentLoop:
     async def _run_streaming_inner(
         self,
         user_input: str | list[ContentBlock],
+        *,
         queued_input_provider: Callable[[], list[str]] | None = None,
+        memory_prefetch: Any = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Inner streaming loop (called from run_streaming inside the ENTRY span)."""
         from iac_code.services.telemetry import start_span
         from iac_code.services.telemetry.names import GenAiAttr, GenAiOperationName, GenAiSpanKind, Spans
 
         for _turn in range(self._max_turns):
-            tool_definitions = self._sync_tool_definitions()
+            system_prompt = self._prepare_provider_system_prompt()
+            tool_definitions = self._sync_tool_definitions(system_prompt=system_prompt)
+            await self._consume_ready_memory_prefetches(memory_prefetch)
 
             # Auto-compact if needed
             if self.context_manager.needs_compaction():
@@ -319,11 +670,19 @@ class AgentLoop:
                 thinking_chunks: list[str] = []
                 message_ended = False
 
+                provider_messages = self._get_provider_messages()
+                provider_tools = tool_definitions or None
+                self._last_provider_request_snapshot = {
+                    "system_prompt": system_prompt,
+                    "provider_messages": list(provider_messages),
+                    "tools": list(provider_tools or []),
+                }
+
                 # Stream from provider
                 async for event in self._provider_manager.stream(
-                    messages=self._get_provider_messages(),
-                    system=self.system_prompt,
-                    tools=tool_definitions if tool_definitions else None,
+                    messages=provider_messages,
+                    system=system_prompt,
+                    tools=provider_tools,
                 ):
                     yield event  # Forward all provider events to UI
 
@@ -541,6 +900,7 @@ class AgentLoop:
                 ]
                 for req, result in zip(requests, results):
                     processed = self._result_storage.process(req.id, result.content)
+                    self._mark_read_memory_tool_result(req, result)
 
                     yield ToolResultEvent(
                         tool_use_id=req.id,
@@ -603,6 +963,19 @@ class AgentLoop:
                     git_branch=self._current_git_branch,
                 )
             yield QueuedInputSubmittedEvent(text=text)
+
+    def _mark_read_memory_tool_result(self, request: ToolCallRequest, result: ToolResult) -> None:
+        if request.name != "read_memory" or result.is_error or self._memory_recall_service is None:
+            return
+        name = request.input.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return
+        mark_files_read = getattr(self._memory_recall_service, "mark_files_read", None)
+        if callable(mark_files_read):
+            filename = name.strip()
+            if not filename.endswith(".md"):
+                filename = f"{filename}.md"
+            mark_files_read([filename])
 
     async def _apply_auto_triggers(self, user_input: str | list[ContentBlock]) -> None:
         if not self._auto_trigger_skills:
@@ -673,6 +1046,8 @@ class AgentLoop:
             self._record_response_usage(response)
             if response.text:
                 original, new = self.context_manager.apply_compaction(response.text)
+                self._sync_recall_suppression_from_context()
+                self._persist_context_messages()
                 duration_ms = int((time.monotonic() - started) * 1000)
                 log_event(
                     Events.MEMORY_COMPACT_SUCCEEDED,
@@ -715,6 +1090,8 @@ class AgentLoop:
             self._record_response_usage(response)
             if response.text:
                 original, compacted = self.context_manager.apply_compaction(response.text)
+                self._sync_recall_suppression_from_context()
+                self._persist_context_messages()
                 return CompactResult(
                     status="success",
                     original_tokens=original,
@@ -748,6 +1125,9 @@ class AgentLoop:
         """
         from iac_code.config import get_config_dir
 
+        self._cancel_pending_memory_prefetches()
+        self._memory_recall_generation += 1
+        self._last_provider_request_snapshot = None
         self._session_id = session_id
         self._current_git_branch = None
         self._auto_loaded_skills.clear()
@@ -755,6 +1135,10 @@ class AgentLoop:
         if resume_messages:
             self.context_manager.load_messages(resume_messages)
         self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
+        reset_recall_stats = getattr(self._memory_recall_service, "reset_stats", None)
+        if callable(reset_recall_stats):
+            reset_recall_stats()
+        self._sync_recall_suppression_from_context()
         self._result_storage = ResultStorage(
             storage_dir=os.path.join(str(get_config_dir()), "tool-results", session_id),
         )
@@ -773,8 +1157,14 @@ class AgentLoop:
             self._current_git_branch = None
 
     def reset(self) -> None:
+        self._cancel_pending_memory_prefetches()
+        self._memory_recall_generation += 1
+        self._last_provider_request_snapshot = None
         self._auto_loaded_skills.clear()
         self.context_manager.reset()
+        reset_recall_stats = getattr(self._memory_recall_service, "reset_stats", None)
+        if callable(reset_recall_stats):
+            reset_recall_stats()
 
     @property
     def session_id(self) -> str:

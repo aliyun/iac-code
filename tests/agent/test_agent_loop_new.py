@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -32,6 +33,66 @@ def mock_registry():
     r.list_tools.return_value = []
     r.get.return_value = None
     return r
+
+
+def test_init_syncs_recalled_memory_from_resume_messages(mock_provider, mock_registry):
+    from iac_code.agent.message import create_recalled_memory_message
+
+    class FakeRecallService:
+        def __init__(self):
+            self.surfaced: set[str] = set()
+
+        def mark_files_surfaced(self, filenames):
+            self.surfaced.update(filenames)
+
+        def get_stats_snapshot(self):
+            return {"last_status": "skipped"}
+
+    recall_service = FakeRecallService()
+    AgentLoop(
+        provider_manager=mock_provider,
+        system_prompt="test",
+        tool_registry=mock_registry,
+        resume_messages=[create_recalled_memory_message("# Recalled Memory\nUse YAML", ["ros-yaml.md"])],
+        memory_recall_service=recall_service,
+    )
+
+    assert recall_service.surfaced == {"ros-yaml.md"}
+
+
+def test_replace_session_syncs_recalled_memory_from_loaded_messages(mock_provider, mock_registry):
+    from iac_code.agent.message import create_recalled_memory_message
+
+    class FakeRecallService:
+        def __init__(self):
+            self.reset_called = False
+            self.surfaced: set[str] = set()
+
+        def reset_stats(self):
+            self.reset_called = True
+
+        def mark_files_surfaced(self, filenames):
+            self.surfaced.update(filenames)
+
+        def get_stats_snapshot(self):
+            return {"last_status": "skipped"}
+
+    recall_service = FakeRecallService()
+    loop = AgentLoop(
+        provider_manager=mock_provider,
+        system_prompt="test",
+        tool_registry=mock_registry,
+        session_id="old-session",
+        memory_recall_service=recall_service,
+    )
+
+    loop.replace_session(
+        "new-session",
+        resume_messages=[create_recalled_memory_message("# Recalled Memory\nUse YAML", ["ros-yaml.md"])],
+    )
+
+    assert recall_service.reset_called is True
+    assert recall_service.surfaced == {"ros-yaml.md"}
 
 
 class TestAgentLoopInit:
@@ -150,6 +211,563 @@ class TestAgentLoopStreaming:
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
         result = await loop.run("Hi")
         assert result == "Hello!"
+
+    async def test_memory_recall_is_hidden_context_message(self, mock_provider, mock_registry):
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRecallService:
+            def __init__(self):
+                self.queries: list[str] = []
+                self.surfaced: set[str] = set()
+                self.replaced: list[set[str]] = []
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                self.queries.append(user_input)
+
+                async def recall():
+                    return MemoryRecallResult(
+                        content="# Recalled Memory\nFreeze on 2026-06-15",
+                        selected_files=["topic.md"],
+                    )
+
+                return MemoryRecallPrefetch(asyncio.create_task(recall()))
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.update(filenames)
+
+            def replace_surfaced_files(self, filenames):
+                self.replaced.append(set(filenames))
+
+        class FakeSessionStorage:
+            def __init__(self):
+                self.messages = []
+
+            def append(self, cwd, session_id, message, git_branch=None):
+                self.messages.append(message)
+
+        mock_provider.stream = fake_stream
+        recall_service = FakeRecallService()
+        storage = FakeSessionStorage()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="base system",
+            tool_registry=mock_registry,
+            session_storage=storage,
+            memory_recall_service=recall_service,
+        )
+
+        events = [event async for event in loop.run_streaming("what is the deadline?")]
+
+        assert any(isinstance(event, MessageEndEvent) for event in events)
+        assert recall_service.queries == ["what is the deadline?"]
+        assert captured_messages[0][-1].role == "user"
+        assert "Relevant persistent memories recalled for this conversation" in captured_messages[0][-1].content
+        assert "Freeze on 2026-06-15" in captured_messages[0][-1].content
+        assert recall_service.surfaced == {"topic.md"}
+        assert any(message.metadata.get("type") == "recalled_memory" for message in storage.messages)
+        assert any("Freeze on 2026-06-15" in str(message.content) for message in storage.messages)
+        assert not hasattr(loop, "_current_recalled_memory_content") or loop._current_recalled_memory_content == ""
+
+    async def test_recalled_memory_persists_and_suppresses_duplicate_in_future_turn(self, mock_provider, mock_registry):
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id=f"m{len(captured_messages)}")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRecallService:
+            def __init__(self):
+                self.queries: list[str] = []
+                self.surfaced: set[str] = set()
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                if "ros-yaml.md" in self.surfaced:
+                    return None
+                self.queries.append(user_input)
+
+                async def recall():
+                    return MemoryRecallResult(
+                        content="# Recalled Memory\nUse YAML for ROS templates",
+                        selected_files=["ros-yaml.md"],
+                    )
+
+                return MemoryRecallPrefetch(asyncio.create_task(recall()))
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.update(filenames)
+
+        mock_provider.stream = fake_stream
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="base system",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+
+        await loop.run("what format should I use?")
+        await loop.run("what format should I use?")
+
+        assert recall_service.queries == ["what format should I use?"]
+        assert "Use YAML for ROS templates" in str(captured_messages[0])
+        assert "Use YAML for ROS templates" in str(captured_messages[1])
+
+    async def test_manual_compaction_resyncs_recalled_memory_suppression(self, mock_provider, mock_registry):
+        class FakeRecallService:
+            def __init__(self):
+                self.surfaced: set[str] = set()
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.update(filenames)
+
+            def get_stats_snapshot(self):
+                return {"last_status": "skipped"}
+
+        async def fake_complete(messages, system):
+            return SimpleNamespace(text="summary", usage=Usage(input_tokens=1, output_tokens=1))
+
+        recall_service = FakeRecallService()
+        mock_provider.complete = fake_complete
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_messages.return_value = [SimpleNamespace(role="user")]
+        loop.context_manager.build_compaction_prompt.return_value = "compact me"
+        loop.context_manager.apply_compaction.return_value = (1200, 400)
+        loop.context_manager.get_surfaced_memory_files.return_value = {"recent.md"}
+
+        result = await loop.compact()
+
+        assert result.status == "success"
+        assert recall_service.surfaced == {"recent.md"}
+
+    async def test_memory_recall_usage_is_recorded_in_session_usage(self, mock_provider, mock_registry, tmp_path):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=10, output_tokens=5))
+
+        class FakeRecallService:
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                async def recall():
+                    return MemoryRecallResult(
+                        content="",
+                        selected_files=[],
+                        usage=Usage(input_tokens=4, output_tokens=1, cache_read_input_tokens=2),
+                    )
+
+                return MemoryRecallPrefetch(asyncio.create_task(recall()))
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+        from iac_code.services.session_usage import SessionUsageStore
+
+        mock_provider.stream = fake_stream
+        store = SessionUsageStore(projects_dir=tmp_path)
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="recall-usage-session",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+            memory_recall_service=FakeRecallService(),
+        )
+
+        await loop.run("Hi")
+
+        totals = loop.get_session_usage()
+        assert totals.input_tokens == 14
+        assert totals.output_tokens == 6
+        assert totals.cache_read_input_tokens == 2
+        assert totals.recorded_events == 2
+        assert store.load("/tmp/status-project", "recall-usage-session").total_tokens == 20
+
+    async def test_slow_memory_prefetch_does_not_block_provider_call_and_appends_late(
+        self, mock_provider, mock_registry
+    ):
+        recall_can_finish = asyncio.Event()
+
+        class FakeRecallService:
+            def __init__(self):
+                self.cancelled = False
+                self.surfaced: list[str] = []
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                async def recall():
+                    await recall_can_finish.wait()
+                    return MemoryRecallResult(content="# Recalled Memory\nlate", selected_files=["late.md"])
+
+                return MemoryRecallPrefetch(
+                    asyncio.create_task(recall()),
+                    on_cancel=lambda: setattr(self, "cancelled", True),
+                )
+
+            def get_stats_snapshot(self):
+                return {"last_status": "cancelled"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.extend(filenames)
+
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="base system",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+
+        events = [event async for event in loop.run_streaming("fast answer")]
+
+        assert any(isinstance(event, MessageEndEvent) for event in events)
+        assert all("# Recalled Memory" not in str(message.content) for message in captured_messages[0])
+        assert recall_service.cancelled is False
+
+        recall_can_finish.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+            if recall_service.surfaced:
+                break
+
+        assert any("# Recalled Memory\nlate" in str(message.content) for message in loop.context_manager.get_messages())
+        assert recall_service.surfaced == ["late.md"]
+
+    async def test_late_memory_recall_is_persisted_for_matching_next_turn(self, mock_provider, mock_registry):
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id="m1")
+            await asyncio.sleep(0.02)
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRecallService:
+            def __init__(self):
+                self.queries: list[str] = []
+                self.surfaced: set[str] = set()
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                if "ros-yaml.md" in self.surfaced:
+                    return None
+                self.queries.append(user_input)
+
+                async def recall():
+                    await asyncio.sleep(0.01)
+                    return MemoryRecallResult(
+                        content="# Recalled Memory\nUse YAML for ROS templates",
+                        selected_files=["ros-yaml.md"],
+                    )
+
+                return MemoryRecallPrefetch(asyncio.create_task(recall()))
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.update(filenames)
+
+        mock_provider.stream = fake_stream
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="base system",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+
+        await loop.run("what format should I use?")
+        await loop.run("what format should I use?")
+        await loop.run("what format should I use?")
+
+        assert recall_service.queries == ["what format should I use?"]
+        assert "# Recalled Memory" not in str(captured_messages[0])
+        assert "Use YAML for ROS templates" in str(captured_messages[1])
+        assert "Use YAML for ROS templates" in str(captured_messages[2])
+        assert recall_service.surfaced == {"ros-yaml.md"}
+
+    async def test_late_memory_recall_is_persisted_after_different_next_turn(self, mock_provider, mock_registry):
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id="m1")
+            await asyncio.sleep(0.02)
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRecallService:
+            def __init__(self):
+                self.queries: list[str] = []
+                self.surfaced: set[str] = set()
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                if user_input == "different question" or "ros-yaml.md" in self.surfaced:
+                    return None
+                self.queries.append(user_input)
+
+                async def recall():
+                    await asyncio.sleep(0.01)
+                    return MemoryRecallResult(
+                        content="# Recalled Memory\nUse YAML for ROS templates",
+                        selected_files=["ros-yaml.md"],
+                    )
+
+                return MemoryRecallPrefetch(asyncio.create_task(recall()))
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.update(filenames)
+
+        mock_provider.stream = fake_stream
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="base system",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+
+        await loop.run("what format should I use?")
+        await loop.run("different question")
+        await loop.run("what format should I use?")
+
+        assert recall_service.queries == ["what format should I use?"]
+        assert "Use YAML for ROS templates" in str(captured_messages[1])
+        assert "Use YAML for ROS templates" in str(captured_messages[2])
+
+    async def test_previous_turn_recall_completing_during_next_turn_is_persisted(self, mock_provider, mock_registry):
+        first_recall_can_finish = asyncio.Event()
+        second_stream_started = asyncio.Event()
+        second_stream_can_finish = asyncio.Event()
+        captured_messages = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_messages.append(messages)
+            yield MessageStartEvent(message_id="m1")
+            if len(captured_messages) == 2:
+                second_stream_started.set()
+                await second_stream_can_finish.wait()
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRecallService:
+            def __init__(self):
+                self.queries: list[str] = []
+                self.surfaced: set[str] = set()
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                self.queries.append(user_input)
+
+                async def recall():
+                    if user_input == "first":
+                        await first_recall_can_finish.wait()
+                        return MemoryRecallResult(
+                            content="# Recalled Memory\nUse YAML for ROS templates",
+                            selected_files=["ros-yaml.md"],
+                        )
+                    return MemoryRecallResult(content="", selected_files=[])
+
+                return MemoryRecallPrefetch(asyncio.create_task(recall()))
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.update(filenames)
+
+            def replace_surfaced_files(self, filenames):
+                self.surfaced = set(filenames)
+
+        mock_provider.stream = fake_stream
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="base system",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+
+        await loop.run("first")
+        second_run = asyncio.create_task(loop.run("second"))
+        await second_stream_started.wait()
+        first_recall_can_finish.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+            if recall_service.surfaced:
+                break
+        assert recall_service.surfaced == set()
+
+        second_stream_can_finish.set()
+        await second_run
+        await loop.run("third")
+
+        assert recall_service.surfaced == {"ros-yaml.md"}
+        assert "Use YAML for ROS templates" not in str(captured_messages[1])
+        assert "Use YAML for ROS templates" in str(captured_messages[2])
+
+    async def test_cancelled_turn_discards_pending_memory_prefetch(self, mock_provider, mock_registry):
+        recall_can_finish = asyncio.Event()
+        stream_started = asyncio.Event()
+        stream_can_finish = asyncio.Event()
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            stream_started.set()
+            await stream_can_finish.wait()
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRecallService:
+            def __init__(self):
+                self.cancelled = False
+                self.surfaced: list[str] = []
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                async def recall():
+                    await recall_can_finish.wait()
+                    return MemoryRecallResult(
+                        content="# Recalled Memory\nDiscard cancelled turn context",
+                        selected_files=["cancelled.md"],
+                    )
+
+                return MemoryRecallPrefetch(
+                    asyncio.create_task(recall()),
+                    on_cancel=lambda: setattr(self, "cancelled", True),
+                )
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.extend(filenames)
+
+        mock_provider.stream = fake_stream
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="base system",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+
+        async def consume():
+            async for _event in loop.run_streaming("cancel this turn"):
+                pass
+
+        task = asyncio.create_task(consume())
+        await stream_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        recall_can_finish.set()
+        stream_can_finish.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert recall_service.cancelled is True
+        assert recall_service.surfaced == []
+        assert not any(
+            getattr(message, "metadata", {}).get("type") == "recalled_memory"
+            for message in loop.context_manager.get_messages()
+        )
+
+    async def test_system_prompt_refresher_updates_each_provider_round_and_tools(self, mock_provider, mock_registry):
+        captured_systems: list[str] = []
+
+        class PromptAwareTool:
+            name = "read_file"
+            description = "Read"
+            input_schema = {}
+
+            def __init__(self):
+                self.prompts: list[str] = []
+
+            def set_system_prompt(self, system_prompt: str) -> None:
+                self.prompts.append(system_prompt)
+
+        tool = PromptAwareTool()
+
+        def refresh_prompt():
+            return "fresh-1" if not captured_systems else "fresh-2"
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            captured_systems.append(system)
+            if len(captured_systems) == 1:
+                yield MessageStartEvent(message_id="m1")
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
+                yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+
+            yield MessageStartEvent(message_id="m2")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [tool]
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="stale",
+            tool_registry=mock_registry,
+            system_prompt_refresher=refresh_prompt,
+        )
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(content="processed result")
+        loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="raw result", is_error=False)])
+
+        await loop.run("Hi")
+
+        assert captured_systems == ["fresh-1", "fresh-2"]
+        assert tool.prompts[-1] == "fresh-2"
+        assert loop.context_manager.system_prompt == "fresh-2"
 
     async def test_records_non_zero_message_end_usage(self, mock_provider, mock_registry, tmp_path):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
@@ -389,6 +1007,296 @@ class TestAgentLoopStreaming:
         assert loop.get_session_usage().input_tokens == 7
         assert loop.get_session_usage().output_tokens == 8
         assert loop.get_session_usage().total_tokens == 15
+
+    async def test_replace_session_resets_memory_recall_stats(self, mock_provider, mock_registry):
+        class FakeRecallService:
+            def __init__(self):
+                self.reset_called = False
+
+            def reset_stats(self):
+                self.reset_called = True
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success", "total_side_queries": 1}
+
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="old-session",
+            memory_recall_service=recall_service,
+        )
+
+        loop.replace_session("new-session", resume_messages=None)
+
+        assert recall_service.reset_called is True
+
+    async def test_replace_session_clears_last_provider_request_snapshot(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        await loop.run("old prompt")
+        assert loop.get_last_provider_request_snapshot()["provider_messages"]
+
+        loop.replace_session("new-session", resume_messages=None)
+
+        assert loop.get_last_provider_request_snapshot() == {}
+
+    async def test_reset_clears_last_provider_request_snapshot(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        await loop.run("old prompt")
+        assert loop.get_last_provider_request_snapshot()["provider_messages"]
+
+        loop.reset()
+
+        assert loop.get_last_provider_request_snapshot() == {}
+
+    async def test_read_memory_tool_marks_file_as_read_for_recall_dedupe(self, mock_provider, mock_registry):
+        class FakeRecallService:
+            def __init__(self):
+                self.marked: list[str] = []
+
+            def get_stats_snapshot(self):
+                return {"last_status": "skipped"}
+
+            def mark_files_read(self, files):
+                self.marked.extend(files)
+
+        call_count = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield MessageStartEvent(message_id="m1")
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_memory")
+                yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_memory", input={"name": "project-deadline"})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+
+            yield MessageStartEvent(message_id="m2")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        from iac_code.memory.memory_tools import ReadMemoryTool
+
+        recall_service = FakeRecallService()
+        read_tool = ReadMemoryTool(MagicMock())
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [read_tool]
+        mock_registry.get.return_value = read_tool
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(content="processed result")
+        loop._tool_executor.execute_batch = AsyncMock(
+            return_value=[ToolResult(content="memory content", is_error=False)]
+        )
+
+        await loop.run("read remembered deadline")
+
+        assert recall_service.marked == ["project-deadline.md"]
+
+    async def test_read_memory_suppresses_completed_prefetch_injection(self, mock_provider, mock_registry):
+        recall_can_finish = asyncio.Event()
+        captured_messages = []
+
+        class FakeRecallService:
+            def __init__(self):
+                self.read_files: set[str] = set()
+
+            def start_prefetch(self, user_input):
+                from iac_code.memory.recall import MemoryRecallPrefetch, MemoryRecallResult
+
+                async def recall():
+                    await recall_can_finish.wait()
+                    return MemoryRecallResult(
+                        content="# Recalled Memory\nFreeze",
+                        selected_files=["project-deadline.md"],
+                    )
+
+                return MemoryRecallPrefetch(asyncio.create_task(recall()))
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def mark_files_read(self, files):
+                self.read_files.update(files)
+
+            def get_suppressed_files(self):
+                return set(self.read_files)
+
+        class FakeSessionStorage:
+            def __init__(self):
+                self.messages = []
+
+            def append(self, cwd, session_id, message, git_branch=None):
+                self.messages.append(message)
+
+        call_count = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal call_count
+            call_count += 1
+            captured_messages.append(messages)
+            if call_count == 1:
+                yield MessageStartEvent(message_id="m1")
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_memory")
+                yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_memory", input={"name": "project-deadline"})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                recall_can_finish.set()
+                return
+
+            yield MessageStartEvent(message_id="m2")
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        from iac_code.memory.memory_tools import ReadMemoryTool
+
+        recall_service = FakeRecallService()
+        storage = FakeSessionStorage()
+        read_tool = ReadMemoryTool(MagicMock())
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [read_tool]
+        mock_registry.get.return_value = read_tool
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=storage,
+            memory_recall_service=recall_service,
+        )
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(content="processed result")
+        loop._tool_executor.execute_batch = AsyncMock(
+            return_value=[ToolResult(content="memory content", is_error=False)]
+        )
+
+        await loop.run("read remembered deadline")
+
+        assert call_count == 2
+        assert recall_service.read_files == {"project-deadline.md"}
+        assert "# Recalled Memory" not in str(captured_messages[1])
+        assert "Freeze" not in str(captured_messages[1])
+        assert not any(message.metadata.get("type") == "recalled_memory" for message in storage.messages)
+
+    async def test_recalled_memory_injection_keeps_unsuppressed_files(self, mock_provider, mock_registry):
+        from iac_code.agent.message import get_recalled_memory_files
+
+        class FakeRecallService:
+            def __init__(self):
+                self.surfaced: list[str] = []
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def get_suppressed_files(self):
+                return {"old.md"}
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.extend(filenames)
+
+        class FakeSessionStorage:
+            def __init__(self):
+                self.messages = []
+
+            def append(self, cwd, session_id, message, git_branch=None):
+                self.messages.append(message)
+
+        storage = FakeSessionStorage()
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=storage,
+            memory_recall_service=recall_service,
+        )
+        result = SimpleNamespace(
+            content=(
+                "# Recalled Memory\n\n"
+                "## old.md\n[project] old topic\n\nold body\n\n"
+                "## new.md\n[project] new topic\n\nnew body"
+            ),
+            selected_files=["old.md", "new.md"],
+        )
+
+        assert loop._inject_recalled_memory_result(result) is True
+
+        [message] = storage.messages
+        assert get_recalled_memory_files(message) == ["new.md"]
+        assert "new body" in str(message.content)
+        assert "old body" not in str(message.content)
+        assert recall_service.surfaced == ["new.md"]
+
+    async def test_compacted_out_recalled_memory_remains_suppressed(self, mock_provider, mock_registry):
+        from iac_code.agent.message import get_recalled_memory_files
+
+        class FakeRecallService:
+            def __init__(self):
+                self.surfaced: set[str] = set()
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+            def replace_surfaced_files(self, filenames):
+                self.surfaced = set(filenames)
+
+            def get_suppressed_files(self):
+                return set(self.surfaced)
+
+            def mark_files_surfaced(self, filenames):
+                self.surfaced.update(filenames)
+
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
+        first_result = SimpleNamespace(
+            content="# Recalled Memory\n\n## old.md\n[project] old topic\n\nold body",
+            selected_files=["old.md"],
+        )
+        second_result = SimpleNamespace(
+            content="# Recalled Memory\n\n## old.md\n[project] old topic\n\nold body again",
+            selected_files=["old.md"],
+        )
+
+        assert loop._inject_recalled_memory_result(first_result) is True
+        for i in range(6):
+            loop.context_manager.add_user_message(f"User message {i}")
+            loop.context_manager.add_assistant_message(f"Assistant response {i}")
+
+        loop.context_manager.apply_compaction("Summary after old memory")
+        loop._sync_recall_suppression_from_context()
+
+        assert recall_service.surfaced == {"old.md"}
+        assert loop._inject_recalled_memory_result(second_result) is False
+        recalled_messages = [
+            message
+            for message in loop.context_manager.get_messages()
+            if get_recalled_memory_files(message) == ["old.md"]
+        ]
+        assert recalled_messages == []
 
     async def test_run_streaming_executes_tools_and_applies_extensions(self, mock_provider, mock_registry):
         call_count = 0
@@ -804,6 +1712,35 @@ class TestAgentLoopCompaction:
         assert event.original_tokens == 1200
         assert event.compacted_tokens == 400
 
+    async def test_auto_compact_persists_compacted_session(self, mock_provider, mock_registry):
+        from iac_code.agent.message import Message
+
+        mock_provider.complete = AsyncMock(return_value=SimpleNamespace(text="summary"))
+        session_storage = MagicMock()
+        compacted_messages = [Message(role="user", content="[Conversation Summary]\nsummary")]
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="auto-compact-session",
+            cwd="/tmp/status-project",
+            session_storage=session_storage,
+        )
+        loop._current_git_branch = "main"
+        loop.context_manager = MagicMock()
+        loop.context_manager.build_compaction_prompt.return_value = "compact me"
+        loop.context_manager.apply_compaction.return_value = (1200, 400)
+        loop.context_manager.get_messages.return_value = compacted_messages
+
+        await loop._auto_compact()
+
+        session_storage.save.assert_called_once_with(
+            "/tmp/status-project",
+            "auto-compact-session",
+            compacted_messages,
+            git_branch="main",
+        )
+
     async def test_auto_compact_records_response_usage(self, mock_provider, mock_registry, tmp_path):
         from iac_code.services.session_usage import SessionUsageStore
 
@@ -837,11 +1774,33 @@ class TestAgentLoopCompaction:
         assert store.load("/tmp/status-project", "auto-compact-usage").total_tokens == 15
 
     async def test_auto_compact_returns_none_without_prompt(self, mock_provider, mock_registry):
-        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        session_storage = MagicMock()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=session_storage,
+        )
         loop.context_manager = MagicMock()
         loop.context_manager.build_compaction_prompt.return_value = ""
 
         assert await loop._auto_compact() is None
+        session_storage.save.assert_not_called()
+
+    async def test_auto_compact_does_not_persist_on_provider_error(self, mock_provider, mock_registry):
+        mock_provider.complete = AsyncMock(side_effect=RuntimeError("boom"))
+        session_storage = MagicMock()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=session_storage,
+        )
+        loop.context_manager = MagicMock()
+        loop.context_manager.build_compaction_prompt.return_value = "compact me"
+
+        assert await loop._auto_compact() is None
+        session_storage.save.assert_not_called()
 
     async def test_compact_returns_success_with_tokens(self, mock_provider, mock_registry):
         mock_provider.complete = AsyncMock(return_value=SimpleNamespace(text="summary"))
@@ -855,6 +1814,36 @@ class TestAgentLoopCompaction:
 
         assert result.status == "success"
         assert (result.original_tokens, result.compacted_tokens) == (900, 300)
+
+    async def test_compact_persists_compacted_session(self, mock_provider, mock_registry):
+        from iac_code.agent.message import Message
+
+        mock_provider.complete = AsyncMock(return_value=SimpleNamespace(text="summary"))
+        session_storage = MagicMock()
+        compacted_messages = [Message(role="user", content="[Conversation Summary]\nsummary")]
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="manual-compact-session",
+            cwd="/tmp/status-project",
+            session_storage=session_storage,
+        )
+        loop._current_git_branch = "dev"
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_messages.return_value = compacted_messages
+        loop.context_manager.build_compaction_prompt.return_value = "compact me"
+        loop.context_manager.apply_compaction.return_value = (900, 300)
+
+        result = await loop.compact()
+
+        assert result.status == "success"
+        session_storage.save.assert_called_once_with(
+            "/tmp/status-project",
+            "manual-compact-session",
+            compacted_messages,
+            git_branch="dev",
+        )
 
     async def test_compact_records_response_usage(self, mock_provider, mock_registry, tmp_path):
         from iac_code.services.session_usage import SessionUsageStore
@@ -890,16 +1879,29 @@ class TestAgentLoopCompaction:
         assert store.load("/tmp/status-project", "manual-compact-usage").total_tokens == 19
 
     async def test_compact_returns_empty_when_no_messages(self, mock_provider, mock_registry):
-        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        session_storage = MagicMock()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=session_storage,
+        )
         loop.context_manager = MagicMock()
         loop.context_manager.get_messages.return_value = []
 
         result = await loop.compact()
 
         assert result.status == "empty"
+        session_storage.save.assert_not_called()
 
     async def test_compact_returns_too_short_when_all_in_preserve_window(self, mock_provider, mock_registry):
-        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        session_storage = MagicMock()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=session_storage,
+        )
         loop.context_manager = MagicMock()
         loop.context_manager.get_messages.return_value = [object()]
         loop.context_manager.build_compaction_prompt.return_value = ""
@@ -909,10 +1911,17 @@ class TestAgentLoopCompaction:
 
         assert result.status == "too_short"
         assert result.preserve_recent_turns == 3
+        session_storage.save.assert_not_called()
 
     async def test_compact_returns_failed_on_provider_error(self, mock_provider, mock_registry):
         mock_provider.complete = AsyncMock(side_effect=RuntimeError("boom"))
-        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        session_storage = MagicMock()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=session_storage,
+        )
         loop.context_manager = MagicMock()
         loop.context_manager.get_messages.return_value = [object()]
         loop.context_manager.build_compaction_prompt.return_value = "compact me"
@@ -920,11 +1929,28 @@ class TestAgentLoopCompaction:
         result = await loop.compact()
 
         assert result.status == "failed"
+        session_storage.save.assert_not_called()
 
 
 class TestAgentLoopHelpers:
     def test_reset_and_get_context_usage_delegate(self, mock_provider, mock_registry):
-        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        class FakeRecallService:
+            def __init__(self):
+                self.reset_called = False
+
+            def reset_stats(self):
+                self.reset_called = True
+
+            def get_stats_snapshot(self):
+                return {"last_status": "success"}
+
+        recall_service = FakeRecallService()
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            memory_recall_service=recall_service,
+        )
         loop.context_manager = MagicMock()
         loop.context_manager.get_usage.return_value = {"total_tokens": 10}
         loop._auto_loaded_skills.add("iac-aliyun")
@@ -935,6 +1961,7 @@ class TestAgentLoopHelpers:
         loop.context_manager.reset.assert_called_once()
         assert loop._auto_loaded_skills == set()
         assert usage == {"total_tokens": 10}
+        assert recall_service.reset_called is True
 
     def test_replace_session_clears_auto_loaded_skills(self, mock_provider, mock_registry):
         from iac_code.agent.message import Message

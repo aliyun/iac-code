@@ -20,11 +20,22 @@ O texto apos o nome do comando e passado como argumentos. Na tabela abaixo, `<ar
 | `/effort [level]` | Mostra ou altera o esforco de raciocinio do modelo ativo quando o modelo selecionado suporta controle de esforco. Com um nivel, aplica o valor solicitado se for valido para o modelo. Sem nivel, abre um seletor interativo no REPL ou imprime o esforco atual em contextos nao interativos. |
 | `/exit` | Sai do REPL interativo. Aliases: `/quit`, `/q`. |
 | `/help` | Mostra os comandos disponiveis e atalhos de teclado comuns dentro do REPL. Alias: `/?`. |
-| `/memory [<nome>\|search <consulta>\|delete <nome>\|help]` | Listar, ver, pesquisar ou excluir memórias salvas. A criação de memórias em linguagem natural continua sendo feita pelo assistente por meio da ferramenta de memória quando você pede que ele se lembre de algo. |
+| `/memory` | Abre o seletor de memória. Edite os arquivos `AGENTS.md` de projeto ou usuário, ative ou desative auto-memory e abra a pasta de auto-memory do projeto quando auto-memory estiver ativada. |
 | `/model [model_name]` | Mostra ou troca o modelo ativo. Com `model_name`, troca diretamente para esse modelo no provedor ativo. Sem argumento, abre um seletor interativo de modelos quando um provedor esta configurado, ou imprime o modelo atual quando nao ha UI de console disponivel. |
 | `/rename <nome>` | Nomear a sessão atual. Os nomes aparecem no banner de boas-vindas, na dica de saída e no seletor de `/resume`, e podem ser usados com `/resume` ou `--resume` quando identificam uma sessão de forma única. |
 | `/resume [id-da-sessao\|prefixo-unico-de-id\|nome-unico-da-sessao]` | Retomar uma sessão anterior. Com um argumento, o IaC Code resolve-o como ID exato, prefixo único de ID ou nome único de sessão. Sem argumento, abre o seletor interativo de sessões. Sessões de outros projetos imprimem um comando `cd ... && iac-code --resume <id>` em vez de trocar o projeto atual em tempo real. |
 | `/skills` | Abrir o seletor de gerenciamento de habilidades. Pesquise por nome ou descrição, ordene por nome/origem/tamanho e ative ou desative habilidades de usuário ou de projeto. Habilidades integradas permanecem bloqueadas e ativadas. |
-| `/status` | Mostrar o ID da sessão atual, provedor, modelo, região da Alibaba Cloud, diretório de trabalho, uso registrado de tokens de API, contagem de turnos e utilização do contexto. |
+| `/status` | Mostrar o ID da sessão atual, provedor, modelo, região da Alibaba Cloud, diretório de trabalho, uso registrado de tokens de API, contagem de turnos e utilização do contexto. No modo debug, também mostra contagens de side calls de memória e uso de tokens. |
 
 A lista exata de comandos pode mudar entre versoes. Use `/help` ou digite `/` no REPL para inspecionar os comandos disponiveis na sua versao instalada.
+
+## Memória
+
+Use `/memory` para editar os arquivos de memória que o IaC Code carrega na conversa:
+
+- A memória do projeto é salva em `AGENTS.md` na raiz do projeto por padrão.
+- A memória do usuário é salva em `AGENTS.md` no diretório de configuração em tempo de execução, `~/.iac-code/` por padrão.
+- Defina `IAC_CODE_INSTRUCTION_MEMORY_FILE` para usar outro nome de arquivo, por exemplo `IAC-CODE.md`.
+- O editor é um editor compacto em tela cheia no estilo Vim. Use `i`, `a` ou `o` para entrar no modo de inserção, `Esc` para voltar ao modo normal, `:wq` para salvar e `:q!` para descartar.
+- A linha `Auto-memory` pode ser alternada com `Enter`. Quando auto-memory está ativada, o IaC Code pode recuperar memórias de tópicos do projeto como contexto oculto da conversa.
+- A opção da pasta de auto-memory só aparece quando auto-memory está ativada.

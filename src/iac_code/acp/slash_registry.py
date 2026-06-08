@@ -1,8 +1,9 @@
 """ACP slash command registry.
 
 Manages commands supported over the ACP protocol.
-Only /compact, /clear, /debug, /memory, and /rename are allowed;
-all other slash commands are rejected with a clear message.
+Only /compact, /clear, /debug, /memory-folder, and /rename are executable;
+all other slash commands are rejected with a clear message listing public
+commands only.
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ from iac_code.services.session_storage import SessionStorage
 
 logger = logging.getLogger(__name__)
 
-ACP_SUPPORTED_COMMANDS: frozenset[str] = frozenset({"compact", "clear", "debug", "memory", "rename"})
+ACP_EXECUTABLE_COMMANDS: frozenset[str] = frozenset({"compact", "clear", "debug", "memory-folder", "rename"})
+ACP_PUBLIC_COMMANDS: frozenset[str] = frozenset({"compact", "clear", "debug", "rename"})
+ACP_SUPPORTED_COMMANDS = ACP_EXECUTABLE_COMMANDS
 
 
 class ACPSlashRegistry:
@@ -33,16 +36,16 @@ class ACPSlashRegistry:
     async def execute(self, text: str, agent_loop, **context) -> str:
         """Execute a slash command and return the result text.
 
-        If the command is not in :data:`ACP_SUPPORTED_COMMANDS`, returns a
-        rejection message listing available commands.
+        If the command is not in :data:`ACP_EXECUTABLE_COMMANDS`, returns a
+        rejection message listing public commands.
         """
         stripped = text.strip()
         parts = stripped[1:].split(None, 1)
         cmd_name = parts[0].lower() if parts else ""
         args_str = parts[1] if len(parts) > 1 else ""
 
-        if cmd_name not in ACP_SUPPORTED_COMMANDS:
-            supported = ", ".join(f"/{c}" for c in sorted(ACP_SUPPORTED_COMMANDS))
+        if cmd_name not in ACP_EXECUTABLE_COMMANDS:
+            supported = ", ".join(f"/{c}" for c in sorted(ACP_PUBLIC_COMMANDS))
             return _("Command '/{cmd_name}' is not supported over ACP. Supported commands: {supported}").format(
                 cmd_name=cmd_name, supported=supported
             )
@@ -53,7 +56,7 @@ class ACPSlashRegistry:
             return await self._handle_clear(agent_loop)
         if cmd_name == "debug":
             return self._handle_debug(args_str)
-        if cmd_name == "memory":
+        if cmd_name == "memory-folder":
             return self._handle_memory(args_str, context.get("memory_manager"))
         if cmd_name == "rename":
             return self._handle_rename(args_str, agent_loop)

@@ -51,10 +51,71 @@ def _render_status_panel(snapshot: dict[str, Any]) -> Panel:
         text.append("\n")
     text.append("\n")
 
+    memory_recall = snapshot.get("memory_recall")
+    if _should_show_memory_recall() and isinstance(memory_recall, dict) and memory_recall:
+        _append_memory_recall(text, memory_recall)
+        text.append("\n")
+
     _append_line(text, _("Turns"), "{} / {}".format(snapshot.get("turn_count", 0), snapshot.get("max_turns", 0)))
     _append_line(text, _("Context"), _format_context(snapshot.get("context_usage") or {}))
 
     return Panel(Group(text), title=_("Session Status"), border_style="cyan", expand=False)
+
+
+def _should_show_memory_recall() -> bool:
+    from iac_code.utils.log import is_debug_enabled
+
+    return is_debug_enabled()
+
+
+def _append_memory_recall(text: Text, memory_recall: dict[str, Any]) -> None:
+    text.append(_("Memory Recall"), style="bold")
+    text.append("\n")
+    in_flight = int(memory_recall.get("in_flight_side_queries") or 0)
+    side_query_summary = _("{total} total, {success} success, {failed} failed, {cancelled} cancelled").format(
+        total=int(memory_recall.get("total_side_queries") or 0),
+        success=int(memory_recall.get("successful_side_queries") or 0),
+        failed=int(memory_recall.get("failed_side_queries") or 0),
+        cancelled=int(memory_recall.get("cancelled_side_queries") or 0),
+    )
+    if in_flight > 0:
+        side_query_summary = _("{summary}, {in_flight} in progress").format(
+            summary=side_query_summary,
+            in_flight=in_flight,
+        )
+    _append_line(
+        text,
+        _("Side queries"),
+        side_query_summary,
+        indent=2,
+    )
+    last_attempt_files = [str(item) for item in memory_recall.get("last_selected_files") or []]
+    _append_line(
+        text,
+        _("Last attempt"),
+        _("{status} in {duration} ms, {count} files selected").format(
+            status=str(memory_recall.get("last_status") or "skipped"),
+            duration=int(memory_recall.get("last_duration_ms") or 0),
+            count=len(last_attempt_files),
+        ),
+        indent=2,
+    )
+    last_side_query_files = [str(item) for item in memory_recall.get("last_side_query_selected_files") or []]
+    if int(memory_recall.get("total_side_queries") or 0) > 0:
+        _append_line(
+            text,
+            _("Last side call"),
+            _("{status} in {duration} ms, {count} files selected").format(
+                status=str(memory_recall.get("last_side_query_status") or "skipped"),
+                duration=int(memory_recall.get("last_side_query_duration_ms") or 0),
+                count=len(last_side_query_files),
+            ),
+            indent=2,
+        )
+    if last_side_query_files:
+        _append_line(text, _("Last files"), ", ".join(last_side_query_files[:3]), indent=2)
+    _append_memory_usage(text, _("Side call usage"), memory_recall.get("total_usage"), indent=2, include_events=True)
+    _append_memory_usage(text, _("Last usage"), memory_recall.get("last_usage"), indent=2)
 
 
 def _append_line(text: Text, label: str, value: str, *, indent: int = 0) -> None:
@@ -65,6 +126,44 @@ def _append_line(text: Text, label: str, value: str, *, indent: int = 0) -> None
     text.append(" " * (padding + 1))
     text.append(str(value))
     text.append("\n")
+
+
+def _append_block(text: Text, value: str, *, indent: int = 0) -> None:
+    prefix = " " * indent
+    for line in value.splitlines():
+        text.append(prefix)
+        text.append(line, style="dim")
+        text.append("\n")
+
+
+def _append_memory_usage(
+    text: Text,
+    label: str,
+    usage: Any,
+    *,
+    indent: int = 0,
+    include_events: bool = False,
+) -> None:
+    if not isinstance(usage, dict) or not usage.get("has_recorded_usage"):
+        _append_line(text, label, _("No token usage reported"), indent=indent)
+        return
+
+    if include_events:
+        value = _("{events} records, input {input}, output {output}, cache read {cache_read}, total {total}").format(
+            events=_format_int(int(usage.get("recorded_events") or 0)),
+            input=_format_int(int(usage.get("input_tokens") or 0)),
+            output=_format_int(int(usage.get("output_tokens") or 0)),
+            cache_read=_format_int(int(usage.get("cache_read_input_tokens") or 0)),
+            total=_format_int(int(usage.get("total_tokens") or 0)),
+        )
+    else:
+        value = _("input {input}, output {output}, cache read {cache_read}, total {total}").format(
+            input=_format_int(int(usage.get("input_tokens") or 0)),
+            output=_format_int(int(usage.get("output_tokens") or 0)),
+            cache_read=_format_int(int(usage.get("cache_read_input_tokens") or 0)),
+            total=_format_int(int(usage.get("total_tokens") or 0)),
+        )
+    _append_line(text, label, value, indent=indent)
 
 
 def _session_display(snapshot: dict[str, Any]) -> str:
