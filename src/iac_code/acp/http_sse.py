@@ -247,9 +247,39 @@ class HTTPConnectionBridge:
                     self._initialized.set()
                 else:
                     try:
-                        self._sse_queue.put_nowait(message)
-                    except asyncio.QueueFull:
-                        logger.warning("SSE queue full for connection %s, discarding message", self.connection_id[:8])
+                        # Apply backpressure: block until space is available
+                        # (up to a timeout) rather than silently discarding.
+                        await asyncio.wait_for(self._sse_queue.put(message), timeout=30.0)
+                    except asyncio.TimeoutError:
+                        # Client is not consuming events within a reasonable
+                        # window — send an error notification and tear down.
+                        logger.error(
+                            "SSE queue full for connection %s: client not consuming events, closing",
+                            self.connection_id[:8],
+                        )
+                        error_event = json.dumps(
+                            {
+                                "jsonrpc": "2.0",
+                                "method": "notifications/cancelled",
+                                "params": {
+                                    "reason": "SSE queue full: client is not consuming events",
+                                },
+                            }
+                        )
+                        # Make room by discarding the oldest pending event so
+                        # the error notification reaches the client.
+                        try:
+                            self._sse_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        try:
+                            self._sse_queue.put_nowait(error_event)
+                        except asyncio.QueueFull:
+                            pass
+                        # Break out of the read loop — the finally block will
+                        # send the sentinel and trigger connection teardown.
+                        fatal_error = True
+                        break
         except asyncio.CancelledError:
             raise
         except Exception:
