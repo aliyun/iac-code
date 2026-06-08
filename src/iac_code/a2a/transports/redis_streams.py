@@ -97,13 +97,18 @@ class RedisStreamsA2AClient:
 
     async def _read_responses(self, correlation_id: str) -> AsyncIterator[RedisStreamsMessage]:
         deadline = asyncio.get_running_loop().time() + self._timeout_seconds
+        # Start from "0-0" instead of "$" to avoid a race where the server
+        # responds before the first xread call.  After each batch we advance
+        # the cursor to the last entry ID we saw, which is the standard
+        # Redis Streams consumer pattern.
+        last_id = "0-0"
         consecutive_errors = 0
         max_consecutive_errors = 3
         while asyncio.get_running_loop().time() < deadline:
             try:
                 remaining = deadline - asyncio.get_running_loop().time()
                 rows = await asyncio.wait_for(
-                    self._redis.xread({self._response_stream: "$"}, count=1, block=100),
+                    self._redis.xread({self._response_stream: last_id}, count=10, block=100),
                     timeout=max(0.001, min(0.2, remaining)),
                 )
                 consecutive_errors = 0
@@ -121,6 +126,8 @@ class RedisStreamsA2AClient:
                 continue
             for _stream, entries in rows:
                 for entry_id, fields in entries:
+                    # Advance cursor past this entry so we don't re-read it.
+                    last_id = entry_id if isinstance(entry_id, str) else entry_id.decode("utf-8")
                     message = parse_redis_entry(entry_id, fields)
                     if message.correlation_id == correlation_id:
                         yield message
