@@ -2,7 +2,7 @@
   <img src="../website/static/img/logo-with-front.png" alt="iac-code" width="200">
 </p>
 <p align="center">
-  <em>自然言語インタラクションを通じて、Alibaba Cloud のリソースオーケストレーションテンプレート（ROS / Terraform）を生成・管理する AI 駆動の Infrastructure as Code（IaC）アシスタントです。</em>
+  <em>自然言語インタラクションを通じて、クラウドインフラのテンプレートを生成・管理する AI 駆動の Infrastructure as Code（IaC）アシスタントです。現在は Alibaba Cloud ROS と Terraform ワークフローをサポートしています。</em>
 </p>
 <p align="center">
   <a href="https://github.com/aliyun/iac-code/actions/workflows/test.yml"><img src="https://github.com/aliyun/iac-code/actions/workflows/test.yml/badge.svg" alt="Test"></a>

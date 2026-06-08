@@ -6,7 +6,7 @@ description: O que o IaC Code faz e por onde comecar.
 
 # Visao geral
 
-O IaC Code e um assistente de Infrastructure as Code com tecnologia de IA para a Alibaba Cloud. Ele ajuda utilizadores e operadores de recursos na nuvem a gerar, implantar e gerenciar templates ROS e Terraform atraves de um fluxo de trabalho no terminal.
+O IaC Code e um assistente de Infrastructure as Code com tecnologia de IA para infraestrutura em nuvem. Ele ajuda utilizadores e operadores de recursos na nuvem a gerar, implantar e gerenciar templates de infraestrutura atraves de um fluxo de trabalho no terminal. A arquitetura foi pensada para fluxos de trabalho multicloud; a versao atual oferece suporte a workflows Alibaba Cloud ROS e Terraform.
 
 Capacidades principais:
 

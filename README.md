@@ -2,7 +2,7 @@
   <img src="website/static/img/logo-with-front.png" alt="iac-code" width="200">
 </p>
 <p align="center">
-  <em>AI-powered Infrastructure as Code assistant for Alibaba Cloud (ROS / Terraform) through natural language interaction.</em>
+  <em>AI-powered Infrastructure as Code assistant for cloud infrastructure through natural language interaction. Currently supports Alibaba Cloud ROS and Terraform workflows.</em>
 </p>
 <p align="center">
   <a href="https://github.com/aliyun/iac-code/actions/workflows/test.yml"><img src="https://github.com/aliyun/iac-code/actions/workflows/test.yml/badge.svg" alt="Test"></a>

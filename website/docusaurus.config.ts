@@ -4,8 +4,8 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'iac-code',
-  tagline: 'AI-powered Infrastructure as Code for Alibaba Cloud',
-  favicon: 'img/logo.png',
+  tagline: 'AI-powered Infrastructure as Code for cloud infrastructure',
+  favicon: 'img/favicon.png',
 
   url: process.env.SITE_URL ?? 'https://aliyun.github.io',
   baseUrl: process.env.BASE_URL ?? '/iac-code/',
@@ -121,7 +121,7 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
+      style: 'light',
       links: [
         {
           title: 'Docs',
