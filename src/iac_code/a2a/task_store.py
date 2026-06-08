@@ -51,12 +51,13 @@ class A2ATaskStore(TaskStore):
     async def save(self, task: Task, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
         task_id = validate_protocol_id(task.id)
-        owner_tasks = self._sdk_tasks.setdefault(owner, {})
-        previous = owner_tasks.get(task_id)
-        if previous is not None:
-            self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
-        owner_tasks[task_id] = _copy_task(task)
-        self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
+        async with self._mutation_lock:
+            owner_tasks = self._sdk_tasks.setdefault(owner, {})
+            previous = owner_tasks.get(task_id)
+            if previous is not None:
+                self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
+            owner_tasks[task_id] = _copy_task(task)
+            self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
 
     async def delete(self, task_id: str, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)

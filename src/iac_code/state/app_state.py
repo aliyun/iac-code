@@ -110,7 +110,7 @@ class AppStateStore:
 
     def _notify(self) -> None:
         """Notify all listeners"""
-        for listener in self._listeners:
+        for listener in list(self._listeners):
             listener(self._state)
 
 

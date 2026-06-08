@@ -199,9 +199,7 @@ class AgentTool(Tool):
                 agent_type=agent_type,
             )
             background_task = asyncio.create_task(self._run_background(task_id, prompt, agent_type, context))
-            attach_task = getattr(self._task_manager, "attach_task", None)
-            if callable(attach_task):
-                attach_task(task_id, background_task)
+            self._task_manager.attach_task(task_id, background_task)
             background_task.add_done_callback(self._consume_background_task_exception)
             if event_queue is not None:
                 await event_queue.put(None)
