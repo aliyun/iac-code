@@ -444,7 +444,6 @@ def _memory_sections(repl: object) -> list[dict[str, str]]:
     sections: list[dict[str, str]] = []
     for title, attr in [
         (_("Instruction Memory"), "instruction_memory_content"),
-        (_("Project Memory Index"), "memory_index_content"),
         (_("Memory Mechanics"), "memory_mechanics_content"),
     ]:
         content = str(getattr(memory_context, attr, "") or "").strip()

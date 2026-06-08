@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from iac_code.memory.memory_manager import MemoryManager
 from iac_code.utils.file_security import ensure_private_dir
 from iac_code.utils.project_paths import find_git_worktree_root, sanitize_path
 
-INSTRUCTION_MEMORY_FILE = "IAC-CODE.md"
+DEFAULT_INSTRUCTION_MEMORY_FILE = "AGENTS.md"
+INSTRUCTION_MEMORY_FILE = DEFAULT_INSTRUCTION_MEMORY_FILE
+INSTRUCTION_MEMORY_FILE_ENV = "IAC_CODE_INSTRUCTION_MEMORY_FILE"
 _MEMORY_SETTINGS_KEY = "memory"
 _AUTO_MEMORY_SETTINGS_KEY = "autoMemory"
 
@@ -25,7 +28,6 @@ class MemoryContext:
         return any(
             (
                 self.instruction_memory_content.strip(),
-                self.memory_index_content.strip(),
                 self.memory_mechanics_content.strip(),
             )
         )
@@ -49,8 +51,9 @@ def get_project_memory_dir(cwd: str) -> Path:
 class ProjectMemoryRuntime:
     def __init__(self, cwd: str):
         self.project_root = resolve_project_root(cwd)
-        self.user_instruction_path = get_config_dir() / INSTRUCTION_MEMORY_FILE
-        self.project_instruction_path = self.project_root / INSTRUCTION_MEMORY_FILE
+        self.instruction_memory_file = get_instruction_memory_file_name()
+        self.user_instruction_path = get_config_dir() / self.instruction_memory_file
+        self.project_instruction_path = self.project_root / self.instruction_memory_file
         self.auto_memory_dir = get_project_memory_dir(cwd)
         self.memory_manager = MemoryManager(memory_dir=str(self.auto_memory_dir))
 
@@ -67,23 +70,35 @@ class ProjectMemoryRuntime:
 
     def build_memory_context(self) -> MemoryContext:
         instruction_content = self._build_instruction_memory_content()
-        index_content = self.memory_manager.get_index_content().strip()
         return MemoryContext(
             instruction_memory_content=instruction_content,
-            memory_index_content=index_content,
-            memory_mechanics_content=_memory_mechanics_content(is_auto_memory_enabled()),
+            memory_mechanics_content=_memory_mechanics_content(
+                is_auto_memory_enabled(),
+                instruction_memory_file=self.instruction_memory_file,
+            ),
         )
 
     def _build_instruction_memory_content(self) -> str:
         parts: list[str] = []
         for label, path in (
-            ("User IAC-CODE.md", self.user_instruction_path),
-            ("Project IAC-CODE.md", self.project_instruction_path),
+            (f"User {self.instruction_memory_file}", self.user_instruction_path),
+            (f"Project {self.instruction_memory_file}", self.project_instruction_path),
         ):
             content = _read_text_if_present(path)
             if content:
                 parts.append(f"## {label}\n{content}")
         return "\n\n".join(parts)
+
+
+def get_instruction_memory_file_name() -> str:
+    configured = os.environ.get(INSTRUCTION_MEMORY_FILE_ENV, "").strip()
+    if not configured:
+        return DEFAULT_INSTRUCTION_MEMORY_FILE
+    if "/" in configured or "\\" in configured:
+        return DEFAULT_INSTRUCTION_MEMORY_FILE
+    if configured in {"", ".", ".."}:
+        return DEFAULT_INSTRUCTION_MEMORY_FILE
+    return configured
 
 
 def _read_text_if_present(path: Path) -> str:
@@ -114,7 +129,7 @@ def save_auto_memory_enabled(enabled: bool) -> None:
     _save_yaml(get_settings_path(), settings)
 
 
-def _memory_mechanics_content(auto_memory_enabled: bool) -> str:
+def _memory_mechanics_content(auto_memory_enabled: bool, *, instruction_memory_file: str) -> str:
     auto_memory_line = (
         "- Auto-memory is on; topic memories may be recalled and updated when the user asks."
         if auto_memory_enabled
@@ -123,10 +138,11 @@ def _memory_mechanics_content(auto_memory_enabled: bool) -> str:
     return "\n".join(
         [
             "Use memory carefully:",
-            "- IAC-CODE.md files contain always-on user and project instructions.",
-            "- MEMORY.md is an always-on index of project topic memories.",
+            f"- {instruction_memory_file} files contain always-on user and project instructions.",
+            "- MEMORY.md is the project auto-memory topic index; it is used by side recall and is not always injected.",
             auto_memory_line,
-            "- Topic files are not always injected; use read_memory to inspect relevant topics.",
+            "- Topic files are selected by side recall and injected as hidden conversation context when relevant.",
+            "- Use read_memory to inspect relevant topics that were not automatically recalled.",
             "- Use write_memory only when the user explicitly asks to remember or preserve information.",
             "- Treat recalled memories as potentially stale and verify before relying on time-sensitive facts.",
         ]

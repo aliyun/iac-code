@@ -1394,10 +1394,6 @@ msgid "Instruction Memory"
 msgstr "指令记忆"
 
 #: src/iac_code/commands/prompt.py
-msgid "Project Memory Index"
-msgstr "项目记忆索引"
-
-#: src/iac_code/commands/prompt.py
 msgid "Memory Mechanics"
 msgstr "记忆机制"
 
@@ -3339,4 +3335,7 @@ msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 np
 
 #~ msgid "{n} day{s} ago"
 #~ msgstr "{n} 天前"
+
+#~ msgid "Project Memory Index"
+#~ msgstr "项目记忆索引"
 

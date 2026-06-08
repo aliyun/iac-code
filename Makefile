@@ -64,10 +64,10 @@ translate: ## Extract, update and compile translations
 	done
 
 run: ## Run iac-code
-	uv run iac-code
+	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md uv run iac-code
 
 dev: ## Run iac-code in debug mode
-	uv run iac-code --debug
+	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md uv run iac-code --debug
 
 clean: ## Clean build artifacts
 	rm -rf .ruff_cache .pytest_cache dist build htmlcov .coverage coverage.xml

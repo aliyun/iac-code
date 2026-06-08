@@ -208,13 +208,11 @@ def _build_actions_section() -> str:
 
 
 def _build_project_instructions(cwd: str) -> str:
-    from iac_code import __release_date__
+    from iac_code.memory.project_memory import get_instruction_memory_file_name
 
-    if not __release_date__.strip():
-        return ""
-
+    instruction_memory_file = get_instruction_memory_file_name()
     instructions: list[str] = []
-    search_names = ["AGENTS.md", ".iac-code/AGENTS.md"]
+    search_names = [instruction_memory_file, os.path.join(".iac-code", instruction_memory_file)]
     current = os.path.abspath(cwd)
     from iac_code.utils.project_paths import find_git_worktree_root
 
@@ -252,13 +250,10 @@ def _build_memory_section(memory_content: str) -> str:
 def _build_memory_context_section(memory_context: object) -> str:
     parts: list[str] = []
     instruction_memory = str(getattr(memory_context, "instruction_memory_content", "") or "").strip()
-    memory_index = str(getattr(memory_context, "memory_index_content", "") or "").strip()
     memory_mechanics = str(getattr(memory_context, "memory_mechanics_content", "") or "").strip()
 
     if instruction_memory:
         parts.append(f"## Instruction Memory\n{instruction_memory}")
-    if memory_index:
-        parts.append(f"## Project Memory Index\n{memory_index}")
     if memory_mechanics:
         parts.append(f"## Memory Mechanics\n{memory_mechanics}")
     if not parts:
@@ -323,7 +318,7 @@ def build_system_prompt(
         is_static=False,
     )
 
-    project_instructions = _build_project_instructions(cwd)
+    project_instructions = "" if memory_context is not None else _build_project_instructions(cwd)
     if project_instructions:
         builder.add_cached_section(
             "project_instructions",

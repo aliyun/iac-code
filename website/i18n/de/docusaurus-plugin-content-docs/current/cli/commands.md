@@ -20,7 +20,7 @@ Text nach dem Befehlsnamen wird als Argumente uebergeben. In der folgenden Tabel
 | `/effort [level]` | Zeigen oder aendern Sie den Denkaufwand fuer das aktive Modell, wenn das ausgewaehlte Modell Aufwandsteuerung unterstuetzt. Mit einem Level wird der angeforderte Wert angewendet, wenn er fuer das Modell gueltig ist. Ohne Level wird im REPL eine interaktive Auswahl geoeffnet, oder der aktuelle Aufwand wird in nicht-interaktiven Kontexten ausgegeben. |
 | `/exit` | Beenden Sie das interaktive REPL. Aliase: `/quit`, `/q`. |
 | `/help` | Zeigen Sie verfuegbare Befehle und gaengige Tastenkuerzel im REPL an. Alias: `/?`. |
-| `/memory` | Öffnet die Speicherauswahl. Bearbeiten Sie Projekt- oder Benutzerdateien `IAC-CODE.md`, schalten Sie auto-memory ein oder aus und öffnen Sie den auto-memory-Ordner des Projekts, wenn auto-memory aktiviert ist. |
+| `/memory` | Öffnet die Speicherauswahl. Bearbeiten Sie Projekt- oder Benutzerdateien `AGENTS.md`, schalten Sie auto-memory ein oder aus und öffnen Sie den auto-memory-Ordner des Projekts, wenn auto-memory aktiviert ist. |
 | `/model [model_name]` | Zeigen oder wechseln Sie das aktive Modell. Mit `model_name` wird direkt zu diesem Modell fuer den aktiven Anbieter gewechselt. Ohne Argument wird eine interaktive Modellauswahl geoeffnet, wenn ein Anbieter konfiguriert ist, oder das aktuelle Modell wird ausgegeben, wenn keine Konsolen-UI verfuegbar ist. |
 | `/rename <name>` | Die aktuelle Sitzung benennen. Namen erscheinen im Willkommensbanner, im Exit-Hinweis und in der `/resume`-Auswahl und können mit `/resume` oder `--resume` verwendet werden, wenn sie eine Sitzung eindeutig identifizieren. |
 | `/resume [sitzungs-id\|eindeutiges-id-präfix\|eindeutiger-sitzungsname]` | Eine frühere Sitzung fortsetzen. Mit einem Argument löst IaC Code es als exakte Sitzungs-ID, eindeutiges ID-Präfix oder eindeutigen Sitzungsnamen auf. Ohne Argument wird die interaktive Sitzungsauswahl geöffnet. Projektübergreifende Sitzungen geben einen `cd ... && iac-code --resume <id>`-Befehl aus, anstatt das aktuelle Projekt direkt zu wechseln. |
@@ -33,8 +33,9 @@ Die genaue Befehlsliste kann sich zwischen Versionen aendern. Verwenden Sie `/he
 
 Verwenden Sie `/memory`, um die Speicherdateien zu bearbeiten, die IaC Code in die Unterhaltung lädt:
 
-- Projektspeicher wird in `IAC-CODE.md` im Projektstamm gespeichert.
-- Benutzerspeicher wird in `IAC-CODE.md` im Laufzeit-Konfigurationsverzeichnis gespeichert, standardmäßig `~/.iac-code/`.
+- Projektspeicher wird standardmäßig in `AGENTS.md` im Projektstamm gespeichert.
+- Benutzerspeicher wird in `AGENTS.md` im Laufzeit-Konfigurationsverzeichnis gespeichert, standardmäßig `~/.iac-code/`.
+- Setzen Sie `IAC_CODE_INSTRUCTION_MEMORY_FILE`, um einen anderen Dateinamen zu verwenden, zum Beispiel `IAC-CODE.md`.
 - Der Editor ist ein kompakter Vollbild-Editor im Vim-Stil. Verwenden Sie `i`, `a` oder `o`, um in den Einfügemodus zu wechseln, `Esc`, um zum Normalmodus zurückzukehren, `:wq` zum Speichern und `:q!` zum Verwerfen.
 - Die Zeile `Auto-memory` kann mit `Enter` umgeschaltet werden. Wenn auto-memory aktiviert ist, kann IaC Code relevante Projektthemen-Speicher als versteckten Unterhaltungskontext abrufen.
 - Die Option für den auto-memory-Ordner erscheint nur, wenn auto-memory aktiviert ist.

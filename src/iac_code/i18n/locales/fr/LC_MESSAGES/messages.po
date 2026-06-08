@@ -1445,10 +1445,6 @@ msgid "Instruction Memory"
 msgstr "Mémoire d’instructions"
 
 #: src/iac_code/commands/prompt.py
-msgid "Project Memory Index"
-msgstr "Index de mémoire du projet"
-
-#: src/iac_code/commands/prompt.py
 msgid "Memory Mechanics"
 msgstr "Mécanique de mémoire"
 
@@ -3474,4 +3470,7 @@ msgstr ""
 
 #~ msgid "{n} day{s} ago"
 #~ msgstr "il y a {n} jour{s}"
+
+#~ msgid "Project Memory Index"
+#~ msgstr "Index de mémoire du projet"
 

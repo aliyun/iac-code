@@ -28,7 +28,7 @@ CLI 引数 > 環境変数 > 設定ファイル
 | `.credentials.yml` | LLM 認証情報 |
 | `.cloud-credentials.yml` | クラウドプロバイダー認証情報 |
 | `settings.yml` | 選択されたプロバイダー、モデル、および関連設定 |
-| `IAC-CODE.md` | 永続的な指示として読み込まれるユーザーメモリ |
+| `AGENTS.md` | 永続的な指示として読み込まれるユーザーメモリ |
 | history files | 対話ワークフローの入力履歴 |
 
 このディレクトリのファイルにはシークレットやローカル設定が含まれる場合があるため、コミットや共有は避けてください。
@@ -39,8 +39,10 @@ IaC Code には公開されているメモリ場所が 2 つあります。
 
 | 場所 | 用途 |
 |---|---|
-| `<project-root>/IAC-CODE.md` | プロジェクトメモリ。プロジェクトで作業する全員に役立つ指示であれば、コミットできます。 |
-| `<config-dir>/IAC-CODE.md` | ユーザーメモリ。`IAC_CODE_CONFIG_DIR` に従い、ローカルユーザー専用です。 |
+| `<project-root>/AGENTS.md` | プロジェクトメモリ。プロジェクトで作業する全員に役立つ指示であれば、コミットできます。 |
+| `<config-dir>/AGENTS.md` | ユーザーメモリ。`IAC_CODE_CONFIG_DIR` に従い、ローカルユーザー専用です。 |
+
+別の instruction memory ファイル名を使うには `IAC_CODE_INSTRUCTION_MEMORY_FILE` を設定します。例: `IAC-CODE.md`。
 
 プロジェクトの auto-memory トピックファイルは以下に保存されます。
 
@@ -48,7 +50,7 @@ IaC Code には公開されているメモリ場所が 2 つあります。
 <config-dir>/projects/<project-key>/memory/
 ```
 
-そのフォルダー内の `MEMORY.md` はトピックインデックスです。auto-memory がオンの場合、IaC Code は side call を使って関連するトピックファイルを選択し、隠し会話コンテキストとして追加できます。
+そのフォルダー内の `MEMORY.md` は auto-memory side call が使うトピックインデックスです。常時コンテキストとしては読み込まれません。auto-memory がオンの場合、IaC Code は関連するトピックファイルを選択し、隠し会話コンテキストとして追加できます。
 
 ## プロジェクト設定
 

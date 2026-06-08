@@ -28,7 +28,7 @@ Common files:
 | `.credentials.yml` | LLM credentials |
 | `.cloud-credentials.yml` | Cloud provider credentials |
 | `settings.yml` | Selected provider, model, and related settings |
-| `IAC-CODE.md` | User memory loaded as persistent instructions |
+| `AGENTS.md` | User memory loaded as persistent instructions |
 | history files | Input history for interactive workflows |
 
 Avoid committing or sharing files from this directory because they can contain secrets or local preferences.
@@ -39,8 +39,10 @@ IaC Code has two public memory locations:
 
 | Location | Purpose |
 |---|---|
-| `<project-root>/IAC-CODE.md` | Project memory. This can be committed when the instructions are useful for everyone working in the project. |
-| `<config-dir>/IAC-CODE.md` | User memory. This follows `IAC_CODE_CONFIG_DIR` and is private to the local user. |
+| `<project-root>/AGENTS.md` | Project memory. This can be committed when the instructions are useful for everyone working in the project. |
+| `<config-dir>/AGENTS.md` | User memory. This follows `IAC_CODE_CONFIG_DIR` and is private to the local user. |
+
+Set `IAC_CODE_INSTRUCTION_MEMORY_FILE` to use another instruction memory filename, for example `IAC-CODE.md`.
 
 Project auto-memory topic files are stored under:
 
@@ -48,7 +50,7 @@ Project auto-memory topic files are stored under:
 <config-dir>/projects/<project-key>/memory/
 ```
 
-`MEMORY.md` in that folder is the topic index. When auto-memory is on, IaC Code may use a side call to select relevant topic files and add them as hidden conversation context.
+`MEMORY.md` in that folder is the topic index used by auto-memory side calls. It is not loaded as always-on context. When auto-memory is on, IaC Code may select relevant topic files and add them as hidden conversation context.
 
 ## Project Settings
 

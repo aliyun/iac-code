@@ -164,8 +164,8 @@ def test_create_agent_runtime_uses_project_memory_context(tmp_path, monkeypatch)
     monkeypatch.chdir(project)
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
     (config_dir).mkdir()
-    (config_dir / "IAC-CODE.md").write_text("User memory instruction\n", encoding="utf-8")
-    (project / "IAC-CODE.md").write_text("Project memory instruction\n", encoding="utf-8")
+    (config_dir / "AGENTS.md").write_text("User memory instruction\n", encoding="utf-8")
+    (project / "AGENTS.md").write_text("Project memory instruction\n", encoding="utf-8")
     topic_manager = MemoryManager(memory_dir=str(get_project_memory_dir(str(project))))
     topic_manager.save(
         "topic-a",
@@ -180,7 +180,7 @@ def test_create_agent_runtime_uses_project_memory_context(tmp_path, monkeypatch)
     assert runtime.agent_loop._memory_recall_service is not None
     assert "User memory instruction" in runtime.agent_loop.system_prompt
     assert "Project memory instruction" in runtime.agent_loop.system_prompt
-    assert "topic-a.md" in runtime.agent_loop.system_prompt
+    assert "topic-a.md" not in runtime.agent_loop.system_prompt
     assert "Topic body should not be always injected" not in runtime.agent_loop.system_prompt
 
 

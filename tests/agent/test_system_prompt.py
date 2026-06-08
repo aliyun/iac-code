@@ -113,7 +113,7 @@ class TestBuildSystemPrompt:
         memory_lines = [line for line in lines if line.strip().startswith("# Memory")]
         assert len(memory_lines) == 0
 
-    def test_explicit_memory_context_includes_instruction_index_and_mechanics(self):
+    def test_explicit_memory_context_excludes_auto_memory_index(self):
         from iac_code.memory.project_memory import MemoryContext
 
         context = MemoryContext(
@@ -126,7 +126,8 @@ class TestBuildSystemPrompt:
 
         assert "User instruction" in prompt
         assert "Project instruction" in prompt
-        assert "topic-a.md" in prompt
+        assert "topic-a.md" not in prompt
+        assert "Project Memory Index" not in prompt
         assert "read_memory" in prompt
         assert "Topic body should not be always injected" not in prompt
 
@@ -144,7 +145,7 @@ class TestBuildSystemPrompt:
         assert "worktree instructions" in prompt
         assert "parent instructions" not in prompt
 
-    def test_project_instructions_skipped_for_local_build(self, tmp_path: Path, monkeypatch):
+    def test_project_instructions_loaded_for_local_build(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr("iac_code.__release_date__", "")
         cwd = tmp_path / "repo"
         cwd.mkdir()
@@ -153,8 +154,23 @@ class TestBuildSystemPrompt:
 
         prompt = build_system_prompt(cwd=str(cwd))
 
-        assert "local build instructions" not in prompt
-        assert "# Project Instructions" not in prompt
+        assert "local build instructions" in prompt
+        assert "# Project Instructions" in prompt
+
+    def test_project_instructions_not_duplicated_when_memory_context_supplies_them(self, tmp_path: Path):
+        from iac_code.memory.project_memory import MemoryContext
+
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        (cwd / ".git").mkdir()
+        (cwd / "AGENTS.md").write_text("project instructions", encoding="utf-8")
+
+        prompt = build_system_prompt(
+            cwd=str(cwd),
+            memory_context=MemoryContext(instruction_memory_content="## Project AGENTS.md\nproject instructions"),
+        )
+
+        assert prompt.count("project instructions") == 1
 
     def test_volatile_current_time_stays_out_of_static_cache_prefix(self, monkeypatch):
         from iac_code.agent import system_prompt

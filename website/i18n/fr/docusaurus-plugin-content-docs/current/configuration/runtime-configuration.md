@@ -28,7 +28,7 @@ Fichiers courants :
 | `.credentials.yml` | Identifiants LLM |
 | `.cloud-credentials.yml` | Identifiants du fournisseur cloud |
 | `settings.yml` | Fournisseur sélectionné, modèle et paramètres associés |
-| `IAC-CODE.md` | Mémoire utilisateur chargée comme instructions persistantes |
+| `AGENTS.md` | Mémoire utilisateur chargée comme instructions persistantes |
 | history files | Historique de saisie pour les flux de travail interactifs |
 
 Évitez de commiter ou de partager les fichiers de ce répertoire car ils peuvent contenir des secrets ou des préférences locales.
@@ -39,8 +39,10 @@ IaC Code possède deux emplacements mémoire publics :
 
 | Emplacement | Objectif |
 |---|---|
-| `<project-root>/IAC-CODE.md` | Mémoire de projet. Elle peut être commitée lorsque les instructions sont utiles à toutes les personnes travaillant sur le projet. |
-| `<config-dir>/IAC-CODE.md` | Mémoire utilisateur. Elle suit `IAC_CODE_CONFIG_DIR` et reste privée pour l'utilisateur local. |
+| `<project-root>/AGENTS.md` | Mémoire de projet. Elle peut être commitée lorsque les instructions sont utiles à toutes les personnes travaillant sur le projet. |
+| `<config-dir>/AGENTS.md` | Mémoire utilisateur. Elle suit `IAC_CODE_CONFIG_DIR` et reste privée pour l'utilisateur local. |
+
+Définissez `IAC_CODE_INSTRUCTION_MEMORY_FILE` pour utiliser un autre nom de fichier de mémoire d'instructions, par exemple `IAC-CODE.md`.
 
 Les fichiers de sujets auto-memory du projet sont stockés sous :
 
@@ -48,7 +50,7 @@ Les fichiers de sujets auto-memory du projet sont stockés sous :
 <config-dir>/projects/<project-key>/memory/
 ```
 
-`MEMORY.md` dans ce dossier est l'index des sujets. Lorsque auto-memory est activé, IaC Code peut utiliser un side call pour sélectionner les fichiers de sujets pertinents et les ajouter comme contexte de conversation masqué.
+`MEMORY.md` dans ce dossier est l'index des sujets utilisé par les side calls auto-memory. Il n'est pas chargé comme contexte permanent. Lorsque auto-memory est activé, IaC Code peut sélectionner des fichiers de sujets pertinents et les ajouter comme contexte de conversation masqué.
 
 ## Paramètres du projet
 

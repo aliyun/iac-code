@@ -1440,10 +1440,6 @@ msgid "Instruction Memory"
 msgstr "Anweisungsspeicher"
 
 #: src/iac_code/commands/prompt.py
-msgid "Project Memory Index"
-msgstr "Projektspeicherindex"
-
-#: src/iac_code/commands/prompt.py
 msgid "Memory Mechanics"
 msgstr "Speichermechanik"
 
@@ -3476,4 +3472,7 @@ msgstr ""
 
 #~ msgid "{n} day{s} ago"
 #~ msgstr "vor {n} Tag{s}"
+
+#~ msgid "Project Memory Index"
+#~ msgstr "Projektspeicherindex"
 

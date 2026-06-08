@@ -28,7 +28,7 @@ Archivos comunes:
 | `.credentials.yml` | Credenciales de LLM |
 | `.cloud-credentials.yml` | Credenciales del proveedor de nube |
 | `settings.yml` | Proveedor seleccionado, modelo y configuraciones relacionadas |
-| `IAC-CODE.md` | Memoria de usuario cargada como instrucciones persistentes |
+| `AGENTS.md` | Memoria de usuario cargada como instrucciones persistentes |
 | history files | Historial de entrada para flujos de trabajo interactivos |
 
 Evite hacer commit o compartir archivos de este directorio porque pueden contener secretos o preferencias locales.
@@ -39,8 +39,10 @@ IaC Code tiene dos ubicaciones públicas de memoria:
 
 | Ubicación | Propósito |
 |---|---|
-| `<project-root>/IAC-CODE.md` | Memoria del proyecto. Puede hacerse commit cuando las instrucciones son útiles para todas las personas que trabajan en el proyecto. |
-| `<config-dir>/IAC-CODE.md` | Memoria de usuario. Sigue `IAC_CODE_CONFIG_DIR` y es privada para el usuario local. |
+| `<project-root>/AGENTS.md` | Memoria del proyecto. Puede hacerse commit cuando las instrucciones son útiles para todas las personas que trabajan en el proyecto. |
+| `<config-dir>/AGENTS.md` | Memoria de usuario. Sigue `IAC_CODE_CONFIG_DIR` y es privada para el usuario local. |
+
+Defina `IAC_CODE_INSTRUCTION_MEMORY_FILE` para usar otro nombre de archivo de memoria de instrucciones, por ejemplo `IAC-CODE.md`.
 
 Los archivos de temas de auto-memory del proyecto se almacenan en:
 
@@ -48,7 +50,7 @@ Los archivos de temas de auto-memory del proyecto se almacenan en:
 <config-dir>/projects/<project-key>/memory/
 ```
 
-`MEMORY.md` en esa carpeta es el índice de temas. Cuando auto-memory está activada, IaC Code puede usar una side call para seleccionar archivos de temas relevantes y añadirlos como contexto oculto de la conversación.
+`MEMORY.md` en esa carpeta es el índice de temas usado por las side calls de auto-memory. No se carga como contexto permanente. Cuando auto-memory está activada, IaC Code puede seleccionar archivos de temas relevantes y añadirlos como contexto oculto de la conversación.
 
 ## Configuración del proyecto
 

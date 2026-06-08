@@ -1,4 +1,4 @@
-"""Small Vim-like editor for IAC-CODE.md memory files."""
+"""Small Vim-like editor for instruction memory files."""
 
 from __future__ import annotations
 

@@ -1406,10 +1406,6 @@ msgid "Instruction Memory"
 msgstr "指示メモリ"
 
 #: src/iac_code/commands/prompt.py
-msgid "Project Memory Index"
-msgstr "プロジェクトメモリ索引"
-
-#: src/iac_code/commands/prompt.py
 msgid "Memory Mechanics"
 msgstr "メモリの仕組み"
 
@@ -3371,4 +3367,7 @@ msgstr "  オプション 2 - github.com にアクセスできない場合は、
 
 #~ msgid "{n} day{s} ago"
 #~ msgstr "{n} 日{s}前"
+
+#~ msgid "Project Memory Index"
+#~ msgstr "プロジェクトメモリ索引"
 
