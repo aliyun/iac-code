@@ -50,6 +50,7 @@ class A2APushJob:
             "configId": self.config_id,
             "url": self.url,
             "payload": self.payload,
+            "headers": redact_push_headers(self.headers),
             "attempt": self.attempt,
             "nextAttemptAt": self.next_attempt_at,
             "lastError": self.last_error,
@@ -137,7 +138,10 @@ class LocalFileA2APushQueue:
         current = time.time() if now is None else now
         self._recover_expired_inflight(current)
         for path in sorted(self.pending_dir.glob("*.json")):
-            job = self._read(path)
+            try:
+                job = self._read(path)
+            except FileNotFoundError:
+                continue
             if job.next_attempt_at > current:
                 continue
             target = self.inflight_dir / path.name
@@ -146,7 +150,10 @@ class LocalFileA2APushQueue:
                 next_attempt_at=current + self._inflight_timeout_seconds,
                 last_error=job.last_error,
             )
-            path.replace(target)
+            try:
+                path.replace(target)
+            except FileNotFoundError:
+                continue
             self._write(target, leased)
             return self._read(target)
         return None
@@ -265,8 +272,14 @@ class RedisStreamsA2APushQueue:
         members = await self._redis.zrangebyscore(self._retry_key, "-inf", now, start=0, num=10)
         for member in members:
             encoded = _decode_redis_field(member)
-            await self._redis.xadd(self._stream, {"job": encoded})
-            await self._redis.zrem(self._retry_key, member)
+            pipe = self._redis.pipeline() if hasattr(self._redis, "pipeline") else None
+            if pipe is not None:
+                pipe.xadd(self._stream, {"job": encoded})
+                pipe.zrem(self._retry_key, member)
+                await pipe.execute()
+            else:
+                await self._redis.xadd(self._stream, {"job": encoded})
+                await self._redis.zrem(self._retry_key, member)
 
     async def _claim_expired(self) -> A2APushJob | None:
         xautoclaim = getattr(self._redis, "xautoclaim", None)

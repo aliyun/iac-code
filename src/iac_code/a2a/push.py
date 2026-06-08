@@ -262,6 +262,7 @@ class A2APushNotifier:
         config = self.load_config(task_id)
         if config is None:
             return False
+        validate_push_callback_url(config.callback_url)
         payload = {"taskId": task_id, "contextId": context_id, "state": state}
         for attempt in range(self._max_attempts):
             try:

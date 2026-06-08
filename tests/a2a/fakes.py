@@ -141,8 +141,32 @@ class FakeRedisPushStore:
                 del values[member]
         return removed
 
+    def pipeline(self):
+        return _FakeRedisPipeline(self)
+
     async def aclose(self):
         self.closed = True
+
+
+class _FakeRedisPipeline:
+    def __init__(self, store: FakeRedisPushStore) -> None:
+        self._store = store
+        self._commands: list[tuple[str, tuple, dict]] = []
+
+    def xadd(self, name, fields):
+        self._commands.append(("xadd", (name, fields), {}))
+        return self
+
+    def zrem(self, name, *members):
+        self._commands.append(("zrem", (name, *members), {}))
+        return self
+
+    async def execute(self):
+        results = []
+        for method, args, kwargs in self._commands:
+            result = await getattr(self._store, method)(*args, **kwargs)
+            results.append(result)
+        return results
 
 
 class FakeRequestContext:
