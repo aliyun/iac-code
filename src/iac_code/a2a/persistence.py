@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from iac_code.a2a.types import validate_protocol_id
+from iac_code.utils.file_security import atomic_write_text
 
 _INTERRUPTED_RESTORE_STATES = {"submitted", "working", "auth-required"}
 
@@ -175,9 +176,7 @@ class A2APersistenceStore:
 
     @staticmethod
     def _write_json(path: Path, data: dict[str, object]) -> None:
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-        tmp.replace(path)
+        atomic_write_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, object] | None:
