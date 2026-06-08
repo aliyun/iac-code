@@ -189,6 +189,7 @@ class AgentLoop:
         if self._memory_recall_service is None:
             return {
                 "total_side_queries": 0,
+                "in_flight_side_queries": 0,
                 "successful_side_queries": 0,
                 "failed_side_queries": 0,
                 "cancelled_side_queries": 0,

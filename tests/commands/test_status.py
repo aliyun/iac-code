@@ -289,6 +289,67 @@ async def test_status_prints_memory_recall_metrics_in_debug(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_status_prints_inflight_memory_recall_metrics_in_debug(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.utils.log.is_debug_enabled", lambda: True)
+    console = MagicMock()
+    repl = MagicMock()
+    repl.get_status_snapshot.return_value = {
+        "session_id": "memory",
+        "resumed": False,
+        "provider": "dashscope",
+        "model": "qwen",
+        "region": "cn-beijing",
+        "cwd": "/tmp/status-project",
+        "api_usage": _usage(),
+        "turn_count": 2,
+        "max_turns": 100,
+        "context_usage": {
+            "total_tokens": 1000,
+            "context_window": 128000,
+            "usage_percent": 1.0,
+        },
+        "memory_recall": {
+            "total_side_queries": 2,
+            "in_flight_side_queries": 2,
+            "successful_side_queries": 0,
+            "failed_side_queries": 0,
+            "cancelled_side_queries": 0,
+            "last_duration_ms": 0,
+            "last_status": "pending",
+            "last_selected_files": [],
+            "last_side_query_duration_ms": 0,
+            "last_side_query_status": "pending",
+            "last_side_query_selected_files": [],
+            "total_usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "total_tokens": 0,
+                "recorded_events": 0,
+                "has_recorded_usage": False,
+            },
+            "last_usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "total_tokens": 0,
+                "recorded_events": 0,
+                "has_recorded_usage": False,
+            },
+        },
+    }
+    context = MagicMock(console=console, repl=repl)
+
+    await status_command(context=context)
+
+    rendered = _render_text(console.print.call_args.args[0])
+    assert "2 total, 0 success, 0 failed, 0 cancelled, 2 in progress" in rendered
+    assert "pending in 0 ms, 0 files selected" in rendered
+
+
+@pytest.mark.asyncio
 async def test_status_uses_compiled_translations(monkeypatch) -> None:
     monkeypatch.setenv("LANGUAGE", "zh")
     setup_i18n()

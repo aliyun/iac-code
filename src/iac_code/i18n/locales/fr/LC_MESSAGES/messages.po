@@ -1703,15 +1703,20 @@ msgid "Memory Recall"
 msgstr "Rappel memoire"
 
 #: src/iac_code/commands/status.py
-msgid "Side queries"
-msgstr "Requetes laterales"
-
-#: src/iac_code/commands/status.py
 #, python-brace-format
 msgid "{total} total, {success} success, {failed} failed, {cancelled} cancelled"
 msgstr ""
 "{total} au total, {success} reussies, {failed} echouees, {cancelled} "
 "annulees"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{summary}, {in_flight} in progress"
+msgstr "{summary}, {in_flight} en cours"
+
+#: src/iac_code/commands/status.py
+msgid "Side queries"
+msgstr "Requetes laterales"
 
 #: src/iac_code/commands/status.py
 msgid "Last attempt"

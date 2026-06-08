@@ -71,15 +71,22 @@ def _should_show_memory_recall() -> bool:
 def _append_memory_recall(text: Text, memory_recall: dict[str, Any]) -> None:
     text.append(_("Memory Recall"), style="bold")
     text.append("\n")
+    in_flight = int(memory_recall.get("in_flight_side_queries") or 0)
+    side_query_summary = _("{total} total, {success} success, {failed} failed, {cancelled} cancelled").format(
+        total=int(memory_recall.get("total_side_queries") or 0),
+        success=int(memory_recall.get("successful_side_queries") or 0),
+        failed=int(memory_recall.get("failed_side_queries") or 0),
+        cancelled=int(memory_recall.get("cancelled_side_queries") or 0),
+    )
+    if in_flight > 0:
+        side_query_summary = _("{summary}, {in_flight} in progress").format(
+            summary=side_query_summary,
+            in_flight=in_flight,
+        )
     _append_line(
         text,
         _("Side queries"),
-        _("{total} total, {success} success, {failed} failed, {cancelled} cancelled").format(
-            total=int(memory_recall.get("total_side_queries") or 0),
-            success=int(memory_recall.get("successful_side_queries") or 0),
-            failed=int(memory_recall.get("failed_side_queries") or 0),
-            cancelled=int(memory_recall.get("cancelled_side_queries") or 0),
-        ),
+        side_query_summary,
         indent=2,
     )
     last_attempt_files = [str(item) for item in memory_recall.get("last_selected_files") or []]

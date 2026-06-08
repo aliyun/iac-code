@@ -1696,15 +1696,20 @@ msgid "Memory Recall"
 msgstr "Speicherabruf"
 
 #: src/iac_code/commands/status.py
-msgid "Side queries"
-msgstr "Nebenabfragen"
-
-#: src/iac_code/commands/status.py
 #, python-brace-format
 msgid "{total} total, {success} success, {failed} failed, {cancelled} cancelled"
 msgstr ""
 "{total} insgesamt, {success} erfolgreich, {failed} fehlgeschlagen, "
 "{cancelled} abgebrochen"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{summary}, {in_flight} in progress"
+msgstr "{summary}, {in_flight} in Bearbeitung"
+
+#: src/iac_code/commands/status.py
+msgid "Side queries"
+msgstr "Nebenabfragen"
 
 #: src/iac_code/commands/status.py
 msgid "Last attempt"

@@ -270,6 +270,42 @@ async def test_start_prefetch_returns_without_waiting_for_provider(memory_manage
 
 
 @pytest.mark.asyncio
+async def test_inflight_prefetch_is_reported_as_pending(memory_manager):
+    from iac_code.memory.recall import MemoryRecallService
+
+    service = MemoryRecallService(
+        memory_manager=memory_manager,
+        provider_manager=FakeRecallProvider(json.dumps({"files": ["project-deadline.md"]}), delay=0.05),
+    )
+
+    prefetch = service.start_prefetch("deadline")
+    assert prefetch is not None
+
+    for _ in range(20):
+        stats = service.get_stats_snapshot()
+        if stats["in_flight_side_queries"] == 1:
+            break
+        await asyncio.sleep(0)
+
+    stats = service.get_stats_snapshot()
+    assert stats["total_side_queries"] == 1
+    assert stats["in_flight_side_queries"] == 1
+    assert stats["successful_side_queries"] == 0
+    assert stats["failed_side_queries"] == 0
+    assert stats["cancelled_side_queries"] == 0
+    assert stats["last_status"] == "pending"
+    assert stats["last_side_query_status"] == "pending"
+
+    result = await prefetch.wait()
+
+    stats = service.get_stats_snapshot()
+    assert result.selected_files == ["project-deadline.md"]
+    assert stats["in_flight_side_queries"] == 0
+    assert stats["successful_side_queries"] == 1
+    assert stats["last_side_query_status"] == "success"
+
+
+@pytest.mark.asyncio
 async def test_prefetch_uses_turn_lifetime_instead_of_sync_timeout(memory_manager):
     from iac_code.memory.recall import MemoryRecallService
 
@@ -501,6 +537,7 @@ def test_recall_stats_can_be_reset(memory_manager):
 
     assert service.get_stats_snapshot() == {
         "total_side_queries": 0,
+        "in_flight_side_queries": 0,
         "successful_side_queries": 0,
         "failed_side_queries": 0,
         "cancelled_side_queries": 0,

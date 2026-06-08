@@ -56,6 +56,7 @@ class MemoryRecallPrefetch:
 @dataclass
 class MemoryRecallStats:
     total_side_queries: int = 0
+    in_flight_side_queries: int = 0
     successful_side_queries: int = 0
     failed_side_queries: int = 0
     cancelled_side_queries: int = 0
@@ -76,6 +77,7 @@ class MemoryRecallStats:
     def snapshot(self) -> dict[str, Any]:
         return {
             "total_side_queries": self.total_side_queries,
+            "in_flight_side_queries": self.in_flight_side_queries,
             "successful_side_queries": self.successful_side_queries,
             "failed_side_queries": self.failed_side_queries,
             "cancelled_side_queries": self.cancelled_side_queries,
@@ -196,10 +198,12 @@ class MemoryRecallService:
             return MemoryRecallResult(status="skipped")
 
         self._stats.total_side_queries += 1
+        self._stats.in_flight_side_queries += 1
         response_usage: Usage | None = None
         prompt = self._build_user_prompt(user_input, manifest)
         response_text = ""
         self._stats.last_usage = MemoryRecallUsageStats()
+        self._record("pending", started, selected_files=[], prompt=prompt, side_query=True)
         try:
             completion = self._provider_manager.complete(
                 messages=[Message.user(prompt)],
@@ -227,6 +231,8 @@ class MemoryRecallService:
             self._stats.failed_side_queries += 1
             self._record("failed", started, selected_files=[], prompt=prompt, response=response_text, side_query=True)
             return MemoryRecallResult(status="failed", usage=response_usage)
+        finally:
+            self._stats.in_flight_side_queries = max(0, self._stats.in_flight_side_queries - 1)
 
         content = self._read_selected_files(selected_files)
         self._stats.successful_side_queries += 1

@@ -1656,13 +1656,18 @@ msgid "Memory Recall"
 msgstr "メモリ呼び出し"
 
 #: src/iac_code/commands/status.py
-msgid "Side queries"
-msgstr "サイドクエリ"
-
-#: src/iac_code/commands/status.py
 #, python-brace-format
 msgid "{total} total, {success} success, {failed} failed, {cancelled} cancelled"
 msgstr "合計 {total}、成功 {success}、失敗 {failed}、キャンセル {cancelled}"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{summary}, {in_flight} in progress"
+msgstr "{summary}、{in_flight} 件進行中"
+
+#: src/iac_code/commands/status.py
+msgid "Side queries"
+msgstr "サイドクエリ"
 
 #: src/iac_code/commands/status.py
 msgid "Last attempt"
