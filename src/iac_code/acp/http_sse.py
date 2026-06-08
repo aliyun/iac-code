@@ -290,11 +290,31 @@ _connections: dict[str, HTTPConnectionBridge] = {}
 
 _ACP_CONN_HEADER = "Acp-Connection-Id"
 _INIT_TIMEOUT = 30.0
+# Maximum allowed request body size (4 MiB). Requests exceeding this limit
+# are rejected with 413 to prevent unbounded memory consumption.
+_MAX_BODY_BYTES = 4 * 1024 * 1024
 
 
 async def _handle_post(request: Request) -> Response:
     """Handle ``POST /acp`` — JSON-RPC requests from the client."""
+    # Enforce body size limit to prevent unbounded memory consumption.
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_BODY_BYTES:
+                return JSONResponse(
+                    {"error": "Request body too large"},
+                    status_code=413,
+                )
+        except (ValueError, OverflowError):
+            pass
+
     body = await request.body()
+    if len(body) > _MAX_BODY_BYTES:
+        return JSONResponse(
+            {"error": "Request body too large"},
+            status_code=413,
+        )
     message = body.decode("utf-8")
 
     try:

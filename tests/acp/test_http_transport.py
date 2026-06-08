@@ -784,3 +784,60 @@ async def test_health_endpoint_with_auth_token():
             resp = await client.get("/health", headers={"Authorization": "Bearer secret-token"})
             assert resp.status_code == 200
             assert resp.json() == {"status": "healthy"}
+
+
+# ---------------------------------------------------------------------------
+# K. Request body size limit
+# ---------------------------------------------------------------------------
+
+
+class TestRequestBodySizeLimit:
+    """K: POST /acp rejects requests exceeding _MAX_BODY_BYTES."""
+
+    @pytest.mark.asyncio
+    async def test_oversized_body_rejected_via_content_length(self, app):
+        """K1: Request with Content-Length exceeding limit returns 413."""
+        import iac_code.acp.http_sse as http_sse_mod
+
+        max_body = getattr(http_sse_mod, "_MAX_BODY_BYTES", 4 * 1024 * 1024)
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            # Send a small body but with a Content-Length header that claims a huge size
+            resp = await client.post(
+                "/acp",
+                content=b'{"method":"initialize"}',
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Length": str(max_body + 1),
+                },
+            )
+        assert resp.status_code == 413
+        assert "too large" in resp.json()["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_oversized_body_rejected_via_actual_size(self):
+        """K2: Request with body exceeding limit is rejected with 413."""
+        with patch("iac_code.acp.http_sse._MAX_BODY_BYTES", 64):
+            app = create_app()
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+            ) as client:
+                oversized_body = b"x" * 128
+                resp = await client.post(
+                    "/acp",
+                    content=oversized_body,
+                    headers={"Content-Type": "application/json"},
+                )
+        assert resp.status_code == 413
+
+    @pytest.mark.asyncio
+    async def test_normal_size_body_accepted(self, app):
+        """K3: A normally-sized body is processed (not rejected by size check)."""
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            resp = await client.post(
+                "/acp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "test", "params": {}},
+                headers={"Content-Type": "application/json"},
+            )
+        # Without connection id, non-init methods return 400, not 413
+        assert resp.status_code == 400
