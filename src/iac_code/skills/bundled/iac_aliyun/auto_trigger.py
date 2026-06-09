@@ -19,7 +19,6 @@ _ALIYUN_SCOPE_PATTERNS = [
     r"alicloud\s+provider",
     r'provider\s+"alicloud"',
     r'resource\s+"alicloud_',
-    r"\binfraguard\b",
     r"\becs\b",
     r"\brds\b",
     r"\boss\b",
@@ -49,10 +48,6 @@ _IAC_WORKFLOW_PATTERNS = [
     r"\bros[-\s]+template\b",
     r"\b(create|generate|write|deploy|explain|validate|improve|update|delete)\b.*\b(template|stack)\b",
     r"\b(template|stack)\b.*\b(create|generate|write|deploy|explain|validate|improve|update|delete)\b",
-    r"\b(generate|write|create|validate)\b.*\b(compliance\s+)?polic(y|ies)\b",
-    r"\b(compliance\s+)?polic(y|ies)\b.*\b(generate|write|create|validate)\b",
-    r"\brego\b",
-    r"\bpolicy\s+validate\b",
     r"ros\s*模[板版]",
     r"模板生成",
     r"模版生成",
@@ -65,13 +60,6 @@ _IAC_WORKFLOW_PATTERNS = [
     r"验证.*模[板版]",
     r"更新.*模[板版]",
     r"删除.*模[板版]",
-    r"合规策略",
-    r"策略生成",
-    r"生成.*策略",
-    r"编写.*策略",
-    r"写.*策略",
-    r"校验.*策略",
-    r"验证.*策略",
     r"资源栈",
     rf"部署.*({_ZH_IAC_NOUNS})",
     rf"({_ZH_IAC_NOUNS}).*部署",
@@ -96,9 +84,33 @@ _IAC_WORKFLOW_PATTERNS = [
     r"\.ros\.ya?ml\b",
 ]
 
+_PAC_WORKFLOW_PATTERNS = [
+    r"\binfraguard\b",
+    r"\brego\b",
+    r"\bpolicy\s+as\s+code\b",
+    r"\bpac\b",
+    r"\bpack:aliyun:",
+    r"\brule:aliyun:",
+    r"\bcompliance\s+polic(y|ies)\b",
+    r"\bpolicy\s+(list|get|update|validate)\b",
+    r"合规策略",
+    r"策略生成",
+    r"生成.*策略",
+    r"编写.*策略",
+    r"写.*策略",
+    r"校验.*策略",
+    r"验证.*策略",
+    r"检查.*策略",
+    r"策略.*校验",
+    r"策略.*验证",
+    r"策略.*检查",
+]
+
 
 def should_trigger(prompt: str) -> bool:
     text = prompt.casefold()
+    if has_pac_workflow(text):
+        return False
     return has_aliyun_scope(text) and has_iac_workflow(text)
 
 
@@ -108,3 +120,7 @@ def has_aliyun_scope(text: str) -> bool:
 
 def has_iac_workflow(text: str) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in _IAC_WORKFLOW_PATTERNS)
+
+
+def has_pac_workflow(text: str) -> bool:
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in _PAC_WORKFLOW_PATTERNS)

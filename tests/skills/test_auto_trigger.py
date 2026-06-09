@@ -172,10 +172,10 @@ def test_iac_aliyun_trigger_matches_alicloud_provider_prompt():
     assert should_trigger('用 provider "alicloud" 写一个 ECS 安全组模板')
 
 
-def test_iac_aliyun_trigger_matches_infraguard_policy_generation():
+def test_iac_aliyun_trigger_rejects_infraguard_policy_generation():
     from iac_code.skills.bundled.iac_aliyun.auto_trigger import should_trigger
 
-    assert should_trigger("生成一个 InfraGuard 合规策略，检查 ECS 不允许公网 IP")
+    assert not should_trigger("生成一个 InfraGuard 合规策略，检查 ECS 不允许公网 IP")
 
 
 @pytest.mark.parametrize(
@@ -186,10 +186,56 @@ def test_iac_aliyun_trigger_matches_infraguard_policy_generation():
         "写一个网络架构最佳实践策略，限制安全组不能开放全部端口",
     ],
 )
-def test_iac_aliyun_trigger_matches_infraguard_policy_dimensions(prompt):
+def test_iac_aliyun_trigger_rejects_infraguard_policy_dimensions(prompt):
     from iac_code.skills.bundled.iac_aliyun.auto_trigger import should_trigger
 
+    assert not should_trigger(prompt)
+
+
+def test_pac_aliyun_trigger_matches_infraguard_policy_generation():
+    from iac_code.skills.bundled.pac_aliyun.auto_trigger import should_trigger
+
+    assert should_trigger("生成一个 InfraGuard 合规策略，检查 ECS 不允许公网 IP")
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "用 InfraGuard 生成高可用合规策略，检查 RDS 必须多可用区",
+        "生成成本优化策略，检查 ECS 规格不能超过指定系列",
+        "写一个网络架构最佳实践策略，限制安全组不能开放全部端口",
+        "Validate this ROS template with InfraGuard policies",
+    ],
+)
+def test_pac_aliyun_trigger_matches_policy_dimensions(prompt):
+    from iac_code.skills.bundled.pac_aliyun.auto_trigger import should_trigger
+
     assert should_trigger(prompt)
+
+
+def test_pac_aliyun_trigger_rejects_aliyun_ram_policy_template_prompt():
+    from iac_code.skills.bundled.pac_aliyun.auto_trigger import should_trigger
+
+    assert not should_trigger("Create an Alibaba Cloud ROS template for a RAM policy")
+
+
+def test_pac_prompt_auto_triggers_only_pac_skill():
+    from iac_code.skills.bundled import _bundled_skills, get_bundled_skills, init_bundled_skills
+
+    _bundled_skills.clear()
+    init_bundled_skills()
+    commands = [
+        PromptCommand(name=skill.name, description=skill.description, skill=skill, source=SkillSource.BUNDLED)
+        for skill in get_bundled_skills()
+    ]
+
+    matches = find_auto_triggered_skills(
+        "生成一个 InfraGuard 合规策略，检查 ECS 不允许公网 IP",
+        commands,
+        loaded_skill_names=set(),
+    )
+
+    assert [match.name for match in matches] == ["pac-aliyun"]
 
 
 @pytest.mark.parametrize(

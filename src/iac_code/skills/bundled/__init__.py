@@ -85,6 +85,10 @@ def init_bundled_skills() -> None:
 
     register_iac_aliyun_skill()
 
+    from iac_code.skills.bundled.pac_aliyun import register_pac_aliyun_skill
+
+    register_pac_aliyun_skill()
+
 
 class _FunctionPromptProvider:
     """Prompt provider that delegates to an async function."""
