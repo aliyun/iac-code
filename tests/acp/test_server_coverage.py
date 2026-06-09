@@ -656,3 +656,66 @@ async def test_cleanup_idle_sessions_collects_session_with_finished_task(monkeyp
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+# ===========================================================================
+# _validate_cwd - cwd path traversal prevention
+# ===========================================================================
+
+
+class TestValidateCwd:
+    """Ensure _validate_cwd rejects invalid or disallowed paths."""
+
+    def test_rejects_relative_path(self, monkeypatch) -> None:
+        """Relative paths are rejected."""
+        monkeypatch.setattr(
+            "iac_code.acp.server.allowed_cwd_roots",
+            lambda: [Path("/")],
+        )
+        server = ACPServer()
+        with pytest.raises(acp.RequestError):
+            server._validate_cwd("relative/path")
+
+    def test_rejects_empty_string(self, monkeypatch) -> None:
+        """Empty cwd is rejected."""
+        monkeypatch.setattr(
+            "iac_code.acp.server.allowed_cwd_roots",
+            lambda: [Path("/")],
+        )
+        server = ACPServer()
+        with pytest.raises(acp.RequestError):
+            server._validate_cwd("")
+
+    def test_rejects_path_outside_allowed_roots(self, monkeypatch) -> None:
+        """A path outside allowed roots is rejected."""
+        monkeypatch.setattr(
+            "iac_code.acp.server.allowed_cwd_roots",
+            lambda: [Path("/allowed/root")],
+        )
+        server = ACPServer()
+        with pytest.raises(acp.RequestError):
+            server._validate_cwd("/some/other/path")
+
+    def test_accepts_path_within_allowed_roots(self, monkeypatch, tmp_path) -> None:
+        """A path within an allowed root is accepted (returns original cwd)."""
+        monkeypatch.setattr(
+            "iac_code.acp.server.allowed_cwd_roots",
+            lambda: [tmp_path],
+        )
+        sub = tmp_path / "project"
+        sub.mkdir()
+        server = ACPServer()
+        result = server._validate_cwd(str(sub))
+        assert result == str(sub)
+
+    def test_rejects_non_directory(self, monkeypatch, tmp_path) -> None:
+        """A path that exists but is not a directory is rejected."""
+        monkeypatch.setattr(
+            "iac_code.acp.server.allowed_cwd_roots",
+            lambda: [tmp_path],
+        )
+        regular_file = tmp_path / "file.txt"
+        regular_file.write_text("content")
+        server = ACPServer()
+        with pytest.raises(acp.RequestError):
+            server._validate_cwd(str(regular_file))

@@ -3,13 +3,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import acp
 
 from iac_code import __version__
+from iac_code.a2a.parts import allowed_cwd_roots, is_relative_to
 from iac_code.acp.metrics import ACPMetrics
 from iac_code.acp.session import ACPSession, Message, _is_auth_error
 from iac_code.acp.slash_registry import ACP_SUPPORTED_COMMANDS
@@ -23,7 +27,11 @@ from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_ru
 from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
 from iac_code.services.session_storage import SessionStorage
-from iac_code.utils.project_paths import format_resume_command, same_project_path
+from iac_code.utils.project_paths import (
+    _looks_like_windows_path,
+    format_resume_command,
+    same_project_path,
+)
 
 SESSION_IDLE_TIMEOUT = 3600  # 1 hour
 CLEANUP_INTERVAL = 300  # 5 minutes
@@ -105,6 +113,36 @@ class ACPServer:
             raise acp.RequestError.invalid_params({"session_id": "Session not found"})
         return session
 
+    @staticmethod
+    def _validate_cwd(cwd: str) -> str:
+        """Validate the working directory path.
+
+        Ensures the path is absolute and falls within one of the allowed CWD
+        roots (same policy as the A2A executor).  Returns the original *cwd*
+        string on success (not resolved) so that session storage lookups
+        remain consistent.  Raises :class:`acp.RequestError` on failure.
+        """
+        if not cwd:
+            raise acp.RequestError.invalid_params({"cwd": "cwd must be an absolute path"})
+        # Accept both POSIX and Windows absolute paths.  ``os.path.isabs``
+        # treats rooted POSIX-style paths (``/tmp``) as absolute on Windows
+        # too, while ``_looks_like_windows_path`` catches drive-letter forms
+        # (``C:\foo``) on POSIX hosts.
+        is_windows_path = _looks_like_windows_path(cwd)
+        if not os.path.isabs(cwd) and not is_windows_path:
+            raise acp.RequestError.invalid_params({"cwd": "cwd must be an absolute path"})
+        # When a Windows-style path is received on a non-Windows host, we
+        # cannot resolve it against the local filesystem; skip the
+        # root-containment and is_dir checks for that case only.
+        if is_windows_path and sys.platform != "win32":
+            return cwd
+        resolved = Path(cwd).resolve()
+        if not any(is_relative_to(resolved, root) for root in allowed_cwd_roots()):
+            raise acp.RequestError.invalid_params({"cwd": "cwd is outside allowed roots"})
+        if resolved.exists() and not resolved.is_dir():
+            raise acp.RequestError.invalid_params({"cwd": "cwd is not a directory"})
+        return cwd
+
     async def initialize(
         self,
         protocol_version: int,
@@ -147,6 +185,8 @@ class ACPServer:
     ) -> acp.NewSessionResponse:
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
+
+        cwd = self._validate_cwd(cwd)
 
         # Convert MCP server configs from ACP protocol types to internal dicts
         mcp_configs = _convert_mcp_servers(mcp_servers)
@@ -272,6 +312,8 @@ class ACPServer:
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
 
+        cwd = self._validate_cwd(cwd)
+
         # 1. Already active in memory — return immediately
         if session_id in self.sessions:
             model = load_saved_model() or DEFAULT_MODEL
@@ -338,6 +380,8 @@ class ACPServer:
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
 
+        cwd = self._validate_cwd(cwd)
+
         # 1. Collect history from the source session
         history: list[Message] = []
         if session_id in self.sessions:
@@ -400,6 +444,8 @@ class ACPServer:
         mcp_servers: list[MCPServer] | None = None,
         **kwargs: Any,
     ) -> acp.schema.ResumeSessionResponse:
+        cwd = self._validate_cwd(cwd)
+
         # 1. If session is still active in memory by exact id, enforce project ownership before returning.
         active_session = self.sessions.get(session_id)
         if active_session is not None:
