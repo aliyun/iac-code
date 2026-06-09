@@ -337,10 +337,9 @@ async def test_prefetch_applies_configured_timeout(memory_manager):
     prefetch = service.start_prefetch("deadline")
     assert prefetch is not None
 
-    await asyncio.sleep(0.01)
+    result = await prefetch.wait()
 
     assert prefetch.done() is True
-    result = prefetch.result()
     assert result.status == "timeout"
     stats = service.get_stats_snapshot()
     assert stats["total_side_queries"] == 1
