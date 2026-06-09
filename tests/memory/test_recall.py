@@ -74,6 +74,25 @@ def memory_manager(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_recall_default_timeout_is_ten_seconds(memory_manager, monkeypatch):
+    from iac_code.memory import recall as recall_mod
+
+    captured: dict[str, float] = {}
+
+    async def capture_wait_for(awaitable, timeout):
+        captured["timeout"] = timeout
+        return await awaitable
+
+    monkeypatch.setattr(recall_mod.asyncio, "wait_for", capture_wait_for)
+    provider = FakeRecallProvider(json.dumps({"files": []}))
+    service = recall_mod.MemoryRecallService(memory_manager=memory_manager, provider_manager=provider)
+
+    await service.recall("deadline")
+
+    assert captured["timeout"] == 10.0
+
+
+@pytest.mark.asyncio
 async def test_recall_selects_valid_topic_files_and_reads_content(memory_manager):
     from iac_code.memory.recall import MemoryRecallService
 
@@ -306,7 +325,7 @@ async def test_inflight_prefetch_is_reported_as_pending(memory_manager):
 
 
 @pytest.mark.asyncio
-async def test_prefetch_uses_turn_lifetime_instead_of_sync_timeout(memory_manager):
+async def test_prefetch_applies_configured_timeout(memory_manager):
     from iac_code.memory.recall import MemoryRecallService
 
     service = MemoryRecallService(
@@ -318,15 +337,17 @@ async def test_prefetch_uses_turn_lifetime_instead_of_sync_timeout(memory_manage
     prefetch = service.start_prefetch("deadline")
     assert prefetch is not None
 
-    await asyncio.sleep(0.01)
+    result = await prefetch.wait()
 
-    assert prefetch.done() is False
-    assert service.get_stats_snapshot()["last_status"] != "timeout"
-
-    prefetch.cancel()
-    await asyncio.sleep(0)
-
-    assert service.get_stats_snapshot()["last_status"] == "cancelled"
+    assert prefetch.done() is True
+    assert result.status == "timeout"
+    stats = service.get_stats_snapshot()
+    assert stats["total_side_queries"] == 1
+    assert stats["in_flight_side_queries"] == 0
+    assert stats["failed_side_queries"] == 1
+    assert stats["cancelled_side_queries"] == 0
+    assert stats["last_status"] == "timeout"
+    assert stats["last_side_query_status"] == "timeout"
 
 
 @pytest.mark.asyncio

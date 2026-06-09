@@ -279,6 +279,33 @@ class AgentLoop:
         self._pending_memory_prefetches.clear()
         self._recorded_memory_prefetch_ids.clear()
 
+    def _discard_memory_prefetch_for_turn(self, prefetch: Any | None) -> None:
+        if prefetch is None:
+            return
+        if not any(pending is prefetch for pending in self._pending_memory_prefetches):
+            return
+        self._pending_memory_prefetches = [
+            pending for pending in self._pending_memory_prefetches if pending is not prefetch
+        ]
+        done = getattr(prefetch, "done", None)
+        if callable(done) and done():
+            try:
+                result = prefetch.result()
+            except asyncio.CancelledError:
+                self._forget_memory_prefetch(prefetch)
+                return
+            except Exception as exc:
+                logger.debug("Memory recall prefetch usage unavailable: {}", exc)
+                self._forget_memory_prefetch(prefetch)
+                return
+            self._record_memory_recall_result_usage_once(prefetch, result)
+            self._forget_memory_prefetch(prefetch)
+            return
+        cancel = getattr(prefetch, "cancel", None)
+        if callable(cancel):
+            cancel()
+        self._forget_memory_prefetch(prefetch)
+
     def _sync_recall_suppression_from_context(self) -> None:
         if self._memory_recall_service is None:
             return
@@ -403,7 +430,6 @@ class AgentLoop:
         if self._memory_recall_active_turns > 0:
             return
         self._pending_memory_prefetches = [item for item in self._pending_memory_prefetches if item is not prefetch]
-        self._inject_recalled_memory_result(result)
         self._forget_memory_prefetch(prefetch)
 
     def _record_memory_recall_result_usage_once(self, prefetch: Any, result: Any) -> None:
@@ -618,14 +644,14 @@ class AgentLoop:
                         yield event
                 except asyncio.CancelledError:
                     turn_cancelled = True
-                    self._memory_recall_generation += 1
-                    self._cancel_pending_memory_prefetches()
+                    self._discard_memory_prefetch_for_turn(memory_prefetch)
                     log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
                     raise
             finally:
-                self._memory_recall_active_turns = max(0, self._memory_recall_active_turns - 1)
                 if not turn_cancelled:
-                    await self._consume_ready_memory_prefetches()
+                    # Recall prefetches are turn-scoped: ready results are consumed only at in-turn poll points.
+                    self._discard_memory_prefetch_for_turn(memory_prefetch)
+                self._memory_recall_active_turns = max(0, self._memory_recall_active_turns - 1)
                 self.context_manager.set_system_prompt(self.system_prompt)
                 elapsed = time.monotonic() - interaction_started
                 add_metric(Metrics.ACTIVE_TIME_TOTAL, int(elapsed), {})

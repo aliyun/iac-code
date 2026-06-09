@@ -819,8 +819,8 @@ msgid "Toggle debug logging"
 msgstr "Activer ou désactiver la journalisation debug"
 
 #: src/iac_code/commands/__init__.py
-msgid "Edit IAC-CODE memory files"
-msgstr "Modifier les fichiers memoire IAC-CODE"
+msgid "Edit memory files"
+msgstr "Modifier les fichiers memoire"
 
 #: src/iac_code/commands/__init__.py
 msgid "View and manage persistent memories"

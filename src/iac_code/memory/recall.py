@@ -154,7 +154,7 @@ class MemoryRecallService:
         provider_manager: Any,
         *,
         max_files: int = 5,
-        timeout_seconds: float = 3.0,
+        timeout_seconds: float = 10.0,
         max_bytes_per_file: int = 12_000,
         max_lines_per_file: int = 240,
         is_enabled: Callable[[], bool] | None = None,
@@ -175,7 +175,7 @@ class MemoryRecallService:
         if not query:
             self._record("skipped", time.monotonic(), selected_files=[])
             return None
-        task = asyncio.create_task(self._recall(query, timeout_seconds=None))
+        task = asyncio.create_task(self._recall(query, timeout_seconds=self._timeout_seconds))
         return MemoryRecallPrefetch(task, on_cancel=lambda: self._record_cancelled())
 
     async def recall(self, user_input: str) -> MemoryRecallResult:

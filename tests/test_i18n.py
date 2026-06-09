@@ -29,6 +29,7 @@ MEMORY_COMMAND_MSGIDS = {
     "Memory '{name}' not found.",
     "Memory '{name}' deleted.",
     "Memory manager is unavailable.",
+    "Edit memory files",
     "View and manage persistent memories",
     "[<name>|search <query>|delete <name>|help]",
     "Search saved memories",

@@ -95,7 +95,7 @@ def create_default_registry() -> CommandRegistry:
     registry.register(
         LocalCommand(
             name="memory",
-            description=_("Edit IAC-CODE memory files"),
+            description=_("Edit memory files"),
             handler=memory_command,
             history_mode="session",
         )

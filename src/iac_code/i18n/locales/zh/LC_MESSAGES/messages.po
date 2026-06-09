@@ -778,8 +778,8 @@ msgid "Toggle debug logging"
 msgstr "切换调试日志开关"
 
 #: src/iac_code/commands/__init__.py
-msgid "Edit IAC-CODE memory files"
-msgstr "编辑 IAC-CODE 记忆文件"
+msgid "Edit memory files"
+msgstr "编辑记忆文件"
 
 #: src/iac_code/commands/__init__.py
 msgid "View and manage persistent memories"
