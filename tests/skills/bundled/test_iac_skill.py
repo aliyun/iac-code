@@ -26,6 +26,29 @@ def _rego_files_with(symbol: str) -> list[Path]:
     return sorted(path for path in POLICY_ROOT.rglob("*.rego") if symbol in path.read_text(encoding="utf-8"))
 
 
+def _rule_ids_from_policy_files(paths: list[Path]) -> set[str]:
+    rule_ids: set[str] = set()
+    for path in paths:
+        match = re.search(r'"id": "([^"]+)"', path.read_text(encoding="utf-8"))
+        assert match is not None
+        rule_ids.add(match.group(1))
+    return rule_ids
+
+
+def _pack_rule_ids(pack: Path) -> set[str]:
+    content = pack.read_text(encoding="utf-8")
+    return set(re.findall(r'"([^"]+)"', content.split('"rules":', 1)[1]))
+
+
+def _iac_aliyun_asset_text() -> str:
+    root = Path("src/iac_code/skills/bundled/iac_aliyun")
+    parts = []
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and path.suffix in {".md", ".py", ".rego"}:
+            parts.append(path.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
 class TestIacSkill:
     def setup_method(self):
         _bundled_skills.clear()
@@ -67,9 +90,20 @@ class TestIacSkill:
         iac_skill = next(s for s in skills if s.name == "iac-aliyun")
         assert "InfraGuard" in iac_skill.content
         assert "references/infraguard-policy-generation.md" in iac_skill.content
+        assert "cloud-infrastructure-security-baseline" not in iac_skill.content
+        assert "references/infraguard-policies/rules/ros/" not in iac_skill.content
         assert "package infraguard.rules" not in iac_skill.content
         assert "helpers.resources_by_type" not in iac_skill.content
         assert "#### InfraGuard Rego 结构" not in iac_skill.content
+
+    def test_iac_aliyun_assets_do_not_reference_removed_baseline_layout(self):
+        assets = _iac_aliyun_asset_text()
+        assert "cloud-infrastructure-security-baseline" not in assets
+        assert "references/infraguard-policies/rules/ros/" not in assets
+        assert "infraguard-policies/rules" not in assets
+        assert "cloud infrastructure security baseline" not in assets.lower()
+        assert "Cloud Infrastructure Security Baseline" not in assets
+        assert "云基础设施安全基线" not in assets
 
     def test_iac_skill_mentions_infraguard_policy_dimensions_and_generated_catalog(self):
         init_bundled_skills()
@@ -98,20 +132,20 @@ class TestIacSkill:
         assert len(policies) >= 100
 
         for scenario in POLICY_SCENARIOS:
-            assert len(list((POLICY_ROOT / scenario).glob("*.rego"))) >= 12
+            assert list((POLICY_ROOT / scenario).glob("*.rego"))
 
     def test_infraguard_policy_catalog_readme_matches_assets(self):
         readme = (POLICY_ROOT / "README.md").read_text(encoding="utf-8")
         scenario_counts = {
             scenario: len(list((POLICY_ROOT / scenario).glob("*.rego"))) for scenario in POLICY_SCENARIOS
         }
-        baseline_rules = list((POLICY_ROOT / "rules" / "ros").glob("*.rego"))
         packs = list(POLICY_PACK_ROOT.glob("*.rego"))
 
         assert f"- Total rule policies: {len(_rego_files_with('rule_meta :='))}" in readme
         assert f"- Scenario policy files: {sum(scenario_counts.values())}" in readme
-        assert f"- Cloud infrastructure security baseline rules: {len(baseline_rules)}" in readme
         assert f"- Packs: {len(packs)}" in readme
+        assert "cloud infrastructure security baseline" not in readme.lower()
+        assert "云基础设施安全基线" not in readme
 
         for scenario, count in scenario_counts.items():
             assert f"`{scenario}`" in readme
@@ -147,21 +181,38 @@ class TestIacSkill:
         packs = sorted(POLICY_PACK_ROOT.glob("iac-code-*-pack.rego"))
         assert len(packs) == len(POLICY_SCENARIOS)
         for pack in packs:
+            scenario = pack.stem.removeprefix("iac-code-").removesuffix("-pack")
+            scenario_rule_ids = _rule_ids_from_policy_files(list((POLICY_ROOT / scenario).glob("*.rego")))
             content = pack.read_text(encoding="utf-8")
             assert "package infraguard.packs.aliyun.iac_code_" in content
             assert "pack_meta :=" in content
             pack_rule_ids = re.findall(r'"([^"]+)"', content.split('"rules":', 1)[1])
-            assert len(pack_rule_ids) >= 12
+            assert pack_rule_ids
             assert set(pack_rule_ids) <= rule_ids
+            assert set(pack_rule_ids) == scenario_rule_ids
 
-        baseline_pack = POLICY_PACK_ROOT / "cloud-infrastructure-security-baseline.rego"
-        assert baseline_pack.exists()
-        baseline_content = baseline_pack.read_text(encoding="utf-8")
-        assert "package infraguard.packs.aliyun.cloud_infrastructure_security_baseline" in baseline_content
-        assert '"id": "cloud-infrastructure-security-baseline"' in baseline_content
+        assert not (POLICY_PACK_ROOT / "cloud-infrastructure-security-baseline.rego").exists()
+
+    def test_infraguard_security_pack_owns_merged_security_rules(self):
+        assert not (POLICY_ROOT / "rules").exists()
+
+        security_rule_ids = _rule_ids_from_policy_files(list((POLICY_ROOT / "security").glob("*.rego")))
+        security_pack_rule_ids = _pack_rule_ids(POLICY_PACK_ROOT / "iac-code-security-pack.rego")
+
+        assert security_pack_rule_ids == security_rule_ids
+        assert {
+            "security-api-gateway-api-auth-required",
+            "security-ecs-instance-no-public-ip",
+            "security-oss-bucket-private-acl",
+            "security-oss-bucket-encryption-configured",
+            "security-oss-bucket-logging-configured",
+            "security-ram-user-mfa-required",
+            "security-rds-instance-ssl-required",
+            "security-rds-instance-tde-enabled",
+        }.isdisjoint(security_rule_ids)
 
     def test_infraguard_security_no_public_ip_policy_checks_common_exposure_paths(self):
-        policy = POLICY_ROOT / "security" / "security-ecs-instance-no-public-ip.rego"
+        policy = POLICY_ROOT / "security" / "ecs-running-instance-no-public-ip.rego"
         content = policy.read_text(encoding="utf-8")
         assert "InternetMaxBandwidthOut" in content
         assert "ALIYUN::VPC::EIPAssociation" in content

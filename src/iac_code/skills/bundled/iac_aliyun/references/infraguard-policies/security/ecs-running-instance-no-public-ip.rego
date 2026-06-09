@@ -46,9 +46,13 @@ rule_meta := {
 	"resource_types": ["ALIYUN::ECS::Instance", "ALIYUN::ECS::InstanceGroup"]
 }
 
-# Check if the instance has a public IP allocated
 has_public_ip(resource) if {
 	helpers.get_property(resource, "AllocatePublicIP", false) == true
+}
+
+has_internet_bandwidth(resource) if {
+	helpers.has_property(resource, "InternetMaxBandwidthOut")
+	resource.Properties.InternetMaxBandwidthOut > 0
 }
 
 deny contains result if {
@@ -58,6 +62,56 @@ deny contains result if {
 		"id": rule_meta.id,
 		"resource_id": name,
 		"violation_path": ["Properties", "AllocatePublicIP"],
+		"meta": {
+			"severity": rule_meta.severity,
+			"reason": rule_meta.reason,
+			"recommendation": rule_meta.recommendation,
+		},
+	}
+}
+
+deny contains result if {
+	some name, resource in helpers.resources_by_types(rule_meta.resource_types)
+	has_internet_bandwidth(resource)
+	not has_public_ip(resource)
+	result := {
+		"id": rule_meta.id,
+		"resource_id": name,
+		"violation_path": ["Properties", "InternetMaxBandwidthOut"],
+		"meta": {
+			"severity": rule_meta.severity,
+			"reason": rule_meta.reason,
+			"recommendation": rule_meta.recommendation,
+		},
+	}
+}
+
+deny contains result if {
+	some name, resource in helpers.resources_by_types(rule_meta.resource_types)
+	some _, eip_resource in helpers.resources_by_type("ALIYUN::VPC::EIPAssociation")
+	instance_id := helpers.get_property(eip_resource, "InstanceId", "")
+	helpers.is_referencing(instance_id, name)
+	result := {
+		"id": rule_meta.id,
+		"resource_id": name,
+		"violation_path": ["Properties"],
+		"meta": {
+			"severity": rule_meta.severity,
+			"reason": rule_meta.reason,
+			"recommendation": rule_meta.recommendation,
+		},
+	}
+}
+
+deny contains result if {
+	some name, resource in helpers.resources_by_types(rule_meta.resource_types)
+	some _, eip_resource in helpers.resources_by_type("ALIYUN::VPC::EIPAssociation")
+	instance_id := helpers.get_property(eip_resource, "InstanceId", "")
+	helpers.is_get_att_referencing(instance_id, name)
+	result := {
+		"id": rule_meta.id,
+		"resource_id": name,
+		"violation_path": ["Properties"],
 		"meta": {
 			"severity": rule_meta.severity,
 			"reason": rule_meta.reason,

@@ -44,15 +44,6 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "zh": "安全性",
         "rules": [
             rule(
-                "ecs-instance-no-public-ip",
-                "ECS instance must not allocate public IP",
-                "ECS 实例禁止分配公网 IP",
-                "ALIYUN::ECS::Instance",
-                "AllocatePublicIP",
-                check="false",
-                severity="high",
-            ),
-            rule(
                 "ecs-instance-security-group-required",
                 "ECS instance must attach a security group",
                 "ECS 实例必须绑定安全组",
@@ -78,32 +69,6 @@ SCENARIOS: dict[str, dict[str, Any]] = {
                 severity="high",
             ),
             rule(
-                "oss-bucket-private-acl",
-                "OSS bucket ACL must be private",
-                "OSS Bucket ACL 必须为私有",
-                "ALIYUN::OSS::Bucket",
-                "AccessControl",
-                check="equals",
-                expected="private",
-                severity="high",
-            ),
-            rule(
-                "oss-bucket-encryption-configured",
-                "OSS bucket must configure server-side encryption",
-                "OSS Bucket 必须配置服务端加密",
-                "ALIYUN::OSS::Bucket",
-                "ServerSideEncryptionConfiguration",
-                severity="high",
-            ),
-            rule(
-                "oss-bucket-logging-configured",
-                "OSS bucket must configure access logging",
-                "OSS Bucket 必须配置访问日志",
-                "ALIYUN::OSS::Bucket",
-                "LoggingConfiguration",
-                severity="medium",
-            ),
-            rule(
                 "rds-instance-vpc-required",
                 "RDS instance must run in VPC",
                 "RDS 实例必须部署在 VPC 内",
@@ -112,46 +77,11 @@ SCENARIOS: dict[str, dict[str, Any]] = {
                 severity="high",
             ),
             rule(
-                "rds-instance-ssl-required",
-                "RDS instance must configure SSL",
-                "RDS 实例必须配置 SSL",
-                "ALIYUN::RDS::DBInstance",
-                "SSLSetting",
-                severity="high",
-            ),
-            rule(
-                "rds-instance-tde-enabled",
-                "RDS instance must enable TDE",
-                "RDS 实例必须启用 TDE",
-                "ALIYUN::RDS::DBInstance",
-                "TDEStatus",
-                check="equals",
-                expected="Enabled",
-                severity="high",
-            ),
-            rule(
                 "redis-instance-vpc-required",
                 "Redis instance must run in VPC",
                 "Redis 实例必须部署在 VPC 内",
                 "ALIYUN::REDIS::Instance",
                 "VpcId",
-                severity="high",
-            ),
-            rule(
-                "ram-user-mfa-required",
-                "RAM user must require MFA",
-                "RAM 用户必须要求 MFA",
-                "ALIYUN::RAM::User",
-                "MFABindRequired",
-                check="true",
-                severity="high",
-            ),
-            rule(
-                "api-gateway-api-auth-required",
-                "API Gateway API must configure authentication",
-                "API 网关 API 必须配置认证",
-                "ALIYUN::ApiGateway::Api",
-                "AuthType",
                 severity="high",
             ),
         ],
@@ -902,6 +832,35 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 }
 
 
+HAND_AUTHORED_SECURITY_RULE_IDS = [
+    "actiontrail-trail-intact-enabled",
+    "vpc-flow-logs-enabled",
+    "ram-user-mfa-check",
+    "ram-password-policy-check",
+    "ram-policy-no-statements-with-admin-access-check",
+    "ecs-running-instance-no-public-ip",
+    "ecs-security-group-risky-ports-check-with-protocol",
+    "ecs-security-group-not-internet-cidr-access",
+    "oss-bucket-server-side-encryption-enabled",
+    "oss-bucket-only-https-enabled",
+    "oss-bucket-public-read-prohibited",
+    "oss-bucket-public-write-prohibited",
+    "oss-bucket-logging-enabled",
+    "rds-public-connection-and-any-ip-access-check",
+    "rds-instance-enabled-ssl",
+    "rds-instance-enabled-tde-disk-encryption",
+    "redis-instance-no-public-ip",
+    "redis-instance-enabled-ssl",
+    "cr-repository-image-scanning-enabled",
+    "cr-repository-type-private",
+    "kms-key-rotation-enabled",
+    "kms-secret-rotation-enabled",
+    "fc-service-internet-access-disable",
+    "api-gateway-api-auth-required",
+    "api-gateway-api-internet-request-https",
+]
+
+
 def rego_value(value: Any) -> str:
     if value is True:
         return "true"
@@ -1106,9 +1065,24 @@ def render_ecs_no_public_ip_policy(scenario: str, scenario_zh: str, policy: dict
 def render_pack(scenario: str, spec: dict[str, Any]) -> str:
     package_name = f"iac_code_{scenario.replace('-', '_')}"
     pack_id = f"iac-code-{scenario}"
-    rule_lines = [f'        "{rule_id(scenario, policy)}"' for policy in spec["rules"]]
+    pack_rule_ids = [rule_id(scenario, policy) for policy in spec["rules"]]
+    if scenario == "security":
+        pack_rule_ids.extend(HAND_AUTHORED_SECURITY_RULE_IDS)
+
+    rule_lines = [f'        "{current_rule_id}"' for current_rule_id in pack_rule_ids]
     rules = ",\n".join(rule_lines)
     scenario_en = scenario.replace("-", " ").title()
+    description_en = f"Scenario-oriented InfraGuard policies for {scenario_en}."
+    description_zh = f"面向{spec['zh']}场景的 InfraGuard 策略组合。"
+    if scenario == "security":
+        description_en = (
+            "Scenario-oriented InfraGuard policies for Security, covering identity, network exposure, "
+            "data protection, audit logging, supply chain, and key management."
+        )
+        description_zh = (
+            "面向安全性场景的 InfraGuard 策略组合，覆盖身份、网络公网暴露、数据保护、审计日志、供应链和密钥管理。"
+        )
+
     return (
         f"package infraguard.packs.aliyun.{package_name}\n\n"
         "import rego.v1\n\n"
@@ -1119,8 +1093,8 @@ def render_pack(scenario: str, spec: dict[str, Any]) -> str:
         f'        "zh": "IaC Code {spec["zh"]}场景合规包",\n'
         "    },\n"
         '    "description": {\n'
-        f'        "en": "Scenario-oriented InfraGuard policies for {scenario_en}.",\n'
-        f'        "zh": "面向{spec["zh"]}场景的 InfraGuard 策略组合。",\n'
+        f'        "en": "{description_en}",\n'
+        f'        "zh": "{description_zh}",\n'
         "    },\n"
         '    "rules": [\n'
         f"{rules}\n"
@@ -1138,7 +1112,8 @@ def main() -> None:
     for scenario in SCENARIOS:
         scenario_dir = ROOT / scenario
         scenario_dir.mkdir(parents=True, exist_ok=True)
-        for existing in scenario_dir.glob("*.rego"):
+        pattern = "security-*.rego" if scenario == "security" else "*.rego"
+        for existing in scenario_dir.glob(pattern):
             existing.unlink()
 
     for scenario, spec in SCENARIOS.items():

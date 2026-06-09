@@ -55,7 +55,7 @@ auto_trigger:
 ### InfraGuard 合规策略生成
 - 用户要求“生成合规策略”“写 InfraGuard 规则”“用 Rego 检查模板”“策略校验”等时，按 [references/infraguard-policy-generation.md](references/infraguard-policy-generation.md) 执行。
 - 已生成的 InfraGuard 策略资产位于 [references/infraguard-policies/](references/infraguard-policies/)，按场景目录组织。
-- 云基础设施安全基线策略优先使用 [references/infraguard-policies/packs/cloud-infrastructure-security-baseline.rego](references/infraguard-policies/packs/cloud-infrastructure-security-baseline.rego) 及 [references/infraguard-policies/rules/ros/](references/infraguard-policies/rules/ros/) 下的官方风格规则，规则依赖 [references/infraguard-policies/lib/helpers.rego](references/infraguard-policies/lib/helpers.rego)。
+- 安全类策略优先使用 [references/infraguard-policies/packs/iac-code-security-pack.rego](references/infraguard-policies/packs/iac-code-security-pack.rego) 及 [references/infraguard-policies/security/](references/infraguard-policies/security/) 下的官方风格规则，规则依赖 [references/infraguard-policies/lib/helpers.rego](references/infraguard-policies/lib/helpers.rego)。
 - 需要自定义或组合策略时，先阅读 InfraGuard 策略生成参考，再读取相关场景下的策略资产。
 
 ## 参数化规则

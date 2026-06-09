@@ -8,7 +8,7 @@
 - 支持按多维度生成或组合策略，包括：安全性、高可用、成本优化、合规性、最佳实践、可运维性、网络架构、弹性能力。
 - IaC Code 需要生成 100+ 个 InfraGuard 策略，覆盖 8 个场景，作为面向不同用户需求的通用合规策略资产。
 - 已生成的策略资产位于 [references/infraguard-policies/](infraguard-policies/)，按场景目录组织。
-- 每个场景都提供一个 InfraGuard pack，位于 [references/infraguard-policies/packs/](infraguard-policies/packs/)，用于按场景快速组合 13 条规则。
+- 每个场景都提供一个 InfraGuard pack，位于 [references/infraguard-policies/packs/](infraguard-policies/packs/)，用于按场景快速组合对应规则；安全类规则统一放在 `security` 场景目录。
 
 ## 策略资产选择
 
@@ -179,12 +179,12 @@ is_compliant(value) if {
 
 如果必须落地为 InfraGuard 策略，只检查模板中可验证的资源配置，例如标签、日志投递、加密、网络暴露、MFA、密码策略、备份策略、镜像扫描、KMS 轮换。
 
-## 云基础设施安全基线
+## 安全规则资产
 
-基于 `docs/infra/security/cloud-infrastructure-security-usage-guidelines.md` 整理出的可静态验证项，已落地为：
+安全相关的可静态验证项已落地为：
 
-- Pack: `references/infraguard-policies/packs/cloud-infrastructure-security-baseline.rego`
-- Rules: `references/infraguard-policies/rules/ros/*.rego`
+- Pack: `references/infraguard-policies/packs/iac-code-security-pack.rego`
+- Rules: `references/infraguard-policies/security/*.rego`
 - Helpers: `references/infraguard-policies/lib/helpers.rego`
 
 该 pack 覆盖身份、网络公网暴露、数据保护、审计日志、供应链和密钥管理。不可静态验证的流程类要求保留在架构评审和上线证据中处理。
