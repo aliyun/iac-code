@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "Security group must configure description",
         "zh": "安全组必须配置描述",
-        "ja": "安全组必须配置描述",
-        "de": "安全组必须配置描述",
-        "es": "安全组必须配置描述",
-        "fr": "安全组必须配置描述",
-        "pt": "安全组必须配置描述"
+        "ja": "ALIYUN::ECS::SecurityGroup には Description を設定する必要があります",
+        "de": "Für ALIYUN::ECS::SecurityGroup muss Description konfiguriert sein",
+        "es": "ALIYUN::ECS::SecurityGroup debe tener Description configurado",
+        "fr": "ALIYUN::ECS::SecurityGroup doit avoir Description configuré",
+        "pt": "ALIYUN::ECS::SecurityGroup deve ter Description configurado"
     },
     "description": {
         "en": "Checks Security group must configure description",
         "zh": "检查安全组必须配置描述",
-        "ja": "检查安全组必须配置描述",
-        "de": "检查安全组必须配置描述",
-        "es": "检查安全组必须配置描述",
-        "fr": "检查安全组必须配置描述",
-        "pt": "检查安全组必须配置描述"
+        "ja": "ALIYUN::ECS::SecurityGroup に Description が設定されていることを確認します",
+        "de": "Prüft, ob Description für ALIYUN::ECS::SecurityGroup konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ECS::SecurityGroup tenga Description configurado",
+        "fr": "Vérifie que ALIYUN::ECS::SecurityGroup a Description configuré",
+        "pt": "Verifica se ALIYUN::ECS::SecurityGroup tem Description configurado"
     },
     "reason": {
         "en": "Security group must configure description is not satisfied.",
         "zh": "安全组必须配置描述未满足。",
-        "ja": "安全组必须配置描述未满足。",
-        "de": "安全组必须配置描述未满足。",
-        "es": "安全组必须配置描述未满足。",
-        "fr": "安全组必须配置描述未满足。",
-        "pt": "安全组必须配置描述未满足。"
+        "ja": "ALIYUN::ECS::SecurityGroup に Description が設定されていません。",
+        "de": "Für ALIYUN::ECS::SecurityGroup ist Description nicht konfiguriert.",
+        "es": "ALIYUN::ECS::SecurityGroup no tiene Description configurado.",
+        "fr": "ALIYUN::ECS::SecurityGroup n'a pas Description configuré.",
+        "pt": "ALIYUN::ECS::SecurityGroup não tem Description configurado."
     },
     "recommendation": {
         "en": "Configure Description on ALIYUN::ECS::SecurityGroup to satisfy the policy.",
         "zh": "请在 ALIYUN::ECS::SecurityGroup 上配置 Description 以满足策略。",
-        "ja": "请在 ALIYUN::ECS::SecurityGroup 上配置 Description 以满足策略。",
-        "de": "请在 ALIYUN::ECS::SecurityGroup 上配置 Description 以满足策略。",
-        "es": "请在 ALIYUN::ECS::SecurityGroup 上配置 Description 以满足策略。",
-        "fr": "请在 ALIYUN::ECS::SecurityGroup 上配置 Description 以满足策略。",
-        "pt": "请在 ALIYUN::ECS::SecurityGroup 上配置 Description 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ECS::SecurityGroup に Description を設定してください。",
+        "de": "Konfigurieren Sie Description für ALIYUN::ECS::SecurityGroup, um die Richtlinie zu erfüllen.",
+        "es": "Configure Description en ALIYUN::ECS::SecurityGroup para cumplir la política.",
+        "fr": "Configurez Description sur ALIYUN::ECS::SecurityGroup pour satisfaire la politique.",
+        "pt": "Configure Description em ALIYUN::ECS::SecurityGroup para atender à política."
     },
     "resource_types": ["ALIYUN::ECS::SecurityGroup"]
 }

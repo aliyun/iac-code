@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "Redis instance must set instance class",
         "zh": "Redis 实例必须设置规格",
-        "ja": "Redis 实例必须设置规格",
-        "de": "Redis 实例必须设置规格",
-        "es": "Redis 实例必须设置规格",
-        "fr": "Redis 实例必须设置规格",
-        "pt": "Redis 实例必须设置规格"
+        "ja": "ALIYUN::REDIS::Instance には InstanceClass を設定する必要があります",
+        "de": "Für ALIYUN::REDIS::Instance muss InstanceClass konfiguriert sein",
+        "es": "ALIYUN::REDIS::Instance debe tener InstanceClass configurado",
+        "fr": "ALIYUN::REDIS::Instance doit avoir InstanceClass configuré",
+        "pt": "ALIYUN::REDIS::Instance deve ter InstanceClass configurado"
     },
     "description": {
         "en": "Checks Redis instance must set instance class",
         "zh": "检查Redis 实例必须设置规格",
-        "ja": "检查Redis 实例必须设置规格",
-        "de": "检查Redis 实例必须设置规格",
-        "es": "检查Redis 实例必须设置规格",
-        "fr": "检查Redis 实例必须设置规格",
-        "pt": "检查Redis 实例必须设置规格"
+        "ja": "ALIYUN::REDIS::Instance に InstanceClass が設定されていることを確認します",
+        "de": "Prüft, ob InstanceClass für ALIYUN::REDIS::Instance konfiguriert ist",
+        "es": "Comprueba que ALIYUN::REDIS::Instance tenga InstanceClass configurado",
+        "fr": "Vérifie que ALIYUN::REDIS::Instance a InstanceClass configuré",
+        "pt": "Verifica se ALIYUN::REDIS::Instance tem InstanceClass configurado"
     },
     "reason": {
         "en": "Redis instance must set instance class is not satisfied.",
         "zh": "Redis 实例必须设置规格未满足。",
-        "ja": "Redis 实例必须设置规格未满足。",
-        "de": "Redis 实例必须设置规格未满足。",
-        "es": "Redis 实例必须设置规格未满足。",
-        "fr": "Redis 实例必须设置规格未满足。",
-        "pt": "Redis 实例必须设置规格未满足。"
+        "ja": "ALIYUN::REDIS::Instance に InstanceClass が設定されていません。",
+        "de": "Für ALIYUN::REDIS::Instance ist InstanceClass nicht konfiguriert.",
+        "es": "ALIYUN::REDIS::Instance no tiene InstanceClass configurado.",
+        "fr": "ALIYUN::REDIS::Instance n'a pas InstanceClass configuré.",
+        "pt": "ALIYUN::REDIS::Instance não tem InstanceClass configurado."
     },
     "recommendation": {
         "en": "Configure InstanceClass on ALIYUN::REDIS::Instance to satisfy the policy.",
         "zh": "请在 ALIYUN::REDIS::Instance 上配置 InstanceClass 以满足策略。",
-        "ja": "请在 ALIYUN::REDIS::Instance 上配置 InstanceClass 以满足策略。",
-        "de": "请在 ALIYUN::REDIS::Instance 上配置 InstanceClass 以满足策略。",
-        "es": "请在 ALIYUN::REDIS::Instance 上配置 InstanceClass 以满足策略。",
-        "fr": "请在 ALIYUN::REDIS::Instance 上配置 InstanceClass 以满足策略。",
-        "pt": "请在 ALIYUN::REDIS::Instance 上配置 InstanceClass 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::REDIS::Instance に InstanceClass を設定してください。",
+        "de": "Konfigurieren Sie InstanceClass für ALIYUN::REDIS::Instance, um die Richtlinie zu erfüllen.",
+        "es": "Configure InstanceClass en ALIYUN::REDIS::Instance para cumplir la política.",
+        "fr": "Configurez InstanceClass sur ALIYUN::REDIS::Instance pour satisfaire la politique.",
+        "pt": "Configure InstanceClass em ALIYUN::REDIS::Instance para atender à política."
     },
     "resource_types": ["ALIYUN::REDIS::Instance"]
 }

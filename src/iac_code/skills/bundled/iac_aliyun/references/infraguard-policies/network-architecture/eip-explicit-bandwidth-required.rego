@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "EIP must configure bandwidth",
         "zh": "EIP 必须配置带宽",
-        "ja": "EIP 必须配置带宽",
-        "de": "EIP 必须配置带宽",
-        "es": "EIP 必须配置带宽",
-        "fr": "EIP 必须配置带宽",
-        "pt": "EIP 必须配置带宽"
+        "ja": "ALIYUN::VPC::EIP には Bandwidth を設定する必要があります",
+        "de": "Für ALIYUN::VPC::EIP muss Bandwidth konfiguriert sein",
+        "es": "ALIYUN::VPC::EIP debe tener Bandwidth configurado",
+        "fr": "ALIYUN::VPC::EIP doit avoir Bandwidth configuré",
+        "pt": "ALIYUN::VPC::EIP deve ter Bandwidth configurado"
     },
     "description": {
         "en": "Checks EIP must configure bandwidth",
         "zh": "检查EIP 必须配置带宽",
-        "ja": "检查EIP 必须配置带宽",
-        "de": "检查EIP 必须配置带宽",
-        "es": "检查EIP 必须配置带宽",
-        "fr": "检查EIP 必须配置带宽",
-        "pt": "检查EIP 必须配置带宽"
+        "ja": "ALIYUN::VPC::EIP に Bandwidth が設定されていることを確認します",
+        "de": "Prüft, ob Bandwidth für ALIYUN::VPC::EIP konfiguriert ist",
+        "es": "Comprueba que ALIYUN::VPC::EIP tenga Bandwidth configurado",
+        "fr": "Vérifie que ALIYUN::VPC::EIP a Bandwidth configuré",
+        "pt": "Verifica se ALIYUN::VPC::EIP tem Bandwidth configurado"
     },
     "reason": {
         "en": "EIP must configure bandwidth is not satisfied.",
         "zh": "EIP 必须配置带宽未满足。",
-        "ja": "EIP 必须配置带宽未满足。",
-        "de": "EIP 必须配置带宽未满足。",
-        "es": "EIP 必须配置带宽未满足。",
-        "fr": "EIP 必须配置带宽未满足。",
-        "pt": "EIP 必须配置带宽未满足。"
+        "ja": "ALIYUN::VPC::EIP に Bandwidth が設定されていません。",
+        "de": "Für ALIYUN::VPC::EIP ist Bandwidth nicht konfiguriert.",
+        "es": "ALIYUN::VPC::EIP no tiene Bandwidth configurado.",
+        "fr": "ALIYUN::VPC::EIP n'a pas Bandwidth configuré.",
+        "pt": "ALIYUN::VPC::EIP não tem Bandwidth configurado."
     },
     "recommendation": {
         "en": "Configure Bandwidth on ALIYUN::VPC::EIP to satisfy the policy.",
         "zh": "请在 ALIYUN::VPC::EIP 上配置 Bandwidth 以满足策略。",
-        "ja": "请在 ALIYUN::VPC::EIP 上配置 Bandwidth 以满足策略。",
-        "de": "请在 ALIYUN::VPC::EIP 上配置 Bandwidth 以满足策略。",
-        "es": "请在 ALIYUN::VPC::EIP 上配置 Bandwidth 以满足策略。",
-        "fr": "请在 ALIYUN::VPC::EIP 上配置 Bandwidth 以满足策略。",
-        "pt": "请在 ALIYUN::VPC::EIP 上配置 Bandwidth 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::VPC::EIP に Bandwidth を設定してください。",
+        "de": "Konfigurieren Sie Bandwidth für ALIYUN::VPC::EIP, um die Richtlinie zu erfüllen.",
+        "es": "Configure Bandwidth en ALIYUN::VPC::EIP para cumplir la política.",
+        "fr": "Configurez Bandwidth sur ALIYUN::VPC::EIP pour satisfaire la politique.",
+        "pt": "Configure Bandwidth em ALIYUN::VPC::EIP para atender à política."
     },
     "resource_types": ["ALIYUN::VPC::EIP"]
 }

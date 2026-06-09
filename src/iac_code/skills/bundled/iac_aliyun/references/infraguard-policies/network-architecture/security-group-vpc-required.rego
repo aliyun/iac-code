@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "Security group must bind VPC",
         "zh": "安全组必须绑定 VPC",
-        "ja": "安全组必须绑定 VPC",
-        "de": "安全组必须绑定 VPC",
-        "es": "安全组必须绑定 VPC",
-        "fr": "安全组必须绑定 VPC",
-        "pt": "安全组必须绑定 VPC"
+        "ja": "ALIYUN::ECS::SecurityGroup には VpcId を設定する必要があります",
+        "de": "Für ALIYUN::ECS::SecurityGroup muss VpcId konfiguriert sein",
+        "es": "ALIYUN::ECS::SecurityGroup debe tener VpcId configurado",
+        "fr": "ALIYUN::ECS::SecurityGroup doit avoir VpcId configuré",
+        "pt": "ALIYUN::ECS::SecurityGroup deve ter VpcId configurado"
     },
     "description": {
         "en": "Checks Security group must bind VPC",
         "zh": "检查安全组必须绑定 VPC",
-        "ja": "检查安全组必须绑定 VPC",
-        "de": "检查安全组必须绑定 VPC",
-        "es": "检查安全组必须绑定 VPC",
-        "fr": "检查安全组必须绑定 VPC",
-        "pt": "检查安全组必须绑定 VPC"
+        "ja": "ALIYUN::ECS::SecurityGroup に VpcId が設定されていることを確認します",
+        "de": "Prüft, ob VpcId für ALIYUN::ECS::SecurityGroup konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ECS::SecurityGroup tenga VpcId configurado",
+        "fr": "Vérifie que ALIYUN::ECS::SecurityGroup a VpcId configuré",
+        "pt": "Verifica se ALIYUN::ECS::SecurityGroup tem VpcId configurado"
     },
     "reason": {
         "en": "Security group must bind VPC is not satisfied.",
         "zh": "安全组必须绑定 VPC未满足。",
-        "ja": "安全组必须绑定 VPC未满足。",
-        "de": "安全组必须绑定 VPC未满足。",
-        "es": "安全组必须绑定 VPC未满足。",
-        "fr": "安全组必须绑定 VPC未满足。",
-        "pt": "安全组必须绑定 VPC未满足。"
+        "ja": "ALIYUN::ECS::SecurityGroup に VpcId が設定されていません。",
+        "de": "Für ALIYUN::ECS::SecurityGroup ist VpcId nicht konfiguriert.",
+        "es": "ALIYUN::ECS::SecurityGroup no tiene VpcId configurado.",
+        "fr": "ALIYUN::ECS::SecurityGroup n'a pas VpcId configuré.",
+        "pt": "ALIYUN::ECS::SecurityGroup não tem VpcId configurado."
     },
     "recommendation": {
         "en": "Configure VpcId on ALIYUN::ECS::SecurityGroup to satisfy the policy.",
         "zh": "请在 ALIYUN::ECS::SecurityGroup 上配置 VpcId 以满足策略。",
-        "ja": "请在 ALIYUN::ECS::SecurityGroup 上配置 VpcId 以满足策略。",
-        "de": "请在 ALIYUN::ECS::SecurityGroup 上配置 VpcId 以满足策略。",
-        "es": "请在 ALIYUN::ECS::SecurityGroup 上配置 VpcId 以满足策略。",
-        "fr": "请在 ALIYUN::ECS::SecurityGroup 上配置 VpcId 以满足策略。",
-        "pt": "请在 ALIYUN::ECS::SecurityGroup 上配置 VpcId 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ECS::SecurityGroup に VpcId を設定してください。",
+        "de": "Konfigurieren Sie VpcId für ALIYUN::ECS::SecurityGroup, um die Richtlinie zu erfüllen.",
+        "es": "Configure VpcId en ALIYUN::ECS::SecurityGroup para cumplir la política.",
+        "fr": "Configurez VpcId sur ALIYUN::ECS::SecurityGroup pour satisfaire la politique.",
+        "pt": "Configure VpcId em ALIYUN::ECS::SecurityGroup para atender à política."
     },
     "resource_types": ["ALIYUN::ECS::SecurityGroup"]
 }

@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ActionTrail trail must configure name",
         "zh": "ActionTrail 跟踪必须配置名称",
-        "ja": "ActionTrail 跟踪必须配置名称",
-        "de": "ActionTrail 跟踪必须配置名称",
-        "es": "ActionTrail 跟踪必须配置名称",
-        "fr": "ActionTrail 跟踪必须配置名称",
-        "pt": "ActionTrail 跟踪必须配置名称"
+        "ja": "ALIYUN::ACTIONTRAIL::Trail には TrailName を設定する必要があります",
+        "de": "Für ALIYUN::ACTIONTRAIL::Trail muss TrailName konfiguriert sein",
+        "es": "ALIYUN::ACTIONTRAIL::Trail debe tener TrailName configurado",
+        "fr": "ALIYUN::ACTIONTRAIL::Trail doit avoir TrailName configuré",
+        "pt": "ALIYUN::ACTIONTRAIL::Trail deve ter TrailName configurado"
     },
     "description": {
         "en": "Checks ActionTrail trail must configure name",
         "zh": "检查ActionTrail 跟踪必须配置名称",
-        "ja": "检查ActionTrail 跟踪必须配置名称",
-        "de": "检查ActionTrail 跟踪必须配置名称",
-        "es": "检查ActionTrail 跟踪必须配置名称",
-        "fr": "检查ActionTrail 跟踪必须配置名称",
-        "pt": "检查ActionTrail 跟踪必须配置名称"
+        "ja": "ALIYUN::ACTIONTRAIL::Trail に TrailName が設定されていることを確認します",
+        "de": "Prüft, ob TrailName für ALIYUN::ACTIONTRAIL::Trail konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ACTIONTRAIL::Trail tenga TrailName configurado",
+        "fr": "Vérifie que ALIYUN::ACTIONTRAIL::Trail a TrailName configuré",
+        "pt": "Verifica se ALIYUN::ACTIONTRAIL::Trail tem TrailName configurado"
     },
     "reason": {
         "en": "ActionTrail trail must configure name is not satisfied.",
         "zh": "ActionTrail 跟踪必须配置名称未满足。",
-        "ja": "ActionTrail 跟踪必须配置名称未满足。",
-        "de": "ActionTrail 跟踪必须配置名称未满足。",
-        "es": "ActionTrail 跟踪必须配置名称未满足。",
-        "fr": "ActionTrail 跟踪必须配置名称未满足。",
-        "pt": "ActionTrail 跟踪必须配置名称未满足。"
+        "ja": "ALIYUN::ACTIONTRAIL::Trail に TrailName が設定されていません。",
+        "de": "Für ALIYUN::ACTIONTRAIL::Trail ist TrailName nicht konfiguriert.",
+        "es": "ALIYUN::ACTIONTRAIL::Trail no tiene TrailName configurado.",
+        "fr": "ALIYUN::ACTIONTRAIL::Trail n'a pas TrailName configuré.",
+        "pt": "ALIYUN::ACTIONTRAIL::Trail não tem TrailName configurado."
     },
     "recommendation": {
         "en": "Configure TrailName on ALIYUN::ACTIONTRAIL::Trail to satisfy the policy.",
         "zh": "请在 ALIYUN::ACTIONTRAIL::Trail 上配置 TrailName 以满足策略。",
-        "ja": "请在 ALIYUN::ACTIONTRAIL::Trail 上配置 TrailName 以满足策略。",
-        "de": "请在 ALIYUN::ACTIONTRAIL::Trail 上配置 TrailName 以满足策略。",
-        "es": "请在 ALIYUN::ACTIONTRAIL::Trail 上配置 TrailName 以满足策略。",
-        "fr": "请在 ALIYUN::ACTIONTRAIL::Trail 上配置 TrailName 以满足策略。",
-        "pt": "请在 ALIYUN::ACTIONTRAIL::Trail 上配置 TrailName 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ACTIONTRAIL::Trail に TrailName を設定してください。",
+        "de": "Konfigurieren Sie TrailName für ALIYUN::ACTIONTRAIL::Trail, um die Richtlinie zu erfüllen.",
+        "es": "Configure TrailName en ALIYUN::ACTIONTRAIL::Trail para cumplir la política.",
+        "fr": "Configurez TrailName sur ALIYUN::ACTIONTRAIL::Trail pour satisfaire la politique.",
+        "pt": "Configure TrailName em ALIYUN::ACTIONTRAIL::Trail para atender à política."
     },
     "resource_types": ["ALIYUN::ACTIONTRAIL::Trail"]
 }

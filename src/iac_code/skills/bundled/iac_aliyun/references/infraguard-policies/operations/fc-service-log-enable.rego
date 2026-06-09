@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "FC service must configure logging",
         "zh": "函数计算服务必须配置日志",
-        "ja": "函数计算服务必须配置日志",
-        "de": "函数计算服务必须配置日志",
-        "es": "函数计算服务必须配置日志",
-        "fr": "函数计算服务必须配置日志",
-        "pt": "函数计算服务必须配置日志"
+        "ja": "ALIYUN::FC::Service には LogConfig を設定する必要があります",
+        "de": "Für ALIYUN::FC::Service muss LogConfig konfiguriert sein",
+        "es": "ALIYUN::FC::Service debe tener LogConfig configurado",
+        "fr": "ALIYUN::FC::Service doit avoir LogConfig configuré",
+        "pt": "ALIYUN::FC::Service deve ter LogConfig configurado"
     },
     "description": {
         "en": "Checks FC service must configure logging",
         "zh": "检查函数计算服务必须配置日志",
-        "ja": "检查函数计算服务必须配置日志",
-        "de": "检查函数计算服务必须配置日志",
-        "es": "检查函数计算服务必须配置日志",
-        "fr": "检查函数计算服务必须配置日志",
-        "pt": "检查函数计算服务必须配置日志"
+        "ja": "ALIYUN::FC::Service に LogConfig が設定されていることを確認します",
+        "de": "Prüft, ob LogConfig für ALIYUN::FC::Service konfiguriert ist",
+        "es": "Comprueba que ALIYUN::FC::Service tenga LogConfig configurado",
+        "fr": "Vérifie que ALIYUN::FC::Service a LogConfig configuré",
+        "pt": "Verifica se ALIYUN::FC::Service tem LogConfig configurado"
     },
     "reason": {
         "en": "FC service must configure logging is not satisfied.",
         "zh": "函数计算服务必须配置日志未满足。",
-        "ja": "函数计算服务必须配置日志未满足。",
-        "de": "函数计算服务必须配置日志未满足。",
-        "es": "函数计算服务必须配置日志未满足。",
-        "fr": "函数计算服务必须配置日志未满足。",
-        "pt": "函数计算服务必须配置日志未满足。"
+        "ja": "ALIYUN::FC::Service に LogConfig が設定されていません。",
+        "de": "Für ALIYUN::FC::Service ist LogConfig nicht konfiguriert.",
+        "es": "ALIYUN::FC::Service no tiene LogConfig configurado.",
+        "fr": "ALIYUN::FC::Service n'a pas LogConfig configuré.",
+        "pt": "ALIYUN::FC::Service não tem LogConfig configurado."
     },
     "recommendation": {
         "en": "Configure LogConfig on ALIYUN::FC::Service to satisfy the policy.",
         "zh": "请在 ALIYUN::FC::Service 上配置 LogConfig 以满足策略。",
-        "ja": "请在 ALIYUN::FC::Service 上配置 LogConfig 以满足策略。",
-        "de": "请在 ALIYUN::FC::Service 上配置 LogConfig 以满足策略。",
-        "es": "请在 ALIYUN::FC::Service 上配置 LogConfig 以满足策略。",
-        "fr": "请在 ALIYUN::FC::Service 上配置 LogConfig 以满足策略。",
-        "pt": "请在 ALIYUN::FC::Service 上配置 LogConfig 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::FC::Service に LogConfig を設定してください。",
+        "de": "Konfigurieren Sie LogConfig für ALIYUN::FC::Service, um die Richtlinie zu erfüllen.",
+        "es": "Configure LogConfig en ALIYUN::FC::Service para cumplir la política.",
+        "fr": "Configurez LogConfig sur ALIYUN::FC::Service pour satisfaire la politique.",
+        "pt": "Configure LogConfig em ALIYUN::FC::Service para atender à política."
     },
     "resource_types": ["ALIYUN::FC::Service"]
 }

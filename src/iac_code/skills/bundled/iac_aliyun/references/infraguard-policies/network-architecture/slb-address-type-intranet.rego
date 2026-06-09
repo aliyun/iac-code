@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "SLB should use intranet address type",
         "zh": "SLB 应使用内网地址类型",
-        "ja": "SLB 应使用内网地址类型",
-        "de": "SLB 应使用内网地址类型",
-        "es": "SLB 应使用内网地址类型",
-        "fr": "SLB 应使用内网地址类型",
-        "pt": "SLB 应使用内网地址类型"
+        "ja": "ALIYUN::SLB::LoadBalancer には AddressType を設定する必要があります",
+        "de": "Für ALIYUN::SLB::LoadBalancer muss AddressType konfiguriert sein",
+        "es": "ALIYUN::SLB::LoadBalancer debe tener AddressType configurado",
+        "fr": "ALIYUN::SLB::LoadBalancer doit avoir AddressType configuré",
+        "pt": "ALIYUN::SLB::LoadBalancer deve ter AddressType configurado"
     },
     "description": {
         "en": "Checks SLB should use intranet address type",
         "zh": "检查SLB 应使用内网地址类型",
-        "ja": "检查SLB 应使用内网地址类型",
-        "de": "检查SLB 应使用内网地址类型",
-        "es": "检查SLB 应使用内网地址类型",
-        "fr": "检查SLB 应使用内网地址类型",
-        "pt": "检查SLB 应使用内网地址类型"
+        "ja": "ALIYUN::SLB::LoadBalancer に AddressType が設定されていることを確認します",
+        "de": "Prüft, ob AddressType für ALIYUN::SLB::LoadBalancer konfiguriert ist",
+        "es": "Comprueba que ALIYUN::SLB::LoadBalancer tenga AddressType configurado",
+        "fr": "Vérifie que ALIYUN::SLB::LoadBalancer a AddressType configuré",
+        "pt": "Verifica se ALIYUN::SLB::LoadBalancer tem AddressType configurado"
     },
     "reason": {
         "en": "SLB should use intranet address type is not satisfied.",
         "zh": "SLB 应使用内网地址类型未满足。",
-        "ja": "SLB 应使用内网地址类型未满足。",
-        "de": "SLB 应使用内网地址类型未满足。",
-        "es": "SLB 应使用内网地址类型未满足。",
-        "fr": "SLB 应使用内网地址类型未满足。",
-        "pt": "SLB 应使用内网地址类型未满足。"
+        "ja": "ALIYUN::SLB::LoadBalancer に AddressType が設定されていません。",
+        "de": "Für ALIYUN::SLB::LoadBalancer ist AddressType nicht konfiguriert.",
+        "es": "ALIYUN::SLB::LoadBalancer no tiene AddressType configurado.",
+        "fr": "ALIYUN::SLB::LoadBalancer n'a pas AddressType configuré.",
+        "pt": "ALIYUN::SLB::LoadBalancer não tem AddressType configurado."
     },
     "recommendation": {
         "en": "Configure AddressType on ALIYUN::SLB::LoadBalancer to satisfy the policy.",
         "zh": "请在 ALIYUN::SLB::LoadBalancer 上配置 AddressType 以满足策略。",
-        "ja": "请在 ALIYUN::SLB::LoadBalancer 上配置 AddressType 以满足策略。",
-        "de": "请在 ALIYUN::SLB::LoadBalancer 上配置 AddressType 以满足策略。",
-        "es": "请在 ALIYUN::SLB::LoadBalancer 上配置 AddressType 以满足策略。",
-        "fr": "请在 ALIYUN::SLB::LoadBalancer 上配置 AddressType 以满足策略。",
-        "pt": "请在 ALIYUN::SLB::LoadBalancer 上配置 AddressType 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::SLB::LoadBalancer に AddressType を設定してください。",
+        "de": "Konfigurieren Sie AddressType für ALIYUN::SLB::LoadBalancer, um die Richtlinie zu erfüllen.",
+        "es": "Configure AddressType en ALIYUN::SLB::LoadBalancer para cumplir la política.",
+        "fr": "Configurez AddressType sur ALIYUN::SLB::LoadBalancer pour satisfaire la politique.",
+        "pt": "Configure AddressType em ALIYUN::SLB::LoadBalancer para atender à política."
     },
     "resource_types": ["ALIYUN::SLB::LoadBalancer"]
 }

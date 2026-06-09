@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ECS instance must set charge type",
         "zh": "ECS 实例必须设置付费类型",
-        "ja": "ECS 实例必须设置付费类型",
-        "de": "ECS 实例必须设置付费类型",
-        "es": "ECS 实例必须设置付费类型",
-        "fr": "ECS 实例必须设置付费类型",
-        "pt": "ECS 实例必须设置付费类型"
+        "ja": "ALIYUN::ECS::Instance には InstanceChargeType を設定する必要があります",
+        "de": "Für ALIYUN::ECS::Instance muss InstanceChargeType konfiguriert sein",
+        "es": "ALIYUN::ECS::Instance debe tener InstanceChargeType configurado",
+        "fr": "ALIYUN::ECS::Instance doit avoir InstanceChargeType configuré",
+        "pt": "ALIYUN::ECS::Instance deve ter InstanceChargeType configurado"
     },
     "description": {
         "en": "Checks ECS instance must set charge type",
         "zh": "检查ECS 实例必须设置付费类型",
-        "ja": "检查ECS 实例必须设置付费类型",
-        "de": "检查ECS 实例必须设置付费类型",
-        "es": "检查ECS 实例必须设置付费类型",
-        "fr": "检查ECS 实例必须设置付费类型",
-        "pt": "检查ECS 实例必须设置付费类型"
+        "ja": "ALIYUN::ECS::Instance に InstanceChargeType が設定されていることを確認します",
+        "de": "Prüft, ob InstanceChargeType für ALIYUN::ECS::Instance konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ECS::Instance tenga InstanceChargeType configurado",
+        "fr": "Vérifie que ALIYUN::ECS::Instance a InstanceChargeType configuré",
+        "pt": "Verifica se ALIYUN::ECS::Instance tem InstanceChargeType configurado"
     },
     "reason": {
         "en": "ECS instance must set charge type is not satisfied.",
         "zh": "ECS 实例必须设置付费类型未满足。",
-        "ja": "ECS 实例必须设置付费类型未满足。",
-        "de": "ECS 实例必须设置付费类型未满足。",
-        "es": "ECS 实例必须设置付费类型未满足。",
-        "fr": "ECS 实例必须设置付费类型未满足。",
-        "pt": "ECS 实例必须设置付费类型未满足。"
+        "ja": "ALIYUN::ECS::Instance に InstanceChargeType が設定されていません。",
+        "de": "Für ALIYUN::ECS::Instance ist InstanceChargeType nicht konfiguriert.",
+        "es": "ALIYUN::ECS::Instance no tiene InstanceChargeType configurado.",
+        "fr": "ALIYUN::ECS::Instance n'a pas InstanceChargeType configuré.",
+        "pt": "ALIYUN::ECS::Instance não tem InstanceChargeType configurado."
     },
     "recommendation": {
         "en": "Configure InstanceChargeType on ALIYUN::ECS::Instance to satisfy the policy.",
         "zh": "请在 ALIYUN::ECS::Instance 上配置 InstanceChargeType 以满足策略。",
-        "ja": "请在 ALIYUN::ECS::Instance 上配置 InstanceChargeType 以满足策略。",
-        "de": "请在 ALIYUN::ECS::Instance 上配置 InstanceChargeType 以满足策略。",
-        "es": "请在 ALIYUN::ECS::Instance 上配置 InstanceChargeType 以满足策略。",
-        "fr": "请在 ALIYUN::ECS::Instance 上配置 InstanceChargeType 以满足策略。",
-        "pt": "请在 ALIYUN::ECS::Instance 上配置 InstanceChargeType 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ECS::Instance に InstanceChargeType を設定してください。",
+        "de": "Konfigurieren Sie InstanceChargeType für ALIYUN::ECS::Instance, um die Richtlinie zu erfüllen.",
+        "es": "Configure InstanceChargeType en ALIYUN::ECS::Instance para cumplir la política.",
+        "fr": "Configurez InstanceChargeType sur ALIYUN::ECS::Instance pour satisfaire la politique.",
+        "pt": "Configure InstanceChargeType em ALIYUN::ECS::Instance para atender à política."
     },
     "resource_types": ["ALIYUN::ECS::Instance"]
 }

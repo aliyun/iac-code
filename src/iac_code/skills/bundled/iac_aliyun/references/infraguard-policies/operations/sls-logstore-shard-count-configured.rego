@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "SLS Logstore must configure shard count",
         "zh": "SLS Logstore 必须配置分区数",
-        "ja": "SLS Logstore 必须配置分区数",
-        "de": "SLS Logstore 必须配置分区数",
-        "es": "SLS Logstore 必须配置分区数",
-        "fr": "SLS Logstore 必须配置分区数",
-        "pt": "SLS Logstore 必须配置分区数"
+        "ja": "ALIYUN::SLS::Logstore には ShardCount を設定する必要があります",
+        "de": "Für ALIYUN::SLS::Logstore muss ShardCount konfiguriert sein",
+        "es": "ALIYUN::SLS::Logstore debe tener ShardCount configurado",
+        "fr": "ALIYUN::SLS::Logstore doit avoir ShardCount configuré",
+        "pt": "ALIYUN::SLS::Logstore deve ter ShardCount configurado"
     },
     "description": {
         "en": "Checks SLS Logstore must configure shard count",
         "zh": "检查SLS Logstore 必须配置分区数",
-        "ja": "检查SLS Logstore 必须配置分区数",
-        "de": "检查SLS Logstore 必须配置分区数",
-        "es": "检查SLS Logstore 必须配置分区数",
-        "fr": "检查SLS Logstore 必须配置分区数",
-        "pt": "检查SLS Logstore 必须配置分区数"
+        "ja": "ALIYUN::SLS::Logstore に ShardCount が設定されていることを確認します",
+        "de": "Prüft, ob ShardCount für ALIYUN::SLS::Logstore konfiguriert ist",
+        "es": "Comprueba que ALIYUN::SLS::Logstore tenga ShardCount configurado",
+        "fr": "Vérifie que ALIYUN::SLS::Logstore a ShardCount configuré",
+        "pt": "Verifica se ALIYUN::SLS::Logstore tem ShardCount configurado"
     },
     "reason": {
         "en": "SLS Logstore must configure shard count is not satisfied.",
         "zh": "SLS Logstore 必须配置分区数未满足。",
-        "ja": "SLS Logstore 必须配置分区数未满足。",
-        "de": "SLS Logstore 必须配置分区数未满足。",
-        "es": "SLS Logstore 必须配置分区数未满足。",
-        "fr": "SLS Logstore 必须配置分区数未满足。",
-        "pt": "SLS Logstore 必须配置分区数未满足。"
+        "ja": "ALIYUN::SLS::Logstore に ShardCount が設定されていません。",
+        "de": "Für ALIYUN::SLS::Logstore ist ShardCount nicht konfiguriert.",
+        "es": "ALIYUN::SLS::Logstore no tiene ShardCount configurado.",
+        "fr": "ALIYUN::SLS::Logstore n'a pas ShardCount configuré.",
+        "pt": "ALIYUN::SLS::Logstore não tem ShardCount configurado."
     },
     "recommendation": {
         "en": "Configure ShardCount on ALIYUN::SLS::Logstore to satisfy the policy.",
         "zh": "请在 ALIYUN::SLS::Logstore 上配置 ShardCount 以满足策略。",
-        "ja": "请在 ALIYUN::SLS::Logstore 上配置 ShardCount 以满足策略。",
-        "de": "请在 ALIYUN::SLS::Logstore 上配置 ShardCount 以满足策略。",
-        "es": "请在 ALIYUN::SLS::Logstore 上配置 ShardCount 以满足策略。",
-        "fr": "请在 ALIYUN::SLS::Logstore 上配置 ShardCount 以满足策略。",
-        "pt": "请在 ALIYUN::SLS::Logstore 上配置 ShardCount 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::SLS::Logstore に ShardCount を設定してください。",
+        "de": "Konfigurieren Sie ShardCount für ALIYUN::SLS::Logstore, um die Richtlinie zu erfüllen.",
+        "es": "Configure ShardCount en ALIYUN::SLS::Logstore para cumplir la política.",
+        "fr": "Configurez ShardCount sur ALIYUN::SLS::Logstore pour satisfaire la politique.",
+        "pt": "Configure ShardCount em ALIYUN::SLS::Logstore para atender à política."
     },
     "resource_types": ["ALIYUN::SLS::Logstore"]
 }

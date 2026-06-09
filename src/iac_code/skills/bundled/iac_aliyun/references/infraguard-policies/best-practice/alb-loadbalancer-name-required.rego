@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ALB must configure name",
         "zh": "ALB 必须配置名称",
-        "ja": "ALB 必须配置名称",
-        "de": "ALB 必须配置名称",
-        "es": "ALB 必须配置名称",
-        "fr": "ALB 必须配置名称",
-        "pt": "ALB 必须配置名称"
+        "ja": "ALIYUN::ALB::LoadBalancer には LoadBalancerName を設定する必要があります",
+        "de": "Für ALIYUN::ALB::LoadBalancer muss LoadBalancerName konfiguriert sein",
+        "es": "ALIYUN::ALB::LoadBalancer debe tener LoadBalancerName configurado",
+        "fr": "ALIYUN::ALB::LoadBalancer doit avoir LoadBalancerName configuré",
+        "pt": "ALIYUN::ALB::LoadBalancer deve ter LoadBalancerName configurado"
     },
     "description": {
         "en": "Checks ALB must configure name",
         "zh": "检查ALB 必须配置名称",
-        "ja": "检查ALB 必须配置名称",
-        "de": "检查ALB 必须配置名称",
-        "es": "检查ALB 必须配置名称",
-        "fr": "检查ALB 必须配置名称",
-        "pt": "检查ALB 必须配置名称"
+        "ja": "ALIYUN::ALB::LoadBalancer に LoadBalancerName が設定されていることを確認します",
+        "de": "Prüft, ob LoadBalancerName für ALIYUN::ALB::LoadBalancer konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ALB::LoadBalancer tenga LoadBalancerName configurado",
+        "fr": "Vérifie que ALIYUN::ALB::LoadBalancer a LoadBalancerName configuré",
+        "pt": "Verifica se ALIYUN::ALB::LoadBalancer tem LoadBalancerName configurado"
     },
     "reason": {
         "en": "ALB must configure name is not satisfied.",
         "zh": "ALB 必须配置名称未满足。",
-        "ja": "ALB 必须配置名称未满足。",
-        "de": "ALB 必须配置名称未满足。",
-        "es": "ALB 必须配置名称未满足。",
-        "fr": "ALB 必须配置名称未满足。",
-        "pt": "ALB 必须配置名称未满足。"
+        "ja": "ALIYUN::ALB::LoadBalancer に LoadBalancerName が設定されていません。",
+        "de": "Für ALIYUN::ALB::LoadBalancer ist LoadBalancerName nicht konfiguriert.",
+        "es": "ALIYUN::ALB::LoadBalancer no tiene LoadBalancerName configurado.",
+        "fr": "ALIYUN::ALB::LoadBalancer n'a pas LoadBalancerName configuré.",
+        "pt": "ALIYUN::ALB::LoadBalancer não tem LoadBalancerName configurado."
     },
     "recommendation": {
         "en": "Configure LoadBalancerName on ALIYUN::ALB::LoadBalancer to satisfy the policy.",
         "zh": "请在 ALIYUN::ALB::LoadBalancer 上配置 LoadBalancerName 以满足策略。",
-        "ja": "请在 ALIYUN::ALB::LoadBalancer 上配置 LoadBalancerName 以满足策略。",
-        "de": "请在 ALIYUN::ALB::LoadBalancer 上配置 LoadBalancerName 以满足策略。",
-        "es": "请在 ALIYUN::ALB::LoadBalancer 上配置 LoadBalancerName 以满足策略。",
-        "fr": "请在 ALIYUN::ALB::LoadBalancer 上配置 LoadBalancerName 以满足策略。",
-        "pt": "请在 ALIYUN::ALB::LoadBalancer 上配置 LoadBalancerName 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ALB::LoadBalancer に LoadBalancerName を設定してください。",
+        "de": "Konfigurieren Sie LoadBalancerName für ALIYUN::ALB::LoadBalancer, um die Richtlinie zu erfüllen.",
+        "es": "Configure LoadBalancerName en ALIYUN::ALB::LoadBalancer para cumplir la política.",
+        "fr": "Configurez LoadBalancerName sur ALIYUN::ALB::LoadBalancer pour satisfaire la politique.",
+        "pt": "Configure LoadBalancerName em ALIYUN::ALB::LoadBalancer para atender à política."
     },
     "resource_types": ["ALIYUN::ALB::LoadBalancer"]
 }

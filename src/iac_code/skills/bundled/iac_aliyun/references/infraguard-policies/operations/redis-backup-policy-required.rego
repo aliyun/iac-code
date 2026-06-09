@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "Redis backup policy must be configured",
         "zh": "Redis 必须配置备份策略",
-        "ja": "Redis 必须配置备份策略",
-        "de": "Redis 必须配置备份策略",
-        "es": "Redis 必须配置备份策略",
-        "fr": "Redis 必须配置备份策略",
-        "pt": "Redis 必须配置备份策略"
+        "ja": "ALIYUN::REDIS::Instance には BackupPolicy を設定する必要があります",
+        "de": "Für ALIYUN::REDIS::Instance muss BackupPolicy konfiguriert sein",
+        "es": "ALIYUN::REDIS::Instance debe tener BackupPolicy configurado",
+        "fr": "ALIYUN::REDIS::Instance doit avoir BackupPolicy configuré",
+        "pt": "ALIYUN::REDIS::Instance deve ter BackupPolicy configurado"
     },
     "description": {
         "en": "Checks Redis backup policy must be configured",
         "zh": "检查Redis 必须配置备份策略",
-        "ja": "检查Redis 必须配置备份策略",
-        "de": "检查Redis 必须配置备份策略",
-        "es": "检查Redis 必须配置备份策略",
-        "fr": "检查Redis 必须配置备份策略",
-        "pt": "检查Redis 必须配置备份策略"
+        "ja": "ALIYUN::REDIS::Instance に BackupPolicy が設定されていることを確認します",
+        "de": "Prüft, ob BackupPolicy für ALIYUN::REDIS::Instance konfiguriert ist",
+        "es": "Comprueba que ALIYUN::REDIS::Instance tenga BackupPolicy configurado",
+        "fr": "Vérifie que ALIYUN::REDIS::Instance a BackupPolicy configuré",
+        "pt": "Verifica se ALIYUN::REDIS::Instance tem BackupPolicy configurado"
     },
     "reason": {
         "en": "Redis backup policy must be configured is not satisfied.",
         "zh": "Redis 必须配置备份策略未满足。",
-        "ja": "Redis 必须配置备份策略未满足。",
-        "de": "Redis 必须配置备份策略未满足。",
-        "es": "Redis 必须配置备份策略未满足。",
-        "fr": "Redis 必须配置备份策略未满足。",
-        "pt": "Redis 必须配置备份策略未满足。"
+        "ja": "ALIYUN::REDIS::Instance に BackupPolicy が設定されていません。",
+        "de": "Für ALIYUN::REDIS::Instance ist BackupPolicy nicht konfiguriert.",
+        "es": "ALIYUN::REDIS::Instance no tiene BackupPolicy configurado.",
+        "fr": "ALIYUN::REDIS::Instance n'a pas BackupPolicy configuré.",
+        "pt": "ALIYUN::REDIS::Instance não tem BackupPolicy configurado."
     },
     "recommendation": {
         "en": "Configure BackupPolicy on ALIYUN::REDIS::Instance to satisfy the policy.",
         "zh": "请在 ALIYUN::REDIS::Instance 上配置 BackupPolicy 以满足策略。",
-        "ja": "请在 ALIYUN::REDIS::Instance 上配置 BackupPolicy 以满足策略。",
-        "de": "请在 ALIYUN::REDIS::Instance 上配置 BackupPolicy 以满足策略。",
-        "es": "请在 ALIYUN::REDIS::Instance 上配置 BackupPolicy 以满足策略。",
-        "fr": "请在 ALIYUN::REDIS::Instance 上配置 BackupPolicy 以满足策略。",
-        "pt": "请在 ALIYUN::REDIS::Instance 上配置 BackupPolicy 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::REDIS::Instance に BackupPolicy を設定してください。",
+        "de": "Konfigurieren Sie BackupPolicy für ALIYUN::REDIS::Instance, um die Richtlinie zu erfüllen.",
+        "es": "Configure BackupPolicy en ALIYUN::REDIS::Instance para cumplir la política.",
+        "fr": "Configurez BackupPolicy sur ALIYUN::REDIS::Instance pour satisfaire la politique.",
+        "pt": "Configure BackupPolicy em ALIYUN::REDIS::Instance para atender à política."
     },
     "resource_types": ["ALIYUN::REDIS::Instance"]
 }

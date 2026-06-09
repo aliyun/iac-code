@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "NAT Gateway must bind VPC",
         "zh": "NAT 网关必须绑定 VPC",
-        "ja": "NAT 网关必须绑定 VPC",
-        "de": "NAT 网关必须绑定 VPC",
-        "es": "NAT 网关必须绑定 VPC",
-        "fr": "NAT 网关必须绑定 VPC",
-        "pt": "NAT 网关必须绑定 VPC"
+        "ja": "ALIYUN::VPC::NatGateway には VpcId を設定する必要があります",
+        "de": "Für ALIYUN::VPC::NatGateway muss VpcId konfiguriert sein",
+        "es": "ALIYUN::VPC::NatGateway debe tener VpcId configurado",
+        "fr": "ALIYUN::VPC::NatGateway doit avoir VpcId configuré",
+        "pt": "ALIYUN::VPC::NatGateway deve ter VpcId configurado"
     },
     "description": {
         "en": "Checks NAT Gateway must bind VPC",
         "zh": "检查NAT 网关必须绑定 VPC",
-        "ja": "检查NAT 网关必须绑定 VPC",
-        "de": "检查NAT 网关必须绑定 VPC",
-        "es": "检查NAT 网关必须绑定 VPC",
-        "fr": "检查NAT 网关必须绑定 VPC",
-        "pt": "检查NAT 网关必须绑定 VPC"
+        "ja": "ALIYUN::VPC::NatGateway に VpcId が設定されていることを確認します",
+        "de": "Prüft, ob VpcId für ALIYUN::VPC::NatGateway konfiguriert ist",
+        "es": "Comprueba que ALIYUN::VPC::NatGateway tenga VpcId configurado",
+        "fr": "Vérifie que ALIYUN::VPC::NatGateway a VpcId configuré",
+        "pt": "Verifica se ALIYUN::VPC::NatGateway tem VpcId configurado"
     },
     "reason": {
         "en": "NAT Gateway must bind VPC is not satisfied.",
         "zh": "NAT 网关必须绑定 VPC未满足。",
-        "ja": "NAT 网关必须绑定 VPC未满足。",
-        "de": "NAT 网关必须绑定 VPC未满足。",
-        "es": "NAT 网关必须绑定 VPC未满足。",
-        "fr": "NAT 网关必须绑定 VPC未满足。",
-        "pt": "NAT 网关必须绑定 VPC未满足。"
+        "ja": "ALIYUN::VPC::NatGateway に VpcId が設定されていません。",
+        "de": "Für ALIYUN::VPC::NatGateway ist VpcId nicht konfiguriert.",
+        "es": "ALIYUN::VPC::NatGateway no tiene VpcId configurado.",
+        "fr": "ALIYUN::VPC::NatGateway n'a pas VpcId configuré.",
+        "pt": "ALIYUN::VPC::NatGateway não tem VpcId configurado."
     },
     "recommendation": {
         "en": "Configure VpcId on ALIYUN::VPC::NatGateway to satisfy the policy.",
         "zh": "请在 ALIYUN::VPC::NatGateway 上配置 VpcId 以满足策略。",
-        "ja": "请在 ALIYUN::VPC::NatGateway 上配置 VpcId 以满足策略。",
-        "de": "请在 ALIYUN::VPC::NatGateway 上配置 VpcId 以满足策略。",
-        "es": "请在 ALIYUN::VPC::NatGateway 上配置 VpcId 以满足策略。",
-        "fr": "请在 ALIYUN::VPC::NatGateway 上配置 VpcId 以满足策略。",
-        "pt": "请在 ALIYUN::VPC::NatGateway 上配置 VpcId 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::VPC::NatGateway に VpcId を設定してください。",
+        "de": "Konfigurieren Sie VpcId für ALIYUN::VPC::NatGateway, um die Richtlinie zu erfüllen.",
+        "es": "Configure VpcId en ALIYUN::VPC::NatGateway para cumplir la política.",
+        "fr": "Configurez VpcId sur ALIYUN::VPC::NatGateway pour satisfaire la politique.",
+        "pt": "Configure VpcId em ALIYUN::VPC::NatGateway para atender à política."
     },
     "resource_types": ["ALIYUN::VPC::NatGateway"]
 }

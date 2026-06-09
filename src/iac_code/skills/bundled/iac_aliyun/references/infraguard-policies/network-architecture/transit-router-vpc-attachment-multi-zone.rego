@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "Transit router VPC attachment must configure zone mapping",
         "zh": "转发路由器 VPC 连接必须配置可用区映射",
-        "ja": "转发路由器 VPC 连接必须配置可用区映射",
-        "de": "转发路由器 VPC 连接必须配置可用区映射",
-        "es": "转发路由器 VPC 连接必须配置可用区映射",
-        "fr": "转发路由器 VPC 连接必须配置可用区映射",
-        "pt": "转发路由器 VPC 连接必须配置可用区映射"
+        "ja": "ALIYUN::CEN::TransitRouterVpcAttachment には ZoneMappings を設定する必要があります",
+        "de": "Für ALIYUN::CEN::TransitRouterVpcAttachment muss ZoneMappings konfiguriert sein",
+        "es": "ALIYUN::CEN::TransitRouterVpcAttachment debe tener ZoneMappings configurado",
+        "fr": "ALIYUN::CEN::TransitRouterVpcAttachment doit avoir ZoneMappings configuré",
+        "pt": "ALIYUN::CEN::TransitRouterVpcAttachment deve ter ZoneMappings configurado"
     },
     "description": {
         "en": "Checks Transit router VPC attachment must configure zone mapping",
         "zh": "检查转发路由器 VPC 连接必须配置可用区映射",
-        "ja": "检查转发路由器 VPC 连接必须配置可用区映射",
-        "de": "检查转发路由器 VPC 连接必须配置可用区映射",
-        "es": "检查转发路由器 VPC 连接必须配置可用区映射",
-        "fr": "检查转发路由器 VPC 连接必须配置可用区映射",
-        "pt": "检查转发路由器 VPC 连接必须配置可用区映射"
+        "ja": "ALIYUN::CEN::TransitRouterVpcAttachment に ZoneMappings が設定されていることを確認します",
+        "de": "Prüft, ob ZoneMappings für ALIYUN::CEN::TransitRouterVpcAttachment konfiguriert ist",
+        "es": "Comprueba que ALIYUN::CEN::TransitRouterVpcAttachment tenga ZoneMappings configurado",
+        "fr": "Vérifie que ALIYUN::CEN::TransitRouterVpcAttachment a ZoneMappings configuré",
+        "pt": "Verifica se ALIYUN::CEN::TransitRouterVpcAttachment tem ZoneMappings configurado"
     },
     "reason": {
         "en": "Transit router VPC attachment must configure zone mapping is not satisfied.",
         "zh": "转发路由器 VPC 连接必须配置可用区映射未满足。",
-        "ja": "转发路由器 VPC 连接必须配置可用区映射未满足。",
-        "de": "转发路由器 VPC 连接必须配置可用区映射未满足。",
-        "es": "转发路由器 VPC 连接必须配置可用区映射未满足。",
-        "fr": "转发路由器 VPC 连接必须配置可用区映射未满足。",
-        "pt": "转发路由器 VPC 连接必须配置可用区映射未满足。"
+        "ja": "ALIYUN::CEN::TransitRouterVpcAttachment に ZoneMappings が設定されていません。",
+        "de": "Für ALIYUN::CEN::TransitRouterVpcAttachment ist ZoneMappings nicht konfiguriert.",
+        "es": "ALIYUN::CEN::TransitRouterVpcAttachment no tiene ZoneMappings configurado.",
+        "fr": "ALIYUN::CEN::TransitRouterVpcAttachment n'a pas ZoneMappings configuré.",
+        "pt": "ALIYUN::CEN::TransitRouterVpcAttachment não tem ZoneMappings configurado."
     },
     "recommendation": {
         "en": "Configure ZoneMappings on ALIYUN::CEN::TransitRouterVpcAttachment to satisfy the policy.",
         "zh": "请在 ALIYUN::CEN::TransitRouterVpcAttachment 上配置 ZoneMappings 以满足策略。",
-        "ja": "请在 ALIYUN::CEN::TransitRouterVpcAttachment 上配置 ZoneMappings 以满足策略。",
-        "de": "请在 ALIYUN::CEN::TransitRouterVpcAttachment 上配置 ZoneMappings 以满足策略。",
-        "es": "请在 ALIYUN::CEN::TransitRouterVpcAttachment 上配置 ZoneMappings 以满足策略。",
-        "fr": "请在 ALIYUN::CEN::TransitRouterVpcAttachment 上配置 ZoneMappings 以满足策略。",
-        "pt": "请在 ALIYUN::CEN::TransitRouterVpcAttachment 上配置 ZoneMappings 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::CEN::TransitRouterVpcAttachment に ZoneMappings を設定してください。",
+        "de": "Konfigurieren Sie ZoneMappings für ALIYUN::CEN::TransitRouterVpcAttachment, um die Richtlinie zu erfüllen.",
+        "es": "Configure ZoneMappings en ALIYUN::CEN::TransitRouterVpcAttachment para cumplir la política.",
+        "fr": "Configurez ZoneMappings sur ALIYUN::CEN::TransitRouterVpcAttachment pour satisfaire la politique.",
+        "pt": "Configure ZoneMappings em ALIYUN::CEN::TransitRouterVpcAttachment para atender à política."
     },
     "resource_types": ["ALIYUN::CEN::TransitRouterVpcAttachment"]
 }

@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "SLB listener must configure backend server port",
         "zh": "SLB 监听必须配置后端端口",
-        "ja": "SLB 监听必须配置后端端口",
-        "de": "SLB 监听必须配置后端端口",
-        "es": "SLB 监听必须配置后端端口",
-        "fr": "SLB 监听必须配置后端端口",
-        "pt": "SLB 监听必须配置后端端口"
+        "ja": "ALIYUN::SLB::Listener には BackendServerPort を設定する必要があります",
+        "de": "Für ALIYUN::SLB::Listener muss BackendServerPort konfiguriert sein",
+        "es": "ALIYUN::SLB::Listener debe tener BackendServerPort configurado",
+        "fr": "ALIYUN::SLB::Listener doit avoir BackendServerPort configuré",
+        "pt": "ALIYUN::SLB::Listener deve ter BackendServerPort configurado"
     },
     "description": {
         "en": "Checks SLB listener must configure backend server port",
         "zh": "检查SLB 监听必须配置后端端口",
-        "ja": "检查SLB 监听必须配置后端端口",
-        "de": "检查SLB 监听必须配置后端端口",
-        "es": "检查SLB 监听必须配置后端端口",
-        "fr": "检查SLB 监听必须配置后端端口",
-        "pt": "检查SLB 监听必须配置后端端口"
+        "ja": "ALIYUN::SLB::Listener に BackendServerPort が設定されていることを確認します",
+        "de": "Prüft, ob BackendServerPort für ALIYUN::SLB::Listener konfiguriert ist",
+        "es": "Comprueba que ALIYUN::SLB::Listener tenga BackendServerPort configurado",
+        "fr": "Vérifie que ALIYUN::SLB::Listener a BackendServerPort configuré",
+        "pt": "Verifica se ALIYUN::SLB::Listener tem BackendServerPort configurado"
     },
     "reason": {
         "en": "SLB listener must configure backend server port is not satisfied.",
         "zh": "SLB 监听必须配置后端端口未满足。",
-        "ja": "SLB 监听必须配置后端端口未满足。",
-        "de": "SLB 监听必须配置后端端口未满足。",
-        "es": "SLB 监听必须配置后端端口未满足。",
-        "fr": "SLB 监听必须配置后端端口未满足。",
-        "pt": "SLB 监听必须配置后端端口未满足。"
+        "ja": "ALIYUN::SLB::Listener に BackendServerPort が設定されていません。",
+        "de": "Für ALIYUN::SLB::Listener ist BackendServerPort nicht konfiguriert.",
+        "es": "ALIYUN::SLB::Listener no tiene BackendServerPort configurado.",
+        "fr": "ALIYUN::SLB::Listener n'a pas BackendServerPort configuré.",
+        "pt": "ALIYUN::SLB::Listener não tem BackendServerPort configurado."
     },
     "recommendation": {
         "en": "Configure BackendServerPort on ALIYUN::SLB::Listener to satisfy the policy.",
         "zh": "请在 ALIYUN::SLB::Listener 上配置 BackendServerPort 以满足策略。",
-        "ja": "请在 ALIYUN::SLB::Listener 上配置 BackendServerPort 以满足策略。",
-        "de": "请在 ALIYUN::SLB::Listener 上配置 BackendServerPort 以满足策略。",
-        "es": "请在 ALIYUN::SLB::Listener 上配置 BackendServerPort 以满足策略。",
-        "fr": "请在 ALIYUN::SLB::Listener 上配置 BackendServerPort 以满足策略。",
-        "pt": "请在 ALIYUN::SLB::Listener 上配置 BackendServerPort 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::SLB::Listener に BackendServerPort を設定してください。",
+        "de": "Konfigurieren Sie BackendServerPort für ALIYUN::SLB::Listener, um die Richtlinie zu erfüllen.",
+        "es": "Configure BackendServerPort en ALIYUN::SLB::Listener para cumplir la política.",
+        "fr": "Configurez BackendServerPort sur ALIYUN::SLB::Listener pour satisfaire la politique.",
+        "pt": "Configure BackendServerPort em ALIYUN::SLB::Listener para atender à política."
     },
     "resource_types": ["ALIYUN::SLB::Listener"]
 }

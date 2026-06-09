@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "OSS bucket must configure tags",
         "zh": "OSS Bucket 必须配置标签",
-        "ja": "OSS Bucket 必须配置标签",
-        "de": "OSS Bucket 必须配置标签",
-        "es": "OSS Bucket 必须配置标签",
-        "fr": "OSS Bucket 必须配置标签",
-        "pt": "OSS Bucket 必须配置标签"
+        "ja": "ALIYUN::OSS::Bucket には Tags を設定する必要があります",
+        "de": "Für ALIYUN::OSS::Bucket muss Tags konfiguriert sein",
+        "es": "ALIYUN::OSS::Bucket debe tener Tags configurado",
+        "fr": "ALIYUN::OSS::Bucket doit avoir Tags configuré",
+        "pt": "ALIYUN::OSS::Bucket deve ter Tags configurado"
     },
     "description": {
         "en": "Checks OSS bucket must configure tags",
         "zh": "检查OSS Bucket 必须配置标签",
-        "ja": "检查OSS Bucket 必须配置标签",
-        "de": "检查OSS Bucket 必须配置标签",
-        "es": "检查OSS Bucket 必须配置标签",
-        "fr": "检查OSS Bucket 必须配置标签",
-        "pt": "检查OSS Bucket 必须配置标签"
+        "ja": "ALIYUN::OSS::Bucket に Tags が設定されていることを確認します",
+        "de": "Prüft, ob Tags für ALIYUN::OSS::Bucket konfiguriert ist",
+        "es": "Comprueba que ALIYUN::OSS::Bucket tenga Tags configurado",
+        "fr": "Vérifie que ALIYUN::OSS::Bucket a Tags configuré",
+        "pt": "Verifica se ALIYUN::OSS::Bucket tem Tags configurado"
     },
     "reason": {
         "en": "OSS bucket must configure tags is not satisfied.",
         "zh": "OSS Bucket 必须配置标签未满足。",
-        "ja": "OSS Bucket 必须配置标签未满足。",
-        "de": "OSS Bucket 必须配置标签未满足。",
-        "es": "OSS Bucket 必须配置标签未满足。",
-        "fr": "OSS Bucket 必须配置标签未满足。",
-        "pt": "OSS Bucket 必须配置标签未满足。"
+        "ja": "ALIYUN::OSS::Bucket に Tags が設定されていません。",
+        "de": "Für ALIYUN::OSS::Bucket ist Tags nicht konfiguriert.",
+        "es": "ALIYUN::OSS::Bucket no tiene Tags configurado.",
+        "fr": "ALIYUN::OSS::Bucket n'a pas Tags configuré.",
+        "pt": "ALIYUN::OSS::Bucket não tem Tags configurado."
     },
     "recommendation": {
         "en": "Configure Tags on ALIYUN::OSS::Bucket to satisfy the policy.",
         "zh": "请在 ALIYUN::OSS::Bucket 上配置 Tags 以满足策略。",
-        "ja": "请在 ALIYUN::OSS::Bucket 上配置 Tags 以满足策略。",
-        "de": "请在 ALIYUN::OSS::Bucket 上配置 Tags 以满足策略。",
-        "es": "请在 ALIYUN::OSS::Bucket 上配置 Tags 以满足策略。",
-        "fr": "请在 ALIYUN::OSS::Bucket 上配置 Tags 以满足策略。",
-        "pt": "请在 ALIYUN::OSS::Bucket 上配置 Tags 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::OSS::Bucket に Tags を設定してください。",
+        "de": "Konfigurieren Sie Tags für ALIYUN::OSS::Bucket, um die Richtlinie zu erfüllen.",
+        "es": "Configure Tags en ALIYUN::OSS::Bucket para cumplir la política.",
+        "fr": "Configurez Tags sur ALIYUN::OSS::Bucket pour satisfaire la politique.",
+        "pt": "Configure Tags em ALIYUN::OSS::Bucket para atender à política."
     },
     "resource_types": ["ALIYUN::OSS::Bucket"]
 }

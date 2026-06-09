@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ESS scaling configuration must set instance type",
         "zh": "ESS 伸缩配置必须设置实例规格",
-        "ja": "ESS 伸缩配置必须设置实例规格",
-        "de": "ESS 伸缩配置必须设置实例规格",
-        "es": "ESS 伸缩配置必须设置实例规格",
-        "fr": "ESS 伸缩配置必须设置实例规格",
-        "pt": "ESS 伸缩配置必须设置实例规格"
+        "ja": "ALIYUN::ESS::ScalingConfiguration には InstanceType を設定する必要があります",
+        "de": "Für ALIYUN::ESS::ScalingConfiguration muss InstanceType konfiguriert sein",
+        "es": "ALIYUN::ESS::ScalingConfiguration debe tener InstanceType configurado",
+        "fr": "ALIYUN::ESS::ScalingConfiguration doit avoir InstanceType configuré",
+        "pt": "ALIYUN::ESS::ScalingConfiguration deve ter InstanceType configurado"
     },
     "description": {
         "en": "Checks ESS scaling configuration must set instance type",
         "zh": "检查ESS 伸缩配置必须设置实例规格",
-        "ja": "检查ESS 伸缩配置必须设置实例规格",
-        "de": "检查ESS 伸缩配置必须设置实例规格",
-        "es": "检查ESS 伸缩配置必须设置实例规格",
-        "fr": "检查ESS 伸缩配置必须设置实例规格",
-        "pt": "检查ESS 伸缩配置必须设置实例规格"
+        "ja": "ALIYUN::ESS::ScalingConfiguration に InstanceType が設定されていることを確認します",
+        "de": "Prüft, ob InstanceType für ALIYUN::ESS::ScalingConfiguration konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ESS::ScalingConfiguration tenga InstanceType configurado",
+        "fr": "Vérifie que ALIYUN::ESS::ScalingConfiguration a InstanceType configuré",
+        "pt": "Verifica se ALIYUN::ESS::ScalingConfiguration tem InstanceType configurado"
     },
     "reason": {
         "en": "ESS scaling configuration must set instance type is not satisfied.",
         "zh": "ESS 伸缩配置必须设置实例规格未满足。",
-        "ja": "ESS 伸缩配置必须设置实例规格未满足。",
-        "de": "ESS 伸缩配置必须设置实例规格未满足。",
-        "es": "ESS 伸缩配置必须设置实例规格未满足。",
-        "fr": "ESS 伸缩配置必须设置实例规格未满足。",
-        "pt": "ESS 伸缩配置必须设置实例规格未满足。"
+        "ja": "ALIYUN::ESS::ScalingConfiguration に InstanceType が設定されていません。",
+        "de": "Für ALIYUN::ESS::ScalingConfiguration ist InstanceType nicht konfiguriert.",
+        "es": "ALIYUN::ESS::ScalingConfiguration no tiene InstanceType configurado.",
+        "fr": "ALIYUN::ESS::ScalingConfiguration n'a pas InstanceType configuré.",
+        "pt": "ALIYUN::ESS::ScalingConfiguration não tem InstanceType configurado."
     },
     "recommendation": {
         "en": "Configure InstanceType on ALIYUN::ESS::ScalingConfiguration to satisfy the policy.",
         "zh": "请在 ALIYUN::ESS::ScalingConfiguration 上配置 InstanceType 以满足策略。",
-        "ja": "请在 ALIYUN::ESS::ScalingConfiguration 上配置 InstanceType 以满足策略。",
-        "de": "请在 ALIYUN::ESS::ScalingConfiguration 上配置 InstanceType 以满足策略。",
-        "es": "请在 ALIYUN::ESS::ScalingConfiguration 上配置 InstanceType 以满足策略。",
-        "fr": "请在 ALIYUN::ESS::ScalingConfiguration 上配置 InstanceType 以满足策略。",
-        "pt": "请在 ALIYUN::ESS::ScalingConfiguration 上配置 InstanceType 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ESS::ScalingConfiguration に InstanceType を設定してください。",
+        "de": "Konfigurieren Sie InstanceType für ALIYUN::ESS::ScalingConfiguration, um die Richtlinie zu erfüllen.",
+        "es": "Configure InstanceType en ALIYUN::ESS::ScalingConfiguration para cumplir la política.",
+        "fr": "Configurez InstanceType sur ALIYUN::ESS::ScalingConfiguration pour satisfaire la politique.",
+        "pt": "Configure InstanceType em ALIYUN::ESS::ScalingConfiguration para atender à política."
     },
     "resource_types": ["ALIYUN::ESS::ScalingConfiguration"]
 }

@@ -10,6 +10,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1] / "references" / "infraguard-policies"
+POLICY_METADATA_LANGUAGES = ("en", "zh", "ja", "de", "es", "fr", "pt")
 
 
 def rule_id(scenario: str, policy: dict[str, Any]) -> str:
@@ -888,6 +889,68 @@ def compliance_expression(policy: dict[str, Any]) -> str:
     raise ValueError(f"Unsupported check: {check}")
 
 
+def localized_policy_metadata(
+    resource_type: str,
+    property_name: str,
+    *,
+    name_en: str,
+    name_zh: str,
+    description_en: str,
+    description_zh: str,
+    reason_en: str,
+    reason_zh: str,
+    recommendation_en: str,
+    recommendation_zh: str,
+) -> dict[str, dict[str, str]]:
+    return {
+        "name": {
+            "en": name_en,
+            "zh": name_zh,
+            "ja": f"{resource_type} には {property_name} を設定する必要があります",
+            "de": f"Für {resource_type} muss {property_name} konfiguriert sein",
+            "es": f"{resource_type} debe tener {property_name} configurado",
+            "fr": f"{resource_type} doit avoir {property_name} configuré",
+            "pt": f"{resource_type} deve ter {property_name} configurado",
+        },
+        "description": {
+            "en": description_en,
+            "zh": description_zh,
+            "ja": f"{resource_type} に {property_name} が設定されていることを確認します",
+            "de": f"Prüft, ob {property_name} für {resource_type} konfiguriert ist",
+            "es": f"Comprueba que {resource_type} tenga {property_name} configurado",
+            "fr": f"Vérifie que {resource_type} a {property_name} configuré",
+            "pt": f"Verifica se {resource_type} tem {property_name} configurado",
+        },
+        "reason": {
+            "en": reason_en,
+            "zh": reason_zh,
+            "ja": f"{resource_type} に {property_name} が設定されていません。",
+            "de": f"Für {resource_type} ist {property_name} nicht konfiguriert.",
+            "es": f"{resource_type} no tiene {property_name} configurado.",
+            "fr": f"{resource_type} n'a pas {property_name} configuré.",
+            "pt": f"{resource_type} não tem {property_name} configurado.",
+        },
+        "recommendation": {
+            "en": recommendation_en,
+            "zh": recommendation_zh,
+            "ja": f"ポリシーを満たすには、{resource_type} に {property_name} を設定してください。",
+            "de": f"Konfigurieren Sie {property_name} für {resource_type}, um die Richtlinie zu erfüllen.",
+            "es": f"Configure {property_name} en {resource_type} para cumplir la política.",
+            "fr": f"Configurez {property_name} sur {resource_type} pour satisfaire la politique.",
+            "pt": f"Configure {property_name} em {resource_type} para atender à política.",
+        },
+    }
+
+
+def render_translation_map(translations: dict[str, str], *, indent: int = 16) -> str:
+    lines = []
+    padding = " " * indent
+    for index, language in enumerate(POLICY_METADATA_LANGUAGES):
+        comma = "," if index < len(POLICY_METADATA_LANGUAGES) - 1 else ""
+        lines.append(f'{padding}"{language}": "{translations[language]}"{comma}')
+    return "\n".join(lines)
+
+
 def render_policy(scenario: str, scenario_zh: str, policy: dict[str, Any]) -> str:
     if scenario == "security" and policy["slug"] == "ecs-instance-no-public-ip":
         return render_ecs_no_public_ip_policy(scenario, scenario_zh, policy)
@@ -901,6 +964,18 @@ def render_policy(scenario: str, scenario_zh: str, policy: dict[str, Any]) -> st
     description_zh = f"检查{policy['zh']}"
     reason_zh = f"{policy['zh']}未满足。"
     recommendation_zh = f"请在 {policy['resource_type']} 上配置 {policy['property']} 以满足策略。"
+    metadata = localized_policy_metadata(
+        policy["resource_type"],
+        policy["property"],
+        name_en=policy["en"],
+        name_zh=policy["zh"],
+        description_en=description_en,
+        description_zh=description_zh,
+        reason_en=reason_en,
+        reason_zh=reason_zh,
+        recommendation_en=recommendation_en,
+        recommendation_zh=recommendation_zh,
+    )
 
     return dedent(
         f'''\
@@ -913,20 +988,16 @@ def render_policy(scenario: str, scenario_zh: str, policy: dict[str, Any]) -> st
             "id": "{current_rule_id}",
             "severity": "{policy["severity"]}",
             "name": {{
-                "en": "{policy["en"]}",
-                "zh": "{policy["zh"]}",
+{render_translation_map(metadata["name"])}
             }},
             "description": {{
-                "en": "{description_en}",
-                "zh": "{description_zh}",
+{render_translation_map(metadata["description"])}
             }},
             "reason": {{
-                "en": "{reason_en}",
-                "zh": "{reason_zh}",
+{render_translation_map(metadata["reason"])}
             }},
             "recommendation": {{
-                "en": "{recommendation_en}",
-                "zh": "{recommendation_zh}",
+{render_translation_map(metadata["recommendation"])}
             }},
             "resource_types": ["{policy["resource_type"]}"],
         }}
@@ -956,6 +1027,18 @@ def render_policy(scenario: str, scenario_zh: str, policy: dict[str, Any]) -> st
 def render_ecs_no_public_ip_policy(scenario: str, scenario_zh: str, policy: dict[str, Any]) -> str:
     current_rule_id = rule_id(scenario, policy)
     package_name = current_rule_id.replace("-", "_")
+    metadata = localized_policy_metadata(
+        "ALIYUN::ECS::Instance",
+        "public exposure",
+        name_en=policy["en"],
+        name_zh=policy["zh"],
+        description_en="Checks ECS public exposure through direct public IP, outbound bandwidth, or EIP association.",
+        description_zh="检查 ECS 是否通过公网 IP、出网带宽或 EIP 绑定暴露公网。",
+        reason_en="ECS instance is exposed to the public network.",
+        reason_zh="ECS 实例存在公网暴露路径。",
+        recommendation_en="Disable public IP allocation, set internet outbound bandwidth to 0, and avoid direct EIP association.",
+        recommendation_zh="关闭公网 IP 分配，将公网出带宽设为 0，并避免直接绑定 EIP。",
+    )
     return dedent(
         f'''\
         package infraguard.rules.aliyun.{package_name}
@@ -967,20 +1050,16 @@ def render_ecs_no_public_ip_policy(scenario: str, scenario_zh: str, policy: dict
             "id": "{current_rule_id}",
             "severity": "{policy["severity"]}",
             "name": {{
-                "en": "{policy["en"]}",
-                "zh": "{policy["zh"]}",
+{render_translation_map(metadata["name"])}
             }},
             "description": {{
-                "en": "Checks ECS public exposure through direct public IP, outbound bandwidth, or EIP association.",
-                "zh": "检查 ECS 是否通过公网 IP、出网带宽或 EIP 绑定暴露公网。",
+{render_translation_map(metadata["description"])}
             }},
             "reason": {{
-                "en": "ECS instance is exposed to the public network.",
-                "zh": "ECS 实例存在公网暴露路径。",
+{render_translation_map(metadata["reason"])}
             }},
             "recommendation": {{
-                "en": "Disable public IP allocation, set internet outbound bandwidth to 0, and avoid direct EIP association.",
-                "zh": "关闭公网 IP 分配，将公网出带宽设为 0，并避免直接绑定 EIP。",
+{render_translation_map(metadata["recommendation"])}
             }},
             "resource_types": ["ALIYUN::ECS::Instance", "ALIYUN::ECS::InstanceGroup"],
         }}

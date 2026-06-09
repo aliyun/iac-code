@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ACK cluster must configure worker VSwitches",
         "zh": "ACK 集群必须配置工作节点交换机",
-        "ja": "ACK 集群必须配置工作节点交换机",
-        "de": "ACK 集群必须配置工作节点交换机",
-        "es": "ACK 集群必须配置工作节点交换机",
-        "fr": "ACK 集群必须配置工作节点交换机",
-        "pt": "ACK 集群必须配置工作节点交换机"
+        "ja": "ALIYUN::CS::ClusterApplication には WorkerVSwitchIds を設定する必要があります",
+        "de": "Für ALIYUN::CS::ClusterApplication muss WorkerVSwitchIds konfiguriert sein",
+        "es": "ALIYUN::CS::ClusterApplication debe tener WorkerVSwitchIds configurado",
+        "fr": "ALIYUN::CS::ClusterApplication doit avoir WorkerVSwitchIds configuré",
+        "pt": "ALIYUN::CS::ClusterApplication deve ter WorkerVSwitchIds configurado"
     },
     "description": {
         "en": "Checks ACK cluster must configure worker VSwitches",
         "zh": "检查ACK 集群必须配置工作节点交换机",
-        "ja": "检查ACK 集群必须配置工作节点交换机",
-        "de": "检查ACK 集群必须配置工作节点交换机",
-        "es": "检查ACK 集群必须配置工作节点交换机",
-        "fr": "检查ACK 集群必须配置工作节点交换机",
-        "pt": "检查ACK 集群必须配置工作节点交换机"
+        "ja": "ALIYUN::CS::ClusterApplication に WorkerVSwitchIds が設定されていることを確認します",
+        "de": "Prüft, ob WorkerVSwitchIds für ALIYUN::CS::ClusterApplication konfiguriert ist",
+        "es": "Comprueba que ALIYUN::CS::ClusterApplication tenga WorkerVSwitchIds configurado",
+        "fr": "Vérifie que ALIYUN::CS::ClusterApplication a WorkerVSwitchIds configuré",
+        "pt": "Verifica se ALIYUN::CS::ClusterApplication tem WorkerVSwitchIds configurado"
     },
     "reason": {
         "en": "ACK cluster must configure worker VSwitches is not satisfied.",
         "zh": "ACK 集群必须配置工作节点交换机未满足。",
-        "ja": "ACK 集群必须配置工作节点交换机未满足。",
-        "de": "ACK 集群必须配置工作节点交换机未满足。",
-        "es": "ACK 集群必须配置工作节点交换机未满足。",
-        "fr": "ACK 集群必须配置工作节点交换机未满足。",
-        "pt": "ACK 集群必须配置工作节点交换机未满足。"
+        "ja": "ALIYUN::CS::ClusterApplication に WorkerVSwitchIds が設定されていません。",
+        "de": "Für ALIYUN::CS::ClusterApplication ist WorkerVSwitchIds nicht konfiguriert.",
+        "es": "ALIYUN::CS::ClusterApplication no tiene WorkerVSwitchIds configurado.",
+        "fr": "ALIYUN::CS::ClusterApplication n'a pas WorkerVSwitchIds configuré.",
+        "pt": "ALIYUN::CS::ClusterApplication não tem WorkerVSwitchIds configurado."
     },
     "recommendation": {
         "en": "Configure WorkerVSwitchIds on ALIYUN::CS::ClusterApplication to satisfy the policy.",
         "zh": "请在 ALIYUN::CS::ClusterApplication 上配置 WorkerVSwitchIds 以满足策略。",
-        "ja": "请在 ALIYUN::CS::ClusterApplication 上配置 WorkerVSwitchIds 以满足策略。",
-        "de": "请在 ALIYUN::CS::ClusterApplication 上配置 WorkerVSwitchIds 以满足策略。",
-        "es": "请在 ALIYUN::CS::ClusterApplication 上配置 WorkerVSwitchIds 以满足策略。",
-        "fr": "请在 ALIYUN::CS::ClusterApplication 上配置 WorkerVSwitchIds 以满足策略。",
-        "pt": "请在 ALIYUN::CS::ClusterApplication 上配置 WorkerVSwitchIds 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::CS::ClusterApplication に WorkerVSwitchIds を設定してください。",
+        "de": "Konfigurieren Sie WorkerVSwitchIds für ALIYUN::CS::ClusterApplication, um die Richtlinie zu erfüllen.",
+        "es": "Configure WorkerVSwitchIds en ALIYUN::CS::ClusterApplication para cumplir la política.",
+        "fr": "Configurez WorkerVSwitchIds sur ALIYUN::CS::ClusterApplication pour satisfaire la politique.",
+        "pt": "Configure WorkerVSwitchIds em ALIYUN::CS::ClusterApplication para atender à política."
     },
     "resource_types": ["ALIYUN::CS::ClusterApplication"]
 }

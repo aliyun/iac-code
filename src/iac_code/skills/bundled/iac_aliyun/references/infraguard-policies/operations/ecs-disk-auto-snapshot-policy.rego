@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ECS disk must attach auto snapshot policy",
         "zh": "ECS 云盘必须绑定自动快照策略",
-        "ja": "ECS 云盘必须绑定自动快照策略",
-        "de": "ECS 云盘必须绑定自动快照策略",
-        "es": "ECS 云盘必须绑定自动快照策略",
-        "fr": "ECS 云盘必须绑定自动快照策略",
-        "pt": "ECS 云盘必须绑定自动快照策略"
+        "ja": "ALIYUN::ECS::Disk には AutoSnapshotPolicyId を設定する必要があります",
+        "de": "Für ALIYUN::ECS::Disk muss AutoSnapshotPolicyId konfiguriert sein",
+        "es": "ALIYUN::ECS::Disk debe tener AutoSnapshotPolicyId configurado",
+        "fr": "ALIYUN::ECS::Disk doit avoir AutoSnapshotPolicyId configuré",
+        "pt": "ALIYUN::ECS::Disk deve ter AutoSnapshotPolicyId configurado"
     },
     "description": {
         "en": "Checks ECS disk must attach auto snapshot policy",
         "zh": "检查ECS 云盘必须绑定自动快照策略",
-        "ja": "检查ECS 云盘必须绑定自动快照策略",
-        "de": "检查ECS 云盘必须绑定自动快照策略",
-        "es": "检查ECS 云盘必须绑定自动快照策略",
-        "fr": "检查ECS 云盘必须绑定自动快照策略",
-        "pt": "检查ECS 云盘必须绑定自动快照策略"
+        "ja": "ALIYUN::ECS::Disk に AutoSnapshotPolicyId が設定されていることを確認します",
+        "de": "Prüft, ob AutoSnapshotPolicyId für ALIYUN::ECS::Disk konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ECS::Disk tenga AutoSnapshotPolicyId configurado",
+        "fr": "Vérifie que ALIYUN::ECS::Disk a AutoSnapshotPolicyId configuré",
+        "pt": "Verifica se ALIYUN::ECS::Disk tem AutoSnapshotPolicyId configurado"
     },
     "reason": {
         "en": "ECS disk must attach auto snapshot policy is not satisfied.",
         "zh": "ECS 云盘必须绑定自动快照策略未满足。",
-        "ja": "ECS 云盘必须绑定自动快照策略未满足。",
-        "de": "ECS 云盘必须绑定自动快照策略未满足。",
-        "es": "ECS 云盘必须绑定自动快照策略未满足。",
-        "fr": "ECS 云盘必须绑定自动快照策略未满足。",
-        "pt": "ECS 云盘必须绑定自动快照策略未满足。"
+        "ja": "ALIYUN::ECS::Disk に AutoSnapshotPolicyId が設定されていません。",
+        "de": "Für ALIYUN::ECS::Disk ist AutoSnapshotPolicyId nicht konfiguriert.",
+        "es": "ALIYUN::ECS::Disk no tiene AutoSnapshotPolicyId configurado.",
+        "fr": "ALIYUN::ECS::Disk n'a pas AutoSnapshotPolicyId configuré.",
+        "pt": "ALIYUN::ECS::Disk não tem AutoSnapshotPolicyId configurado."
     },
     "recommendation": {
         "en": "Configure AutoSnapshotPolicyId on ALIYUN::ECS::Disk to satisfy the policy.",
         "zh": "请在 ALIYUN::ECS::Disk 上配置 AutoSnapshotPolicyId 以满足策略。",
-        "ja": "请在 ALIYUN::ECS::Disk 上配置 AutoSnapshotPolicyId 以满足策略。",
-        "de": "请在 ALIYUN::ECS::Disk 上配置 AutoSnapshotPolicyId 以满足策略。",
-        "es": "请在 ALIYUN::ECS::Disk 上配置 AutoSnapshotPolicyId 以满足策略。",
-        "fr": "请在 ALIYUN::ECS::Disk 上配置 AutoSnapshotPolicyId 以满足策略。",
-        "pt": "请在 ALIYUN::ECS::Disk 上配置 AutoSnapshotPolicyId 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ECS::Disk に AutoSnapshotPolicyId を設定してください。",
+        "de": "Konfigurieren Sie AutoSnapshotPolicyId für ALIYUN::ECS::Disk, um die Richtlinie zu erfüllen.",
+        "es": "Configure AutoSnapshotPolicyId en ALIYUN::ECS::Disk para cumplir la política.",
+        "fr": "Configurez AutoSnapshotPolicyId sur ALIYUN::ECS::Disk pour satisfaire la politique.",
+        "pt": "Configure AutoSnapshotPolicyId em ALIYUN::ECS::Disk para atender à política."
     },
     "resource_types": ["ALIYUN::ECS::Disk"]
 }

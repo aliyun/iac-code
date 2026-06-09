@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ESS scaling group must configure MinSize",
         "zh": "ESS 伸缩组必须配置最小容量",
-        "ja": "ESS 伸缩组必须配置最小容量",
-        "de": "ESS 伸缩组必须配置最小容量",
-        "es": "ESS 伸缩组必须配置最小容量",
-        "fr": "ESS 伸缩组必须配置最小容量",
-        "pt": "ESS 伸缩组必须配置最小容量"
+        "ja": "ALIYUN::ESS::ScalingGroup には MinSize を設定する必要があります",
+        "de": "Für ALIYUN::ESS::ScalingGroup muss MinSize konfiguriert sein",
+        "es": "ALIYUN::ESS::ScalingGroup debe tener MinSize configurado",
+        "fr": "ALIYUN::ESS::ScalingGroup doit avoir MinSize configuré",
+        "pt": "ALIYUN::ESS::ScalingGroup deve ter MinSize configurado"
     },
     "description": {
         "en": "Checks ESS scaling group must configure MinSize",
         "zh": "检查ESS 伸缩组必须配置最小容量",
-        "ja": "检查ESS 伸缩组必须配置最小容量",
-        "de": "检查ESS 伸缩组必须配置最小容量",
-        "es": "检查ESS 伸缩组必须配置最小容量",
-        "fr": "检查ESS 伸缩组必须配置最小容量",
-        "pt": "检查ESS 伸缩组必须配置最小容量"
+        "ja": "ALIYUN::ESS::ScalingGroup に MinSize が設定されていることを確認します",
+        "de": "Prüft, ob MinSize für ALIYUN::ESS::ScalingGroup konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ESS::ScalingGroup tenga MinSize configurado",
+        "fr": "Vérifie que ALIYUN::ESS::ScalingGroup a MinSize configuré",
+        "pt": "Verifica se ALIYUN::ESS::ScalingGroup tem MinSize configurado"
     },
     "reason": {
         "en": "ESS scaling group must configure MinSize is not satisfied.",
         "zh": "ESS 伸缩组必须配置最小容量未满足。",
-        "ja": "ESS 伸缩组必须配置最小容量未满足。",
-        "de": "ESS 伸缩组必须配置最小容量未满足。",
-        "es": "ESS 伸缩组必须配置最小容量未满足。",
-        "fr": "ESS 伸缩组必须配置最小容量未满足。",
-        "pt": "ESS 伸缩组必须配置最小容量未满足。"
+        "ja": "ALIYUN::ESS::ScalingGroup に MinSize が設定されていません。",
+        "de": "Für ALIYUN::ESS::ScalingGroup ist MinSize nicht konfiguriert.",
+        "es": "ALIYUN::ESS::ScalingGroup no tiene MinSize configurado.",
+        "fr": "ALIYUN::ESS::ScalingGroup n'a pas MinSize configuré.",
+        "pt": "ALIYUN::ESS::ScalingGroup não tem MinSize configurado."
     },
     "recommendation": {
         "en": "Configure MinSize on ALIYUN::ESS::ScalingGroup to satisfy the policy.",
         "zh": "请在 ALIYUN::ESS::ScalingGroup 上配置 MinSize 以满足策略。",
-        "ja": "请在 ALIYUN::ESS::ScalingGroup 上配置 MinSize 以满足策略。",
-        "de": "请在 ALIYUN::ESS::ScalingGroup 上配置 MinSize 以满足策略。",
-        "es": "请在 ALIYUN::ESS::ScalingGroup 上配置 MinSize 以满足策略。",
-        "fr": "请在 ALIYUN::ESS::ScalingGroup 上配置 MinSize 以满足策略。",
-        "pt": "请在 ALIYUN::ESS::ScalingGroup 上配置 MinSize 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ESS::ScalingGroup に MinSize を設定してください。",
+        "de": "Konfigurieren Sie MinSize für ALIYUN::ESS::ScalingGroup, um die Richtlinie zu erfüllen.",
+        "es": "Configure MinSize en ALIYUN::ESS::ScalingGroup para cumplir la política.",
+        "fr": "Configurez MinSize sur ALIYUN::ESS::ScalingGroup pour satisfaire la politique.",
+        "pt": "Configure MinSize em ALIYUN::ESS::ScalingGroup para atender à política."
     },
     "resource_types": ["ALIYUN::ESS::ScalingGroup"]
 }

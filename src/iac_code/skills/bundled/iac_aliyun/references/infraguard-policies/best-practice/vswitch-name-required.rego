@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "VSwitch must configure name",
         "zh": "交换机必须配置名称",
-        "ja": "交换机必须配置名称",
-        "de": "交换机必须配置名称",
-        "es": "交换机必须配置名称",
-        "fr": "交换机必须配置名称",
-        "pt": "交换机必须配置名称"
+        "ja": "ALIYUN::ECS::VSwitch には VSwitchName を設定する必要があります",
+        "de": "Für ALIYUN::ECS::VSwitch muss VSwitchName konfiguriert sein",
+        "es": "ALIYUN::ECS::VSwitch debe tener VSwitchName configurado",
+        "fr": "ALIYUN::ECS::VSwitch doit avoir VSwitchName configuré",
+        "pt": "ALIYUN::ECS::VSwitch deve ter VSwitchName configurado"
     },
     "description": {
         "en": "Checks VSwitch must configure name",
         "zh": "检查交换机必须配置名称",
-        "ja": "检查交换机必须配置名称",
-        "de": "检查交换机必须配置名称",
-        "es": "检查交换机必须配置名称",
-        "fr": "检查交换机必须配置名称",
-        "pt": "检查交换机必须配置名称"
+        "ja": "ALIYUN::ECS::VSwitch に VSwitchName が設定されていることを確認します",
+        "de": "Prüft, ob VSwitchName für ALIYUN::ECS::VSwitch konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ECS::VSwitch tenga VSwitchName configurado",
+        "fr": "Vérifie que ALIYUN::ECS::VSwitch a VSwitchName configuré",
+        "pt": "Verifica se ALIYUN::ECS::VSwitch tem VSwitchName configurado"
     },
     "reason": {
         "en": "VSwitch must configure name is not satisfied.",
         "zh": "交换机必须配置名称未满足。",
-        "ja": "交换机必须配置名称未满足。",
-        "de": "交换机必须配置名称未满足。",
-        "es": "交换机必须配置名称未满足。",
-        "fr": "交换机必须配置名称未满足。",
-        "pt": "交换机必须配置名称未满足。"
+        "ja": "ALIYUN::ECS::VSwitch に VSwitchName が設定されていません。",
+        "de": "Für ALIYUN::ECS::VSwitch ist VSwitchName nicht konfiguriert.",
+        "es": "ALIYUN::ECS::VSwitch no tiene VSwitchName configurado.",
+        "fr": "ALIYUN::ECS::VSwitch n'a pas VSwitchName configuré.",
+        "pt": "ALIYUN::ECS::VSwitch não tem VSwitchName configurado."
     },
     "recommendation": {
         "en": "Configure VSwitchName on ALIYUN::ECS::VSwitch to satisfy the policy.",
         "zh": "请在 ALIYUN::ECS::VSwitch 上配置 VSwitchName 以满足策略。",
-        "ja": "请在 ALIYUN::ECS::VSwitch 上配置 VSwitchName 以满足策略。",
-        "de": "请在 ALIYUN::ECS::VSwitch 上配置 VSwitchName 以满足策略。",
-        "es": "请在 ALIYUN::ECS::VSwitch 上配置 VSwitchName 以满足策略。",
-        "fr": "请在 ALIYUN::ECS::VSwitch 上配置 VSwitchName 以满足策略。",
-        "pt": "请在 ALIYUN::ECS::VSwitch 上配置 VSwitchName 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ECS::VSwitch に VSwitchName を設定してください。",
+        "de": "Konfigurieren Sie VSwitchName für ALIYUN::ECS::VSwitch, um die Richtlinie zu erfüllen.",
+        "es": "Configure VSwitchName en ALIYUN::ECS::VSwitch para cumplir la política.",
+        "fr": "Configurez VSwitchName sur ALIYUN::ECS::VSwitch pour satisfaire la politique.",
+        "pt": "Configure VSwitchName em ALIYUN::ECS::VSwitch para atender à política."
     },
     "resource_types": ["ALIYUN::ECS::VSwitch"]
 }

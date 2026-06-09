@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ECS instance must configure tags",
         "zh": "ECS 实例必须配置标签",
-        "ja": "ECS 实例必须配置标签",
-        "de": "ECS 实例必须配置标签",
-        "es": "ECS 实例必须配置标签",
-        "fr": "ECS 实例必须配置标签",
-        "pt": "ECS 实例必须配置标签"
+        "ja": "ALIYUN::ECS::Instance には Tags を設定する必要があります",
+        "de": "Für ALIYUN::ECS::Instance muss Tags konfiguriert sein",
+        "es": "ALIYUN::ECS::Instance debe tener Tags configurado",
+        "fr": "ALIYUN::ECS::Instance doit avoir Tags configuré",
+        "pt": "ALIYUN::ECS::Instance deve ter Tags configurado"
     },
     "description": {
         "en": "Checks ECS instance must configure tags",
         "zh": "检查ECS 实例必须配置标签",
-        "ja": "检查ECS 实例必须配置标签",
-        "de": "检查ECS 实例必须配置标签",
-        "es": "检查ECS 实例必须配置标签",
-        "fr": "检查ECS 实例必须配置标签",
-        "pt": "检查ECS 实例必须配置标签"
+        "ja": "ALIYUN::ECS::Instance に Tags が設定されていることを確認します",
+        "de": "Prüft, ob Tags für ALIYUN::ECS::Instance konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ECS::Instance tenga Tags configurado",
+        "fr": "Vérifie que ALIYUN::ECS::Instance a Tags configuré",
+        "pt": "Verifica se ALIYUN::ECS::Instance tem Tags configurado"
     },
     "reason": {
         "en": "ECS instance must configure tags is not satisfied.",
         "zh": "ECS 实例必须配置标签未满足。",
-        "ja": "ECS 实例必须配置标签未满足。",
-        "de": "ECS 实例必须配置标签未满足。",
-        "es": "ECS 实例必须配置标签未满足。",
-        "fr": "ECS 实例必须配置标签未满足。",
-        "pt": "ECS 实例必须配置标签未满足。"
+        "ja": "ALIYUN::ECS::Instance に Tags が設定されていません。",
+        "de": "Für ALIYUN::ECS::Instance ist Tags nicht konfiguriert.",
+        "es": "ALIYUN::ECS::Instance no tiene Tags configurado.",
+        "fr": "ALIYUN::ECS::Instance n'a pas Tags configuré.",
+        "pt": "ALIYUN::ECS::Instance não tem Tags configurado."
     },
     "recommendation": {
         "en": "Configure Tags on ALIYUN::ECS::Instance to satisfy the policy.",
         "zh": "请在 ALIYUN::ECS::Instance 上配置 Tags 以满足策略。",
-        "ja": "请在 ALIYUN::ECS::Instance 上配置 Tags 以满足策略。",
-        "de": "请在 ALIYUN::ECS::Instance 上配置 Tags 以满足策略。",
-        "es": "请在 ALIYUN::ECS::Instance 上配置 Tags 以满足策略。",
-        "fr": "请在 ALIYUN::ECS::Instance 上配置 Tags 以满足策略。",
-        "pt": "请在 ALIYUN::ECS::Instance 上配置 Tags 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ECS::Instance に Tags を設定してください。",
+        "de": "Konfigurieren Sie Tags für ALIYUN::ECS::Instance, um die Richtlinie zu erfüllen.",
+        "es": "Configure Tags en ALIYUN::ECS::Instance para cumplir la política.",
+        "fr": "Configurez Tags sur ALIYUN::ECS::Instance pour satisfaire la politique.",
+        "pt": "Configure Tags em ALIYUN::ECS::Instance para atender à política."
     },
     "resource_types": ["ALIYUN::ECS::Instance"]
 }

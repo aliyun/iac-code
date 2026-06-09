@@ -1,11 +1,14 @@
+import importlib.util
 import re
 from pathlib import Path
+from types import ModuleType
 
 from iac_code.skills.bundled import _bundled_skills, get_bundled_skills, init_bundled_skills
 
 POLICY_ROOT = Path("src/iac_code/skills/bundled/iac_aliyun/references/infraguard-policies")
 POLICY_PACK_ROOT = POLICY_ROOT / "packs"
 POLICY_GENERATION_REFERENCE = Path("src/iac_code/skills/bundled/iac_aliyun/references/infraguard-policy-generation.md")
+POLICY_GENERATOR_SCRIPT = Path("src/iac_code/skills/bundled/iac_aliyun/scripts/generate_infraguard_policies.py")
 POLICY_SCENARIOS = {
     "security",
     "high-availability",
@@ -47,6 +50,21 @@ def _iac_aliyun_asset_text() -> str:
         if path.is_file() and path.suffix in {".md", ".py", ".rego"}:
             parts.append(path.read_text(encoding="utf-8"))
     return "\n".join(parts)
+
+
+def _policy_translation_block(content: str, field: str) -> dict[str, str]:
+    match = re.search(rf'"{field}":\s*\{{(?P<body>[^{{}}]*)\}}', content, re.DOTALL)
+    assert match is not None
+    return dict(re.findall(r'"([a-z]{2})": "([^"]+)"', match.group("body")))
+
+
+def _load_policy_generator() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("generate_infraguard_policies", POLICY_GENERATOR_SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class TestIacSkill:
@@ -170,6 +188,104 @@ class TestIacSkill:
             rule_id = match.group(1)
             assert rule_id not in rule_ids
             rule_ids.add(rule_id)
+
+    def test_infraguard_policy_metadata_does_not_copy_zh_into_other_locales(self):
+        copied_translations = []
+        metadata_fields = ("name", "description", "reason", "recommendation")
+        non_zh_languages = ("ja", "de", "es", "fr", "pt")
+
+        for policy in _rule_policy_files():
+            content = policy.read_text(encoding="utf-8")
+            for field in metadata_fields:
+                translations = _policy_translation_block(content, field)
+                zh_value = translations.get("zh")
+                if not zh_value:
+                    continue
+
+                for language in non_zh_languages:
+                    if translations.get(language) == zh_value:
+                        copied_translations.append(f"{policy.relative_to(POLICY_ROOT)}:{field}:{language}")
+
+        assert not copied_translations, "Policy metadata locales copied from zh:\n" + "\n".join(copied_translations)
+
+    def test_infraguard_policy_metadata_non_cjk_locales_do_not_contain_chinese_text(self):
+        chinese_text_translations = []
+        metadata_fields = ("name", "description", "reason", "recommendation")
+        non_cjk_languages = ("de", "es", "fr", "pt")
+        han_character = re.compile(r"[\u4e00-\u9fff]")
+
+        for policy in _rule_policy_files():
+            content = policy.read_text(encoding="utf-8")
+            for field in metadata_fields:
+                translations = _policy_translation_block(content, field)
+                for language in non_cjk_languages:
+                    value = translations.get(language, "")
+                    if han_character.search(value):
+                        chinese_text_translations.append(f"{policy.relative_to(POLICY_ROOT)}:{field}:{language}")
+
+        assert not chinese_text_translations, "Policy metadata non-CJK locales contain Chinese text:\n" + "\n".join(
+            chinese_text_translations
+        )
+
+    def test_ecs_instance_name_required_has_localized_policy_metadata(self):
+        policy = POLICY_ROOT / "best-practice" / "ecs-instance-name-required.rego"
+        content = policy.read_text(encoding="utf-8")
+
+        expected = {
+            "name": {
+                "en": "ECS instance must configure name",
+                "zh": "ECS 实例必须配置名称",
+                "ja": "ECS インスタンスには名前を設定する必要があります",
+                "de": "Für ECS-Instanzen muss ein Name konfiguriert sein",
+                "es": "Las instancias ECS deben tener un nombre configurado",
+                "fr": "Les instances ECS doivent avoir un nom configuré",
+                "pt": "As instâncias ECS devem ter um nome configurado",
+            },
+            "description": {
+                "en": "Checks ECS instance must configure name",
+                "zh": "检查ECS 实例必须配置名称",
+                "ja": "ECS インスタンスに名前が設定されていることを確認します",
+                "de": "Prüft, ob für ECS-Instanzen ein Name konfiguriert ist",
+                "es": "Comprueba que las instancias ECS tengan un nombre configurado",
+                "fr": "Vérifie que les instances ECS ont un nom configuré",
+                "pt": "Verifica se as instâncias ECS têm um nome configurado",
+            },
+            "reason": {
+                "en": "ECS instance must configure name is not satisfied.",
+                "zh": "ECS 实例必须配置名称未满足。",
+                "ja": "ECS インスタンス名の設定要件を満たしていません。",
+                "de": "Für die ECS-Instanz ist kein Name konfiguriert.",
+                "es": "La instancia ECS no tiene un nombre configurado.",
+                "fr": "L'instance ECS n'a pas de nom configuré.",
+                "pt": "A instância ECS não tem um nome configurado.",
+            },
+            "recommendation": {
+                "en": "Configure InstanceName on ALIYUN::ECS::Instance to satisfy the policy.",
+                "zh": "请在 ALIYUN::ECS::Instance 上配置 InstanceName 以满足策略。",
+                "ja": "ポリシーを満たすには、ALIYUN::ECS::Instance に InstanceName を設定してください。",
+                "de": "Konfigurieren Sie InstanceName für ALIYUN::ECS::Instance, um die Richtlinie zu erfüllen.",
+                "es": "Configure InstanceName en ALIYUN::ECS::Instance para cumplir la política.",
+                "fr": "Configurez InstanceName sur ALIYUN::ECS::Instance pour satisfaire la politique.",
+                "pt": "Configure InstanceName em ALIYUN::ECS::Instance para atender à política.",
+            },
+        }
+
+        for field, translations in expected.items():
+            assert _policy_translation_block(content, field) == translations
+
+    def test_infraguard_policy_generator_renders_localized_metadata(self):
+        generator = _load_policy_generator()
+        policy = generator.SCENARIOS["best-practice"]["rules"][1]
+        content = generator.render_policy("best-practice", "最佳实践", policy)
+
+        expected_languages = {"en", "zh", "ja", "de", "es", "fr", "pt"}
+        for field in ("name", "description", "reason", "recommendation"):
+            translations = _policy_translation_block(content, field)
+            assert set(translations) == expected_languages
+            assert translations["ja"] != translations["zh"]
+            for language in ("de", "es", "fr", "pt"):
+                assert translations[language] != translations["zh"]
+                assert not re.search(r"[\u4e00-\u9fff]", translations[language])
 
     def test_infraguard_policy_catalog_has_scenario_packs(self):
         rule_ids = set()

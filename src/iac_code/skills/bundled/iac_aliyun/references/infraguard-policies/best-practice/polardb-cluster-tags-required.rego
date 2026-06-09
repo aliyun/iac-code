@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "PolarDB cluster must configure tags",
         "zh": "PolarDB 集群必须配置标签",
-        "ja": "PolarDB 集群必须配置标签",
-        "de": "PolarDB 集群必须配置标签",
-        "es": "PolarDB 集群必须配置标签",
-        "fr": "PolarDB 集群必须配置标签",
-        "pt": "PolarDB 集群必须配置标签"
+        "ja": "ALIYUN::POLARDB::DBCluster には Tags を設定する必要があります",
+        "de": "Für ALIYUN::POLARDB::DBCluster muss Tags konfiguriert sein",
+        "es": "ALIYUN::POLARDB::DBCluster debe tener Tags configurado",
+        "fr": "ALIYUN::POLARDB::DBCluster doit avoir Tags configuré",
+        "pt": "ALIYUN::POLARDB::DBCluster deve ter Tags configurado"
     },
     "description": {
         "en": "Checks PolarDB cluster must configure tags",
         "zh": "检查PolarDB 集群必须配置标签",
-        "ja": "检查PolarDB 集群必须配置标签",
-        "de": "检查PolarDB 集群必须配置标签",
-        "es": "检查PolarDB 集群必须配置标签",
-        "fr": "检查PolarDB 集群必须配置标签",
-        "pt": "检查PolarDB 集群必须配置标签"
+        "ja": "ALIYUN::POLARDB::DBCluster に Tags が設定されていることを確認します",
+        "de": "Prüft, ob Tags für ALIYUN::POLARDB::DBCluster konfiguriert ist",
+        "es": "Comprueba que ALIYUN::POLARDB::DBCluster tenga Tags configurado",
+        "fr": "Vérifie que ALIYUN::POLARDB::DBCluster a Tags configuré",
+        "pt": "Verifica se ALIYUN::POLARDB::DBCluster tem Tags configurado"
     },
     "reason": {
         "en": "PolarDB cluster must configure tags is not satisfied.",
         "zh": "PolarDB 集群必须配置标签未满足。",
-        "ja": "PolarDB 集群必须配置标签未满足。",
-        "de": "PolarDB 集群必须配置标签未满足。",
-        "es": "PolarDB 集群必须配置标签未满足。",
-        "fr": "PolarDB 集群必须配置标签未满足。",
-        "pt": "PolarDB 集群必须配置标签未满足。"
+        "ja": "ALIYUN::POLARDB::DBCluster に Tags が設定されていません。",
+        "de": "Für ALIYUN::POLARDB::DBCluster ist Tags nicht konfiguriert.",
+        "es": "ALIYUN::POLARDB::DBCluster no tiene Tags configurado.",
+        "fr": "ALIYUN::POLARDB::DBCluster n'a pas Tags configuré.",
+        "pt": "ALIYUN::POLARDB::DBCluster não tem Tags configurado."
     },
     "recommendation": {
         "en": "Configure Tags on ALIYUN::POLARDB::DBCluster to satisfy the policy.",
         "zh": "请在 ALIYUN::POLARDB::DBCluster 上配置 Tags 以满足策略。",
-        "ja": "请在 ALIYUN::POLARDB::DBCluster 上配置 Tags 以满足策略。",
-        "de": "请在 ALIYUN::POLARDB::DBCluster 上配置 Tags 以满足策略。",
-        "es": "请在 ALIYUN::POLARDB::DBCluster 上配置 Tags 以满足策略。",
-        "fr": "请在 ALIYUN::POLARDB::DBCluster 上配置 Tags 以满足策略。",
-        "pt": "请在 ALIYUN::POLARDB::DBCluster 上配置 Tags 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::POLARDB::DBCluster に Tags を設定してください。",
+        "de": "Konfigurieren Sie Tags für ALIYUN::POLARDB::DBCluster, um die Richtlinie zu erfüllen.",
+        "es": "Configure Tags en ALIYUN::POLARDB::DBCluster para cumplir la política.",
+        "fr": "Configurez Tags sur ALIYUN::POLARDB::DBCluster pour satisfaire la politique.",
+        "pt": "Configure Tags em ALIYUN::POLARDB::DBCluster para atender à política."
     },
     "resource_types": ["ALIYUN::POLARDB::DBCluster"]
 }

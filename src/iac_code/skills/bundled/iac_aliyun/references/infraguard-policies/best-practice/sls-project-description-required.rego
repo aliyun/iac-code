@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "SLS project must configure description",
         "zh": "SLS Project 必须配置描述",
-        "ja": "SLS Project 必须配置描述",
-        "de": "SLS Project 必须配置描述",
-        "es": "SLS Project 必须配置描述",
-        "fr": "SLS Project 必须配置描述",
-        "pt": "SLS Project 必须配置描述"
+        "ja": "ALIYUN::SLS::Project には Description を設定する必要があります",
+        "de": "Für ALIYUN::SLS::Project muss Description konfiguriert sein",
+        "es": "ALIYUN::SLS::Project debe tener Description configurado",
+        "fr": "ALIYUN::SLS::Project doit avoir Description configuré",
+        "pt": "ALIYUN::SLS::Project deve ter Description configurado"
     },
     "description": {
         "en": "Checks SLS project must configure description",
         "zh": "检查SLS Project 必须配置描述",
-        "ja": "检查SLS Project 必须配置描述",
-        "de": "检查SLS Project 必须配置描述",
-        "es": "检查SLS Project 必须配置描述",
-        "fr": "检查SLS Project 必须配置描述",
-        "pt": "检查SLS Project 必须配置描述"
+        "ja": "ALIYUN::SLS::Project に Description が設定されていることを確認します",
+        "de": "Prüft, ob Description für ALIYUN::SLS::Project konfiguriert ist",
+        "es": "Comprueba que ALIYUN::SLS::Project tenga Description configurado",
+        "fr": "Vérifie que ALIYUN::SLS::Project a Description configuré",
+        "pt": "Verifica se ALIYUN::SLS::Project tem Description configurado"
     },
     "reason": {
         "en": "SLS project must configure description is not satisfied.",
         "zh": "SLS Project 必须配置描述未满足。",
-        "ja": "SLS Project 必须配置描述未满足。",
-        "de": "SLS Project 必须配置描述未满足。",
-        "es": "SLS Project 必须配置描述未满足。",
-        "fr": "SLS Project 必须配置描述未满足。",
-        "pt": "SLS Project 必须配置描述未满足。"
+        "ja": "ALIYUN::SLS::Project に Description が設定されていません。",
+        "de": "Für ALIYUN::SLS::Project ist Description nicht konfiguriert.",
+        "es": "ALIYUN::SLS::Project no tiene Description configurado.",
+        "fr": "ALIYUN::SLS::Project n'a pas Description configuré.",
+        "pt": "ALIYUN::SLS::Project não tem Description configurado."
     },
     "recommendation": {
         "en": "Configure Description on ALIYUN::SLS::Project to satisfy the policy.",
         "zh": "请在 ALIYUN::SLS::Project 上配置 Description 以满足策略。",
-        "ja": "请在 ALIYUN::SLS::Project 上配置 Description 以满足策略。",
-        "de": "请在 ALIYUN::SLS::Project 上配置 Description 以满足策略。",
-        "es": "请在 ALIYUN::SLS::Project 上配置 Description 以满足策略。",
-        "fr": "请在 ALIYUN::SLS::Project 上配置 Description 以满足策略。",
-        "pt": "请在 ALIYUN::SLS::Project 上配置 Description 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::SLS::Project に Description を設定してください。",
+        "de": "Konfigurieren Sie Description für ALIYUN::SLS::Project, um die Richtlinie zu erfüllen.",
+        "es": "Configure Description en ALIYUN::SLS::Project para cumplir la política.",
+        "fr": "Configurez Description sur ALIYUN::SLS::Project pour satisfaire la politique.",
+        "pt": "Configure Description em ALIYUN::SLS::Project para atender à política."
     },
     "resource_types": ["ALIYUN::SLS::Project"]
 }

@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "ESS scaling group must configure MaxSize",
         "zh": "ESS 伸缩组必须配置最大容量",
-        "ja": "ESS 伸缩组必须配置最大容量",
-        "de": "ESS 伸缩组必须配置最大容量",
-        "es": "ESS 伸缩组必须配置最大容量",
-        "fr": "ESS 伸缩组必须配置最大容量",
-        "pt": "ESS 伸缩组必须配置最大容量"
+        "ja": "ALIYUN::ESS::ScalingGroup には MaxSize を設定する必要があります",
+        "de": "Für ALIYUN::ESS::ScalingGroup muss MaxSize konfiguriert sein",
+        "es": "ALIYUN::ESS::ScalingGroup debe tener MaxSize configurado",
+        "fr": "ALIYUN::ESS::ScalingGroup doit avoir MaxSize configuré",
+        "pt": "ALIYUN::ESS::ScalingGroup deve ter MaxSize configurado"
     },
     "description": {
         "en": "Checks ESS scaling group must configure MaxSize",
         "zh": "检查ESS 伸缩组必须配置最大容量",
-        "ja": "检查ESS 伸缩组必须配置最大容量",
-        "de": "检查ESS 伸缩组必须配置最大容量",
-        "es": "检查ESS 伸缩组必须配置最大容量",
-        "fr": "检查ESS 伸缩组必须配置最大容量",
-        "pt": "检查ESS 伸缩组必须配置最大容量"
+        "ja": "ALIYUN::ESS::ScalingGroup に MaxSize が設定されていることを確認します",
+        "de": "Prüft, ob MaxSize für ALIYUN::ESS::ScalingGroup konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ESS::ScalingGroup tenga MaxSize configurado",
+        "fr": "Vérifie que ALIYUN::ESS::ScalingGroup a MaxSize configuré",
+        "pt": "Verifica se ALIYUN::ESS::ScalingGroup tem MaxSize configurado"
     },
     "reason": {
         "en": "ESS scaling group must configure MaxSize is not satisfied.",
         "zh": "ESS 伸缩组必须配置最大容量未满足。",
-        "ja": "ESS 伸缩组必须配置最大容量未满足。",
-        "de": "ESS 伸缩组必须配置最大容量未满足。",
-        "es": "ESS 伸缩组必须配置最大容量未满足。",
-        "fr": "ESS 伸缩组必须配置最大容量未满足。",
-        "pt": "ESS 伸缩组必须配置最大容量未满足。"
+        "ja": "ALIYUN::ESS::ScalingGroup に MaxSize が設定されていません。",
+        "de": "Für ALIYUN::ESS::ScalingGroup ist MaxSize nicht konfiguriert.",
+        "es": "ALIYUN::ESS::ScalingGroup no tiene MaxSize configurado.",
+        "fr": "ALIYUN::ESS::ScalingGroup n'a pas MaxSize configuré.",
+        "pt": "ALIYUN::ESS::ScalingGroup não tem MaxSize configurado."
     },
     "recommendation": {
         "en": "Configure MaxSize on ALIYUN::ESS::ScalingGroup to satisfy the policy.",
         "zh": "请在 ALIYUN::ESS::ScalingGroup 上配置 MaxSize 以满足策略。",
-        "ja": "请在 ALIYUN::ESS::ScalingGroup 上配置 MaxSize 以满足策略。",
-        "de": "请在 ALIYUN::ESS::ScalingGroup 上配置 MaxSize 以满足策略。",
-        "es": "请在 ALIYUN::ESS::ScalingGroup 上配置 MaxSize 以满足策略。",
-        "fr": "请在 ALIYUN::ESS::ScalingGroup 上配置 MaxSize 以满足策略。",
-        "pt": "请在 ALIYUN::ESS::ScalingGroup 上配置 MaxSize 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ESS::ScalingGroup に MaxSize を設定してください。",
+        "de": "Konfigurieren Sie MaxSize für ALIYUN::ESS::ScalingGroup, um die Richtlinie zu erfüllen.",
+        "es": "Configure MaxSize en ALIYUN::ESS::ScalingGroup para cumplir la política.",
+        "fr": "Configurez MaxSize sur ALIYUN::ESS::ScalingGroup pour satisfaire la politique.",
+        "pt": "Configure MaxSize em ALIYUN::ESS::ScalingGroup para atender à política."
     },
     "resource_types": ["ALIYUN::ESS::ScalingGroup"]
 }

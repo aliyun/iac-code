@@ -9,38 +9,38 @@ rule_meta := {
     "name": {
         "en": "VPC must configure CIDR block",
         "zh": "VPC 必须配置网段",
-        "ja": "VPC 必须配置网段",
-        "de": "VPC 必须配置网段",
-        "es": "VPC 必须配置网段",
-        "fr": "VPC 必须配置网段",
-        "pt": "VPC 必须配置网段"
+        "ja": "ALIYUN::ECS::VPC には CidrBlock を設定する必要があります",
+        "de": "Für ALIYUN::ECS::VPC muss CidrBlock konfiguriert sein",
+        "es": "ALIYUN::ECS::VPC debe tener CidrBlock configurado",
+        "fr": "ALIYUN::ECS::VPC doit avoir CidrBlock configuré",
+        "pt": "ALIYUN::ECS::VPC deve ter CidrBlock configurado"
     },
     "description": {
         "en": "Checks VPC must configure CIDR block",
         "zh": "检查VPC 必须配置网段",
-        "ja": "检查VPC 必须配置网段",
-        "de": "检查VPC 必须配置网段",
-        "es": "检查VPC 必须配置网段",
-        "fr": "检查VPC 必须配置网段",
-        "pt": "检查VPC 必须配置网段"
+        "ja": "ALIYUN::ECS::VPC に CidrBlock が設定されていることを確認します",
+        "de": "Prüft, ob CidrBlock für ALIYUN::ECS::VPC konfiguriert ist",
+        "es": "Comprueba que ALIYUN::ECS::VPC tenga CidrBlock configurado",
+        "fr": "Vérifie que ALIYUN::ECS::VPC a CidrBlock configuré",
+        "pt": "Verifica se ALIYUN::ECS::VPC tem CidrBlock configurado"
     },
     "reason": {
         "en": "VPC must configure CIDR block is not satisfied.",
         "zh": "VPC 必须配置网段未满足。",
-        "ja": "VPC 必须配置网段未满足。",
-        "de": "VPC 必须配置网段未满足。",
-        "es": "VPC 必须配置网段未满足。",
-        "fr": "VPC 必须配置网段未满足。",
-        "pt": "VPC 必须配置网段未满足。"
+        "ja": "ALIYUN::ECS::VPC に CidrBlock が設定されていません。",
+        "de": "Für ALIYUN::ECS::VPC ist CidrBlock nicht konfiguriert.",
+        "es": "ALIYUN::ECS::VPC no tiene CidrBlock configurado.",
+        "fr": "ALIYUN::ECS::VPC n'a pas CidrBlock configuré.",
+        "pt": "ALIYUN::ECS::VPC não tem CidrBlock configurado."
     },
     "recommendation": {
         "en": "Configure CidrBlock on ALIYUN::ECS::VPC to satisfy the policy.",
         "zh": "请在 ALIYUN::ECS::VPC 上配置 CidrBlock 以满足策略。",
-        "ja": "请在 ALIYUN::ECS::VPC 上配置 CidrBlock 以满足策略。",
-        "de": "请在 ALIYUN::ECS::VPC 上配置 CidrBlock 以满足策略。",
-        "es": "请在 ALIYUN::ECS::VPC 上配置 CidrBlock 以满足策略。",
-        "fr": "请在 ALIYUN::ECS::VPC 上配置 CidrBlock 以满足策略。",
-        "pt": "请在 ALIYUN::ECS::VPC 上配置 CidrBlock 以满足策略。"
+        "ja": "ポリシーを満たすには、ALIYUN::ECS::VPC に CidrBlock を設定してください。",
+        "de": "Konfigurieren Sie CidrBlock für ALIYUN::ECS::VPC, um die Richtlinie zu erfüllen.",
+        "es": "Configure CidrBlock en ALIYUN::ECS::VPC para cumplir la política.",
+        "fr": "Configurez CidrBlock sur ALIYUN::ECS::VPC pour satisfaire la politique.",
+        "pt": "Configure CidrBlock em ALIYUN::ECS::VPC para atender à política."
     },
     "resource_types": ["ALIYUN::ECS::VPC"]
 }
