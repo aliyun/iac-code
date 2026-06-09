@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -118,13 +120,17 @@ class ACPServer:
         """
         if not cwd:
             raise acp.RequestError.invalid_params({"cwd": "cwd must be an absolute path"})
-        # Accept both POSIX and Windows absolute paths (the ACP server may
-        # receive requests from Windows clients even on a non-Windows host).
-        if not Path(cwd).is_absolute() and not _looks_like_windows_path(cwd):
+        # Accept both POSIX and Windows absolute paths.  ``os.path.isabs``
+        # treats rooted POSIX-style paths (``/tmp``) as absolute on Windows
+        # too, while ``_looks_like_windows_path`` catches drive-letter forms
+        # (``C:\foo``) on POSIX hosts.
+        is_windows_path = _looks_like_windows_path(cwd)
+        if not os.path.isabs(cwd) and not is_windows_path:
             raise acp.RequestError.invalid_params({"cwd": "cwd must be an absolute path"})
-        # On non-Windows, skip root-containment and is_dir checks for Windows
-        # paths since they cannot be resolved on the local filesystem.
-        if _looks_like_windows_path(cwd):
+        # When a Windows-style path is received on a non-Windows host, we
+        # cannot resolve it against the local filesystem; skip the
+        # root-containment and is_dir checks for that case only.
+        if is_windows_path and sys.platform != "win32":
             return cwd
         resolved = Path(cwd).resolve()
         if not any(is_relative_to(resolved, root) for root in allowed_cwd_roots()):
