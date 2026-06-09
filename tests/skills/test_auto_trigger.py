@@ -172,6 +172,26 @@ def test_iac_aliyun_trigger_matches_alicloud_provider_prompt():
     assert should_trigger('用 provider "alicloud" 写一个 ECS 安全组模板')
 
 
+def test_iac_aliyun_trigger_matches_infraguard_policy_generation():
+    from iac_code.skills.bundled.iac_aliyun.auto_trigger import should_trigger
+
+    assert should_trigger("生成一个 InfraGuard 合规策略，检查 ECS 不允许公网 IP")
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "用 InfraGuard 生成高可用合规策略，检查 RDS 必须多可用区",
+        "生成成本优化策略，检查 ECS 规格不能超过指定系列",
+        "写一个网络架构最佳实践策略，限制安全组不能开放全部端口",
+    ],
+)
+def test_iac_aliyun_trigger_matches_infraguard_policy_dimensions(prompt):
+    from iac_code.skills.bundled.iac_aliyun.auto_trigger import should_trigger
+
+    assert should_trigger(prompt)
+
+
 @pytest.mark.parametrize(
     "prompt",
     [

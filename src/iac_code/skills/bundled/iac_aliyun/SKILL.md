@@ -1,7 +1,7 @@
 ---
 name: iac-aliyun
-description: 阿里云 Alibaba Cloud ROS/Terraform IaC 模板生成、解释、完善、校验、询价与部署
-when_to_use: 当用户请求阿里云/Alibaba Cloud/Alicloud 的 ROS 模板、资源栈、Terraform alicloud provider 模板生成、解释、完善、校验、询价、部署、更新或删除时，必须先调用 skill 工具加载 iac-aliyun。
+description: 阿里云 Alibaba Cloud ROS/Terraform IaC 模板生成、解释、完善、校验、询价、部署与 InfraGuard 合规策略生成
+when_to_use: 当用户请求阿里云/Alibaba Cloud/Alicloud 的 ROS 模板、资源栈、Terraform alicloud provider 模板生成、解释、完善、校验、询价、部署、更新、删除，或 InfraGuard 合规策略生成时，必须先调用 skill 工具加载 iac-aliyun。
 user_invocable: false
 auto_trigger:
   script: auto_trigger.py
@@ -9,7 +9,7 @@ auto_trigger:
 
 # 阿里云 IaC 技能
 
-阿里云 IaC 模板生成、解释、完善与部署。帮助用户通过 ROS/Terraform 模板管理云资源。
+阿里云 IaC 模板生成、解释、完善与部署，以及 InfraGuard 合规策略生成。帮助用户通过 ROS/Terraform 模板管理云资源，并通过 InfraGuard 在部署前检查安全与合规要求。
 
 ## 地域
 
@@ -51,6 +51,12 @@ auto_trigger:
 
 ### 询价
 - 查询部署的预估价格
+
+### InfraGuard 合规策略生成
+- 用户要求“生成合规策略”“写 InfraGuard 规则”“用 Rego 检查模板”“策略校验”等时，按 [references/infraguard-policy-generation.md](references/infraguard-policy-generation.md) 执行。
+- 已生成的 InfraGuard 策略资产位于 [references/infraguard-policies/](references/infraguard-policies/)，按场景目录组织。
+- 云基础设施安全基线策略优先使用 [references/infraguard-policies/packs/cloud-infrastructure-security-baseline.rego](references/infraguard-policies/packs/cloud-infrastructure-security-baseline.rego) 及 [references/infraguard-policies/rules/ros/](references/infraguard-policies/rules/ros/) 下的官方风格规则，规则依赖 [references/infraguard-policies/lib/helpers.rego](references/infraguard-policies/lib/helpers.rego)。
+- 需要自定义或组合策略时，先阅读 InfraGuard 策略生成参考，再读取相关场景下的策略资产。
 
 ## 参数化规则
 
