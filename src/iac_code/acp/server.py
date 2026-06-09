@@ -127,13 +127,10 @@ class ACPServer:
         is_windows_path = _looks_like_windows_path(cwd)
         if not os.path.isabs(cwd) and not is_windows_path:
             raise acp.RequestError.invalid_params({"cwd": "cwd must be an absolute path"})
-        # When the path style doesn't match the host platform we cannot
-        # resolve it against the local filesystem in any meaningful way —
-        # skip the root-containment and is_dir checks for that case only.
-        # (Windows-style path on POSIX host, or POSIX-style path on Windows.)
-        on_windows = sys.platform == "win32"
-        is_posix_path = cwd.startswith("/") and not is_windows_path
-        if (is_windows_path and not on_windows) or (is_posix_path and on_windows):
+        # When a Windows-style path is received on a non-Windows host, we
+        # cannot resolve it against the local filesystem; skip the
+        # root-containment and is_dir checks for that case only.
+        if is_windows_path and sys.platform != "win32":
             return cwd
         resolved = Path(cwd).resolve()
         if not any(is_relative_to(resolved, root) for root in allowed_cwd_roots()):
