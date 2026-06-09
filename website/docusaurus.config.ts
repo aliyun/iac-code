@@ -12,6 +12,7 @@ const config: Config = {
 
   organizationName: 'aliyun',
   projectName: 'iac-code',
+  clientModules: ['./src/clientModules/localeRedirect.js'],
 
   onBrokenLinks: 'throw',
   markdown: {
