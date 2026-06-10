@@ -91,6 +91,7 @@ version = {attr = "iac_code.__version__"}
     "**/*.yaml",
     "**/*.json",
     "**/*.md",
+    "**/*.rego",
     "**/*.mo",
     "**/*.po",
 ]

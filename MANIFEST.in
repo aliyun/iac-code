@@ -1,7 +1,7 @@
 include LICENSE
 include README.md
 include pyproject.toml
-recursive-include src/iac_code *.yml *.yaml *.json *.md *.mo *.po
+recursive-include src/iac_code *.yml *.yaml *.json *.md *.rego *.mo *.po
 
 prune tests
 prune htmlcov

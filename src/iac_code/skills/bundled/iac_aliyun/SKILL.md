@@ -52,6 +52,10 @@ auto_trigger:
 ### 询价
 - 查询部署的预估价格
 
+### Policy as Code / InfraGuard
+- 用户要求“生成合规策略”“写 InfraGuard 规则”“用 Rego 检查模板”“策略校验”“策略库查询”等 PAC 工作时，改用 `pac-aliyun` skill。
+- 不在 `iac-aliyun` 内维护 InfraGuard 策略副本；`iac-aliyun` 只在 PAC 结果要求修改模板时负责 ROS/Terraform 模板改动。
+
 ## 参数化规则
 
 生成模板时，以下属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）：

@@ -19,6 +19,16 @@ _ALIYUN_SCOPE_PATTERNS = [
     r"alicloud\s+provider",
     r'provider\s+"alicloud"',
     r'resource\s+"alicloud_',
+    r"\becs\b",
+    r"\brds\b",
+    r"\boss\b",
+    r"\bvpc\b",
+    r"\bslb\b",
+    r"\balb\b",
+    r"\bnlb\b",
+    r"安全组",
+    r"负载均衡",
+    r"云资源",
 ]
 
 _ES_TEMPLATE_ACTIONS = r"genera|generar|crea|crear|despliega|desplegar|explica|explicar|valida|validar|mejora|mejorar"

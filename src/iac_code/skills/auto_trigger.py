@@ -45,13 +45,17 @@ def find_auto_triggered_skills(
         return []
 
     matches: list[PromptCommand] = []
+    suppressed_skill_names: set[str] = set()
     context_messages = context_messages or []
     for command in skills:
         skill = command.skill
-        if skill is None or command.name in loaded_skill_names:
+        if skill is None:
             continue
-        if context_has_skill_tag(context_messages, command.name):
+        is_loaded = command.name in loaded_skill_names
+        if not is_loaded and context_has_skill_tag(context_messages, command.name):
             loaded_skill_names.add(command.name)
+            is_loaded = True
+        if is_loaded and not skill.auto_trigger.get("supersedes"):
             continue
         script = skill.auto_trigger.get("script")
         if not script or command.source != SkillSource.BUNDLED or skill.source != SkillSource.BUNDLED:
@@ -63,10 +67,15 @@ def find_auto_triggered_skills(
         if not callable(should_trigger):
             continue
         try:
-            if should_trigger(prompt):
+            if not should_trigger(prompt):
+                continue
+            suppressed_skill_names.update(_split_supersedes(skill.auto_trigger.get("supersedes", "")))
+            if not is_loaded:
                 matches.append(command)
         except Exception as exc:
             logger.warning("Skill auto-trigger failed for {}: {}", command.name, exc)
+    if suppressed_skill_names:
+        return [command for command in matches if command.name not in suppressed_skill_names]
     return matches
 
 
@@ -113,3 +122,7 @@ def _load_trigger_module(skill_root: str, script: str, skill_name: str) -> Modul
         logger.warning("Failed to load skill auto-trigger script for {}: {}", skill_name, exc)
         return None
     return module
+
+
+def _split_supersedes(value: str) -> set[str]:
+    return {name for name in value.replace(",", " ").split() if name}
