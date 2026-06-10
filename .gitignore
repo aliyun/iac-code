@@ -15,8 +15,6 @@ downloads/
 eggs/
 .eggs/
 lib/
-!src/iac_code/skills/bundled/iac_aliyun/references/infraguard-policies/lib/
-!src/iac_code/skills/bundled/iac_aliyun/references/infraguard-policies/lib/*.rego
 lib64/
 parts/
 sdist/

@@ -33,7 +33,7 @@ class TestPacAliyunSkill:
         init_bundled_skills()
         skills = get_bundled_skills()
         pac_skill = next(s for s in skills if s.name == "pac-aliyun")
-        assert pac_skill.auto_trigger == {"script": "auto_trigger.py"}
+        assert pac_skill.auto_trigger == {"script": "auto_trigger.py", "supersedes": "iac-aliyun"}
 
     def test_pac_aliyun_skill_hosts_infraguard_policy_generation(self):
         init_bundled_skills()

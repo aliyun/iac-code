@@ -5,6 +5,7 @@ when_to_use: 当用户请求阿里云/Alibaba Cloud/Alicloud 的 Policy as Code�
 user_invocable: false
 auto_trigger:
   script: auto_trigger.py
+  supersedes: iac-aliyun
 ---
 
 # 阿里云 PAC 技能

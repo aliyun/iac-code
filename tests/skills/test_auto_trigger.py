@@ -192,6 +192,13 @@ def test_iac_aliyun_trigger_rejects_infraguard_policy_dimensions(prompt):
     assert not should_trigger(prompt)
 
 
+def test_iac_aliyun_auto_trigger_does_not_own_pac_classifier():
+    source = Path("src/iac_code/skills/bundled/iac_aliyun/auto_trigger.py").read_text(encoding="utf-8")
+
+    assert "_PAC_WORKFLOW_PATTERNS" not in source
+    assert "has_pac_workflow" not in source
+
+
 def test_pac_aliyun_trigger_matches_infraguard_policy_generation():
     from iac_code.skills.bundled.pac_aliyun.auto_trigger import should_trigger
 
@@ -219,7 +226,14 @@ def test_pac_aliyun_trigger_rejects_aliyun_ram_policy_template_prompt():
     assert not should_trigger("Create an Alibaba Cloud ROS template for a RAM policy")
 
 
-def test_pac_prompt_auto_triggers_only_pac_skill():
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "生成一个 InfraGuard 合规策略，检查 ECS 不允许公网 IP",
+        "用 Rego 检查这个阿里云 ROS 模板",
+    ],
+)
+def test_pac_prompt_auto_triggers_only_pac_skill(prompt):
     from iac_code.skills.bundled import _bundled_skills, get_bundled_skills, init_bundled_skills
 
     _bundled_skills.clear()
@@ -230,7 +244,7 @@ def test_pac_prompt_auto_triggers_only_pac_skill():
     ]
 
     matches = find_auto_triggered_skills(
-        "生成一个 InfraGuard 合规策略，检查 ECS 不允许公网 IP",
+        prompt,
         commands,
         loaded_skill_names=set(),
     )

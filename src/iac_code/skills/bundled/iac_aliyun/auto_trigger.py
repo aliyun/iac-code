@@ -84,33 +84,9 @@ _IAC_WORKFLOW_PATTERNS = [
     r"\.ros\.ya?ml\b",
 ]
 
-_PAC_WORKFLOW_PATTERNS = [
-    r"\binfraguard\b",
-    r"\brego\b",
-    r"\bpolicy\s+as\s+code\b",
-    r"\bpac\b",
-    r"\bpack:aliyun:",
-    r"\brule:aliyun:",
-    r"\bcompliance\s+polic(y|ies)\b",
-    r"\bpolicy\s+(list|get|update|validate)\b",
-    r"合规策略",
-    r"策略生成",
-    r"生成.*策略",
-    r"编写.*策略",
-    r"写.*策略",
-    r"校验.*策略",
-    r"验证.*策略",
-    r"检查.*策略",
-    r"策略.*校验",
-    r"策略.*验证",
-    r"策略.*检查",
-]
-
 
 def should_trigger(prompt: str) -> bool:
     text = prompt.casefold()
-    if has_pac_workflow(text):
-        return False
     return has_aliyun_scope(text) and has_iac_workflow(text)
 
 
@@ -120,7 +96,3 @@ def has_aliyun_scope(text: str) -> bool:
 
 def has_iac_workflow(text: str) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in _IAC_WORKFLOW_PATTERNS)
-
-
-def has_pac_workflow(text: str) -> bool:
-    return any(re.search(pattern, text, re.IGNORECASE) for pattern in _PAC_WORKFLOW_PATTERNS)

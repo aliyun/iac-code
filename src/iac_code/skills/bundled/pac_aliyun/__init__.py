@@ -16,5 +16,5 @@ def register_pac_aliyun_skill() -> None:
         ),
         user_invocable=False,
         skill_root=str(SKILL_DIR),
-        auto_trigger={"script": "auto_trigger.py"},
+        auto_trigger={"script": "auto_trigger.py", "supersedes": "iac-aliyun"},
     )
