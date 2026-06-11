@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Event
 
 import httpx
+import pytest
 import yaml
 
 from iac_code.services import update_checker
@@ -24,11 +25,14 @@ from iac_code.services.update_checker import (
     suppress_version,
 )
 
+TEST_CURRENT_VERSION = "0.3.0"
+SENTINEL_RUNNING_VERSION = "9999.0.0"
+
 
 def _pending_update_data() -> dict[str, object]:
     return {
         "version": "0.4.0",
-        "current_version": "0.3.0",
+        "current_version": TEST_CURRENT_VERSION,
         "source": "official_pypi",
         "checked_at": 100.0,
         "update_command": ["/python", "-m", "pip", "install", "--upgrade", "iac-code"],
@@ -53,6 +57,13 @@ class FakeHTTPClient:
         if isinstance(result, BaseException):
             raise result
         return result
+
+
+@pytest.fixture(autouse=True)
+def _isolate_running_version(monkeypatch):
+    import iac_code
+
+    monkeypatch.setattr(iac_code, "__version__", SENTINEL_RUNNING_VERSION)
 
 
 def _json_response(url: str, payload: object, status_code: int = 200) -> httpx.Response:
@@ -800,7 +811,13 @@ def test_semantically_better_detected_pending_wins_over_newer_race_pending(monke
 
     monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version=TEST_CURRENT_VERSION,
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.5.0"
@@ -836,7 +853,13 @@ def test_newer_configured_race_pending_wins_over_older_official_detection(monkey
 
     monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version=TEST_CURRENT_VERSION,
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.5.0"
@@ -915,7 +938,13 @@ def test_newer_configured_pending_is_preserved_against_older_fresh_official_dete
 
     monkeypatch.setattr(update_checker.subprocess, "run", fail_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version=TEST_CURRENT_VERSION,
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "0.5.0"
@@ -987,7 +1016,13 @@ def test_official_pypi_without_installable_newer_release_falls_back_to_configure
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version=TEST_CURRENT_VERSION,
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is not None
     assert state.pending.version == "100.0.0"
@@ -1186,7 +1221,13 @@ def test_successful_no_update_check_clears_stale_pending(monkeypatch, tmp_path):
 
     monkeypatch.setattr(update_checker.subprocess, "run", fake_run)
 
-    state = check_for_updates_once(path=path, http_client=http_client, now=1000.0, python_executable="/python")
+    state = check_for_updates_once(
+        path=path,
+        current_version=TEST_CURRENT_VERSION,
+        http_client=http_client,
+        now=1000.0,
+        python_executable="/python",
+    )
 
     assert state.pending is None
     assert state.last_successful_check_at == 1000.0
