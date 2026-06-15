@@ -24,7 +24,7 @@ sidebar_position: 3
 | `iac-code a2a-client push-config-list` | タスクプッシュ通知設定を一覧表示 |
 | `iac-code a2a-client push-config-delete` | タスクプッシュ通知設定を削除 |
 | `iac-code a2a-client extended-card` | 認証済みの拡張 Agent Card を取得 |
-| `iac-code a2a-route-preview` | `a2a-client call` のローカルルート選択をプレビュー |
+| `iac-code a2a-client route-preview` | `a2a-client call` のローカルルート選択をプレビュー |
 
 すべての HTTP クライアントコマンドは、同じ認証オプションを受け付けます。
 
@@ -465,12 +465,12 @@ iac-code a2a-client --config a2a-client.yml extended-card \
 
 公開 Agent Card は `capabilities.extendedAgentCard=true` を広告します。拡張カードは、タスク管理やプッシュ設定機能メタデータを含む認証済みランタイム詳細を追加します。
 
-## `iac-code a2a-route-preview`
+## `iac-code a2a-client route-preview`
 
 `a2a-client call` が、`--url` が省略された場合に設定済みルートをどのように解決するかをプレビューします。
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "template=http://127.0.0.1:41242/;skills=iac_generation;tags=ros,template" \
   --skill iac_generation \
   --prompt "Create a ROS VPC template"
@@ -488,7 +488,7 @@ iac-code a2a-route-preview \
 ルートスナップショットを保存する:
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "ros=http://127.0.0.1:41242/;skills=iac_generation;tags=ros" \
   --route-state-dir ~/.iac-code/a2a \
   --save-routes

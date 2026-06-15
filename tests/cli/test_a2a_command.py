@@ -5,7 +5,11 @@ from typer.testing import CliRunner
 
 from iac_code.a2a.persistence import A2APersistenceStore, A2ARouteSnapshot
 from iac_code.a2a.transport import A2AAuthConfig
-from iac_code.cli.main import app
+from iac_code.cli.main import (
+    _a2a_client_missing_dependencies_message,
+    _a2a_server_missing_dependencies_message,
+    app,
+)
 from iac_code.config import DEFAULT_MODEL
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -51,13 +55,15 @@ def test_a2a_client_help_groups_client_commands() -> None:
     assert "push-config-create" in stdout
     assert "extended-card" in stdout
     assert "route-preview" in stdout
+    assert "a2a-route-preview" not in stdout
 
 
-def test_removed_top_level_a2a_client_command_is_rejected() -> None:
-    result = CliRunner().invoke(app, ["a2a-call", "--help"])
+def test_removed_top_level_a2a_client_commands_are_rejected() -> None:
+    for command in ("a2a-call", "a2a-route-preview"):
+        result = CliRunner().invoke(app, [command, "--help"])
 
-    assert result.exit_code == 2
-    assert "No such command" in result.stderr
+        assert result.exit_code == 2
+        assert "No such command" in result.stderr
 
 
 def test_a2a_command_passes_config_options_to_server(monkeypatch, tmp_path) -> None:
@@ -972,7 +978,7 @@ def test_a2a_route_preview_resolves_and_saves_routes(tmp_path) -> None:
 
 def test_a2a_command_reports_missing_extra(monkeypatch) -> None:
     def fake_run_server(**kwargs) -> None:
-        raise RuntimeError("A2A server dependencies are missing. Install iac-code with the 'a2a' extra.")
+        raise RuntimeError(_a2a_server_missing_dependencies_message())
 
     monkeypatch.setattr("iac_code.a2a.app.run_server", fake_run_server)
     monkeypatch.setattr("iac_code.a2a.app.resolve_token", lambda token: None)
@@ -983,7 +989,7 @@ def test_a2a_command_reports_missing_extra(monkeypatch) -> None:
 
     assert result.exit_code == 1
     combined_output = (result.stdout or "") + (result.stderr or "") + (result.output or "")
-    assert "a2a" in combined_output
+    assert _a2a_server_missing_dependencies_message() in combined_output
 
 
 def test_a2a_command_reports_import_error(monkeypatch) -> None:
@@ -1002,7 +1008,26 @@ def test_a2a_command_reports_import_error(monkeypatch) -> None:
 
     assert result.exit_code == 1
     combined_output = (result.stdout or "") + (result.stderr or "") + (result.output or "")
-    assert "a2a" in combined_output
+    assert _a2a_server_missing_dependencies_message() in combined_output
+
+
+def test_a2a_client_command_reports_import_error(monkeypatch) -> None:
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "iac_code.a2a.client":
+            raise ImportError("missing optional a2a dependency")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    result = CliRunner().invoke(app, ["a2a-client", "discover", "--url", "http://agent.example/rpc"])
+
+    assert result.exit_code == 1
+    combined_output = (result.stdout or "") + (result.stderr or "") + (result.output or "")
+    assert _a2a_client_missing_dependencies_message() in combined_output
 
 
 def test_a2a_command_bootstraps_telemetry_around_run_server(monkeypatch) -> None:

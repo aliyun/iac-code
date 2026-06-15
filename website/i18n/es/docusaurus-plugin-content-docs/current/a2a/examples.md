@@ -165,7 +165,7 @@ iac-code a2a-client --config a2a-client.yml push-config-create \
 Previsualiza la selección de ruta antes de llamar a un agente enrutado:
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "ros=http://127.0.0.1:41242/;skills=iac_generation;tags=ros,template" \
   --skill iac_generation \
   --prompt "Create a ROS VPC template"

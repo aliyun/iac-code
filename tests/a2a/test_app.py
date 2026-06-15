@@ -1,4 +1,5 @@
 import asyncio
+import builtins
 import json
 from base64 import b64encode
 from pathlib import Path
@@ -25,6 +26,7 @@ from iac_code.a2a.app import (
     resolve_api_key,
     resolve_basic_credentials,
     resolve_token,
+    run_server,
 )
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.transports.dispatcher import create_runtime_components
@@ -84,6 +86,34 @@ def test_health_route() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
+
+
+def test_run_server_reports_aligned_missing_uvicorn_hint(monkeypatch, tmp_path) -> None:
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "uvicorn":
+            raise ImportError("No module named 'uvicorn'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr("iac_code.a2a.app.create_app", lambda **kwargs: object())
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"A2A server dependencies are missing\. Install with: pip install 'iac-code\[a2a\]'",
+    ):
+        run_server(
+            host="127.0.0.1",
+            port=41242,
+            token=None,
+            model="qwen3.6-plus",
+            basic_username=None,
+            basic_password=None,
+            api_key=None,
+            api_key_header="X-API-Key",
+            persistence_dir=tmp_path / "a2a",
+        )
 
 
 def test_agent_card_route() -> None:

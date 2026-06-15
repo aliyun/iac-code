@@ -47,6 +47,15 @@ a2a_client_app = typer.Typer(
 )
 app.add_typer(a2a_client_app, name="a2a-client")
 
+
+def _a2a_client_missing_dependencies_message() -> str:
+    return _("A2A client dependencies are missing. Install with: pip install 'iac-code[a2a]'")
+
+
+def _a2a_server_missing_dependencies_message() -> str:
+    return _("A2A server dependencies are missing. Install with: pip install 'iac-code[a2a]'")
+
+
 # `install-git-bash` is a Windows-only helper that installs Git for Windows
 # via the npmmirror mirror. We register it conditionally so it does not
 # show up in --help on non-Windows platforms (where it could not work).
@@ -71,7 +80,7 @@ def a2a_client(
         import iac_code.a2a.client  # noqa: F401
     except ImportError:
         typer.echo(
-            _("A2A client dependencies are missing. Install with: pip install 'iac-code[a2a]'"),
+            _a2a_client_missing_dependencies_message(),
             err=True,
         )
         raise typer.Exit(1)
@@ -649,7 +658,7 @@ def a2a(
         )
     except ImportError as exc:
         typer.echo(
-            _("A2A server dependencies are missing. Install with: pip install 'iac-code[a2a]'"),
+            _a2a_server_missing_dependencies_message(),
             err=True,
         )
         raise typer.Exit(1) from exc
@@ -1504,7 +1513,7 @@ def _build_a2a_auth_config(
         from iac_code.a2a.transport import A2AAuthConfig
     except ImportError as exc:
         typer.echo(
-            _("A2A client dependencies are missing. Install with: pip install 'iac-code[a2a]'"),
+            _a2a_client_missing_dependencies_message(),
             err=True,
         )
         raise typer.Exit(1) from exc
@@ -1865,7 +1874,7 @@ def _parse_a2a_route_spec(value: str):
         from iac_code.a2a.router import A2ARoute
     except ImportError as exc:
         typer.echo(
-            _("A2A client dependencies are missing. Install with: pip install 'iac-code[a2a]'"),
+            _a2a_client_missing_dependencies_message(),
             err=True,
         )
         raise typer.Exit(1) from exc
@@ -1904,7 +1913,7 @@ def _save_a2a_route_snapshots(persistence_dir: str, routes: list[Any]) -> None:
         from iac_code.a2a.persistence import A2APersistenceStore, A2ARouteSnapshot
     except ImportError as exc:
         typer.echo(
-            _("A2A client dependencies are missing. Install with: pip install 'iac-code[a2a]'"),
+            _a2a_client_missing_dependencies_message(),
             err=True,
         )
         raise typer.Exit(1) from exc

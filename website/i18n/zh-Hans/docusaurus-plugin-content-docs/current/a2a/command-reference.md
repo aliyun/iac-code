@@ -24,7 +24,7 @@ sidebar_position: 3
 | `iac-code a2a-client push-config-list` | 列出 task push notification configs |
 | `iac-code a2a-client push-config-delete` | 删除 task push notification config |
 | `iac-code a2a-client extended-card` | 获取已认证的扩展 Agent Card |
-| `iac-code a2a-route-preview` | 为 `a2a-client call` 预览本地路由选择 |
+| `iac-code a2a-client route-preview` | 为 `a2a-client call` 预览本地路由选择 |
 
 所有 HTTP client 命令都接受相同的认证选项：
 
@@ -465,12 +465,12 @@ iac-code a2a-client --config a2a-client.yml extended-card \
 
 Public Agent Card 会公布 `capabilities.extendedAgentCard=true`。扩展 card 会添加已认证运行时细节，包括任务管理和推送配置能力元数据。
 
-## `iac-code a2a-route-preview`
+## `iac-code a2a-client route-preview`
 
 预览省略 `--url` 时 `a2a-client call` 如何解析已配置路由。
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "template=http://127.0.0.1:41242/;skills=iac_generation;tags=ros,template" \
   --skill iac_generation \
   --prompt "Create a ROS VPC template"
@@ -488,7 +488,7 @@ iac-code a2a-route-preview \
 保存 route snapshots：
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "ros=http://127.0.0.1:41242/;skills=iac_generation;tags=ros" \
   --route-state-dir ~/.iac-code/a2a \
   --save-routes
