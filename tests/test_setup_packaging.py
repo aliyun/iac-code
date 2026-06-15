@@ -37,7 +37,7 @@ def test_selling_skill_references_are_expanded_for_installed_artifacts(monkeypat
 
 def test_selling_skill_references_are_expanded_for_sdist_release_tree(monkeypatch, tmp_path):
     setup_module = _load_setup_module(monkeypatch)
-    release_tree = tmp_path / "iac_code-0.5.0"
+    release_tree = tmp_path / "iac_code-0.6.0"
 
     setup_module._copy_selling_skill_references_to_sdist_release_tree(str(release_tree))
 
@@ -71,7 +71,7 @@ def test_legacy_setup_declares_package_metadata(monkeypatch):
     kwargs = setup_module._TEST_SETUP_KWARGS
 
     assert kwargs["name"] == "iac_code"
-    assert kwargs["version"] == "0.5.0"
+    assert kwargs["version"] == "0.6.0"
     assert kwargs["package_dir"] == {"": "src"}
     assert "iac_code.pipeline.selling.tools" in kwargs["packages"]
     assert "iac_code.pipeline.selling.hooks" in kwargs["packages"]
