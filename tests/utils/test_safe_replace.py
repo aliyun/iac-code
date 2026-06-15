@@ -15,12 +15,12 @@ def test_safe_replace_succeeds_first_try(tmp_path: Path):
     """Normal case: replace succeeds immediately."""
     src = tmp_path / "src.txt"
     dst = tmp_path / "dst.txt"
-    src.write_text("new")
-    dst.write_text("old")
+    src.write_text("new", encoding="utf-8")
+    dst.write_text("old", encoding="utf-8")
 
     _safe_replace(str(src), str(dst))
 
-    assert dst.read_text() == "new"
+    assert dst.read_text(encoding="utf-8") == "new"
     assert not src.exists()
 
 
@@ -28,8 +28,8 @@ def test_safe_replace_retries_on_permission_error(tmp_path: Path):
     """On PermissionError, retries up to 3 times."""
     src = tmp_path / "src.txt"
     dst = tmp_path / "dst.txt"
-    src.write_text("new")
-    dst.write_text("old")
+    src.write_text("new", encoding="utf-8")
+    dst.write_text("old", encoding="utf-8")
 
     call_count = [0]
     original_replace = os.replace
@@ -50,8 +50,8 @@ def test_safe_replace_raises_after_max_retries(tmp_path: Path):
     """After 3 retries, PermissionError propagates."""
     src = tmp_path / "src.txt"
     dst = tmp_path / "dst.txt"
-    src.write_text("new")
-    dst.write_text("old")
+    src.write_text("new", encoding="utf-8")
+    dst.write_text("old", encoding="utf-8")
 
     with patch("os.replace", side_effect=PermissionError("locked")), patch("time.sleep"):
         with pytest.raises(PermissionError):

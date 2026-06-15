@@ -303,8 +303,58 @@ class TestRawInputCaptureRuntime:
         assert event is not None
         assert event.key == "escape"
 
+    def test_read_key_parses_slow_split_csi_arrow(self, monkeypatch):
+        reads = iter([b"\x1b", b"[", b"C"])
+
+        monkeypatch.setattr("iac_code.ui.core.raw_input.os.read", lambda fd, n: next(reads))
+        monkeypatch.setattr("select.select", lambda fds, _w, _x, timeout: ([7], [], []))
+        capture = RawInputCapture(fd=7)
+
+        event = capture.read_key()
+
+        assert event is not None
+        assert event.key == "right"
+
+    def test_read_key_slow_split_ss3_arrow_is_not_escape(self, monkeypatch):
+        reads = iter([b"\x1b", b"O", b"A"])
+
+        monkeypatch.setattr("iac_code.ui.core.raw_input.os.read", lambda fd, n: next(reads))
+        monkeypatch.setattr("select.select", lambda fds, _w, _x, timeout: ([7], [], []))
+        capture = RawInputCapture(fd=7)
+
+        event = capture.read_key()
+
+        assert event is not None
+        assert event.key == "unknown"
+
+    def test_read_key_incomplete_csi_returns_unknown(self, monkeypatch):
+        reads = iter([b"\x1b", b"["])
+        readiness = iter([([7], [], []), ([], [], [])])
+
+        monkeypatch.setattr("iac_code.ui.core.raw_input.os.read", lambda fd, n: next(reads))
+        monkeypatch.setattr("select.select", lambda fds, _w, _x, timeout: next(readiness))
+        capture = RawInputCapture(fd=7)
+
+        event = capture.read_key()
+
+        assert event is not None
+        assert event.key == "unknown"
+
     def test_read_key_parses_bracketed_paste(self, monkeypatch):
         reads = iter([b"\x1b", b"[200~hello", b"\r\nworld\x1b[201~"])
+
+        monkeypatch.setattr("iac_code.ui.core.raw_input.os.read", lambda fd, n: next(reads))
+        monkeypatch.setattr("select.select", lambda fds, _w, _x, timeout: ([7], [], []))
+        capture = RawInputCapture(fd=7)
+
+        event = capture.read_key()
+
+        assert event is not None
+        assert event.key == "paste"
+        assert event.char == "hello\nworld"
+
+    def test_read_key_parses_byte_by_byte_bracketed_paste(self, monkeypatch):
+        reads = iter([b"\x1b", b"[", b"2", b"0", b"0", b"~", b"hello\r", b"world\x1b[201~"])
 
         monkeypatch.setattr("iac_code.ui.core.raw_input.os.read", lambda fd, n: next(reads))
         monkeypatch.setattr("select.select", lambda fds, _w, _x, timeout: ([7], [], []))
@@ -346,6 +396,20 @@ class TestRawInputCaptureRuntime:
 
         monkeypatch.setattr("iac_code.ui.core.raw_input.os.read", lambda fd, n: next(reads))
         monkeypatch.setattr("select.select", lambda fds, _w, _x, timeout: ([7], [], []))
+        capture = RawInputCapture(fd=7)
+
+        event = capture.read_key()
+
+        assert event is not None
+        assert event.key == "x"
+        assert event.alt is True
+
+    def test_read_key_incremental_escape_reader_preserves_alt_x(self, monkeypatch):
+        reads = iter([b"\x1b", b"x"])
+        readiness = iter([([7], [], [])])
+
+        monkeypatch.setattr("iac_code.ui.core.raw_input.os.read", lambda fd, n: next(reads))
+        monkeypatch.setattr("select.select", lambda fds, _w, _x, timeout: next(readiness))
         capture = RawInputCapture(fd=7)
 
         event = capture.read_key()

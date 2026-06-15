@@ -83,7 +83,10 @@ class TestMemoryManager:
 
     def test_legacy_invalid_memory_file_does_not_break_listing_or_index_update(self, manager, tmp_path):
         legacy = tmp_path / "old memory.md"
-        legacy.write_text("---\nname: old memory\ndescription: Legacy\ntype: user\n---\n\nlegacy content\n")
+        legacy.write_text(
+            "---\nname: old memory\ndescription: Legacy\ntype: user\n---\n\nlegacy content\n",
+            encoding="utf-8",
+        )
 
         memories = manager.list_memories()
         manager.save("new-safe", content="new content", memory_type="user", description="New")
@@ -112,7 +115,10 @@ class TestMemoryManager:
     @pytest.mark.skipif(sys.platform == "win32", reason="Symlink permissions vary on Windows")
     def test_list_and_search_ignore_symlinked_memory_files(self, manager, tmp_path):
         outside = tmp_path.parent / "outside.md"
-        outside.write_text("---\nname: leaked\ndescription: Secret\ntype: user\n---\n\nsecret outside content\n")
+        outside.write_text(
+            "---\nname: leaked\ndescription: Secret\ntype: user\n---\n\nsecret outside content\n",
+            encoding="utf-8",
+        )
         (tmp_path / "leaked.md").symlink_to(outside)
 
         assert manager.list_memories() == []
@@ -121,7 +127,10 @@ class TestMemoryManager:
     @pytest.mark.skipif(sys.platform == "win32", reason="Symlink permissions vary on Windows")
     def test_load_does_not_follow_symlinked_memory_file(self, manager, tmp_path):
         outside = tmp_path.parent / "outside.md"
-        outside.write_text("---\nname: leaked\ndescription: Secret\ntype: user\n---\n\nsecret outside content\n")
+        outside.write_text(
+            "---\nname: leaked\ndescription: Secret\ntype: user\n---\n\nsecret outside content\n",
+            encoding="utf-8",
+        )
         (tmp_path / "leaked.md").symlink_to(outside)
 
         assert manager.load("leaked") is None
@@ -129,18 +138,18 @@ class TestMemoryManager:
     @pytest.mark.skipif(sys.platform == "win32", reason="Symlink permissions vary on Windows")
     def test_save_does_not_overwrite_symlinked_memory_file(self, manager, tmp_path):
         outside = tmp_path.parent / "outside.md"
-        outside.write_text("original")
+        outside.write_text("original", encoding="utf-8")
         (tmp_path / "leaked.md").symlink_to(outside)
 
         with pytest.raises(ValueError, match="Invalid memory path"):
             manager.save("leaked", content="new", memory_type="user", description="bad")
 
-        assert outside.read_text() == "original"
+        assert outside.read_text(encoding="utf-8") == "original"
 
     @pytest.mark.skipif(sys.platform == "win32", reason="Symlink permissions vary on Windows")
     def test_get_index_content_does_not_follow_symlinked_index(self, manager, tmp_path):
         outside = tmp_path.parent / "outside-index.md"
-        outside.write_text("secret index")
+        outside.write_text("secret index", encoding="utf-8")
         (tmp_path / "MEMORY.md").symlink_to(outside)
 
         assert manager.get_index_content() == ""
@@ -148,11 +157,11 @@ class TestMemoryManager:
     @pytest.mark.skipif(sys.platform == "win32", reason="Symlink permissions vary on Windows")
     def test_save_does_not_overwrite_symlinked_index(self, manager, tmp_path):
         outside = tmp_path.parent / "outside-index.md"
-        outside.write_text("original index")
+        outside.write_text("original index", encoding="utf-8")
         (tmp_path / "MEMORY.md").symlink_to(outside)
 
         with pytest.raises(ValueError, match="Invalid memory path"):
             manager.save("safe", content="content", memory_type="user", description="safe")
 
-        assert outside.read_text() == "original index"
+        assert outside.read_text(encoding="utf-8") == "original index"
         assert not (tmp_path / "safe.md").exists()

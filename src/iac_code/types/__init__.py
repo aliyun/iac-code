@@ -2,6 +2,7 @@
 
 from iac_code.types.permissions import PermissionMode, PermissionResult
 from iac_code.types.stream_events import (
+    AskUserQuestionEvent,
     CompactionEvent,
     ErrorEvent,
     MessageEndEvent,
@@ -20,6 +21,7 @@ from iac_code.types.stream_events import (
 )
 
 __all__ = [
+    "AskUserQuestionEvent",
     "CompactionEvent",
     "ErrorEvent",
     "MessageEndEvent",

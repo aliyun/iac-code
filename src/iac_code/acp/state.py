@@ -33,7 +33,8 @@ class ToolCallState:
     def _update_title(self) -> None:
         """Compute a display title from tool name + streamed arguments."""
         subtitle = _extract_key_argument(self.tool_name, self.accumulated_input)
-        self.title = f"{self.tool_name}: {subtitle}" if subtitle else self.tool_name
+        title = display_tool_title(self.tool_name)
+        self.title = f"{title}: {subtitle}" if subtitle else title
 
 
 @dataclass
@@ -45,7 +46,7 @@ class TurnState:
 
     def start_tool_call(self, tool_call_id: str, tool_name: str) -> ToolCallState:
         state = ToolCallState(tool_call_id=tool_call_id, tool_name=tool_name)
-        state.title = tool_name
+        state.title = display_tool_title(tool_name)
         self.tool_calls[tool_call_id] = state
         return state
 
@@ -70,6 +71,12 @@ _KEY_ARG_MAP: dict[str, str] = {
 }
 
 _SUBTITLE_MAX_LEN = 60
+
+
+def display_tool_title(tool_name: str) -> str:
+    from iac_code.pipeline.display_names import known_tool_display_name
+
+    return known_tool_display_name(tool_name) or tool_name
 
 
 def _extract_key_argument(tool_name: str, raw_json: str) -> str:

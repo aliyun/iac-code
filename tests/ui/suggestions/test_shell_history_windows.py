@@ -12,7 +12,7 @@ from iac_code.ui.suggestions.shell_history_provider import _detect_history_path
 def test_windows_git_bash_history(tmp_path: Path):
     """On Windows, detect Git Bash .bash_history in USERPROFILE."""
     bash_hist = tmp_path / ".bash_history"
-    bash_hist.write_text("ls\ncd /tmp\n")
+    bash_hist.write_text("ls\ncd /tmp\n", encoding="utf-8")
 
     with (
         patch("sys.platform", "win32"),
@@ -29,7 +29,7 @@ def test_windows_powershell_history_fallback(tmp_path: Path):
     ps_dir = appdata / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine"
     ps_dir.mkdir(parents=True)
     ps_hist = ps_dir / "ConsoleHost_history.txt"
-    ps_hist.write_text("Get-Process\n")
+    ps_hist.write_text("Get-Process\n", encoding="utf-8")
 
     with (
         patch("sys.platform", "win32"),

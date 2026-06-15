@@ -36,13 +36,13 @@ class TestWriteFileTool:
         assert result.is_error is False
         assert "successfully" in result.content.lower()
         assert file_path.exists()
-        assert file_path.read_text() == content
+        assert file_path.read_text(encoding="utf-8") == content
 
     @pytest.mark.asyncio
     async def test_overwrite_existing_file(self, tmp_path, write_file_tool):
         """Test overwriting an existing file."""
         file_path = tmp_path / "existing.txt"
-        file_path.write_text("Old content")
+        file_path.write_text("Old content", encoding="utf-8")
 
         new_content = "New content here"
         context = ToolContext(cwd=str(tmp_path))
@@ -52,7 +52,7 @@ class TestWriteFileTool:
         )
 
         assert result.is_error is False
-        assert file_path.read_text() == new_content
+        assert file_path.read_text(encoding="utf-8") == new_content
 
     @pytest.mark.asyncio
     async def test_auto_create_parent_directories(self, tmp_path, write_file_tool):
@@ -68,7 +68,7 @@ class TestWriteFileTool:
 
         assert result.is_error is False
         assert file_path.exists()
-        assert file_path.read_text() == content
+        assert file_path.read_text(encoding="utf-8") == content
 
     @pytest.mark.asyncio
     async def test_relative_path_resolution(self, tmp_path, write_file_tool):
@@ -82,7 +82,7 @@ class TestWriteFileTool:
         assert result.is_error is False
         file_path = tmp_path / "relative.txt"
         assert file_path.exists()
-        assert file_path.read_text() == "Relative content"
+        assert file_path.read_text(encoding="utf-8") == "Relative content"
 
     @pytest.mark.asyncio
     async def test_write_empty_content(self, tmp_path, write_file_tool):
@@ -97,7 +97,7 @@ class TestWriteFileTool:
 
         assert result.is_error is False
         assert file_path.exists()
-        assert file_path.read_text() == ""
+        assert file_path.read_text(encoding="utf-8") == ""
 
     @pytest.mark.asyncio
     async def test_write_multiline_content(self, tmp_path, write_file_tool):
@@ -113,7 +113,7 @@ class TestWriteFileTool:
 
         assert result.is_error is False
         assert "4 lines" in result.content
-        assert file_path.read_text() == content
+        assert file_path.read_text(encoding="utf-8") == content
 
     @pytest.mark.asyncio
     async def test_write_unicode_content(self, tmp_path, write_file_tool):
@@ -142,7 +142,7 @@ class TestWriteFileTool:
         assert result.is_error is False
         file_path = tmp_path / "subdir" / "file.txt"
         assert file_path.exists()
-        assert file_path.read_text() == "Nested file"
+        assert file_path.read_text(encoding="utf-8") == "Nested file"
 
     @pytest.mark.asyncio
     async def test_windows_posix_path_conversion(self, tmp_path, write_file_tool, monkeypatch):

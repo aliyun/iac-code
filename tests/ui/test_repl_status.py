@@ -92,6 +92,53 @@ def test_status_snapshot_uses_agent_loop_and_original_cwd(monkeypatch) -> None:
     assert snapshot["memory_recall"]["last_selected_files"] == ["topic.md"]
 
 
+def test_status_snapshot_refreshes_session_usage_before_reading(monkeypatch) -> None:
+    repl = object.__new__(InlineREPL)
+    repl._session_id = "abc123"
+    repl._was_resumed = False
+    repl._original_cwd = "/tmp/status-project"
+    repl.store = AppStateStore(AppState(model="qwen3.7-max", cwd="/tmp/status-project"))
+    repl._provider_manager = MagicMock()
+    repl._provider_manager.get_provider_display.return_value = "Alibaba Cloud Bailian"
+    repl._provider_manager.get_model_name.return_value = "qwen3.7-max"
+
+    refreshed = False
+
+    def refresh_usage() -> None:
+        nonlocal refreshed
+        refreshed = True
+
+    def get_session_usage():
+        total = 340472 if refreshed else 8739
+        return SimpleNamespace(
+            input_tokens=total,
+            output_tokens=0,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+            total_tokens=total,
+            recorded_events=1,
+            has_recorded_usage=True,
+        )
+
+    repl._agent_loop = MagicMock()
+    repl._agent_loop.max_turns = 100
+    repl._agent_loop.refresh_session_usage = MagicMock(side_effect=refresh_usage)
+    repl._agent_loop.get_session_usage.side_effect = get_session_usage
+    repl._agent_loop.get_context_usage.return_value = {}
+    repl._agent_loop.context_manager.get_messages.return_value = []
+
+    monkeypatch.setattr("iac_code.ui.repl.get_active_provider_key", lambda: "dashscope")
+    monkeypatch.setattr(
+        "iac_code.services.cloud_credentials.CloudCredentials",
+        lambda: SimpleNamespace(get_provider=lambda name: None),
+    )
+
+    snapshot = repl.get_status_snapshot()
+
+    repl._agent_loop.refresh_session_usage.assert_called_once_with()
+    assert snapshot["api_usage"].total_tokens == 340472
+
+
 def test_status_snapshot_uses_runtime_provider_manager(monkeypatch) -> None:
     repl = object.__new__(InlineREPL)
     repl._session_id = "runtime"

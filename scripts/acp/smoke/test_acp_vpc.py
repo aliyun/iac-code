@@ -7,7 +7,7 @@ Starts the ACP stdio server and sends JSON-RPC messages via stdin/stdout
 to simulate a full initialize -> new_session -> prompt("create VPC") -> close flow.
 
 Usage:
-    python scripts/test_acp_vpc.py
+    python scripts/acp/smoke/test_acp_vpc.py
 
 Prerequisites:
     - iac-code installed (pip install -e . or pip install iac-code)

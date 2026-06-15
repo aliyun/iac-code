@@ -96,6 +96,32 @@ def test_error_event_to_message_chunk() -> None:
     assert "Rate limit exceeded" in updates[0].content.text
 
 
+def test_error_event_to_message_chunk_redacts_public_error() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+    updates = converter.event_to_updates(
+        ErrorEvent(
+            error="RuntimeError: Cookie: sid=session-secret; refresh=refresh-secret",
+            is_retryable=False,
+        )
+    )
+
+    text = updates[0].content.text
+    assert "[Error]" in text
+    assert "session-secret" not in text
+    assert "refresh-secret" not in text
+
+
+def test_error_event_to_message_chunk_handles_artifact_aware_public_text() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+    encoded_path = "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
+    uri = "iac-code-artifact://artifact-1/template.yaml"
+
+    updates = converter.event_to_updates(ErrorEvent(error=f"failed at {encoded_path}; see {uri}.", is_retryable=False))
+
+    text = updates[0].content.text
+    assert text == f"[Error] failed at [PATH]; see {uri}."
+
+
 # ---------------------------------------------------------------------------
 # Tool call full lifecycle
 # ---------------------------------------------------------------------------
@@ -455,6 +481,81 @@ def test_tool_result_emits_progress_then_end() -> None:
     assert updates[1].content is None  # no duplicate content on end marker
 
 
+def test_failed_tool_result_content_is_sanitized() -> None:
+    """Failed tool result payloads must not expose raw exception details to ACP clients."""
+    converter = ACPEventConverter(turn_id="turn-1")
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
+    encoded_uri = (
+        "iac-code-artifact%3A%2F%2Fartifact-1%2FC%3A%5CUsers%5Calice%5C.iac-code%5Cprojects%5Cdemo%5Ctemplate.yaml"
+    )
+
+    updates = converter.event_to_updates(
+        ToolResultEvent(
+            tool_use_id="t1",
+            tool_name="bash",
+            result=f"Tool failed: DB_PASSWORD=hunter2 at /Users/alice/.iac-code/settings.yml and {encoded_uri}",
+            is_error=True,
+        )
+    )
+
+    rendered = str(updates[0].content[0].content.text)
+    assert "hunter2" not in rendered
+    assert "/Users/alice" not in rendered
+    assert "%5CUsers" not in rendered
+    assert ".iac-code" not in rendered
+    assert updates[1].status == "failed"
+
+
+def test_successful_tool_result_content_is_sanitized() -> None:
+    """Successful tool results can still contain local paths and must be public-safe."""
+    converter = ACPEventConverter(turn_id="turn-1")
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
+    encoded_path = "file%3A%2F%2F%2FUsers%2FAlice%20Smith%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
+    uri = "iac-code-artifact://artifact-1/template.yaml"
+
+    updates = converter.event_to_updates(
+        ToolResultEvent(
+            tool_use_id="t1",
+            tool_name="bash",
+            result=f"ok {encoded_path}; see {uri}",
+            is_error=False,
+        )
+    )
+
+    rendered = str(updates[0].content[0].content.text)
+    assert rendered == f"ok [PATH]; see {uri}"
+    assert "Alice" not in rendered
+    assert ".iac-code" not in rendered
+    assert updates[1].status == "completed"
+
+
+def test_successful_tool_result_dict_is_sanitized_and_serialized() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="write_file"))
+
+    updates = converter.event_to_updates(
+        ToolResultEvent(
+            tool_use_id="t1",
+            tool_name="write_file",
+            result={
+                "artifact": {
+                    "filename": r"C:\Users\Alice Smith\.iac-code\projects\demo\template.yaml",
+                    "Content": "secret content",
+                    "uri": r"file:///Users/Alice Smith/.iac-code/projects/demo/template.yaml",
+                }
+            },
+            is_error=False,
+        )
+    )
+
+    rendered = str(updates[0].content[0].content.text)
+    assert '"filename": "template.yaml"' in rendered
+    assert "secret content" not in rendered
+    assert "Alice Smith" not in rendered
+    assert ".iac-code" not in rendered
+    assert updates[1].status == "completed"
+
+
 def test_tool_call_complete_lifecycle() -> None:
     """Validate full lifecycle: start -> input -> use_end -> result(progress+end)."""
     converter = ACPEventConverter(turn_id="turn-1")
@@ -567,6 +668,25 @@ def test_tool_input_delta_updates_tool_call_state_and_generates_title_in_progres
     tc = ts.get_tool_call("tc-2")
     assert tc is not None
     assert tc.accumulated_input == '{"file_path": "/tmp/test.tf"}'
+
+
+def test_pipeline_tool_call_titles_use_display_names() -> None:
+    ts = TurnState(turn_id="turn-pipeline-tool")
+    converter = ACPEventConverter(turn_id="turn-pipeline-tool", turn_state=ts)
+
+    start_updates = converter.event_to_updates(ToolUseStartEvent(tool_use_id="tc-1", name="complete_step"))
+    assert start_updates[0].title == "Complete step"
+
+    tc = ts.get_tool_call("tc-1")
+    assert tc is not None
+    assert tc.tool_name == "complete_step"
+    assert tc.title == "Complete step"
+
+    progress_updates = converter.event_to_updates(ToolInputDeltaEvent(tool_use_id="tc-1", partial_json="{}"))
+    assert progress_updates[0].title == "Complete step"
+
+    end_updates = converter.event_to_updates(ToolUseEndEvent(tool_use_id="tc-1", name="complete_step", input={}))
+    assert end_updates[0].title == "Complete step"
 
 
 def test_converter_works_without_turn_state_backward_compatible() -> None:

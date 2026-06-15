@@ -20,10 +20,17 @@ from google.protobuf.json_format import ParseDict
 from iac_code import __version__
 from iac_code.a2a.exposure import format_a2a_exposure_types
 from iac_code.a2a.parts import supported_input_mime_types
+from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI
 from iac_code.a2a.signing import sign_agent_card_dict
+from iac_code.i18n import _
+from iac_code.pipeline.config import RunMode, get_run_mode
 
 IAC_CODE_ARTIFACT_METADATA_EXTENSION_URI = "urn:iac-code:a2a:artifact-metadata:v1"
+IAC_CODE_PIPELINE_EVENTS_EXTENSION_URI = PIPELINE_EVENTS_EXTENSION_URI
 IAC_CODE_THINKING_EXPOSURE_EXTENSION_URI = "urn:iac-code:a2a:thinking-exposure:v1"
+CANONICAL_CALLER_EXTENSION_URIS = {
+    IAC_CODE_PIPELINE_EVENTS_EXTENSION_URI,
+}
 
 
 def _base_url(host: str, port: int) -> str:
@@ -168,8 +175,31 @@ def build_agent_card(
             )
             ParseDict({"enabledTypes": enabled_types}, extension.params)
             card.capabilities.extensions.append(extension)
-    for item in _iter_agent_extensions(agent_extensions):
+    for item in _iter_agent_extensions(agent_extensions, excluded_uris=CANONICAL_CALLER_EXTENSION_URIS):
         card.capabilities.extensions.append(_agent_extension_from_dict(item))
+    pipeline_events_extension = AgentExtension(
+        uri=IAC_CODE_PIPELINE_EVENTS_EXTENSION_URI,
+        description=_(
+            "Optional iac-code pipeline event extension for state snapshots, replay, interrupts, "
+            "and parallel candidate streams."
+        ),
+        required=False,
+    )
+    run_mode = get_run_mode()
+    ParseDict(
+        {
+            "schemaVersion": "1.0",
+            "enabled": run_mode == RunMode.PIPELINE,
+            "mode": run_mode.value,
+            "supportsSnapshot": True,
+            "supportsReplay": True,
+            "supportsInterrupts": True,
+            "supportsParallelCandidates": True,
+            "stateEndpoint": "/iac-code/pipeline/state",
+        },
+        pipeline_events_extension.params,
+    )
+    card.capabilities.extensions.append(pipeline_events_extension)
 
     if token_enabled:
         card.security_schemes["bearerAuth"].http_auth_security_scheme.CopyFrom(HTTPAuthSecurityScheme(scheme="bearer"))
@@ -231,7 +261,12 @@ def _agent_extension_from_dict(item: dict[str, Any]) -> AgentExtension:
     return extension
 
 
-def _iter_agent_extensions(value: Any) -> list[dict[str, Any]]:
+def _iter_agent_extensions(value: Any, *, excluded_uris: set[str] | None = None) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, dict) and isinstance(item.get("uri"), str)]
+    blocked_uris = excluded_uris or set()
+    return [
+        item
+        for item in value
+        if isinstance(item, dict) and isinstance(item.get("uri"), str) and item["uri"] not in blocked_uris
+    ]

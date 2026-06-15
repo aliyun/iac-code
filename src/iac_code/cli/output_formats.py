@@ -11,6 +11,7 @@ import sys
 from enum import Enum
 from typing import IO, Any
 
+from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -20,6 +21,7 @@ from iac_code.types.stream_events import (
     ToolUseEndEvent,
     ToolUseStartEvent,
 )
+from iac_code.utils.public_errors import sanitize_public_text
 
 
 class OutputFormat(str, Enum):
@@ -28,6 +30,26 @@ class OutputFormat(str, Enum):
     TEXT = "text"
     JSON = "json"
     STREAM_JSON = "stream-json"
+
+
+def _public_tool_result(event: ToolResultEvent) -> Any:
+    return sanitize_public_tool_output_data(event.result)
+
+
+def _public_tool_metadata(event: ToolResultEvent, metadata: Any) -> Any:
+    return sanitize_public_tool_output_data(_sanitize_public_value(metadata) if event.is_error else metadata)
+
+
+def _sanitize_public_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_public_text(value)
+    if isinstance(value, list):
+        return [_sanitize_public_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_public_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _sanitize_public_value(item) for key, item in value.items()}
+    return value
 
 
 class TextWriter:
@@ -46,7 +68,7 @@ class TextWriter:
             self._stream.flush()
             self._has_output = True
         elif isinstance(event, ErrorEvent):
-            sys.stderr.write(f"Error: {event.error}\n")
+            sys.stderr.write(f"Error: {sanitize_public_text(event.error)}\n")
             sys.stderr.flush()
 
     def finalize(self) -> None:
@@ -68,6 +90,7 @@ class JsonWriter:
         self._tool_uses: dict[str, dict[str, Any]] = {}
         self._usage: dict[str, int] | None = None
         self._error: str | None = None
+        self._error_id: str | None = None
 
     def handle(self, event: StreamEvent) -> None:
         if isinstance(event, TextDeltaEvent):
@@ -78,7 +101,7 @@ class JsonWriter:
             self._tool_uses.setdefault(event.tool_use_id, {})["input"] = event.input
         elif isinstance(event, ToolResultEvent):
             entry = self._tool_uses.setdefault(event.tool_use_id, {})
-            entry["result"] = event.result
+            entry["result"] = _public_tool_result(event)
             entry["is_error"] = event.is_error
         elif isinstance(event, MessageEndEvent):
             usage = {
@@ -93,7 +116,8 @@ class JsonWriter:
             if not is_empty_synthetic_max_turns:
                 self._usage = usage
         elif isinstance(event, ErrorEvent):
-            self._error = event.error
+            self._error = sanitize_public_text(event.error)
+            self._error_id = event.error_id
 
     def finalize(self) -> None:
         result: dict[str, Any] = {
@@ -103,6 +127,8 @@ class JsonWriter:
         }
         if self._error is not None:
             result["error"] = self._error
+        if self._error_id is not None:
+            result["error_id"] = self._error_id
         self._stream.write(json.dumps(result, ensure_ascii=False))
         self._stream.write("\n")
         self._stream.flush()
@@ -116,6 +142,14 @@ class StreamJsonWriter:
 
     def handle(self, event: StreamEvent) -> None:
         data = dataclasses.asdict(event)
+        if isinstance(event, ErrorEvent):
+            data["error"] = sanitize_public_text(event.error)
+        elif isinstance(event, ToolResultEvent):
+            if data.get("metadata") is None:
+                data.pop("metadata", None)
+            elif "metadata" in data:
+                data["metadata"] = _public_tool_metadata(event, data["metadata"])
+            data["result"] = _public_tool_result(event)
         self._stream.write(json.dumps(data, ensure_ascii=False, default=str))
         self._stream.write("\n")
         self._stream.flush()

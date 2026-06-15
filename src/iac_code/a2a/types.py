@@ -8,6 +8,7 @@ from typing import Any
 
 A2A_ID_MAX_LENGTH = 128
 TASK_STATE_CANCELED = "canceled"
+TASK_STATE_COMPLETED = "completed"
 TASK_STATE_FAILED = "failed"
 TASK_STATE_INPUT_REQUIRED = "input-required"
 TASK_STATE_SUBMITTED = "submitted"
@@ -28,9 +29,11 @@ class A2ATaskRecord:
     task_id: str
     context_id: str
     state: str = TASK_STATE_SUBMITTED
+    owner: str = ""
     output_text: list[str] = field(default_factory=list)
     active_task: asyncio.Task[Any] | None = None
     expired: bool = False
+    updated_at: float = field(default_factory=time.time)
     created_at: float = field(default_factory=time.monotonic)
     last_active: float = field(default_factory=time.monotonic)
 

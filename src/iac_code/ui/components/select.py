@@ -83,6 +83,7 @@ class Select:
         self._on_cancel: Callable[[], None] | None = None
         self._done: bool = False
         self._result: Any = None
+        self._interrupted: bool = False
 
         # Active search box for InputOption editing
         self._active_search_box: SearchBox | None = None
@@ -122,6 +123,7 @@ class Select:
 
         self._on_select = on_select
         self._on_cancel = on_cancel
+        self._interrupted = False
 
         try:
             with RawInputCapture() as cap:
@@ -133,6 +135,8 @@ class Select:
         finally:
             renderer.clear()
 
+        if self._interrupted:
+            raise KeyboardInterrupt
         if cancelled[0]:
             return None
         return result_holder[0] if result_holder else None
@@ -151,6 +155,13 @@ class Select:
         """Handle a key event. Returns True if consumed."""
         key = key_event.key
         ctrl = key_event.ctrl
+
+        if ctrl and key == "c":
+            self._interrupted = True
+            self._done = True
+            if self._on_cancel is not None:
+                self._on_cancel()
+            return True
 
         # If we're in input edit mode, delegate to search box
         if self.state.is_in_input and self._active_search_box is not None:
@@ -290,7 +301,7 @@ class Select:
         self.state.visible_from = vf
         self.state.visible_to = vt
 
-    def _render_option(self, opt: OptionType, is_focused: bool, index: int) -> Text:
+    def _render_option(self, opt: OptionType, is_focused: bool, index: int) -> RenderableType:
         """Render a single option line."""
         text = Text()
 
@@ -301,8 +312,14 @@ class Select:
 
         if isinstance(opt, TextOption):
             style = "dim" if opt.disabled else ("bold" if is_focused else "")
+            if self._layout == SelectLayout.EXPANDED:
+                text.append(f"{index + 1}. ", style="dim")
             text.append(opt.label, style=style)
             if opt.description:
+                if self._layout == SelectLayout.EXPANDED:
+                    description = Text(" " * (len(str(index + 1)) + 4))
+                    description.append(opt.description, style="dim")
+                    return Group(text, description)
                 text.append(f"  {opt.description}", style="dim")
         elif isinstance(opt, InputOption):
             text.append(opt.label, style="bold" if is_focused else "")

@@ -51,9 +51,19 @@ class TestProjectPathComparison:
 
 class TestFormatResumeCommand:
     def test_windows_command_quotes_for_cmd_exe(self):
-        command = format_resume_command(r"C:\Users\Me\iac repo & unsafe", "abc123", platform="win32")
+        command = format_resume_command(r"C:\Users\Me\iac repo & unsafe", "abc & unsafe", platform="win32")
 
-        assert command == r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume abc123'
+        assert command == r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume "abc & unsafe"'
+
+    def test_windows_unc_command_uses_pushd(self):
+        command = format_resume_command(r"\\server\share\My Repo", "abc & unsafe", platform="win32")
+
+        assert command == r'pushd "\\server\share\My Repo" && iac-code --resume "abc & unsafe" & popd'
+
+    def test_windows_command_escapes_cmd_expansion_characters(self):
+        command = format_resume_command(r"C:\Users\%USERNAME%\repo^name!", "abc%id^!", platform="win32")
+
+        assert command == r'cd /d "C:\Users\^%USERNAME^%\repo^^name^!" && iac-code --resume "abc^%id^^^!"'
 
     def test_posix_command_keeps_shell_quoting(self):
         command = format_resume_command("/project a;unsafe", "abc123", platform="linux")

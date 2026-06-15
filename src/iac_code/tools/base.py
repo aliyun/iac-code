@@ -21,6 +21,11 @@ class ToolContext:
 
     cwd: str = field(default_factory=os.getcwd)
     event_queue: asyncio.Queue | None = None
+    # U-I14: tool_use_id of the current tool invocation; lets tools tag emitted
+    # events so multiple parallel calls of the same tool can be distinguished
+    # downstream (e.g. in the renderer's per-tab accumulator). Populated by the
+    # ToolExecutor on each call.
+    tool_use_id: str | None = None
 
 
 @dataclass
@@ -37,6 +42,7 @@ class ToolResult:
     is_error: bool = False
     new_messages: list[dict[str, Any]] = field(default_factory=list)
     context_modifier: Callable[[dict], dict] | None = None
+    metadata: dict[str, Any] | None = None
 
     @staticmethod
     def error(message: str) -> ToolResult:
@@ -50,7 +56,13 @@ class ToolResult:
 
 
 class Tool(ABC):
-    """Abstract base class for all tools."""
+    """Abstract base class for all tools.
+
+    Important for third-party tool authors: if your tool emits events to the
+    UI (StackProgressEvent, DiagramEvent, etc.), you MUST override
+    needs_event_queue() to return True. Otherwise the AgentLoop will not
+    pass an event_queue and your event emissions will silently noop.
+    """
 
     @property
     @abstractmethod
@@ -190,6 +202,18 @@ class Tool(ABC):
         """Whether the tool performs destructive operations."""
         return False
 
+    def needs_event_queue(self) -> bool:
+        """Override to return True if this tool emits ToolEmittedEvent subclasses.
+
+        Default False. If True, AgentLoop passes an event_queue kwarg to the
+        tool's execute() method. Without it, calls to event_queue.put() are
+        unreachable and the UI sees nothing.
+
+        In-tree tools that override this: AgentTool, ROSStackTool,
+        ROSStackInstancesTool, ShowDiagramTool, ShowCandidateDetailTool.
+        """
+        return False
+
     async def check_permissions(self, input: dict, context=None) -> "PermissionResult":
         """Check permissions"""
         from iac_code.types.permissions import PermissionResult
@@ -224,6 +248,41 @@ class ToolRegistry:
     def to_api_format(self) -> list[dict[str, Any]]:
         """Convert all tools to LLM API format (legacy OpenAI format)."""
         return [tool.to_api_format() for tool in self._tools.values()]
+
+    def clone(self) -> "ToolRegistry":
+        """Create an independent copy of this registry.
+
+        Primarily used by the pipeline subsystem when constructing per-step
+        tool subsets via clone() + filter()/exclude(). Not typically needed
+        in normal mode.
+        """
+        new_reg = ToolRegistry()
+        for tool in self._tools.values():
+            new_reg.register(tool)
+        return new_reg
+
+    def filter(self, allowed_names: list[str]) -> "ToolRegistry":
+        """Return a new registry containing only tools whose name is in `allowed_names`.
+
+        Pipeline subsystem only — see pipeline.yaml `tools.include`.
+        """
+        new_reg = ToolRegistry()
+        for name in allowed_names:
+            tool = self._tools.get(name)
+            if tool is not None:
+                new_reg.register(tool)
+        return new_reg
+
+    def exclude(self, names: list[str]) -> "ToolRegistry":
+        """Return a new registry with the named tools removed.
+
+        Pipeline subsystem only — see pipeline.yaml `tools.exclude`.
+        """
+        new_reg = ToolRegistry()
+        for name, tool in self._tools.items():
+            if name not in names:
+                new_reg.register(tool)
+        return new_reg
 
     def register_default_tools(self) -> None:
         """Register all default built-in tools."""

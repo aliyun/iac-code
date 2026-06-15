@@ -62,7 +62,24 @@ class AliyunDocSearch(Tool):
     def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str | None:
         if is_error:
             return output
-        return self._last_summary if hasattr(self, "_last_summary") else None
+        if hasattr(self, "_last_summary"):
+            return self._last_summary
+        return self._summary_from_persisted_output(output)
+
+    @staticmethod
+    def _summary_from_persisted_output(output: str) -> str | None:
+        for line in reversed(output.splitlines()):
+            text = line.strip()
+            if not text or "web_fetch" in text:
+                continue
+            lower = text.lower()
+            if "found" in lower and "document" in lower:
+                return text
+            if "no documents found" in lower:
+                return text
+            if "文档" in text and ("找到" in text or "共" in text):
+                return text
+        return None
 
     def get_activity_description(self, input: dict | None = None) -> str | None:
         if input:

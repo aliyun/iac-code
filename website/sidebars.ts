@@ -43,6 +43,7 @@ const sidebars: SidebarsConfig = {
       label: 'Automation',
       items: [
         'automation/non-interactive-mode',
+        'automation/pipeline-mode',
         {
           type: 'category',
           label: 'ACP Protocol',

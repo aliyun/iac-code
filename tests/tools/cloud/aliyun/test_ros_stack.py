@@ -13,6 +13,11 @@ from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
 from iac_code.types.stream_events import StackProgressEvent
 
+_MINIMAL_TEMPLATE_BODY = (
+    '{"ROSTemplateFormatVersion": "2015-09-01", '
+    '"Resources": {"Vpc": {"Type": "ALIYUN::ECS::VPC", "Properties": {"CidrBlock": "192.168.0.0/16"}}}}'
+)
+
 
 @pytest.fixture
 def mock_credentials():
@@ -1438,7 +1443,7 @@ class TestRosStackExtra:
     @pytest.mark.asyncio
     async def test_template_url_local_file_read(self, stack, tmp_path):
         tpl = tmp_path / "tpl.json"
-        tpl.write_text('{"ROSTemplateFormatVersion": "2015-09-01"}')
+        tpl.write_text('{"ROSTemplateFormatVersion": "2015-09-01"}', encoding="utf-8")
         result = await stack.call_action(
             "CreateStack",
             {"StackName": "n", "TemplateURL": str(tpl)},
@@ -1517,12 +1522,96 @@ class TestRosStackExtra:
         assert resources == []
         assert "list_stack_resources" in to_thread_calls
 
+    @pytest.mark.asyncio
+    async def test_create_stack_parameters_survive_hooks_for_typed_sdk(self, monkeypatch):
+        from iac_code.tools.cloud.aliyun.ros_stack import RosStack
+
+        client = _FakeRosClient()
+        s = RosStack()
+        monkeypatch.setattr(s, "_get_client", lambda region: client)
+
+        result = await s.call_action(
+            "CreateStack",
+            {
+                "StackName": "n",
+                "TemplateBody": _MINIMAL_TEMPLATE_BODY,
+                "Parameters": [
+                    {"ParameterKey": "VpcId", "ParameterValue": "vpc-123"},
+                    {"ParameterKey": "ZoneId", "ParameterValue": "cn-hangzhou-h"},
+                ],
+            },
+            "cn-hangzhou",
+        )
+
+        assert result == "stack-fake"
+        assert client.create_request is not None
+        assert client.create_request.to_map()["Parameters"] == [
+            {"ParameterKey": "VpcId", "ParameterValue": "vpc-123"},
+            {"ParameterKey": "ZoneId", "ParameterValue": "cn-hangzhou-h"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_create_stack_flat_parameters_are_restored_for_typed_sdk(self, monkeypatch):
+        from iac_code.tools.cloud.aliyun.ros_stack import RosStack
+
+        client = _FakeRosClient()
+        s = RosStack()
+        monkeypatch.setattr(s, "_get_client", lambda region: client)
+
+        result = await s.call_action(
+            "CreateStack",
+            {
+                "StackName": "n",
+                "TemplateBody": _MINIMAL_TEMPLATE_BODY,
+                "Parameters.1.ParameterKey": "VpcId",
+                "Parameters.1.ParameterValue": "vpc-123",
+            },
+            "cn-hangzhou",
+        )
+
+        assert result == "stack-fake"
+        assert client.create_request is not None
+        assert client.create_request.to_map()["Parameters"] == [
+            {"ParameterKey": "VpcId", "ParameterValue": "vpc-123"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_update_stack_flat_parameters_are_restored_for_typed_sdk(self, monkeypatch):
+        from iac_code.tools.cloud.aliyun.ros_stack import RosStack
+
+        client = _FakeRosClient()
+        s = RosStack()
+        monkeypatch.setattr(s, "_get_client", lambda region: client)
+
+        result = await s.call_action(
+            "UpdateStack",
+            {
+                "StackId": "stack-123",
+                "TemplateBody": _MINIMAL_TEMPLATE_BODY,
+                "Parameters.1.ParameterKey": "VpcId",
+                "Parameters.1.ParameterValue": "vpc-123",
+            },
+            "cn-hangzhou",
+        )
+
+        assert result == "stack-fake"
+        assert client.update_request is not None
+        assert client.update_request.to_map()["Parameters"] == [
+            {"ParameterKey": "VpcId", "ParameterValue": "vpc-123"},
+        ]
+
 
 class _FakeRosClient:
+    def __init__(self):
+        self.create_request = None
+        self.update_request = None
+
     def create_stack(self, req):
+        self.create_request = req
         return _FakeResp("stack-fake")
 
     def update_stack(self, req):
+        self.update_request = req
         return _FakeResp("stack-fake")
 
     def continue_create_stack(self, req):

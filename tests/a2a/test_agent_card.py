@@ -2,6 +2,28 @@ from a2a.server.routes.agent_card_routes import agent_card_to_dict
 
 from iac_code.a2a.agent_card import build_agent_card
 from iac_code.a2a.exposure import A2AExposureType
+from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI
+
+PIPELINE_EVENTS_EXTENSION_PARAMS = {
+    "schemaVersion": "1.0",
+    "enabled": False,
+    "mode": "normal",
+    "supportsSnapshot": True,
+    "supportsReplay": True,
+    "supportsInterrupts": True,
+    "supportsParallelCandidates": True,
+    "stateEndpoint": "/iac-code/pipeline/state",
+}
+
+
+def _extensions_by_uri(data: dict, uri: str) -> list[dict]:
+    return [extension for extension in data["capabilities"]["extensions"] if extension["uri"] == uri]
+
+
+def _extension_by_uri(data: dict, uri: str) -> dict:
+    matches = _extensions_by_uri(data, uri)
+    assert len(matches) == 1
+    return matches[0]
 
 
 def test_agent_card_declares_a2a_1_jsonrpc_interface() -> None:
@@ -46,9 +68,51 @@ def test_agent_card_advertises_optional_iac_code_extension() -> None:
     card = build_agent_card(host="127.0.0.1", port=41242, token_enabled=False)
     data = agent_card_to_dict(card)
 
-    extension = data["capabilities"]["extensions"][0]
+    extension = _extension_by_uri(data, "urn:iac-code:a2a:artifact-metadata:v1")
     assert extension["uri"] == "urn:iac-code:a2a:artifact-metadata:v1"
     assert extension.get("required", False) is False
+
+
+def test_agent_card_advertises_pipeline_events_extension() -> None:
+    card = build_agent_card(host="127.0.0.1", port=41242, token_enabled=False)
+    data = agent_card_to_dict(card)
+
+    extension = _extension_by_uri(data, PIPELINE_EVENTS_EXTENSION_URI)
+    assert extension.get("required", False) is False
+    assert extension["params"] == PIPELINE_EVENTS_EXTENSION_PARAMS
+
+
+def test_agent_card_marks_pipeline_events_extension_enabled_in_pipeline_mode(monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    card = build_agent_card(host="127.0.0.1", port=41242, token_enabled=False)
+    data = agent_card_to_dict(card)
+
+    extension = _extension_by_uri(data, PIPELINE_EVENTS_EXTENSION_URI)
+    assert extension["params"]["enabled"] is True
+    assert extension["params"]["mode"] == "pipeline"
+
+
+def test_agent_card_uses_canonical_pipeline_events_extension_when_caller_provides_duplicate() -> None:
+    card = build_agent_card(
+        host="127.0.0.1",
+        port=41242,
+        token_enabled=False,
+        agent_extensions=[
+            {
+                "uri": PIPELINE_EVENTS_EXTENSION_URI,
+                "description": "caller-provided stale pipeline extension",
+                "required": True,
+                "params": {"schemaVersion": "0.1", "supportsSnapshot": False},
+            }
+        ],
+    )
+    data = agent_card_to_dict(card)
+
+    extensions = _extensions_by_uri(data, PIPELINE_EVENTS_EXTENSION_URI)
+    assert len(extensions) == 1
+    extension = extensions[0]
+    assert extension.get("required", False) is False
+    assert extension["params"] == PIPELINE_EVENTS_EXTENSION_PARAMS
 
 
 def test_agent_card_advertises_enabled_thinking_exposure_types() -> None:
@@ -60,7 +124,7 @@ def test_agent_card_advertises_enabled_thinking_exposure_types() -> None:
     )
     data = agent_card_to_dict(card)
 
-    extension = data["capabilities"]["extensions"][1]
+    extension = _extension_by_uri(data, "urn:iac-code:a2a:thinking-exposure:v1")
     assert extension["uri"] == "urn:iac-code:a2a:thinking-exposure:v1"
     assert extension["params"]["enabledTypes"] == ["raw_thinking", "tool_trace"]
     assert extension.get("required", False) is False
@@ -77,8 +141,8 @@ def test_agent_card_accepts_required_extensions() -> None:
     )
     data = agent_card_to_dict(card)
 
-    assert data["capabilities"]["extensions"][1]["uri"] == "urn:iac-code:test-required"
-    assert data["capabilities"]["extensions"][1]["required"] is True
+    extension = _extension_by_uri(data, "urn:iac-code:test-required")
+    assert extension["required"] is True
 
 
 def test_agent_card_lists_enabled_runtime_interfaces() -> None:

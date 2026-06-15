@@ -594,11 +594,31 @@ class PromptInput:
             out.flush()
             self._prev_suggestion_lines = 0
 
+    def _render_transient_cleanup(self) -> None:
+        """Clear the prompt frame in-place so the caller can render feedback.
+
+        Cursor at entry is at ``_prev_cursor_physical_row`` (the cursor's
+        physical row from the last render), NOT at the bottom of content.
+        Using ``_prev_content_extra_lines`` here would overshoot when the
+        cursor was mid-buffer at submission, getting clamped at row 0 and
+        causing ``\\033[J`` to erase content above the prompt frame (U-C1).
+        """
+        if self._prev_cursor_physical_row > 0:
+            sys.stdout.write(f"\033[{self._prev_cursor_physical_row}A")
+        sys.stdout.write("\r\033[J")
+        sys.stdout.flush()
+
     # ------------------------------------------------------------------
     # Public async entry-point
     # ------------------------------------------------------------------
 
-    async def get_input(self, prompt: str = "❯ ", *, initial_text: str = "") -> Optional[str]:
+    async def get_input(
+        self,
+        prompt: str = "❯ ",
+        *,
+        initial_text: str = "",
+        transient: bool = False,
+    ) -> Optional[str]:
         """Prompt the user for input and return it.
 
         Runs the blocking input loop directly in the main thread because
@@ -606,12 +626,16 @@ class PromptInput:
         This blocks the event loop while waiting for input, which is
         acceptable for a REPL — we must wait for user input before proceeding.
 
+        When ``transient`` is true, the prompt + entered text are cleared
+        from the screen before returning, so the caller can render its own
+        feedback in that space (used by pipeline interrupt input).
+
         Returns the entered string, or None if the user pressed Ctrl+C or
         Ctrl+D.
         """
-        return self._input_loop(prompt, initial_text=initial_text)
+        return self._input_loop(prompt, initial_text=initial_text, transient=transient)
 
-    def _input_loop(self, prompt: str, *, initial_text: str = "") -> Optional[str]:
+    def _input_loop(self, prompt: str, *, initial_text: str = "", transient: bool = False) -> Optional[str]:
         """Blocking input loop with inline rendering."""
         from iac_code.ui.core.raw_input import RawInputCapture
 
@@ -685,32 +709,35 @@ class PromptInput:
         # Clear suggestion overlay before returning
         self._clear_suggestions()
 
-        # Re-render submitted content with background highlight
-        if self._submitted:
-            text = self._get_text()
-            lines = text.split("\n")
-            term_width = shutil.get_terminal_size().columns
-            _bg = "\033[48;5;236m"
+        if transient:
+            self._render_transient_cleanup()
+        else:
+            # Re-render submitted content with background highlight
+            if self._submitted:
+                text = self._get_text()
+                lines = text.split("\n")
+                term_width = shutil.get_terminal_size().columns
+                _bg = "\033[48;5;236m"
 
-            # Move cursor up to prompt line (from cursor's physical row)
-            if self._prev_cursor_physical_row > 0:
-                sys.stdout.write(f"\033[{self._prev_cursor_physical_row}A")
+                # Move cursor up to prompt line (from cursor's physical row)
+                if self._prev_cursor_physical_row > 0:
+                    sys.stdout.write(f"\033[{self._prev_cursor_physical_row}A")
 
-            # Render first line with prompt
-            first_content = f"{prompt}{lines[0]}"
-            pad = max(0, term_width - _display_width(first_content))
-            sys.stdout.write(
-                f"\r{_bg}{_COLOR_BOLD}{_COLOR_CYAN}{prompt}{_COLOR_RESET}"
-                f"{_bg}{self._highlight_image_refs(lines[0])}{' ' * pad}{_COLOR_RESET}"
-            )
+                # Render first line with prompt
+                first_content = f"{prompt}{lines[0]}"
+                pad = max(0, term_width - _display_width(first_content))
+                sys.stdout.write(
+                    f"\r{_bg}{_COLOR_BOLD}{_COLOR_CYAN}{prompt}{_COLOR_RESET}"
+                    f"{_bg}{self._highlight_image_refs(lines[0])}{' ' * pad}{_COLOR_RESET}"
+                )
 
-            # Render continuation lines
-            for i in range(1, len(lines)):
-                pad = max(0, term_width - _display_width(lines[i]))
-                sys.stdout.write(f"\n\r{_bg}{self._highlight_image_refs(lines[i])}{' ' * pad}{_COLOR_RESET}")
+                # Render continuation lines
+                for i in range(1, len(lines)):
+                    pad = max(0, term_width - _display_width(lines[i]))
+                    sys.stdout.write(f"\n\r{_bg}{self._highlight_image_refs(lines[i])}{' ' * pad}{_COLOR_RESET}")
 
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
         if self._cancelled:
             return None

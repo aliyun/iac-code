@@ -25,7 +25,7 @@ class TestEditFileTool:
     async def test_normal_search_replace(self, tmp_path, edit_file_tool):
         """Test normal search and replace operation."""
         file_path = tmp_path / "test.txt"
-        file_path.write_text("Hello, world!\nThis is a test.\n")
+        file_path.write_text("Hello, world!\nThis is a test.\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -39,13 +39,13 @@ class TestEditFileTool:
 
         assert result.is_error is False
         assert "successfully" in result.content.lower()
-        assert file_path.read_text() == "Goodbye, world!\nThis is a test.\n"
+        assert file_path.read_text(encoding="utf-8") == "Goodbye, world!\nThis is a test.\n"
 
     @pytest.mark.asyncio
     async def test_old_string_not_found(self, tmp_path, edit_file_tool):
         """Test error when old_string is not found."""
         file_path = tmp_path / "test.txt"
-        file_path.write_text("Some content here")
+        file_path.write_text("Some content here", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -59,13 +59,13 @@ class TestEditFileTool:
 
         assert result.is_error is True
         assert "not found" in result.content.lower()
-        assert file_path.read_text() == "Some content here"
+        assert file_path.read_text(encoding="utf-8") == "Some content here"
 
     @pytest.mark.asyncio
     async def test_old_string_multiple_matches(self, tmp_path, edit_file_tool):
         """Test error when old_string matches multiple times."""
         file_path = tmp_path / "test.txt"
-        file_path.write_text("hello hello hello")
+        file_path.write_text("hello hello hello", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -79,7 +79,7 @@ class TestEditFileTool:
 
         assert result.is_error is True
         assert "3 times" in result.content
-        assert file_path.read_text() == "hello hello hello"
+        assert file_path.read_text(encoding="utf-8") == "hello hello hello"
 
     @pytest.mark.asyncio
     async def test_file_not_found(self, tmp_path, edit_file_tool):
@@ -102,7 +102,7 @@ class TestEditFileTool:
         """Test replacing multi-line content."""
         file_path = tmp_path / "test.txt"
         original = "def foo():\n    pass\n"
-        file_path.write_text(original)
+        file_path.write_text(original, encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -115,13 +115,13 @@ class TestEditFileTool:
         )
 
         assert result.is_error is False
-        assert file_path.read_text() == "def foo():\n    return 42\n"
+        assert file_path.read_text(encoding="utf-8") == "def foo():\n    return 42\n"
 
     @pytest.mark.asyncio
     async def test_relative_path(self, tmp_path, edit_file_tool):
         """Test editing with relative path."""
         file_path = tmp_path / "relative.txt"
-        file_path.write_text("old content")
+        file_path.write_text("old content", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -134,13 +134,13 @@ class TestEditFileTool:
         )
 
         assert result.is_error is False
-        assert file_path.read_text() == "new content"
+        assert file_path.read_text(encoding="utf-8") == "new content"
 
     @pytest.mark.asyncio
     async def test_replace_with_empty_string(self, tmp_path, edit_file_tool):
         """Test replacing content with empty string (deletion)."""
         file_path = tmp_path / "test.txt"
-        file_path.write_text("Hello, world!")
+        file_path.write_text("Hello, world!", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -153,13 +153,13 @@ class TestEditFileTool:
         )
 
         assert result.is_error is False
-        assert file_path.read_text() == "Hello!"
+        assert file_path.read_text(encoding="utf-8") == "Hello!"
 
     @pytest.mark.asyncio
     async def test_replace_preserves_whitespace(self, tmp_path, edit_file_tool):
         """Test that whitespace in old_string is matched exactly."""
         file_path = tmp_path / "test.txt"
-        file_path.write_text("    indented line\n")
+        file_path.write_text("    indented line\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -172,13 +172,13 @@ class TestEditFileTool:
         )
 
         assert result.is_error is False
-        assert file_path.read_text() == "  less indented\n"
+        assert file_path.read_text(encoding="utf-8") == "  less indented\n"
 
     @pytest.mark.asyncio
     async def test_unique_match_with_context(self, tmp_path, edit_file_tool):
         """Test that including more context makes a unique match."""
         file_path = tmp_path / "test.txt"
-        file_path.write_text("hello\nworld hello\nhello world\n")
+        file_path.write_text("hello\nworld hello\nhello world\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await edit_file_tool.execute(
@@ -191,7 +191,7 @@ class TestEditFileTool:
         )
 
         assert result.is_error is False
-        assert file_path.read_text() == "REPLACED\nworld hello\nhello world\n"
+        assert file_path.read_text(encoding="utf-8") == "REPLACED\nworld hello\nhello world\n"
 
     @pytest.mark.asyncio
     async def test_windows_posix_path_conversion(self, tmp_path, edit_file_tool, monkeypatch):
@@ -218,7 +218,7 @@ class TestEditFileTool:
     @pytest.mark.asyncio
     async def test_read_error_returned(self, tmp_path, edit_file_tool, monkeypatch):
         file_path = tmp_path / "x.txt"
-        file_path.write_text("abc")
+        file_path.write_text("abc", encoding="utf-8")
 
         def boom(*a, **kw):
             raise OSError("boom-read")
@@ -235,7 +235,7 @@ class TestEditFileTool:
     @pytest.mark.asyncio
     async def test_write_error_returned(self, tmp_path, edit_file_tool, monkeypatch):
         file_path = tmp_path / "x.txt"
-        file_path.write_text("abc")
+        file_path.write_text("abc", encoding="utf-8")
 
         real_open = open
         calls = {"count": 0}

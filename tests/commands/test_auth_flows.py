@@ -769,7 +769,10 @@ class TestPartnerSourceInLlmFlow:
 
         settings_path = iac_home / ".iac-code" / "settings.yml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text("activeProvider: dashscope\nproviders:\n  dashscope:\n    model: qwen-plus\n")
+        settings_path.write_text(
+            "activeProvider: dashscope\nproviders:\n  dashscope:\n    model: qwen-plus\n",
+            encoding="utf-8",
+        )
 
         monkeypatch.setattr("iac_code.commands.auth.get_settings_path", lambda: settings_path)
 
@@ -800,7 +803,7 @@ class TestPartnerSourceInLlmFlow:
 
         settings_path = iac_home / ".iac-code" / "settings.yml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text("")
+        settings_path.write_text("", encoding="utf-8")
 
         monkeypatch.setattr("iac_code.commands.auth.get_settings_path", lambda: settings_path)
 

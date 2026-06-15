@@ -15,6 +15,7 @@ import httpx
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.push import InvalidPushNotificationConfigError, validate_push_callback_url
 from iac_code.a2a.push_queue import A2APushJob, A2APushQueue, A2APushRetryPolicy, redact_push_headers
+from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,9 @@ class LoggingA2APushAlertSink:
             extra={
                 "task_id": job.task_id,
                 "config_id": job.config_id,
-                "url": job.url,
+                "url": _safe_callback_url_for_log(job.url),
                 "attempt": job.attempt,
-                "last_error": job.last_error,
+                "last_error": sanitize_public_text(job.last_error),
                 "headers": redact_push_headers(job.headers),
             },
         )
@@ -147,12 +148,16 @@ class A2APushDeliveryWorker:
         if transient and next_attempt < self._retry_policy.max_attempts:
             delay = self._retry_policy.delay_for_attempt(next_attempt)
             await self._queue.retry(
-                job.with_attempt(attempt=next_attempt, next_attempt_at=self._clock() + delay, last_error=str(exc))
+                job.with_attempt(
+                    attempt=next_attempt,
+                    next_attempt_at=self._clock() + delay,
+                    last_error=_public_push_error(exc),
+                )
             )
             self._metrics.record_push_retry_scheduled()
             return
 
-        dead = job.with_attempt(attempt=next_attempt, last_error=str(exc))
+        dead = job.with_attempt(attempt=next_attempt, last_error=_public_push_error(exc))
         await self._queue.dead_letter(dead)
         self._metrics.record_push_dead_lettered()
         await self._alert_sink.dead_lettered(dead)
@@ -172,6 +177,27 @@ def _is_transient_delivery_error(exc: Exception) -> bool:
     if isinstance(exc, (httpx.TimeoutException, httpx.TransportError, TimeoutError, OSError)):
         return True
     return any(f"HTTP {code}" in text for code in (408, 409, 425, 429, 500, 502, 503, 504))
+
+
+def _public_push_error(exc: Exception) -> str:
+    return public_exception_summary(exc, max_chars=1000)
+
+
+def _safe_callback_url_for_log(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or parsed.hostname is None:
+        return sanitize_public_text(url)
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = host
+    try:
+        port = parsed.port
+    except ValueError:
+        return sanitize_public_text(url)
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    return urlunparse((parsed.scheme, netloc, parsed.path or "", "", "", ""))
 
 
 async def _validate_resolved_callback_host(url: str) -> list[str]:

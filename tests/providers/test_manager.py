@@ -170,6 +170,29 @@ class TestProviderManager:
         assert m._provider is None
         assert m.get_model_name() == "some-model"
 
+    def test_failure_telemetry_uses_public_error_summary(self, monkeypatch):
+        from iac_code.services.telemetry.names import Events
+
+        telemetry_events = []
+        monkeypatch.setattr(
+            "iac_code.providers.manager.log_event",
+            lambda name, attrs: telemetry_events.append((name, attrs)),
+        )
+        monkeypatch.setattr("iac_code.providers.manager.add_metric", lambda *args, **kwargs: None)
+
+        ProviderManager._emit_failure_telemetry(
+            "dashscope",
+            "qwen3.6-plus",
+            0.0,
+            RuntimeError("Authorization: Bearer sk-live at /Users/alice/.iac-code/settings.yml"),
+        )
+
+        _, attrs = next(item for item in telemetry_events if item[0] == Events.API_REQUEST_FAILED)
+        assert attrs["error_id"]
+        assert "sk-live" not in attrs["error_message"]
+        assert "/Users/alice" not in attrs["error_message"]
+        assert "[REDACTED]" in attrs["error_message"]
+
 
 @pytest.mark.asyncio
 class TestProviderManagerStreaming:
@@ -241,6 +264,31 @@ class TestProviderManagerStreaming:
         err = next(e for e in events if e.type == "error")
         assert err.error.startswith("ValueError:")
         assert "irrecoverable" in err.error
+        assert err.error_id
+
+    async def test_fallback_complete_error_event_redacts_public_error(self):
+        mock_provider = AsyncMock()
+
+        async def failing_stream(*a, **kw):
+            yield MessageStartEvent(message_id="m1")
+            raise ConnectionError("stream died")
+
+        mock_provider.stream = failing_stream
+        mock_provider.get_model_name.return_value = "test"
+        mock_provider.complete = AsyncMock(
+            side_effect=RuntimeError("Authorization: Bearer sk-live at /Users/alice/.iac-code/settings.yml")
+        )
+
+        mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
+        mgr._provider = mock_provider
+        mgr._retry_config.max_retries = 0
+
+        events = [e async for e in mgr.stream(messages=[Message.user("hi")], system="sys")]
+        err = next(e for e in events if e.type == "error")
+        assert "sk-live" not in err.error
+        assert "/Users/alice" not in err.error
+        assert err.error.startswith("RuntimeError:")
+        assert err.error_id
 
     async def test_fallback_error_event_preserves_original_exception_type_via_retry_wrapper(self):
         class RateLimitError(Exception):
@@ -266,6 +314,7 @@ class TestProviderManagerStreaming:
         assert "RetryableError" in err.error
         assert "RateLimitError" in err.error
         assert "slow down" in err.error
+        assert err.error_id
 
     async def test_stream_idle_timeout_recovers_with_non_streaming_fallback(self):
         class HangingStreamProvider:
@@ -474,6 +523,7 @@ class TestProviderManagerStreaming:
         assert events[0].type == "error"
         assert "bad qwenpaw config" in events[0].error
         assert events[0].is_retryable is False
+        assert events[0].error_id
 
 
 @pytest.mark.asyncio

@@ -214,8 +214,8 @@ class TestCreateDefaultRegistry:
         registry = create_default_registry()
         assert isinstance(registry, CommandRegistry)
 
-    def test_create_default_registry_has_13_commands(self):
-        """Test create_default_registry has 13 commands."""
+    def test_create_default_registry_has_13_visible_commands(self):
+        """Test create_default_registry has 13 visible commands."""
         registry = create_default_registry()
         all_cmds = registry.get_all()
         assert len(all_cmds) == 13
@@ -240,6 +240,15 @@ class TestCreateDefaultRegistry:
             "status",
             "rename",
         }
+
+    def test_default_registry_keeps_prompt_executable_but_hidden(self):
+        """The debug-only prompt command should run without appearing in input hints."""
+        registry = create_default_registry()
+        prompt_cmd = registry.get("prompt")
+        assert prompt_cmd is not None
+        assert prompt_cmd.hidden is True
+        assert "prompt" not in registry.get_completions("pro")
+        assert all(match.command.name != "prompt" for match in registry.fuzzy_search("pro"))
 
     def test_default_registry_includes_rename(self):
         """Test rename command metadata."""

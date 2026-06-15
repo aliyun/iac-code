@@ -32,7 +32,7 @@ def test_write_creates_owner_only_file(store):
 def test_write_produces_one_line_per_event(store):
     events = [{"event.name": f"iac.n{i}"} for i in range(3)]
     path = store.write("iac_sess_abc", events)
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3
     assert all(json.loads(line)["event.name"].startswith("iac.n") for line in lines)
 
@@ -48,7 +48,7 @@ def test_list_returns_paths_for_all_failed_batches(store):
 def test_list_ignores_non_failed_files(store, tmp_path):
     tele_dir = tmp_path / "telemetry"
     tele_dir.mkdir(parents=True, exist_ok=True)
-    (tele_dir / "other.txt").write_text("noise")
+    (tele_dir / "other.txt").write_text("noise", encoding="utf-8")
     store.write("iac_sess_1", [{"event.name": "a"}])
     assert len(list(store.list_pending())) == 1
 
@@ -74,6 +74,6 @@ def test_read_returns_parsed_events(store):
 def test_read_skips_unparseable_lines(store, tmp_path):
     path = tmp_path / "telemetry" / "failed_events.iac_sess_1.abc.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('{"event.name":"ok"}\ngarbage\n{"event.name":"ok2"}\n')
+    path.write_text('{"event.name":"ok"}\ngarbage\n{"event.name":"ok2"}\n', encoding="utf-8")
     events = store.read(path)
     assert len(events) == 2

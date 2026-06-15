@@ -13,6 +13,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from iac_code.a2a.transports.dispatcher import A2AJsonRpcDispatcher, A2ARuntimeComponents
 from iac_code.a2a.transports.stdio import is_streaming_request
+from iac_code.utils.public_errors import public_error_from_exception
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,11 @@ def websocket_event_frame(payload: dict[str, Any], *, final: bool) -> dict[str, 
     return {"id": payload.get("id"), "payload": payload, "final": final}
 
 
-def websocket_error_frame(request_id: Any, *, code: int, message: str) -> dict[str, Any]:
-    payload = {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+def websocket_error_frame(request_id: Any, *, code: int, message: str, error_id: str | None = None) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if error_id:
+        error["data"] = {"error_id": error_id}
+    payload = {"jsonrpc": "2.0", "id": request_id, "error": error}
     return websocket_event_frame(payload, final=True)
 
 
@@ -63,14 +67,42 @@ class WebSocketA2AServerApp:
                     await _send_json(websocket, websocket_error_frame(None, code=-32600, message="Invalid Request"))
                     return
                 if is_streaming_request(payload):
-                    async for event in self.dispatcher.dispatch_stream(payload):
-                        if not await _send_json(websocket, websocket_event_frame(event, final=False)):
-                            return
-                    final_payload = {"jsonrpc": "2.0", "id": payload.get("id")}
-                    await _send_json(websocket, websocket_event_frame(final_payload, final=True))
+                    try:
+                        async for event in self.dispatcher.dispatch_stream(payload):
+                            if not await _send_json(websocket, websocket_event_frame(event, final=False)):
+                                return
+                    except Exception as exc:
+                        failure = public_error_from_exception(exc)
+                        logger.warning("A2A WebSocket streaming dispatch failed: error_id=%s", failure.error_id)
+                        await _send_json(
+                            websocket,
+                            websocket_error_frame(
+                                payload.get("id"),
+                                code=-32603,
+                                message=failure.summary,
+                                error_id=failure.error_id,
+                            ),
+                        )
+                    else:
+                        final_payload = {"jsonrpc": "2.0", "id": payload.get("id")}
+                        await _send_json(websocket, websocket_event_frame(final_payload, final=True))
                     return
 
-                response = await self.dispatcher.dispatch(payload)
+                try:
+                    response = await self.dispatcher.dispatch(payload)
+                except Exception as exc:
+                    failure = public_error_from_exception(exc)
+                    logger.warning("A2A WebSocket dispatch failed: error_id=%s", failure.error_id)
+                    await _send_json(
+                        websocket,
+                        websocket_error_frame(
+                            payload.get("id"),
+                            code=-32603,
+                            message=failure.summary,
+                            error_id=failure.error_id,
+                        ),
+                    )
+                    return
                 await _send_json(websocket, websocket_event_frame(response, final=True))
 
         @asynccontextmanager

@@ -16,29 +16,29 @@ def make_token(text: str) -> CompletionToken:
 def sample_tree(tmp_path):
     """Create a sample directory tree for testing."""
     # Normal files
-    (tmp_path / "main.py").write_text("# main")
-    (tmp_path / "config.yaml").write_text("key: value")
+    (tmp_path / "main.py").write_text("# main", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("key: value", encoding="utf-8")
     src = tmp_path / "src"
     src.mkdir()
-    (src / "app.py").write_text("# app")
-    (src / "utils.py").write_text("# utils")
+    (src / "app.py").write_text("# app", encoding="utf-8")
+    (src / "utils.py").write_text("# utils", encoding="utf-8")
     ui = src / "ui"
     ui.mkdir()
-    (ui / "input.py").write_text("# input")
+    (ui / "input.py").write_text("# input", encoding="utf-8")
 
     # Excluded dirs
     git = tmp_path / ".git"
     git.mkdir()
-    (git / "config").write_text("git config")
+    (git / "config").write_text("git config", encoding="utf-8")
 
     pycache = tmp_path / "__pycache__"
     pycache.mkdir()
-    (pycache / "main.cpython-312.pyc").write_text("bytecode")
+    (pycache / "main.cpython-312.pyc").write_text("bytecode", encoding="utf-8")
 
     # egg-info excluded dir
     egg = tmp_path / "mypackage.egg-info"
     egg.mkdir()
-    (egg / "PKG-INFO").write_text("pkg info")
+    (egg / "PKG-INFO").write_text("pkg info", encoding="utf-8")
 
     return tmp_path
 

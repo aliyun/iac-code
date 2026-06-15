@@ -1,5 +1,7 @@
 """Tests for bundled skill registration."""
 
+from unittest.mock import patch
+
 from iac_code.skills.bundled import (
     _bundled_skills,
     get_bundled_skills,
@@ -86,3 +88,32 @@ class TestBundledSkills:
         )
         skill = get_bundled_skills()[0]
         assert skill.auto_trigger == {"script": "auto_trigger.py"}
+
+
+class TestPipelineSkillRegistration:
+    def setup_method(self):
+        from iac_code.skills.bundled import _bundled_skills
+
+        _bundled_skills.clear()
+
+    def test_normal_mode_no_pipeline_skills(self):
+        with patch.dict("os.environ", {"IAC_CODE_MODE": "normal"}):
+            init_bundled_skills()
+            names = {s.name for s in get_bundled_skills()}
+            assert "iac-aliyun" in names
+            assert "iac-aliyun-intent" not in names
+
+    def test_selling_mode_decomposed_no_global_pipeline_skills(self):
+        with patch.dict("os.environ", {"IAC_CODE_MODE": "selling", "IAC_CODE_SKILL_MODE": "decomposed"}):
+            init_bundled_skills()
+            names = {s.name for s in get_bundled_skills()}
+            assert "iac-aliyun-intent" not in names
+            assert "iac-aliyun-architecture" not in names
+            assert "iac-aliyun-deploy" not in names
+
+    def test_selling_mode_whole_no_pipeline_skills(self):
+        with patch.dict("os.environ", {"IAC_CODE_MODE": "selling", "IAC_CODE_SKILL_MODE": "whole"}):
+            init_bundled_skills()
+            names = {s.name for s in get_bundled_skills()}
+            assert "iac-aliyun" in names
+            assert "iac-aliyun-intent" not in names

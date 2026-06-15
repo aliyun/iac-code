@@ -1,11 +1,12 @@
 import asyncio
+import json
 
 import pytest
 
 from iac_code.a2a.transports.base import A2ATransportDependencyError
 from iac_code.a2a.transports.dispatcher import create_runtime_components
 from iac_code.a2a.transports.grpc import GrpcA2AServer, require_grpc
-from iac_code.a2a.transports.grpc_jsonrpc import GrpcA2AClient, JsonRpcEnvelope, _JsonRpcServicer
+from iac_code.a2a.transports.grpc_jsonrpc import GrpcA2AClient, JsonRpcEnvelope, _from_envelope, _JsonRpcServicer
 
 
 class FakeGrpcStub:
@@ -83,6 +84,83 @@ async def test_grpc_stream_swallows_client_disconnect() -> None:
     ]
 
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_grpc_jsonrpc_stream_emits_final_envelope_after_dispatch_completes() -> None:
+    class CompletingDispatcher:
+        async def dispatch_stream(self, payload):
+            yield {"jsonrpc": "2.0", "id": payload["id"], "result": {"state": "working"}}
+
+    class OpenContext:
+        def cancelled(self) -> bool:
+            return False
+
+    servicer = _JsonRpcServicer.__new__(_JsonRpcServicer)
+    servicer._dispatcher = CompletingDispatcher()
+
+    envelopes = [
+        envelope
+        async for envelope in servicer.Stream(
+            JsonRpcEnvelope(payload=b'{"jsonrpc":"2.0","id":"stream-1"}'),
+            OpenContext(),
+        )
+    ]
+
+    assert len(envelopes) == 2
+    assert envelopes[0].final is False
+    assert envelopes[1].final is True
+
+
+@pytest.mark.asyncio
+async def test_grpc_jsonrpc_send_returns_public_error_for_dispatch_failure() -> None:
+    class FailingDispatcher:
+        async def dispatch(self, payload):
+            raise RuntimeError("boom with DB_PASSWORD=hunter2 at /Users/alice/.iac-code/settings.yml")
+
+    servicer = _JsonRpcServicer.__new__(_JsonRpcServicer)
+    servicer._dispatcher = FailingDispatcher()
+
+    response = await servicer.Send(JsonRpcEnvelope(payload=b'{"jsonrpc":"2.0","id":"send-1"}'), object())
+    payload = _from_envelope(response)
+
+    assert payload["id"] == "send-1"
+    assert payload["error"]["code"] == -32603
+    assert "hunter2" not in payload["error"]["message"]
+    assert "/Users/alice" not in payload["error"]["message"]
+    assert payload["error"]["data"]["error_id"]
+
+
+@pytest.mark.asyncio
+async def test_grpc_jsonrpc_stream_returns_final_public_error_for_dispatch_failure() -> None:
+    class FailingStreamDispatcher:
+        async def dispatch_stream(self, payload):
+            yield {"jsonrpc": "2.0", "id": payload["id"], "result": {"state": "working"}}
+            raise RuntimeError("stream failed with api_key=sk-live at /Users/alice/.iac-code/settings.yml")
+
+    class OpenContext:
+        def cancelled(self) -> bool:
+            return False
+
+    servicer = _JsonRpcServicer.__new__(_JsonRpcServicer)
+    servicer._dispatcher = FailingStreamDispatcher()
+
+    envelopes = [
+        envelope
+        async for envelope in servicer.Stream(
+            JsonRpcEnvelope(payload=b'{"jsonrpc":"2.0","id":"stream-1"}'),
+            OpenContext(),
+        )
+    ]
+    payloads = [json.loads(envelope.payload.decode("utf-8")) for envelope in envelopes]
+
+    assert envelopes[0].final is False
+    assert envelopes[1].final is True
+    assert payloads[1]["id"] == "stream-1"
+    assert payloads[1]["error"]["code"] == -32603
+    assert "sk-live" not in payloads[1]["error"]["message"]
+    assert "/Users/alice" not in payloads[1]["error"]["message"]
+    assert payloads[1]["error"]["data"]["error_id"]
 
 
 @pytest.mark.asyncio

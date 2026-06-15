@@ -2,10 +2,13 @@ import asyncio
 import json
 from base64 import b64encode
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from a2a.server.context import ServerCallContext
 from a2a.types import (
+    CancelTaskRequest,
+    GetTaskRequest,
     Message,
     Part,
     Role,
@@ -13,8 +16,10 @@ from a2a.types import (
     SendMessageRequest,
     SubscribeToTaskRequest,
     Task,
+    TaskPushNotificationConfig,
+    TaskState,
 )
-from a2a.utils.errors import TaskNotFoundError
+from a2a.utils.errors import TaskNotCancelableError, TaskNotFoundError
 from starlette.testclient import TestClient
 
 from iac_code.a2a.app import (
@@ -26,8 +31,11 @@ from iac_code.a2a.app import (
     resolve_basic_credentials,
     resolve_token,
 )
-from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
+from iac_code.a2a.pipeline_journal import A2APipelineJournal
+from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.transports.dispatcher import create_runtime_components
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
 
 from .fakes import FakeAgentLoop, FakeRuntime
@@ -84,6 +92,399 @@ def test_health_route() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
+
+
+def test_pipeline_state_endpoint_requires_context_id(tmp_path) -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "a2a",
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "contextId or taskId is required"}
+
+
+def test_pipeline_state_endpoint_returns_404_for_missing_context(tmp_path) -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "a2a",
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=missing")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "A2A context not found"}
+
+
+def test_pipeline_state_endpoint_rejects_unicode_digit_after_sequence(tmp_path) -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "a2a",
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state",
+            params={"contextId": "missing", "afterSequence": "²"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "afterSequence must be a non-negative integer"}
+
+
+def test_pipeline_state_endpoint_rejects_overlong_after_sequence(tmp_path) -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "a2a",
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state",
+            params={"contextId": "missing", "afterSequence": "9" * 5000},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "afterSequence must be a non-negative integer"}
+
+
+def test_pipeline_state_endpoint_rejects_after_sequence_above_max_length(tmp_path) -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "a2a",
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state",
+            params={"contextId": "missing", "afterSequence": "9" * 21},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "afterSequence must be a non-negative integer"}
+
+
+def test_pipeline_state_endpoint_returns_recovery_state(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(_pipeline_event(1, "evt-1"))
+    journal.append(_pipeline_event(2, "evt-2"))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([_pipeline_event(1, "evt-1")]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1&afterSequence=1")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["snapshot"]["lastSequence"] == 1
+    assert [event["eventId"] for event in data["events"]] == ["evt-2"]
+
+
+def test_pipeline_state_endpoint_resolves_recovery_state_from_task_id(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="completed"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(_pipeline_event(1, "evt-1"))
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([_pipeline_event(1, "evt-1")]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?taskId=task-1")
+
+    assert response.status_code == 200
+    assert response.json()["snapshot"]["contextId"] == "ctx-1"
+
+
+def test_pipeline_state_endpoint_allows_task_id_for_matching_authenticated_owner(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="completed", owner="bearer"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token="secret",
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state?taskId=task-1",
+            headers={"Authorization": "Bearer secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["snapshot"]["taskId"] == "task-1"
+
+
+def test_pipeline_state_endpoint_hides_task_id_from_wrong_authenticated_owner(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="completed", owner="bearer"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        basic_username="alice",
+        basic_password="pass",
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state?taskId=task-1",
+            headers={"Authorization": "Basic " + b64encode(b"alice:pass").decode("ascii")},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "A2A pipeline state not found"}
+
+
+def test_pipeline_state_endpoint_hides_context_only_state_when_owner_cannot_be_verified(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token="secret",
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state?contextId=ctx-1",
+            headers={"Authorization": "Bearer secret"},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "A2A pipeline state not found"}
+
+
+def test_pipeline_state_endpoint_binds_context_only_owner_check_to_context_id(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="completed", owner="bearer"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-2", session_id="session-2", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-2") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    event["contextId"] = "ctx-2"
+    event["pipelineRunId"] = "ctx-2"
+    event["taskId"] = "task-1"
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token="secret",
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/iac-code/pipeline/state?contextId=ctx-2",
+            headers={"Authorization": "Bearer secret"},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "A2A pipeline state not found"}
+
+
+def test_pipeline_state_endpoint_returns_404_when_task_id_state_belongs_to_different_task(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-2", context_id="ctx-1", state="completed"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?taskId=task-2")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "A2A pipeline state not found"}
+
+
+def test_pipeline_state_endpoint_returns_404_for_context_task_mismatch(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="completed"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-2", session_id="session-2", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-2") / "pipeline"
+    event = _pipeline_event(1, "evt-1")
+    event["taskId"] = "task-2"
+    event["contextId"] = "ctx-2"
+    event["pipelineRunId"] = "ctx-2"
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-2&taskId=task-1")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "A2A task/context mismatch"}
+
+
+def test_pipeline_state_endpoint_returns_404_for_context_without_pipeline_state(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-empty", session_id="session-empty", cwd=str(tmp_path)))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-empty")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "A2A pipeline state not found"}
+
+
+def test_pipeline_state_endpoint_sanitizes_non_finite_floats(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    event = _pipeline_cost_event(1, "evt-1", float("nan"))
+    A2APipelineJournal(pipeline_dir).append(event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([event]))
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1&afterSequence=0")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["snapshot"]["display"]["candidateDetails"][0]["totalMonthlyCost"] is None
+    assert data["events"][0]["data"]["totalMonthlyCost"] is None
+
+
+def _pipeline_event(sequence: int, event_id: str) -> dict:
+    return {
+        "schemaVersion": "1.0",
+        "eventId": event_id,
+        "sequence": sequence,
+        "eventType": "pipeline_started",
+        "scope": "pipeline",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "working",
+        "data": {},
+    }
+
+
+def _pipeline_pending_ask_event() -> dict:
+    event = _pipeline_event(1, "evt-ask")
+    event["eventType"] = "input_required"
+    event["scope"] = "step"
+    event["status"] = "input_required"
+    event["step"] = {"runId": "step-intent_parsing-1", "id": "intent_parsing", "attempt": 1}
+    event["data"] = {"kind": "ask_user_question", "toolUseId": "ask-1"}
+    event["input"] = {
+        "inputId": "ask-ask-1",
+        "kind": "ask_user_question",
+        "toolUseId": "ask-1",
+        "question": "请选择部署目标",
+        "options": [{"id": "nginx", "label": "Nginx 网站"}],
+        "allowFreeText": True,
+    }
+    return event
+
+
+def _pipeline_cost_event(sequence: int, event_id: str, total_monthly_cost: float) -> dict:
+    event = _pipeline_event(sequence, event_id)
+    event["eventType"] = "candidate_detail_shown"
+    event["scope"] = "candidate"
+    event["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    event["data"] = {
+        "detailId": "detail-1",
+        "summary": "single ecs",
+        "totalMonthlyCost": total_monthly_cost,
+    }
+    return event
 
 
 def test_agent_card_route() -> None:
@@ -608,9 +1009,15 @@ def test_send_message_stores_standard_artifact_update_in_task(monkeypatch, tmp_p
     )
 
     task = response.json()["result"]["task"]
-    assert task["artifacts"][0]["name"] == "result.txt"
-    assert task["artifacts"][0]["parts"][0]["url"].startswith("file://")
-    assert task["artifacts"][0]["parts"][0]["mediaType"] == "text/plain"
+    artifact = task["artifacts"][0]
+    assert artifact["name"] == "result.txt"
+    assert artifact["parts"][0]["url"].startswith("iac-code-artifact://")
+    assert artifact["parts"][0]["mediaType"] == "text/plain"
+    assert "file://" not in str(artifact)
+    assert str(tmp_path) not in str(artifact)
+    assert (tmp_path / "artifacts" / artifact["artifactId"] / "result.txt").read_text(encoding="utf-8") == (
+        "hello artifact"
+    )
 
 
 def test_send_message_stores_binary_artifact_update_in_task(monkeypatch, tmp_path) -> None:
@@ -659,13 +1066,13 @@ def test_send_message_stores_binary_artifact_update_in_task(monkeypatch, tmp_pat
     )
 
     task = response.json()["result"]["task"]
-    assert task["artifacts"][0]["name"] == "diagram.png"
-    assert task["artifacts"][0]["parts"][0]["mediaType"] == "image/png"
-    from urllib.parse import urlparse
-    from urllib.request import url2pathname
-
-    artifact_url = task["artifacts"][0]["parts"][0]["url"]
-    artifact_path = Path(url2pathname(urlparse(artifact_url).path))
+    artifact = task["artifacts"][0]
+    assert artifact["name"] == "diagram.png"
+    assert artifact["parts"][0]["url"].startswith("iac-code-artifact://")
+    assert artifact["parts"][0]["mediaType"] == "image/png"
+    assert "file://" not in str(artifact)
+    assert str(tmp_path) not in str(artifact)
+    artifact_path = tmp_path / "artifacts" / artifact["artifactId"] / "diagram.png"
     assert artifact_path.read_bytes() == b"\x89PNG\r\n\x1a\nimage"
 
 
@@ -939,6 +1346,446 @@ def test_cancel_non_running_task_returns_standard_jsonrpc_error(monkeypatch, tmp
     assert canceled["error"]["message"] == "Task cannot be canceled"
 
 
+def test_persisted_task_get_and_cancel_work_with_bearer_auth_after_restart(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    A2APersistenceStore(persistence_dir).save_task(
+        A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working", owner="bearer")
+    )
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token="secret",
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        get_result = client.post(
+            "/",
+            headers={"A2A-Version": "1.0", "Authorization": "Bearer secret"},
+            json={"jsonrpc": "2.0", "id": "1", "method": "GetTask", "params": {"id": "task-1"}},
+        ).json()
+        cancel_result = client.post(
+            "/",
+            headers={"A2A-Version": "1.0", "Authorization": "Bearer secret"},
+            json={"jsonrpc": "2.0", "id": "2", "method": "CancelTask", "params": {"id": "task-1"}},
+        ).json()
+
+    assert get_result["result"]["id"] == "task-1"
+    assert get_result["result"]["contextId"] == "ctx-1"
+    assert "result" not in cancel_result
+    assert cancel_result["error"]["message"] == "Task cannot be canceled"
+
+
+def test_send_message_routes_context_only_pending_pipeline_input_after_restart(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    class WaitingAskPipeline:
+        pipeline_name = "selling"
+        sidecar_status = "waiting_input"
+
+        def __init__(self) -> None:
+            self.ask_answers: list[dict[str, str]] = []
+            self.run_prompts: list[str] = []
+            self.resume_prompts: list[str] = []
+            self.clear_sidecar_calls = 0
+
+        async def run(self, prompt: str):
+            self.run_prompts.append(prompt)
+            yield TextDeltaEvent(text="fresh pipeline")
+
+        async def resume(self, prompt: str):
+            self.resume_prompts.append(prompt)
+            yield TextDeltaEvent(text="resumed pipeline")
+
+        async def resume_ask_user_question(self, answer: dict[str, str], *, tool_use_id: str):
+            self.ask_answers.append(answer)
+            assert tool_use_id == "ask-1"
+            yield TextDeltaEvent(text="nginx selected")
+
+        def clear_sidecar(self) -> None:
+            self.clear_sidecar_calls += 1
+
+    fake_pipeline = WaitingAskPipeline()
+    fake_runtime = SimpleNamespace(provider_manager=object(), tool_registry=object())
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: fake_runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-answer",
+                        "contextId": "ctx-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "Nginx 网站"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        )
+
+    data = response.json()
+    assert "error" not in data
+    assert data["result"]["task"]["id"] == "task-1"
+    assert fake_pipeline.clear_sidecar_calls == 0
+    assert fake_pipeline.run_prompts == []
+    assert fake_pipeline.resume_prompts == []
+    assert fake_pipeline.ask_answers == [{"selected_id": "nginx", "selected_label": "Nginx 网站", "free_text": ""}]
+    assert "nginx selected" in json.dumps(data, ensure_ascii=False)
+
+
+def test_send_message_routes_context_only_pending_pipeline_input_from_legacy_sidecar_after_restart(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    class WaitingAskPipeline:
+        pipeline_name = "selling"
+        sidecar_status = "waiting_input"
+
+        def __init__(self) -> None:
+            self.ask_answers: list[dict[str, str]] = []
+            self.run_prompts: list[str] = []
+            self.clear_sidecar_calls = 0
+
+        async def run(self, prompt: str):
+            self.run_prompts.append(prompt)
+            yield TextDeltaEvent(text="fresh pipeline")
+
+        async def resume_ask_user_question(self, answer: dict[str, str], *, tool_use_id: str):
+            self.ask_answers.append(answer)
+            assert tool_use_id == "ask-1"
+            yield TextDeltaEvent(text="nginx selected from legacy")
+
+        def clear_sidecar(self) -> None:
+            self.clear_sidecar_calls += 1
+
+    fake_pipeline = WaitingAskPipeline()
+    fake_runtime = SimpleNamespace(provider_manager=object(), tool_registry=object())
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: fake_runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-answer",
+                        "contextId": "ctx-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "Nginx 网站"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        )
+
+    data = response.json()
+    assert "error" not in data
+    assert data["result"]["task"]["id"] == "task-1"
+    assert fake_pipeline.clear_sidecar_calls == 0
+    assert fake_pipeline.run_prompts == []
+    assert fake_pipeline.ask_answers == [{"selected_id": "nginx", "selected_label": "Nginx 网站", "free_text": ""}]
+    assert "nginx selected from legacy" in json.dumps(data, ensure_ascii=False)
+
+
+def test_send_message_rejects_context_only_pending_pipeline_input_for_wrong_owner(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required", owner="bob"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    class UnexpectedPipeline:
+        pipeline_name = "selling"
+        sidecar_status = "waiting_input"
+
+        async def run(self, prompt: str):
+            yield TextDeltaEvent(text=f"unexpected fresh run: {prompt}")
+
+    fake_runtime = SimpleNamespace(provider_manager=object(), tool_registry=object())
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: fake_runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: UnexpectedPipeline())
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token="secret",
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        result = client.post(
+            "/",
+            headers={"A2A-Version": "1.0", "Authorization": "Bearer secret"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-answer",
+                        "contextId": "ctx-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "Nginx 网站"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ).json()
+
+    assert result["error"]["message"] == "Task task-1 not found"
+
+
+@pytest.mark.asyncio
+async def test_persisted_task_is_visible_to_get_and_cancel_after_restart(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    A2APersistenceStore(persistence_dir).save_task(
+        A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working")
+    )
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+    )
+    call_context = ServerCallContext()
+
+    try:
+        task = await components.handler.on_get_task(GetTaskRequest(id="task-1"), call_context)
+
+        assert isinstance(task, Task)
+        assert task.id == "task-1"
+        assert task.context_id == "ctx-1"
+        assert task.status.state == TaskState.TASK_STATE_WORKING
+        assert A2APersistenceStore(persistence_dir).load_task("task-1").state == "working"
+        with pytest.raises(TaskNotCancelableError):
+            await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), call_context)
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+    )
+    call_context = ServerCallContext()
+
+    try:
+        task = await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), call_context)
+
+        assert isinstance(task, Task)
+        assert task.status.state == TaskState.TASK_STATE_CANCELED
+        assert persistence.load_task("task-1").state == "canceled"
+        snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+        assert snapshot["status"] == "canceled"
+        assert A2APipelineJournal(pipeline_dir).read_all_repairing_tail()[-1]["eventType"] == "pipeline_canceled"
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_stale_input_required_pipeline_task_reconciles_terminal_sidecar(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    canceled = _pipeline_event(2, "evt-canceled")
+    canceled["eventType"] = "pipeline_canceled"
+    canceled["status"] = "canceled"
+    canceled["data"] = {"source": "a2a_cancel"}
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending)
+    journal.append(canceled)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending, canceled]))
+
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+    )
+    call_context = ServerCallContext()
+
+    try:
+        task = await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), call_context)
+
+        assert isinstance(task, Task)
+        assert task.status.state == TaskState.TASK_STATE_CANCELED
+        assert persistence.load_task("task-1").state == "canceled"
+        assert A2APipelineSnapshotStore(pipeline_dir).load()["status"] == "canceled"
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_input_required_pipeline_task_after_restart_enqueues_push_update(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+        push_notifications=True,
+    )
+    call_context = ServerCallContext()
+
+    try:
+        await components.handler.on_create_task_push_notification_config(
+            TaskPushNotificationConfig(
+                task_id="task-1",
+                id="cfg-1",
+                url="https://callback.example/a2a",
+            ),
+            call_context,
+        )
+
+        await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), call_context)
+
+        job = await components.push_queue.claim()
+        assert job is not None
+        assert job.task_id == "task-1"
+        assert job.config_id == "cfg-1"
+        assert job.payload["statusUpdate"]["taskId"] == "task-1"
+        assert job.payload["statusUpdate"]["status"]["state"] == "TASK_STATE_CANCELED"
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_input_required_pipeline_task_after_restart_ignores_push_enqueue_failure(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+        push_notifications=True,
+    )
+    call_context = ServerCallContext()
+
+    async def fail_send_notification(*_args, **_kwargs) -> None:
+        raise OSError("queue unavailable")
+
+    try:
+        components.handler._push_sender.send_notification = fail_send_notification  # type: ignore[union-attr, method-assign]
+
+        with caplog.at_level("WARNING", logger="iac_code.a2a.transports.dispatcher"):
+            task = await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), call_context)
+
+        assert task.status.state == TaskState.TASK_STATE_CANCELED
+        assert persistence.load_task("task-1").state == "canceled"
+        snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+        assert snapshot["status"] == "canceled"
+        assert "Failed to enqueue A2A push notification for terminal task task-1" in caplog.text
+    finally:
+        await components.aclose()
+
+
 @pytest.mark.asyncio
 async def test_subscribe_to_inactive_task_returns_error_without_hanging(monkeypatch, tmp_path) -> None:
     loop = FakeAgentLoop([TextDeltaEvent(text="done")])
@@ -1014,6 +1861,74 @@ async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeyp
     assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in remaining_events])
     assert prompts == ["hello"]
     await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, tmp_path, caplog) -> None:
+    release = asyncio.Event()
+
+    class ControlledLoop:
+        async def run_streaming(self, _prompt: str):
+            yield TextDeltaEvent(text="first")
+            await release.wait()
+            yield TextDeltaEvent(text="second")
+
+    runtime = FakeRuntime(agent_loop=ControlledLoop(), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=tmp_path / "a2a",
+        push_notifications=True,
+    )
+    call_context = ServerCallContext()
+
+    async def fail_enqueue(_job) -> None:
+        raise OSError("queue unavailable")
+
+    try:
+        result = await components.handler.on_message_send(
+            SendMessageRequest(
+                message=Message(
+                    message_id="msg-1",
+                    role=Role.ROLE_USER,
+                    parts=[Part(text="hello")],
+                    metadata={"iac_code": {"cwd": str(tmp_path)}},
+                ),
+                configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"], return_immediately=True),
+            ),
+            call_context,
+        )
+        assert isinstance(result, Task)
+        await components.handler.on_create_task_push_notification_config(
+            TaskPushNotificationConfig(
+                task_id=result.id,
+                id="cfg-1",
+                url="https://callback.example/a2a",
+            ),
+            call_context,
+        )
+        components.push_queue.enqueue = fail_enqueue  # type: ignore[union-attr, method-assign]
+
+        stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), call_context)
+        await asyncio.wait_for(anext(stream), timeout=1)
+        with caplog.at_level("WARNING", logger="iac_code.a2a.push"):
+            release.set()
+            remaining_events = []
+
+            async def collect_remaining_events() -> None:
+                async for event in stream:
+                    remaining_events.append(event)
+
+            await asyncio.wait_for(collect_remaining_events(), timeout=1)
+
+        final_task = await components.handler.on_get_task(GetTaskRequest(id=result.id), call_context)
+        assert final_task.status.state != TaskState.TASK_STATE_FAILED
+        assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in remaining_events])
+        assert "Failed to enqueue A2A push notification for task" in caplog.text
+    finally:
+        await components.aclose()
 
 
 def test_create_app_wires_stateful_server_primitives(monkeypatch, tmp_path) -> None:

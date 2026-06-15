@@ -40,6 +40,7 @@ from iac_code.types.stream_events import (
     ToolUseEndEvent,
     ToolUseStartEvent,
 )
+from iac_code.utils.public_errors import public_error, public_exception_summary
 
 
 class ProviderNotConfiguredError(ValueError):
@@ -55,6 +56,12 @@ class _CompletionResult:
     response: NonStreamingResponse
     model: str
     provider_name: str
+
+
+def _error_event_from_exception(exc: BaseException) -> ErrorEvent:
+    summary = public_exception_summary(exc, max_chars=1000)
+    failure = public_error(message=summary, error_type=type(exc).__name__)
+    return ErrorEvent(error=summary, is_retryable=False, error_id=failure.error_id)
 
 
 MODEL_FALLBACK_MAP = {
@@ -272,7 +279,7 @@ class ProviderManager:
         try:
             self._check_qwenpaw_config_change()
         except ProviderConfigurationError as exc:
-            yield ErrorEvent(error=f"{type(exc).__name__}: {str(exc)[:1000]}", is_retryable=False)
+            yield _error_event_from_exception(exc)
             return
         provider = self._ensure_provider()
         provider_name = type(provider).__name__.replace("Provider", "").lower()
@@ -344,7 +351,7 @@ class ProviderManager:
                     completion = await self._complete_with_retry_result(messages, system, tools, max_tokens)
                 except Exception as e:
                     self._emit_failure_telemetry(provider_name, sanitized_model, started, e)
-                    yield ErrorEvent(error=f"{type(e).__name__}: {str(e)[:1000]}", is_retryable=False)
+                    yield _error_event_from_exception(e)
                     return
                 response = completion.response
                 response_model = sanitize_model_name(completion.model)
@@ -418,6 +425,8 @@ class ProviderManager:
     @staticmethod
     def _emit_failure_telemetry(provider_name: str, model: str, started: float, exc: Exception) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
+        summary = public_exception_summary(exc, max_chars=1000)
+        failure = public_error(message=summary, error_type=type(exc).__name__)
         log_event(
             Events.API_REQUEST_FAILED,
             {
@@ -425,7 +434,8 @@ class ProviderManager:
                 "model": model,
                 "error_type": type(exc).__name__,
                 "duration_ms": duration_ms,
-                "error_message": sanitize_error_message(str(exc)),
+                "error_message": sanitize_error_message(failure.summary),
+                "error_id": failure.error_id,
             },
         )
         add_metric(

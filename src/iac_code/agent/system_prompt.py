@@ -6,6 +6,7 @@ separated by DYNAMIC_BOUNDARY.
 
 from __future__ import annotations
 
+import inspect
 import os
 import platform
 import sys
@@ -291,6 +292,66 @@ def _build_output_style_section() -> str:
         "- Use markdown for formatting when helpful.\n"
         "- When referencing code, include file path and line number."
     )
+
+
+SECTION_BUILDERS: dict[str, Callable[..., str]] = {
+    "identity": _build_identity_section,
+    "system": _build_system_section,
+    "env": _build_environment_section,
+    "cloud_config": _build_cloud_config_section,
+    "tools": _build_tools_section,
+    "doing_tasks": _build_doing_tasks_section,
+    "actions": _build_actions_section,
+    "output_style": _build_output_style_section,
+}
+
+SECTION_PRIORITIES: dict[str, int] = {
+    "identity": 100,
+    "system": 95,
+    "env": 90,
+    "cloud_config": 88,
+    "tools": 85,
+    "doing_tasks": 80,
+    "actions": 75,
+    "output_style": 50,
+}
+
+DEFAULT_PIPELINE_SECTIONS: list[str] = ["identity", "system", "env", "cloud_config", "tools"]
+
+
+def build_base_sections(section_names: list[str], cwd: str, memory_content: str = "") -> str:
+    """Build system prompt from a subset of section names, ordered by priority.
+
+    Args:
+        section_names: which base sections to include
+        cwd: working directory passed to env-aware builders
+        memory_content: if non-empty, inserted as a "# Memory\\n<content>" section
+            at priority 60 (matching build_system_prompt's placement so both
+            implementations produce identical ordering relative to other sections).
+    """
+    parts: list[tuple[int, str]] = []
+    if section_names:
+        for name in section_names:
+            builder = SECTION_BUILDERS.get(name)
+            if builder is None:
+                continue
+            priority = SECTION_PRIORITIES.get(name, 0)
+            if "cwd" in inspect.signature(builder).parameters:
+                content = builder(cwd)
+            else:
+                content = builder()
+            if content:
+                parts.append((priority, content))
+
+    if memory_content:
+        memory_section = _build_memory_section(memory_content)
+        if memory_section:
+            parts.append((60, memory_section))
+
+    if not parts:
+        return ""
+    parts.sort(key=lambda x: -x[0])
+    return "\n\n".join(content for _, content in parts)
 
 
 def build_system_prompt(

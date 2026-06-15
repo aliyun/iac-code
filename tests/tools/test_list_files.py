@@ -25,8 +25,8 @@ class TestListFilesTool:
     async def test_list_directory_contents(self, tmp_path, list_files_tool):
         """Test listing directory contents."""
         # Create some files and directories
-        (tmp_path / "file1.txt").write_text("content1")
-        (tmp_path / "file2.py").write_text("content2")
+        (tmp_path / "file1.txt").write_text("content1", encoding="utf-8")
+        (tmp_path / "file2.py").write_text("content2", encoding="utf-8")
         (tmp_path / "subdir").mkdir()
 
         context = ToolContext(cwd=str(tmp_path))
@@ -70,7 +70,7 @@ class TestListFilesTool:
     @pytest.mark.asyncio
     async def test_distinguish_files_and_directories(self, tmp_path, list_files_tool):
         """Test that files and directories are distinguished."""
-        (tmp_path / "regular_file.txt").write_text("content")
+        (tmp_path / "regular_file.txt").write_text("content", encoding="utf-8")
         (tmp_path / "a_directory").mkdir()
 
         context = ToolContext(cwd=str(tmp_path))
@@ -88,7 +88,7 @@ class TestListFilesTool:
     @pytest.mark.asyncio
     async def test_default_path_uses_cwd(self, tmp_path, list_files_tool):
         """Test that no path defaults to current working directory."""
-        (tmp_path / "cwd_file.txt").write_text("content")
+        (tmp_path / "cwd_file.txt").write_text("content", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await list_files_tool.execute(
@@ -104,7 +104,7 @@ class TestListFilesTool:
         """Test listing with relative path."""
         subdir = tmp_path / "subdir"
         subdir.mkdir()
-        (subdir / "nested_file.txt").write_text("content")
+        (subdir / "nested_file.txt").write_text("content", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await list_files_tool.execute(
@@ -119,7 +119,7 @@ class TestListFilesTool:
     async def test_path_is_file_not_directory(self, tmp_path, list_files_tool):
         """Test error when path is a file, not a directory."""
         file_path = tmp_path / "just_a_file.txt"
-        file_path.write_text("content")
+        file_path.write_text("content", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await list_files_tool.execute(
@@ -133,7 +133,7 @@ class TestListFilesTool:
     @pytest.mark.asyncio
     async def test_shows_file_sizes(self, tmp_path, list_files_tool):
         """Test that file sizes are shown."""
-        (tmp_path / "sized_file.txt").write_text("12345678901234567890")  # 20 bytes
+        (tmp_path / "sized_file.txt").write_text("12345678901234567890", encoding="utf-8")  # 20 bytes
 
         context = ToolContext(cwd=str(tmp_path))
         result = await list_files_tool.execute(
@@ -149,9 +149,9 @@ class TestListFilesTool:
     @pytest.mark.asyncio
     async def test_sorted_output(self, tmp_path, list_files_tool):
         """Test that output is sorted alphabetically."""
-        (tmp_path / "zebra.txt").write_text("z")
-        (tmp_path / "alpha.txt").write_text("a")
-        (tmp_path / "middle.txt").write_text("m")
+        (tmp_path / "zebra.txt").write_text("z", encoding="utf-8")
+        (tmp_path / "alpha.txt").write_text("a", encoding="utf-8")
+        (tmp_path / "middle.txt").write_text("m", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await list_files_tool.execute(
@@ -169,7 +169,7 @@ class TestListFilesTool:
     @pytest.mark.asyncio
     async def test_skips_broken_symlink(self, tmp_path, list_files_tool):
         """Test that broken symlinks do not crash directory listing."""
-        (tmp_path / "ok.txt").write_text("content")
+        (tmp_path / "ok.txt").write_text("content", encoding="utf-8")
         broken = tmp_path / "broken-link"
         try:
             broken.symlink_to(tmp_path / "missing-target")

@@ -62,9 +62,15 @@ class ToolExecutor:
                 f"Please provide all required parameters as defined in the tool schema."
             )
 
-        # Pass event_queue from call to context for tools that emit progress events
-        if call.event_queue is not None:
-            context = ToolContext(cwd=context.cwd, event_queue=call.event_queue)
+        # Pass event_queue from call to context for tools that emit progress events.
+        # Always derive a per-call ToolContext so that ``tool_use_id`` (U-I14) is
+        # populated for the executing tool — needed so emitted events can be
+        # attributed to the specific tool invocation that produced them.
+        context = ToolContext(
+            cwd=context.cwd,
+            event_queue=call.event_queue if call.event_queue is not None else context.event_queue,
+            tool_use_id=call.id,
+        )
 
         timeout = tool.timeout if tool.timeout is not None else self._tool_timeout
 

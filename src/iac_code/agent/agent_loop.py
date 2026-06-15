@@ -6,7 +6,9 @@ import asyncio
 import os
 import time
 import uuid
+from collections import deque
 from collections.abc import AsyncGenerator, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -24,13 +26,12 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     PermissionRequestEvent,
     QueuedInputSubmittedEvent,
-    StackInstancesProgressEvent,
-    StackProgressEvent,
     StreamEvent,
     SubAgentToolEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
     TombstoneEvent,
+    ToolEmittedEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
@@ -127,6 +128,7 @@ class AgentLoop:
         auto_trigger_skills: list[Any] | None = None,
         memory_recall_service: Any = None,
         system_prompt_refresher: Callable[[], str] | None = None,
+        pause_event: asyncio.Event | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -165,6 +167,30 @@ class AgentLoop:
         self._result_storage = ResultStorage(
             storage_dir=os.path.join(str(get_config_dir()), "tool-results", self._session_id),
         )
+        self._pending_injections: deque[str] = deque()
+        self._current_turn_text: str = ""
+        self._accepting_injected_user_messages = False
+        self._pause_event = pause_event
+
+    @property
+    def current_turn_text(self) -> str:
+        return self._current_turn_text
+
+    def inject_user_message(self, msg: str) -> None:
+        """Schedule a user message to be injected before the next LLM turn."""
+        self._pending_injections.append(msg)
+
+    @property
+    def can_accept_injected_user_message(self) -> bool:
+        """Whether a queued supplement can still be consumed by this run."""
+        return self._accepting_injected_user_messages
+
+    def try_inject_user_message(self, msg: str) -> bool:
+        """Queue a supplement only when this loop still has a consumable turn."""
+        if not self.can_accept_injected_user_message:
+            return False
+        self.inject_user_message(msg)
+        return True
 
     def set_provider(self, provider_manager: Any, system_prompt: str | None = None) -> None:
         """Swap the provider manager in place, preserving conversation history.
@@ -661,6 +687,66 @@ class AgentLoop:
                         serialize_output_messages("".join(final_text_chunks), final_stop_reason),
                     )
 
+    async def continue_streaming(self) -> AsyncGenerator[StreamEvent, None]:
+        """Continue from already-loaded context without appending a new user message.
+
+        Used by pipeline recovery when the original step prompt is already present
+        in the restored transcript. Normal REPL turns must continue using
+        run_streaming() so user messages are persisted before provider streaming.
+        """
+        from iac_code.services.telemetry import add_metric, get_session_id, get_user_id, log_event, start_span
+        from iac_code.services.telemetry.config import should_capture_content_on_span
+        from iac_code.services.telemetry.content_serializer import serialize_output_messages
+        from iac_code.services.telemetry.names import (
+            FRAMEWORK_IAC_CODE,
+            Events,
+            GenAiAttr,
+            GenAiOperationName,
+            GenAiSpanKind,
+            Metrics,
+            Spans,
+        )
+
+        entry_attrs: dict[str, Any] = {
+            GenAiAttr.SPAN_KIND: GenAiSpanKind.ENTRY,
+            GenAiAttr.OPERATION_NAME: GenAiOperationName.ENTER,
+            GenAiAttr.SESSION_ID: get_session_id(),
+            GenAiAttr.USER_ID: get_user_id(),
+            GenAiAttr.FRAMEWORK: FRAMEWORK_IAC_CODE,
+        }
+        with start_span(Spans.ENTRY, entry_attrs) as entry_span:
+            interaction_started = time.monotonic()
+            first_token_received = False
+            final_text_chunks: list[str] = []
+            final_stop_reason = "stop"
+            try:
+                self._refresh_git_branch()
+                try:
+                    async for event in self._run_streaming_inner("", memory_prefetch=None):
+                        if isinstance(event, TextDeltaEvent) and not first_token_received:
+                            first_token_received = True
+                            ttft_ns = int((time.monotonic() - interaction_started) * 1_000_000_000)
+                            entry_span.set_attribute(GenAiAttr.RESPONSE_TIME_TO_FIRST_TOKEN, ttft_ns)
+                            entry_span.set_attribute(GenAiAttr.USER_TIME_TO_FIRST_TOKEN, ttft_ns)
+                        if isinstance(event, TextDeltaEvent):
+                            final_text_chunks.append(event.text)
+                        if isinstance(event, MessageEndEvent):
+                            final_stop_reason = event.stop_reason
+                            self._record_session_usage(event.usage)
+                        yield event
+                except asyncio.CancelledError:
+                    log_event(Events.SESSION_CANCELLED, {"stage": "in_query"})
+                    raise
+            finally:
+                self.context_manager.set_system_prompt(self.system_prompt)
+                elapsed = time.monotonic() - interaction_started
+                add_metric(Metrics.ACTIVE_TIME_TOTAL, int(elapsed), {})
+                if should_capture_content_on_span() and final_text_chunks:
+                    entry_span.set_attribute(
+                        GenAiAttr.OUTPUT_MESSAGES,
+                        serialize_output_messages("".join(final_text_chunks), final_stop_reason),
+                    )
+
     async def _run_streaming_inner(
         self,
         user_input: str | list[ContentBlock],
@@ -670,9 +756,20 @@ class AgentLoop:
     ) -> AsyncGenerator[StreamEvent, None]:
         """Inner streaming loop (called from run_streaming inside the ENTRY span)."""
         from iac_code.services.telemetry import start_span
+        from iac_code.services.telemetry.config import should_capture_content_on_span
+        from iac_code.services.telemetry.content_serializer import serialize_output_messages
         from iac_code.services.telemetry.names import GenAiAttr, GenAiOperationName, GenAiSpanKind, Spans
 
         for _turn in range(self._max_turns):
+            # Pipeline interrupt/recovery can pause between LLM turns and
+            # inject supplemental user text before the next provider call.
+            if self._pause_event is not None:
+                await self._pause_event.wait()
+            while self._pending_injections:
+                self.context_manager.add_user_message(self._pending_injections.popleft())
+            self._accepting_injected_user_messages = False
+            self._current_turn_text = ""
+
             system_prompt = self._prepare_provider_system_prompt()
             tool_definitions = self._sync_tool_definitions(system_prompt=system_prompt)
             await self._consume_ready_memory_prefetches(memory_prefetch)
@@ -695,6 +792,7 @@ class AgentLoop:
                 text_chunks: list[str] = []
                 thinking_chunks: list[str] = []
                 message_ended = False
+                turn_stop_reason = "stop"
 
                 provider_messages = self._get_provider_messages()
                 provider_tools = tool_definitions or None
@@ -715,6 +813,8 @@ class AgentLoop:
                     # Collect data from events
                     if isinstance(event, TextDeltaEvent):
                         text_chunks.append(event.text)
+                        if self._pause_event is not None:
+                            self._current_turn_text += event.text
                     elif isinstance(event, ThinkingDeltaEvent):
                         thinking_chunks.append(event.text)
                     elif isinstance(event, ToolUseStartEvent):
@@ -729,10 +829,13 @@ class AgentLoop:
                         pending_tool_uses_by_id.clear()
                         text_chunks.clear()
                         thinking_chunks.clear()
+                        self._accepting_injected_user_messages = False
                     elif isinstance(event, MessageEndEvent):
                         message_ended = True
+                        turn_stop_reason = event.stop_reason
 
                 if not message_ended:
+                    self._accepting_injected_user_messages = False
                     step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "error")
                     yield MessageEndEvent(stop_reason="stream_error", usage=Usage())
                     break
@@ -745,6 +848,11 @@ class AgentLoop:
                 full_text = "".join(text_chunks)
                 if full_text:
                     assistant_blocks.append(TextBlock(text=full_text))
+                if should_capture_content_on_span() and full_text:
+                    step_span.set_attribute(
+                        GenAiAttr.OUTPUT_MESSAGES,
+                        serialize_output_messages(full_text, turn_stop_reason),
+                    )
 
                 # Collect completed tool uses (those with both name and input)
                 completed_tools = []
@@ -752,6 +860,7 @@ class AgentLoop:
                     if "name" in tu and "input" in tu:
                         completed_tools.append(tu)
                         assistant_blocks.append(ToolUseBlock(id=tu["id"], name=tu["name"], input=tu.get("input", {})))
+                self._accepting_injected_user_messages = bool(completed_tools) and _turn < self._max_turns - 1
 
                 if assistant_blocks:
                     self.context_manager.add_assistant_message(assistant_blocks)
@@ -767,6 +876,7 @@ class AgentLoop:
 
                 # No tool calls -> end turn
                 if not completed_tools:
+                    self._accepting_injected_user_messages = False
                     step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "stop")
                     break
 
@@ -778,7 +888,8 @@ class AgentLoop:
                 event_queues: dict[str, asyncio.Queue] = {}
                 for tu in completed_tools:
                     queue = None
-                    if tu["name"] in tools_with_progress:
+                    tool = self.tool_registry.get(tu["name"])
+                    if tu["name"] in tools_with_progress or (tool is not None and tool.needs_event_queue()):
                         queue = asyncio.Queue()
                         event_queues[tu["id"]] = queue
                     requests.append(
@@ -828,7 +939,13 @@ class AgentLoop:
                         response_future=response_future,
                         permission_result=permission,
                     )
-                    if await response_future:
+                    try:
+                        approved = await asyncio.shield(response_future)
+                    except asyncio.CancelledError:
+                        if not response_future.done():
+                            response_future.set_result(False)
+                        raise
+                    if approved:
                         allowed_requests.append(request)
                     else:
                         denied_results.append((request, ToolResult.error(_("Permission denied."))))
@@ -880,7 +997,7 @@ class AgentLoop:
                                     item = queue.get_nowait()
                                     if item is None:
                                         break
-                                    if isinstance(item, (StackProgressEvent, StackInstancesProgressEvent)):
+                                    if isinstance(item, ToolEmittedEvent):
                                         yield item
                                     elif isinstance(item, dict):
                                         yield SubAgentToolEvent(
@@ -899,7 +1016,7 @@ class AgentLoop:
                             item = queue.get_nowait()
                             if item is None:
                                 continue
-                            if isinstance(item, (StackProgressEvent, StackInstancesProgressEvent)):
+                            if isinstance(item, ToolEmittedEvent):
                                 yield item
                             elif isinstance(item, dict):
                                 yield SubAgentToolEvent(
@@ -910,12 +1027,20 @@ class AgentLoop:
                                     is_error=item.get("is_error", False),
                                 )
 
-                async for sub_event in poll_event_queues():
-                    yield sub_event
+                try:
+                    async for sub_event in poll_event_queues():
+                        yield sub_event
 
-                results = await exec_task
+                    results = await exec_task
+                except asyncio.CancelledError:
+                    if not exec_task.done():
+                        exec_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await exec_task
+                    raise
 
                 # Process results and yield ToolResultEvents
+                terminal_step_result = False
                 tool_result_blocks: list[ToolResultBlock] = [
                     ToolResultBlock(
                         tool_use_id=request.id,
@@ -925,6 +1050,8 @@ class AgentLoop:
                     for request, result in denied_results
                 ]
                 for req, result in zip(requests, results):
+                    if result.metadata and result.metadata.get("step_result") is not None:
+                        terminal_step_result = True
                     processed = self._result_storage.process(req.id, result.content)
                     self._mark_read_memory_tool_result(req, result)
 
@@ -933,6 +1060,7 @@ class AgentLoop:
                         tool_name=req.name,
                         result=processed.content,
                         is_error=result.is_error,
+                        metadata=result.metadata,
                     )
 
                     tool_result_blocks.append(
@@ -964,7 +1092,11 @@ class AgentLoop:
 
                 async for event in self._submit_queued_inputs_after_tool_call(queued_input_provider):
                     yield event
+                if terminal_step_result:
+                    self._accepting_injected_user_messages = False
+                    break
         else:
+            self._accepting_injected_user_messages = False
             yield MessageEndEvent(stop_reason="max_turns", usage=Usage())
 
     async def _submit_queued_inputs_after_tool_call(
@@ -1205,6 +1337,9 @@ class AgentLoop:
 
     def get_session_usage(self) -> SessionUsageTotals:
         return self._session_usage_totals.copy()
+
+    def refresh_session_usage(self) -> None:
+        self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
 
     def _record_session_usage(self, usage: Usage) -> None:
         if not self._session_usage_totals.add(usage):

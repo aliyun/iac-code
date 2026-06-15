@@ -13,6 +13,8 @@ from pathlib import Path
 from time import time
 from typing import Awaitable, Callable
 
+from a2a.auth.user import User
+from a2a.server.context import ServerCallContext
 from a2a.server.routes import create_jsonrpc_routes, create_rest_routes
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
 from starlette.applications import Starlette
@@ -23,6 +25,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
 from iac_code.a2a.agent_card import agent_card_to_client_dict
+from iac_code.i18n import _
 
 _V03_JSONRPC_METHODS = frozenset(
     {
@@ -38,6 +41,20 @@ _V03_JSONRPC_METHODS = frozenset(
         "agent/getAuthenticatedExtendedCard",
     }
 )
+_MAX_AFTER_SEQUENCE_DIGITS = 20
+
+
+class _PrincipalUser(User):
+    def __init__(self, principal: str) -> None:
+        self._principal = principal
+
+    @property
+    def is_authenticated(self) -> bool:
+        return True
+
+    @property
+    def user_name(self) -> str:
+        return self._principal
 
 
 def resolve_token(cli_token: str | None) -> str | None:
@@ -197,6 +214,7 @@ def create_app(
         auto_approve_permissions=auto_approve_permissions,
         thinking_exposure=thinking_exposure,
     )
+    from iac_code.a2a.pipeline_recovery import A2APipelineRecoveryService
 
     @asynccontextmanager
     async def lifespan(app: Starlette):
@@ -227,9 +245,33 @@ def create_app(
             return Response(status_code=304, headers=card_cache_headers)
         return JSONResponse(card_data, headers=card_cache_headers)
 
+    recovery_service = A2APipelineRecoveryService(task_store=components.task_store)
+
+    async def get_pipeline_state(request: Request) -> JSONResponse:
+        context_id = request.query_params.get("contextId") or None
+        task_id = request.query_params.get("taskId") or None
+        if not context_id and not task_id:
+            return JSONResponse({"error": _("contextId or taskId is required")}, status_code=400)
+
+        after_sequence, parse_error = _parse_after_sequence(request.query_params.get("afterSequence"))
+        if parse_error is not None:
+            return JSONResponse({"error": parse_error}, status_code=400)
+
+        try:
+            state = await recovery_service.get_state(
+                context_id=context_id,
+                task_id=task_id,
+                after_sequence=after_sequence,
+                call_context=_call_context_from_request(request),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return JSONResponse(state)
+
     routes: list[BaseRoute] = [
         Route("/health", health, methods=["GET"]),
         Route(AGENT_CARD_WELL_KNOWN_PATH, get_agent_card, methods=["GET"]),
+        Route("/iac-code/pipeline/state", get_pipeline_state, methods=["GET"]),
     ]
     jsonrpc_endpoint = create_jsonrpc_routes(components.handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
 
@@ -251,9 +293,30 @@ def create_app(
     return app
 
 
+def _call_context_from_request(request: Request) -> ServerCallContext | None:
+    user = request.scope.get("user")
+    principal = getattr(user, "username", None) or getattr(user, "display_name", None)
+    if not isinstance(principal, str) or not principal:
+        return None
+    return ServerCallContext(user=_PrincipalUser(principal))
+
+
 def _agent_card_etag(card: dict[str, object]) -> str:
     body = json.dumps(card, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return f'"sha256-{hashlib.sha256(body).hexdigest()}"'
+
+
+def _parse_after_sequence(value: str | None) -> tuple[int | None, str | None]:
+    if value is None or value == "":
+        return None, None
+    if len(value) > _MAX_AFTER_SEQUENCE_DIGITS:
+        return None, _("afterSequence must be a non-negative integer")
+    if value.isascii() and value.isdecimal():
+        try:
+            return int(value), None
+        except ValueError:
+            pass
+    return None, _("afterSequence must be a non-negative integer")
 
 
 def run_server(

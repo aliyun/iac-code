@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 import threading
 from collections.abc import AsyncIterator
@@ -9,6 +10,9 @@ from typing import Any
 
 from iac_code.a2a.transports.base import A2AFrameError
 from iac_code.a2a.transports.dispatcher import A2AJsonRpcDispatcher, A2ARuntimeComponents
+from iac_code.utils.public_errors import public_error_from_exception
+
+logger = logging.getLogger(__name__)
 
 
 def encode_frame(payload: dict[str, Any]) -> bytes:
@@ -27,7 +31,7 @@ def decode_frame(line: bytes | str) -> dict[str, Any]:
 
 
 def is_streaming_request(payload: dict[str, Any]) -> bool:
-    return payload.get("method") in {"message/stream", "StreamMessage"}
+    return payload.get("method") in {"message/stream", "StreamMessage", "SendStreamingMessage"}
 
 
 class StdioA2AServer:
@@ -53,17 +57,31 @@ class StdioA2AServer:
             line = await reader.readline()
             if not line:
                 break
+            request_id: str | int | None = None
+            streaming_request = False
             try:
                 payload = decode_frame(line)
-                if is_streaming_request(payload):
+                raw_request_id = payload.get("id")
+                request_id = (
+                    raw_request_id if isinstance(raw_request_id, (str, int)) or raw_request_id is None else None
+                )
+                streaming_request = is_streaming_request(payload)
+                if streaming_request:
                     async for event in self._dispatcher.dispatch_stream(payload):
                         writer.write(encode_frame(event))
                         await writer.drain()
+                    writer.write(encode_frame({"jsonrpc": "2.0", "id": request_id, "final": True}))
+                    await writer.drain()
                 else:
                     writer.write(encode_frame(await self._dispatcher.dispatch(payload)))
                     await writer.drain()
             except Exception as exc:
-                writer.write(encode_frame(_error_response(None, str(exc))))
+                logger.exception("A2A stdio transport request failed")
+                failure = public_error_from_exception(exc)
+                response = _error_response(request_id, failure.summary, error_id=failure.error_id)
+                if streaming_request:
+                    response["final"] = True
+                writer.write(encode_frame(response))
                 await writer.drain()
 
     async def aclose(self) -> None:
@@ -99,8 +117,11 @@ class StdioA2AClient:
             await wait_closed()
 
 
-def _error_response(request_id: str | int | None, message: str) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": message}}
+def _error_response(request_id: str | int | None, message: str, *, error_id: str | None = None) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": -32603, "message": message}
+    if error_id is not None:
+        error["data"] = {"error_id": error_id}
+    return {"jsonrpc": "2.0", "id": request_id, "error": error}
 
 
 async def open_stdio_streams() -> tuple[asyncio.StreamReader, Any]:

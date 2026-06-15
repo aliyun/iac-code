@@ -294,34 +294,98 @@ def test_a4_history_message_to_updates_all_types() -> None:
     updates = _history_message_to_updates(asst_tool)
     assert len(updates) == 2
     assert updates[0].session_update == "tool_call"
-    assert updates[0].tool_call_id == "tool-1"
-    assert updates[0].status == "completed"
+    assert updates[0].tool_call_id == "history/0/tool-1"
+    assert updates[0].kind == "execute"
+    assert updates[0].status == "pending"
     assert updates[1].session_update == "tool_call_update"
-    assert updates[1].tool_call_id == "tool-1"
-    assert updates[1].status == "completed"
+    assert updates[1].tool_call_id == "history/0/tool-1"
+    assert updates[1].status == "in_progress"
 
     user_result = Message(
         role="user",
         content=[ToolResultBlock(tool_use_id="tool-1", content="file list", is_error=False)],
     )
     updates = _history_message_to_updates(user_result)
-    assert len(updates) == 1
+    assert len(updates) == 2
     assert updates[0].session_update == "tool_call_update"
-    assert updates[0].status == "completed"
+    assert updates[0].tool_call_id == "history/0/tool-1"
+    assert updates[0].status == "in_progress"
+    assert updates[0].content[0].content.text == "file list"
+    assert updates[1].tool_call_id == "history/0/tool-1"
+    assert updates[1].status == "completed"
+
+    user_success_with_path = Message(
+        role="user",
+        content=[
+            ToolResultBlock(
+                tool_use_id="tool-1b",
+                content=("wrote file%3A%2F%2F%2FUsers%2FAlice%20Smith%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"),
+                is_error=False,
+            )
+        ],
+    )
+    updates = _history_message_to_updates(user_success_with_path)
+    rendered = str(updates[0].content[0].content.text)
+    assert rendered == "wrote [PATH]"
+    assert "Alice" not in rendered
+    assert ".iac-code" not in rendered
 
     user_err = Message(
         role="user",
-        content=[ToolResultBlock(tool_use_id="tool-2", content="error occurred", is_error=True)],
+        content=[
+            ToolResultBlock(
+                tool_use_id="tool-2",
+                content=(
+                    "error occurred with DB_PASSWORD=hunter2 at /Users/alice/.iac-code/settings.yml and "
+                    "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
+                ),
+                is_error=True,
+            )
+        ],
     )
     updates = _history_message_to_updates(user_err)
-    assert len(updates) == 1
-    assert updates[0].status == "failed"
+    assert len(updates) == 2
+    assert updates[0].status == "in_progress"
+    rendered = updates[0].content[0].content.text
+    assert "hunter2" not in rendered
+    assert "/Users/alice" not in rendered
+    assert "%2FUsers" not in rendered
+    assert ".iac-code" not in rendered
+    assert "DB_PASSWORD=[REDACTED]" in rendered
+    assert "[PATH]" in rendered
+    assert updates[1].status == "failed"
 
     asst_str = Message(role="assistant", content="plain text assistant")
     updates = _history_message_to_updates(asst_str)
     assert len(updates) == 1
     assert updates[0].session_update == "agent_message_chunk"
     assert updates[0].content.text == "plain text assistant"
+
+
+@pytest.mark.asyncio
+async def test_history_replay_uses_distinct_tool_ids_for_reused_provider_ids() -> None:
+    """History replay should not merge separate historical tool calls with the same provider id."""
+    conn = FakeConn()
+    session = ACPSession("history-session", FakeLoop(), conn)
+
+    messages = [
+        Message(role="assistant", content=[ToolUseBlock(id="tool-1", name="bash", input={"cmd": "first"})]),
+        Message(role="user", content=[ToolResultBlock(tool_use_id="tool-1", content="first result")]),
+        Message(role="assistant", content=[ToolUseBlock(id="tool-1", name="bash", input={"cmd": "second"})]),
+        Message(role="user", content=[ToolResultBlock(tool_use_id="tool-1", content="second result")]),
+    ]
+
+    await session.replay_history(messages)
+
+    updates = [update for _, update in conn.updates]
+    starts = [update for update in updates if update.session_update == "tool_call"]
+    assert [start.tool_call_id for start in starts] == ["history/0/tool-1", "history/2/tool-1"]
+    first_updates = [update for update in updates if update.tool_call_id == "history/0/tool-1"]
+    second_updates = [update for update in updates if update.tool_call_id == "history/2/tool-1"]
+    assert [update.status for update in first_updates] == ["pending", "in_progress", "in_progress", "completed"]
+    assert [update.status for update in second_updates] == ["pending", "in_progress", "in_progress", "completed"]
+    assert first_updates[2].content[0].content.text == "first result"
+    assert second_updates[2].content[0].content.text == "second result"
 
 
 @pytest.mark.asyncio

@@ -39,7 +39,7 @@ def parse_tool_input_events(
         parts = parse_concatenated_json(raw_json)
         if parts:
             logger.info(
-                "Recovered %d concatenated tool inputs for tool_use_id=%s",
+                "Recovered {} concatenated tool inputs for tool_use_id={}",
                 len(parts),
                 tool_use_id,
             )
@@ -53,7 +53,7 @@ def parse_tool_input_events(
             return
 
         logger.warning(
-            "Tool input JSON parse failed: tool_use_id=%s, length=%d, raw=%s",
+            "Tool input JSON parse failed: tool_use_id={}, length={}, raw={}",
             tool_use_id,
             len(raw_json),
             raw_json[:200],

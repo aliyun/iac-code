@@ -20,7 +20,7 @@ def test_unknown_model_defaults_to_no_images():
 
 def test_settings_override_wins_over_builtin(monkeypatch, tmp_path):
     settings = tmp_path / "settings.yml"
-    settings.write_text("multiModal:\n  models:\n    custom-vl: {supportMultimodal: true}\n")
+    settings.write_text("multiModal:\n  models:\n    custom-vl: {supportMultimodal: true}\n", encoding="utf-8")
     monkeypatch.setattr(
         "iac_code.services.capabilities.multimodal.get_settings_path",
         lambda: settings,
@@ -30,7 +30,7 @@ def test_settings_override_wins_over_builtin(monkeypatch, tmp_path):
 
 def test_settings_override_can_disable_builtin(monkeypatch, tmp_path):
     settings = tmp_path / "settings.yml"
-    settings.write_text("multiModal:\n  models:\n    claude-opus-4-7: {supportMultimodal: false}\n")
+    settings.write_text("multiModal:\n  models:\n    claude-opus-4-7: {supportMultimodal: false}\n", encoding="utf-8")
     monkeypatch.setattr(
         "iac_code.services.capabilities.multimodal.get_settings_path",
         lambda: settings,

@@ -7,7 +7,7 @@ Runs ``iac-code -p "..." --output-format json`` in non-interactive mode,
 verifying that headless mode can complete a conversation round and produce output.
 
 Usage:
-    python scripts/test_headless_vpc.py
+    python scripts/headless/smoke/test_headless_vpc.py
 
 Prerequisites:
     - iac-code installed (pip install -e . or pip install iac-code)

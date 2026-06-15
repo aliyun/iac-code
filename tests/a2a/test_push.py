@@ -1,11 +1,12 @@
 import json
+from pathlib import Path
 
 import pytest
 from a2a.server.context import ServerCallContext
 from a2a.types import TaskPushNotificationConfig, TaskState, TaskStatus, TaskStatusUpdateEvent
 from cryptography.fernet import Fernet
 
-from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.persistence import A2APersistenceStore, _protocol_id_file_stem
 from iac_code.a2a.push import (
     A2APushConfig,
     A2APushConfigStore,
@@ -46,6 +47,11 @@ class FakeHTTPClient:
         self.closed = True
 
 
+class FailingPushQueue:
+    async def enqueue(self, _job) -> None:
+        raise OSError("queue unavailable")
+
+
 def test_push_config_rejects_non_http_url() -> None:
     with pytest.raises(InvalidPushNotificationConfigError):
         A2APushConfig(task_id="task-1", callback_url="file:///tmp/callback")
@@ -80,6 +86,20 @@ async def test_notifier_retries_temporary_push_failures(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_notifier_uses_filesystem_safe_name_for_windows_reserved_task_id(tmp_path) -> None:
+    http = FakeHTTPClient()
+    notifier = A2APushNotifier(persistence=A2APersistenceStore(tmp_path), http_client=http)
+
+    notifier.save_config(A2APushConfig(task_id="CON.txt", callback_url="https://example.test/a2a"))
+    delivered = await notifier.notify_task_state(task_id="CON.txt", context_id="ctx-1", state="completed")
+
+    assert delivered is True
+    assert http.posts[0][1]["json"]["taskId"] == "CON.txt"
+    assert _protocol_id_file_stem("CON.txt") != "CON.txt"
+    assert not (tmp_path / "push" / "CON.txt.json").exists()
+
+
+@pytest.mark.asyncio
 async def test_notifier_does_not_close_injected_http_client(tmp_path) -> None:
     http = FakeHTTPClient()
     notifier = A2APushNotifier(persistence=A2APersistenceStore(tmp_path), http_client=http)
@@ -106,6 +126,117 @@ async def test_push_config_store_persists_configs_by_owner(tmp_path) -> None:
     assert [config.id for config in await store.get_info("task-1", alice)] == ["cfg-1"]
     assert await store.get_info("task-1", bob) == []
     assert [config.id for config in await store.get_info_for_dispatch("task-1")] == ["cfg-1"]
+
+
+@pytest.mark.asyncio
+async def test_push_config_store_uses_filesystem_safe_names_for_protocol_ids(tmp_path) -> None:
+    store = A2APushConfigStore(persistence=A2APersistenceStore(tmp_path))
+    context = ServerCallContext()
+
+    await store.set_info(
+        "task:1",
+        TaskPushNotificationConfig(task_id="task:1", id="cfg:1", url="https://callback.example/a2a"),
+        context,
+    )
+
+    assert [config.id for config in await store.get_info("task:1", context)] == ["cfg:1"]
+    assert [config.id for config in await store.get_info_for_dispatch("task:1")] == ["cfg:1"]
+    assert await store.resolve_headers_for_dispatch("task:1", "cfg:1") == {}
+    assert all(":" not in part for path in tmp_path.rglob("*") for part in path.relative_to(tmp_path).parts)
+
+
+@pytest.mark.asyncio
+async def test_push_config_store_encodes_windows_reserved_protocol_id_basenames(tmp_path) -> None:
+    store = A2APushConfigStore(persistence=A2APersistenceStore(tmp_path))
+    context = ServerCallContext()
+
+    await store.set_info(
+        "CON.txt",
+        TaskPushNotificationConfig(task_id="CON.txt", id="LPT1.json", url="https://callback.example/a2a"),
+        context,
+    )
+
+    assert [config.id for config in await store.get_info("CON.txt", context)] == ["LPT1.json"]
+    assert _protocol_id_file_stem("CON.txt") != "CON.txt"
+    assert _protocol_id_file_stem("LPT1.json") != "LPT1.json"
+    assert not any(part in {"CON.txt", "LPT1.json.json"} for path in tmp_path.rglob("*") for part in path.parts)
+
+
+def test_push_config_store_deduplicates_encoded_and_legacy_configs(monkeypatch, tmp_path) -> None:
+    store = A2APushConfigStore(persistence=A2APersistenceStore(tmp_path))
+    encoded_dir = tmp_path / "encoded"
+    legacy_dir = tmp_path / "legacy"
+    encoded_dir.mkdir()
+    legacy_dir.mkdir()
+    encoded_config = TaskPushNotificationConfig(task_id="task-1", id="cfg-1", url="https://encoded.example/a2a")
+    legacy_duplicate = TaskPushNotificationConfig(task_id="task-1", id="cfg-1", url="https://legacy.example/a2a")
+    legacy_only = TaskPushNotificationConfig(task_id="task-1", id="cfg-2", url="https://legacy2.example/a2a")
+    (encoded_dir / "cfg-1.json").write_text(json.dumps(store._config_to_storage(encoded_config)), encoding="utf-8")
+    (legacy_dir / "cfg-1.json").write_text(json.dumps(store._config_to_storage(legacy_duplicate)), encoding="utf-8")
+    (legacy_dir / "cfg-2.json").write_text(json.dumps(store._config_to_storage(legacy_only)), encoding="utf-8")
+
+    monkeypatch.setattr(
+        store,
+        "_task_dirs_for_id",
+        lambda owner, task_id, *, owner_dir=None: [encoded_dir, legacy_dir],
+    )
+
+    configs = store._load_configs_for_owner("owner", "task-1")
+
+    assert [(config.id, config.url) for config in configs] == [
+        ("cfg-1", "https://encoded.example/a2a"),
+        ("cfg-2", "https://legacy2.example/a2a"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_push_config_store_delete_ignores_unaddressable_legacy_raw_paths(monkeypatch, tmp_path) -> None:
+    store = A2APushConfigStore(persistence=A2APersistenceStore(tmp_path))
+    context = ServerCallContext()
+    await store.set_info(
+        "task:1",
+        TaskPushNotificationConfig(task_id="task:1", id="cfg:1", url="https://callback.example/a2a"),
+        context,
+    )
+
+    original_unlink = Path.unlink
+
+    def windows_unlink(path: Path, *args, **kwargs):
+        if any(":" in part for part in path.parts):
+            raise OSError("WinError 123: invalid filename")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", windows_unlink)
+
+    await store.delete_info("task:1", context, "cfg:1")
+
+    assert await store.get_info("task:1", context) == []
+
+
+@pytest.mark.asyncio
+async def test_push_config_store_delete_propagates_encoded_path_failure(monkeypatch, tmp_path) -> None:
+    store = A2APushConfigStore(persistence=A2APersistenceStore(tmp_path))
+    context = ServerCallContext()
+    await store.set_info(
+        "task:1",
+        TaskPushNotificationConfig(task_id="task:1", id="cfg:1", url="https://callback.example/a2a"),
+        context,
+    )
+
+    encoded_filename = f"{_protocol_id_file_stem('cfg:1')}.json"
+    original_unlink = Path.unlink
+
+    def fail_encoded_unlink(path: Path, *args, **kwargs):
+        if path.name == encoded_filename:
+            raise OSError("encoded delete failed")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_encoded_unlink)
+
+    with pytest.raises(OSError, match="encoded delete failed"):
+        await store.delete_info("task:1", context, "cfg:1")
+
+    assert [config.id for config in await store.get_info("task:1", context)] == ["cfg:1"]
 
 
 @pytest.mark.asyncio
@@ -315,3 +446,31 @@ async def test_push_sender_enqueues_standard_stream_response_without_persisting_
         "X-A2A-Notification-Token": "token-1",
         "Authorization": "Bearer secret",
     }
+
+
+@pytest.mark.asyncio
+async def test_push_sender_ignores_enqueue_failure_for_best_effort_notifications(
+    tmp_path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    store = A2APushConfigStore(persistence=persistence)
+    sender = A2APushSender(config_store=store, queue=FailingPushQueue())
+    context = ServerCallContext()
+    await store.set_info(
+        "task-1",
+        TaskPushNotificationConfig(task_id="task-1", id="cfg-1", url="https://callback.example/a2a"),
+        context,
+    )
+
+    with caplog.at_level("WARNING", logger="iac_code.a2a.push"):
+        await sender.send_notification(
+            "task-1",
+            TaskStatusUpdateEvent(
+                task_id="task-1",
+                context_id="ctx-1",
+                status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+            ),
+        )
+
+    assert "Failed to enqueue A2A push notification for task task-1 config cfg-1" in caplog.text

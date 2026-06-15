@@ -23,7 +23,8 @@ class TestLoadSettingsPermissions:
                         "additional_directories": ["/shared"],
                     }
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         result = load_settings_permissions(f, "user_settings")
         assert "bash(git *)" in result["allow"]
@@ -37,7 +38,7 @@ class TestLoadSettingsPermissions:
 
     def test_no_permissions_section(self, tmp_path):
         f = tmp_path / "settings.yml"
-        f.write_text(yaml.dump({"model": "gpt-4"}))
+        f.write_text(yaml.dump({"model": "gpt-4"}), encoding="utf-8")
         result = load_settings_permissions(f, "user_settings")
         assert result["allow"] == []
 
@@ -46,7 +47,7 @@ class TestLoadPermissionContext:
     def test_basic_load(self, tmp_path, monkeypatch):
         global_settings = tmp_path / ".iac-code" / "settings.yml"
         global_settings.parent.mkdir(parents=True)
-        global_settings.write_text(yaml.dump({"permissions": {"allow": ["bash(git *)"]}}))
+        global_settings.write_text(yaml.dump({"permissions": {"allow": ["bash(git *)"]}}), encoding="utf-8")
         monkeypatch.setattr("iac_code.services.permissions.loader._get_global_settings_path", lambda: global_settings)
         ctx = load_permission_context(str(tmp_path))
         assert ctx.mode == PermissionMode.DEFAULT
@@ -96,7 +97,9 @@ class TestLoadPermissionContext:
         )
         project_dir = tmp_path / ".iac-code"
         project_dir.mkdir()
-        (project_dir / "settings.yml").write_text(yaml.dump({"permissions": {"deny": ["bash(curl *)"]}}))
+        (project_dir / "settings.yml").write_text(
+            yaml.dump({"permissions": {"deny": ["bash(curl *)"]}}), encoding="utf-8"
+        )
         ctx = load_permission_context(str(tmp_path))
         assert "bash(curl *)" in ctx.deny_rules.get("project_settings", [])
 

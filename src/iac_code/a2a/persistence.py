@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
@@ -11,6 +13,23 @@ from iac_code.a2a.types import validate_protocol_id
 from iac_code.utils.file_security import atomic_write_text
 
 _INTERRUPTED_RESTORE_STATES = {"submitted", "working", "auth-required"}
+_FILESYSTEM_SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+_WINDOWS_RESERVED_BASENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+_WINDOWS_RESERVED_DIGIT_TRANSLATION = str.maketrans(
+    {
+        "\N{SUPERSCRIPT ONE}": "1",
+        "\N{SUPERSCRIPT TWO}": "2",
+        "\N{SUPERSCRIPT THREE}": "3",
+    }
+)
+_ENCODED_ID_PREFIX = "a2aid~"
 
 
 @dataclass(frozen=True)
@@ -21,6 +40,7 @@ class A2ATaskSnapshot:
     output_text: list[str] = field(default_factory=list)
     status_message: str = ""
     updated_at: float = field(default_factory=time.time)
+    owner: str = ""
 
 
 @dataclass(frozen=True)
@@ -50,10 +70,13 @@ class A2APersistenceStore:
     def save_task(self, snapshot: A2ATaskSnapshot) -> None:
         task_id = validate_protocol_id(snapshot.task_id)
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
-        self._write_json(self.tasks_dir / f"{task_id}.json", asdict(snapshot))
+        self._write_json(self.tasks_dir / f"{_protocol_id_file_stem(task_id)}.json", asdict(snapshot))
 
     def load_task(self, task_id: str) -> A2ATaskSnapshot | None:
-        data = self._read_json(self.tasks_dir / f"{validate_protocol_id(task_id)}.json")
+        task_id = validate_protocol_id(task_id)
+        data = self._read_json(self.tasks_dir / f"{_protocol_id_file_stem(task_id)}.json")
+        if data is None and _protocol_id_file_stem(task_id) != task_id:
+            data = self._read_json(self.tasks_dir / f"{task_id}.json")
         if data is None:
             return None
         return self._task_from_dict(data)
@@ -67,8 +90,10 @@ class A2APersistenceStore:
                 task_id=snapshot.task_id,
                 context_id=snapshot.context_id,
                 state="interrupted",
+                owner=snapshot.owner,
                 output_text=snapshot.output_text,
                 status_message="Task was interrupted by process exit and cannot be revived automatically.",
+                updated_at=snapshot.updated_at,
             )
             self.save_task(interrupted)
             return interrupted
@@ -90,10 +115,13 @@ class A2APersistenceStore:
     def save_context(self, snapshot: A2AContextSnapshot) -> None:
         context_id = validate_protocol_id(snapshot.context_id)
         self.contexts_dir.mkdir(parents=True, exist_ok=True)
-        self._write_json(self.contexts_dir / f"{context_id}.json", asdict(snapshot))
+        self._write_json(self.contexts_dir / f"{_protocol_id_file_stem(context_id)}.json", asdict(snapshot))
 
     def load_context(self, context_id: str) -> A2AContextSnapshot | None:
-        data = self._read_json(self.contexts_dir / f"{validate_protocol_id(context_id)}.json")
+        context_id = validate_protocol_id(context_id)
+        data = self._read_json(self.contexts_dir / f"{_protocol_id_file_stem(context_id)}.json")
+        if data is None and _protocol_id_file_stem(context_id) != context_id:
+            data = self._read_json(self.contexts_dir / f"{context_id}.json")
         if data is None:
             return None
         return self._context_from_dict(data)
@@ -131,12 +159,14 @@ class A2APersistenceStore:
         output_text = (
             [item for item in raw_output_text if isinstance(item, str)] if isinstance(raw_output_text, list) else []
         )
+        owner = data.get("owner")
         status_message = data.get("status_message")
         updated_at = data.get("updated_at")
         return A2ATaskSnapshot(
             task_id=task_id,
             context_id=context_id,
             state=state,
+            owner=owner if isinstance(owner, str) else "",
             output_text=output_text,
             status_message=status_message if isinstance(status_message, str) else "",
             updated_at=float(updated_at) if isinstance(updated_at, (int, float)) else time.time(),
@@ -185,3 +215,16 @@ class A2APersistenceStore:
         except (OSError, json.JSONDecodeError):
             return None
         return data if isinstance(data, dict) else None
+
+
+def _protocol_id_file_stem(value: str) -> str:
+    protocol_id = validate_protocol_id(value)
+    basename = protocol_id.rstrip(".").split(".", 1)[0].upper().translate(_WINDOWS_RESERVED_DIGIT_TRANSLATION)
+    if (
+        _FILESYSTEM_SAFE_ID_PATTERN.fullmatch(protocol_id) is not None
+        and protocol_id == protocol_id.rstrip(".")
+        and basename not in _WINDOWS_RESERVED_BASENAMES
+    ):
+        return protocol_id
+    encoded = base64.urlsafe_b64encode(protocol_id.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"{_ENCODED_ID_PREFIX}{encoded}"

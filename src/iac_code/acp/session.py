@@ -12,10 +12,11 @@ from typing import Any
 
 import acp
 
-from iac_code.acp.convert import ACPEventConverter, acp_blocks_to_prompt_text
+from iac_code.a2a.artifacts import sanitize_public_tool_output_data
+from iac_code.acp.convert import ACPEventConverter, _tool_kind, acp_blocks_to_prompt_text
 from iac_code.acp.metrics import ACPMetrics
 from iac_code.acp.slash_registry import ACPSlashRegistry
-from iac_code.acp.state import TurnState
+from iac_code.acp.state import TurnState, display_tool_title
 from iac_code.acp.tools import ACPTerminalBashTool
 from iac_code.acp.types import ACPContentBlock
 from iac_code.agent.message import (
@@ -30,6 +31,7 @@ from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
 from iac_code.types.permissions import PermissionDecision
 from iac_code.types.stream_events import PermissionRequestEvent
+from iac_code.utils.public_errors import public_error
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +64,45 @@ def _is_auth_error(exc: Exception) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _history_message_to_updates(msg: Message) -> list[Any]:
+def _history_tool_call_id(tool_use_id: str, history_index: int) -> str:
+    return f"history/{history_index}/{tool_use_id}"
+
+
+def _history_tool_content(text: str) -> acp.schema.ContentToolCallContent:
+    return acp.schema.ContentToolCallContent(
+        type="content",
+        content=acp.schema.TextContentBlock(type="text", text=text),
+    )
+
+
+def _history_tool_result_text(value: Any) -> str:
+    sanitized = sanitize_public_tool_output_data(value)
+    if isinstance(sanitized, str):
+        return sanitized
+    return json.dumps(sanitized, ensure_ascii=False, default=str)
+
+
+def _history_message_to_updates(
+    msg: Message,
+    *,
+    history_index: int = 0,
+    tool_call_ids: dict[str, str] | None = None,
+) -> list[Any]:
     """Convert a single persisted *Message* to a list of ACP session updates.
 
     * **user** messages become ``UserMessageUpdate`` (ACP "user_message").
     * **assistant** text / thinking become ``AgentMessageChunk`` / ``AgentThoughtChunk``.
-    * **assistant** tool-use blocks become ``ToolCallStart`` then a completed
-      ``ToolCallProgress``.
-    * **user** tool-result blocks are emitted as completed ``ToolCallProgress``.
+    * **assistant** tool-use blocks become ``ToolCallStart`` then an
+      in-progress input update.
+    * **user** tool-result blocks are emitted as an in-progress content update
+      followed by a terminal ``ToolCallProgress``.
     """
     if is_recalled_memory_message(msg):
         return []
 
     updates: list[Any] = []
     content = msg.content
+    tool_call_ids = tool_call_ids if tool_call_ids is not None else {}
 
     if msg.role == "user":
         # Simple text prompt
@@ -92,17 +119,24 @@ def _history_message_to_updates(msg: Message) -> list[Any]:
         for block in content:
             if isinstance(block, ToolResultBlock):
                 status = "failed" if block.is_error else "completed"
+                text = _history_tool_result_text(block.content)
+                tool_call_id = tool_call_ids.get(block.tool_use_id) or _history_tool_call_id(
+                    block.tool_use_id,
+                    history_index,
+                )
                 updates.append(
                     acp.schema.ToolCallProgress(
                         session_update="tool_call_update",
-                        tool_call_id=block.tool_use_id,
+                        tool_call_id=tool_call_id,
+                        status="in_progress",
+                        content=[_history_tool_content(text)],
+                    )
+                )
+                updates.append(
+                    acp.schema.ToolCallProgress(
+                        session_update="tool_call_update",
+                        tool_call_id=tool_call_id,
                         status=status,
-                        content=[
-                            acp.schema.ContentToolCallContent(
-                                type="content",
-                                content=acp.schema.TextContentBlock(type="text", text=block.content),
-                            )
-                        ],
                     )
                 )
         return updates
@@ -133,26 +167,24 @@ def _history_message_to_updates(msg: Message) -> list[Any]:
                 )
             )
         elif isinstance(block, ToolUseBlock):
+            tool_call_id = _history_tool_call_id(block.id, history_index)
+            tool_call_ids[block.id] = tool_call_id
             updates.append(
                 acp.schema.ToolCallStart(
                     session_update="tool_call",
-                    tool_call_id=block.id,
-                    title=block.name,
-                    status="completed",
+                    tool_call_id=tool_call_id,
+                    title=display_tool_title(block.name),
+                    kind=_tool_kind(block.name),
+                    status="pending",
                 )
             )
             input_text = json.dumps(block.input, ensure_ascii=False) if block.input else ""
             updates.append(
                 acp.schema.ToolCallProgress(
                     session_update="tool_call_update",
-                    tool_call_id=block.id,
-                    status="completed",
-                    content=[
-                        acp.schema.ContentToolCallContent(
-                            type="content",
-                            content=acp.schema.TextContentBlock(type="text", text=input_text),
-                        )
-                    ],
+                    tool_call_id=tool_call_id,
+                    status="in_progress",
+                    content=[_history_tool_content(input_text)],
                 )
             )
     return updates
@@ -250,8 +282,9 @@ class ACPSession:
         ``load_session`` or ``fork_session``.
         """
         replay_batch_size = 50
+        tool_call_ids: dict[str, str] = {}
         for i, msg in enumerate(messages):
-            updates = _history_message_to_updates(msg)
+            updates = _history_message_to_updates(msg, history_index=i, tool_call_ids=tool_call_ids)
             for update in updates:
                 await self._conn.session_update(session_id=self.id, update=update)
             if (i + 1) % replay_batch_size == 0:
@@ -377,7 +410,13 @@ class ACPSession:
                     }
                 ) from exc
             logger.error("ACP session %s: unhandled error: %s", self.id, exc, exc_info=True)
-            raise acp.RequestError.internal_error({"error": str(exc)}) from exc
+            failure = public_error(message=f"{type(exc).__name__}: {exc}", error_type=type(exc).__name__)
+            raise acp.RequestError.internal_error(
+                {
+                    "error": failure.summary,
+                    "error_id": failure.error_id,
+                }
+            ) from exc
         finally:
             self._current_task = None
             duration_ms = (time.monotonic() - prompt_start) * 1000
@@ -517,7 +556,8 @@ class ACPSession:
         )
 
         # Build content with command details and suggested rule.
-        content_text = "Approve tool call: {}\nInput: {}".format(tool_name, event.tool_input)
+        tool_title = display_tool_title(tool_name)
+        content_text = "Approve tool call: {}\nInput: {}".format(tool_title, event.tool_input)
         if suggestions:
             content_text += "\nSuggested rule: {}".format(",".join(s.rule_content for s in suggestions))
 
@@ -526,7 +566,7 @@ class ACPSession:
             self.id,
             acp.schema.ToolCallUpdate(
                 tool_call_id="permission/{}".format(event.tool_use_id),
-                title=event.tool_name,
+                title=tool_title,
                 content=[
                     acp.schema.ContentToolCallContent(
                         type="content",

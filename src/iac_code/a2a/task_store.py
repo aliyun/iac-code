@@ -5,20 +5,33 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, TypeAlias
 
 from a2a.server.context import ServerCallContext
 from a2a.server.tasks import TaskStore
 from a2a.server.tasks.inmemory_task_store import DEFAULT_LIST_TASKS_PAGE_SIZE, decode_page_token, encode_page_token
 from a2a.server.tasks.inmemory_task_store import resolve_user_scope as default_owner_resolver
-from a2a.types import ListTasksRequest, ListTasksResponse, Task
+from a2a.types import ListTasksRequest, ListTasksResponse, Message, Part, Role, Task, TaskState, TaskStatus
 from a2a.utils.errors import InvalidParamsError
 
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
-from iac_code.a2a.types import A2AContextRecord, A2ATaskRecord, validate_protocol_id
+from iac_code.a2a.types import (
+    TASK_STATE_CANCELED,
+    TASK_STATE_COMPLETED,
+    TASK_STATE_FAILED,
+    TASK_STATE_INPUT_REQUIRED,
+    TASK_STATE_SUBMITTED,
+    TASK_STATE_WORKING,
+    A2AContextRecord,
+    A2ATaskRecord,
+    validate_protocol_id,
+)
+from iac_code.i18n import _
 
 logger = logging.getLogger(__name__)
+A2ATaskSnapshotList: TypeAlias = list[A2ATaskSnapshot]
 
 
 class A2ATaskStore(TaskStore):
@@ -45,8 +58,17 @@ class A2ATaskStore(TaskStore):
         self._owner_resolver = owner_resolver
 
     async def get(self, task_id: str, context: ServerCallContext | None = None) -> Task | None:
-        task = self._owner_tasks(context).get(validate_protocol_id(task_id))
-        return _copy_task(task) if task is not None else None
+        owner = self._owner(context)
+        task_id = validate_protocol_id(task_id)
+        task = self._sdk_tasks.get(owner, {}).get(task_id)
+        if task is not None:
+            return _copy_task(task)
+        if self._persistence is None:
+            return None
+        snapshot = self._load_task_snapshot(task_id)
+        if snapshot is None or snapshot.owner != owner:
+            return None
+        return _task_from_snapshot(snapshot) if snapshot is not None else None
 
     async def save(self, task: Task, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
@@ -58,6 +80,23 @@ class A2ATaskStore(TaskStore):
                 self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
             owner_tasks[task_id] = _copy_task(task)
             self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
+            record = self._tasks.get(task_id)
+            if record is None:
+                record = A2ATaskRecord(
+                    task_id=task_id,
+                    context_id=task.context_id,
+                    state=_task_state_from_sdk_task(task),
+                    owner=owner,
+                    updated_at=_task_updated_at_from_sdk_task(task),
+                )
+                self._tasks[task_id] = record
+                self._metrics.record_task_created()
+            else:
+                record.state = _task_state_from_sdk_task(task)
+                record.owner = owner
+                record.updated_at = _task_updated_at_from_sdk_task(task)
+                record.touch()
+            self._mirror_task(record)
 
     async def delete(self, task_id: str, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
@@ -79,25 +118,29 @@ class A2ATaskStore(TaskStore):
             tasks = [owner_tasks[task_id] for task_id in task_ids if task_id in owner_tasks]
         else:
             tasks = list(owner_tasks.values())
+        if self._persistence is not None:
+            known_task_ids = {task.id for task in tasks}
+            tasks.extend(
+                _task_from_snapshot(snapshot)
+                for snapshot in self._list_task_snapshots(owner)
+                if snapshot.task_id not in known_task_ids
+                and (not params.context_id or snapshot.context_id == params.context_id)
+            )
 
         if params.status:
             tasks = [task for task in tasks if task.status.state == params.status]
         if params.HasField("status_timestamp_after"):
-            after = params.status_timestamp_after.ToJsonString()
+            after = _timestamp_key(params.status_timestamp_after)
             tasks = [
                 task
                 for task in tasks
-                if task.HasField("status")
-                and task.status.HasField("timestamp")
-                and task.status.timestamp.ToJsonString() >= after
+                if (timestamp_key := _task_status_timestamp_key(task)) is not None and timestamp_key >= after
             ]
 
         tasks.sort(
             key=lambda task: (
-                task.status.HasField("timestamp") if task.HasField("status") else False,
-                task.status.timestamp.ToJsonString()
-                if task.HasField("status") and task.status.HasField("timestamp")
-                else "",
+                (timestamp_key := _task_status_timestamp_key(task)) is not None,
+                timestamp_key or (0, 0),
                 task.id,
             ),
             reverse=True,
@@ -125,19 +168,42 @@ class A2ATaskStore(TaskStore):
             total_size=total_size,
         )
 
-    async def get_or_create_task(self, *, task_id: str | None, context_id: str) -> A2ATaskRecord:
+    async def get_or_create_task(
+        self,
+        *,
+        task_id: str | None,
+        context_id: str,
+        owner: str | None = None,
+        restore_interrupted: bool = True,
+    ) -> A2ATaskRecord:
         context_id = validate_protocol_id(context_id)
         task_id = validate_protocol_id(task_id or str(uuid.uuid4()))
         async with self._mutation_lock:
             if task_id in self._expired_task_tombstones:
-                raise ValueError("A2A task expired")
+                raise ValueError(_("A2A task expired"))
             record = self._tasks.get(task_id)
             if record is None:
-                record = A2ATaskRecord(task_id=task_id, context_id=context_id)
+                snapshot = self._load_task_snapshot(task_id)
+                if snapshot is not None:
+                    if snapshot.context_id != context_id:
+                        raise ValueError(_("Task belongs to a different context"))
+                    if owner is not None and snapshot.owner and snapshot.owner != owner:
+                        raise ValueError(_("Task belongs to a different owner"))
+                    if restore_interrupted:
+                        snapshot = self._restore_task_snapshot(task_id) or snapshot
+                    record = _record_from_snapshot(snapshot)
+                    if owner is not None and not record.owner:
+                        record.owner = owner
+                else:
+                    record = A2ATaskRecord(task_id=task_id, context_id=context_id, owner=owner or "")
                 self._tasks[task_id] = record
                 self._metrics.record_task_created()
             elif record.context_id != context_id:
-                raise ValueError("Task belongs to a different context")
+                raise ValueError(_("Task belongs to a different context"))
+            elif owner is not None:
+                if record.owner and record.owner != owner:
+                    raise ValueError(_("Task belongs to a different owner"))
+                record.owner = owner
             record.touch()
             self._mirror_task(record)
             return record
@@ -154,9 +220,9 @@ class A2ATaskStore(TaskStore):
             if context_id in self._contexts:
                 record = self._contexts[context_id]
                 if record.expired:
-                    raise ValueError("A2A context expired")
+                    raise ValueError(_("A2A context expired"))
                 if record.cwd != cwd:
-                    raise ValueError("A2A context belongs to a different workspace")
+                    raise ValueError(_("A2A context belongs to a different workspace"))
                 record.touch()
                 self._mirror_context(record)
                 return record
@@ -166,7 +232,7 @@ class A2ATaskStore(TaskStore):
                 snapshot = self._persistence.load_context(context_id)
                 if snapshot is not None:
                     if snapshot.cwd != cwd:
-                        raise ValueError("A2A context belongs to a different workspace")
+                        raise ValueError(_("A2A context belongs to a different workspace"))
                     session_id = snapshot.session_id
 
             if session_id is None:
@@ -182,10 +248,61 @@ class A2ATaskStore(TaskStore):
             self._mirror_context(record)
             return record
 
+    async def get_context_record(self, context_id: str) -> A2AContextRecord:
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            record = self._contexts.get(context_id)
+            if record is not None:
+                return A2AContextRecord(
+                    context_id=record.context_id,
+                    session_id=record.session_id,
+                    cwd=record.cwd,
+                    active_task_id=record.active_task_id,
+                    expired=record.expired,
+                    created_at=record.created_at,
+                    last_active=record.last_active,
+                )
+
+            if self._persistence is not None:
+                snapshot = self._persistence.load_context(context_id)
+                if snapshot is not None:
+                    return A2AContextRecord(
+                        context_id=snapshot.context_id,
+                        session_id=snapshot.session_id,
+                        cwd=snapshot.cwd,
+                        active_task_id=snapshot.active_task_id,
+                    )
+
+        raise ValueError(_("A2A context not found"))
+
+    async def get_task_record(self, task_id: str) -> A2ATaskRecord:
+        task_id = validate_protocol_id(task_id)
+        async with self._mutation_lock:
+            record = self._tasks.get(task_id)
+            if record is not None:
+                return A2ATaskRecord(
+                    task_id=record.task_id,
+                    context_id=record.context_id,
+                    state=record.state,
+                    owner=record.owner,
+                    output_text=list(record.output_text),
+                    expired=record.expired,
+                    updated_at=record.updated_at,
+                    created_at=record.created_at,
+                    last_active=record.last_active,
+                )
+
+            if self._persistence is not None:
+                snapshot = self._load_task_snapshot(task_id)
+                if snapshot is not None:
+                    return _record_from_snapshot(snapshot)
+
+        raise ValueError(_("A2A task not found"))
+
     async def ensure_task_not_expired(self, task_id: str) -> None:
         async with self._mutation_lock:
             if validate_protocol_id(task_id) in self._expired_task_tombstones:
-                raise ValueError("A2A task expired")
+                raise ValueError(_("A2A task expired"))
 
     async def cancel_task(self, task_id: str) -> bool:
         async with self._mutation_lock:
@@ -201,6 +318,7 @@ class A2ATaskStore(TaskStore):
             return bool(record is not None and record.active_task is not None and not record.active_task.done())
 
     def mirror_task(self, record: A2ATaskRecord) -> None:
+        record.updated_at = time.time()
         self._mirror_task(record)
 
     def mirror_context(self, record: A2AContextRecord) -> None:
@@ -265,7 +383,9 @@ class A2ATaskStore(TaskStore):
                     task_id=record.task_id,
                     context_id=record.context_id,
                     state=record.state,
+                    owner=record.owner,
                     output_text=list(record.output_text),
+                    updated_at=record.updated_at,
                 )
             )
         except Exception:
@@ -285,6 +405,52 @@ class A2ATaskStore(TaskStore):
             )
         except Exception:
             logger.exception("Failed to persist A2A context %s", record.context_id)
+
+    def _load_task_snapshot(self, task_id: str) -> A2ATaskSnapshot | None:
+        if self._persistence is None:
+            return None
+        load_task = getattr(self._persistence, "load_task", None)
+        if load_task is None:
+            return None
+        try:
+            return load_task(task_id)
+        except Exception:
+            logger.exception("Failed to load persisted A2A task %s", task_id)
+            return None
+
+    def _restore_task_snapshot(self, task_id: str) -> A2ATaskSnapshot | None:
+        if self._persistence is None:
+            return None
+        restore_task = getattr(self._persistence, "restore_task", None)
+        if restore_task is None:
+            return self._load_task_snapshot(task_id)
+        try:
+            return restore_task(task_id)
+        except Exception:
+            logger.exception("Failed to restore persisted A2A task %s", task_id)
+            return None
+
+    def _list_task_snapshots(self, owner: str) -> A2ATaskSnapshotList:
+        if self._persistence is None:
+            return []
+        list_tasks = getattr(self._persistence, "list_tasks", None)
+        if list_tasks is None:
+            return []
+        try:
+            snapshots = list_tasks()
+        except Exception:
+            logger.exception("Failed to list persisted A2A tasks")
+            return []
+        restored: list[A2ATaskSnapshot] = []
+        for snapshot in snapshots:
+            if not isinstance(snapshot, A2ATaskSnapshot):
+                continue
+            if snapshot.owner == owner:
+                restored.append(snapshot)
+        return restored
+
+    def owner_for_context(self, context: ServerCallContext | None) -> str:
+        return self._owner(context)
 
     def _owner(self, context: ServerCallContext | None) -> str:
         if context is None:
@@ -318,3 +484,85 @@ def _project_task(task: Task, *, include_artifacts: bool) -> Task:
     if not include_artifacts:
         projected.ClearField("artifacts")
     return projected
+
+
+def _record_from_snapshot(snapshot: A2ATaskSnapshot) -> A2ATaskRecord:
+    return A2ATaskRecord(
+        task_id=snapshot.task_id,
+        context_id=snapshot.context_id,
+        state=snapshot.state,
+        owner=snapshot.owner,
+        output_text=list(snapshot.output_text),
+        updated_at=snapshot.updated_at,
+    )
+
+
+def _task_from_snapshot(snapshot: A2ATaskSnapshot) -> Task:
+    status_message = None
+    if snapshot.status_message:
+        status_message = Message(
+            message_id=f"{snapshot.task_id}-restored",
+            task_id=snapshot.task_id,
+            context_id=snapshot.context_id,
+            role=Role.ROLE_AGENT,
+            parts=[Part(text=snapshot.status_message)],
+        )
+    status = TaskStatus(
+        state=TaskState.Name(_task_state_to_a2a_state(snapshot.state)),
+        message=status_message,
+        timestamp=_timestamp_from_epoch(snapshot.updated_at),
+    )
+    return Task(id=snapshot.task_id, context_id=snapshot.context_id, status=status)
+
+
+def _task_state_to_a2a_state(state: str) -> int:
+    if state == TASK_STATE_COMPLETED:
+        return TaskState.TASK_STATE_COMPLETED
+    if state == TASK_STATE_FAILED:
+        return TaskState.TASK_STATE_FAILED
+    if state == TASK_STATE_CANCELED:
+        return TaskState.TASK_STATE_CANCELED
+    if state == TASK_STATE_WORKING:
+        return TaskState.TASK_STATE_WORKING
+    if state == TASK_STATE_SUBMITTED:
+        return TaskState.TASK_STATE_SUBMITTED
+    if state == TASK_STATE_INPUT_REQUIRED:
+        return TaskState.TASK_STATE_INPUT_REQUIRED
+    return TaskState.TASK_STATE_INPUT_REQUIRED
+
+
+def _task_state_from_sdk_task(task: Task) -> str:
+    if not task.HasField("status"):
+        return TASK_STATE_SUBMITTED
+    state = task.status.state
+    if state == TaskState.TASK_STATE_COMPLETED:
+        return TASK_STATE_COMPLETED
+    if state == TaskState.TASK_STATE_FAILED:
+        return TASK_STATE_FAILED
+    if state == TaskState.TASK_STATE_CANCELED:
+        return TASK_STATE_CANCELED
+    if state == TaskState.TASK_STATE_WORKING:
+        return TASK_STATE_WORKING
+    if state == TaskState.TASK_STATE_INPUT_REQUIRED:
+        return TASK_STATE_INPUT_REQUIRED
+    return TASK_STATE_SUBMITTED
+
+
+def _task_updated_at_from_sdk_task(task: Task) -> float:
+    if task.HasField("status") and task.status.HasField("timestamp"):
+        return float(task.status.timestamp.seconds) + (float(task.status.timestamp.nanos) / 1_000_000_000)
+    return time.time()
+
+
+def _task_status_timestamp_key(task: Task) -> tuple[int, int] | None:
+    if not task.HasField("status") or not task.status.HasField("timestamp"):
+        return None
+    return _timestamp_key(task.status.timestamp)
+
+
+def _timestamp_key(timestamp: Any) -> tuple[int, int]:
+    return (int(getattr(timestamp, "seconds", 0)), int(getattr(timestamp, "nanos", 0)))
+
+
+def _timestamp_from_epoch(value: float) -> datetime:
+    return datetime.fromtimestamp(value, tz=timezone.utc)
