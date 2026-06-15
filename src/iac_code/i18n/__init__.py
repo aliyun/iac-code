@@ -72,6 +72,24 @@ _TYPER_CLICK_STRINGS = [
     _("Aborted!"),
 ]
 
+# Legacy strings retained so translation catalogs do not drop entries from
+# feature branches when the code path or command wording moves during rebases.
+_LEGACY_FEATURE_PIPELINE_STRINGS = [
+    _("No active AgentLoop context is available."),
+    _("No pending model call context is available for the current pipeline state."),
+    _("Prompt command requires a context."),
+    _("Prompt context written to {path} and opened in browser."),
+    _("Prompt context written to {path}. Open it in a browser if it did not appear."),
+    _("Show the current model prompt context"),
+    _("Usage: /memory [<name>|search <query>|delete <name>|help]"),
+    _("sed in-place edit requires confirmation"),
+    _("{n} day{s} ago"),
+    _("{n} hour{s} ago"),
+    _("{n} message{s}"),
+    _("{n} minute{s} ago"),
+    _("{n} more line{s}"),
+]
+
 
 def get_current_language() -> str:
     """Return the currently detected language code (e.g., 'zh', 'en')."""

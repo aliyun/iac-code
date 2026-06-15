@@ -21,7 +21,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from iac_code.config import get_config_dir, get_settings_path
 from iac_code.services.telemetry.attributes import AttributeBuilder
-from iac_code.services.telemetry.config import is_telemetry_disabled
+from iac_code.services.telemetry.config import is_telemetry_disabled, is_telemetry_endpoint_allowed
 from iac_code.services.telemetry.events import EventEmitter
 from iac_code.services.telemetry.fallback import FallbackStore
 from iac_code.services.telemetry.identity import Identity
@@ -200,36 +200,47 @@ class TelemetryClient:
 
     # -------- Default OTLP backend wiring helpers --------
 
+    @staticmethod
+    def _allowed_endpoint(endpoint: str) -> str:
+        endpoint = endpoint.strip()
+        if endpoint and is_telemetry_endpoint_allowed(endpoint):
+            return endpoint
+        return ""
+
+    @staticmethod
+    def _otlp_signal_endpoint(base: str, signal: str) -> str:
+        return f"{base.rstrip('/')}/v1/{signal}"
+
     @classmethod
     def _traces_endpoint(cls) -> str:
         """Full URL for traces export. Per-signal override > base + suffix > fallback."""
-        override = os.environ.get("IAC_CODE_TELEMETRY_TRACES_ENDPOINT", "").strip()
+        override = cls._allowed_endpoint(os.environ.get("IAC_CODE_TELEMETRY_TRACES_ENDPOINT", ""))
         if override:
             return override
-        base = os.environ.get("IAC_CODE_TELEMETRY_ENDPOINT", "").strip()
+        base = cls._allowed_endpoint(os.environ.get("IAC_CODE_TELEMETRY_ENDPOINT", ""))
         if base:
             return f"{base}/v1/traces"
-        return cls._DEFAULT_TRACES_ENDPOINT_FALLBACK
+        return cls._allowed_endpoint(cls._DEFAULT_TRACES_ENDPOINT_FALLBACK)
 
     @classmethod
     def _metrics_endpoint(cls) -> str:
-        override = os.environ.get("IAC_CODE_TELEMETRY_METRICS_ENDPOINT", "").strip()
+        override = cls._allowed_endpoint(os.environ.get("IAC_CODE_TELEMETRY_METRICS_ENDPOINT", ""))
         if override:
             return override
-        base = os.environ.get("IAC_CODE_TELEMETRY_ENDPOINT", "").strip()
+        base = cls._allowed_endpoint(os.environ.get("IAC_CODE_TELEMETRY_ENDPOINT", ""))
         if base:
             return f"{base}/v1/metrics"
-        return cls._DEFAULT_METRICS_ENDPOINT_FALLBACK
+        return cls._allowed_endpoint(cls._DEFAULT_METRICS_ENDPOINT_FALLBACK)
 
     @classmethod
     def _logs_endpoint(cls) -> str:
-        override = os.environ.get("IAC_CODE_TELEMETRY_LOGS_ENDPOINT", "").strip()
+        override = cls._allowed_endpoint(os.environ.get("IAC_CODE_TELEMETRY_LOGS_ENDPOINT", ""))
         if override:
             return override
-        base = os.environ.get("IAC_CODE_TELEMETRY_ENDPOINT", "").strip()
+        base = cls._allowed_endpoint(os.environ.get("IAC_CODE_TELEMETRY_ENDPOINT", ""))
         if base:
             return f"{base}/v1/logs"
-        return cls._DEFAULT_LOGS_ENDPOINT_FALLBACK
+        return cls._allowed_endpoint(cls._DEFAULT_LOGS_ENDPOINT_FALLBACK)
 
     @classmethod
     def _default_headers(cls) -> dict[str, str]:
@@ -280,17 +291,43 @@ class TelemetryClient:
             timeout=10,
         )
 
-    @staticmethod
-    def _user_otlp_enabled() -> bool:
-        return bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")) and not is_telemetry_disabled()
+    @classmethod
+    def _user_otlp_enabled(cls) -> bool:
+        return (
+            bool(cls._user_traces_endpoint() or cls._user_metrics_endpoint() or cls._user_logs_endpoint())
+            and not is_telemetry_disabled()
+        )
+
+    @classmethod
+    def _user_traces_endpoint(cls) -> str:
+        return cls._user_signal_endpoint("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "traces")
+
+    @classmethod
+    def _user_metrics_endpoint(cls) -> str:
+        return cls._user_signal_endpoint("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "metrics")
+
+    @classmethod
+    def _user_logs_endpoint(cls) -> str:
+        return cls._user_signal_endpoint("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "logs")
+
+    @classmethod
+    def _user_signal_endpoint(cls, override_env: str, signal: str) -> str:
+        override = cls._allowed_endpoint(os.environ.get(override_env, ""))
+        if override:
+            return override
+        base = cls._allowed_endpoint(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
+        if base:
+            return cls._otlp_signal_endpoint(base, signal)
+        return ""
 
     def _maybe_append_user_metric_reader(self, readers: list) -> None:
-        if not self._user_otlp_enabled():
+        endpoint = self._user_metrics_endpoint()
+        if not endpoint or is_telemetry_disabled():
             return
         try:
             readers.append(
                 PeriodicExportingMetricReader(
-                    OTLPMetricExporter(),  # reads env
+                    OTLPMetricExporter(endpoint=endpoint),
                     export_interval_millis=_METRICS_EXPORT_INTERVAL_MS,
                 )
             )
@@ -298,12 +335,13 @@ class TelemetryClient:
             log.warning("Failed to wire user OTLP metric exporter: %s", e)
 
     def _maybe_append_user_log_processor(self, provider: LoggerProvider) -> None:
-        if not self._user_otlp_enabled():
+        endpoint = self._user_logs_endpoint()
+        if not endpoint or is_telemetry_disabled():
             return
         try:
             provider.add_log_record_processor(
                 BatchLogRecordProcessor(
-                    OTLPLogExporter(),
+                    OTLPLogExporter(endpoint=endpoint),
                     schedule_delay_millis=_EVENTS_BATCH_DELAY_MS,
                     max_export_batch_size=_EVENTS_BATCH_MAX_SIZE,
                 )
@@ -312,10 +350,11 @@ class TelemetryClient:
             log.warning("Failed to wire user OTLP log exporter: %s", e)
 
     def _maybe_append_user_span_processor(self, provider: TracerProvider) -> None:
-        if not self._user_otlp_enabled():
+        endpoint = self._user_traces_endpoint()
+        if not endpoint or is_telemetry_disabled():
             return
         try:
-            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
         except Exception as e:
             log.warning("Failed to wire user OTLP span exporter: %s", e)
 

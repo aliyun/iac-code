@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local OTLP Pipeline Test Console</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Local OTLP Pipeline Test Console</h1>
+        <p>Receive OTLP traces, logs, and metrics locally. Drill into Pipeline -> Step -> AgentLoop -> Raw payload.</p>
+      </div>
+      <div class="badges">
+        <span>POST /v1/traces</span>
+        <span>POST /v1/logs</span>
+        <span>POST /v1/metrics</span>
+      </div>
+    </header>
+    <main class="layout">
+      <aside class="panel">
+        <div class="panel-title">Runs & Controls</div>
+        <div class="controls">
+          <button id="clear">Clear</button>
+          <button id="demo-off">Demo debug off</button>
+          <button id="demo-on">Demo debug on</button>
+          <a id="export" href="/api/export">Export JSONL</a>
+        </div>
+        <pre id="env">export IAC_CODE_TELEMETRY_ENDPOINT=&lt;this web origin&gt;
+export IAC_CODE_ENABLE_LOCAL_TELEMETRY=1
+export OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=SPAN_AND_EVENT</pre>
+        <div id="health"></div>
+        <div id="runs"></div>
+      </aside>
+      <section class="panel">
+        <div class="panel-title">Pipeline Drill-down</div>
+        <div id="pipeline" class="tree"></div>
+      </section>
+      <aside class="panel">
+        <div class="panel-title">Assertions & Raw Evidence</div>
+        <label class="field">
+          Expected raw content
+          <select id="raw-mode">
+            <option value="off">off</option>
+            <option value="on">on</option>
+          </select>
+        </label>
+        <div id="assertions"></div>
+        <details open>
+          <summary>Recent raw records</summary>
+          <pre id="raw"></pre>
+        </details>
+      </aside>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

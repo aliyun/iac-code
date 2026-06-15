@@ -44,9 +44,9 @@ class TestGrepTool:
     @pytest.mark.asyncio
     async def test_basic_search_matches_across_files(self, tmp_path, grep_tool):
         """Test basic search matching across files."""
-        (tmp_path / "alpha.py").write_text("def hello_world():\n    pass\n")
-        (tmp_path / "beta.py").write_text("def greet():\n    print('hello')\n")
-        (tmp_path / "gamma.py").write_text("def unrelated():\n    return 42\n")
+        (tmp_path / "alpha.py").write_text("def hello_world():\n    pass\n", encoding="utf-8")
+        (tmp_path / "beta.py").write_text("def greet():\n    print('hello')\n", encoding="utf-8")
+        (tmp_path / "gamma.py").write_text("def unrelated():\n    return 42\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -63,9 +63,9 @@ class TestGrepTool:
     @pytest.mark.asyncio
     async def test_glob_filter_limits_to_py_files(self, tmp_path, grep_tool):
         """Test that glob filter limits search to matching files."""
-        (tmp_path / "match.py").write_text("target_string here\n")
-        (tmp_path / "ignore.txt").write_text("target_string here\n")
-        (tmp_path / "also_ignore.md").write_text("target_string here\n")
+        (tmp_path / "match.py").write_text("target_string here\n", encoding="utf-8")
+        (tmp_path / "ignore.txt").write_text("target_string here\n", encoding="utf-8")
+        (tmp_path / "also_ignore.md").write_text("target_string here\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -86,7 +86,7 @@ class TestGrepTool:
     async def test_content_output_mode_shows_matching_lines_with_line_numbers(self, tmp_path, grep_tool):
         """Test content output mode shows matching lines with line numbers."""
         content = "line one\nfind_me here\nline three\nfind_me again\n"
-        (tmp_path / "sample.py").write_text(content)
+        (tmp_path / "sample.py").write_text(content, encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -108,7 +108,7 @@ class TestGrepTool:
     @pytest.mark.asyncio
     async def test_no_matches_returns_no_matches(self, tmp_path, grep_tool):
         """Test that no matches returns 'No matches'."""
-        (tmp_path / "file.py").write_text("nothing interesting here\n")
+        (tmp_path / "file.py").write_text("nothing interesting here\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -122,7 +122,7 @@ class TestGrepTool:
     @pytest.mark.asyncio
     async def test_case_insensitive_search(self, tmp_path, grep_tool):
         """Test case insensitive search."""
-        (tmp_path / "file.py").write_text("Hello World\nHELLO WORLD\nhello world\n")
+        (tmp_path / "file.py").write_text("Hello World\nHELLO WORLD\nhello world\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -141,7 +141,7 @@ class TestGrepTool:
     @pytest.mark.asyncio
     async def test_case_sensitive_search_by_default(self, tmp_path, grep_tool):
         """Test that search is case-sensitive by default."""
-        (tmp_path / "file.py").write_text("Hello World\nhello world\n")
+        (tmp_path / "file.py").write_text("Hello World\nhello world\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         # Search for uppercase HELLO — should not match lowercase "hello world" line
@@ -162,8 +162,8 @@ class TestGrepTool:
     @pytest.mark.asyncio
     async def test_files_with_matches_output_mode(self, tmp_path, grep_tool):
         """Test files_with_matches output mode returns file paths."""
-        (tmp_path / "has_match.py").write_text("needle in a haystack\n")
-        (tmp_path / "no_match.py").write_text("nothing to find here\n")
+        (tmp_path / "has_match.py").write_text("needle in a haystack\n", encoding="utf-8")
+        (tmp_path / "no_match.py").write_text("nothing to find here\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -184,7 +184,7 @@ class TestGrepTool:
         """Test max_results limits the number of results."""
         # Create 10 files each containing the pattern
         for i in range(10):
-            (tmp_path / f"file{i}.py").write_text(f"match_pattern in file {i}\n")
+            (tmp_path / f"file{i}.py").write_text(f"match_pattern in file {i}\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -205,7 +205,7 @@ class TestGrepTool:
     @pytest.mark.asyncio
     async def test_uses_cwd_when_no_path_given(self, tmp_path, grep_tool):
         """Test that tool uses context.cwd when no path is given."""
-        (tmp_path / "cwd_file.py").write_text("cwd_search_target\n")
+        (tmp_path / "cwd_file.py").write_text("cwd_search_target\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await grep_tool.execute(
@@ -235,7 +235,7 @@ class TestGrepTool:
         project = tmp_path / "project"
         outside.mkdir()
         project.mkdir()
-        (outside / "secret.txt").write_text("outside needle\n")
+        (outside / "secret.txt").write_text("outside needle\n", encoding="utf-8")
         (project / "link.txt").symlink_to(outside / "secret.txt")
 
         monkeypatch.setattr("iac_code.tools.grep._is_rg_available", lambda: False)

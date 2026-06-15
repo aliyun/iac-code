@@ -4,10 +4,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from iac_code.agent.system_prompt import (
+    DEFAULT_PIPELINE_SECTIONS,
     DYNAMIC_BOUNDARY,
+    SECTION_BUILDERS,
+    SECTION_PRIORITIES,
     SystemPromptBuilder,
     _build_cloud_config_section,
     _build_environment_section,
+    build_base_sections,
     build_system_prompt,
     split_by_dynamic_boundary,
 )
@@ -328,3 +332,38 @@ class TestBuildEnvironmentSectionGit:
             _build_environment_section(str(tmp_path))
             mock_run.assert_not_called()
             mock_popen.assert_not_called()
+
+
+class TestBuildBaseSections:
+    def test_returns_string_with_selected_sections(self):
+        result = build_base_sections(["identity", "tools"], cwd="/tmp")
+        assert "Infrastructure as Code" in result
+        assert "Using Tools" in result
+
+    def test_respects_priority_ordering(self):
+        result = build_base_sections(["tools", "identity"], cwd="/tmp")
+        identity_pos = result.find("Infrastructure as Code")
+        tools_pos = result.find("Using Tools")
+        assert identity_pos < tools_pos
+
+    def test_empty_list_returns_empty_string(self):
+        result = build_base_sections([], cwd="/tmp")
+        assert result == ""
+
+    def test_env_section_includes_cwd(self):
+        result = build_base_sections(["env"], cwd="/some/test/path")
+        assert "/some/test/path" in result
+
+    def test_default_pipeline_sections_constant(self):
+        assert DEFAULT_PIPELINE_SECTIONS == ["identity", "system", "env", "cloud_config", "tools"]
+
+    def test_section_builders_has_all_keys(self):
+        expected_keys = {"identity", "system", "env", "cloud_config", "tools", "doing_tasks", "actions", "output_style"}
+        assert set(SECTION_BUILDERS.keys()) == expected_keys
+
+    def test_section_priorities_has_all_keys(self):
+        assert set(SECTION_PRIORITIES.keys()) == set(SECTION_BUILDERS.keys())
+
+    def test_unknown_section_key_ignored(self):
+        result = build_base_sections(["identity", "nonexistent_section"], cwd="/tmp")
+        assert "Infrastructure as Code" in result

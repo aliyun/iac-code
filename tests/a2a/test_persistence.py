@@ -1,4 +1,10 @@
-from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ARouteSnapshot, A2ATaskSnapshot
+from iac_code.a2a.persistence import (
+    A2AContextSnapshot,
+    A2APersistenceStore,
+    A2ARouteSnapshot,
+    A2ATaskSnapshot,
+    _protocol_id_file_stem,
+)
 
 
 def test_persistence_round_trips_task_and_context(tmp_path) -> None:
@@ -9,6 +15,32 @@ def test_persistence_round_trips_task_and_context(tmp_path) -> None:
 
     assert store.load_task("task-1").state == "working"
     assert store.load_context("ctx-1").session_id == "session-1"
+
+
+def test_persistence_uses_filesystem_safe_names_for_protocol_ids(tmp_path) -> None:
+    store = A2APersistenceStore(tmp_path)
+
+    store.save_task(A2ATaskSnapshot(task_id="task:1", context_id="ctx:1", state="working", output_text=["hi"]))
+    store.save_context(A2AContextSnapshot(context_id="ctx:1", session_id="session-1", cwd=str(tmp_path)))
+
+    assert store.load_task("task:1").state == "working"
+    assert store.load_context("ctx:1").session_id == "session-1"
+    assert all(":" not in part for path in tmp_path.rglob("*") for part in path.relative_to(tmp_path).parts)
+
+
+def test_persistence_encodes_windows_reserved_protocol_id_basenames(tmp_path) -> None:
+    store = A2APersistenceStore(tmp_path)
+
+    store.save_task(A2ATaskSnapshot(task_id="CON.txt", context_id="COM1.txt", state="working", output_text=["hi"]))
+    store.save_context(A2AContextSnapshot(context_id="LPT1.json", session_id="session-1", cwd=str(tmp_path)))
+
+    assert store.load_task("CON.txt").state == "working"
+    assert store.load_context("LPT1.json").session_id == "session-1"
+    assert _protocol_id_file_stem("CON.txt") != "CON.txt"
+    assert _protocol_id_file_stem("COM1.txt") != "COM1.txt"
+    assert _protocol_id_file_stem("LPT1.json") != "LPT1.json"
+    assert not (tmp_path / "tasks" / "CON.txt.json").exists()
+    assert not (tmp_path / "contexts" / "LPT1.json.json").exists()
 
 
 def test_persistence_rejects_path_traversal_ids(tmp_path) -> None:

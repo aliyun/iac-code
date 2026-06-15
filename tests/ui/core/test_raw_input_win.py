@@ -227,9 +227,13 @@ class TestAnsiEscapeSequences:
         assert event == KeyEvent(key=expected_key, char="")
 
     def test_esc_followed_by_non_bracket_preserves_char(self):
-        """ESC + non-'[' char: return escape, next read_key returns the char."""
+        """ESC + non-CSI/SS3 char: return escape, next read_key returns the char.
+
+        Note: 'O' is no longer a "non-bracket" char post-W-I2 — it's the SS3
+        prefix. Use a character that is neither '[' (CSI) nor 'O' (SS3).
+        """
         self.mock.kbhit.side_effect = [True, True, True]
-        self.mock.getwch.side_effect = ["\x1b", "O"]
+        self.mock.getwch.side_effect = ["\x1b", "X"]
 
         from iac_code.ui.core.raw_input_win import RawInputCapture
 
@@ -239,7 +243,7 @@ class TestAnsiEscapeSequences:
         assert event1 == KeyEvent(key="escape", char="\x1b")
 
         event2 = cap.read_key(timeout=1.0)
-        assert event2 == KeyEvent(key="O", char="O")
+        assert event2 == KeyEvent(key="X", char="X")
 
     def test_unknown_csi_sequence(self):
         """Unrecognized CSI sequence returns 'unknown'."""

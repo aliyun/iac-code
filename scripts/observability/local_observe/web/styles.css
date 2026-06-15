@@ -1,0 +1,257 @@
+:root {
+  color-scheme: light;
+  --bg: #eef2f6;
+  --panel: #ffffff;
+  --panel-alt: #f8fafc;
+  --border: #c7d2e1;
+  --text: #182230;
+  --muted: #667085;
+  --blue: #2e90fa;
+  --green: #079455;
+  --red: #d92d20;
+  --amber: #dc6803;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.badges span,
+.tag {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 280px minmax(520px, 1fr) 420px;
+  gap: 14px;
+  padding: 0 22px 22px;
+}
+
+.panel {
+  min-height: 70vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.panel-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-alt);
+  font-weight: 800;
+}
+
+.controls,
+.field,
+#health,
+#runs,
+#assertions,
+details {
+  margin: 12px;
+}
+
+button,
+a,
+select {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 7px;
+  padding: 7px 9px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.run,
+.node,
+.assertion {
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border: 1px solid #d7dee9;
+  border-radius: 7px;
+  background: var(--panel-alt);
+}
+
+.run strong,
+.node strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.record-meta {
+  margin: 2px 0 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.section-label {
+  margin: 10px 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.metric-table {
+  width: 100%;
+  margin: 6px 0 10px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.metric-table th,
+.metric-table td {
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.metric-table th {
+  background: #eef4ff;
+  color: #344054;
+  font-size: 11px;
+}
+
+.assertion-note {
+  margin: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.tree {
+  padding: 12px;
+}
+
+details.node {
+  padding: 0;
+}
+
+summary {
+  cursor: pointer;
+  padding: 10px;
+  font-weight: 800;
+}
+
+.children {
+  padding: 0 10px 10px 18px;
+}
+
+.attrs {
+  margin: 8px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.attr-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.attr-key {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.attr-value {
+  max-height: 220px;
+  min-width: 0;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.assertion.pass {
+  border-color: #abefc6;
+  background: #ecfdf3;
+  color: var(--green);
+}
+
+.assertion.fail {
+  border-color: #fecdd6;
+  background: #fff1f3;
+  color: var(--red);
+}
+
+.assertion.warn {
+  border-color: #fedf89;
+  background: #fffaeb;
+  color: var(--amber);
+}
+
+pre {
+  overflow: auto;
+  max-height: 340px;
+  margin: 12px;
+  padding: 10px;
+  border-radius: 7px;
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 11px;
+  line-height: 1.45;
+}

@@ -8,6 +8,7 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.timestamp_pb2 import Timestamp
 
 from iac_code.a2a.metrics import NoOpA2AMetrics
+from iac_code.a2a.persistence import A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.task_store import A2ATaskStore
 
 
@@ -44,6 +45,11 @@ def call_context(user_name: str) -> ServerCallContext:
 def timestamp(seconds: int) -> Timestamp:
     value = Timestamp()
     value.FromSeconds(seconds)
+    return value
+
+
+def timestamp_with_nanos(seconds: int, nanos: int) -> Timestamp:
+    value = Timestamp(seconds=seconds, nanos=nanos)
     return value
 
 
@@ -165,6 +171,115 @@ async def test_task_id_cannot_move_between_contexts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_or_create_task_rejects_persisted_context_mismatch_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-a", state="working"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    with pytest.raises(ValueError, match="different context"):
+        await store.get_or_create_task(task_id="task-1", context_id="ctx-b")
+
+    snapshot = persistence.load_task("task-1")
+    assert snapshot is not None
+    assert snapshot.context_id == "ctx-a"
+    assert snapshot.state == "working"
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_task_restores_persisted_interrupted_state_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+
+    assert task.context_id == "ctx-1"
+    assert task.state == "interrupted"
+    assert persistence.load_task("task-1").state == "interrupted"
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_task_can_load_recoverable_persisted_task_without_interrupting(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1", restore_interrupted=False)
+
+    assert task.context_id == "ctx-1"
+    assert task.state == "working"
+    assert persistence.load_task("task-1").state == "working"
+
+
+@pytest.mark.asyncio
+async def test_get_returns_persisted_task_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    task = await store.get("task-1")
+
+    assert task is not None
+    assert task.id == "task-1"
+    assert task.context_id == "ctx-1"
+    assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_get_does_not_mutate_running_persisted_task_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    task = await store.get("task-1")
+
+    assert task is not None
+    assert task.status.state == TaskState.TASK_STATE_WORKING
+    assert persistence.load_task("task-1").state == "working"
+
+
+@pytest.mark.asyncio
+async def test_get_returns_persisted_task_for_matching_authenticated_owner_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required", owner="alice"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    alice_task = await store.get("task-1", context=call_context("alice"))
+    bob_task = await store.get("task-1", context=call_context("bob"))
+
+    assert alice_task is not None
+    assert alice_task.id == "task-1"
+    assert alice_task.context_id == "ctx-1"
+    assert bob_task is None
+
+
+@pytest.mark.asyncio
+async def test_authenticated_get_and_list_hide_legacy_ownerless_persisted_task_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    task = await store.get("task-1", context=call_context("alice"))
+    response = await store.list(ListTasksRequest(context_id="ctx-1"), context=call_context("alice"))
+
+    assert task is None
+    assert response.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_task_claims_legacy_ownerless_snapshot_for_authenticated_owner(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1", owner="alice")
+
+    assert record.owner == "alice"
+    assert persistence.load_task("task-1").owner == "alice"
+    assert await store.get("task-1", context=call_context("bob")) is None
+
+
+@pytest.mark.asyncio
 async def test_cleanup_does_not_evict_in_flight_context() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=0, cleanup_interval_seconds=300)
     context = await store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=lambda sid: object())
@@ -185,6 +300,138 @@ async def test_list_filters_by_context_with_index() -> None:
     response = await store.list(ListTasksRequest(context_id="ctx-a"))
 
     assert [task.id for task in response.tasks] == ["task-1"]
+
+
+@pytest.mark.asyncio
+async def test_list_includes_persisted_tasks_for_matching_authenticated_owner_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(
+        A2ATaskSnapshot(task_id="alice-task", context_id="ctx-a", state="input-required", owner="alice")
+    )
+    persistence.save_task(A2ATaskSnapshot(task_id="bob-task", context_id="ctx-b", state="input-required", owner="bob"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    alice = await store.list(ListTasksRequest(), context=call_context("alice"))
+    bob = await store.list(ListTasksRequest(), context=call_context("bob"))
+
+    assert [task.id for task in alice.tasks] == ["alice-task"]
+    assert [task.id for task in bob.tasks] == ["bob-task"]
+
+
+@pytest.mark.asyncio
+async def test_list_does_not_mutate_running_persisted_task_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    response = await store.list(ListTasksRequest())
+
+    assert [task.id for task in response.tasks] == ["task-1"]
+    assert response.tasks[0].status.state == TaskState.TASK_STATE_WORKING
+    assert persistence.load_task("task-1").state == "working"
+
+
+@pytest.mark.asyncio
+async def test_list_filters_persisted_tasks_by_context_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-a", context_id="ctx-a", state="input-required"))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-b", context_id="ctx-b", state="input-required"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    response = await store.list(ListTasksRequest(context_id="ctx-a"))
+
+    assert [task.id for task in response.tasks] == ["task-a"]
+
+
+@pytest.mark.asyncio
+async def test_list_sorts_and_filters_persisted_tasks_by_updated_at_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(
+        A2ATaskSnapshot(task_id="task-old", context_id="ctx-1", state="input-required", updated_at=10)
+    )
+    persistence.save_task(
+        A2ATaskSnapshot(task_id="task-new", context_id="ctx-1", state="input-required", updated_at=30)
+    )
+    persistence.save_task(
+        A2ATaskSnapshot(task_id="task-mid", context_id="ctx-1", state="input-required", updated_at=20)
+    )
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    after = timestamp(20)
+
+    first = await store.list(
+        ListTasksRequest(
+            status=TaskState.TASK_STATE_INPUT_REQUIRED,
+            status_timestamp_after=after,
+            page_size=1,
+        )
+    )
+    second = await store.list(
+        ListTasksRequest(
+            status=TaskState.TASK_STATE_INPUT_REQUIRED,
+            status_timestamp_after=after,
+            page_size=1,
+            page_token=first.next_page_token,
+        )
+    )
+
+    assert [task.id for task in first.tasks] == ["task-new"]
+    assert first.next_page_token
+    assert [task.id for task in second.tasks] == ["task-mid"]
+    assert second.next_page_token == ""
+
+
+@pytest.mark.asyncio
+async def test_list_preserves_running_sdk_task_timestamp_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    writer = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await writer.save(sdk_task("task-old", state=TaskState.TASK_STATE_WORKING, updated_at=10))
+    await writer.save(sdk_task("task-new", state=TaskState.TASK_STATE_WORKING, updated_at=30))
+    reader = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    response = await reader.list(
+        ListTasksRequest(
+            status=TaskState.TASK_STATE_WORKING,
+            status_timestamp_after=timestamp(20),
+        )
+    )
+
+    assert [task.id for task in response.tasks] == ["task-new"]
+    assert response.tasks[0].status.timestamp.seconds == 30
+    assert persistence.load_task("task-new").state == "working"
+
+
+@pytest.mark.asyncio
+async def test_get_task_record_does_not_mutate_running_persisted_task_after_restart(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    record = await store.get_task_record("task-1")
+
+    assert record.state == "working"
+    assert persistence.load_task("task-1").state == "working"
+
+
+@pytest.mark.asyncio
+async def test_list_compares_persisted_fractional_timestamps_numerically(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    persistence.save_task(
+        A2ATaskSnapshot(task_id="task-exact", context_id="ctx-1", state="input-required", updated_at=20)
+    )
+    persistence.save_task(
+        A2ATaskSnapshot(task_id="task-half", context_id="ctx-1", state="input-required", updated_at=20.5)
+    )
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    response = await store.list(
+        ListTasksRequest(
+            status=TaskState.TASK_STATE_INPUT_REQUIRED,
+            status_timestamp_after=timestamp(20),
+        )
+    )
+
+    assert [task.id for task in response.tasks] == ["task-half", "task-exact"]
+    assert response.tasks[0].status.timestamp == timestamp_with_nanos(20, 500_000_000)
 
 
 @pytest.mark.asyncio
@@ -252,6 +499,49 @@ async def test_task_store_scopes_sdk_tasks_by_authenticated_user() -> None:
     assert [task.id for task in alice.tasks] == ["alice-task"]
     assert [task.id for task in bob.tasks] == ["bob-task"]
     assert await store.get("bob-task", context=call_context("alice")) is None
+
+
+@pytest.mark.asyncio
+async def test_save_persists_sdk_task_owner_even_before_executor_record_exists(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    await store.save(sdk_task("task-1", context_id="ctx-1"), context=call_context("alice"))
+
+    snapshot = persistence.load_task("task-1")
+    assert snapshot is not None
+    assert snapshot.context_id == "ctx-1"
+    assert snapshot.owner == "alice"
+
+
+@pytest.mark.asyncio
+async def test_save_updates_existing_executor_record_state_in_persistence(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+
+    await store.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_COMPLETED))
+
+    snapshot = persistence.load_task("task-1")
+    assert record.state == "completed"
+    assert snapshot is not None
+    assert snapshot.state == "completed"
+
+
+@pytest.mark.asyncio
+async def test_mirror_task_updates_internal_record_timestamp(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.updated_at = 10
+    record.state = "completed"
+
+    store.mirror_task(record)
+
+    snapshot = persistence.load_task("task-1")
+    assert snapshot is not None
+    assert snapshot.state == "completed"
+    assert snapshot.updated_at > 10
 
 
 @pytest.mark.asyncio

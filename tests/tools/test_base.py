@@ -42,6 +42,24 @@ class TestToolResult:
         assert result.is_error is False
 
 
+class TestToolResultMetadata:
+    def test_metadata_defaults_to_none(self):
+        result = ToolResult(content="ok")
+        assert result.metadata is None
+
+    def test_metadata_preserves_dict(self):
+        result = ToolResult(content="ok", metadata={"key": "value"})
+        assert result.metadata == {"key": "value"}
+
+    def test_success_factory_no_metadata(self):
+        result = ToolResult.success("ok")
+        assert result.metadata is None
+
+    def test_error_factory_no_metadata(self):
+        result = ToolResult.error("fail")
+        assert result.metadata is None
+
+
 class DummyTool(Tool):
     """A dummy tool for testing purposes."""
 
@@ -168,6 +186,62 @@ class TestToolRegistry:
         assert registry.get("edit_file") is not None
         assert registry.get("bash") is not None
         assert registry.get("list_files") is not None
+
+
+class TestToolRegistryCloneFilter:
+    def setup_method(self):
+        self.registry = ToolRegistry()
+        self.registry.register(DummyTool())
+
+    def test_clone_creates_independent_copy(self):
+        cloned = self.registry.clone()
+        assert len(cloned.list_tools()) == len(self.registry.list_tools())
+
+        class AnotherTool(Tool):
+            @property
+            def name(self) -> str:
+                return "another"
+
+            @property
+            def description(self) -> str:
+                return "another"
+
+            @property
+            def input_schema(self) -> dict[str, Any]:
+                return {"type": "object", "properties": {}}
+
+            async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+                return ToolResult.success("ok")
+
+        cloned.register(AnotherTool())
+        assert cloned.get("another") is not None
+        assert self.registry.get("another") is None
+
+    def test_filter_keeps_only_allowed(self):
+        class SecondTool(Tool):
+            @property
+            def name(self) -> str:
+                return "second"
+
+            @property
+            def description(self) -> str:
+                return "second"
+
+            @property
+            def input_schema(self) -> dict[str, Any]:
+                return {"type": "object", "properties": {}}
+
+            async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+                return ToolResult.success("ok")
+
+        self.registry.register(SecondTool())
+        filtered = self.registry.filter(["dummy"])
+        assert filtered.get("dummy") is not None
+        assert filtered.get("second") is None
+
+    def test_filter_empty_list_returns_empty_registry(self):
+        filtered = self.registry.filter([])
+        assert len(filtered.list_tools()) == 0
 
 
 class TestValidateInput:

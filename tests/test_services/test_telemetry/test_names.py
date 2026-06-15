@@ -136,3 +136,37 @@ def test_genai_attr_llm_fields_defined():
     defined = {getattr(GenAiAttr, a) for a in dir(GenAiAttr) if not a.startswith("_")}
     for attr in required_attrs:
         assert attr in defined, f"Missing GenAiAttr for {attr}"
+
+
+def test_pipeline_b_schema_names_are_defined():
+    assert Events.PIPELINE_SUB_PIPELINE_STARTED == "iac.pipeline.sub_pipeline.started"
+    assert Events.PIPELINE_SUB_PIPELINE_COMPLETED == "iac.pipeline.sub_pipeline.completed"
+    assert Events.PIPELINE_SUB_PIPELINE_FAILED == "iac.pipeline.sub_pipeline.failed"
+    assert Events.PIPELINE_SUB_STEP_STARTED == "iac.pipeline.sub_step.started"
+    assert Events.PIPELINE_SUB_STEP_COMPLETED == "iac.pipeline.sub_step.completed"
+    assert Events.PIPELINE_SUB_STEP_FAILED == "iac.pipeline.sub_step.failed"
+    assert Events.PIPELINE_CANDIDATE_CANCELLED == "iac.pipeline.candidate.cancelled"
+    assert Events.PIPELINE_STEP_NUDGED == "iac.pipeline.step.nudged"
+    assert Events.PIPELINE_HARD_INTERRUPT == "iac.pipeline.hard_interrupt"
+    assert Events.PIPELINE_SIDECAR_FAILED == "iac.pipeline.sidecar.failed"
+
+    assert Metrics.PIPELINE_SUB_PIPELINE_DURATION == "iac.pipeline.sub_pipeline.duration"
+    assert Metrics.PIPELINE_SUB_STEP_DURATION == "iac.pipeline.sub_step.duration"
+    assert Metrics.PIPELINE_CANDIDATE_CANCELLED_COUNT == "iac.pipeline.candidate.cancelled.count"
+
+    assert Spans.PIPELINE_SUB_PIPELINE == "iac.pipeline.sub_pipeline"
+    assert Spans.PIPELINE_SUB_STEP == "iac.pipeline.sub_step"
+
+
+def test_pipeline_c_observability_names_are_defined():
+    assert Events.PIPELINE_USER_INPUT_REQUIRED == "iac.pipeline.user_input.required"
+    assert Events.PIPELINE_USER_INPUT_RECEIVED == "iac.pipeline.user_input.received"
+    assert Events.PIPELINE_SELECTION_MADE == "iac.pipeline.selection.made"
+    assert Events.PIPELINE_CANDIDATES_EVALUATED == "iac.pipeline.candidates.evaluated"
+    assert Events.PIPELINE_FUNNEL_STEP == "iac.pipeline.funnel.step"
+
+    assert Metrics.PIPELINE_USER_INPUT_WAIT_DURATION == "iac.pipeline.user_input.wait.duration"
+    assert Metrics.PIPELINE_CANDIDATE_COUNT == "iac.pipeline.candidate.count"
+    assert Metrics.PIPELINE_CANDIDATE_SUCCESS_COUNT == "iac.pipeline.candidate.success.count"
+    assert Metrics.PIPELINE_CANDIDATE_FAILED_COUNT == "iac.pipeline.candidate.failed.count"
+    assert Metrics.PIPELINE_FUNNEL_STEP_COUNT == "iac.pipeline.funnel.step.count"

@@ -25,6 +25,23 @@ def test_metric_names_covers_spec_core_set():
     assert expected.issubset(set(METRIC_NAMES))
 
 
+def test_metric_names_include_pipeline_metrics():
+    expected = {
+        M.PIPELINE_STEP_DURATION,
+        M.PIPELINE_ROLLBACK_COUNT,
+        M.PIPELINE_COMPLETION_TIME,
+        M.PIPELINE_SUB_PIPELINE_DURATION,
+        M.PIPELINE_SUB_STEP_DURATION,
+        M.PIPELINE_CANDIDATE_CANCELLED_COUNT,
+        M.PIPELINE_USER_INPUT_WAIT_DURATION,
+        M.PIPELINE_CANDIDATE_COUNT,
+        M.PIPELINE_CANDIDATE_SUCCESS_COUNT,
+        M.PIPELINE_CANDIDATE_FAILED_COUNT,
+        M.PIPELINE_FUNNEL_STEP_COUNT,
+    }
+    assert expected.issubset(set(METRIC_NAMES))
+
+
 def test_add_dispatches_to_counter():
     counter = MagicMock()
     registry = MetricsRegistry(instruments={M.SESSION_COUNT: counter})
@@ -57,3 +74,34 @@ def test_register_all_creates_counter_and_histogram_instruments():
     assert M.API_REQUEST_DURATION in hist_names
     assert M.DEPLOYMENT_DURATION in hist_names
     assert M.ALIYUN_API_CALLED_DURATION in hist_names
+
+
+def test_pipeline_duration_metrics_are_histograms():
+    meter = MagicMock()
+    meter.create_counter.return_value = MagicMock(name="counter-inst")
+    meter.create_histogram.return_value = MagicMock(name="histogram-inst")
+    registry = MetricsRegistry()
+    registry.register_all(meter)
+
+    hist_names = {call.kwargs.get("name") or call.args[0] for call in meter.create_histogram.call_args_list}
+    assert M.PIPELINE_STEP_DURATION in hist_names
+    assert M.PIPELINE_COMPLETION_TIME in hist_names
+    assert M.PIPELINE_SUB_PIPELINE_DURATION in hist_names
+    assert M.PIPELINE_SUB_STEP_DURATION in hist_names
+    assert M.PIPELINE_USER_INPUT_WAIT_DURATION in hist_names
+
+
+def test_pipeline_count_metrics_are_counters():
+    meter = MagicMock()
+    meter.create_counter.return_value = MagicMock(name="counter-inst")
+    meter.create_histogram.return_value = MagicMock(name="histogram-inst")
+    registry = MetricsRegistry()
+    registry.register_all(meter)
+
+    counter_names = {call.kwargs.get("name") or call.args[0] for call in meter.create_counter.call_args_list}
+    assert M.PIPELINE_ROLLBACK_COUNT in counter_names
+    assert M.PIPELINE_CANDIDATE_CANCELLED_COUNT in counter_names
+    assert M.PIPELINE_CANDIDATE_COUNT in counter_names
+    assert M.PIPELINE_CANDIDATE_SUCCESS_COUNT in counter_names
+    assert M.PIPELINE_CANDIDATE_FAILED_COUNT in counter_names
+    assert M.PIPELINE_FUNNEL_STEP_COUNT in counter_names

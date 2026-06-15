@@ -193,6 +193,29 @@ def test_history_search_uses_agent_context_messages():
     assert captured["messages"] == [{"role": "user", "content": "prompt from agent context"}]
 
 
+def test_history_search_hides_internal_skill_context_messages():
+    from iac_code.agent.message import Message
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._history = None
+    repl._agent_loop = SimpleNamespace(
+        context_manager=SimpleNamespace(
+            get_messages=Mock(
+                return_value=[
+                    Message(role="user", content="继续"),
+                    Message(
+                        role="user",
+                        content="<skill-name>iac-aliyun</skill-name>\n\nBase directory for this skill: /tmp/skill",
+                    ),
+                ]
+            )
+        )
+    )
+
+    assert repl._history_search_messages() == [{"role": "user", "content": "继续"}]
+
+
 def test_history_search_uses_input_history_when_context_is_empty():
     from iac_code.state.app_state import AppState
     from iac_code.ui.repl import InlineREPL
@@ -595,9 +618,9 @@ def test_cross_project_message_uses_windows_resume_command(monkeypatch):
 
     monkeypatch.setattr(project_paths.sys, "platform", "win32")
 
-    message = InlineREPL._cross_project_message(r"C:\Users\Me\iac repo & unsafe", "abc123")
+    message = InlineREPL._cross_project_message(r"C:\Users\Me\iac repo & unsafe", "abc & unsafe")
 
-    assert r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume abc123' in message
+    assert r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume "abc & unsafe"' in message
 
 
 @patch("iac_code.ui.repl.ProviderManager")
@@ -1094,6 +1117,12 @@ def test_run_reads_pending_update_then_renders_banner_then_starts_background(moc
     def _record_start_background():
         call_order.append("start_background_update_check")
 
+    async def _record_startup_pipeline_restore():
+        call_order.append("resume_pipeline_sidecar_on_startup")
+        return False
+
+    repl._resume_pipeline_sidecar_on_startup = AsyncMock(side_effect=_record_startup_pipeline_restore)
+
     with (
         patch("iac_code.ui.repl.get_pending_update", side_effect=_record_get_pending),
         patch("iac_code.ui.repl.render_welcome_banner", side_effect=_record_render_banner),
@@ -1106,6 +1135,7 @@ def test_run_reads_pending_update_then_renders_banner_then_starts_background(moc
         "get_pending_update",
         "render_welcome_banner",
         "start_background_update_check",
+        "resume_pipeline_sidecar_on_startup",
     ]
 
 

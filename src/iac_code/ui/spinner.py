@@ -11,8 +11,11 @@ import time
 
 from rich.text import Text
 
+from iac_code.utils.console import use_ascii_symbols
+
 # Animation frame sequences
 SPINNER_DOTS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+SPINNER_ASCII = ["-", "\\", "|", "/"]
 
 # Spinner color — warm orange
 SPINNER_COLOR = "rgb(215,119,87)"
@@ -42,6 +45,19 @@ def _format_elapsed(seconds: float) -> str:
     minutes = int(seconds // 60)
     secs = int(seconds % 60)
     return f"{minutes}m {secs}s"
+
+
+def spinner_frames() -> list[str]:
+    """Return the active spinner frame sequence for the current console."""
+    return SPINNER_ASCII if use_ascii_symbols() else SPINNER_DOTS
+
+
+def current_spinner_frame(now: float | None = None) -> str:
+    """Return the spinner frame for *now* using the shared frame interval."""
+    frame_time = time.monotonic() if now is None else now
+    frames = spinner_frames()
+    frame_idx = int(frame_time / _FRAME_INTERVAL) % len(frames)
+    return frames[frame_idx]
 
 
 def random_spinner_verb() -> str:
@@ -85,14 +101,16 @@ class ShimmerSpinner:
         """Seconds since this spinner was created."""
         return time.monotonic() - self._start_time
 
+    def frame(self, now: float | None = None) -> str:
+        """Return the current spinner frame."""
+        return current_spinner_frame(now)
+
     def render(self) -> Text:
         """Produce a single frame as a Rich Text object."""
         now = time.monotonic()
         elapsed = now - self._start_time
 
-        # Spinner character (rotates based on wall clock)
-        frame_idx = int(now / _FRAME_INTERVAL) % len(SPINNER_DOTS)
-        frame = SPINNER_DOTS[frame_idx]
+        frame = self.frame(now)
 
         text = Text()
 

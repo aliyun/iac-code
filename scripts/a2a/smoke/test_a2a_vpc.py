@@ -7,7 +7,7 @@ Starts the A2A HTTP server, then sends a "create VPC" prompt via
 ``iac-code a2a-client call`` to verify the full server <-> client flow.
 
 Usage:
-    python scripts/test_a2a_vpc.py
+    python scripts/a2a/smoke/test_a2a_vpc.py
 
 Prerequisites:
     - iac-code[a2a] installed (pip install -e ".[a2a]" or pip install iac-code[a2a])

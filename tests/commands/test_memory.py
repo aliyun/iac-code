@@ -113,6 +113,38 @@ def test_execute_memory_command_invalid_name(manager):
     assert "Invalid memory name" in output
 
 
+class _LeakyMemoryManager:
+    def load(self, name):
+        raise ValueError(
+            "Invalid memory name from /Users/alice/.iac-code/memory; Authorization: Bearer sk-memorycmdsecret123"
+        )
+
+    def delete(self, name):
+        raise AssertionError("delete should not be called when load fails")
+
+
+def test_execute_memory_command_sanitizes_load_validation_error():
+    output = execute_memory_command(_LeakyMemoryManager(), ["secret"])
+
+    assert "Invalid memory name" in output
+    assert "sk-memorycmdsecret123" not in output
+    assert "Authorization: Bearer" not in output
+    assert "/Users/alice" not in output
+    assert "[REDACTED]" in output
+    assert "[PATH]" in output
+
+
+def test_execute_memory_command_sanitizes_delete_validation_error():
+    output = execute_memory_command(_LeakyMemoryManager(), ["delete", "secret"])
+
+    assert "Invalid memory name" in output
+    assert "sk-memorycmdsecret123" not in output
+    assert "Authorization: Bearer" not in output
+    assert "/Users/alice" not in output
+    assert "[REDACTED]" in output
+    assert "[PATH]" in output
+
+
 def test_execute_memory_command_help_and_unknown_multi_token(manager):
     assert "Usage: /memory-folder" in execute_memory_command(manager, ["help"])
     assert "Usage: /memory-folder" in execute_memory_command(manager, ["remove", "user-role"])

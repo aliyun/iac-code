@@ -31,6 +31,7 @@ _URL_SCHEMES = ("http://", "https://", "oss://")
 # Telemetry helpers
 _TERRAFORM_TRANSFORM_PREFIXES = ("Aliyun::Terraform-", "Aliyun::OpenTofu-")
 _HCL_RESOURCE_RE = re.compile(r'resource\s+"([^"]+)"\s+"[^"]+"\s*\{', re.MULTILINE)
+_FLAT_PARAMETER_RE = re.compile(r"^Parameters\.(\d+)\.(ParameterKey|ParameterValue)$")
 
 _ROS_ERROR_CATEGORIES = {
     "InvalidTemplateBody": "syntax",
@@ -157,6 +158,65 @@ def _count_by_type(types: list[str]) -> dict[str, int]:
     for t in types:
         counts[t] = counts.get(t, 0) + 1
     return counts
+
+
+def _parameter_value_to_str(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _normalize_stack_parameters_for_sdk(params: dict[str, Any]) -> None:
+    """Normalize ROS Parameters into the typed SDK model shape.
+
+    The generic Aliyun RPC path accepts Parameters.1.ParameterKey style fields,
+    but alibabacloud_ros20190910 typed request models only read a Parameters
+    list from from_map().
+    """
+    flat_parameters: dict[int, dict[str, Any]] = {}
+    for key in list(params):
+        match = _FLAT_PARAMETER_RE.match(key)
+        if match is None:
+            continue
+        index = int(match.group(1))
+        field = match.group(2)
+        flat_parameters.setdefault(index, {})[field] = params.pop(key)
+
+    if flat_parameters:
+        params["Parameters"] = [
+            {
+                "ParameterKey": str(item["ParameterKey"]),
+                "ParameterValue": _parameter_value_to_str(item["ParameterValue"]),
+            }
+            for _, item in sorted(flat_parameters.items())
+            if item.get("ParameterKey") is not None and item.get("ParameterValue") is not None
+        ]
+        return
+
+    parameters = params.get("Parameters")
+    if isinstance(parameters, dict):
+        params["Parameters"] = [
+            {"ParameterKey": str(key), "ParameterValue": _parameter_value_to_str(value)}
+            for key, value in parameters.items()
+            if value is not None
+        ]
+        return
+
+    if isinstance(parameters, list):
+        normalized: list[dict[str, str]] = []
+        for item in parameters:
+            if not isinstance(item, dict):
+                return
+            key = item.get("ParameterKey")
+            if key is None:
+                return
+            value = item.get("ParameterValue")
+            if value is None:
+                continue
+            normalized.append({"ParameterKey": str(key), "ParameterValue": _parameter_value_to_str(value)})
+        params["Parameters"] = normalized
 
 
 def _classify_ros_error(e: Exception) -> str:
@@ -525,6 +585,7 @@ class RosStack(BaseCloudStack):
 
         started = time.monotonic()
         try:
+            _normalize_stack_parameters_for_sdk(params)
             request = ros_models.CreateStackRequest().from_map(params)
             response = await asyncio.to_thread(client.create_stack, request)
             stack_id = response.body.stack_id
@@ -634,6 +695,7 @@ class RosStack(BaseCloudStack):
 
         started = time.monotonic()
         try:
+            _normalize_stack_parameters_for_sdk(params)
             request = ros_models.UpdateStackRequest().from_map(params)
             response = await asyncio.to_thread(client.update_stack, request)
             stack_id = response.body.stack_id

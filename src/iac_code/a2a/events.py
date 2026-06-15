@@ -18,6 +18,10 @@ from a2a.types import (
 )
 from google.protobuf.json_format import ParseDict
 
+from iac_code.a2a.artifacts import (
+    sanitize_public_artifact_text,
+    sanitize_public_tool_output_data,
+)
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.types.stream_events import (
     ErrorEvent,
@@ -42,7 +46,7 @@ def _truncate(value: Any, *, _depth: int = 0) -> Any:
     if _depth >= _METADATA_MAX_DEPTH:
         return "[truncated-depth]"
     if isinstance(value, str):
-        return value[:_METADATA_MAX_CHARS]
+        return sanitize_public_artifact_text(value)[:_METADATA_MAX_CHARS]
     if isinstance(value, dict):
         return {str(k): _truncate(v, _depth=_depth + 1) for k, v in value.items()}
     if isinstance(value, list):
@@ -86,22 +90,11 @@ def _extract_artifact_metadata(result: Any, artifact_store: Any | None) -> dict[
     return None
 
 
-def _tool_result_metadata(result: Any) -> Any:
-    if not isinstance(result, dict):
-        return _truncate(result)
-    data = dict(result)
-    raw_artifact = data.get("artifact")
-    if isinstance(raw_artifact, dict) and any(
-        key in raw_artifact for key in ("content", "bytes", "base64", "raw", "path")
-    ):
-        artifact = dict(raw_artifact)
-        artifact.pop("content", None)
-        artifact.pop("bytes", None)
-        artifact.pop("base64", None)
-        artifact.pop("raw", None)
-        artifact.pop("path", None)
-        data["artifact"] = artifact
-    return _truncate(data)
+def _tool_result_metadata(result: Any, *, is_error: bool = False) -> Any:
+    sanitized = sanitize_public_tool_output_data(result)
+    if is_error and isinstance(sanitized, str):
+        return sanitize_public_artifact_text(sanitized)
+    return _truncate(sanitized)
 
 
 def _artifact_update_event(*, task_id: str, context_id: str, metadata: dict[str, Any]) -> TaskArtifactUpdateEvent:
@@ -264,7 +257,7 @@ async def publish_stream_event(
             "status": "failed" if event.is_error else "completed",
             "toolUseId": event.tool_use_id,
             "name": event.tool_name,
-            "result": _tool_result_metadata(event.result),
+            "result": _tool_result_metadata(event.result, is_error=event.is_error),
         }
         if artifact_metadata is not None:
             tool_metadata["artifact"] = artifact_metadata
@@ -326,12 +319,15 @@ async def publish_stream_event(
         return None
 
     if isinstance(event, ErrorEvent):
+        error_metadata: dict[str, Any] = {"retryable": event.is_retryable}
+        if event.error_id:
+            error_metadata["errorId"] = event.error_id
         if event.is_retryable:
             text = "A temporary error occurred. Please retry."
             state = TaskState.TASK_STATE_INPUT_REQUIRED
         else:
             raw = event.error or "Unknown error"
-            text = raw[:_ERROR_TEXT_MAX_CHARS]
+            text = sanitize_public_artifact_text(raw)[:_ERROR_TEXT_MAX_CHARS]
             state = TaskState.TASK_STATE_FAILED
         await _enqueue_status(
             event_queue,
@@ -339,6 +335,7 @@ async def publish_stream_event(
             context_id=context_id,
             state=state,
             message=_agent_text_message(task_id=task_id, context_id=context_id, text=text),
+            metadata={"iac_code": {"error": error_metadata}},
         )
         return None
 

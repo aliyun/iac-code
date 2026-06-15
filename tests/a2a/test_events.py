@@ -63,6 +63,26 @@ async def test_permission_request_is_denied_by_default_and_truncated() -> None:
 
 
 @pytest.mark.asyncio
+async def test_permission_request_tool_input_redacts_secret_values() -> None:
+    queue = FakeEventQueue()
+    event = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": 'cat /Users/alice/.iac-code/settings.yml && curl -H "Authorization: Bearer sk-live-secret"'},
+        tool_use_id="tool-1",
+    )
+
+    await publish_stream_event(queue, task_id="task-1", context_id="ctx-1", event=event)
+
+    dumped = dump(queue.events[0])
+    tool_input = dumped["metadata"]["iac_code"]["permission"]["toolInput"]
+    assert "sk-live-secret" not in str(tool_input)
+    assert "Authorization: Bearer" not in str(tool_input)
+    assert "/Users/alice" not in str(tool_input)
+    assert "[REDACTED]" in str(tool_input)
+    assert "[PATH]" in str(tool_input)
+
+
+@pytest.mark.asyncio
 async def test_permission_request_uses_configured_default_decision() -> None:
     queue = FakeEventQueue()
     future = pending_future()
@@ -156,12 +176,50 @@ async def test_error_event_passes_through_error_field() -> None:
         queue,
         task_id="task-1",
         context_id="ctx-1",
-        event=ErrorEvent(error="boom with /secret/path", is_retryable=False),
+        event=ErrorEvent(error="boom with /secret/path", is_retryable=False, error_id="err-123"),
     )
 
     dumped = dump(queue.events[0])
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     assert dumped["status"]["message"]["parts"][0]["text"] == "boom with /secret/path"
+    assert dumped["metadata"]["iac_code"]["error"] == {"retryable": False, "errorId": "err-123"}
+
+
+@pytest.mark.asyncio
+async def test_error_event_redacts_public_error_text() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ErrorEvent(
+            error="RuntimeError: Authorization: Bearer sk-live at /Users/alice/.iac-code/settings.yml",
+            is_retryable=False,
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    text = dumped["status"]["message"]["parts"][0]["text"]
+    assert "sk-live" not in text
+    assert "/Users/alice" not in text
+
+
+@pytest.mark.asyncio
+async def test_retryable_error_event_publishes_error_metadata() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ErrorEvent(error="should not leak", is_retryable=True, error_id="err-retry"),
+    )
+
+    dumped = dump(queue.events[0])
+    assert dumped["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    assert dumped["status"]["message"]["parts"][0]["text"] == "A temporary error occurred. Please retry."
+    assert dumped["metadata"]["iac_code"]["error"] == {"retryable": True, "errorId": "err-retry"}
 
 
 @pytest.mark.asyncio
@@ -244,6 +302,146 @@ async def test_tool_events_publish_metadata_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_use_input_metadata_redacts_secret_values() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(
+            tool_use_id="tool-1",
+            name="bash",
+            input={"cmd": 'cat /Users/alice/.iac-code/settings.yml && curl -H "Authorization: Bearer sk-live-secret"'},
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool_input = dumped["metadata"]["iac_code"]["tool"]["input"]
+    assert "sk-live-secret" not in str(tool_input)
+    assert "Authorization: Bearer" not in str(tool_input)
+    assert "/Users/alice" not in str(tool_input)
+    assert "[REDACTED]" in str(tool_input)
+    assert "[PATH]" in str(tool_input)
+
+
+@pytest.mark.asyncio
+async def test_tool_use_input_metadata_redacts_malformed_opaque_artifact_uri() -> None:
+    queue = FakeEventQueue()
+    malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(
+            tool_use_id="tool-1",
+            name="bash",
+            input={"cmd": f"cat {malformed_uri}", "note": malformed_uri},
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool_input = dumped["metadata"]["iac_code"]["tool"]["input"]
+    rendered = str(tool_input)
+    assert "[PATH]" in rendered
+    assert "iac-code-artifac[PATH]" not in rendered
+    assert "Users" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_use_input_metadata_redacts_percent_encoded_local_path() -> None:
+    queue = FakeEventQueue()
+    encoded_path = "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(
+            tool_use_id="tool-1",
+            name="bash",
+            input={"cmd": f"cat {encoded_path}"},
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped["metadata"]["iac_code"]["tool"]["input"])
+    assert "[PATH]" in rendered
+    assert "%2FUsers" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_failed_tool_result_metadata_is_sanitized() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="bash",
+            result="Tool failed: DB_PASSWORD=hunter2 at /Users/alice/.iac-code/settings.yml",
+            is_error=True,
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    assert tool["status"] == "failed"
+    assert "hunter2" not in str(tool["result"])
+    assert "/Users/alice" not in str(tool["result"])
+
+
+@pytest.mark.asyncio
+async def test_failed_tool_result_metadata_redacts_malformed_opaque_artifact_uri() -> None:
+    queue = FakeEventQueue()
+    malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="bash",
+            result=f"Tool failed: {malformed_uri}",
+            is_error=True,
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped["metadata"]["iac_code"]["tool"]["result"])
+    assert "[PATH]" in rendered
+    assert "iac-code-artifac[PATH]" not in rendered
+    assert "Users" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_error_event_redacts_malformed_opaque_artifact_uri() -> None:
+    queue = FakeEventQueue()
+    malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ErrorEvent(error=f"boom {malformed_uri}", is_retryable=False),
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped["status"]["message"]["parts"][0]["text"])
+    assert "[PATH]" in rendered
+    assert "iac-code-artifac[PATH]" not in rendered
+    assert "Users" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_tool_result_externalizes_large_file_metadata(tmp_path) -> None:
     from iac_code.a2a.artifacts import A2AArtifactStore
 
@@ -266,6 +464,299 @@ async def test_tool_result_externalizes_large_file_metadata(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_result_artifact_windows_filename_does_not_leak_path(tmp_path) -> None:
+    from iac_code.a2a.artifacts import A2AArtifactStore
+
+    queue = FakeEventQueue()
+    store = A2AArtifactStore(tmp_path)
+    result = {
+        "artifact": {
+            "filename": r"C:\Users\alice\.iac-code\projects\demo\template.yaml",
+            "mediaType": "text/yaml",
+            "content": "ROSTemplate",
+        }
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+        artifact_store=store,
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped)
+    assert dumped["artifact"]["name"] == "template.yaml"
+    assert dumped["artifact"]["parts"][0]["filename"] == "template.yaml"
+    assert r"C:\\" not in rendered
+    assert "%5CUsers" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_result_uri_only_artifact_drops_legacy_file_uri() -> None:
+    queue = FakeEventQueue()
+    result = {
+        "artifact": {
+            "filename": "template.yaml",
+            "uri": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml",
+            "downloadUrl": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml",
+            "publicUrl": r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml",
+            "encodedOwnerUrl": "iac-code-artifact://C%3A%5CUsers%5Calice%5C.iac-code%5Cprojects%5Cdemo/template.yaml",
+            "backupUri": [r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"],
+            "sourceUri": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml",
+            "source": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml",
+            "metadata": {
+                "uri": [r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"],
+                "byteSize": 10,
+            },
+            "parts": [
+                {
+                    "url": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml",
+                    "metadata": {"uri": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"},
+                }
+            ],
+        }
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+    )
+
+    dumped = dump(queue.events[0])
+    artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
+    rendered = str(dumped)
+    assert artifact["filename"] == "template.yaml"
+    assert artifact["metadata"] == {"byteSize": 10}
+    assert "uri" not in artifact
+    assert "downloadUrl" not in artifact
+    assert "publicUrl" not in artifact
+    assert "encodedOwnerUrl" not in artifact
+    assert "backupUri" not in artifact
+    assert "sourceUri" not in artifact
+    assert artifact["source"] == "[PATH]"
+    assert "url" not in artifact["parts"][0]
+    assert "uri" not in artifact["parts"][0]["metadata"]
+    assert "file://" not in rendered
+    assert "Users" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_result_uri_only_artifact_keeps_valid_opaque_uri() -> None:
+    queue = FakeEventQueue()
+    uri = "iac-code-artifact://artifact-1/template.yaml"
+    result = {
+        "artifact": {
+            "filename": "template.yaml",
+            "uri": uri,
+            "downloadUrl": uri,
+            "parts": [{"url": uri}],
+        }
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+    )
+
+    dumped = dump(queue.events[0])
+    artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
+    assert artifact["uri"] == uri
+    assert artifact["downloadUrl"] == uri
+    assert artifact["parts"][0]["url"] == uri
+    rendered = str(dumped)
+    assert "iac-code-artifac[PATH]" not in rendered
+    assert "file://" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_result_artifact_list_is_sanitized() -> None:
+    queue = FakeEventQueue()
+    legacy_uri = r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"
+    result = {
+        "artifact": [
+            legacy_uri,
+            {
+                "filename": r"C:\Users\alice\.iac-code\projects\demo\template.yaml",
+                "uri": [legacy_uri],
+                "parts": [legacy_uri, {"url": legacy_uri}],
+            },
+        ]
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+    )
+
+    dumped = dump(queue.events[0])
+    artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
+    assert artifact[0] == "[PATH]"
+    assert artifact[1]["filename"] == "template.yaml"
+    assert "uri" not in artifact[1]
+    assert artifact[1]["parts"][0] == "[PATH]"
+    assert "url" not in artifact[1]["parts"][1]
+    rendered = str(dumped)
+    assert "file://" not in rendered
+    assert "Users" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_result_artifact_scalar_is_sanitized() -> None:
+    queue = FakeEventQueue()
+    result = {"artifact": r"file://C:\Users\alice\.iac-code\projects\demo\template.yaml"}
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+    )
+
+    dumped = dump(queue.events[0])
+    artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
+    assert artifact == "[PATH]"
+    rendered = str(dumped)
+    assert "file://" not in rendered
+    assert "Users" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_result_artifact_payload_keys_are_sanitized_case_insensitively() -> None:
+    queue = FakeEventQueue()
+    result = {
+        "artifact": {
+            "filename": "result.txt",
+            "Content": "secret content",
+            "Raw": "secret raw",
+            "Base64": "c2VjcmV0",
+            "Path": r"C:\Users\alice\.iac-code\projects\demo\template.yaml",
+            "metadata": {"label": "safe", "api_key": "plain-secret"},
+        }
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+    )
+
+    dumped = dump(queue.events[0])
+    artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["artifact"]
+    assert artifact == {"filename": "result.txt", "metadata": {"label": "safe", "api_key": "[REDACTED]"}}
+    rendered = str(dumped)
+    assert "secret content" not in rendered
+    assert "secret raw" not in rendered
+    assert "c2VjcmV0" not in rendered
+    assert "plain-secret" not in rendered
+    assert "Users" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_result_metadata_sanitizes_root_artifact_list() -> None:
+    queue = FakeEventQueue()
+    result = [
+        {
+            "artifact": {
+                "filename": "template.yaml",
+                "Content": "RAW-TEMPLATE-CONTENT",
+                "metadata": {"token": "plain-token"},
+                "uri": r"file:///Users/Alice and Bob/.iac-code/projects/demo/template.yaml",
+            }
+        }
+    ]
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped)
+    artifact = dumped["metadata"]["iac_code"]["tool"]["result"][0]["artifact"]
+    assert artifact == {"filename": "template.yaml", "metadata": {"token": "[REDACTED]"}}
+    assert "RAW-TEMPLATE-CONTENT" not in rendered
+    assert "plain-token" not in rendered
+    assert "Alice and Bob" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_result_metadata_sanitizes_case_variant_artifact_key() -> None:
+    queue = FakeEventQueue()
+    result = {
+        "Artifact": {
+            "filename": "template.yaml",
+            "Content": "RAW-TEMPLATE-CONTENT",
+            "uri": r"file:///Users/Alice and Bob/.iac-code/projects/demo/template.yaml",
+        }
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=False),
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped)
+    artifact = dumped["metadata"]["iac_code"]["tool"]["result"]["Artifact"]
+    assert artifact == {"filename": "template.yaml"}
+    assert "RAW-TEMPLATE-CONTENT" not in rendered
+    assert "Alice and Bob" not in rendered
+    assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_failed_tool_result_dict_artifact_payload_is_sanitized() -> None:
+    queue = FakeEventQueue()
+    result = {
+        "artifact": {
+            "filename": "template.yaml",
+            "Content": "RAW-TEMPLATE-CONTENT",
+            "Raw": "RAW",
+            "Base64": "UkFX",
+            "metadata": {"Authorization": "Bearer plain-auth-value"},
+        },
+        "api_key": "secret-key",
+    }
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(tool_use_id="tool-1", tool_name="write_file", result=result, is_error=True),
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped)
+    result_metadata = dumped["metadata"]["iac_code"]["tool"]["result"]
+    assert result_metadata == {
+        "artifact": {"filename": "template.yaml", "metadata": {"Authorization": "[REDACTED]"}},
+        "api_key": "[REDACTED]",
+    }
+    assert "RAW-TEMPLATE-CONTENT" not in rendered
+    assert "plain-auth-value" not in rendered
+    assert "secret-key" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_tool_result_publishes_standard_artifact_update_event(tmp_path) -> None:
     from iac_code.a2a.artifacts import A2AArtifactStore
 
@@ -285,11 +776,14 @@ async def test_tool_result_publishes_standard_artifact_update_event(tmp_path) ->
     assert isinstance(artifact_event, TaskArtifactUpdateEvent)
     dumped = dump(artifact_event)
     assert dumped["artifact"]["name"] == "result.txt"
-    assert dumped["artifact"]["parts"][0]["url"].startswith("file://")
+    assert dumped["artifact"]["parts"][0]["url"].startswith("iac-code-artifact://")
     assert dumped["artifact"]["parts"][0]["mediaType"] == "text/plain"
     assert dumped["artifact"]["metadata"]["byteSize"] == 14
     assert dumped["lastChunk"] is True
     assert dumped.get("append", False) is False
+    rendered = str(dumped)
+    assert "file://" not in rendered
+    assert str(tmp_path) not in rendered
     assert (
         dumped["artifact"]["artifactId"]
         == dump(queue.events[1])["metadata"]["iac_code"]["tool"]["artifact"]["artifactId"]

@@ -1,8 +1,9 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from iac_code.agent.message import Message as AgentMessage
 from iac_code.commands import create_default_registry
 from iac_code.commands import prompt as prompt_module
 from iac_code.providers.base import ContentBlock, Message, ToolDefinition
@@ -166,3 +167,82 @@ async def test_prompt_command_requires_repl_context():
     result = await prompt_module.prompt_command(context=MagicMock(repl=None))
 
     assert "REPL context" in result
+
+
+@pytest.mark.asyncio
+async def test_prompt_command_exports_pipeline_prompt_context(tmp_path):
+    ensure = AsyncMock(return_value=True)
+    prompt_context = SimpleNamespace(
+        scope="parent",
+        step_id="architecture_planning",
+        system_prompt="real system prompt",
+        messages=[AgentMessage(role="user", content="original prompt")],
+        agent_loop_session_id="transcript_att_0001",
+        initial_prompt="fallback initial prompt",
+        candidate_index=None,
+        candidate_name="",
+        sub_pipeline_id="",
+    )
+    pipeline = SimpleNamespace(get_prompt_contexts=lambda: [prompt_context])
+    session_dir = tmp_path / "root-session"
+    repl = SimpleNamespace(
+        ensure_pipeline_restored_for_prompt=ensure,
+        _pipeline=pipeline,
+        _session_storage=SimpleNamespace(session_dir=lambda cwd, session_id: session_dir),
+        _original_cwd="/repo",
+        _session_id="root-session",
+        get_status_snapshot=lambda: {"session_id": "root-session", "cwd": "/repo"},
+    )
+    opened_urls: list[str] = []
+
+    result = await prompt_module.prompt_command(
+        context=SimpleNamespace(repl=repl),
+        browser_opener=lambda url: opened_urls.append(url) or True,
+    )
+
+    ensure.assert_awaited_once()
+    assert "real system prompt" not in result
+    assert "original prompt" not in result
+
+    html_path = session_dir / "prompt.html"
+    assert opened_urls == [html_path.resolve().as_uri()]
+    html = html_path.read_text(encoding="utf-8")
+    assert "Step architecture_planning" in html
+    assert "transcript_att_0001" in html
+    assert "real system prompt" in html
+    assert "[user]" in html
+    assert "original prompt" in html
+
+
+@pytest.mark.asyncio
+async def test_prompt_command_escapes_pipeline_prompt_html(tmp_path):
+    ensure = AsyncMock(return_value=True)
+    prompt_context = SimpleNamespace(
+        scope="parent",
+        step_id="reviewing",
+        system_prompt="<script>alert('system')</script>",
+        messages=[AgentMessage(role="user", content="<script>alert('message')</script>")],
+        agent_loop_session_id="transcript_review",
+        initial_prompt="",
+        candidate_index=None,
+        candidate_name="",
+        sub_pipeline_id="",
+    )
+    session_dir = tmp_path / "root-session"
+    repl = SimpleNamespace(
+        ensure_pipeline_restored_for_prompt=ensure,
+        _pipeline=SimpleNamespace(get_prompt_contexts=lambda: [prompt_context]),
+        _session_storage=SimpleNamespace(session_dir=lambda cwd, session_id: session_dir),
+        _original_cwd="/repo",
+        _session_id="root-session",
+        get_status_snapshot=lambda: {"session_id": "root-session", "cwd": "/repo"},
+    )
+
+    await prompt_module.prompt_command(
+        context=SimpleNamespace(repl=repl),
+        browser_opener=lambda url: True,
+    )
+
+    html = (session_dir / "prompt.html").read_text(encoding="utf-8")
+    assert "<script>alert('system')</script>" not in html
+    assert "&lt;script&gt;alert(&#x27;system&#x27;)&lt;/script&gt;" in html

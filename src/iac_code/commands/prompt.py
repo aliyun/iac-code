@@ -24,27 +24,47 @@ async def prompt_command(context=None, **kwargs) -> str:
     if repl is None:
         return _("Prompt command requires a REPL context.")
 
+    ensure_pipeline = getattr(repl, "ensure_pipeline_restored_for_prompt", None)
+    if callable(ensure_pipeline):
+        await ensure_pipeline()
+
     try:
-        path = export_prompt_html(repl, output_dir=kwargs.get("output_dir"))
+        snapshot = _pipeline_prompt_snapshot(repl) or build_prompt_snapshot(repl)
+        path = export_prompt_html(
+            repl,
+            output_dir=kwargs.get("output_dir"),
+            snapshot=snapshot,
+            prefer_session_path=callable(kwargs.get("browser_opener")),
+        )
     except Exception as exc:
         return _("Failed to export prompt: {error}").format(error=exc)
 
     try:
-        _open_path(path)
+        _open_prompt_export(path, kwargs.get("browser_opener"))
     except Exception as exc:
         return _("Prompt exported: {path}\nFailed to open it automatically: {error}").format(path=path, error=exc)
 
     return _("Prompt exported and opened: {path}").format(path=path)
 
 
-def export_prompt_html(repl: object, *, output_dir: Path | str | None = None) -> Path:
-    snapshot = build_prompt_snapshot(repl)
+def export_prompt_html(
+    repl: object,
+    *,
+    output_dir: Path | str | None = None,
+    snapshot: dict[str, Any] | None = None,
+    prefer_session_path: bool = False,
+) -> Path:
+    snapshot = snapshot or build_prompt_snapshot(repl)
     html = render_prompt_html(snapshot)
-    directory = Path(output_dir) if output_dir is not None else Path(tempfile.mkdtemp(prefix="iac-code-prompt-"))
-    directory.mkdir(parents=True, exist_ok=True)
-    session_id = _safe_filename(str(snapshot["metadata"].get("session_id") or "session"))
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = directory / f"iac-code-prompt-{session_id}-{timestamp}.html"
+    if output_dir is None and prefer_session_path:
+        path = _prompt_html_path(repl)
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        directory = Path(output_dir) if output_dir is not None else Path(tempfile.mkdtemp(prefix="iac-code-prompt-"))
+        directory.mkdir(parents=True, exist_ok=True)
+        session_id = _safe_filename(str(snapshot["metadata"].get("session_id") or "session"))
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = directory / f"iac-code-prompt-{session_id}-{timestamp}.html"
     path.write_text(html, encoding="utf-8", newline="\n")
     ensure_private_file(path)
     return path
@@ -81,6 +101,103 @@ def build_prompt_snapshot(repl: object) -> dict[str, Any]:
         "tools": tools,
         "memory_sections": _memory_sections(repl),
     }
+
+
+def _pipeline_prompt_snapshot(repl: object) -> dict[str, Any] | None:
+    pipeline = getattr(repl, "_pipeline", None)
+    get_prompt_contexts = getattr(pipeline, "get_prompt_contexts", None)
+    if not callable(get_prompt_contexts):
+        return None
+    contexts = list(get_prompt_contexts() or [])
+    if not contexts:
+        return None
+
+    status = _status_snapshot(repl)
+    sections = _pipeline_sections(contexts)
+    system_prompt = "\n\n".join(section["content"] for section in sections)
+    metadata = {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "session_id": status.get("session_id") or getattr(repl, "_session_id", ""),
+        "provider": status.get("provider", ""),
+        "model": status.get("model", ""),
+        "cwd": status.get("cwd") or getattr(repl, "_original_cwd", ""),
+        "source": _("Pipeline prompt contexts"),
+    }
+    return {
+        "metadata": metadata,
+        "system_prompt": system_prompt,
+        "system_sections": sections,
+        "provider_messages": [],
+        "tools": [],
+        "memory_sections": [],
+    }
+
+
+def _pipeline_sections(contexts: list[object]) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    for item in contexts:
+        title = _pipeline_context_title(item)
+        sections.append(
+            {
+                "title": title,
+                "content": _format_pipeline_context(item, title),
+                "zone": _("pipeline"),
+            }
+        )
+    return sections
+
+
+def _pipeline_context_title(item: object) -> str:
+    scope = str(getattr(item, "scope", "") or "")
+    step_id = str(getattr(item, "step_id", "") or "")
+    if scope == "candidate":
+        candidate_index = getattr(item, "candidate_index", None)
+        if candidate_index is None:
+            number = 0
+        else:
+            try:
+                number = int(candidate_index) + 1
+            except (TypeError, ValueError):
+                number = 0
+        title = _("Candidate #{index}").format(index=number)
+        candidate_name = str(getattr(item, "candidate_name", "") or "")
+        if candidate_name:
+            title = _("{title} - {name}").format(title=title, name=candidate_name)
+        if step_id:
+            title = _("{title} / {step}").format(title=title, step=step_id)
+        return title
+    return _("Step {step}").format(step=step_id)
+
+
+def _format_pipeline_context(item: object, title: str) -> str:
+    lines = [title]
+    session_id = str(getattr(item, "agent_loop_session_id", "") or "")
+    if session_id:
+        lines.append(_("AgentLoop session: {session_id}").format(session_id=session_id))
+    system_prompt = str(getattr(item, "system_prompt", "") or "")
+    lines.extend(["", _("System Prompt:"), system_prompt])
+    initial_prompt = str(getattr(item, "initial_prompt", "") or "")
+    messages = list(getattr(item, "messages", []) or [])
+    if initial_prompt and not messages:
+        lines.extend(["", _("Initial User Prompt:"), initial_prompt])
+    lines.append("")
+    lines.append(_("Messages:"))
+    if not messages:
+        lines.append(_("(none)"))
+    for message in messages:
+        role = str(getattr(message, "role", "") or "message")
+        lines.append("[{role}]".format(role=role))
+        lines.append(_message_text(message))
+    return "\n".join(lines)
+
+
+def _message_text(message: object) -> str:
+    get_text = getattr(message, "get_text", None)
+    if callable(get_text):
+        text = get_text()
+        if text:
+            return str(text)
+    return str(getattr(message, "content", "") or "")
 
 
 def render_prompt_html(snapshot: dict[str, Any]) -> str:
@@ -681,6 +798,31 @@ def _card_header(title: str, badge: str = "") -> str:
 def _safe_filename(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in value.strip())
     return cleaned[:80] or "session"
+
+
+def _prompt_html_path(repl: object) -> Path:
+    session_storage = getattr(repl, "_session_storage", None)
+    cwd = str(getattr(repl, "_original_cwd", "") or Path.cwd())
+    session_id = str(getattr(repl, "_session_id", "") or "current")
+    session_dir = getattr(session_storage, "session_dir", None)
+    if callable(session_dir):
+        try:
+            raw_path = session_dir(cwd, session_id)
+        except Exception:
+            raw_path = None
+        if isinstance(raw_path, (str, Path)):
+            return Path(raw_path) / "prompt.html"
+    return Path(tempfile.gettempdir()) / "iac-code-prompts" / _safe_filename(session_id) / "prompt.html"
+
+
+def _open_prompt_export(path: Path, browser_opener: object = None) -> None:
+    if callable(browser_opener):
+        opener = cast(Any, browser_opener)
+        opened = opener(path.resolve().as_uri())
+        if not opened:
+            raise RuntimeError(_("browser opener returned false"))
+        return
+    _open_path(path)
 
 
 def _open_path(path: Path) -> None:

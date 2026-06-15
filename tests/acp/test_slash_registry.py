@@ -130,11 +130,18 @@ async def test_compact_exception(registry: ACPSlashRegistry) -> None:
     agent_loop = MagicMock()
 
     async def _compact():
-        raise RuntimeError("network error")
+        raise RuntimeError(
+            "network error\nAuthorization: Bearer sk-compactsecret123\nconfig: /Users/alice/.iac-code/settings.yml"
+        )
 
     agent_loop.compact = _compact
     result = await registry.execute("/compact", agent_loop=agent_loop)
     assert "network error" in result
+    assert "sk-compactsecret123" not in result
+    assert "Authorization: Bearer" not in result
+    assert "/Users/alice" not in result
+    assert "[REDACTED]" in result
+    assert "[PATH]" in result
 
 
 # ---------------------------------------------------------------------------
@@ -153,9 +160,14 @@ async def test_clear_success(registry: ACPSlashRegistry) -> None:
 @pytest.mark.asyncio
 async def test_clear_exception(registry: ACPSlashRegistry) -> None:
     agent_loop = MagicMock()
-    agent_loop.reset.side_effect = RuntimeError("db error")
+    agent_loop.reset.side_effect = RuntimeError("db error\nCookie: session=sk-clearsecret123\ncache: ~/.iac-code/cache")
     result = await registry.execute("/clear", agent_loop=agent_loop)
     assert "db error" in result
+    assert "sk-clearsecret123" not in result
+    assert "Cookie:" not in result
+    assert "~/.iac-code" not in result
+    assert "[REDACTED]" in result
+    assert "[PATH]" in result
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +252,13 @@ class _MemoryManager:
         ]
 
 
+class _LeakyMemoryManager(_MemoryManager):
+    def load(self, name):
+        raise ValueError(
+            "Invalid memory name from /Users/alice/.iac-code/memory; Authorization: Bearer sk-memorysecret123"
+        )
+
+
 @pytest.mark.asyncio
 async def test_memory_without_manager_returns_unavailable(registry: ACPSlashRegistry) -> None:
     result = await registry.execute("/memory-folder", agent_loop=None)
@@ -277,6 +296,18 @@ async def test_memory_help_missing_invalid_name_and_unknown_usage(registry: ACPS
     assert missing == "Memory 'missing' not found."
     assert invalid == "Invalid memory name: '../escape'"
     assert unknown == "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
+
+
+@pytest.mark.asyncio
+async def test_memory_error_sanitizes_public_output(registry: ACPSlashRegistry) -> None:
+    result = await registry.execute("/memory-folder secret", agent_loop=None, memory_manager=_LeakyMemoryManager())
+
+    assert "Invalid memory name" in result
+    assert "sk-memorysecret123" not in result
+    assert "Authorization: Bearer" not in result
+    assert "/Users/alice" not in result
+    assert "[REDACTED]" in result
+    assert "[PATH]" in result
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +367,28 @@ async def test_rename_value_error_returns_message(registry: ACPSlashRegistry) ->
         result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
 
     assert result == "Session name already exists in this project: deploy-prod"
+
+
+@pytest.mark.asyncio
+async def test_rename_value_error_sanitizes_public_output(registry: ACPSlashRegistry) -> None:
+    agent_loop = MagicMock()
+    agent_loop._cwd = "/project"
+    agent_loop._session_id = "session-1"
+    agent_loop._current_git_branch = None
+
+    storage = MagicMock()
+    storage.rename_session.side_effect = ValueError(
+        "Duplicate session stored at /Users/alice/.iac-code/projects/session.json with api_key=sk-renamesecret123"
+    )
+
+    with patch("iac_code.acp.slash_registry.SessionStorage", return_value=storage):
+        result = await registry.execute("/rename deploy-prod", agent_loop=agent_loop)
+
+    assert "Duplicate session" in result
+    assert "/Users/alice" not in result
+    assert "sk-renamesecret123" not in result
+    assert "[PATH]" in result
+    assert "[REDACTED]" in result
 
 
 @pytest.mark.asyncio

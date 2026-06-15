@@ -5,6 +5,20 @@ import sys
 import types
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def reset_console_detection_cache(monkeypatch):
+    from iac_code.utils import console as console_mod
+
+    if hasattr(console_mod, "_stdout_initial_mode"):
+        monkeypatch.setattr(console_mod, "_stdout_initial_mode", None)
+    if hasattr(console_mod, "_stdout_initial_mode_known"):
+        monkeypatch.setattr(console_mod, "_stdout_initial_mode_known", False)
+    for env_var in ("WT_SESSION", "TERM_PROGRAM", "VSCODE_PID", "ANSICON", "ConEmuANSI"):
+        monkeypatch.delenv(env_var, raising=False)
+
 
 class TestEnableVirtualTerminal:
     @patch("iac_code.utils.console.sys")
@@ -147,3 +161,110 @@ class TestEnableVirtualTerminalTypeDeclarations:
 
         mock_kernel32.GetConsoleMode.assert_not_called()
         mock_kernel32.SetConsoleMode.assert_not_called()
+
+
+class TestConsoleCapabilityQueries:
+    def test_supports_virtual_terminal_false_when_win32_stdout_lacks_vt(self, monkeypatch):
+        import ctypes
+        import types as _types
+        from unittest.mock import MagicMock
+
+        from iac_code.utils import console as console_mod
+
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetStdHandle.return_value = 12345
+
+        def get_console_mode(_handle, mode_ptr):
+            mode_ptr._obj.value = 0x0008
+            return True
+
+        mock_kernel32.GetConsoleMode.side_effect = get_console_mode
+        monkeypatch.setattr("iac_code.utils.console.sys.platform", "win32")
+        monkeypatch.setattr(ctypes, "windll", _types.SimpleNamespace(kernel32=mock_kernel32), raising=False)
+
+        assert console_mod.stdout_supports_virtual_terminal() is False
+        assert console_mod.is_legacy_windows_console() is True
+        assert console_mod.use_ascii_symbols() is True
+
+    def test_supports_virtual_terminal_true_when_win32_stdout_has_vt(self, monkeypatch):
+        import ctypes
+        import types as _types
+        from unittest.mock import MagicMock
+
+        from iac_code.utils import console as console_mod
+
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetStdHandle.return_value = 12345
+
+        def get_console_mode(_handle, mode_ptr):
+            mode_ptr._obj.value = 0x0008 | 0x0004
+            return True
+
+        mock_kernel32.GetConsoleMode.side_effect = get_console_mode
+        monkeypatch.setattr("iac_code.utils.console.sys.platform", "win32")
+        monkeypatch.setattr(ctypes, "windll", _types.SimpleNamespace(kernel32=mock_kernel32), raising=False)
+
+        assert console_mod.stdout_supports_virtual_terminal() is True
+        assert console_mod.is_legacy_windows_console() is False
+        assert console_mod.use_ascii_symbols() is False
+
+    def test_ascii_fallback_survives_successful_vt_enable_in_classic_console(self, monkeypatch):
+        import ctypes
+        import types as _types
+        from unittest.mock import MagicMock
+
+        from iac_code.utils import console as console_mod
+
+        mode_value = {"value": 0x0008}
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetStdHandle.return_value = 12345
+
+        def get_console_mode(_handle, mode_ptr):
+            mode_ptr._obj.value = mode_value["value"]
+            return True
+
+        def set_console_mode(_handle, new_mode):
+            mode_value["value"] = int(new_mode)
+            return True
+
+        mock_kernel32.GetConsoleMode.side_effect = get_console_mode
+        mock_kernel32.SetConsoleMode.side_effect = set_console_mode
+        monkeypatch.setattr("iac_code.utils.console.sys.platform", "win32")
+        monkeypatch.setattr(ctypes, "windll", _types.SimpleNamespace(kernel32=mock_kernel32), raising=False)
+
+        console_mod.enable_virtual_terminal()
+
+        assert console_mod.stdout_supports_virtual_terminal() is True
+        assert console_mod.is_legacy_windows_console() is True
+        assert console_mod.use_ascii_symbols() is True
+
+    def test_modern_windows_terminal_env_is_not_legacy_console(self, monkeypatch):
+        import ctypes
+        import types as _types
+        from unittest.mock import MagicMock
+
+        from iac_code.utils import console as console_mod
+
+        mock_kernel32 = MagicMock()
+        mock_kernel32.GetStdHandle.return_value = 12345
+
+        def get_console_mode(_handle, mode_ptr):
+            mode_ptr._obj.value = 0x0008
+            return True
+
+        mock_kernel32.GetConsoleMode.side_effect = get_console_mode
+        monkeypatch.setattr("iac_code.utils.console.sys.platform", "win32")
+        monkeypatch.setattr(ctypes, "windll", _types.SimpleNamespace(kernel32=mock_kernel32), raising=False)
+        monkeypatch.setenv("WT_SESSION", "fake-session")
+
+        assert console_mod.is_legacy_windows_console() is False
+        assert console_mod.use_ascii_symbols() is False
+
+    def test_non_windows_is_not_legacy_and_supports_vt(self, monkeypatch):
+        from iac_code.utils import console as console_mod
+
+        monkeypatch.setattr("iac_code.utils.console.sys.platform", "linux")
+
+        assert console_mod.stdout_supports_virtual_terminal() is True
+        assert console_mod.is_legacy_windows_console() is False
+        assert console_mod.use_ascii_symbols() is False

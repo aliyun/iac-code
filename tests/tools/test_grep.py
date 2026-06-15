@@ -13,26 +13,26 @@ def tool():
 
 class TestPythonGrep:
     def test_matches_files_with_matches(self, tmp_path):
-        (tmp_path / "a.txt").write_text("hello world\n")
-        (tmp_path / "b.txt").write_text("nothing\n")
+        (tmp_path / "a.txt").write_text("hello world\n", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("nothing\n", encoding="utf-8")
         out = _python_grep("hello", str(tmp_path))
         assert str(tmp_path / "a.txt") in out
         assert str(tmp_path / "b.txt") not in out
 
     def test_content_output_mode(self, tmp_path):
-        (tmp_path / "a.txt").write_text("foo\nhello world\nbar\n")
+        (tmp_path / "a.txt").write_text("foo\nhello world\nbar\n", encoding="utf-8")
         out = _python_grep("hello", str(tmp_path), output_mode="content")
         assert "hello world" in out
         assert ":2:" in out
 
     def test_case_insensitive(self, tmp_path):
-        (tmp_path / "a.txt").write_text("HELLO\n")
+        (tmp_path / "a.txt").write_text("HELLO\n", encoding="utf-8")
         assert "a.txt" in _python_grep("hello", str(tmp_path), case_insensitive=True)
         assert _python_grep("hello", str(tmp_path), case_insensitive=False).strip() == ""
 
     def test_glob_filter(self, tmp_path):
-        (tmp_path / "a.py").write_text("hit\n")
-        (tmp_path / "a.txt").write_text("hit\n")
+        (tmp_path / "a.py").write_text("hit\n", encoding="utf-8")
+        (tmp_path / "a.txt").write_text("hit\n", encoding="utf-8")
         out = _python_grep("hit", str(tmp_path), glob="*.py")
         assert "a.py" in out
         assert "a.txt" not in out
@@ -41,9 +41,9 @@ class TestPythonGrep:
         src = tmp_path / "src"
         package = src / "pkg"
         package.mkdir(parents=True)
-        (src / "app.py").write_text("hit\n")
-        (package / "nested.py").write_text("hit\n")
-        (tmp_path / "app.py").write_text("hit\n")
+        (src / "app.py").write_text("hit\n", encoding="utf-8")
+        (package / "nested.py").write_text("hit\n", encoding="utf-8")
+        (tmp_path / "app.py").write_text("hit\n", encoding="utf-8")
 
         out = _python_grep("hit", str(tmp_path), glob="src/**/*.py")
 
@@ -55,8 +55,8 @@ class TestPythonGrep:
         src = tmp_path / "src"
         package = src / "pkg"
         package.mkdir(parents=True)
-        (src / "app.py").write_text("hit\n")
-        (package / "nested.py").write_text("hit\n")
+        (src / "app.py").write_text("hit\n", encoding="utf-8")
+        (package / "nested.py").write_text("hit\n", encoding="utf-8")
 
         out = _python_grep("hit", str(tmp_path), glob="src/*.py")
 
@@ -66,7 +66,7 @@ class TestPythonGrep:
     def test_glob_filter_normalizes_windows_separators(self, tmp_path, monkeypatch):
         package = tmp_path / "src" / "pkg"
         package.mkdir(parents=True)
-        (package / "app.py").write_text("hit\n")
+        (package / "app.py").write_text("hit\n", encoding="utf-8")
 
         monkeypatch.setattr(
             "iac_code.tools.grep.os.path.relpath",
@@ -83,13 +83,13 @@ class TestPythonGrep:
 
     def test_max_results_limits_files(self, tmp_path):
         for i in range(5):
-            (tmp_path / f"{i}.txt").write_text("hit\n")
+            (tmp_path / f"{i}.txt").write_text("hit\n", encoding="utf-8")
         out = _python_grep("hit", str(tmp_path), max_results=2)
         assert len(out.splitlines()) == 2
 
     def test_unreadable_file_skipped(self, tmp_path, monkeypatch):
-        (tmp_path / "a.txt").write_text("hit\n")
-        (tmp_path / "b.txt").write_text("hit\n")
+        (tmp_path / "a.txt").write_text("hit\n", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("hit\n", encoding="utf-8")
         real_open = open
 
         def fail_for_b(path, *args, **kwargs):
@@ -106,7 +106,7 @@ class TestPythonGrep:
 @pytest.mark.asyncio
 class TestGrepExecute:
     async def test_pattern_found_with_python_fallback(self, tool, tmp_path, monkeypatch):
-        (tmp_path / "f.txt").write_text("needle\n")
+        (tmp_path / "f.txt").write_text("needle\n", encoding="utf-8")
         monkeypatch.setattr("iac_code.tools.grep._is_rg_available", lambda: False)
         context = ToolContext(cwd=str(tmp_path))
         result = await tool.execute(tool_input={"pattern": "needle", "path": str(tmp_path)}, context=context)
@@ -114,7 +114,7 @@ class TestGrepExecute:
         assert "f.txt" in result.content
 
     async def test_no_matches_returns_message(self, tool, tmp_path, monkeypatch):
-        (tmp_path / "f.txt").write_text("other\n")
+        (tmp_path / "f.txt").write_text("other\n", encoding="utf-8")
         monkeypatch.setattr("iac_code.tools.grep._is_rg_available", lambda: False)
         context = ToolContext(cwd=str(tmp_path))
         result = await tool.execute(tool_input={"pattern": "needle", "path": str(tmp_path)}, context=context)
@@ -156,9 +156,9 @@ class TestGrepExecute:
         src = tmp_path / "src"
         package = src / "pkg"
         package.mkdir(parents=True)
-        (src / "app.py").write_text("hit\n")
-        (package / "nested.py").write_text("hit\n")
-        (tmp_path / "app.py").write_text("hit\n")
+        (src / "app.py").write_text("hit\n", encoding="utf-8")
+        (package / "nested.py").write_text("hit\n", encoding="utf-8")
+        (tmp_path / "app.py").write_text("hit\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await tool.execute(

@@ -251,6 +251,15 @@ class TestRendererHelpers:
         assert "1.2k tokens" in str(header)
         assert renderer._render_tool_result(record) is None
 
+    def test_render_tool_header_localizes_pipeline_tool_name(self):
+        renderer = make_renderer()
+        record = _ToolCallRecord(tool_name="complete_step", tool_input={}, done=True)
+
+        header = renderer._render_tool_header(record)
+
+        assert "Complete step" in header.plain
+        assert "complete_step" not in header.plain
+
     def test_print_segments_to_scrollback_archives_and_merges_assistant_turns(self):
         renderer = make_renderer()
 
@@ -263,6 +272,30 @@ class TestRendererHelpers:
         output = renderer.console.file.getvalue()
         assert "first" in output
         assert "second" in output
+
+    def test_replay_history_hides_internal_skill_context_messages(self):
+        from iac_code.agent.message import Message
+
+        renderer = make_renderer()
+
+        renderer.replay_history(
+            [
+                Message(role="user", content="继续"),
+                Message(
+                    role="user",
+                    content=(
+                        "<skill-name>iac-aliyun</skill-name>\n\nBase directory for this skill: /tmp/skill\n\n# Body"
+                    ),
+                ),
+                Message(role="assistant", content="ok"),
+            ]
+        )
+
+        output = renderer.console.file.getvalue()
+        assert "继续" in output
+        assert "ok" in output
+        assert "<skill-name>iac-aliyun</skill-name>" not in output
+        assert "Base directory for this skill" not in output
 
     def test_show_transcript_constructs_view_with_current_segments(self):
         renderer = make_renderer()

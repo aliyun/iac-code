@@ -12,6 +12,7 @@ from typing import Any
 from iac_code.a2a.transports.base import A2ATransportDependencyError
 from iac_code.a2a.transports.dispatcher import A2AJsonRpcDispatcher, A2ARuntimeComponents
 from iac_code.a2a.transports.stdio import is_streaming_request
+from iac_code.utils.public_errors import public_error_from_exception
 
 
 @dataclass(frozen=True)
@@ -211,29 +212,46 @@ class RedisStreamsA2AServer:
         try:
             message = parse_redis_entry(entry_id, fields)
             reply_stream = self._reply_stream(fields)
+            request_id = message.payload.get("id")
 
             if is_streaming_request(message.payload):
-                async for event in self._dispatcher.dispatch_stream(message.payload):
+                try:
+                    async for event in self._dispatcher.dispatch_stream(message.payload):
+                        await self._write_response(
+                            reply_stream,
+                            correlation_id=message.correlation_id,
+                            payload=event,
+                            final=False,
+                        )
                     await self._write_response(
                         reply_stream,
                         correlation_id=message.correlation_id,
-                        payload=event,
-                        final=False,
+                        payload={"jsonrpc": "2.0", "id": request_id},
+                        final=True,
                     )
-                await self._write_response(
-                    reply_stream,
-                    correlation_id=message.correlation_id,
-                    payload={"jsonrpc": "2.0", "id": message.payload.get("id")},
-                    final=True,
-                )
+                except Exception as exc:
+                    await self._write_error_response(
+                        reply_stream,
+                        correlation_id=message.correlation_id,
+                        request_id=request_id,
+                        exc=exc,
+                    )
             else:
-                response = await self._dispatcher.dispatch(message.payload)
-                await self._write_response(
-                    reply_stream,
-                    correlation_id=message.correlation_id,
-                    payload=response,
-                    final=True,
-                )
+                try:
+                    response = await self._dispatcher.dispatch(message.payload)
+                    await self._write_response(
+                        reply_stream,
+                        correlation_id=message.correlation_id,
+                        payload=response,
+                        final=True,
+                    )
+                except Exception as exc:
+                    await self._write_error_response(
+                        reply_stream,
+                        correlation_id=message.correlation_id,
+                        request_id=request_id,
+                        exc=exc,
+                    )
         finally:
             await self._ack(entry_id)
 
@@ -256,6 +274,22 @@ class RedisStreamsA2AServer:
                 "payload": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
                 "final": "true" if final else "false",
             },
+        )
+
+    async def _write_error_response(
+        self,
+        stream: str,
+        *,
+        correlation_id: str,
+        request_id: Any,
+        exc: BaseException,
+    ) -> None:
+        failure = public_error_from_exception(exc)
+        await self._write_response(
+            stream,
+            correlation_id=correlation_id,
+            payload=_error_response(request_id, failure.summary, error_id=failure.error_id),
+            final=True,
         )
 
     async def _ack(self, entry_id: str) -> None:
@@ -285,3 +319,10 @@ def _decode_field(value: Any) -> str:
 
 def _field_value(fields: Mapping[Any, Any], name: str) -> Any:
     return fields.get(name, fields.get(name.encode("utf-8")))
+
+
+def _error_response(request_id: Any, message: str, *, error_id: str | None = None) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": -32603, "message": message}
+    if error_id is not None:
+        error["data"] = {"error_id": error_id}
+    return {"jsonrpc": "2.0", "id": request_id, "error": error}

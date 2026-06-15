@@ -15,25 +15,25 @@ def make_token(text: str) -> CompletionToken:
 @pytest.fixture
 def sample_tree(tmp_path):
     """Create a sample directory tree for testing."""
-    (tmp_path / "main.py").write_text("# main")
-    (tmp_path / "config.yaml").write_text("key: value")
+    (tmp_path / "main.py").write_text("# main", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("key: value", encoding="utf-8")
     src = tmp_path / "src"
     src.mkdir()
-    (src / "app.py").write_text("# app")
-    (src / "utils.py").write_text("# utils")
+    (src / "app.py").write_text("# app", encoding="utf-8")
+    (src / "utils.py").write_text("# utils", encoding="utf-8")
     ui = src / "ui"
     ui.mkdir()
-    (ui / "input.py").write_text("# input")
+    (ui / "input.py").write_text("# input", encoding="utf-8")
 
     # Hidden dir — should be excluded
     hidden = tmp_path / ".hidden"
     hidden.mkdir()
-    (hidden / "secret.py").write_text("secret")
+    (hidden / "secret.py").write_text("secret", encoding="utf-8")
 
     # Excluded dir
     pycache = tmp_path / "__pycache__"
     pycache.mkdir()
-    (pycache / "bytecode.pyc").write_text("bytes")
+    (pycache / "bytecode.pyc").write_text("bytes", encoding="utf-8")
 
     return tmp_path
 

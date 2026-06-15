@@ -9,7 +9,7 @@ class TestLoadSkillFromPath:
     def test_load_simple_skill(self, tmp_path):
         """Load a simple skill markdown file."""
         skill_file = tmp_path / "greet.md"
-        skill_file.write_text("---\ndescription: Say hello\n---\nHello $ARGUMENTS!")
+        skill_file.write_text("---\ndescription: Say hello\n---\nHello $ARGUMENTS!", encoding="utf-8")
 
         skill = load_skill_from_path(skill_file, skill_name="greet")
         assert skill is not None
@@ -20,7 +20,7 @@ class TestLoadSkillFromPath:
     def test_load_skill_with_frontmatter_name(self, tmp_path):
         """Frontmatter name overrides filesystem name."""
         skill_file = tmp_path / "old-name.md"
-        skill_file.write_text("---\nname: new-name\ndescription: Test\n---\nBody")
+        skill_file.write_text("---\nname: new-name\ndescription: Test\n---\nBody", encoding="utf-8")
 
         skill = load_skill_from_path(skill_file, skill_name="old-name")
         assert skill is not None
@@ -29,7 +29,7 @@ class TestLoadSkillFromPath:
     def test_load_skill_without_frontmatter(self, tmp_path):
         """Skill without frontmatter gets defaults."""
         skill_file = tmp_path / "raw.md"
-        skill_file.write_text("Just raw content.")
+        skill_file.write_text("Just raw content.", encoding="utf-8")
 
         skill = load_skill_from_path(skill_file, skill_name="raw")
         assert skill is not None
@@ -46,7 +46,7 @@ class TestLoadSkillFromPath:
     def test_content_length_set(self, tmp_path):
         """content_length is set to length of content."""
         skill_file = tmp_path / "test.md"
-        skill_file.write_text("---\ndescription: Test\n---\nHello World")
+        skill_file.write_text("---\ndescription: Test\n---\nHello World", encoding="utf-8")
 
         skill = load_skill_from_path(skill_file, skill_name="test")
         assert skill is not None
@@ -55,7 +55,7 @@ class TestLoadSkillFromPath:
     def test_file_path_set(self, tmp_path):
         """file_path is recorded."""
         skill_file = tmp_path / "test.md"
-        skill_file.write_text("---\ndescription: Test\n---\nBody")
+        skill_file.write_text("---\ndescription: Test\n---\nBody", encoding="utf-8")
 
         skill = load_skill_from_path(skill_file, skill_name="test")
         assert skill is not None

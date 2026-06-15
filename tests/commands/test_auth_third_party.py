@@ -88,7 +88,7 @@ class TestThirdPartyCategory:
         monkeypatch.setenv("HOME", str(tmp_path))
         settings_path = tmp_path / ".iac-code" / "settings.yml"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text("")
+        settings_path.write_text("", encoding="utf-8")
 
         monkeypatch.setattr("iac_code.commands.auth.get_settings_path", lambda: settings_path)
         monkeypatch.setattr(

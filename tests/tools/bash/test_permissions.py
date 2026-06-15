@@ -266,7 +266,7 @@ class TestBashToolHasPermission:
 
     @pytest.mark.asyncio
     async def test_cat_file_under_cwd_allows(self, tmp_path):
-        (tmp_path / "file.txt").write_text("ok")
+        (tmp_path / "file.txt").write_text("ok", encoding="utf-8")
         r = await bash_tool_has_permission("cat file.txt", _ctx(cwd=str(tmp_path)))
         assert r.behavior == "allow"
 
@@ -274,7 +274,7 @@ class TestBashToolHasPermission:
     async def test_cat_trusted_read_directory_allows_outside_cwd(self, tmp_path):
         trusted = tmp_path / "trusted"
         trusted.mkdir()
-        (trusted / "file.txt").write_text("ok")
+        (trusted / "file.txt").write_text("ok", encoding="utf-8")
         cwd = tmp_path / "project"
         cwd.mkdir()
         r = await bash_tool_has_permission(

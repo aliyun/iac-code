@@ -26,7 +26,7 @@ class TestSaveLlmKey:
         save_llm_key("anthropic", "sk-123")
         creds_path = tmp_path / ".iac-code" / ".credentials.yml"
         assert creds_path.exists()
-        data = yaml.safe_load(creds_path.read_text())
+        data = yaml.safe_load(creds_path.read_text(encoding="utf-8"))
         assert data == {"anthropic": "sk-123"}
 
     def test_adds_to_existing_file(self):
@@ -49,7 +49,7 @@ class TestSaveActiveProviderConfig:
             "api_base": "https://api.example.com",
         }
         save_active_provider_config(provider, "claude-sonnet-4-6")
-        settings = yaml.safe_load((tmp_path / ".iac-code" / "settings.yml").read_text())
+        settings = yaml.safe_load((tmp_path / ".iac-code" / "settings.yml").read_text(encoding="utf-8"))
         assert settings["activeProvider"] == "anthropic"
         assert settings["providers"]["anthropic"]["model"] == "claude-sonnet-4-6"
         assert settings["providers"]["anthropic"]["name"] == "Anthropic"
@@ -130,7 +130,7 @@ class TestLegacyBailianMigration:
     def _write_legacy_creds(self, tmp_path, value: str) -> None:
         creds_dir = tmp_path / ".iac-code"
         creds_dir.mkdir(exist_ok=True)
-        (creds_dir / ".credentials.yml").write_text(f"bailian: {value}\n")
+        (creds_dir / ".credentials.yml").write_text(f"bailian: {value}\n", encoding="utf-8")
 
     def test_load_existing_key_dashscope_falls_back_to_bailian(self, tmp_path):
         self._write_legacy_creds(tmp_path, "legacy-key")
@@ -143,16 +143,19 @@ class TestLegacyBailianMigration:
     def test_save_llm_key_drops_legacy_bailian(self, tmp_path):
         self._write_legacy_creds(tmp_path, "legacy-key")
         save_llm_key("dashscope", "new-key")
-        data = yaml.safe_load((tmp_path / ".iac-code" / ".credentials.yml").read_text())
+        data = yaml.safe_load((tmp_path / ".iac-code" / ".credentials.yml").read_text(encoding="utf-8"))
         assert data == {"dashscope": "new-key"}
 
     def test_save_active_provider_config_drops_legacy_providers_bailian(self, tmp_path):
         settings_path = tmp_path / ".iac-code" / "settings.yml"
         settings_path.parent.mkdir(exist_ok=True)
-        settings_path.write_text("activeProvider: bailian\nproviders:\n  bailian:\n    model: qwen3.5-plus\n")
+        settings_path.write_text(
+            "activeProvider: bailian\nproviders:\n  bailian:\n    model: qwen3.5-plus\n",
+            encoding="utf-8",
+        )
         provider = {"name": "DashScope", "key_name": "dashscope", "api_base": "https://x/v1"}
         save_active_provider_config(provider, "qwen3.6-plus")
-        settings = yaml.safe_load(settings_path.read_text())
+        settings = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
         assert settings["activeProvider"] == "dashscope"
         assert "bailian" not in settings["providers"]
         assert settings["providers"]["dashscope"]["model"] == "qwen3.6-plus"

@@ -23,8 +23,10 @@ class FakeRedis:
         self.acked: list[tuple[str, str, str]] = []
         self.created_groups: list[tuple[str, str, str, bool]] = []
         self.read_groups: list[tuple[str, str, dict[str, str], int, int]] = []
+        self.operations: list[tuple[str, str]] = []
 
     async def xadd(self, stream, fields):
+        self.operations.append(("xadd", stream))
         self.streams.setdefault(stream, []).append(fields)
         return "1-0"
 
@@ -50,6 +52,7 @@ class FakeRedis:
         return [(stream, [("1-0", items.pop(0))])]
 
     async def xack(self, stream, group, entry_id):
+        self.operations.append(("xack", stream))
         self.acked.append((stream, group, entry_id))
         return 1
 
@@ -200,10 +203,12 @@ async def test_redis_server_creates_group_and_reads_with_consumer_group(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_redis_server_acks_request_when_dispatch_fails() -> None:
+async def test_redis_server_returns_sanitized_error_when_dispatch_fails() -> None:
     class FailingDispatcher:
         async def dispatch(self, payload):
-            raise RuntimeError("dispatch failed")
+            raise RuntimeError(
+                "dispatch failed at /Users/alice/.iac-code/a2a.sock; Authorization: Bearer sk-redissecret123"
+            )
 
     redis = FakeRedis()
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
@@ -221,10 +226,61 @@ async def test_redis_server_acks_request_when_dispatch_fails() -> None:
         "payload": json.dumps({"jsonrpc": "2.0", "id": "1", "method": "message/send"}),
     }
 
-    with pytest.raises(RuntimeError, match="dispatch failed"):
-        await server._process_entry("9-0", fields)
+    await server._process_entry("9-0", fields)
 
+    response = parse_redis_entry("1-0", redis.streams["responses"][0])
+    assert response.final is True
+    assert response.correlation_id == "corr-server"
+    error = response.payload["error"]
+    assert error["code"] == -32603
+    assert "dispatch failed" in error["message"]
+    assert "sk-redissecret123" not in error["message"]
+    assert "Authorization: Bearer" not in error["message"]
+    assert "/Users/alice" not in error["message"]
+    assert "[REDACTED]" in error["message"]
+    assert error["data"]["error_id"]
     assert redis.acked == [("requests", "iac-code", "9-0")]
+    assert redis.operations[-2:] == [("xadd", "responses"), ("xack", "requests")]
+    await server.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redis_server_returns_final_error_when_stream_dispatch_fails() -> None:
+    class FailingStreamingDispatcher:
+        async def dispatch_stream(self, payload):
+            yield {"jsonrpc": "2.0", "id": payload["id"], "result": {"delta": "hello"}}
+            raise RuntimeError("stream failed token=tok-redistreamsecret123 at /Users/alice/.iac-code/a2a.sock")
+
+    redis = FakeRedis()
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    server = RedisStreamsA2AServer(
+        redis=redis,
+        components=components,
+        request_stream="requests",
+        response_stream="responses",
+        consumer_group="iac-code",
+    )
+    server._dispatcher = FailingStreamingDispatcher()
+    fields = {
+        "correlation_id": "corr-stream",
+        "reply_stream": "responses",
+        "payload": json.dumps({"jsonrpc": "2.0", "id": "stream-1", "method": "SendStreamingMessage"}),
+    }
+
+    await server._process_entry("9-0", fields)
+
+    first = parse_redis_entry("1-0", redis.streams["responses"][0])
+    second = parse_redis_entry("1-1", redis.streams["responses"][1])
+    assert first.final is False
+    assert first.payload["result"]["delta"] == "hello"
+    assert second.final is True
+    error = second.payload["error"]
+    assert error["code"] == -32603
+    assert "tok-redistreamsecret123" not in error["message"]
+    assert "/Users/alice" not in error["message"]
+    assert error["data"]["error_id"]
+    assert redis.acked == [("requests", "iac-code", "9-0")]
+    assert redis.operations[-2:] == [("xadd", "responses"), ("xack", "requests")]
     await server.aclose()
 
 

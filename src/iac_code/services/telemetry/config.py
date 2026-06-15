@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 from enum import Enum
+from ipaddress import ip_address
+from urllib.parse import urlparse
 
 # =====================================================================
 # Privacy level
@@ -17,6 +19,16 @@ class PrivacyLevel(Enum):
 
 
 _TRUTHY = {"1", "true", "yes", "on"}
+_LOCAL_TELEMETRY_ENDPOINT_ENVS = (
+    "IAC_CODE_TELEMETRY_ENDPOINT",
+    "IAC_CODE_TELEMETRY_TRACES_ENDPOINT",
+    "IAC_CODE_TELEMETRY_METRICS_ENDPOINT",
+    "IAC_CODE_TELEMETRY_LOGS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+)
 
 
 def _is_env_truthy(name: str) -> bool:
@@ -40,8 +52,36 @@ def _is_local_build() -> bool:
     return not __release_date__.strip()
 
 
+def _is_local_endpoint(raw: str) -> bool:
+    endpoint = raw.strip()
+    if not endpoint:
+        return False
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    if parsed.hostname.lower() == "localhost":
+        return True
+    try:
+        return ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _has_local_telemetry_endpoint() -> bool:
+    return any(_is_local_endpoint(os.environ.get(name, "")) for name in _LOCAL_TELEMETRY_ENDPOINT_ENVS)
+
+
+def _local_telemetry_opt_in_enabled() -> bool:
+    return _is_env_truthy("IAC_CODE_ENABLE_LOCAL_TELEMETRY") and _has_local_telemetry_endpoint()
+
+
+def is_telemetry_endpoint_allowed(raw: str) -> bool:
+    """Whether a configured OTLP endpoint may be used for this build."""
+    return not _is_local_build() or _is_local_endpoint(raw)
+
+
 def is_telemetry_disabled() -> bool:
-    if _is_local_build():
+    if _is_local_build() and not _local_telemetry_opt_in_enabled():
         return True
     return get_privacy_level() != PrivacyLevel.DEFAULT
 
