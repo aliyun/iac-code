@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from iac_code.providers.openai_provider import OpenAIProvider
+from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec
 
 
 class ZhiPuProvider(OpenAIProvider):
@@ -26,5 +27,12 @@ class ZhiPuProvider(OpenAIProvider):
             api_key=api_key,
             base_url=base_url,
             effort=effort,
+            provider_key=provider_key,
         )
         self._PROVIDER_KEY = provider_key
+
+    def _build_thinking_kwargs(self) -> dict[str, Any]:
+        spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
+        if spec.family is not ThinkingFamily.ZHIPU:
+            return {}
+        return {"extra_body": {"thinking": {"type": "enabled"}}}
