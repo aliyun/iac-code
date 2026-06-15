@@ -2512,19 +2512,14 @@ class InlineREPL:
 
         key_task: asyncio.Task | None = None
 
-        def _should_propagate_current_task_cancellation() -> bool:
-            task = asyncio.current_task()
-            cancelling = getattr(task, "cancelling", None)
-            return bool(cancelling is not None and cancelling())
-
         async def _cancel_key_task() -> None:
             nonlocal key_task
             if key_task and not key_task.done():
                 key_task.cancel()
                 try:
-                    await key_task
+                    await asyncio.shield(key_task)
                 except asyncio.CancelledError:
-                    if _should_propagate_current_task_cancellation():
+                    if not key_task.done() or not key_task.cancelled():
                         raise
                 except OSError:
                     pass
@@ -2806,19 +2801,14 @@ class InlineREPL:
             except (OSError, ValueError):
                 pass
 
-        def _should_propagate_current_task_cancellation() -> bool:
-            task = asyncio.current_task()
-            cancelling = getattr(task, "cancelling", None)
-            return bool(cancelling is not None and cancelling())
-
         async def _cancel_key_task() -> None:
             nonlocal key_task
             if key_task and not key_task.done():
                 key_task.cancel()
                 try:
-                    await key_task
+                    await asyncio.shield(key_task)
                 except asyncio.CancelledError:
-                    if _should_propagate_current_task_cancellation():
+                    if not key_task.done() or not key_task.cancelled():
                         raise
                 except OSError:
                     pass

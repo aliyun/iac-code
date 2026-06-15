@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import html
 import json
 import os
@@ -4607,13 +4608,30 @@ def _message_stream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return server_url, payload
 
 
+def _is_client_disconnect_error(exc: BaseException) -> bool:
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    if not isinstance(exc, OSError):
+        return False
+    return getattr(exc, "errno", None) in {errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED} or getattr(
+        exc,
+        "winerror",
+        None,
+    ) in {10053, 10054}
+
+
 def _send_sse_error(handler: BaseHTTPRequestHandler, status: int, message: str) -> None:
     body = f"data: {json.dumps({'ok': False, 'error': message}, ensure_ascii=False)}\n\n".encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+    except OSError as exc:
+        if _is_client_disconnect_error(exc):
+            return
+        raise
 
 
 def create_server(config: DebuggerConfig) -> ThreadingHTTPServer:
@@ -4673,14 +4691,18 @@ def create_server(config: DebuggerConfig) -> ThreadingHTTPServer:
                                 try:
                                     self.wfile.write(line)
                                     self.wfile.flush()
-                                except (BrokenPipeError, ConnectionResetError):
-                                    return
+                                except OSError as exc:
+                                    if _is_client_disconnect_error(exc):
+                                        return
+                                    raise
                             if event_count == 0:
                                 append_debug_log(config, "sse", {"type": "stream_empty", "statusCode": response.status})
                     except HTTPError as exc:
                         append_debug_log(config, "error", {"ok": False, "error": f"HTTP {exc.code}"})
                         _send_sse_error(self, 502, f"HTTP {exc.code}")
                     except (TimeoutError, URLError, OSError) as exc:
+                        if _is_client_disconnect_error(exc):
+                            return
                         error = str(exc)
                         append_debug_log(config, "error", {"ok": False, "error": error})
                         _send_sse_error(self, 502, error)

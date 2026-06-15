@@ -7,6 +7,8 @@ from iac_code.providers.base import Message, NonStreamingResponse
 from iac_code.providers.manager import ProviderManager, _detect_provider_name, create_provider
 from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent, Usage
 
+STREAM_IDLE_TEST_TIMEOUT = 0.2
+
 
 async def _collect_stream_events(stream):
     return [event async for event in stream]
@@ -337,13 +339,13 @@ class TestProviderManagerStreaming:
         mgr = ProviderManager(
             model="claude-sonnet-4-6",
             credentials={"anthropic": "k"},
-            stream_idle_timeout=0.01,
+            stream_idle_timeout=STREAM_IDLE_TEST_TIMEOUT,
         )
         mgr._provider = HangingStreamProvider()
 
         events = await asyncio.wait_for(
             _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys")),
-            timeout=0.5,
+            timeout=1.0,
         )
 
         assert [event.type for event in events] == ["message_start", "text_delta", "message_end"]
@@ -372,13 +374,13 @@ class TestProviderManagerStreaming:
         mgr = ProviderManager(
             model="claude-sonnet-4-6",
             credentials={"anthropic": "k"},
-            stream_idle_timeout=0.01,
+            stream_idle_timeout=STREAM_IDLE_TEST_TIMEOUT,
         )
         mgr._provider = HangingAfterStartProvider()
 
         events = await asyncio.wait_for(
             _collect_stream_events(mgr.stream(messages=[Message.user("hi")], system="sys")),
-            timeout=0.5,
+            timeout=1.0,
         )
 
         assert [event.type for event in events] == [

@@ -1811,7 +1811,7 @@ def test_message_stream_route_ignores_client_disconnect_without_traceback(capsys
                 try:
                     self.wfile.write(f'data: {{"index": {index}}}\n\n'.encode("utf-8"))
                     self.wfile.flush()
-                except BrokenPipeError:
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     return
                 time.sleep(0.02)
 

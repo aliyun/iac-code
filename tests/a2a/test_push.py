@@ -202,7 +202,10 @@ async def test_push_config_store_delete_ignores_unaddressable_legacy_raw_paths(m
     original_unlink = Path.unlink
 
     def windows_unlink(path: Path, *args, **kwargs):
-        if any(":" in part for part in path.parts):
+        # Windows absolute paths include a drive component such as ``C:\``.
+        # Only raw task/config path components should trigger this simulated
+        # WinError 123.
+        if any(":" in part for part in path.relative_to(tmp_path).parts):
             raise OSError("WinError 123: invalid filename")
         return original_unlink(path, *args, **kwargs)
 

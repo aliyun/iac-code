@@ -154,7 +154,7 @@ class TestReferencesExist:
         ref = SKILL_DIR / "references"
         if not ref.is_symlink():
             pytest.skip("references is not a symlink in this checkout")
-        target = str(ref.readlink())
+        target = str(ref.readlink()).replace("\\", "/")
         assert "skills/bundled/iac_aliyun/references" in target
 
     def test_references_resolves_to_dir(self):
