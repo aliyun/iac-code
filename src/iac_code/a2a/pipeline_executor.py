@@ -30,11 +30,13 @@ from iac_code.a2a.types import (
 )
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.i18n import _
-from iac_code.pipeline import create_pipeline
+from iac_code.pipeline import create_pipeline, discover_pipelines
 from iac_code.pipeline.config import get_pipeline_name
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
-from iac_code.pipeline.engine.handoff import terminal_outcome_from_completed_event
+from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
+from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.public_errors import public_error
+from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import use_session_id
@@ -1382,13 +1384,123 @@ def cancel_waiting_input_task_from_sidecar(
     )
     if int(envelope.get("sequence") or 0) <= high_water_sequence:
         envelope["sequence"] = high_water_sequence + 1
+    handoff_envelope = _waiting_input_cancel_handoff_event(
+        translator,
+        snapshot=snapshot,
+        cwd=cwd,
+        session_id=session_id,
+        pipeline_name=pipeline_name,
+        reason=reason,
+    )
+    if handoff_envelope is not None and int(handoff_envelope.get("sequence") or 0) <= int(
+        envelope.get("sequence") or 0
+    ):
+        handoff_envelope["sequence"] = int(envelope.get("sequence") or 0) + 1
     try:
         journal.append(envelope)
+        if handoff_envelope is not None:
+            journal.append(handoff_envelope)
         snapshot_store.save(reduce_pipeline_events(journal.read_all_repairing_tail()))
     except Exception:
         logger.warning("Failed to persist waiting A2A pipeline cancellation", exc_info=True)
         return False
     return True
+
+
+def _waiting_input_cancel_handoff_event(
+    translator: PipelineEventTranslator,
+    *,
+    snapshot: dict[str, Any] | None,
+    cwd: str,
+    session_id: str,
+    pipeline_name: str,
+    reason: str,
+) -> dict[str, Any] | None:
+    loaded_pipeline = _load_pipeline_definition_for_handoff(pipeline_name)
+    if loaded_pipeline is None:
+        return None
+    policy = getattr(loaded_pipeline, "on_complete", None)
+    if policy is None or policy.action != "switch_to_normal" or "canceled" not in policy.apply_on:
+        return None
+
+    include_fields = getattr(policy.handoff_context, "include", [])
+    context_snapshot = _flat_pipeline_context_from_sidecar(cwd=cwd, session_id=session_id)
+    if not context_snapshot:
+        context_snapshot = _flat_pipeline_context_from_a2a_snapshot(snapshot, loaded_pipeline)
+    summary = build_handoff_summary(
+        pipeline_name=pipeline_name,
+        outcome="canceled",
+        context_snapshot=context_snapshot,
+        include_fields=include_fields,
+    )
+    return translator.manual_event(
+        "pipeline_handoff_ready",
+        "pipeline",
+        status="canceled",
+        data={
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "canceled",
+            "summary": summary,
+            "reason": reason,
+        },
+    )
+
+
+def _load_pipeline_definition_for_handoff(pipeline_name: str) -> Any | None:
+    try:
+        pipeline_dir = discover_pipelines().get(pipeline_name)
+        if pipeline_dir is None:
+            return None
+        return load_pipeline_dir(pipeline_dir)
+    except Exception:
+        logger.warning("Failed to load A2A pipeline handoff policy for %s", pipeline_name, exc_info=True)
+        return None
+
+
+def _flat_pipeline_context_from_sidecar(*, cwd: str, session_id: str) -> dict[str, Any]:
+    try:
+        restored = PipelineSession(SessionStorage().session_dir(cwd, session_id) / "pipeline").restore_sync()
+    except Exception:
+        logger.warning("Failed to load pipeline context for A2A cancel handoff", exc_info=True)
+        return {}
+    if not isinstance(restored, dict):
+        return {}
+    context_snapshot = restored.get("context_snapshot")
+    if not isinstance(context_snapshot, dict):
+        return {}
+    return _flatten_pipeline_context_snapshot(context_snapshot)
+
+
+def _flat_pipeline_context_from_a2a_snapshot(snapshot: dict[str, Any] | None, loaded_pipeline: Any) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        return {}
+    field_by_step_id = {
+        str(getattr(step, "step_id")): str(getattr(step, "conclusion_field"))
+        for step in getattr(loaded_pipeline, "steps", [])
+        if getattr(step, "step_id", None) and getattr(step, "conclusion_field", None)
+    }
+    context: dict[str, Any] = {}
+    for step in snapshot.get("steps", []) if isinstance(snapshot.get("steps"), list) else []:
+        if not isinstance(step, dict):
+            continue
+        field_name = field_by_step_id.get(str(step.get("id") or ""))
+        if not field_name:
+            continue
+        conclusion = step.get("conclusion")
+        if conclusion is not None:
+            context[field_name] = conclusion
+    return context
+
+
+def _flatten_pipeline_context_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    flattened: dict[str, Any] = {}
+    for field_name, field_value in snapshot.items():
+        if isinstance(field_value, dict) and "value" in field_value:
+            value = field_value.get("value")
+            if value is not None:
+                flattened[field_name] = value
+    return flattened
 
 
 def terminal_task_state_from_sidecar(*, cwd: str, session_id: str, context_id: str, task_id: str) -> str | None:

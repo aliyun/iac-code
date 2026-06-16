@@ -206,6 +206,9 @@ def _extract_pipeline_envelope(payload: Any) -> dict[str, Any] | None:
                 return envelope
         return None
 
+    if isinstance(payload.get("eventType") or payload.get("event_type"), str):
+        return payload
+
     for key in ("pipeline", "pipelineEvent", "pipelineSnapshot"):
         if isinstance(payload.get(key), dict):
             return payload[key]
@@ -322,10 +325,26 @@ def load_debug_log_export(log_dir: str | Path) -> dict[str, Any]:
     snapshots = _load_debug_log_raw_values(path / "snapshots.jsonl")
     requests = _load_debug_log_raw_values(path / "requests.jsonl")
     latest_snapshot = snapshots[-1] if snapshots else None
+    snapshot_events = [
+        event
+        for snapshot in snapshots
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("events"), list)
+        for event in snapshot["events"]
+    ]
+    replay_events = [*sse_events, *snapshot_events]
     latest_pipeline = None
     active_task_id = ""
     task_history: dict[str, dict[str, str]] = {}
     last_sequence = 0
+
+    def sequence_value(value: Any) -> int | None:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return None
+        return int(value)
+
+    def terminal_pipeline_status(value: Any) -> bool:
+        state = str(value or "").lower().replace("task_state_", "").replace("-", "_")
+        return state in {"canceled", "cancelled", "failed", "denied", "completed"}
 
     def remember_task(*, task_id: Any, context_id: Any = "", state: Any = "", role: str = "active") -> None:
         normalized_task_id = str(task_id or "")
@@ -339,7 +358,7 @@ def load_debug_log_export(log_dir: str | Path) -> dict[str, Any]:
             "role": role or existing.get("role") or "active",
         }
 
-    for item in sse_events:
+    for item in replay_events:
         identity = _a2a_task_identity(item)
         if identity is not None:
             active_task_id = str(identity.get("taskId") or active_task_id)
@@ -359,9 +378,13 @@ def load_debug_log_export(log_dir: str | Path) -> dict[str, Any]:
             state=envelope.get("state") or envelope.get("status"),
             role="pipeline",
         )
-        sequence = envelope.get("sequence")
-        if isinstance(sequence, int) and not isinstance(sequence, bool):
+        sequence = sequence_value(envelope.get("sequence"))
+        if sequence is not None:
             last_sequence = max(last_sequence, sequence)
+        if terminal_pipeline_status(envelope.get("state") or envelope.get("status")) and active_task_id == str(
+            envelope.get("taskId") or ""
+        ):
+            active_task_id = ""
     return {
         "schemaVersion": "iac-code-a2a-debugger-export-v1",
         "exportedAt": _utc_now(),
@@ -378,7 +401,7 @@ def load_debug_log_export(log_dir: str | Path) -> dict[str, Any]:
         "waitingInput": "",
         "latestPermission": None,
         "snapshot": latest_snapshot,
-        "sseEvents": sse_events,
+        "sseEvents": replay_events,
         "requests": requests,
         "executionTree": {"rootIds": [], "nodes": {}},
         "uiState": {},
@@ -888,6 +911,11 @@ def render_index_html(config: DebuggerConfig) -> str:
     .timeline-rollback {
       border-color: #fecaca;
       background: #fef2f2;
+    }
+
+    .timeline-canceled {
+      border-color: #fecaca;
+      background: #fff1f2;
     }
 
     .pill {
@@ -1726,6 +1754,14 @@ def render_index_html(config: DebuggerConfig) -> str:
       return stateValue === "TASK_STATE_SUBMITTED" || stateValue === "TASK_STATE_WORKING";
     }
 
+    function isTerminalPipelineTaskState(value) {
+      const stateValue = String(value || "")
+        .toLowerCase()
+        .replace(/^task_state_/, "")
+        .replace(/-/g, "_");
+      return ["canceled", "cancelled", "failed", "denied", "completed"].includes(stateValue);
+    }
+
     function shouldKeepActiveTaskId(identity) {
       return identity && isWorkingA2ATaskState(identity.state);
     }
@@ -1769,14 +1805,12 @@ def render_index_html(config: DebuggerConfig) -> str:
       if (activeTaskInput && state.activeTaskId && activeTaskInput.value.trim() !== state.activeTaskId) {
         activeTaskInput.value = state.activeTaskId;
       }
-      if (activeTaskInput && !state.activeTaskId && state.normalHandoffReady && activeTaskInput.value.trim()) {
-        activeTaskInput.value = "";
-      }
       if (
         activeTaskInput &&
         !state.activeTaskId &&
-        state.normalHandoffReady &&
-        activeTaskInput.value.trim() === state.taskId
+        activeTaskInput.value.trim() &&
+        (state.normalHandoffReady ||
+          (isTerminalPipelineTaskState(state.status) && activeTaskInput.value.trim() === state.taskId))
       ) {
         activeTaskInput.value = "";
       }
@@ -1815,10 +1849,15 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function streamTaskIdForControls(controls) {
-      if (state.normalHandoffReady && !controls.activeTaskId) {
+      const activeTaskId = controls.activeTaskId || state.activeTaskId;
+      const pipelineTaskId = controls.taskId || state.taskId;
+      if (activeTaskId && !(isTerminalPipelineTaskState(state.status) && activeTaskId === pipelineTaskId)) {
+        return activeTaskId;
+      }
+      if (state.normalHandoffReady || isTerminalPipelineTaskState(state.status)) {
         return "";
       }
-      return controls.activeTaskId || state.activeTaskId || controls.taskId || state.taskId;
+      return pipelineTaskId;
     }
 
     function cancelTaskIdForControls(controls) {
@@ -2598,6 +2637,13 @@ def render_index_html(config: DebuggerConfig) -> str:
       if (type === "input_required") {
         return {label: "input required", text: summarizeValue(data), className: "timeline-permission"};
       }
+      if (type === "pipeline_canceled") {
+        return {
+          label: "pipeline canceled",
+          text: data.reason || summarizeValue(data),
+          className: "timeline-canceled"
+        };
+      }
       if (type.endsWith("_completed") && Object.prototype.hasOwnProperty.call(data, "conclusion")) {
         return {
           label: type.replace(/_/g, " "),
@@ -3340,7 +3386,8 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function snapshotNormalHandoff(snapshot) {
-      return snapshotObject(snapshot && (snapshot.normalHandoff || snapshot.normal_handoff));
+      const envelope = snapshotEnvelope(snapshot);
+      return snapshotObject(envelope && (envelope.normalHandoff || envelope.normal_handoff));
     }
 
     function normalHandoffSummary(snapshot) {
@@ -4021,6 +4068,7 @@ def render_index_html(config: DebuggerConfig) -> str:
         updateRawRequest(requestRow, {status: "ok", response: body});
         appendRawEvent("sse", {type: "cancel", body});
         applyPipelineEvent(body);
+        await fetchStateIfAvailable();
       } catch (error) {
         updateRawRequest(requestRow, {
           status: "error",

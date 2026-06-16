@@ -85,6 +85,15 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         context_id = context.context_id or "ctx-" + uuid.uuid4().hex[:12]
         task = None
+        initial_task_published = False
+
+        async def publish_initial_task_if_missing() -> None:
+            nonlocal initial_task_published
+            if initial_task_published or isinstance(getattr(context, "current_task", None), Task):
+                return
+            await self._publish_initial_task(event_queue, task_id=task_id, context_id=context_id, context=context)
+            initial_task_published = True
+
         try:
             metadata = getattr(context, "metadata", None) or getattr(
                 getattr(context, "message", None), "metadata", None
@@ -107,10 +116,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                 owner=owner,
                 restore_interrupted=not pipeline_mode,
             )
-            if not isinstance(getattr(context, "current_task", None), Task):
-                await self._publish_initial_task(event_queue, task_id=task_id, context_id=context_id, context=context)
+            await publish_initial_task_if_missing()
             await self._task_store.ensure_task_not_expired(task.task_id)
         except Exception as exc:
+            await publish_initial_task_if_missing()
             if _is_retryable_executor_error(exc):
                 await self._publish_status(
                     event_queue,

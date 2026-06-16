@@ -1038,6 +1038,23 @@ def test_index_html_cancel_uses_active_task_id() -> None:
         assert expected in html
 
 
+def test_index_html_fetches_pipeline_state_after_cancel() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+    cancel_body = html.split("async function cancelTask()", 1)[1].split("async function streamMessage()", 1)[0]
+
+    assert 'appendRawEvent("sse", {type: "cancel", body});' in cancel_body
+    assert "await fetchStateIfAvailable();" in cancel_body
+
+
 def test_index_html_yields_between_batched_sse_events() -> None:
     debugger = load_debugger_module()
 
@@ -1076,12 +1093,77 @@ def test_index_html_omits_completed_pipeline_task_id_after_normal_handoff() -> N
     for expected in [
         "normalHandoffReady",
         "function streamTaskIdForControls",
-        "state.normalHandoffReady && !controls.activeTaskId",
+        "state.normalHandoffReady || isTerminalPipelineTaskState(state.status)",
         'state.activeTaskId = "";',
         'return "";',
         "updateNormalHandoffState(envelope);",
     ]:
         assert expected in html
+
+
+def test_index_html_omits_terminal_pipeline_task_id_when_streaming_followup(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+    script = html[html.index("<script>") + len("<script>") : html.rindex("</script>")]
+
+    assert "function isTerminalPipelineTaskState" in script
+    assert "isTerminalPipelineTaskState(state.status)" in script
+
+    def extract_function(name: str) -> str:
+        start = script.index(f"function {name}")
+        brace = script.index("{", start)
+        depth = 0
+        for index in range(brace, len(script)):
+            char = script[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return script[start : index + 1]
+        raise AssertionError(f"Could not extract {name}")
+
+    functions = [extract_function("streamTaskIdForControls")]
+    if "function isTerminalPipelineTaskState" in script:
+        functions.insert(0, extract_function("isTerminalPipelineTaskState"))
+
+    js_path = tmp_path / "stream-task-routing.js"
+    js_path.write_text(
+        "\n".join(
+            [
+                'const state = {normalHandoffReady: false, activeTaskId: "", taskId: "task-1", status: ""};',
+                *functions,
+                'state.status = "TASK_STATE_CANCELED";',
+                'if (streamTaskIdForControls({activeTaskId: "", taskId: "task-1"}) !== "") {',
+                '  throw new Error("canceled pipeline taskId should not be reused");',
+                "}",
+                'state.status = "canceled";',
+                'if (streamTaskIdForControls({activeTaskId: "", taskId: "task-1"}) !== "") {',
+                '  throw new Error("snapshot canceled pipeline taskId should not be reused");',
+                "}",
+                'state.status = "waiting_input";',
+                'if (streamTaskIdForControls({activeTaskId: "", taskId: "task-1"}) !== "task-1") {',
+                '  throw new Error("waiting input pipeline taskId should be reused");',
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        result = subprocess.run(["node", str(js_path)], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        pytest.skip("node is not installed")
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_index_html_clears_finished_active_task_after_normal_chat_turn() -> None:
@@ -1190,6 +1272,112 @@ def test_index_html_can_restore_debugger_log_replay_payload(tmp_path: Path) -> N
     ]
 
 
+def test_load_log_dir_replays_state_fetch_cancel_handoff_events(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "sse-events.jsonl").write_text(
+        json.dumps(
+            {
+                "raw": {
+                    "statusUpdate": {
+                        "taskId": "task-pipeline",
+                        "contextId": "ctx-1",
+                        "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
+                        "metadata": {
+                            "iac_code": {
+                                "pipeline": {
+                                    "eventType": "input_required",
+                                    "sequence": 72.0,
+                                    "taskId": "task-pipeline",
+                                    "contextId": "ctx-1",
+                                    "status": "input_required",
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (log_dir / "snapshots.jsonl").write_text(
+        json.dumps(
+            {
+                "raw": {
+                    "snapshot": {
+                        "status": "canceled",
+                        "taskId": "task-pipeline",
+                        "contextId": "ctx-1",
+                        "lastSequence": 74,
+                        "normalHandoff": {
+                            "action": "switch_to_normal",
+                            "targetMode": "normal",
+                            "outcome": "canceled",
+                        },
+                    },
+                    "events": [
+                        {
+                            "eventType": "pipeline_canceled",
+                            "sequence": 73,
+                            "taskId": "task-pipeline",
+                            "contextId": "ctx-1",
+                            "status": "canceled",
+                        },
+                        {
+                            "eventType": "pipeline_handoff_ready",
+                            "sequence": 74,
+                            "taskId": "task-pipeline",
+                            "contextId": "ctx-1",
+                            "status": "canceled",
+                            "data": {
+                                "action": "switch_to_normal",
+                                "targetMode": "normal",
+                                "outcome": "canceled",
+                            },
+                        },
+                    ],
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    replay = debugger.load_debug_log_export(log_dir)
+
+    assert replay["task"]["taskId"] == "task-pipeline"
+    assert replay["task"]["activeTaskId"] == ""
+    assert replay["task"]["contextId"] == "ctx-1"
+    assert replay["task"]["status"] == "canceled"
+    assert replay["task"]["lastSequence"] == 74
+    assert [event["eventType"] for event in replay["sseEvents"][-2:]] == [
+        "pipeline_canceled",
+        "pipeline_handoff_ready",
+    ]
+
+
+def test_index_html_normal_handoff_summary_reads_snapshot_response_wrapper() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+    normal_handoff_body = html.split("function snapshotNormalHandoff(snapshot)", 1)[1].split(
+        "function normalHandoffSummary(snapshot)",
+        1,
+    )[0]
+
+    assert "snapshotEnvelope(snapshot)" in normal_handoff_body
+    assert "snapshotObject(envelope &&" in normal_handoff_body
+
+
 def test_index_html_fills_context_and_task_id_controls_after_capture() -> None:
     debugger = load_debugger_module()
 
@@ -1250,6 +1438,26 @@ def test_index_html_reads_input_required_data_and_clears_stale_permissions() -> 
         "envelope.data",
         "state.latestPermission = null",
         "fetchStateIfAvailable",
+    ]:
+        assert expected in html
+
+
+def test_index_html_highlights_pipeline_canceled_events() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+
+    for expected in [
+        'type === "pipeline_canceled"',
+        'label: "pipeline canceled"',
+        "timeline-canceled",
     ]:
         assert expected in html
 

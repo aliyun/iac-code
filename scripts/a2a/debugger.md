@@ -30,6 +30,32 @@ uv run python scripts/a2a/debugger.py --port 41880 \
   --default-cwd "$PWD"
 ```
 
+`--default-cwd` is sent to the A2A server as `metadata.iac_code.cwd` on each
+message. It is the server-side workspace for the task, not merely the debugger's
+own working directory.
+
+The A2A server validates this path before running the agent. By default, the
+server accepts its own startup directory and Python's temp directory. If the
+server starts in directory `a` but the debugger starts in directory `b`,
+`--default-cwd "$PWD"` expands to `b`; the request is rejected with
+`Invalid A2A workspace metadata.` unless `b` is under an allowed root.
+
+Use one of these patterns:
+
+```bash
+# Start the debugger with a cwd accepted by the already-running server.
+uv run python scripts/a2a/debugger.py --port 41880 \
+  --default-server-url http://127.0.0.1:41299 \
+  --default-cwd "/path/to/server/workspace"
+```
+
+```bash
+# Or explicitly allow the debugger/client workspace when starting the server.
+IACCODE_A2A_ALLOWED_CWDS="/path/to/server/workspace:/path/to/client/workspace" \
+IAC_CODE_MODE=pipeline \
+uv run iac-code a2a --transport http --host 127.0.0.1 --port 41299
+```
+
 Open:
 
 ```text
