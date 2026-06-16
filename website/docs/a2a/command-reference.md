@@ -59,6 +59,7 @@ require-card-signature: true
 timeout: 30
 cwd: /path/to/workspace
 context-id: ctx-123
+iac-code-model: qwen-plus
 task-id: task-123
 config-id: webhook-1
 callback-url: https://hooks.example.com/a2a
@@ -95,6 +96,7 @@ By default, the server binds to `127.0.0.1:41242` and serves JSON-RPC over HTTP.
 | `--transport` | `http` | Server transport: `http`, `stdio`, `unix`, `websocket`, `grpc`, `grpc-jsonrpc`, or `redis-streams` |
 | `--thinking-exposure` | `tool-trace` | Expose an A2A thinking signal type; repeat for multiple. Values: `raw-thinking`, `tool-trace` |
 | `--debug`, `-d` | `false` | Enable debug logging |
+| `--log-to-stdout` / `--no-log-to-stdout` | `false` | Mirror server logs to stdout. Not supported with `--transport stdio` because stdout carries A2A protocol frames |
 
 Example:
 
@@ -114,6 +116,7 @@ token: local-dev-token
 persistence-dir: .iac-code-a2a/state
 artifact-dir: .iac-code-a2a/artifacts
 push-notifications: true
+log-to-stdout: true
 ```
 
 Run it with:
@@ -267,7 +270,8 @@ Discover an Agent Card, choose the advertised endpoint, and send a prompt.
 ```bash
 iac-code a2a-client --config a2a-client.yml call \
   --prompt "Create a ROS VPC template with two vSwitches." \
-  --cwd "$PWD"
+  --cwd "$PWD" \
+  --iac-code-model qwen-plus
 ```
 
 | Option | Default | Description |
@@ -278,6 +282,7 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--prompt`, `-p` | required | Prompt text |
 | `--cwd` | `.` | Workspace path sent as `message.metadata.iac_code.cwd` |
 | `--context-id` | empty | Existing A2A context ID for a follow-up message |
+| `--iac-code-model` | empty | LLM model sent as `message.metadata.iac_code.iac_code_model`; overrides server model config for this message turn only |
 | `--verify-card-secret`, `--signing-secret` | empty | HMAC secret for Agent Card verification |
 | `--verify-card-jwks-url` | empty | Remote JWKS URL used for Agent Card verification |
 | `--require-card-signature`, `--require-signature` | `false` | Reject unsigned or invalid Agent Cards |

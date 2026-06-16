@@ -901,7 +901,7 @@ def _llm_auth_flow(console, store) -> str | None | _BackSentinel:
         ("Azure OpenAI", ["azure_openai"]),
         ("OpenRouter", ["openrouter"]),
         ("Local", ["ollama", "lmstudio"]),
-        ("Compatible", ["openapi_compatible", "anthropic_compatible"]),
+        ("Compatible", ["openai_compatible", "anthropic_compatible"]),
     ]
 
     provider_map: dict[str, LLMProvider] = {str(p["key_name"]): p for p in PROVIDERS}
@@ -968,7 +968,7 @@ def _llm_auth_flow(console, store) -> str | None | _BackSentinel:
 
         # Step 3 (Compatible providers): API Base URL
         user_api_base = None
-        if provider["key_name"] in ("openapi_compatible", "anthropic_compatible"):
+        if provider["key_name"] in ("openai_compatible", "anthropic_compatible"):
             existing_api_base = _load_existing_api_base(str(provider["key_name"]))
             api_base_result = _input_text_with_default(
                 _("Configure {provider}").format(provider=provider["display_name"]),

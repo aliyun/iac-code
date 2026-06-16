@@ -97,17 +97,17 @@ def is_model_multimodal(
         return overrides[model].support_multimodal
     if model in _builtin_multimodal_models():
         return True
-    if provider_key == "openapi_compatible" and base_url:
+    if provider_key == "openai_compatible" and base_url:
         from iac_code.services.capabilities.auto_detect import (
             AutoDetectCache,
-            probe_openapi_compatible,
+            probe_openai_compatible,
         )
 
         cache = AutoDetectCache()
         cached = cache.get(base_url, model)
         if cached is not None:
             return cached
-        result = probe_openapi_compatible(base_url=base_url, api_key=api_key, model=model)
+        result = probe_openai_compatible(base_url=base_url, api_key=api_key, model=model)
         if result is not None:
             cache.set(base_url, model, result)
             cache.flush()

@@ -84,6 +84,8 @@ def _build_provider_name_to_key() -> dict[str, str]:
     for desc in PROVIDER_REGISTRY.values():
         _add_alias(desc.name, desc.key)
         _add_alias(desc.key, desc.key)
+    _add_alias("OpenAPI Compatible", "openai_compatible")
+    _add_alias("openapi_compatible", "openai_compatible")
     return mapping
 
 
@@ -108,9 +110,10 @@ def _build_canonical_names() -> tuple[str, ...]:
 _PROVIDER_CANONICAL_NAMES: tuple[str, ...] = _build_canonical_names()
 
 # Legacy key_name aliases accepted when reading settings.yml (write path always uses
-# the canonical key on the right). Keep DashScope's old "bailian" name readable.
+# the canonical key on the right).
 _LEGACY_KEY_NAME_ALIASES: dict[str, str] = {
     "bailian": "dashscope",
+    "openapi_compatible": "openai_compatible",
 }
 
 # Model-name prefix → provider key_name.  Used by _detect_provider_name (in
@@ -132,7 +135,7 @@ _MODEL_PREFIX_TO_PROVIDER: tuple[tuple[str, str], ...] = (
 )
 
 # Module-level flag — warn once per process when IAC_CODE_BASE_URL is set
-# but the active provider is not OpenAPICompatible. Reset by tests.
+# but the active provider is not OpenAICompatible. Reset by tests.
 _warned_base_url_ignored: bool = False
 
 
@@ -319,11 +322,12 @@ def get_provider_config(key_name: str) -> dict[str, Any]:
 
     When ``key_name`` is the active provider, IAC_CODE_MODEL and
     IAC_CODE_BASE_URL env values are overlaid. IAC_CODE_BASE_URL only
-    applies when the active provider is ``openapi_compatible``; setting
+    applies when the active provider is ``openai_compatible``; setting
     it for other providers logs a one-time warning and is ignored.
     """
     global _warned_base_url_ignored
 
+    key_name = _LEGACY_KEY_NAME_ALIASES.get(key_name, key_name)
     settings = _load_yaml(get_settings_path())
     providers = settings.get("providers")
     entry: dict[str, Any] = {}
@@ -350,7 +354,7 @@ def get_provider_config(key_name: str) -> dict[str, Any]:
         if env["model"]:
             entry["model"] = env["model"]
         if env["api_base"]:
-            if active_key == "openapi_compatible":
+            if active_key == "openai_compatible":
                 entry["apiBase"] = env["api_base"]
             elif not _warned_base_url_ignored:
                 from loguru import logger
@@ -358,7 +362,7 @@ def get_provider_config(key_name: str) -> dict[str, Any]:
                 logger.warning(
                     "IAC_CODE_BASE_URL is set but active provider is "
                     f"{active_key!r}; the value is ignored. "
-                    "IAC_CODE_BASE_URL only applies to OpenAPICompatible."
+                    "IAC_CODE_BASE_URL only applies to OpenAICompatible."
                 )
                 _warned_base_url_ignored = True
 
@@ -405,7 +409,7 @@ def load_credentials(model: str | None = None) -> dict[str, str]:
 
     Returns a dict with six fixed slots: ``anthropic``, ``openai``,
     ``dashscope``, ``dashscope_token_plan``, ``deepseek``,
-    ``openapi_compatible``. The ``dashscope`` slot also accepts the legacy
+    ``openai_compatible``. The ``dashscope`` slot also accepts the legacy
     ``bailian`` key in the YAML file (file's ``dashscope`` value takes
     precedence when both are present).
 
@@ -428,6 +432,8 @@ def load_credentials(model: str | None = None) -> dict[str, str]:
         creds[key] = str(raw.get(key, "") or "")
     if not creds.get("dashscope"):
         creds["dashscope"] = str(raw.get("bailian", "") or "")
+    if not creds.get("openai_compatible"):
+        creds["openai_compatible"] = str(raw.get("openapi_compatible", "") or "")
 
     env = _get_env_overrides()
     if env["api_key"]:

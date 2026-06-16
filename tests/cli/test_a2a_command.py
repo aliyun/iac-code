@@ -30,6 +30,7 @@ def test_a2a_help_shows_common_server_options_only() -> None:
     assert "--transport" in stdout
     assert "--thinking-exposure" in stdout
     assert "--debug" in stdout
+    assert "--log-to-stdout" in stdout
     assert "--socket-path" not in stdout
     assert "--token" not in stdout
     assert "--persistence-dir" not in stdout
@@ -233,9 +234,13 @@ def test_a2a_command_rejects_missing_push_redis_url(tmp_path) -> None:
 
 def test_a2a_command_loads_config_file_and_cli_overrides(monkeypatch, tmp_path) -> None:
     captured = {}
+    logging_setup = {}
 
     def fake_run_server(**kwargs):
         captured.update(kwargs)
+
+    def fake_setup_logging(**kwargs):
+        logging_setup.update(kwargs)
 
     config = tmp_path / "a2a.yml"
     config.write_text(
@@ -250,16 +255,19 @@ def test_a2a_command_loads_config_file_and_cli_overrides(monkeypatch, tmp_path) 
                 "push_notifications: true",
                 "auto_approve_permissions: true",
                 "thinking_exposure: raw-thinking, tool-trace",
+                "log-to-stdout: true",
             ]
         ),
         encoding="utf-8",
     )
     monkeypatch.setattr("iac_code.cli.main.load_saved_model", lambda: "qwen3.6-plus")
+    monkeypatch.setattr("iac_code.cli.main.setup_logging", fake_setup_logging)
     monkeypatch.setattr("iac_code.a2a.app.run_server", fake_run_server)
 
     result = CliRunner().invoke(app, ["a2a", "--config", str(config), "--port", "54321"])
 
     assert result.exit_code == 0
+    assert logging_setup == {"session_id": "a2a-server", "debug": False, "stdout": True}
     assert captured["host"] == "0.0.0.0"
     assert captured["port"] == 54321
     assert captured["transport"] == "websocket"
@@ -269,6 +277,49 @@ def test_a2a_command_loads_config_file_and_cli_overrides(monkeypatch, tmp_path) 
     assert captured["push_notifications"] is True
     assert captured["auto_approve_permissions"] is True
     assert captured["thinking_exposure"] == "raw-thinking, tool-trace"
+
+
+def test_a2a_command_log_to_stdout_cli_overrides_config(monkeypatch, tmp_path) -> None:
+    logging_setup = {}
+
+    def fake_setup_logging(**kwargs):
+        logging_setup.update(kwargs)
+
+    config = tmp_path / "a2a.yml"
+    config.write_text("log-to-stdout: false\n", encoding="utf-8")
+    monkeypatch.setattr("iac_code.cli.main.setup_logging", fake_setup_logging)
+    monkeypatch.setattr("iac_code.a2a.app.run_server", lambda **_kwargs: None)
+
+    result = CliRunner().invoke(app, ["a2a", "--config", str(config), "--log-to-stdout"])
+
+    assert result.exit_code == 0
+    assert logging_setup == {"session_id": "a2a-server", "debug": False, "stdout": True}
+
+
+def test_a2a_command_no_log_to_stdout_cli_overrides_config(monkeypatch, tmp_path) -> None:
+    logging_setup = {}
+
+    def fake_setup_logging(**kwargs):
+        logging_setup.update(kwargs)
+
+    config = tmp_path / "a2a.yml"
+    config.write_text("log-to-stdout: true\n", encoding="utf-8")
+    monkeypatch.setattr("iac_code.cli.main.setup_logging", fake_setup_logging)
+    monkeypatch.setattr("iac_code.a2a.app.run_server", lambda **_kwargs: None)
+
+    result = CliRunner().invoke(app, ["a2a", "--config", str(config), "--no-log-to-stdout"])
+
+    assert result.exit_code == 0
+    assert logging_setup == {"session_id": "a2a-server", "debug": False, "stdout": False}
+
+
+def test_a2a_command_rejects_stdio_log_to_stdout(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.cli.main.setup_logging", lambda **_kwargs: None)
+
+    result = CliRunner().invoke(app, ["a2a", "--transport", "stdio", "--log-to-stdout"])
+
+    assert result.exit_code == 1
+    assert "--log-to-stdout cannot be used with --transport stdio" in result.stderr
 
 
 def test_a2a_command_accepts_repeated_thinking_exposure_flags(monkeypatch) -> None:
@@ -363,8 +414,16 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
             called["require_card_signature"] = require_card_signature
             called["timeout_seconds"] = timeout_seconds
 
-        async def send_message(self, url: str, prompt: str, *, cwd: str, context_id: str | None = None):
-            called["send"] = {"url": url, "prompt": prompt, "cwd": cwd, "context_id": context_id}
+        async def send_message(
+            self,
+            url: str,
+            prompt: str,
+            *,
+            cwd: str,
+            context_id: str | None = None,
+            model: str | None = None,
+        ):
+            called["send"] = {"url": url, "prompt": prompt, "cwd": cwd, "context_id": context_id, "model": model}
             return SimpleNamespace(text="created stack", payload={"result": {"text": "created stack"}})
 
         async def discover(self, url: str):
@@ -404,6 +463,8 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
             str(tmp_path),
             "--context-id",
             "ctx-1",
+            "--iac-code-model",
+            "metadata-model",
             "--token",
             "bearer",
             "--api-key",
@@ -431,6 +492,7 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
         "prompt": "create vpc",
         "cwd": str(tmp_path),
         "context_id": "ctx-1",
+        "model": "metadata-model",
     }
     assert called["discover"] == "http://agent.example/rpc"
     assert called["fallback_url"] == "http://agent.example/rpc"
@@ -448,6 +510,37 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
     assert called["closed"] is True
 
 
+def test_a2a_call_default_cwd_prefers_logical_pwd(monkeypatch, tmp_path) -> None:
+    called = {}
+    physical = tmp_path / "mount-root" / "oss" / "bucket"
+    physical.mkdir(parents=True)
+    logical = tmp_path / "workspace"
+    logical.symlink_to(physical, target_is_directory=True)
+
+    async def fake_run_a2a_call(**kwargs) -> str:
+        called.update(kwargs)
+        return "ok"
+
+    monkeypatch.chdir(logical)
+    monkeypatch.setenv("PWD", str(logical))
+    monkeypatch.setattr("iac_code.cli.main._run_a2a_call", fake_run_a2a_call)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "a2a-client",
+            "call",
+            "--url",
+            "http://agent.example/rpc",
+            "--prompt",
+            "create vpc",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert called["cwd"] == str(logical)
+
+
 def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
     called = {}
 
@@ -463,8 +556,16 @@ def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
         def select_endpoint_url(card, *, fallback_url: str) -> str:
             return card.get("url", fallback_url)
 
-        async def stream_message(self, url: str, prompt: str, *, cwd: str, context_id: str | None = None):
-            called["stream"] = {"url": url, "prompt": prompt, "cwd": cwd, "context_id": context_id}
+        async def stream_message(
+            self,
+            url: str,
+            prompt: str,
+            *,
+            cwd: str,
+            context_id: str | None = None,
+            model: str | None = None,
+        ):
+            called["stream"] = {"url": url, "prompt": prompt, "cwd": cwd, "context_id": context_id, "model": model}
             yield {"result": {"status": {"state": "working", "message": {"parts": [{"text": "planning"}]}}}}
             yield {"result": {"text": "created stack"}}
 
@@ -501,6 +602,7 @@ def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
         "prompt": "create vpc",
         "cwd": str(tmp_path),
         "context_id": "ctx-1",
+        "model": None,
     }
     assert called["closed"] is True
 
@@ -551,6 +653,7 @@ def test_a2a_client_call_loads_config_and_allows_cli_overrides(monkeypatch, tmp_
                 "url: http://agent.example/rpc",
                 "cwd: /workspace/from-config",
                 "context-id: ctx-from-config",
+                "iac-code-model: config-model",
                 "token: config-token",
                 "basic-username: config-user",
                 "basic-password: config-pass",
@@ -587,6 +690,7 @@ def test_a2a_client_call_loads_config_and_allows_cli_overrides(monkeypatch, tmp_
         "prompt": "create vpc",
         "cwd": "/workspace/from-config",
         "context_id": "ctx-from-config",
+        "model": "config-model",
         "token": "config-token",
         "basic_username": "config-user",
         "basic_password": "config-pass",
@@ -1085,6 +1189,26 @@ def test_a2a_command_bootstraps_telemetry_around_run_server(monkeypatch) -> None
     assert ("iac.session.count", 1, {}) in metrics
     assert server_kwargs["transport"] == "http"
     assert shutdown_calls == [1]
+
+
+def test_a2a_command_does_not_create_settings_yml_before_request(monkeypatch, tmp_path) -> None:
+    from iac_code.services.telemetry import set_client
+
+    config_dir = tmp_path / "config"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("DISABLE_TELEMETRY", "1")
+    set_client(None)
+    monkeypatch.setattr("iac_code.cli.main.load_saved_model", lambda: "qwen3.6-plus")
+    monkeypatch.setattr("iac_code.a2a.app.run_server", lambda **kwargs: None)
+    monkeypatch.setattr("atexit.register", lambda *args, **kwargs: None)
+
+    try:
+        result = CliRunner().invoke(app, ["a2a", "--transport", "http"])
+    finally:
+        set_client(None)
+
+    assert result.exit_code == 0
+    assert not (config_dir / "settings.yml").exists()
 
 
 def test_a2a_command_flushes_telemetry_when_validation_fails(monkeypatch) -> None:

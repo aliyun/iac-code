@@ -613,6 +613,10 @@ msgid ""
 msgstr "A2A トランスポート: http、stdio、unix、websocket、grpc、grpc-jsonrpc、または redis-streams"
 
 #: src/iac_code/cli/main.py
+msgid "Mirror server logs to stdout"
+msgstr "サーバーログを標準出力にミラーリング"
+
+#: src/iac_code/cli/main.py
 msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
@@ -651,6 +655,10 @@ msgstr "リクエストと共に送信する作業ディレクトリのメタデ
 #: src/iac_code/cli/main.py
 msgid "A2A context ID to continue"
 msgstr "継続する A2A コンテキスト ID"
+
+#: src/iac_code/cli/main.py
+msgid "Model metadata to send with this A2A request"
+msgstr "この A2A リクエストで送信するモデルメタデータ"
 
 #: src/iac_code/cli/main.py
 msgid "Bearer token for A2A HTTP requests"
@@ -2391,7 +2399,7 @@ msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "Alibaba Cloud 百錬 Token Plan"
 
 #: src/iac_code/providers/registry.py
-msgid "OpenAPI Compatible"
+msgid "OpenAI Compatible"
 msgstr "OpenAPI 互換"
 
 #: src/iac_code/providers/registry.py
@@ -4359,4 +4367,3 @@ msgstr "公開イベントではスタックトレースを省略しました。
 
 #~ msgid "Project Memory Index"
 #~ msgstr "プロジェクトメモリ索引"
-

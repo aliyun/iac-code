@@ -645,6 +645,10 @@ msgstr ""
 "redis-streams"
 
 #: src/iac_code/cli/main.py
+msgid "Mirror server logs to stdout"
+msgstr "Dupliquer les journaux du serveur vers stdout"
+
+#: src/iac_code/cli/main.py
 msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
@@ -687,6 +691,10 @@ msgstr "Métadonnées du répertoire de travail à envoyer avec la requête"
 #: src/iac_code/cli/main.py
 msgid "A2A context ID to continue"
 msgstr "ID de contexte A2A à poursuivre"
+
+#: src/iac_code/cli/main.py
+msgid "Model metadata to send with this A2A request"
+msgstr "Métadonnées du modèle à envoyer avec cette requête A2A"
 
 #: src/iac_code/cli/main.py
 msgid "Bearer token for A2A HTTP requests"
@@ -2491,7 +2499,7 @@ msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "Alibaba Cloud Bailian Token Plan"
 
 #: src/iac_code/providers/registry.py
-msgid "OpenAPI Compatible"
+msgid "OpenAI Compatible"
 msgstr "Compatible OpenAPI"
 
 #: src/iac_code/providers/registry.py
@@ -4523,4 +4531,3 @@ msgstr "Trace de pile omise de l’événement public ; consultez error_id."
 
 #~ msgid "Project Memory Index"
 #~ msgstr "Index de mémoire du projet"
-

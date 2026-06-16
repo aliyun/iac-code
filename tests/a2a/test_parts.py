@@ -86,6 +86,32 @@ def test_file_url_audio_part_adds_multimodal_manifest(tmp_path) -> None:
     assert f"source={source.as_uri()}" in prompt
 
 
+def test_resolve_workspace_path_falls_back_for_absolute_path_when_process_cwd_is_deleted(monkeypatch, tmp_path) -> None:
+    def deleted_process_cwd_failure(self):
+        raise FileNotFoundError("[Errno 2] No such file or directory")
+
+    monkeypatch.setattr(parts.Path, "resolve", deleted_process_cwd_failure)
+
+    assert parts.resolve_workspace_path(tmp_path) == tmp_path.absolute()
+
+
+def test_resolve_workspace_path_does_not_fallback_through_symlink_when_process_cwd_is_deleted(
+    monkeypatch, tmp_path
+) -> None:
+    outside = tmp_path.parent / "outside"
+    outside.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(outside, target_is_directory=True)
+
+    def deleted_process_cwd_failure(self):
+        raise FileNotFoundError("[Errno 2] No such file or directory")
+
+    monkeypatch.setattr(parts.Path, "resolve", deleted_process_cwd_failure)
+
+    with pytest.raises(FileNotFoundError):
+        parts.resolve_workspace_path(link)
+
+
 def test_binary_data_part_decodes_base64_manifest(tmp_path) -> None:
     encoded = base64.b64encode(b"\x00\x01binary").decode("ascii")
 

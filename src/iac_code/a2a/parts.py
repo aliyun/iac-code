@@ -70,7 +70,7 @@ def allowed_cwd_roots() -> list[Path]:
         candidates = [Path(item) for item in raw.split(os.pathsep) if item]
     else:
         candidates = [Path.cwd(), Path(tempfile.gettempdir())]
-    return [path.resolve() for path in candidates if path.exists() and path.is_dir()]
+    return [resolve_workspace_path(path) for path in candidates if path.exists() and path.is_dir()]
 
 
 def is_relative_to(path: Path, root: Path) -> bool:
@@ -79,6 +79,28 @@ def is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def resolve_workspace_path(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except FileNotFoundError:
+        if not path.is_absolute() or _has_symlink_component(path):
+            raise
+        return path.absolute()
+
+
+def _has_symlink_component(path: Path) -> bool:
+    current = Path(path.anchor) if path.anchor else Path()
+    parts = path.parts[1:] if path.anchor else path.parts
+    for part in parts:
+        current /= part
+        try:
+            if current.is_symlink():
+                return True
+        except OSError:
+            return False
+    return False
 
 
 def parts_to_prompt(message_parts: Iterable[Any], *, cwd: str | Path) -> str:

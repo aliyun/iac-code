@@ -162,6 +162,17 @@ class TestFindGitWorktreeRoot:
         sub.mkdir(parents=True)
         assert find_git_worktree_root(str(sub)) == tmp_path.resolve()
 
+    def test_symlinked_repo_returns_logical_worktree_root(self, tmp_path: Path):
+        physical = tmp_path / "mount-root" / "oss" / "bucket"
+        physical.mkdir(parents=True)
+        (physical / ".git").mkdir()
+        logical = tmp_path / "workspace"
+        logical.symlink_to(physical, target_is_directory=True)
+        sub = logical / "ctx-1"
+        sub.mkdir()
+
+        assert find_git_worktree_root(str(sub)) == logical
+
     def test_worktree_with_absolute_gitdir_pointer(self, tmp_path: Path):
         """A linked worktree's root is the dir containing its .git file."""
         real_git = tmp_path / "real" / ".git"

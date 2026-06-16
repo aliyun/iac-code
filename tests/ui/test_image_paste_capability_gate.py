@@ -139,14 +139,14 @@ def test_ctrl_v_warns_when_store_fails(repl):
 
 
 def test_ctrl_v_passes_provider_context_to_is_model_multimodal(repl):
-    """When provider is openapi_compatible, the call must include base_url + api_key
+    """When provider is openai_compatible, the call must include base_url + api_key
     so auto-detect can probe."""
     repl._current_model = "custom-vl"
     repl._current_provider_config = {
-        "keyName": "openapi_compatible",
+        "keyName": "openai_compatible",
         "apiBase": "https://example.com/v1",
     }
-    repl._credentials = {"openapi_compatible": "sk-test"}
+    repl._credentials = {"openai_compatible": "sk-test"}
     img = ClipboardImage(data=_valid_png_bytes(), media_type="image/png")
     with (
         patch("iac_code.utils.image.clipboard.get_image_from_clipboard", return_value=img),
@@ -160,7 +160,7 @@ def test_ctrl_v_passes_provider_context_to_is_model_multimodal(repl):
         handle_image_paste(repl)
     mock_capability.assert_called_once_with(
         "custom-vl",
-        provider_key="openapi_compatible",
+        provider_key="openai_compatible",
         base_url="https://example.com/v1",
         api_key="sk-test",
     )

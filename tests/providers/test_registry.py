@@ -33,7 +33,7 @@ class TestProviderRegistry:
             "openrouter",
             "azure_openai",
             "modelscope",
-            "openapi_compatible",
+            "openai_compatible",
         ]
         for key in expected:
             assert key in PROVIDER_REGISTRY, f"Missing provider: {key}"
@@ -78,7 +78,7 @@ class TestProviderRegistry:
             assert desc.is_local is True
 
     def test_qwenpaw_provider_ids_populated(self):
-        compatible_keys = {"openapi_compatible", "anthropic_compatible"}
+        compatible_keys = {"openai_compatible", "anthropic_compatible"}
         for key, desc in PROVIDER_REGISTRY.items():
             if key not in compatible_keys:
                 assert desc.qwenpaw_provider_ids, f"{key} missing qwenpaw_provider_ids"

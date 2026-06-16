@@ -37,7 +37,10 @@ def resolve_project_root(cwd: str) -> Path:
     git_root = find_git_worktree_root(cwd)
     if git_root is not None:
         return git_root
-    return Path(cwd).expanduser().resolve()
+    path = Path(cwd).expanduser()
+    if not path.is_absolute():
+        path = Path(os.path.abspath(str(path)))
+    return Path(os.path.normpath(str(path)))
 
 
 def project_key_for_cwd(cwd: str) -> str:

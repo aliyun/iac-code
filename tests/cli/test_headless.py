@@ -858,7 +858,7 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
             "anthropic": "ak",
             "openai": "ok",
             "bailian": "bk",
-            "openapi_compatible": "compat",
+            "openai_compatible": "compat",
         },
         skills=[],
     )
@@ -872,7 +872,7 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
     assert pm["credentials"]["anthropic"] == "ak"
     assert pm["credentials"]["openai"] == "ok"
     assert pm["credentials"]["dashscope"] == "bk"
-    assert pm["credentials"]["openapi_compatible"] == "compat"
+    assert pm["credentials"]["openai_compatible"] == "compat"
     # Session storage is now project-partitioned and constructs its own
     # default projects_dir from get_config_dir(), so we just assert the
     # storage was instantiated rather than checking a specific path.
@@ -909,7 +909,7 @@ def test_create_agent_loop_handles_credential_load_failure_and_skill_conflict(mo
         runner._create_agent_loop()
 
     creds = captured["provider_manager"]["credentials"]
-    for key in ("anthropic", "openai", "dashscope", "dashscope_token_plan", "deepseek", "openapi_compatible"):
+    for key in ("anthropic", "openai", "dashscope", "dashscope_token_plan", "deepseek", "openai_compatible"):
         assert creds[key] == ""
     warning.assert_called_once()
     assert fake_command_registry.registered == []

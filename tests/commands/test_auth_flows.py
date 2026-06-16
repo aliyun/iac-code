@@ -237,8 +237,8 @@ class TestLlmAuthFlow:
         assert "qwen3.6-plus" in result
         store.set_state.assert_called_once_with(model="qwen3.6-plus")
 
-    def test_openapi_compatible_uses_api_base_and_existing_key(self, monkeypatch):
-        monkeypatch.setattr("iac_code.commands.auth._get_active_key_name", lambda: "openapi_compatible")
+    def test_openai_compatible_uses_api_base_and_existing_key(self, monkeypatch):
+        monkeypatch.setattr("iac_code.commands.auth._get_active_key_name", lambda: "openai_compatible")
         calls = {"select": 0}
 
         def select_side_effect(title, options, default_index=0):
@@ -285,13 +285,13 @@ class TestLlmAuthFlow:
         assert "custom-model" in result
         assert "key" not in saved
         assert saved == {
-            "provider": "openapi_compatible",
+            "provider": "openai_compatible",
             "model": "custom-model",
             "api_base": "https://new.example/v1",
         }
         store.set_state.assert_called_once_with(model="custom-model")
 
-    def test_openapi_compatible_empty_api_base_restarts_group_selection(self, monkeypatch):
+    def test_openai_compatible_empty_api_base_restarts_group_selection(self, monkeypatch):
         calls = {"select": 0}
 
         def select_side_effect(title, options, default_index=0):

@@ -138,10 +138,10 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         ],
         qwenpaw_provider_ids=["deepseek"],
     ),
-    "openapi_compatible": ProviderDescriptor(
-        key="openapi_compatible",
-        name="OpenAPI Compatible",
-        display_name="OpenAPI Compatible",
+    "openai_compatible": ProviderDescriptor(
+        key="openai_compatible",
+        name="OpenAI Compatible",
+        display_name="OpenAI Compatible",
         provider_class="iac_code.providers.openai_provider.OpenAIProvider",
         base_url=None,
         models=[],
@@ -447,7 +447,7 @@ _DISPLAY_NAME_MARKERS = [
     _("OpenAI"),
     _("Anthropic"),
     _("DeepSeek"),
-    _("OpenAPI Compatible"),
+    _("OpenAI Compatible"),
     _("Google Gemini"),
     _("Kimi (China)"),
     _("Kimi (International)"),

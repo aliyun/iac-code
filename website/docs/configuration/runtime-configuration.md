@@ -19,7 +19,7 @@ The runtime directory defaults to:
 ~/.iac-code/
 ```
 
-You can relocate it by setting the `IAC_CODE_CONFIG_DIR` environment variable (supports `~` and `$VAR` expansion). When set, every persisted artifact — credentials, settings, history, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — follows the new location.
+You can relocate it by setting the `IAC_CODE_CONFIG_DIR` environment variable (supports `~` and `$VAR` expansion). When set, every persisted artifact — credentials, settings, history, `projects/`, `image-cache/`, `tool-results/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — follows the new location. Logs default to `<config-dir>/logs/` but can be moved separately with `IAC_CODE_LOG_DIR`.
 
 Common files:
 

@@ -59,6 +59,7 @@ require-card-signature: true
 timeout: 30
 cwd: /path/to/workspace
 context-id: ctx-123
+iac-code-model: qwen-plus
 task-id: task-123
 config-id: webhook-1
 callback-url: https://hooks.example.com/a2a
@@ -267,7 +268,8 @@ thinking-exposure:
 ```bash
 iac-code a2a-client --config a2a-client.yml call \
   --prompt "Create a ROS VPC template with two vSwitches." \
-  --cwd "$PWD"
+  --cwd "$PWD" \
+  --iac-code-model qwen-plus
 ```
 
 | 选项 | 默认值 | 描述 |
@@ -278,6 +280,7 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--prompt`, `-p` | 必需 | Prompt text |
 | `--cwd` | `.` | 作为 `message.metadata.iac_code.cwd` 发送的 workspace path |
 | `--context-id` | 空 | 用于后续消息的现有 A2A context ID |
+| `--iac-code-model` | 空 | 作为 `message.metadata.iac_code.iac_code_model` 发送的 LLM model；只在本次 message turn 覆盖 server model 配置 |
 | `--verify-card-secret`, `--signing-secret` | 空 | Agent Card verification 的 HMAC secret |
 | `--verify-card-jwks-url` | 空 | 用于 Agent Card verification 的远程 JWKS URL |
 | `--require-card-signature`, `--require-signature` | `false` | 拒绝未签名或无效的 Agent Cards |

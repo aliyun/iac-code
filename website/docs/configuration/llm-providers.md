@@ -57,7 +57,7 @@ CLI arguments > environment variables > configuration files
 
 | Provider value | Purpose |
 |---|---|
-| `OpenAPI Compatible` | Any OpenAI-compatible API endpoint |
+| `OpenAI Compatible` | Any OpenAI-compatible API endpoint |
 | `Anthropic Compatible` | Any Anthropic-compatible API endpoint |
 | `OpenRouter` | OpenRouter aggregation gateway |
 
@@ -74,5 +74,5 @@ CLI arguments > environment variables > configuration files
 |---|---|
 | `IAC_CODE_PROVIDER` | Model provider name (case-insensitive). See tables above for valid values |
 | `IAC_CODE_MODEL` | Model name |
-| `IAC_CODE_BASE_URL` | API endpoint for `OpenAPI Compatible` and `Anthropic Compatible` only; ignored for other providers |
+| `IAC_CODE_BASE_URL` | API endpoint for `OpenAI Compatible` and `Anthropic Compatible` only; ignored for other providers |
 | `IAC_CODE_API_KEY` | Provider API key |

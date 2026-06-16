@@ -44,13 +44,13 @@ class TestCreateProvider:
         with pytest.raises(ValueError, match="Cannot determine provider"):
             create_provider("unknown-model", credentials={})
 
-    def test_openapi_compatible(self, monkeypatch):
-        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openapi_compatible")
+    def test_openai_compatible(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai_compatible")
         monkeypatch.setattr(
             "iac_code.config.get_provider_config",
             lambda name: {"apiBase": "https://my.llm.local/v1"},
         )
-        p = create_provider("any-model", credentials={"openapi_compatible": "sk-x"})
+        p = create_provider("any-model", credentials={"openai_compatible": "sk-x"})
         assert p.get_model_name() == "any-model"
         assert p._base_url == "https://my.llm.local/v1"
 

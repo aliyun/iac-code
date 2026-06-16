@@ -74,7 +74,7 @@ class AutoDetectCache:
         self._dirty = False
 
 
-def probe_openapi_compatible(
+def probe_openai_compatible(
     *,
     base_url: str,
     api_key: str | None,

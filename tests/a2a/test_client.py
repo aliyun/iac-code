@@ -138,6 +138,29 @@ async def test_send_message_posts_a2a_1_jsonrpc_request() -> None:
     assert headers == {"A2A-Version": "1.0"}
 
 
+@pytest.mark.asyncio
+async def test_message_payload_includes_metadata_iac_code_model() -> None:
+    http = FakeHTTPClient()
+    client = A2AClient(http_client=http)
+
+    await client.send_message("http://remote/", "hello", cwd="/tmp/work", model="metadata-model")
+    events = [
+        event async for event in client.stream_message("http://remote/", "hello", cwd="/tmp/work", model="stream-model")
+    ]
+
+    assert events
+    send_payload = http.requests[-2][2]
+    stream_payload = http.requests[-1][2]
+    assert send_payload["params"]["message"]["metadata"]["iac_code"] == {
+        "cwd": "/tmp/work",
+        "iac_code_model": "metadata-model",
+    }
+    assert stream_payload["params"]["message"]["metadata"]["iac_code"] == {
+        "cwd": "/tmp/work",
+        "iac_code_model": "stream-model",
+    }
+
+
 def test_response_text_extracts_from_task_history_agent_message() -> None:
     response = A2AClientResponse(
         payload={

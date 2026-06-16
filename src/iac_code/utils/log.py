@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import sys
 from pathlib import Path
 
 from loguru import logger
@@ -14,9 +16,18 @@ from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 _LOG_FORMAT = "{time:YYYY-MM-DDTHH:mm:ss.SSS} [{level:<5}] {name}:{function}:{line} - {message}"
 
 _startup_handler_id: int | None = None
+_stdout_handler_id: int | None = None
 _runtime_debug_handler_ids: list[int] = []
 _debug_enabled: bool = False
+_stdout_enabled: bool = False
 _current_log_file: Path | None = None
+
+
+def _get_log_dir() -> Path:
+    raw = os.environ.get("IAC_CODE_LOG_DIR", "").strip()
+    if raw:
+        return ensure_private_dir(Path(os.path.expandvars(os.path.expanduser(raw))).resolve())
+    return ensure_private_dir(get_config_dir() / "logs")
 
 
 def _link_latest(log_dir: Path, log_file: Path) -> None:
@@ -56,19 +67,24 @@ class _StdlibToLoguruHandler(logging.Handler):
 def setup_logging(
     session_id: str,
     debug: bool = False,
+    *,
+    stdout: bool = False,
 ) -> None:
     """Configure loguru for the application.
 
     Args:
         session_id: Current session ID, used in log filenames.
         debug: Enable debug file logging.
+        stdout: Mirror the same log stream to stdout.
     """
-    global _startup_handler_id, _runtime_debug_handler_ids, _debug_enabled, _current_log_file
+    global _startup_handler_id, _stdout_handler_id, _runtime_debug_handler_ids, _debug_enabled, _stdout_enabled
+    global _current_log_file
 
     logger.remove()
     _runtime_debug_handler_ids = []
+    _stdout_handler_id = None
 
-    log_dir = ensure_private_dir(get_config_dir() / "logs")
+    log_dir = _get_log_dir()
     log_file = log_dir / f"{session_id}.log"
     level = "DEBUG" if debug else "INFO"
 
@@ -78,7 +94,14 @@ def setup_logging(
         format=_LOG_FORMAT,
         encoding="utf-8",
     )
+    if stdout:
+        _stdout_handler_id = logger.add(
+            sys.stdout,
+            level=level,
+            format=_LOG_FORMAT,
+        )
     _debug_enabled = debug
+    _stdout_enabled = stdout
     _current_log_file = log_file
     ensure_private_file(log_file)
 
@@ -103,14 +126,23 @@ def enable_debug_at_runtime(session_id: str) -> Path:
     Returns:
         Path to the log file.
     """
-    global _debug_enabled, _current_log_file
+    global _debug_enabled, _current_log_file, _stdout_handler_id
 
-    log_dir = ensure_private_dir(get_config_dir() / "logs")
+    log_dir = _get_log_dir()
     log_file = log_dir / f"{session_id}.log"
     _current_log_file = log_file
 
     if _debug_enabled:
         return log_file
+
+    if _stdout_enabled:
+        if _stdout_handler_id is not None:
+            logger.remove(_stdout_handler_id)
+        _stdout_handler_id = logger.add(
+            sys.stdout,
+            level="DEBUG",
+            format=_LOG_FORMAT,
+        )
 
     handler_id = logger.add(
         str(log_file),
@@ -129,7 +161,7 @@ def enable_debug_at_runtime(session_id: str) -> Path:
 
 def disable_debug_at_runtime() -> None:
     """Disable debug logging mid-session (for /debug off)."""
-    global _debug_enabled, _startup_handler_id, _runtime_debug_handler_ids
+    global _debug_enabled, _startup_handler_id, _stdout_handler_id, _runtime_debug_handler_ids
 
     if not _debug_enabled:
         return
@@ -151,6 +183,17 @@ def disable_debug_at_runtime() -> None:
             level="INFO",
             format=_LOG_FORMAT,
             encoding="utf-8",
+        )
+
+    if _stdout_enabled and _stdout_handler_id is not None:
+        try:
+            logger.remove(_stdout_handler_id)
+        except ValueError:
+            pass
+        _stdout_handler_id = logger.add(
+            sys.stdout,
+            level="INFO",
+            format=_LOG_FORMAT,
         )
 
     _debug_enabled = False

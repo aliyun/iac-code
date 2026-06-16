@@ -603,6 +603,10 @@ msgid ""
 msgstr "A2A 传输方式：http、stdio、unix、websocket、grpc、grpc-jsonrpc 或 redis-streams"
 
 #: src/iac_code/cli/main.py
+msgid "Mirror server logs to stdout"
+msgstr "将服务器日志镜像到标准输出"
+
+#: src/iac_code/cli/main.py
 msgid ""
 "Expose A2A thinking signal types; repeat for multiple. Values: raw-"
 "thinking, tool-trace."
@@ -641,6 +645,10 @@ msgstr "随请求一起发送的工作目录元数据"
 #: src/iac_code/cli/main.py
 msgid "A2A context ID to continue"
 msgstr "要继续的 A2A 上下文 ID"
+
+#: src/iac_code/cli/main.py
+msgid "Model metadata to send with this A2A request"
+msgstr "随本次 A2A 请求发送的模型元数据"
 
 #: src/iac_code/cli/main.py
 msgid "Bearer token for A2A HTTP requests"
@@ -2367,7 +2375,7 @@ msgid "Alibaba Cloud Bailian Token Plan"
 msgstr "阿里云百炼 Token Plan"
 
 #: src/iac_code/providers/registry.py
-msgid "OpenAPI Compatible"
+msgid "OpenAI Compatible"
 msgstr "OpenAPI 兼容"
 
 #: src/iac_code/providers/registry.py
@@ -4317,4 +4325,3 @@ msgstr "公开事件中已省略堆栈跟踪；请查看 error_id。"
 
 #~ msgid "Project Memory Index"
 #~ msgstr "项目记忆索引"
-

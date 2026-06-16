@@ -1,6 +1,9 @@
+import contextvars
 import json
 import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -71,6 +74,20 @@ class AliyunCredential:
     oauth_refresh_token_expire: int = 0
 
 
+_aliyun_credential_override: contextvars.ContextVar[AliyunCredential | None] = contextvars.ContextVar(
+    "iac_code_aliyun_credential_override", default=None
+)
+
+
+@contextmanager
+def use_aliyun_credential(credential: AliyunCredential) -> Iterator[None]:
+    token = _aliyun_credential_override.set(credential)
+    try:
+        yield
+    finally:
+        _aliyun_credential_override.reset(token)
+
+
 def mask_sensitive(value: str) -> str:
     """Mask a sensitive value with '*' characters of the same length."""
     if not value:
@@ -82,6 +99,10 @@ class AliyunCredentials:
     @staticmethod
     def load(config_path: str | None = None) -> AliyunCredential | None:
         """Load credentials with priority: env vars > iac-code config > aliyun CLI config."""
+        override = _aliyun_credential_override.get()
+        if override is not None:
+            return override
+
         # Try environment variables first
         access_key_id = os.environ.get("ALIBABA_CLOUD_ACCESS_KEY_ID")
         access_key_secret = os.environ.get("ALIBABA_CLOUD_ACCESS_KEY_SECRET")
