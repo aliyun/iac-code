@@ -1,0 +1,56 @@
+ROSTemplateFormatVersion: '2015-09-01'
+Description: 在已有VPC下创建VSwitch
+Metadata:
+  ALIYUN::ROS::Interface:
+    ParameterGroups:
+      - Parameters:
+          - VpcId
+          - ZoneId
+          - VSwitchCidrBlock
+        Label:
+          default: 网络配置
+Parameters:
+  VpcId:
+    Type: String
+    Label:
+      en: VPC
+      zh-cn: 专有网络
+    AssociationProperty: ALIYUN::ECS::VPC::VPCId
+    AssociationPropertyMetadata:
+      RegionId: ${ALIYUN::Region}
+  ZoneId:
+    Type: String
+    Label:
+      en: Zone ID
+      zh-cn: 可用区
+    AssociationProperty: ALIYUN::ECS::ZoneId
+    AssociationPropertyMetadata:
+      RegionId: ${ALIYUN::Region}
+  VSwitchCidrBlock:
+    Type: String
+    Default: 10.0.1.0/24
+    Label:
+      en: VSwitch CIDR Block
+      zh-cn: 交换机网段
+    Description:
+      en: The CIDR block of the VSwitch. Must be a subnet of the VPC CIDR.
+      zh-cn: 交换机的网段，必须是VPC网段的子网。
+Resources:
+  VSwitch:
+    Type: ALIYUN::ECS::VSwitch
+    Properties:
+      VpcId: !Ref VpcId
+      ZoneId: !Ref ZoneId
+      CidrBlock: !Ref VSwitchCidrBlock
+      VSwitchName: app-vswitch
+Outputs:
+  VSwitchId:
+    Label:
+      en: VSwitch ID
+      zh-cn: 交换机ID
+    Value: !GetAtt VSwitch.VSwitchId
+  VSwitchCidrBlock:
+    Label:
+      en: VSwitch CIDR Block
+      zh-cn: 交换机网段
+    Value: !GetAtt VSwitch.CidrBlock
