@@ -517,7 +517,7 @@ def run_server(
     try:
         import uvicorn
     except ImportError as exc:
-        raise RuntimeError("A2A server dependencies are missing. Install iac-code with the 'a2a' extra.") from exc
+        raise RuntimeError("A2A server dependencies are missing. Install with: pip install 'iac-code[a2a]'") from exc
 
     uvicorn.run(
         app,

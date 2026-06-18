@@ -36,4 +36,3 @@ Then run `iac-code` normally.
 - Pipeline-level evidence is split into lifecycle, normal chat after pipeline, and other session evidence.
 - Use **Clear** before a new manual test.
 - Use **Export JSONL** to save the captured records.
-

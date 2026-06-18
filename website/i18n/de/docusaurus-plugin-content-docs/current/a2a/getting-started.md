@@ -167,7 +167,7 @@ iac-code a2a-client --config a2a-client.yml call \
 Zeigen Sie bei Multi-Agent-Routing die Routenauswahl vor dem Aufruf in der Vorschau an:
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "template=http://127.0.0.1:41242/;skills=iac_generation;tags=ros,template" \
   --skill iac_generation \
   --route-state-dir ~/.iac-code/a2a

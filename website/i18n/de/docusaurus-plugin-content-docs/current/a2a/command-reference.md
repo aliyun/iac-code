@@ -24,7 +24,7 @@ Diese Seite dokumentiert jeden A2A-bezogenen `iac-code`-Befehl. Verwenden Sie si
 | `iac-code a2a-client push-config-list` | Task-Push-Notification-Configs auflisten |
 | `iac-code a2a-client push-config-delete` | Eine Task-Push-Notification-Config loeschen |
 | `iac-code a2a-client extended-card` | Die authentifizierte erweiterte Agent Card abrufen |
-| `iac-code a2a-route-preview` | Lokale Routenauswahl fuer `a2a-client call` voranzeigen |
+| `iac-code a2a-client route-preview` | Lokale Routenauswahl fuer `a2a-client call` voranzeigen |
 
 Alle HTTP-Clientbefehle akzeptieren dieselben Authentifizierungsoptionen:
 
@@ -465,12 +465,12 @@ iac-code a2a-client --config a2a-client.yml extended-card \
 
 Die oeffentliche Agent Card bewirbt `capabilities.extendedAgentCard=true`. Die erweiterte Karte fuegt authentifizierte Laufzeitdetails hinzu, einschliesslich Task-Verwaltung und Push-Konfigurationsfaehigkeitsmetadaten.
 
-## `iac-code a2a-route-preview`
+## `iac-code a2a-client route-preview`
 
 Vorschau, wie `a2a-client call` konfigurierte Routen aufloest, wenn `--url` ausgelassen ist.
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "template=http://127.0.0.1:41242/;skills=iac_generation;tags=ros,template" \
   --skill iac_generation \
   --prompt "Create a ROS VPC template"
@@ -488,7 +488,7 @@ iac-code a2a-route-preview \
 Routen-Snapshots speichern:
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "ros=http://127.0.0.1:41242/;skills=iac_generation;tags=ros" \
   --route-state-dir ~/.iac-code/a2a \
   --save-routes

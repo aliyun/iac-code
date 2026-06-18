@@ -167,7 +167,7 @@ iac-code a2a-client --config a2a-client.yml call \
 对于多 agent 路由，请在调用前预览路由选择：
 
 ```bash
-iac-code a2a-route-preview \
+iac-code a2a-client route-preview \
   --route "template=http://127.0.0.1:41242/;skills=iac_generation;tags=ros,template" \
   --skill iac_generation \
   --route-state-dir ~/.iac-code/a2a
