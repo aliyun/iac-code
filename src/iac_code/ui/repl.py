@@ -21,13 +21,17 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from io import StringIO
 from types import ModuleType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from loguru import logger
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
+from rich.text import Text
 
 from iac_code.agent.agent_loop import AgentLoop
+from iac_code.agent.message import ContentBlock, ImageBlock, Message
 from iac_code.agent.system_prompt import build_system_prompt
 from iac_code.commands import create_default_registry
 from iac_code.commands.registry import CommandResult, LocalCommand, PromptCommand
@@ -55,6 +59,16 @@ from iac_code.state.app_state import AppState
 from iac_code.tasks.notification_queue import NotificationQueue
 from iac_code.tasks.task_state import TaskManager
 from iac_code.tools.base import ToolRegistry
+from iac_code.types.stream_events import (
+    AskUserQuestionEvent,
+    CandidateDetailEvent,
+    DiagramEvent,
+    PermissionRequestEvent,
+    SubPipelineStreamEvent,
+    TextDeltaEvent,
+    ToolInputDeltaEvent,
+    ToolUseStartEvent,
+)
 from iac_code.ui.banner import render_update_prompt_header, render_welcome_banner
 from iac_code.ui.components.select import Select, SelectLayout, TextOption
 from iac_code.ui.core.input_history import InputHistory
@@ -70,7 +84,13 @@ from iac_code.ui.suggestions.skill_provider import SkillProvider
 from iac_code.utils.background_housekeeping import start_background_housekeeping
 from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipboard, try_read_image_from_path
 from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
+from iac_code.utils.json_utils import extract_json_int_value, extract_json_string_value
 from iac_code.utils.project_paths import format_resume_command, same_project_path
+
+if TYPE_CHECKING:
+    from iac_code.pipeline import PipelineRunner
+    from iac_code.pipeline.config import RunMode
+    from iac_code.pipeline.engine.events import PipelineEvent
 
 termios: ModuleType | None
 try:
@@ -79,6 +99,13 @@ except ImportError:  # Windows
     termios = None
 else:
     termios = _termios
+
+
+# Slash commands that remain available mid-pipeline regardless of the
+# pipeline's allow_user_escapes.command setting (problem 5). Permanent whitelist
+# so users are never locked out of the basics while a pipeline is running.
+_PIPELINE_SAFE_COMMANDS: frozenset[str] = frozenset({"/exit", "/help", "/status", "/prompt", "/resume"})
+PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed"]
 
 
 class ExitREPLError(Exception):
@@ -145,6 +172,7 @@ class InlineREPL:
         self.session_index = SessionIndex()
         self._session_id = self._resolve_session_id(resume_session_id)
         self._was_resumed = resume_session_id is not None
+        self._runtime_mode = self._resolve_initial_runtime_mode(resume_session_id)
         from iac_code.utils.image.store import ImageStore
 
         self._image_store = ImageStore(session_id=self._session_id)
@@ -234,6 +262,12 @@ class InlineREPL:
             status_callback=self._status_text,
             app_state_store=self.store,
         )
+
+        self._pipeline: PipelineRunner | None = None
+        self._pipeline_waiting_input: bool = False
+        self._pipeline_restored_status: str | None = None
+        self._pipeline_display_recorder = None
+        self._pipeline_display_current_step_id: str | None = None
 
         # Keybinding manager
         self._keybinding_manager = KeybindingManager()
@@ -380,7 +414,7 @@ class InlineREPL:
             render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
         )
         if self._resume_messages:
-            self.renderer.replay_history(self._resume_messages)
+            self._replay_resume_messages(self._resume_messages)
             self.console.print()  # blank line before first new user turn
         start_background_housekeeping(session_id=self._session_id)
         self._start_background_update_checker()
@@ -410,7 +444,7 @@ class InlineREPL:
         # KeyboardInterrupt instead of cancelling the task. Our handler
         # always cancels the main task, allowing the REPL to recover via
         # uncancel() and continue.
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         main_task = asyncio.current_task()
 
         def _on_sigint() -> None:
@@ -423,6 +457,9 @@ class InlineREPL:
             _has_sigint_handler = True
         except (NotImplementedError, OSError):
             pass  # Windows or restricted environment
+
+        if initial_prompt is None:
+            await self._resume_pipeline_sidecar_on_startup()
 
         first_turn = True
         last_ctrl_c_time: float = 0.0
@@ -467,6 +504,11 @@ class InlineREPL:
                     last_ctrl_c_time = 0.0  # Reset on valid input
                     user_input = user_input.strip()
                     if not user_input:
+                        continue
+
+                    # 问题 5：pipeline 模式 gate user escapes
+                    if self._maybe_block_user_escape(user_input):
+                        self._clear_cancel_state()
                         continue
 
                     if user_input.startswith("!"):
@@ -760,7 +802,7 @@ class InlineREPL:
         for msg in context_messages:
             if getattr(msg, "role", None) != "user":
                 continue
-            if is_recalled_memory_message(msg):
+            if is_recalled_memory_message(msg) or Renderer.is_internal_skill_context_message(msg):
                 continue
             get_text = getattr(msg, "get_text", None)
             if callable(get_text):
@@ -879,6 +921,48 @@ class InlineREPL:
         if not allowed:
             self.renderer.print_system_message(_("Permission denied."), style="red")
         return allowed
+
+    def _is_pipeline_safe_command(self, user_input: str) -> bool:
+        """Commands always allowed mid-pipeline regardless of allow_user_escapes.command."""
+        first = user_input.split(None, 1)[0] if user_input else ""
+        return first in _PIPELINE_SAFE_COMMANDS
+
+    def _maybe_block_user_escape(self, user_input: str) -> bool:
+        """Return True if the input is a gated escape and we should NOT process it.
+
+        Side effect: prints a yellow system message explaining why.
+        """
+        if self._pipeline is not None:
+            escapes = self._pipeline.allow_user_escapes
+        else:
+            from iac_code.pipeline.config import RunMode
+
+            if self._get_runtime_mode() != RunMode.PIPELINE:
+                return False
+            from iac_code.pipeline.engine.step_spec import AllowUserEscapes
+
+            escapes = AllowUserEscapes()
+        if user_input.startswith("!") and not escapes.shell:
+            self.renderer.print_system_message(
+                _("Shell escapes are disabled in this pipeline."),
+                style="yellow",
+            )
+            return True
+        if user_input.startswith("$") and not escapes.skill:
+            self.renderer.print_system_message(
+                _("Skill triggers are disabled in this pipeline."),
+                style="yellow",
+            )
+            return True
+        if self.command_registry.is_command(user_input) and not escapes.command:
+            if not self._is_pipeline_safe_command(user_input):
+                allowed = ", ".join(sorted(_PIPELINE_SAFE_COMMANDS))
+                self.renderer.print_system_message(
+                    _("Slash commands are disabled in this pipeline. Allowed: {allowed}").format(allowed=allowed),
+                    style="yellow",
+                )
+                return True
+        return False
 
     async def _handle_command(self, user_input: str) -> list[str]:
         """Dispatch a slash command and print the result."""
@@ -1065,9 +1149,148 @@ class InlineREPL:
                 self.console.print()
             self.renderer.replay_history(messages[prev:])
 
+    def _replay_resume_messages(self, messages: list[Message]) -> None:
+        model = self._load_pipeline_display_replay_model()
+        split_at = self._pipeline_display_replay_insert_index(messages) if model is not None else None
+        if model is None or split_at is None:
+            self.renderer.replay_history(self._pipeline_visible_resume_messages(messages))
+            return
+        before = self._pipeline_visible_resume_messages(messages[:split_at])
+        after = self._pipeline_visible_resume_messages(messages[split_at:])
+        if before:
+            self.renderer.replay_history(before)
+        from iac_code.ui.pipeline_display_replay import PipelineDisplayReplayRenderer
+
+        PipelineDisplayReplayRenderer(
+            self.console,
+            history_replayer=self.renderer.replay_history,
+            history_renderable_factory=self._render_pipeline_display_transcript_window,
+            transcript_loader=self._load_pipeline_display_transcript_messages,
+        ).render(model)
+        if after:
+            self.console.print()
+            self.renderer.replay_history(after)
+
+    @classmethod
+    def _pipeline_display_replay_insert_index(cls, messages: list[Message]) -> int | None:
+        abort_notice = cls._pipeline_abort_notice_text()
+        for index, message in enumerate(messages):
+            if message.role == "assistant" and message.content == abort_notice:
+                return index
+        for index, message in enumerate(messages):
+            if cls._is_pipeline_handoff_context_message(message):
+                return index
+        last_user_index = None
+        for index, message in enumerate(messages):
+            if message.role == "user" and isinstance(message.content, str):
+                last_user_index = index
+        return last_user_index + 1 if last_user_index is not None else None
+
+    @classmethod
+    def _pipeline_visible_resume_messages(cls, messages: list[Message]) -> list[Message]:
+        return [message for message in messages if not cls._is_pipeline_handoff_context_message(message)]
+
+    @staticmethod
+    def _is_pipeline_handoff_context_message(message: Message) -> bool:
+        return isinstance(message.content, str) and message.content.startswith("[Pipeline Handoff Context]")
+
+    def _load_pipeline_display_replay_model(self, *, include_nonterminal: bool = False):
+        from pathlib import Path
+
+        from iac_code.pipeline.config import get_working_directory
+        from iac_code.pipeline.engine.display_replay import (
+            DISPLAY_TRANSCRIPT_FILENAME,
+            PipelineDisplayReducer,
+            load_display_events,
+        )
+
+        pipeline_cwd = get_working_directory() or self._original_cwd
+        terminal_status = self._terminal_pipeline_status(pipeline_cwd, self._session_id)
+        allowed_statuses = {"completed", "failed", "user_aborted"}
+        if include_nonterminal:
+            allowed_statuses.update({"running", "waiting_input"})
+        if terminal_status not in allowed_statuses:
+            return None
+        try:
+            display_path = (
+                Path(self._session_storage.session_dir(pipeline_cwd, self._session_id))
+                / "pipeline"
+                / DISPLAY_TRANSCRIPT_FILENAME
+            )
+            events = load_display_events(display_path)
+            if not events:
+                return None
+            from iac_code.pipeline.engine.session import PipelineSession
+
+            sidecar = PipelineSession(
+                Path(self._session_storage.session_dir(pipeline_cwd, self._session_id)) / "pipeline"
+            )
+            restore_result = sidecar.restore_sync({})
+            model = PipelineDisplayReducer().reduce(events, restore_result.attempts)
+            return model if model.attempts else None
+        except Exception as exc:
+            logger.warning("Failed to load pipeline display replay model: {}", exc)
+            return None
+
+    def _load_pipeline_display_transcript_messages(self, transcript_id: str) -> list[Message]:
+        from pathlib import Path
+
+        from iac_code.pipeline.config import get_working_directory
+        from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
+
+        if not isinstance(transcript_id, str) or not transcript_id:
+            return []
+        pipeline_cwd = get_working_directory() or self._original_cwd
+        try:
+            sidecar_dir = Path(self._session_storage.session_dir(pipeline_cwd, self._session_id)) / "pipeline"
+            transcript_storage = PipelineTranscriptStorage(sidecar_dir)
+            loaded = transcript_storage.load(pipeline_cwd, transcript_id)
+            return transcript_storage.repair_interrupted(loaded)
+        except Exception as exc:
+            logger.warning("Failed to load pipeline display transcript {}: {}", transcript_id, exc)
+            return []
+
+    def _render_pipeline_display_transcript_window(self, messages: list[Message]) -> Text:
+        if not messages:
+            return Text("")
+
+        stream = StringIO()
+        width = self.console.width or 100
+        height = self.console.height or 24
+        temp_console = Console(file=stream, force_terminal=True, width=width, height=height)
+        temp_renderer = Renderer(
+            temp_console,
+            self.tool_registry,
+            status_callback=self._status_text,
+            app_state_store=self.store,
+        )
+        temp_renderer.replay_history(messages)
+        rendered = stream.getvalue().rstrip()
+        if not rendered:
+            return Text("")
+        return Text.from_ansi(self._tail_pipeline_display_window(rendered, max_lines=max(height - 8, 5)))
+
+    @staticmethod
+    def _tail_pipeline_display_window(text: str, *, max_lines: int) -> str:
+        lines = text.splitlines()
+        if len(lines) <= max_lines:
+            return text
+        return "\n".join(lines[-max_lines:])
+
     # ------------------------------------------------------------------
     # Chat handling
     # ------------------------------------------------------------------
+
+    def _get_runtime_mode(self) -> RunMode:
+        from iac_code.pipeline.config import get_run_mode
+
+        runtime_mode = getattr(self, "_runtime_mode", None)
+        if runtime_mode is not None:
+            return runtime_mode
+        return get_run_mode()
+
+    def _set_runtime_mode(self, mode: RunMode) -> None:
+        self._runtime_mode = mode
 
     async def _handle_chat_continue(self) -> list[str]:
         """Continue the agent loop after injecting messages (e.g., skill prompt).
@@ -1075,6 +1298,13 @@ class InlineREPL:
         Unlike _handle_chat, this doesn't add a new user message — the messages
         were already injected into the context.
         """
+        # U-I17: not valid in pipeline mode (callers should use _handle_pipeline_chat).
+        from iac_code.pipeline.config import RunMode
+
+        if self._get_runtime_mode() == RunMode.PIPELINE:
+            logger.error("_handle_chat_continue called in pipeline mode; this is a bug")
+            return []
+
         self.store.set_state(is_busy=True)
         try:
             streaming_input = StreamingInputBuffer()
@@ -1101,7 +1331,22 @@ class InlineREPL:
 
     async def _handle_chat(self, user_input: PromptInputResult | str) -> list[str]:
         """Send the user message to the agent loop and stream output."""
-        from iac_code.agent.message import ContentBlock, ImageBlock
+        from iac_code.pipeline.config import RunMode
+
+        if self._get_runtime_mode() == RunMode.PIPELINE:
+            # Pipeline mode doesn't accept multimodal input — flatten to text.
+            text = user_input.text if isinstance(user_input, PromptInputResult) else user_input
+            # U-I4: warn user if we're about to drop pasted image content.
+            if isinstance(user_input, PromptInputResult) and user_input.pasted_contents:
+                has_image = any(pc.type == "image" for pc in user_input.pasted_contents.values())
+                if has_image:
+                    self.renderer.print_system_message(
+                        _("Note: images are not supported in pipeline mode and will be ignored."),
+                        style="yellow",
+                    )
+            await self._handle_pipeline_chat(text)
+            return []
+
         from iac_code.utils.image.processor import process_user_input
 
         if isinstance(user_input, PromptInputResult):
@@ -1142,6 +1387,1760 @@ class InlineREPL:
             return queued_inputs
         finally:
             self.store.set_state(is_busy=False)
+
+    async def _flush_pipeline_telemetry(self) -> None:
+        from iac_code.services.telemetry import flush_telemetry
+
+        try:
+            await asyncio.to_thread(flush_telemetry)
+        except Exception:
+            logger.debug("flush_telemetry after pipeline boundary failed", exc_info=True)
+
+    def _refresh_pipeline_display_recorder(self) -> None:
+        from pathlib import Path
+
+        pipeline = getattr(self, "_pipeline", None)
+        transcript_path = getattr(pipeline, "display_transcript_path", None) if pipeline is not None else None
+        if not isinstance(transcript_path, (str, Path)):
+            self._pipeline_display_recorder = None
+            return
+        try:
+            from iac_code.pipeline.engine.display_replay import PipelineDisplayRecorder
+
+            self._pipeline_display_recorder = PipelineDisplayRecorder(transcript_path)
+        except Exception as exc:
+            logger.warning("Failed to initialize pipeline display recorder: {}", exc)
+            self._pipeline_display_recorder = None
+
+    def _record_pipeline_display_event(self, event) -> None:
+        recorder = getattr(self, "_pipeline_display_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_pipeline_event(event)
+        except Exception as exc:
+            logger.warning("Failed to record pipeline display event: {}", exc)
+
+    def _record_pipeline_display_tool_use(
+        self,
+        event,
+        *,
+        step_id: str | None = None,
+        sub_pipeline_id: str | None = None,
+    ) -> None:
+        if getattr(event, "name", "") != "complete_step":
+            return
+        recorder = getattr(self, "_pipeline_display_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_tool_use(
+                event,
+                step_id=step_id or getattr(self, "_pipeline_display_current_step_id", None),
+                sub_pipeline_id=sub_pipeline_id,
+            )
+        except Exception as exc:
+            logger.warning("Failed to record pipeline display tool use: {}", exc)
+
+    def _record_pipeline_display_candidate_diagram(self, event, *, step_id: str | None = None) -> None:
+        recorder = getattr(self, "_pipeline_display_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_candidate_diagram(
+                event,
+                step_id=step_id or getattr(self, "_pipeline_display_current_step_id", None),
+            )
+        except Exception as exc:
+            logger.warning("Failed to record pipeline display candidate diagram: {}", exc)
+
+    def _record_pipeline_display_candidate_detail(self, event, *, step_id: str | None = None) -> None:
+        recorder = getattr(self, "_pipeline_display_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_candidate_detail(
+                event,
+                step_id=step_id or getattr(self, "_pipeline_display_current_step_id", None),
+            )
+        except Exception as exc:
+            logger.warning("Failed to record pipeline display candidate detail: {}", exc)
+
+    def _record_pipeline_display_candidate_selected(
+        self,
+        *,
+        step_id: str | None,
+        candidate_name: str,
+        candidate_index: int | None,
+    ) -> None:
+        recorder = getattr(self, "_pipeline_display_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_candidate_selected(
+                step_id=step_id,
+                candidate_name=candidate_name,
+                candidate_index=candidate_index,
+            )
+        except Exception as exc:
+            logger.warning("Failed to record pipeline display candidate selection: {}", exc)
+
+    def _record_pipeline_display_user_aborted(self) -> None:
+        recorder = getattr(self, "_pipeline_display_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_user_aborted()
+        except Exception as exc:
+            logger.warning("Failed to record pipeline display user abort: {}", exc)
+
+    async def ensure_pipeline_restored_for_prompt(self) -> bool:
+        """Restore a resumable pipeline sidecar so /prompt can inspect the real AgentLoop context."""
+        from iac_code.pipeline import create_pipeline
+        from iac_code.pipeline.config import RunMode, get_pipeline_name, get_working_directory
+
+        if self._pipeline is not None:
+            return True
+        if self._get_runtime_mode() != RunMode.PIPELINE:
+            return False
+
+        pipeline_cwd = get_working_directory() or self._original_cwd
+        if not self._detect_pipeline_session(pipeline_cwd, self._session_id):
+            return False
+
+        self._pipeline = create_pipeline(
+            name=get_pipeline_name(),
+            provider_manager=self._provider_manager,
+            base_tool_registry=self.tool_registry,
+            session_storage=self._session_storage,
+            session_id=self._session_id,
+            cwd=pipeline_cwd,
+            permission_context_getter=lambda: self.store.get_state().permission_context,
+            memory_content_getter=(lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""),
+            auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
+            resume_from_sidecar=True,
+        )
+        self._refresh_pipeline_display_recorder()
+        restored = self._pipeline.sidecar_restore_result
+        if restored is None:
+            restored = await self._pipeline.restore_from_sidecar()
+        if restored.ok is False:
+            detail = restored.reason or restored.status
+            if detail:
+                self.renderer.print_system_message(
+                    _("Ignoring saved pipeline state: {reason}").format(reason=detail),
+                    style="yellow",
+                )
+            self._pipeline = None
+            self._pipeline_waiting_input = False
+            self._pipeline_restored_status = None
+            return False
+
+        self._pipeline_restored_status = restored.status
+        self._pipeline_waiting_input = restored.status == "waiting_input"
+        return True
+
+    async def _handle_pipeline_chat(self, user_input: str) -> None:
+        """Drive the pipeline and render output."""
+        from iac_code.pipeline import create_pipeline
+        from iac_code.pipeline.config import get_pipeline_name, get_working_directory
+
+        self.renderer.record_user_turn(user_input)
+
+        if self._pipeline is None:
+            pipeline_cwd = get_working_directory() or self._original_cwd
+            self._pipeline = create_pipeline(
+                name=get_pipeline_name(),
+                provider_manager=self._provider_manager,
+                base_tool_registry=self.tool_registry,
+                session_storage=self._session_storage,
+                session_id=self._session_id,
+                cwd=pipeline_cwd,
+                permission_context_getter=lambda: self.store.get_state().permission_context,
+                memory_content_getter=(
+                    lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""
+                ),
+                auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
+            )
+            self._refresh_pipeline_display_recorder()
+            restored = None
+            if self._detect_pipeline_session(pipeline_cwd, self._session_id):
+                restored = await self._pipeline.restore_from_sidecar()
+                if restored.ok is False:
+                    detail = restored.reason or restored.status
+                    if detail:
+                        self.renderer.print_system_message(
+                            _("Ignoring saved pipeline state: {reason}").format(reason=detail),
+                            style="yellow",
+                        )
+            resume_waiting_candidate_selection = False
+            event_stream = None
+            if restored and restored.ok and restored.status == "waiting_input":
+                self._pipeline_waiting_input = False
+                if self._pipeline_current_step_is_candidate_selection() is True:
+                    resume_waiting_candidate_selection = True
+                else:
+                    event_stream = self._pipeline.resume(user_input)
+            elif restored and restored.ok and restored.status == "running":
+                self._pipeline_waiting_input = False
+                event_stream = self._pipeline.continue_from_sidecar(user_input=user_input)
+            else:
+                self._persist_pipeline_visible_user_turn(user_input)
+                event_stream = self._pipeline.run(user_input)
+        else:
+            self._refresh_pipeline_display_recorder()
+            self._pipeline_waiting_input = False
+            restored_status = getattr(self, "_pipeline_restored_status", None)
+            self._pipeline_restored_status = None
+            resume_waiting_candidate_selection = False
+            event_stream = None
+            if restored_status == "running":
+                event_stream = self._pipeline.continue_from_sidecar(user_input=user_input)
+            elif restored_status == "waiting_input":
+                if self._pipeline_current_step_is_candidate_selection() is True:
+                    resume_waiting_candidate_selection = True
+                else:
+                    event_stream = self._pipeline.resume(user_input)
+            else:
+                event_stream = self._pipeline.resume(user_input)
+
+        # No except for CancelledError/KeyboardInterrupt here: Ctrl+C must
+        # propagate to the run() loop's single handler (which keeps the REPL
+        # alive and prints the interrupt message). Swallowing it here would
+        # violate the asyncio cancellation contract. The finally still runs,
+        # tearing down the pipeline regardless of how the stream ended.
+        terminal_event = None
+        try:
+            self.store.set_state(is_busy=True)
+            if resume_waiting_candidate_selection:
+                terminal_event = await self._resume_waiting_candidate_selection_from_sidecar()
+                if terminal_event is None:
+                    self._pipeline_waiting_input = True
+            else:
+                assert event_stream is not None
+                terminal_event = await self._render_pipeline_stream(event_stream)
+        finally:
+            self.store.set_state(is_busy=False)
+            pipeline_for_flush = self._pipeline
+            self._finalize_pipeline_after_render(terminal_event)
+            if pipeline_for_flush is not None:
+                await self._flush_pipeline_telemetry()
+
+    def _pipeline_current_step_is_candidate_selection(self) -> bool:
+        pipeline = getattr(self, "_pipeline", None)
+        if pipeline is None:
+            return False
+        try:
+            return getattr(pipeline.state_machine.current_step, "ui_mode", "") == "candidate_selection"
+        except (AttributeError, IndexError):
+            return False
+
+    async def _resume_pipeline_sidecar_on_startup(self) -> bool:
+        from iac_code.pipeline.config import RunMode
+
+        if self._get_runtime_mode() != RunMode.PIPELINE:
+            return False
+        restored = await self.ensure_pipeline_restored_for_prompt()
+        if not restored:
+            return False
+        self._render_pipeline_display_replay_on_startup()
+        if (
+            self._pipeline_restored_status != "waiting_input"
+            or self._pipeline_current_step_is_candidate_selection() is not True
+        ):
+            return False
+
+        terminal_event = None
+        try:
+            self.store.set_state(is_busy=True)
+            terminal_event = await self._resume_waiting_candidate_selection_from_sidecar()
+            if terminal_event is None:
+                self._pipeline_waiting_input = True
+        finally:
+            self.store.set_state(is_busy=False)
+            self._finalize_pipeline_after_render(terminal_event)
+        return True
+
+    def _render_pipeline_display_replay_on_startup(self) -> None:
+        model = self._load_pipeline_display_replay_model(include_nonterminal=True)
+        if model is None:
+            self._ensure_pipeline_progress_state()
+            return
+
+        self._seed_pipeline_progress_state_from_replay_model(model)
+        messages = self._session_storage.load(self._original_cwd, self._session_id)
+        repaired = self._session_storage.repair_interrupted(messages)
+        visible_messages = self._pipeline_visible_resume_messages(repaired)
+        if visible_messages:
+            self.renderer.replay_history(visible_messages)
+
+        from iac_code.ui.pipeline_display_replay import PipelineDisplayReplayRenderer
+
+        PipelineDisplayReplayRenderer(
+            self.console,
+            history_replayer=self.renderer.replay_history,
+            history_renderable_factory=self._render_pipeline_display_transcript_window,
+            transcript_loader=self._load_pipeline_display_transcript_messages,
+        ).render(self._startup_replay_model_for_interactive_resume(model))
+
+    def _seed_pipeline_progress_state_from_replay_model(self, model) -> None:
+        step_names = self._pipeline_step_names_from_active_pipeline()
+        if not step_names:
+            step_names = self._pipeline_step_names_from_replay_model(model)
+        completed_indices: set[int] = set()
+        for attempt in model.attempts:
+            if attempt.status != "completed":
+                continue
+            if attempt.index is not None:
+                completed_indices.add(attempt.index - 1)
+            elif attempt.step_id in step_names:
+                completed_indices.add(step_names.index(attempt.step_id))
+        self._pipeline_step_names = step_names
+        self._pipeline_completed_indices = completed_indices
+        duration_s = getattr(model, "duration_s", None)
+        self._pipeline_start_time = time.time() - duration_s if isinstance(duration_s, (int, float)) else time.time()
+
+    def _pipeline_step_names_from_active_pipeline(self) -> list[str]:
+        pipeline = getattr(self, "_pipeline", None)
+        if pipeline is None:
+            return []
+        try:
+            order = getattr(pipeline.state_machine, "_order", [])
+        except AttributeError:
+            return []
+        return [str(step_id) for step_id in order]
+
+    @staticmethod
+    def _pipeline_step_names_from_replay_model(model) -> list[str]:
+        ordered: list[tuple[int, str]] = []
+        fallback: list[str] = []
+        for attempt in model.attempts:
+            if attempt.step_id not in fallback:
+                fallback.append(attempt.step_id)
+            if attempt.index is not None:
+                ordered.append((attempt.index, attempt.step_id))
+        if ordered:
+            return [step_id for _index, step_id in sorted(dict(ordered).items())]
+        return fallback
+
+    @staticmethod
+    def _startup_replay_model_for_interactive_resume(model):
+        import copy
+
+        from iac_code.pipeline.engine.display_replay import DisplayCandidateSelection
+
+        replay_model = copy.deepcopy(model)
+        for attempt in reversed(replay_model.attempts):
+            if attempt.status == "waiting_input" and attempt.ui_mode == "candidate_selection":
+                attempt.status = "running"
+                attempt.candidate_selection = DisplayCandidateSelection()
+                break
+        return replay_model
+
+    def _ensure_pipeline_progress_state(self) -> None:
+        if not hasattr(self, "_pipeline_step_names"):
+            self._pipeline_step_names = []
+        if not hasattr(self, "_pipeline_completed_indices"):
+            self._pipeline_completed_indices = set()
+        if not hasattr(self, "_pipeline_start_time"):
+            self._pipeline_start_time = time.time()
+
+    async def _resume_waiting_candidate_selection_from_sidecar(self) -> PipelineEvent | None:
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+        from iac_code.types.stream_events import CandidateDetailEvent, DiagramEvent
+
+        model = self._load_pipeline_display_replay_model(include_nonterminal=True)
+        if model is None:
+            return None
+        attempt = next(
+            (
+                item
+                for item in reversed(model.attempts)
+                if item.ui_mode == "candidate_selection" and item.candidate_selection.state == "waiting"
+            ),
+            None,
+        )
+        if attempt is None:
+            return None
+        selection = attempt.candidate_selection
+        self._pipeline_display_current_step_id = attempt.step_id
+
+        async def restored_selection_stream():
+            ordered_candidates = sorted(
+                selection.candidates.values(),
+                key=lambda candidate: (
+                    candidate.candidate_index is None,
+                    candidate.candidate_index if candidate.candidate_index is not None else candidate.name,
+                ),
+            )
+            for index, candidate in enumerate(ordered_candidates):
+                if candidate.mermaid_source:
+                    yield DiagramEvent(
+                        candidate_name=candidate.name,
+                        candidate_index=candidate.candidate_index,
+                        template_content="",
+                        mermaid_source=candidate.mermaid_source,
+                    )
+                if candidate.summary or candidate.cost_items or candidate.total_monthly_cost:
+                    yield CandidateDetailEvent(
+                        tool_use_id=f"restored_candidate_detail_{index}",
+                        candidate_name=candidate.name,
+                        candidate_index=candidate.candidate_index,
+                        summary=candidate.summary,
+                        cost_items=candidate.cost_items,
+                        total_monthly_cost=candidate.total_monthly_cost,
+                    )
+            yield PipelineEvent(
+                type=PipelineEventType.USER_INPUT_REQUIRED,
+                step_id=attempt.step_id,
+                timestamp=time.time(),
+                data={
+                    "step_id": attempt.step_id,
+                    "prompt": selection.prompt,
+                    "options": selection.options,
+                },
+            )
+
+        result = await self._render_candidate_selection_tabs(restored_selection_stream())
+        return result if isinstance(result, PipelineEvent) else None
+
+    def _clear_pipeline_runtime_state(self) -> None:
+        self._pipeline = None
+        self._pipeline_waiting_input = False
+        self._pipeline_restored_status = None
+        self._pipeline_display_recorder = None
+        self._pipeline_display_current_step_id = None
+
+    def _finalize_pipeline_after_render(self, terminal_event: PipelineEvent | None) -> None:
+        # Keep terminal sidecars on disk for debugging. Terminal metadata
+        # controls whether they are resumable.
+        handoff_result = self._handoff_pipeline_to_normal(terminal_event)
+        if handoff_result in {"succeeded", "failed"}:
+            self._clear_pipeline_runtime_state()
+        elif self._pipeline is not None and self._pipeline.sidecar_status == "failed":
+            self._clear_pipeline_runtime_state()
+        elif self._pipeline is not None and self._pipeline.state_machine.is_complete:
+            self._clear_pipeline_runtime_state()
+        elif self._pipeline is not None and not self._pipeline_waiting_input:
+            self._pipeline.mark_user_aborted("pipeline interrupted by user or renderer cancellation")
+            self._switch_user_aborted_pipeline_to_normal()
+            self._clear_pipeline_runtime_state()
+
+    def _handoff_pipeline_to_normal(self, terminal_event: PipelineEvent | None) -> PipelineHandoffResult:
+        from iac_code.pipeline.config import RunMode
+        from iac_code.pipeline.engine.events import PipelineEventType
+
+        pipeline = self._pipeline
+        if pipeline is None or terminal_event is None:
+            return "not_applicable"
+        if terminal_event.type != PipelineEventType.PIPELINE_COMPLETED:
+            return "not_applicable"
+        if not pipeline.should_switch_to_normal(terminal_event.data):
+            return "not_applicable"
+
+        self._set_runtime_mode(RunMode.NORMAL)
+        try:
+            summary = pipeline.build_normal_handoff_summary(terminal_event.data)
+            injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": summary})
+            # Persist into the normal AgentLoop session partition. Future normal
+            # turns are stored under _original_cwd, even if the pipeline sidecar
+            # used IAC_CODE_CWD for its own resumable state.
+            self._session_storage.append(
+                self._original_cwd,
+                self._session_id,
+                injected,
+                git_branch=self.current_git_branch(),
+            )
+        except Exception as exc:
+            pipeline.mark_normal_handoff(status="failed", failed_reason=str(exc))
+            logger.opt(exception=True).warning("Pipeline-to-normal handoff injection failed: {}", exc)
+            self.renderer.print_system_message(
+                _("Pipeline completed. Normal chat is active, but the handoff context could not be injected or saved."),
+                style="yellow",
+            )
+            return "failed"
+        else:
+            pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
+            self.renderer.print_system_message(
+                _("Pipeline completed. Normal chat is now active."),
+                style="green",
+            )
+        return "succeeded"
+
+    async def _handle_mid_pipeline_message(self, msg: str, suppress_render: bool = False) -> tuple[bool, str]:
+        """Process a user message received during pipeline execution via judge.
+
+        Returns (needs_restart, feedback_text). When suppress_render is True,
+        the caller is responsible for displaying feedback_text (e.g. by injecting
+        it into a Live content area instead of printing to scrollback).
+        """
+        if self._pipeline is None:
+            return False, ""
+
+        from rich.spinner import Spinner
+
+        with Live(
+            Spinner("dots", text=_("Judging your input...")),
+            console=self.console,
+            refresh_per_second=10,
+            transient=True,
+        ):
+            verdict = await self._pipeline.handle_user_interrupt(msg)
+
+        self._last_interrupt_paused = bool(getattr(verdict, "paused", False))
+        if verdict.action == "continue":
+            feedback = self._format_interrupt_feedback("continue", msg, verdict)
+            if getattr(verdict, "paused", False):
+                save_interrupt_pause = getattr(self._pipeline, "save_interrupt_pause", None)
+                if callable(save_interrupt_pause):
+                    await save_interrupt_pause(verdict)
+                self._pipeline_waiting_input = True
+            # P-I18: surface ambiguous continue verdicts so users see their input wasn't understood
+            if verdict.reason and verdict.reason.startswith("[ambiguous]"):
+                self.renderer.print_system_message(
+                    _(
+                        "Note: your input wasn't clearly understood and was treated as chitchat. "
+                        "To interrupt, be more explicit (e.g. 'switch to cheaper plan')."
+                    ),
+                    style="yellow",
+                )
+            if not suppress_render:
+                self._render_interrupt_feedback("continue", msg, verdict)
+            return False, feedback
+        if verdict.action == "supplement":
+            feedback = self._format_interrupt_feedback("supplement", msg, verdict)
+            if not suppress_render:
+                self._render_interrupt_feedback("supplement", msg, verdict)
+            return False, feedback
+        if verdict.action == "hard_interrupt":
+            is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict)
+            applied_verdict = getattr(self._pipeline, "last_applied_interrupt_verdict", None)
+            feedback_verdict = (
+                applied_verdict if getattr(applied_verdict, "action", None) == "hard_interrupt" else verdict
+            )
+            if not is_parent_rollback:
+                feedback = self._format_interrupt_feedback("hard_interrupt_candidate", msg, feedback_verdict)
+                if not suppress_render:
+                    self._render_interrupt_feedback("hard_interrupt_candidate", msg, feedback_verdict)
+                return False, feedback
+            feedback = self._format_interrupt_feedback("hard_interrupt_parent", msg, feedback_verdict)
+            if not suppress_render:
+                self._render_interrupt_feedback("hard_interrupt_parent", msg, feedback_verdict)
+            return True, feedback
+        return False, ""
+
+    def _format_interrupt_feedback(self, kind: str, user_msg: str, verdict) -> str:
+        """Format interrupt feedback as plain text for injection into content areas."""
+        from iac_code.pipeline.display_names import display_step_name
+
+        reason = verdict.reason or ""
+        if kind == "continue" and getattr(verdict, "paused", False):
+            kind = "paused"
+        if kind == "continue" and reason.startswith(("judge failed", "parse failed")):
+            kind = "judge_failed"
+        if kind == "supplement" and reason.startswith("supplement_dropped"):
+            kind = "supplement_dropped"
+
+        if kind == "judge_failed":
+            return _(
+                "⚠ Interrupt judging did not finish; your message was not processed\n  You said: {user_msg}"
+            ).format(user_msg=user_msg)
+        elif kind == "paused":
+            return _(
+                "⚠ Interrupt judging did not finish; the pipeline was paused to avoid continuing side-effect steps\n"
+                "  You said: {user_msg}"
+            ).format(user_msg=user_msg)
+        elif kind == "supplement_dropped":
+            return _(
+                "⚠ The message was treated as supplemental input, but there is no AgentLoop to inject it into\n"
+                "  You said: {user_msg}"
+            ).format(user_msg=user_msg)
+        elif kind == "continue":
+            return _("· Message is unrelated to the current step and was ignored\n  You said: {user_msg}").format(
+                user_msg=user_msg
+            )
+        elif kind == "supplement":
+            target = display_step_name(verdict.supplement_target) if verdict.supplement_target else _("current step")
+            return _("✎ Added to {target}\n  You said: {user_msg}").format(target=target, user_msg=user_msg)
+        elif kind == "hard_interrupt_parent":
+            reason_line = "\n  " + _("Reason: {reason}").format(reason=reason) if reason else ""
+            return _("⚠ Interrupted → rolled back to {target}\n  You said: {user_msg}{reason_line}").format(
+                target=display_step_name(verdict.rollback_target) if verdict.rollback_target else "?",
+                user_msg=user_msg,
+                reason_line=reason_line,
+            )
+        elif kind == "hard_interrupt_candidate":
+            scope = verdict.candidate_scope or "?"
+            target = display_step_name(verdict.rollback_target) if verdict.rollback_target else "?"
+            reason_line = "\n  " + _("Reason: {reason}").format(reason=reason) if reason else ""
+            return _(
+                "⚠ Candidate {scope} restarted → starting again from {target}\n  You said: {user_msg}{reason_line}"
+            ).format(
+                scope=scope,
+                target=target,
+                user_msg=user_msg,
+                reason_line=reason_line,
+            )
+        return ""
+
+    def _render_interrupt_feedback(self, kind: str, user_msg: str, verdict) -> None:
+        """Render structured feedback for an interrupt judge verdict.
+
+        Failure modes detected via verdict.reason prefix and rendered in a
+        Panel so they can't be silently lost in scrollback when the streaming
+        Live region restarts right after.
+        """
+        from rich.panel import Panel
+
+        from iac_code.pipeline.display_names import display_step_name
+
+        reason = verdict.reason or ""
+        # Detect silent-failure modes that leak through as action="continue"
+        if kind == "continue" and getattr(verdict, "paused", False):
+            kind = "paused"
+        if kind == "continue" and reason.startswith(("judge failed", "parse failed")):
+            kind = "judge_failed"
+        # Detect supplement that found no AgentLoop to inject into
+        if kind == "supplement" and reason.startswith("supplement_dropped"):
+            kind = "supplement_dropped"
+
+        body = Text()
+        if kind == "judge_failed":
+            body.append(_("⚠ Interrupt judging did not finish; your message was not processed\n"), style="bold yellow")
+            body.append(_("The pipeline continued; press Esc again to retry.\n"), style="yellow")
+        elif kind == "paused":
+            body.append(_("⚠ Interrupt judging did not finish; the pipeline is paused\n"), style="bold yellow")
+            body.append(
+                _("Confirm whether to continue, roll back, or cancel before side-effect steps proceed.\n"),
+                style="yellow",
+            )
+        elif kind == "supplement_dropped":
+            body.append(
+                _("⚠ Message was treated as supplemental input, but no AgentLoop is available in this parallel run\n"),
+                style="bold yellow",
+            )
+            body.append(
+                _("The judge should return supplement_target=candidate_index:N or hard_interrupt.\n"),
+                style="yellow",
+            )
+        elif kind == "continue":
+            body.append(_("· Message is unrelated to the current step and was ignored\n"), style="dim")
+        elif kind == "supplement":
+            target = display_step_name(verdict.supplement_target) if verdict.supplement_target else _("current step")
+            body.append(_("✎ Added to "), style="green")
+            body.append(target, style="bold green")
+            body.append("\n", style="green")
+        elif kind == "hard_interrupt_parent":
+            body.append(_("⚠ Interrupted → rolled back to "), style="yellow")
+            target = display_step_name(verdict.rollback_target) if verdict.rollback_target else "?"
+            body.append(target, style="bold yellow")
+            body.append("\n", style="yellow")
+        elif kind == "hard_interrupt_candidate":
+            body.append(_("⚠ Candidate "), style="yellow")
+            body.append(verdict.candidate_scope or "?", style="bold yellow")
+            body.append(_(" restarted → starting again from "), style="yellow")
+            target = display_step_name(verdict.rollback_target) if verdict.rollback_target else "?"
+            body.append(target, style="bold yellow")
+            body.append("\n", style="yellow")
+        body.append(_("  You said: {user_msg}\n").format(user_msg=user_msg), style="cyan")
+        body.append(_("  Reason: {reason}").format(reason=reason), style="dim")
+
+        if kind in ("judge_failed", "supplement_dropped", "paused"):
+            # Wrap in panel so it's hard to miss when the parallel-tabs Live
+            # region restarts and pushes scrollback content upward.
+            self.console.print(Panel(body, border_style="yellow", title=_("Interrupt handling")))
+        else:
+            self.console.print(body)
+
+    def _render_interrupt_feedback_inline(self, feedback: str) -> None:
+        """Print interrupt feedback as a styled panel (used after Live has stopped)."""
+        from rich.panel import Panel
+
+        self.renderer.console.print(Panel(Text(feedback), border_style="yellow", title=_("Interrupt handling")))
+
+    async def _restart_pipeline_stream_after_interrupt(self, old_stream, completed_indices):
+        """Swap in a fresh event_stream after a hard interrupt.
+
+        Closes the old generator (defensive — aclose is idempotent in CPython
+        but wrapping protects against generator/runtime changes), narrows
+        completed_indices to steps strictly before the new current step, and
+        returns the post-interrupt event stream.
+        """
+        assert self._pipeline is not None  # callers guard with `if self._pipeline`
+        new_stream = self._pipeline.continue_after_interrupt()
+        try:
+            await old_stream.aclose()
+        except Exception:
+            logger.debug("old event_stream aclose during restart failed", exc_info=True)
+        completed_indices.intersection_update(range(self._pipeline.state_machine.current_step_index))
+        return new_stream
+
+    async def _render_pipeline_stream(self, event_stream) -> PipelineEvent | None:
+        """Render mixed pipeline + agent events with animated progress bar."""
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+        from iac_code.pipeline.engine.types import StepResult
+        from iac_code.pipeline.engine.ui_contract import PipelineStepType, PipelineUiMode
+
+        self._ensure_pipeline_progress_state()
+        agent_events_queue: asyncio.Queue | None = None
+        renderer_task: asyncio.Task | None = None
+        step_names: list[str] = list(self._pipeline_step_names)
+        completed_indices: set[int] = set(self._pipeline_completed_indices)
+        current_index: int = -1
+        spinner_frame: list[int] = [0]
+
+        # Esc detection runs inside the renderer's existing key listener via
+        # this callback — a separate stdin reader would race with the renderer
+        # for bytes and silently drop ~half of the user's Esc presses.
+        interrupt_requested = asyncio.Event()
+
+        def _on_escape():
+            interrupt_requested.set()
+            if self._pipeline:
+                self._pipeline.pause_agent_loops()
+
+        async def _agent_event_gen(q: asyncio.Queue):
+            while True:
+                event = await q.get()
+                if event is None:
+                    return
+                yield event
+
+        def _make_header_fn():
+            def _header():
+                spinner_frame[0] += 1
+                return self._build_progress_bar(step_names, completed_indices, current_index, spinner_frame[0])
+
+            return _header
+
+        async def _stop_renderer() -> bool:
+            nonlocal renderer_task, agent_events_queue
+            if renderer_task is not None and not renderer_task.done() and agent_events_queue is not None:
+                await agent_events_queue.put(None)
+                # Bounded wait mirrors the final cleanup: a wedged renderer must
+                # not hang the transition between render phases.
+                try:
+                    await asyncio.wait_for(renderer_task, timeout=3.0)
+                except asyncio.TimeoutError:
+                    renderer_task.cancel()
+                    try:
+                        await renderer_task
+                    except asyncio.CancelledError:
+                        pass
+                renderer_task = None
+                return True
+            return False
+
+        try:
+            while True:
+                restarted = False
+                async for event in event_stream:
+                    # Check for Esc interrupt
+                    if interrupt_requested.is_set():
+                        # Freeze AgentLoops at next turn boundary so candidates
+                        # don't race ahead while the user is typing or the
+                        # judge LLM is in flight. Pause BEFORE stopping the
+                        # renderer so no extra events queue up during teardown.
+                        if self._pipeline:
+                            self._last_interrupt_paused = False
+                            self._pipeline.pause_agent_loops()
+                        try:
+                            had_renderer = await _stop_renderer()
+                            user_input = await self._prompt_input.get_input(prompt="✎ ", transient=True)
+                            if user_input and user_input.strip():
+                                needs_restart, feedback = await self._handle_mid_pipeline_message(
+                                    user_input.strip(), suppress_render=True
+                                )
+                                if needs_restart and self._pipeline:
+                                    event_stream = await self._restart_pipeline_stream_after_interrupt(
+                                        event_stream, completed_indices
+                                    )
+                                    restarted = True
+                                    interrupt_requested.clear()
+                                    break
+                            else:
+                                feedback = ""
+                        finally:
+                            if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
+                                self._pipeline.resume_agent_loops()
+                        interrupt_requested.clear()
+                        if self._pipeline_waiting_input:
+                            return None
+                        if had_renderer:
+                            agent_events_queue = asyncio.Queue()
+                            renderer_task = asyncio.create_task(
+                                self.renderer.run_streaming_output(
+                                    _agent_event_gen(agent_events_queue),
+                                    permission_handler=self.renderer.prompt_permission,
+                                    live_header=_make_header_fn(),
+                                    on_escape=_on_escape,
+                                )
+                            )
+                            if feedback:
+                                await agent_events_queue.put(TextDeltaEvent(text="\n" + feedback + "\n"))
+                        continue
+
+                    if isinstance(event, PipelineEvent):
+                        self._record_pipeline_display_event(event)
+                        if event.type == PipelineEventType.STEP_STARTED:
+                            self._pipeline_display_current_step_id = event.step_id
+                        # Only tear down the renderer at boundaries that genuinely
+                        # end its lifetime. STEP_COMPLETED is NOT such a boundary —
+                        # the agent loop may still emit MessageEndEvent / ToolResultEvent
+                        # immediately after, which would otherwise be silently
+                        # dropped (U-C2). Tear down on STEP_STARTED (new step
+                        # gets a new renderer below), USER_INPUT_REQUIRED (REPL
+                        # takes over input), or PIPELINE_COMPLETED.
+                        teardown_events = (
+                            PipelineEventType.STEP_STARTED,
+                            PipelineEventType.USER_INPUT_REQUIRED,
+                            PipelineEventType.PIPELINE_COMPLETED,
+                        )
+                        if event.type in teardown_events:
+                            if (
+                                renderer_task is not None
+                                and not renderer_task.done()
+                                and agent_events_queue is not None
+                            ):
+                                await agent_events_queue.put(None)
+                                await renderer_task
+                                renderer_task = None
+                                agent_events_queue = None
+
+                        # Detect candidate selection step — enter tabbed selection mode
+                        if (
+                            event.type == PipelineEventType.STEP_STARTED
+                            and event.data.get("ui_mode") == PipelineUiMode.CANDIDATE_SELECTION.value
+                        ):
+                            current_index = event.data.get("index", 1) - 1
+                            self._update_pipeline_state_from_event(event)
+                            self._render_pipeline_event(event)
+                            selection_result = await self._render_candidate_selection_tabs(
+                                event_stream, progress_bar_fn=_make_header_fn()
+                            )
+                            if (
+                                isinstance(selection_result, PipelineEvent)
+                                and selection_result.type == PipelineEventType.PIPELINE_COMPLETED
+                            ):
+                                return selection_result
+                            if self._pipeline_waiting_input:
+                                return None
+                            if selection_result is True and self._pipeline:
+                                self._pipeline_waiting_input = False
+                                event_stream = await self._restart_pipeline_stream_after_interrupt(
+                                    event_stream, completed_indices
+                                )
+                                restarted = True
+                                break
+                            completed_indices.add(current_index)
+                            continue
+
+                        # Detect parallel sub-pipeline step — enter tab mode
+                        if (
+                            event.type == PipelineEventType.STEP_STARTED
+                            and event.data.get("step_type") == PipelineStepType.PARALLEL_SUB_PIPELINE.value
+                        ):
+                            current_index = event.data.get("index", 1) - 1
+                            self._update_pipeline_state_from_event(event)
+                            self._render_pipeline_event(event)
+                            tabs_interrupted = await self._render_parallel_tabs(
+                                event_stream, progress_bar_fn=_make_header_fn()
+                            )
+                            if (
+                                isinstance(tabs_interrupted, PipelineEvent)
+                                and tabs_interrupted.type == PipelineEventType.PIPELINE_COMPLETED
+                            ):
+                                return tabs_interrupted
+                            if self._pipeline_waiting_input:
+                                return None
+                            if tabs_interrupted is True and self._pipeline:
+                                event_stream = await self._restart_pipeline_stream_after_interrupt(
+                                    event_stream, completed_indices
+                                )
+                                restarted = True
+                                break
+                            completed_indices.add(current_index)
+                            continue
+
+                        self._update_pipeline_state_from_event(event)
+                        self._render_pipeline_event(event)
+
+                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                            return event
+
+                        if event.type == PipelineEventType.PIPELINE_STARTED:
+                            step_names = self._pipeline_step_names
+                            completed_indices = self._pipeline_completed_indices
+
+                        if event.type == PipelineEventType.USER_INPUT_REQUIRED:
+                            # Renderer + queue already torn down by the top-level teardown guard
+                            # for this event type. Just mark the waiting flag and return.
+                            self._pipeline_waiting_input = True
+                            return
+
+                        if event.type == PipelineEventType.STEP_STARTED:
+                            current_index = event.data.get("index", 1) - 1
+                            spinner_frame[0] = 0
+                            agent_events_queue = asyncio.Queue()
+                            renderer_task = asyncio.create_task(
+                                self.renderer.run_streaming_output(
+                                    _agent_event_gen(agent_events_queue),
+                                    permission_handler=self.renderer.prompt_permission,
+                                    live_header=_make_header_fn(),
+                                    on_escape=_on_escape,
+                                )
+                            )
+
+                        if event.type == PipelineEventType.STEP_COMPLETED:
+                            step_id = event.step_id or ""
+                            idx = next((i for i, n in enumerate(step_names) if n == step_id), -1)
+                            if idx >= 0:
+                                completed_indices.add(idx)
+
+                    elif isinstance(event, (StepResult, SubPipelineStreamEvent)):
+                        continue
+                    elif isinstance(event, AskUserQuestionEvent):
+                        had_renderer = await _stop_renderer()
+                        try:
+                            answer = await self.renderer.prompt_user_question(event)
+                        except (asyncio.CancelledError, KeyboardInterrupt):
+                            if event.response_future is not None and not event.response_future.done():
+                                event.response_future.set_result(None)
+                            raise
+                        except Exception as exc:
+                            if event.response_future is not None and not event.response_future.done():
+                                event.response_future.set_result(None)
+                            msg = _("Error: {error}").format(error=str(exc))
+                            self.renderer.print_system_message(msg, style="red")
+                        else:
+                            if event.response_future is not None and not event.response_future.done():
+                                event.response_future.set_result(answer)
+
+                        if had_renderer:
+                            agent_events_queue = asyncio.Queue()
+                            renderer_task = asyncio.create_task(
+                                self.renderer.run_streaming_output(
+                                    _agent_event_gen(agent_events_queue),
+                                    permission_handler=self.renderer.prompt_permission,
+                                    live_header=_make_header_fn(),
+                                    on_escape=_on_escape,
+                                )
+                            )
+                    else:
+                        if isinstance(event, ToolUseStartEvent):
+                            self._record_pipeline_display_tool_use(event)
+                        if renderer_task is not None and not renderer_task.done() and agent_events_queue is not None:
+                            await agent_events_queue.put(event)
+                        else:
+                            logger.warning(
+                                "dropped agent event in pipeline gap: {}",
+                                type(event).__name__,
+                            )
+                else:
+                    break  # Stream finished naturally
+
+                if not restarted:
+                    break
+        finally:
+            # aclose() may raise CancelledError (a BaseException, not Exception)
+            # if the cleanup chain is itself cancelled. The renderer teardown
+            # lives in a finally so it runs regardless — otherwise that exception
+            # would skip it and orphan renderer_task — and the CancelledError
+            # still propagates afterwards (asyncio contract).
+            try:
+                await event_stream.aclose()
+            except Exception:
+                logger.debug("event_stream aclose failed", exc_info=True)
+            finally:
+                if renderer_task is not None and not renderer_task.done():
+                    if agent_events_queue is not None:
+                        await agent_events_queue.put(None)
+                    try:
+                        await asyncio.wait_for(renderer_task, timeout=3.0)
+                    except asyncio.TimeoutError:
+                        renderer_task.cancel()
+                        try:
+                            await renderer_task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as exc:
+                            logger.warning("renderer_task cleanup failed: %s", exc, exc_info=True)
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:
+                        logger.warning("renderer_task cleanup failed: %s", exc, exc_info=True)
+
+    async def _render_candidate_selection_tabs(
+        self, event_stream, progress_bar_fn=None
+    ) -> str | bool | PipelineEvent | None:
+        """Render candidate selection with tabbed architecture diagrams and details.
+
+        Returns the selected candidate name, True for a restart-triggering
+        hard interrupt, a terminal PIPELINE_COMPLETED event, or None.
+        """
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+        from iac_code.pipeline.engine.types import StepResult
+        from iac_code.pipeline.engine.ui_contract import encode_selected_candidate
+        from iac_code.ui.components.candidate_selection import CandidateSelectionRenderer
+        from iac_code.ui.core.raw_input import RawInputCapture
+
+        tabs = CandidateSelectionRenderer(console=self.renderer.console)
+        waiting_input = False
+        selected = None
+        interrupted = False
+        interrupt_feedback = ""
+        terminal_event: PipelineEvent | None = None
+
+        detail_tool_ids: set[str] = set()
+        detail_accumulated: dict[str, str] = {}
+
+        live = Live(
+            console=self.renderer.console,
+            refresh_per_second=12,
+            transient=True,
+        )
+
+        def _live_update(content):
+            if progress_bar_fn is not None:
+                live.update(Group(content, progress_bar_fn()))
+            else:
+                live.update(content)
+
+        stop_keys = asyncio.Event()
+        interrupt_requested = asyncio.Event()
+        input_mode = False
+        input_chars: list[str] = []
+        input_done = asyncio.Event()
+        parent_task = asyncio.current_task()
+
+        def _request_pipeline_cancel() -> None:
+            self._pipeline_waiting_input = False
+            stop_keys.set()
+            if parent_task is not None and not parent_task.done():
+                parent_task.cancel()
+
+        async def key_reader():
+            nonlocal input_mode
+            loop = asyncio.get_running_loop()
+            try:
+                with RawInputCapture(use_cbreak=True) as cap:
+                    while not stop_keys.is_set():
+                        key_event = await loop.run_in_executor(None, cap.read_key, 0.1)
+                        if key_event is None:
+                            continue
+
+                        if key_event.ctrl and key_event.key == "c":
+                            _request_pipeline_cancel()
+                            return
+
+                        if input_mode:
+                            if key_event.key == "enter":
+                                input_done.set()
+                                return
+                            if key_event.key == "escape":
+                                input_chars.clear()
+                                input_done.set()
+                                return
+                            if key_event.key == "backspace":
+                                if input_chars:
+                                    input_chars.pop()
+                            elif key_event.key == "paste":
+                                if key_event.char:
+                                    input_chars.extend(key_event.char)
+                            elif key_event.char and key_event.char.isprintable():
+                                input_chars.append(key_event.char)
+                            tabs.set_status_message(f"✎ {''.join(input_chars)}█")
+                            _live_update(tabs.render())
+                            continue
+
+                        if key_event.key == "escape":
+                            interrupt_requested.set()
+                            if self._pipeline:
+                                self._pipeline.pause_agent_loops()
+                            return
+                        if waiting_input and key_event.key == "enter":
+                            nonlocal selected
+                            candidate_selection = tabs.confirm_selection()
+                            if candidate_selection.selected_candidate_name:
+                                selected = candidate_selection
+                                stop_keys.set()
+                            continue
+                        if tabs.handle_key(key_event):
+                            _live_update(tabs.render())
+            except (OSError, ValueError):
+                pass
+
+        async def _handle_esc_interrupt() -> bool:
+            """Handle ESC interrupt inline (no live.stop). Returns True if pipeline restarted."""
+            nonlocal input_mode, interrupt_feedback
+            if self._pipeline:
+                self._last_interrupt_paused = False
+                self._pipeline.pause_agent_loops()
+            try:
+                input_mode = True
+                input_chars.clear()
+                input_done.clear()
+                tabs.set_status_message("✎ █")
+                _live_update(tabs.render())
+
+                nonlocal key_task
+                key_task = asyncio.create_task(key_reader())
+                await input_done.wait()
+
+                user_input = "".join(input_chars).strip()
+                input_mode = False
+
+                if user_input:
+                    tabs.set_status_message(_("Judging your input..."))
+                    _live_update(tabs.render())
+                    needs_restart, feedback = await self._handle_mid_pipeline_message(user_input, suppress_render=True)
+                    if feedback:
+                        tabs.set_status_message(feedback)
+                    else:
+                        tabs.set_status_message("")
+                    if needs_restart:
+                        interrupt_feedback = feedback
+                        return True
+                else:
+                    tabs.set_status_message("")
+            finally:
+                if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
+                    self._pipeline.resume_agent_loops()
+            interrupt_requested.clear()
+            _live_update(tabs.render())
+            return False
+
+        key_task: asyncio.Task | None = None
+
+        async def _cancel_key_task() -> None:
+            nonlocal key_task
+            if key_task and not key_task.done():
+                key_task.cancel()
+                try:
+                    await asyncio.shield(key_task)
+                except asyncio.CancelledError:
+                    if not key_task.done() or not key_task.cancelled():
+                        raise
+                except OSError:
+                    pass
+            key_task = None
+
+        async def _stop_key_reader() -> None:
+            stop_keys.set()
+            await _cancel_key_task()
+
+        try:
+            live.start()
+            key_task = asyncio.create_task(key_reader())
+
+            async for event in event_stream:
+                if interrupt_requested.is_set():
+                    if await _handle_esc_interrupt():
+                        interrupted = True
+                        await _stop_key_reader()
+                        break
+                    if self._pipeline_waiting_input and getattr(self, "_last_interrupt_paused", False):
+                        await _stop_key_reader()
+                        return None
+                    key_task = asyncio.create_task(key_reader())
+
+                if isinstance(event, PipelineEvent):
+                    if event.type == PipelineEventType.USER_INPUT_REQUIRED:
+                        recorder = getattr(self, "_pipeline_display_recorder", None)
+                        if recorder is not None:
+                            try:
+                                recorder.record(
+                                    "candidate_selection_ready",
+                                    step_id=getattr(self, "_pipeline_display_current_step_id", None),
+                                    payload=dict(event.data),
+                                    timestamp=event.timestamp,
+                                )
+                            except Exception as exc:
+                                logger.warning("Failed to record candidate selection ready event: {}", exc)
+                    else:
+                        self._record_pipeline_display_event(event)
+                    if event.type == PipelineEventType.USER_INPUT_REQUIRED:
+                        options = event.data.get("options", [])
+                        tabs.seed_candidates(options if isinstance(options, list) else [])
+                        waiting_input = True
+                        tabs.enter_selection_mode()
+                        self._pipeline_waiting_input = True
+                        _live_update(tabs.render())
+                        while not stop_keys.is_set():
+                            done, _pending = await asyncio.wait(
+                                [
+                                    asyncio.ensure_future(stop_keys.wait()),
+                                    asyncio.ensure_future(interrupt_requested.wait()),
+                                ],
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                            if interrupt_requested.is_set():
+                                if await _handle_esc_interrupt():
+                                    interrupted = True
+                                    await _stop_key_reader()
+                                    break
+                                if self._pipeline_waiting_input and getattr(self, "_last_interrupt_paused", False):
+                                    await _stop_key_reader()
+                                    return None
+                                key_task = asyncio.create_task(key_reader())
+                                continue
+                            break
+                        break
+
+                    if event.type == PipelineEventType.STEP_COMPLETED:
+                        continue
+
+                    if event.type in (
+                        PipelineEventType.STEP_FAILED,
+                        PipelineEventType.PIPELINE_COMPLETED,
+                        PipelineEventType.ROLLBACK_TRIGGERED,
+                    ):
+                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                            terminal_event = event
+                        break
+
+                elif isinstance(event, DiagramEvent):
+                    self._record_pipeline_display_candidate_diagram(event)
+                    tabs.add_diagram(
+                        event.candidate_name,
+                        event.mermaid_source,
+                        candidate_index=event.candidate_index,
+                    )
+
+                elif isinstance(event, CandidateDetailEvent):
+                    self._record_pipeline_display_candidate_detail(event)
+                    # U-I14: pass tool_use_id as the dedup key so multiple
+                    # show_candidate_detail calls for the same candidate_name
+                    # don't silently overwrite each other in the renderer.
+                    tabs.add_detail(
+                        event.tool_use_id,
+                        event.candidate_name,
+                        event.summary,
+                        event.cost_items,
+                        event.total_monthly_cost,
+                        candidate_index=event.candidate_index,
+                    )
+                    expired = [tid for tid in detail_tool_ids if tid in detail_accumulated]
+                    for tid in expired:
+                        detail_tool_ids.discard(tid)
+                        detail_accumulated.pop(tid, None)
+
+                elif isinstance(event, ToolUseStartEvent):
+                    self._record_pipeline_display_tool_use(event)
+                    if event.name == "show_candidate_detail":
+                        detail_tool_ids.add(event.tool_use_id)
+                        detail_accumulated[event.tool_use_id] = ""
+
+                elif isinstance(event, ToolInputDeltaEvent):
+                    if event.tool_use_id in detail_tool_ids:
+                        detail_accumulated[event.tool_use_id] += event.partial_json
+                        acc = detail_accumulated[event.tool_use_id]
+                        cname = extract_json_string_value(acc, "candidate_name")
+                        candidate_index = extract_json_int_value(acc, "candidate_index")
+                        summary = extract_json_string_value(acc, "summary", allow_partial=True)
+                        if cname and summary:
+                            tabs.update_streaming_summary(cname, summary, candidate_index=candidate_index)
+
+                elif isinstance(event, StepResult):
+                    continue
+
+                if tabs.tab_count > 0:
+                    _live_update(tabs.render())
+
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            self._pipeline_waiting_input = False
+            raise
+        finally:
+            try:
+                await _stop_key_reader()
+            finally:
+                live.stop()
+
+        if interrupted:
+            self._pipeline_waiting_input = False
+            try:
+                await event_stream.aclose()
+            except Exception:
+                pass
+            static_content = tabs.render_selected_static()
+            if static_content is not None:
+                self.renderer.console.print()
+                self.renderer.console.print(static_content)
+            if interrupt_feedback:
+                self.renderer.console.print()
+                self._render_interrupt_feedback_inline(interrupt_feedback)
+            return True
+
+        if terminal_event is not None:
+            return terminal_event
+
+        if selected and self._pipeline is not None:
+            selected_name = selected.selected_candidate_name
+            selected_label = selected.display_label or selected_name
+            self._record_pipeline_display_candidate_selected(
+                step_id=getattr(self, "_pipeline_display_current_step_id", None),
+                candidate_name=selected.selected_candidate_name,
+                candidate_index=selected.selected_candidate_index,
+            )
+            self.renderer.console.print()
+            self.renderer.console.print("  [green]✓[/] {} [bold]{}[/]".format(_("Selected:"), selected_label))
+            static_content = tabs.render_selected_static()
+            if static_content is not None:
+                self.renderer.console.print()
+                self.renderer.console.print(static_content)
+            # U-I7: release the outer candidate-selection stream before recursing
+            # into _render_pipeline_stream on the resumed stream. Without this,
+            # the outer generator is only implicitly drained (via _continue_from_current
+            # returning early on USER_INPUT_REQUIRED) — a fragile contract.
+            try:
+                await event_stream.aclose()
+            except Exception:
+                pass
+            resume_payload = encode_selected_candidate(
+                selected.selected_candidate_name,
+                selected.selected_candidate_index,
+            )
+            event_stream = self._pipeline.resume(resume_payload)
+            try:
+                self.store.set_state(is_busy=True)
+                terminal_event = await self._render_pipeline_stream(event_stream)
+            finally:
+                self.store.set_state(is_busy=False)
+            if terminal_event is not None:
+                return terminal_event
+
+        return selected.selected_candidate_name if selected else None
+
+    def _create_parallel_live(self) -> Live:
+        return Live(
+            console=self.renderer.console,
+            refresh_per_second=12,
+            transient=True,
+        )
+
+    async def _render_parallel_tabs(self, event_stream, progress_bar_fn=None) -> bool | PipelineEvent | None:
+        """Render parallel sub-pipeline execution with tab switching UI.
+
+        Returns True if a hard_interrupt occurred and the pipeline stream needs
+        restart, a terminal PIPELINE_COMPLETED event, or False.
+
+        Uses StreamAccumulator per candidate to process events the same way
+        as run_streaming_output, then calls renderer._render_segments to
+        render the selected tab's content with full markdown/tool formatting.
+        """
+        from iac_code.pipeline.display_names import display_step_name
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+        from iac_code.pipeline.engine.types import StepResult
+        from iac_code.ui.components.parallel_tabs import CandidateState, CandidateStatus, ParallelTabsRenderer
+        from iac_code.ui.core.raw_input import RawInputCapture
+        from iac_code.ui.stream_accumulator import StreamAccumulator
+
+        candidates: list[CandidateState] = []
+        tabs_renderer: ParallelTabsRenderer | None = None
+        step_counters: dict[str, int] = {}
+        accumulators: dict[str, StreamAccumulator] = {}
+        terminal_event: PipelineEvent | None = None
+
+        live = self._create_parallel_live()
+
+        stop_keys = asyncio.Event()
+        interrupt_requested = asyncio.Event()
+        input_mode = False
+        input_chars: list[str] = []
+        input_done = asyncio.Event()
+        parent_task = asyncio.current_task()
+
+        def _request_pipeline_cancel() -> None:
+            self._pipeline_waiting_input = False
+            stop_keys.set()
+            if parent_task is not None and not parent_task.done():
+                parent_task.cancel()
+
+        async def key_reader():
+            nonlocal input_mode
+            loop = asyncio.get_running_loop()
+            try:
+                with RawInputCapture(use_cbreak=True) as cap:
+                    while not stop_keys.is_set():
+                        key_event = await loop.run_in_executor(None, cap.read_key, 0.1)
+                        if key_event is None:
+                            continue
+
+                        if key_event.ctrl and key_event.key == "c":
+                            _request_pipeline_cancel()
+                            return
+
+                        if input_mode:
+                            if key_event.key == "enter":
+                                input_done.set()
+                                return
+                            if key_event.key == "escape":
+                                input_chars.clear()
+                                input_done.set()
+                                return
+                            if key_event.key == "backspace":
+                                if input_chars:
+                                    input_chars.pop()
+                            elif key_event.key == "paste":
+                                if key_event.char:
+                                    input_chars.extend(key_event.char)
+                            elif key_event.char and key_event.char.isprintable():
+                                input_chars.append(key_event.char)
+                            if tabs_renderer:
+                                tabs_renderer.set_input_line("".join(input_chars))
+                            _update_live()
+                            continue
+
+                        if key_event.key == "escape":
+                            interrupt_requested.set()
+                            if self._pipeline:
+                                self._pipeline.pause_agent_loops()
+                            return
+                        if tabs_renderer:
+                            tabs_renderer.handle_key(key_event)
+            except (OSError, ValueError):
+                pass
+
+        async def _cancel_key_task() -> None:
+            nonlocal key_task
+            if key_task and not key_task.done():
+                key_task.cancel()
+                try:
+                    await asyncio.shield(key_task)
+                except asyncio.CancelledError:
+                    if not key_task.done() or not key_task.cancelled():
+                        raise
+                except OSError:
+                    pass
+            key_task = None
+
+        async def _stop_key_reader() -> None:
+            stop_keys.set()
+            await _cancel_key_task()
+
+        def _new_live() -> Live:
+            return self._create_parallel_live()
+
+        def _update_live():
+            if not tabs_renderer:
+                return
+            selected = tabs_renderer.selected_index
+            if selected < len(candidates):
+                sub_id = candidates[selected].sub_pipeline_id
+                acc = accumulators.get(sub_id)
+                if acc:
+                    content = self.renderer._render_segments(
+                        acc.segments, None, acc.text_buffer, thinking_buffer=acc.thinking_buffer, embedded=True
+                    )
+                    rendered = tabs_renderer.render_with_content(content)
+                    if progress_bar_fn is not None:
+                        live.update(Group(rendered, progress_bar_fn()))
+                    else:
+                        live.update(rendered)
+                    return
+            rendered = tabs_renderer.render()
+            if progress_bar_fn is not None:
+                live.update(Group(rendered, progress_bar_fn()))
+            else:
+                live.update(rendered)
+
+        key_task: asyncio.Task | None = None
+
+        async def _prompt_child_permission(sub_id: str, inner: PermissionRequestEvent) -> None:
+            nonlocal input_mode, key_task, live
+            response_future = inner.response_future
+            if response_future is None or response_future.done():
+                return
+
+            allowed = False
+            try:
+                await _stop_key_reader()
+                input_mode = False
+                input_chars.clear()
+                input_done.clear()
+                if tabs_renderer:
+                    tabs_renderer.set_input_line(None)
+                live.stop()
+                allowed = await self.renderer.prompt_permission(inner)
+            except asyncio.CancelledError:
+                if not response_future.done():
+                    response_future.set_result(False)
+                raise
+            except Exception:
+                logger.warning("Permission prompt failed for parallel sub-pipeline {}", sub_id, exc_info=True)
+                allowed = False
+            if not response_future.done():
+                response_future.set_result(allowed)
+            stop_keys.clear()
+            live = _new_live()
+            live.start()
+            key_task = asyncio.create_task(key_reader())
+            _update_live()
+
+        try:
+            live.start()
+            key_task = asyncio.create_task(key_reader())
+
+            async for event in event_stream:
+                # Check for Esc interrupt
+                if interrupt_requested.is_set():
+                    if self._pipeline:
+                        self._last_interrupt_paused = False
+                        self._pipeline.pause_agent_loops()
+                    try:
+                        input_mode = True
+                        input_chars.clear()
+                        input_done.clear()
+                        if tabs_renderer:
+                            tabs_renderer.set_input_line("")
+                        _update_live()
+                        key_task = asyncio.create_task(key_reader())
+                        await input_done.wait()
+
+                        user_input = "".join(input_chars).strip()
+                        input_mode = False
+                        if tabs_renderer:
+                            tabs_renderer.set_input_line(None)
+
+                        if user_input:
+                            if tabs_renderer:
+                                tabs_renderer.set_input_line(_("Judging your input..."))
+                            _update_live()
+                            needs_restart, feedback = await self._handle_mid_pipeline_message(
+                                user_input, suppress_render=True
+                            )
+                            if tabs_renderer:
+                                tabs_renderer.set_input_line(None)
+                            if needs_restart:
+                                # Unlike _render_candidate_selection_tabs (which
+                                # snapshots the committed selection), the parallel
+                                # candidates are mid-execution and discarded by the
+                                # rollback, so there's no meaningful state to print
+                                # — a half-streamed "✓ 完成" would be misleading.
+                                # Return True and let the caller close + restart the
+                                # stream; the transient Live content is dropped on
+                                # purpose.
+                                await _stop_key_reader()
+                                return True
+                            if self._pipeline_waiting_input and getattr(self, "_last_interrupt_paused", False):
+                                await _stop_key_reader()
+                                return None
+                            if feedback:
+                                for acc in accumulators.values():
+                                    acc.text_buffer += "\n" + feedback + "\n"
+                    finally:
+                        if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
+                            self._pipeline.resume_agent_loops()
+                    interrupt_requested.clear()
+                    key_task = asyncio.create_task(key_reader())
+                    _update_live()
+                    continue
+
+                if isinstance(event, PipelineEvent):
+                    self._record_pipeline_display_event(event)
+                    if event.type == PipelineEventType.SUB_PIPELINE_STARTED:
+                        cs = CandidateState(
+                            sub_pipeline_id=event.data["sub_pipeline_id"],
+                            candidate_index=event.data["candidate_index"],
+                            name=event.data.get(
+                                "candidate_name",
+                                _("Candidate {index}").format(index=event.data["candidate_index"] + 1),
+                            ),
+                            total_steps=event.data.get("total_steps", 3),
+                        )
+                        replaced = False
+                        for ci, existing in enumerate(candidates):
+                            if existing.candidate_index == cs.candidate_index:
+                                old_id = existing.sub_pipeline_id
+                                candidates[ci] = cs
+                                accumulators.pop(old_id, None)
+                                step_counters.pop(old_id, None)
+                                replaced = True
+                                break
+                        if not replaced:
+                            candidates.append(cs)
+                        step_counters[cs.sub_pipeline_id] = 0
+                        accumulators[cs.sub_pipeline_id] = StreamAccumulator()
+                        tabs_renderer = ParallelTabsRenderer(candidates=candidates, console=self.renderer.console)
+
+                    elif event.type == PipelineEventType.SUB_STEP_STARTED:
+                        sub_id = event.data.get("sub_pipeline_id", "")
+                        step_name = event.data.get("step_id", "")
+                        step_idx = event.data.get("step_index", 0)
+                        if tabs_renderer:
+                            tabs_renderer.update_step(sub_id, display_step_name(step_name), step_idx + 1)
+
+                    elif event.type == PipelineEventType.SUB_STEP_COMPLETED:
+                        sub_id = event.data.get("sub_pipeline_id", "")
+                        if sub_id in step_counters:
+                            step_counters[sub_id] += 1
+                            if tabs_renderer:
+                                tabs_renderer.update_step(sub_id, step_name="", completed=step_counters[sub_id])
+
+                    elif event.type == PipelineEventType.SUB_PIPELINE_COMPLETED:
+                        sub_id = event.data.get("sub_pipeline_id", "")
+                        if sub_id in accumulators:
+                            accumulators[sub_id].finalize_text()
+                        if tabs_renderer:
+                            if event.data.get("failed", False):
+                                tabs_renderer.mark_failed(sub_id, error=event.data.get("error", ""))
+                            else:
+                                tabs_renderer.mark_done(sub_id)
+
+                    elif event.type == PipelineEventType.STEP_COMPLETED:
+                        break
+
+                    elif event.type in (
+                        PipelineEventType.STEP_STARTED,
+                        PipelineEventType.PIPELINE_COMPLETED,
+                        PipelineEventType.STEP_FAILED,
+                    ):
+                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                            terminal_event = event
+                        break
+
+                elif isinstance(event, SubPipelineStreamEvent):
+                    sub_id = event.sub_pipeline_id
+                    inner = event.inner
+                    if isinstance(inner, PermissionRequestEvent):
+                        await _prompt_child_permission(sub_id, inner)
+                        continue
+                    if isinstance(inner, ToolUseStartEvent):
+                        self._record_pipeline_display_tool_use(inner, sub_pipeline_id=sub_id)
+                    acc = accumulators.get(sub_id)
+                    if acc:
+                        acc.process(inner)
+
+                elif isinstance(event, StepResult):
+                    continue
+
+                if tabs_renderer:
+                    _update_live()
+
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            self._pipeline_waiting_input = False
+            raise
+        finally:
+            stop_keys.set()
+            try:
+                await _cancel_key_task()
+            finally:
+                live.stop()
+
+        if tabs_renderer:
+            self.renderer.console.print()
+            summary = Text()
+            for c in candidates:
+                if c.status == CandidateStatus.DONE:
+                    summary.append(_("  ✓ {name}: Completed\n").format(name=c.name), style="green")
+                elif c.status == CandidateStatus.FAILED:
+                    summary.append(_("  ✘ {name}: Failed").format(name=c.name), style="red")
+                    if c.error:
+                        summary.append(" — {}".format(c.error), style="dim red")
+                    summary.append("\n")
+            self.renderer.console.print(summary)
+
+        if terminal_event is not None:
+            return terminal_event
+        return False
+
+    _SPINNER_CHARS = "◐◓◑◒"
+
+    def _build_progress_bar(self, step_names: list[str], completed: set[int], current_index: int, spinner_frame: int):
+        """Build horizontal progress bar as a Rich Text object."""
+        from iac_code.pipeline.display_names import display_step_name
+        from iac_code.ui.pipeline_styles import PIPELINE_ACTIVE_PROGRESS_STYLE
+
+        bar = Text()
+        for i, name in enumerate(step_names):
+            label = display_step_name(name)
+            if i > 0:
+                bar.append(" → ", style="dim")
+            if i in completed:
+                bar.append(f"✓ {label}", style="green")
+            elif i == current_index:
+                char = self._SPINNER_CHARS[spinner_frame % 4]
+                bar.append(f"{char} {label}", style=PIPELINE_ACTIVE_PROGRESS_STYLE)
+            else:
+                bar.append(label, style="dim")
+        return bar
+
+    def _update_pipeline_state_from_event(self, event):
+        """Pre-render: update instance state from event metadata.
+
+        Kept separate from _render_pipeline_event so render is pure (U-I16).
+        """
+        from iac_code.pipeline.engine.events import PipelineEventType
+
+        if event.type == PipelineEventType.PIPELINE_STARTED:
+            self._pipeline_step_names = event.data.get("step_names", [])
+            self._pipeline_start_time = time.time()
+            self._pipeline_completed_indices = set()
+
+    def _render_pipeline_event(self, event):
+        from rich.panel import Panel
+
+        from iac_code.pipeline.display_names import display_pipeline_name, display_step_name
+        from iac_code.pipeline.engine.events import PipelineEventType
+        from iac_code.ui.pipeline_styles import PIPELINE_PANEL_BORDER_STYLE, pipeline_step_header, pipeline_title
+
+        con = self.renderer.console
+
+        match event.type:
+            case PipelineEventType.PIPELINE_STARTED:
+                name = event.data.get("pipeline_type", "Pipeline")
+                title = _("AI {name} Pipeline").format(name=display_pipeline_name(name))
+                con.print()
+                con.print(pipeline_title(title))
+                con.print()
+            case PipelineEventType.STEP_STARTED:
+                step_id = event.step_id or ""
+                idx = event.data.get("index", 1)
+                total = event.data.get("total", len(self._pipeline_step_names))
+                con.print()
+                con.print(pipeline_step_header(f"● {display_step_name(step_id)} ({idx}/{total})"))
+            case PipelineEventType.STEP_COMPLETED:
+                pass
+            case PipelineEventType.STEP_FAILED:
+                err = event.data.get("error", "")
+                step_id = event.step_id or ""
+                con.print(f"  [red]✗ {display_step_name(step_id)}[/] [dim]── {err}[/]")
+            case PipelineEventType.USER_INPUT_REQUIRED:
+                options = event.data.get("options", [])
+                prompt_text = event.data.get("prompt", "")
+                if prompt_text:
+                    con.print(f"\n{prompt_text}")
+                if options:
+                    for i, opt in enumerate(options, 1):
+                        name = opt.get("name", _("Option {index}").format(index=i))
+                        summary = opt.get("summary", opt.get("description", ""))
+                        body = summary or name
+                        con.print(Panel(body, title=f"[bold]{i}. {name}[/]", border_style=PIPELINE_PANEL_BORDER_STYLE))
+                    con.print("\n" + _("Please enter your choice:"))
+            case PipelineEventType.ROLLBACK_TRIGGERED:
+                con.print(
+                    "  [yellow]⟲[/] "
+                    + _("Rollback: {from_step} → {to_step}").format(
+                        from_step=display_step_name(str(event.data.get("from_step") or "")),
+                        to_step=display_step_name(str(event.data.get("to_step") or "")),
+                    )
+                )
+            case PipelineEventType.PIPELINE_COMPLETED:
+                if not event.data.get("early_exit") and not event.data.get("failed"):
+                    elapsed = time.time() - getattr(self, "_pipeline_start_time", time.time())
+                    if elapsed >= 60:
+                        elapsed_str = f"{elapsed / 60:.1f}m"
+                    else:
+                        elapsed_str = f"{elapsed:.1f}s"
+                    con.print()
+                    con.print(
+                        "  [green]{}[/] [dim]{}[/]".format(
+                            _("✔ Pipeline completed"),
+                            _("── total time {duration}").format(duration=elapsed_str),
+                        )
+                    )
+            case _:
+                pass
 
     @staticmethod
     def _clear_cancel_state() -> None:
@@ -1272,6 +3271,42 @@ class InlineREPL:
             self._provider_key_override = qwenpaw_config.provider_key
             self._base_url_override = qwenpaw_config.base_url
 
+    def _detect_pipeline_session(self, cwd: str, session_id: str) -> bool:
+        """Check if a session has an actively resumable pipeline sidecar.
+
+        Sidecar lives at ``<session_id>/pipeline/`` under the session dir,
+        nested with main's directory-format session layout (problem 4).
+        """
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.session import PipelineSession
+
+        raw_session_dir = self._session_storage.session_dir(cwd, session_id)
+        if not isinstance(raw_session_dir, (str, Path)):
+            return False
+        sidecar = PipelineSession(Path(raw_session_dir) / "pipeline")
+        return sidecar.has_resumable_status()
+
+    def _resolve_initial_runtime_mode(self, resume_session_id: str | bool | None) -> RunMode:
+        """Resolve startup routing once, then keep it session-local.
+
+        A fresh explicit pipeline launch still enters pipeline mode via
+        IAC_CODE_MODE. When resuming, pipeline mode only takes over if the
+        target session has an active sidecar; otherwise normal chat history
+        should load even if the parent process still has IAC_CODE_MODE set.
+        """
+        from iac_code.pipeline.config import RunMode, get_run_mode, get_working_directory
+
+        mode = get_run_mode()
+        if resume_session_id is None:
+            return mode
+        pipeline_cwd = get_working_directory() or self._original_cwd
+        if self._detect_pipeline_session(pipeline_cwd, self._session_id):
+            return RunMode.PIPELINE
+        if mode == RunMode.PIPELINE:
+            return RunMode.NORMAL
+        return mode
+
     def _load_credentials(self) -> dict[str, str]:
         """Load API credentials (delegates to config.load_credentials with env overlay)."""
         return load_credentials(model=self._current_model)
@@ -1308,11 +3343,174 @@ class InlineREPL:
         return str(uuid.uuid4())
 
     def _load_resume_messages(self, resume: str | bool | None) -> list:
-        """Load and repair saved messages when resuming a session."""
+        """Load and repair saved messages when resuming a session.
+
+        The pipeline sidecar takes priority ONLY in pipeline mode. In normal
+        mode, even if a pipeline sidecar exists from a prior run, we MUST
+        load the chat history — the user explicitly switched modes and
+        expects their conversation back (N-I1).
+        """
         if resume is None:
             return []
+        # Lazy import to avoid pulling pipeline subsystem into normal-mode
+        # startup (a separate clean-up tracked under N-I2).
+        from iac_code.pipeline.config import RunMode, get_working_directory
+
+        pipeline_cwd = get_working_directory() or self._original_cwd
+        if self._get_runtime_mode() == RunMode.PIPELINE and self._detect_pipeline_session(
+            pipeline_cwd, self._session_id
+        ):
+            return []
         messages = self._session_storage.load(self._original_cwd, self._session_id)
-        return self._session_storage.repair_interrupted(messages)
+        repaired = self._session_storage.repair_interrupted(messages)
+        if not repaired:
+            repaired = self._load_terminal_pipeline_initial_user_message(pipeline_cwd, self._session_id)
+        return self._with_terminal_pipeline_abort_notice(repaired, pipeline_cwd, self._session_id)
+
+    @staticmethod
+    def _pipeline_abort_notice_text() -> str:
+        return _("Pipeline was interrupted. Switched to normal chat; you can continue from here.")
+
+    def _switch_user_aborted_pipeline_to_normal(self) -> None:
+        """Switch the current REPL to normal chat after a user-aborted pipeline."""
+        from iac_code.pipeline.config import RunMode
+
+        self._record_pipeline_display_user_aborted()
+        self._set_runtime_mode(RunMode.NORMAL)
+        try:
+            messages = self._session_storage.load(self._original_cwd, self._session_id)
+            repaired = self._session_storage.repair_interrupted(messages)
+            self._agent_loop.replace_session(self._session_id, repaired or None)
+            if self._has_pipeline_abort_notice(repaired):
+                return
+            notice_text = self._pipeline_abort_notice_text()
+            self.renderer.print_system_message(notice_text, style="yellow")
+            injected = self._agent_loop.context_manager.add_raw_message({"role": "assistant", "content": notice_text})
+            self._session_storage.append(
+                self._original_cwd,
+                self._session_id,
+                injected,
+                git_branch=self.current_git_branch(),
+            )
+        except Exception as exc:
+            logger.warning("Failed to switch aborted pipeline to normal chat: {}", exc)
+
+    def _with_terminal_pipeline_abort_notice(
+        self,
+        messages: list[Message],
+        pipeline_cwd: str,
+        session_id: str,
+    ) -> list[Message]:
+        """Add a replay-only abort notice for terminal pipeline sessions."""
+        if not messages or self._has_pipeline_abort_notice(messages):
+            return messages
+        plain_user_turns = [
+            message
+            for message in messages
+            if self._message_role(message) == "user" and isinstance(self._message_content(message), str)
+        ]
+        assistant_turns = [message for message in messages if self._message_role(message) == "assistant"]
+        if len(plain_user_turns) != 1 or assistant_turns:
+            return messages
+        status = self._terminal_pipeline_status(pipeline_cwd, session_id)
+        if status != "user_aborted":
+            return messages
+        return [*messages, Message(role="assistant", content=self._pipeline_abort_notice_text())]
+
+    @classmethod
+    def _has_pipeline_abort_notice(cls, messages: list[Message]) -> bool:
+        notice = cls._pipeline_abort_notice_text()
+        return any(
+            cls._message_role(message) == "assistant" and cls._message_content(message) == notice
+            for message in messages
+        )
+
+    @staticmethod
+    def _message_role(message: Message | dict[str, Any]) -> str | None:
+        if isinstance(message, dict):
+            value = message.get("role")
+            return value if isinstance(value, str) else None
+        value = getattr(message, "role", None)
+        return value if isinstance(value, str) else None
+
+    @staticmethod
+    def _message_content(message: Message | dict[str, Any]) -> Any:
+        if isinstance(message, dict):
+            return message.get("content")
+        return getattr(message, "content", None)
+
+    def _terminal_pipeline_status(self, pipeline_cwd: str, session_id: str) -> str | None:
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.session import PipelineSession
+
+        try:
+            sidecar = PipelineSession(Path(self._session_storage.session_dir(pipeline_cwd, session_id)) / "pipeline")
+            if not sidecar.exists():
+                return None
+            result = sidecar.restore_sync({})
+            return result.status
+        except Exception as exc:
+            logger.warning("Failed to inspect terminal pipeline sidecar: {}", exc)
+            return None
+
+    def _persist_pipeline_visible_user_turn(self, user_input: str) -> None:
+        """Persist the user-visible pipeline prompt into the root session."""
+        if not isinstance(user_input, str) or not user_input.strip():
+            return
+        try:
+            injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": user_input})
+            self._session_storage.append(
+                self._original_cwd,
+                self._session_id,
+                injected,
+                git_branch=self.current_git_branch(),
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist pipeline user turn to root session: {}", exc)
+
+    def _load_terminal_pipeline_initial_user_message(self, pipeline_cwd: str, session_id: str) -> list:
+        """Recover the first visible pipeline prompt for terminal legacy sessions.
+
+        Internal step transcripts are not normal chat history. This fallback is
+        intentionally narrow: when the root session has no role messages and
+        the sidecar is terminal, expose only the first plain user text so
+        ``--resume`` does not look empty after a user-aborted pipeline.
+        """
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.session import PipelineSession
+        from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
+
+        try:
+            sidecar = PipelineSession(Path(self._session_storage.session_dir(pipeline_cwd, session_id)) / "pipeline")
+            if not sidecar.exists():
+                return []
+            restore_result = sidecar.restore_sync({})
+            if restore_result.status not in {"completed", "user_aborted", "failed", "discarded"}:
+                return []
+            transcript_storage = PipelineTranscriptStorage(sidecar.session_dir)
+            transcript_ids: list[str] = []
+            attempts = restore_result.attempts or {}
+            items = attempts.get("items") if isinstance(attempts, dict) else None
+            if isinstance(items, dict):
+                attempt_items = cast(dict[Any, Any], items)
+                for _attempt_id, raw_attempt in sorted(attempt_items.items()):
+                    if not isinstance(raw_attempt, dict):
+                        continue
+                    attempt = cast(dict[str, Any], raw_attempt)
+                    transcript_id = attempt.get("transcript_id")
+                    if isinstance(transcript_id, str) and transcript_id:
+                        transcript_ids.append(transcript_id)
+            if not transcript_ids:
+                transcript_ids = transcript_storage.list_transcript_ids()
+            for transcript_id in transcript_ids:
+                for message in transcript_storage.load(pipeline_cwd, transcript_id):
+                    if message.role == "user" and isinstance(message.content, str) and message.content.strip():
+                        return [message]
+        except Exception as exc:
+            logger.warning("Failed to load terminal pipeline prompt fallback: {}", exc)
+        return []
 
     def _load_current_session_name(self) -> str | None:
         """Read the persisted display name for the active session."""
@@ -1381,8 +3579,20 @@ class InlineREPL:
         return self._session_id
 
     def get_status_snapshot(self) -> dict[str, Any]:
+        # getattr-guard: existing tests construct minimal InlineREPL instances
+        # via object.__new__ that never set `_pipeline`. Treat that the same as
+        # normal (non-pipeline) mode.
+        if getattr(self, "_pipeline", None) is None:
+            return self._build_normal_status()
+        return self._build_pipeline_status()
+
+    def _build_normal_status(self) -> dict[str, Any]:
+        """Existing /status logic (extracted intact). Normal-mode regression-safe."""
         state = self.store.get_state()
         messages = self._agent_loop.context_manager.get_messages()
+        refresh_usage = getattr(self._agent_loop, "refresh_session_usage", None)
+        if callable(refresh_usage):
+            refresh_usage()
         return {
             "session_id": self._session_id,
             "resumed": self._was_resumed,
@@ -1398,6 +3608,59 @@ class InlineREPL:
             if hasattr(self._agent_loop, "get_memory_recall_stats")
             else {},
         }
+
+    def _build_pipeline_status(self) -> dict[str, Any]:
+        """Pipeline-aware /status: aggregate token usage across active candidate loops."""
+        pipeline = self._pipeline
+        assert pipeline is not None  # callers already gated on `_pipeline is None`
+        state = self.store.get_state()
+        loops = list(pipeline.iter_active_agent_loops())
+        return {
+            "session_id": self._session_id,
+            "resumed": self._was_resumed,
+            "provider": self._status_provider_display(),
+            "model": self._status_model(state.model),
+            "region": self._status_region(),
+            "cwd": self._original_cwd,
+            "pipeline": {
+                "name": pipeline._loaded.name,
+                "current_step": pipeline.state_machine.current_step.step_id,
+                "step_index": pipeline.state_machine.current_step_index + 1,
+                "total_steps": len(pipeline._loaded.steps),
+            },
+            "api_usage": self._aggregate_session_usage(loops),
+            "turn_count": 0,
+            "max_turns": max((loop.max_turns for loop in loops), default=0),
+            "context_usage": self._aggregate_context_usage(loops),
+        }
+
+    def _aggregate_session_usage(self, loops: list[Any]) -> dict[str, int]:
+        """Sum session usage across active agent loops, surviving per-loop races."""
+        totals: dict[str, int] = {}
+        for loop in loops:
+            try:
+                usage = loop.get_session_usage()
+            except Exception:
+                continue
+            if isinstance(usage, dict):
+                for k, v in usage.items():
+                    if isinstance(v, (int, float)):
+                        totals[k] = totals.get(k, 0) + v
+        return totals
+
+    def _aggregate_context_usage(self, loops: list[Any]) -> dict[str, int]:
+        """Max context_usage across active loops — 'how full is the worst tab'."""
+        totals: dict[str, int] = {}
+        for loop in loops:
+            try:
+                usage = loop.get_context_usage()
+            except Exception:
+                continue
+            if isinstance(usage, dict):
+                for k, v in usage.items():
+                    if isinstance(v, (int, float)):
+                        totals[k] = max(totals.get(k, 0), v)
+        return totals
 
     def _status_provider_display(self) -> str:
         if hasattr(self._provider_manager, "get_provider_display"):
@@ -1454,18 +3717,23 @@ class InlineREPL:
 
     def swap_session(self, new_session_id: str) -> None:
         """Replace the active session in-place (same project only)."""
+        from iac_code.pipeline.config import get_working_directory
         from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 
         old_session_id = self._session_id
+        pipeline_cwd = get_working_directory() or self._original_cwd
         new_messages = self._session_storage.load(self._original_cwd, new_session_id)
         new_messages = self._session_storage.repair_interrupted(new_messages)
+        if not new_messages:
+            new_messages = self._load_terminal_pipeline_initial_user_message(pipeline_cwd, new_session_id)
+        new_messages = self._with_terminal_pipeline_abort_notice(new_messages, pipeline_cwd, new_session_id)
         self._agent_loop.replace_session(new_session_id, new_messages or None)
         self._session_id = new_session_id
         self._was_resumed = True
         self._session_name = self._load_current_session_name()
 
         state = self.store.get_state()
-        permission_context = state.permission_context
+        permission_context = getattr(state, "permission_context", None)
         if permission_context is not None:
             old_roots = set(build_session_trusted_read_directories(old_session_id))
             permission_context.trusted_read_directories = [
@@ -1485,13 +3753,125 @@ class InlineREPL:
             )
         )
         if new_messages:
-            self.renderer.replay_history(new_messages)
+            self._replay_resume_messages(new_messages)
             self.console.print()
+
+    async def swap_session_async(self, new_session_id: str) -> None:
+        """Async variant of swap_session for mid-pipeline sidecar detection.
+
+        Steps:
+          1. Clear self._pipeline (防旧 PipelineRunner 把状态写到新 session sidecar)
+          2. 走原 swap_session sync 逻辑（load messages、replace_session、清屏、replay banner）
+          3. 探测目标 session 是否有 pipeline sidecar
+          4. 若有 → 弹确认 UI；用户选 resume → 重建 self._pipeline
+        """
+        # Step 1: clear pipeline so the old PipelineRunner can't write to new
+        # session's sidecar after the id rotation in step 2.
+        self._pipeline = None
+        self._pipeline_waiting_input = False
+        self._pipeline_restored_status = None
+
+        # Step 2: delegate to existing sync swap (handles message reload, clear,
+        # banner, history replay).
+        self.swap_session(new_session_id)
+        from iac_code.pipeline.config import RunMode
+
+        self._set_runtime_mode(RunMode.NORMAL)
+
+        # Step 3: detect target sidecar
+        from iac_code.pipeline.config import get_pipeline_name, get_working_directory
+        from iac_code.pipeline.engine.session import PipelineSession
+
+        pipeline_cwd = get_working_directory() or self._original_cwd
+        sidecar = PipelineSession(self._session_storage.session_dir(pipeline_cwd, new_session_id) / "pipeline")
+        if not sidecar.has_resumable_status():
+            return
+
+        # Step 4: prompt user; conditionally resume
+        choice = await self._confirm_pipeline_resume(sidecar.meta_path)
+        if choice == "discard":
+            try:
+                sidecar.mark_discarded(reason="discarded from /resume picker")
+            except Exception as exc:
+                logger.opt(exception=True).warning("Failed to mark pipeline sidecar discarded during /resume: {}", exc)
+                self.renderer.print_system_message(
+                    _("Could not mark pipeline state discarded: {reason}").format(
+                        reason=str(exc) or type(exc).__name__
+                    ),
+                    style="yellow",
+                )
+            return
+        if choice == "resume":
+            from iac_code.pipeline import create_pipeline
+
+            self._pipeline = create_pipeline(
+                name=get_pipeline_name(),
+                provider_manager=self._provider_manager,
+                base_tool_registry=self.tool_registry,
+                session_storage=self._session_storage,
+                session_id=new_session_id,
+                cwd=pipeline_cwd,
+                permission_context_getter=lambda: self.store.get_state().permission_context,
+                memory_content_getter=(
+                    lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""
+                ),
+                auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
+                resume_from_sidecar=True,
+            )
+            restored = self._pipeline.sidecar_restore_result
+            if restored is None or restored.ok is False:
+                detail = None if restored is None else restored.reason or restored.status
+                self.renderer.print_system_message(
+                    _("Could not resume pipeline state: {reason}").format(reason=detail or _("unknown error")),
+                    style="yellow",
+                )
+                self._pipeline = None
+                self._pipeline_waiting_input = False
+                self._pipeline_restored_status = None
+                return
+            self._pipeline_restored_status = restored.status
+            self._set_runtime_mode(RunMode.PIPELINE)
+            try:
+                step_id = self._pipeline.state_machine.current_step.step_id
+            except (AttributeError, IndexError):
+                step_id = "?"
+            from iac_code.pipeline.display_names import display_step_name
+
+            self.renderer.print_system_message(
+                _("Resumed pipeline at step: {step}").format(step=display_step_name(step_id)),
+                style="yellow",
+            )
+
+    async def _confirm_pipeline_resume(self, meta_path) -> str:
+        """Prompt the user whether to resume or discard the target session's
+        pipeline state. Returns ``"resume"`` or ``"discard"``."""
+        import yaml as _yaml
+
+        from iac_code.pipeline.display_names import display_step_name
+        from iac_code.ui.components.select import InputOption, Select, SelectLayout, TextOption
+
+        meta = _yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+        current_step = display_step_name(str(meta.get("current_step", "?")))
+
+        title = _("Found pipeline state in this session (paused at: {step}).").format(step=current_step)
+        # The Select component does not render a built-in title; surface the
+        # context via a system message so the user sees what they're choosing
+        # between.
+        self.renderer.print_system_message(title)
+
+        options: list[TextOption | InputOption] = [
+            TextOption(label=_("Resume pipeline from where it left off"), value="resume"),
+            TextOption(label=_("Discard pipeline state and continue as normal chat"), value="discard"),
+        ]
+        select = Select(options=options, default_value="resume", layout=SelectLayout.EXPANDED, visible_count=2)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, select.run)
+        return result if result in ("resume", "discard") else "discard"
 
     async def swap_or_announce_session(self, entry) -> None:
         """Hot-swap if same project; otherwise print the resume command."""
         if entry.cwd and same_project_path(entry.cwd, self._original_cwd):
-            self.swap_session(entry.session_id)
+            await self.swap_session_async(entry.session_id)
             return
         await self._announce_cross_project(entry)
 

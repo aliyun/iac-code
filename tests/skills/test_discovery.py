@@ -32,7 +32,7 @@ class TestScanSkillsDir:
         """Top-level markdown files are documentation, not skills."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        (skills_dir / "greet.md").write_text("---\ndescription: Greet\n---\nHello!")
+        (skills_dir / "greet.md").write_text("---\ndescription: Greet\n---\nHello!", encoding="utf-8")
 
         assert _scan_skills_dir(skills_dir) == []
 
@@ -41,7 +41,7 @@ class TestScanSkillsDir:
         skills_dir = tmp_path / "skills"
         skill_folder = skills_dir / "review"
         skill_folder.mkdir(parents=True)
-        (skill_folder / "SKILL.md").write_text("---\ndescription: Code review\n---\nReview code.")
+        (skill_folder / "SKILL.md").write_text("---\ndescription: Code review\n---\nReview code.", encoding="utf-8")
 
         skills = _scan_skills_dir(skills_dir)
         assert len(skills) == 1
@@ -52,8 +52,8 @@ class TestScanSkillsDir:
         """Non-.md files are ignored."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        (skills_dir / "readme.txt").write_text("Not a skill")
-        (skills_dir / "script.sh").write_text("#!/bin/bash")
+        (skills_dir / "readme.txt").write_text("Not a skill", encoding="utf-8")
+        (skills_dir / "script.sh").write_text("#!/bin/bash", encoding="utf-8")
 
         assert _scan_skills_dir(skills_dir) == []
 
@@ -61,7 +61,7 @@ class TestScanSkillsDir:
         """SKILL.md at top level is not a single-file skill."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        (skills_dir / "SKILL.md").write_text("---\ndescription: Ignored\n---\n")
+        (skills_dir / "SKILL.md").write_text("---\ndescription: Ignored\n---\n", encoding="utf-8")
 
         assert _scan_skills_dir(skills_dir) == []
 
@@ -69,7 +69,7 @@ class TestScanSkillsDir:
         """README.md documents a skills directory and is not a single-file skill."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        (skills_dir / "README.md").write_text("# Skills\n\nDocumentation.")
+        (skills_dir / "README.md").write_text("# Skills\n\nDocumentation.", encoding="utf-8")
 
         assert _scan_skills_dir(skills_dir) == []
 
@@ -79,10 +79,10 @@ class TestScanSkillsDir:
         skills_dir.mkdir()
         alpha_dir = skills_dir / "alpha"
         alpha_dir.mkdir()
-        (alpha_dir / "SKILL.md").write_text("---\ndescription: Alpha\n---\n")
+        (alpha_dir / "SKILL.md").write_text("---\ndescription: Alpha\n---\n", encoding="utf-8")
         beta_dir = skills_dir / "beta"
         beta_dir.mkdir()
-        (beta_dir / "SKILL.md").write_text("---\ndescription: Beta\n---\n")
+        (beta_dir / "SKILL.md").write_text("---\ndescription: Beta\n---\n", encoding="utf-8")
 
         skills = _scan_skills_dir(skills_dir)
         names = {s.name for s in skills}
@@ -192,7 +192,7 @@ class TestDiscoverAllSkills:
         skills_dir = tmp_path / "skills"
         skill_dir = skills_dir / "simplify"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("---\ndescription: Custom simplify\n---\nCustom body")
+        (skill_dir / "SKILL.md").write_text("---\ndescription: Custom simplify\n---\nCustom body", encoding="utf-8")
 
         skills = discover_all_skills(str(tmp_path))
         simplify = next(s for s in skills if s.name == "simplify")
@@ -208,10 +208,10 @@ class TestDiscoverAllSkills:
 
         root_skill = repo / "skills" / "deploy"
         root_skill.mkdir(parents=True)
-        (root_skill / "SKILL.md").write_text("---\ndescription: Root deploy\n---\n")
+        (root_skill / "SKILL.md").write_text("---\ndescription: Root deploy\n---\n", encoding="utf-8")
         child_skill = repo / "app" / "skills" / "deploy"
         child_skill.mkdir(parents=True)
-        (child_skill / "SKILL.md").write_text("---\ndescription: Child deploy\n---\n")
+        (child_skill / "SKILL.md").write_text("---\ndescription: Child deploy\n---\n", encoding="utf-8")
 
         skills = discover_all_skills(str(nested))
         deploy = next(s for s in skills if s.name == "deploy")
@@ -285,7 +285,7 @@ class TestUserGlobalSkillsRespectConfigDirEnv:
         skills_dir = target / "skills"
         skill_dir = skills_dir / "alpha"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("---\ndescription: Alpha\n---\n")
+        (skill_dir / "SKILL.md").write_text("---\ndescription: Alpha\n---\n", encoding="utf-8")
 
         project_cwd = tmp_path / "proj"
         project_cwd.mkdir()

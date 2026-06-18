@@ -16,6 +16,27 @@ from iac_code.ui.spinner import (
 )
 
 # ---------------------------------------------------------------------------
+# Spinner frame source
+# ---------------------------------------------------------------------------
+
+
+class TestSpinnerFrameSource:
+    def test_current_spinner_frame_uses_unicode_frames_by_default(self, monkeypatch):
+        from iac_code.ui import spinner
+
+        monkeypatch.setattr("iac_code.ui.spinner.use_ascii_symbols", lambda: False)
+
+        assert spinner.current_spinner_frame(now=0.0) == spinner.SPINNER_DOTS[0]
+
+    def test_current_spinner_frame_uses_ascii_frames_for_legacy_windows(self, monkeypatch):
+        from iac_code.ui import spinner
+
+        monkeypatch.setattr("iac_code.ui.spinner.use_ascii_symbols", lambda: True)
+
+        assert spinner.current_spinner_frame(now=0.0) == spinner.SPINNER_ASCII[0]
+
+
+# ---------------------------------------------------------------------------
 # _format_elapsed
 # ---------------------------------------------------------------------------
 
@@ -177,13 +198,23 @@ class TestShimmerSpinnerRender:
         assert ")" in plain
         assert "s" in plain
 
-    def test_render_contains_spinner_char(self):
+    def test_render_contains_spinner_char(self, monkeypatch):
         from iac_code.ui.spinner import SPINNER_DOTS
 
+        monkeypatch.setattr("iac_code.ui.spinner.use_ascii_symbols", lambda: False)
         spinner = ShimmerSpinner(status="Testing")
         result = spinner.render()
         plain = result.plain
         assert any(dot in plain for dot in SPINNER_DOTS)
+
+    def test_render_contains_ascii_spinner_char_when_needed(self, monkeypatch):
+        from iac_code.ui.spinner import SPINNER_ASCII
+
+        monkeypatch.setattr("iac_code.ui.spinner.use_ascii_symbols", lambda: True)
+        spinner = ShimmerSpinner(status="Testing")
+        result = spinner.render()
+        plain = result.plain
+        assert any(frame in plain for frame in SPINNER_ASCII)
 
     def test_render_updates_with_elapsed(self):
         spinner = ShimmerSpinner(status="Testing")

@@ -4,7 +4,7 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.5.0\n"
+"Project-Id-Version: iac-code 0.6.0\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-04 15:58+0800\n"
 "PO-Revision-Date: 2026-05-13 00:00+0000\n"
@@ -24,6 +24,86 @@ msgstr ""
 "Valor de IAC_CODE_PROVIDER no válido: {!r}. Valores válidos (sin "
 "distinguir mayúsculas/minúsculas): {}"
 
+#: src/iac_code/a2a/agent_card.py
+msgid ""
+"Optional iac-code pipeline event extension for state snapshots, replay, "
+"interrupts, and parallel candidate streams."
+msgstr ""
+"Extensión opcional de eventos de pipeline de iac-code para instantáneas "
+"de estado, reproducción, interrupciones y flujos de candidatos en "
+"paralelo."
+
+#: src/iac_code/a2a/app.py src/iac_code/a2a/pipeline_recovery.py
+msgid "contextId or taskId is required"
+msgstr "contextId o taskId es obligatorio"
+
+#: src/iac_code/a2a/app.py
+msgid "afterSequence must be a non-negative integer"
+msgstr "afterSequence debe ser un entero no negativo"
+
+#: src/iac_code/a2a/artifacts.py
+msgid "Unsafe artifact filename"
+msgstr "Nombre de archivo de artefacto no seguro"
+
+#: src/iac_code/a2a/artifacts.py src/iac_code/utils/public_errors.py
+msgid "Unknown error"
+msgstr "Error desconocido"
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid "Task is already working."
+msgstr "La tarea ya está en ejecución."
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/transports/dispatcher.py
+msgid "Task canceled."
+msgstr "Tarea cancelada."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A temporary error occurred. Please retry."
+msgstr "Se produjo un error temporal. Inténtalo de nuevo."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Authentication required. Configure credentials and retry."
+msgstr ""
+"Se requiere autenticación. Configura las credenciales e inténtalo de "
+"nuevo."
+
+#: src/iac_code/a2a/pipeline_recovery.py
+msgid "A2A pipeline state not found"
+msgstr "No se encontró el estado del pipeline A2A"
+
+#: src/iac_code/a2a/pipeline_recovery.py
+msgid "A2A task/context mismatch"
+msgstr "La tarea y el contexto A2A no coinciden"
+
+#: src/iac_code/a2a/task_store.py
+msgid "A2A task expired"
+msgstr "La tarea A2A ha caducado"
+
+#: src/iac_code/a2a/task_store.py
+msgid "Task belongs to a different context"
+msgstr "La tarea pertenece a otro contexto"
+
+#: src/iac_code/a2a/task_store.py
+msgid "Task belongs to a different owner"
+msgstr "La tarea pertenece a otro propietario"
+
+#: src/iac_code/a2a/task_store.py
+msgid "A2A context expired"
+msgstr "El contexto A2A ha caducado"
+
+#: src/iac_code/a2a/task_store.py
+msgid "A2A context belongs to a different workspace"
+msgstr "El contexto A2A pertenece a otro espacio de trabajo"
+
+#: src/iac_code/a2a/task_store.py
+msgid "A2A context not found"
+msgstr "No se encontró el contexto A2A"
+
+#: src/iac_code/a2a/task_store.py
+msgid "A2A task not found"
+msgstr "No se encontró la tarea A2A"
+
 #: src/iac_code/a2a/transports/base.py
 msgid ""
 "Unix domain socket transport is not supported on Windows. Use --transport"
@@ -31,6 +111,23 @@ msgid ""
 msgstr ""
 "El transporte de socket de dominio Unix no es compatible con Windows. Use"
 " --transport http o --transport stdio en su lugar."
+
+#: src/iac_code/a2a/transports/dispatcher.py
+#, python-brace-format
+msgid "Task {task_id} is already completed."
+msgstr "La tarea {task_id} ya está completada."
+
+#: src/iac_code/a2a/transports/dispatcher.py
+msgid "Task canceled while waiting for input."
+msgstr "Tarea cancelada mientras esperaba entrada."
+
+#: src/iac_code/a2a/transports/dispatcher.py
+msgid "Task completed."
+msgstr "Tarea completada."
+
+#: src/iac_code/a2a/transports/dispatcher.py
+msgid "Task failed."
+msgstr "La tarea falló."
 
 #: src/iac_code/acp/server.py
 msgid "Session not found"
@@ -361,6 +458,12 @@ msgstr ""
 "  Documentación: https://aliyun.github.io/iac-"
 "code/es/docs/configuration/authentication\n"
 
+#: src/iac_code/cli/headless.py src/iac_code/ui/renderer.py
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Error: {error}"
+msgstr "Error: {error}"
+
 #: src/iac_code/cli/install_git_bash.py
 #, python-brace-format
 msgid "Git Bash is already installed at {}"
@@ -493,6 +596,14 @@ msgstr "Error: --resume y --continue no pueden usarse a la vez."
 #, python-brace-format
 msgid "Invalid --output-format '{}'. Valid values: {}"
 msgstr "--output-format '{}' no válido. Valores válidos: {}"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Pipeline mode requires the interactive REPL. Remove --prompt or set "
+"IAC_CODE_MODE=normal."
+msgstr ""
+"El modo pipeline requiere el REPL interactivo. Elimina --prompt o "
+"establece IAC_CODE_MODE=normal."
 
 #: src/iac_code/cli/main.py
 msgid "Run iac-code as an ACP server."
@@ -1359,6 +1470,55 @@ msgid "Current runtime state"
 msgstr "Estado actual en ejecución"
 
 #: src/iac_code/commands/prompt.py
+msgid "Pipeline prompt contexts"
+msgstr "Contextos de prompt del pipeline"
+
+#: src/iac_code/commands/prompt.py
+msgid "pipeline"
+msgstr "pipeline"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Candidate #{index}"
+msgstr "Candidato n.º {index}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{title} - {name}"
+msgstr "{title} - {name}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{title} / {step}"
+msgstr "{title} / {step}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "Step {step}"
+msgstr "Paso {step}"
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "AgentLoop session: {session_id}"
+msgstr "Sesión de AgentLoop: {session_id}"
+
+#: src/iac_code/commands/prompt.py
+msgid "System Prompt:"
+msgstr "Prompt del sistema:"
+
+#: src/iac_code/commands/prompt.py
+msgid "Initial User Prompt:"
+msgstr "Prompt inicial del usuario:"
+
+#: src/iac_code/commands/prompt.py
+msgid "Messages:"
+msgstr "Mensajes:"
+
+#: src/iac_code/commands/prompt.py
+msgid "(none)"
+msgstr "(ninguno)"
+
+#: src/iac_code/commands/prompt.py
 msgid "Generated"
 msgstr "Generado"
 
@@ -1599,6 +1759,10 @@ msgstr "Esquema de entrada"
 msgid "tool"
 msgstr "herramienta"
 
+#: src/iac_code/commands/prompt.py
+msgid "browser opener returned false"
+msgstr "el abridor del navegador devolvió false"
+
 #: src/iac_code/commands/rename.py
 msgid "Rename is only available in interactive mode."
 msgstr "El cambio de nombre solo está disponible en modo interactivo."
@@ -1676,6 +1840,8 @@ msgid "Cache read"
 msgstr "Lectura de caché"
 
 #: src/iac_code/commands/status.py
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
 msgid "Total"
 msgstr "Total"
 
@@ -1809,6 +1975,71 @@ msgstr "(dinámico)"
 msgid "Aborted!"
 msgstr "¡Operación cancelada!"
 
+#: src/iac_code/i18n/__init__.py
+msgid "No active AgentLoop context is available."
+msgstr "No hay ningún contexto AgentLoop activo disponible."
+
+#: src/iac_code/i18n/__init__.py
+msgid "No pending model call context is available for the current pipeline state."
+msgstr ""
+"No hay ningún contexto de llamada al modelo pendiente disponible para el "
+"estado actual del pipeline."
+
+#: src/iac_code/i18n/__init__.py
+msgid "Prompt command requires a context."
+msgstr "El comando de prompt requiere un contexto."
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "Prompt context written to {path} and opened in browser."
+msgstr "Contexto del prompt escrito en {path} y abierto en el navegador."
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid ""
+"Prompt context written to {path}. Open it in a browser if it did not "
+"appear."
+msgstr ""
+"Contexto del prompt escrito en {path}. Ábrelo en un navegador si no "
+"apareció."
+
+#: src/iac_code/i18n/__init__.py
+msgid "Show the current model prompt context"
+msgstr "Mostrar el contexto actual del prompt del modelo"
+
+#: src/iac_code/i18n/__init__.py
+msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
+msgstr "Uso: /memory [<nombre>|search <consulta>|delete <nombre>|help]"
+
+#: src/iac_code/i18n/__init__.py
+msgid "sed in-place edit requires confirmation"
+msgstr "La edición sed in situ requiere confirmación"
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "{n} day{s} ago"
+msgstr "hace {n} día{s}"
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "{n} hour{s} ago"
+msgstr "hace {n} hora{s}"
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "{n} message{s}"
+msgstr "{n} mensaje{s}"
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "{n} minute{s} ago"
+msgstr "hace {n} minuto{s}"
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "{n} more line{s}"
+msgstr "{n} línea{s} más"
+
 #: src/iac_code/memory/memory_tools.py
 msgid ""
 "Read persistent memories. Omit name to list all, or provide name to read "
@@ -1842,6 +2073,370 @@ msgstr "La memoria automática está desactivada."
 #, python-brace-format
 msgid "Memory '{name}' saved."
 msgstr "Memoria '{name}' guardada."
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Selling"
+msgstr "Ventas"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Intent parsing"
+msgstr "Análisis de intención"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Architecture planning"
+msgstr "Planificación de arquitectura"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Evaluate candidates"
+msgstr "Evaluar candidatos"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Confirm and select"
+msgstr "Confirmar y seleccionar"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Deploying"
+msgstr "Despliegue"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Evaluate candidate"
+msgstr "Evaluar candidato"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Template generation"
+msgstr "Generación de plantilla"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Review"
+msgstr "Revisión"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Cost estimation"
+msgstr "Estimación de costes"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Current step"
+msgstr "paso actual"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Complete step"
+msgstr "Completar paso"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Ask user question"
+msgstr "Preguntar al usuario"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Show architecture diagram"
+msgstr "Mostrar diagrama de arquitectura"
+
+#: src/iac_code/pipeline/display_names.py
+msgid "Show candidate details"
+msgstr "Mostrar detalles del candidato"
+
+#: src/iac_code/pipeline/engine/ask_user_question_tool.py
+msgid ""
+"Pipeline-only tool that asks the user to choose an option or type "
+"clarification details."
+msgstr ""
+"Herramienta exclusiva del pipeline que pide al usuario elegir una opción "
+"o escribir detalles de aclaración."
+
+#: src/iac_code/pipeline/engine/ask_user_question_tool.py
+msgid "The user-facing question to ask."
+msgstr "La pregunta que se mostrará al usuario."
+
+#: src/iac_code/pipeline/engine/ask_user_question_tool.py
+msgid "ask_user_question requires a pipeline event queue."
+msgstr "ask_user_question requiere una cola de eventos del pipeline."
+
+#: src/iac_code/pipeline/engine/ask_user_question_tool.py
+msgid "User cancelled ask_user_question."
+msgstr "El usuario canceló ask_user_question."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Complete the current step by calling this tool to submit the conclusion. "
+"If you need to roll back to an earlier step, set rollback_request."
+msgstr ""
+"Completa el paso actual llamando a esta herramienta para enviar la "
+"conclusión. Si necesitas volver a un paso anterior, define "
+"rollback_request."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "Set this field when you need to roll back to an earlier step"
+msgstr "Define este campo cuando necesites volver a un paso anterior"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "Target step ID to roll back to"
+msgstr "ID del paso de destino al que revertir"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "Reason for rollback"
+msgstr "Motivo de reversión"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "Structured conclusion for the current step. Required and non-empty."
+msgstr ""
+"Conclusión estructurada para el paso actual. Es obligatoria y no puede "
+"estar vacía."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{error}\n"
+"Current step: {step_id}\n"
+"Do not repeat the previous invalid arguments: {invalid_json}\n"
+"complete_step arguments must be {{\"conclusion\": {{...}}}}; do not "
+"submit empty arguments or put conclusion fields at the top level.\n"
+"{schema_hint}\n"
+"Outer argument example: {example}"
+msgstr ""
+"{error}\n"
+"Paso actual: {step_id}\n"
+"No repitas los argumentos inválidos anteriores: {invalid_json}\n"
+"Los argumentos de complete_step deben ser {{\"conclusion\": {{...}}}}; no"
+" envíes argumentos vacíos ni pongas campos de conclusion en el nivel "
+"superior.\n"
+"{schema_hint}\n"
+"Ejemplo de argumentos externos: {example}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"conclusion must be a non-empty object; fill the structured conclusion "
+"required by this step."
+msgstr ""
+"conclusion debe ser un objeto no vacío; rellena la conclusión "
+"estructurada requerida por este paso."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "conclusion must match this schema summary:\n"
+msgstr "conclusion debe coincidir con este resumen de esquema:\n"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "<fill according to the current step requirements>"
+msgstr "<rellenar según los requisitos del paso actual>"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "Clarification is required before completing the current step."
+msgstr "Se requiere una aclaración antes de completar el paso actual."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Call {required_tool} first, then call complete_step after "
+"receiving the tool result."
+msgstr ""
+"{message} Llama primero a {required_tool} y luego llama a complete_step "
+"tras recibir el resultado de la herramienta."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "Clarification output is required before completing the current step."
+msgstr ""
+"Se requiere el resultado de la aclaración antes de completar el paso "
+"actual."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} complete_step.conclusion must include {required_field}."
+msgstr "{message} complete_step.conclusion debe incluir {required_field}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid " or "
+msgstr " o "
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion must include one of these fields: "
+"{fields}."
+msgstr ""
+"{message} complete_step.conclusion debe incluir uno de estos campos: "
+"{fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Candidate count cannot exceed {limit}; {count} were submitted."
+msgstr "La cantidad de candidatos no puede superar {limit}; se enviaron {count}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback target count cannot exceed {limit}; there are {count}. Ask the "
+"user for help or narrow the rollback targets before calling "
+"complete_step."
+msgstr ""
+"La cantidad de destinos de reversión no puede superar {limit}; hay "
+"{count}. Pide ayuda al usuario o reduce los destinos antes de llamar a "
+"complete_step."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
+"or ask the user for help."
+msgstr ""
+"La cantidad de reversiones no puede superar {max_rollbacks}. Completa el "
+"paso actual o pide ayuda al usuario."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Schema validation failed after {attempts} attempts: {error}"
+msgstr "La validación del esquema falló tras {attempts} intentos: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"conclusion validation failed after exceeding the maximum retry count "
+"({max_retries}): {error}"
+msgstr ""
+"La validación de conclusion falló tras superar el máximo de reintentos "
+"({max_retries}): {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "conclusion validation failed; fix it and call complete_step again: {error}"
+msgstr ""
+"La validación de conclusion falló; corrígela y llama de nuevo a "
+"complete_step: {error}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Step {step_id} completed. Conclusion submitted."
+msgstr "Paso {step_id} completado. Conclusión enviada."
+
+#: src/iac_code/pipeline/engine/pipeline_runner.py
+#: src/iac_code/pipeline/engine/sub_pipeline_executor.py
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Candidate {index}"
+msgstr "Candidato {index}"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "ECS instance"
+msgstr "Instancia ECS"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "ECS instance group"
+msgstr "Grupo de instancias ECS"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "Elastic IP address"
+msgstr "Dirección IP elástica"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "SLB load balancer"
+msgstr "Balanceador de carga SLB"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "NAT gateway"
+msgstr "Puerta de enlace NAT"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "Shared bandwidth package"
+msgstr "Paquete de ancho de banda compartido"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "Database instance"
+msgstr "Instancia de base de datos"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "VPC"
+msgstr "VPC"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "VSwitch"
+msgstr "VSwitch"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "Security group"
+msgstr "Grupo de seguridad"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "YAML parse error"
+msgstr "Error al analizar YAML"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Read a ROS template YAML file and generate an architecture diagram. Pass "
+"the template file path relative to the working directory and the "
+"candidate name."
+msgstr ""
+"Lee un archivo YAML de plantilla ROS y genera un diagrama de "
+"arquitectura. Pasa la ruta de la plantilla relativa al directorio de "
+"trabajo y el nombre del candidato."
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Relative path to the ROS template YAML file, such as templates/1-simple-"
+"nginx.yml"
+msgstr ""
+"Ruta relativa al archivo YAML de plantilla ROS, como templates/1-simple-"
+"nginx.yml"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "Candidate name, such as Simple Nginx single-instance plan"
+msgstr "Nombre del candidato, por ejemplo, plan Nginx simple de una sola instancia"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid ""
+"Zero-based candidate index in evaluated_candidates; used to distinguish "
+"duplicate names"
+msgstr ""
+"Índice de candidato basado en cero en evaluated_candidates; se usa para "
+"distinguir nombres duplicados"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+#, python-brace-format
+msgid "Template file does not exist: {file_path}"
+msgstr "El archivo de plantilla no existe: {file_path}"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+#, python-brace-format
+msgid "Generated the architecture diagram for \"{candidate_name}\"."
+msgstr "Se generó el diagrama de arquitectura de \"{candidate_name}\"."
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "Template file path must be relative to the working directory"
+msgstr ""
+"La ruta del archivo de plantilla debe ser relativa al directorio de "
+"trabajo"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid "Template file path cannot escape the working directory"
+msgstr "La ruta del archivo de plantilla no puede salir del directorio de trabajo"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid ""
+"Display candidate details (summary and cost breakdown) in the comparison "
+"tabs."
+msgstr ""
+"Muestra los detalles del candidato (resumen y desglose de costos) en las "
+"pestañas de comparación."
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Candidate name; must match candidate_name in show_architecture_diagram"
+msgstr ""
+"Nombre del candidato; debe coincidir con candidate_name en "
+"show_architecture_diagram"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Candidate summary description"
+msgstr "Descripción resumida del candidato"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Cost breakdown list"
+msgstr "Lista de desglose de costos"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+msgid "Total monthly cost, such as CNY 1,234/month"
+msgstr "Costo mensual total, por ejemplo CNY 1.234/mes"
+
+#: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
+#, python-brace-format
+msgid "Displayed details for \"{candidate_name}\"."
+msgstr "Se mostraron los detalles de \"{candidate_name}\"."
 
 #: src/iac_code/providers/manager.py
 #, python-brace-format
@@ -2804,6 +3399,109 @@ msgstr "Modo depuración"
 msgid "Log file"
 msgstr "Archivo de registro"
 
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "AI {name} Pipeline"
+msgstr "Pipeline de IA {name}"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Interrupted"
+msgstr "Interrumpido"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Running"
+msgstr "En ejecución"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Completed"
+msgstr "Completado"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Failed"
+msgstr "Error"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "  ✗ {name}: Failed"
+msgstr "  ✗ {name}: error"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "  ✓ {name}: Completed"
+msgstr "  ✓ {name}: completado"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Rolled back"
+msgstr "Revertido"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Candidate"
+msgstr "Candidato"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "  ✓ Selected: {name}"
+msgstr "  ✓ Seleccionado: {name}"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "  Candidate selection completed"
+msgstr "  Selección de candidato completada"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Cost details"
+msgstr "Detalles de costos"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Product"
+msgstr "Producto"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Specification"
+msgstr "Especificación"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Monthly cost"
+msgstr "Costo mensual"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   ✓ Completed{detail}"
+msgstr "   ✓ Completado{detail}"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "   ✗ Failed"
+msgstr "   ✗ Error"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "previous step"
+msgstr "paso anterior"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   ↩ Rolled back to {target}"
+msgstr "   ↩ Revertido a {target}"
+
+#: src/iac_code/ui/pipeline_display_replay.py
+msgid "Waiting for user input"
+msgstr "Esperando entrada del usuario"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
+msgid "✔ Pipeline completed"
+msgstr "✔ Pipeline completado"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "── total time {duration}"
+msgstr "── tiempo total {duration}"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
+msgid "Pipeline completed. Normal chat is now active."
+msgstr "El pipeline se completó. El chat normal está activo."
+
 #: src/iac_code/ui/renderer.py
 msgid "Messages to be submitted after next tool call"
 msgstr "Mensajes que se enviarán después de la próxima llamada a herramienta"
@@ -2863,11 +3561,6 @@ msgstr "No hay ninguna API key configurada."
 #: src/iac_code/ui/renderer.py
 msgid "Please run /auth to set up your LLM provider and API key."
 msgstr "Ejecute /auth para configurar el proveedor LLM y la API key."
-
-#: src/iac_code/ui/renderer.py
-#, python-brace-format
-msgid "Error: {error}"
-msgstr "Error: {error}"
 
 #: src/iac_code/ui/renderer.py
 msgid "Allow this action?"
@@ -2960,6 +3653,21 @@ msgid "Shell command support is unavailable."
 msgstr "La compatibilidad con comandos de shell no está disponible."
 
 #: src/iac_code/ui/repl.py
+msgid "Shell escapes are disabled in this pipeline."
+msgstr "Los escapes de shell están desactivados en este pipeline."
+
+#: src/iac_code/ui/repl.py
+msgid "Skill triggers are disabled in this pipeline."
+msgstr "Los disparadores de skills están desactivados en este pipeline."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Slash commands are disabled in this pipeline. Allowed: {allowed}"
+msgstr ""
+"Los comandos de barra están desactivados en este pipeline. Permitidos: "
+"{allowed}"
+
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Unknown skill: ${name}. Type / to list commands and skills."
 msgstr ""
@@ -2990,6 +3698,210 @@ msgid "Command has no handler: {name}"
 msgstr "El comando no tiene controlador: {name}"
 
 #: src/iac_code/ui/repl.py
+msgid "Note: images are not supported in pipeline mode and will be ignored."
+msgstr "Nota: las imágenes no son compatibles con el modo pipeline y se ignorarán."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Ignoring saved pipeline state: {reason}"
+msgstr "Ignorando el estado guardado del pipeline: {reason}"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Pipeline completed. Normal chat is active, but the handoff context could "
+"not be injected or saved."
+msgstr ""
+"El pipeline se completó. El chat normal está activo, pero no se pudo "
+"inyectar ni guardar el contexto de traspaso."
+
+#: src/iac_code/ui/repl.py
+msgid "Judging your input..."
+msgstr "Evaluando tu entrada..."
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Note: your input wasn't clearly understood and was treated as chitchat. "
+"To interrupt, be more explicit (e.g. 'switch to cheaper plan')."
+msgstr ""
+"Nota: tu entrada no se entendió claramente y se trató como conversación "
+"casual. Para interrumpir, sé más explícito (por ejemplo, 'cambiar a un "
+"plan más barato')."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"⚠ Interrupt judging did not finish; your message was not processed\n"
+"  You said: {user_msg}"
+msgstr ""
+"⚠ La evaluación de la interrupción no terminó; tu mensaje no se procesó\n"
+"  Dijiste: {user_msg}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"⚠ Interrupt judging did not finish; the pipeline was paused to avoid "
+"continuing side-effect steps\n"
+"  You said: {user_msg}"
+msgstr ""
+"⚠ La evaluación de la interrupción no terminó; el pipeline se pausó para "
+"evitar continuar pasos con efectos secundarios\n"
+"  Dijiste: {user_msg}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"⚠ The message was treated as supplemental input, but there is no "
+"AgentLoop to inject it into\n"
+"  You said: {user_msg}"
+msgstr ""
+"⚠ El mensaje se trató como entrada complementaria, pero no hay AgentLoop "
+"donde inyectarlo\n"
+"  Dijiste: {user_msg}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"· Message is unrelated to the current step and was ignored\n"
+"  You said: {user_msg}"
+msgstr ""
+"· El mensaje no está relacionado con el paso actual y se ignoró\n"
+"  Dijiste: {user_msg}"
+
+#: src/iac_code/ui/repl.py
+msgid "current step"
+msgstr "paso actual"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"✎ Added to {target}\n"
+"  You said: {user_msg}"
+msgstr ""
+"✎ Añadido a {target}\n"
+"  Dijiste: {user_msg}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Reason: {reason}"
+msgstr "Motivo: {reason}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"⚠ Interrupted → rolled back to {target}\n"
+"  You said: {user_msg}{reason_line}"
+msgstr ""
+"⚠ Interrumpido → revertido a {target}\n"
+"  Dijiste: {user_msg}{reason_line}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"⚠ Candidate {scope} restarted → starting again from {target}\n"
+"  You said: {user_msg}{reason_line}"
+msgstr ""
+"⚠ Candidato {scope} reiniciado → comenzando de nuevo desde {target}\n"
+"  Dijiste: {user_msg}{reason_line}"
+
+#: src/iac_code/ui/repl.py
+msgid "⚠ Interrupt judging did not finish; your message was not processed\n"
+msgstr "⚠ La evaluación de la interrupción no terminó; tu mensaje no se procesó\n"
+
+#: src/iac_code/ui/repl.py
+msgid "The pipeline continued; press Esc again to retry.\n"
+msgstr "El pipeline continuó; pulsa Esc otra vez para reintentarlo.\n"
+
+#: src/iac_code/ui/repl.py
+msgid "⚠ Interrupt judging did not finish; the pipeline is paused\n"
+msgstr "⚠ La evaluación de la interrupción no terminó; el pipeline está pausado\n"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Confirm whether to continue, roll back, or cancel before side-effect "
+"steps proceed.\n"
+msgstr ""
+"Confirma si deseas continuar, revertir o cancelar antes de que avancen "
+"pasos con efectos secundarios.\n"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"⚠ Message was treated as supplemental input, but no AgentLoop is "
+"available in this parallel run\n"
+msgstr ""
+"⚠ El mensaje se trató como entrada complementaria, pero no hay AgentLoop "
+"disponible en esta ejecución paralela\n"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"The judge should return supplement_target=candidate_index:N or "
+"hard_interrupt.\n"
+msgstr ""
+"El evaluador debe devolver supplement_target=candidate_index:N o "
+"hard_interrupt.\n"
+
+#: src/iac_code/ui/repl.py
+msgid "· Message is unrelated to the current step and was ignored\n"
+msgstr "· El mensaje no está relacionado con el paso actual y se ignoró\n"
+
+#: src/iac_code/ui/repl.py
+msgid "✎ Added to "
+msgstr "✎ Añadido a "
+
+#: src/iac_code/ui/repl.py
+msgid "⚠ Interrupted → rolled back to "
+msgstr "⚠ Interrumpido → revertido a "
+
+#: src/iac_code/ui/repl.py
+msgid "⚠ Candidate "
+msgstr "⚠ Candidato "
+
+#: src/iac_code/ui/repl.py
+msgid " restarted → starting again from "
+msgstr " reiniciado → comenzando de nuevo desde "
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "  You said: {user_msg}\n"
+msgstr "  Dijiste: {user_msg}\n"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "  Reason: {reason}"
+msgstr "  Motivo: {reason}"
+
+#: src/iac_code/ui/repl.py
+msgid "Interrupt handling"
+msgstr "Gestión de interrupción"
+
+#: src/iac_code/ui/repl.py
+msgid "Selected:"
+msgstr "Seleccionado:"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "  ✓ {name}: Completed\n"
+msgstr "  ✓ {name}: completado\n"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "  ✘ {name}: Failed"
+msgstr "  ✘ {name}: error"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Option {index}"
+msgstr "Opción {index}"
+
+#: src/iac_code/ui/repl.py
+msgid "Please enter your choice:"
+msgstr "Introduce tu elección:"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Rollback: {from_step} → {to_step}"
+msgstr "Reversión: {from_step} → {to_step}"
+
+#: src/iac_code/ui/repl.py
 msgid "Goodbye!"
 msgstr "¡Hasta luego!"
 
@@ -3005,6 +3917,14 @@ msgstr "ID de sesión"
 #, python-brace-format
 msgid "Session not found: {session_id}"
 msgstr "Sesión no encontrada: {session_id}"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Pipeline was interrupted. Switched to normal chat; you can continue from "
+"here."
+msgstr ""
+"El pipeline se interrumpió. Se cambió al chat normal; puedes continuar "
+"desde aquí."
 
 #: src/iac_code/ui/repl.py
 msgid "Session name: "
@@ -3028,6 +3948,38 @@ msgstr ""
 #: src/iac_code/ui/repl.py
 msgid "Multiple sessions match. Resume one by ID:"
 msgstr "Varias sesiones coinciden. Reanuda una por ID:"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Could not mark pipeline state discarded: {reason}"
+msgstr "No se pudo marcar el estado del pipeline como descartado: {reason}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Could not resume pipeline state: {reason}"
+msgstr "No se pudo reanudar el estado del pipeline: {reason}"
+
+#: src/iac_code/ui/repl.py
+msgid "unknown error"
+msgstr "error desconocido"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Resumed pipeline at step: {step}"
+msgstr "Pipeline reanudado en el paso: {step}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Found pipeline state in this session (paused at: {step})."
+msgstr "Se encontró estado del pipeline en esta sesión (pausado en: {step})."
+
+#: src/iac_code/ui/repl.py
+msgid "Resume pipeline from where it left off"
+msgstr "Reanudar el pipeline desde donde quedó"
+
+#: src/iac_code/ui/repl.py
+msgid "Discard pipeline state and continue as normal chat"
+msgstr "Descartar el estado del pipeline y continuar como chat normal"
 
 #: src/iac_code/ui/repl.py
 msgid "This conversation is from a different directory."
@@ -3091,9 +4043,95 @@ msgstr "Prompt:"
 msgid "Showing transcript · ctrl+o to toggle"
 msgstr "Mostrando transcripción · ctrl+o para alternar"
 
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "Waiting for candidate data..."
+msgstr "Esperando datos de candidatos..."
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "architecture diagram"
+msgstr "diagrama de arquitectura"
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "details"
+msgstr "detalles"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#, python-brace-format
+msgid "{label} missing {items}"
+msgstr "A {label} le falta {items}"
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "Some candidate display data is incomplete: "
+msgstr "Faltan datos de visualización de algunos candidatos: "
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/components/parallel_tabs.py
+msgid "Scroll up to view more"
+msgstr "Desplázate hacia arriba para ver más"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/components/parallel_tabs.py
+msgid "Scroll down to view more"
+msgstr "Desplázate hacia abajo para ver más"
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "Loading architecture diagram..."
+msgstr "Cargando diagrama de arquitectura..."
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "Loading candidate details..."
+msgstr "Cargando detalles del candidato..."
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid ""
+"Press number keys to select a candidate, Enter to confirm | ← → switch "
+"candidates | ↑ ↓ scroll"
+msgstr ""
+"Pulsa números para seleccionar un candidato, Enter para confirmar | ← → "
+"cambiar candidatos | ↑ ↓ desplazar"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/components/parallel_tabs.py
+msgid "← → switch candidates | ↑ ↓ scroll"
+msgstr "← → cambiar candidatos | ↑ ↓ desplazar"
+
+#: src/iac_code/ui/components/candidate_selection.py
+#: src/iac_code/ui/components/parallel_tabs.py
+#, python-brace-format
+msgid " | 1-{count} jump directly"
+msgstr " | 1-{count} saltar directamente"
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "↑ ↓ scroll"
+msgstr "↑ ↓ desplazar"
+
 #: src/iac_code/ui/components/fuzzy_picker.py
 msgid "No matches found"
 msgstr "No se encontraron coincidencias"
+
+#: src/iac_code/ui/components/parallel_tabs.py
+#, python-brace-format
+msgid "{name}: {icon} Done"
+msgstr "{name}: {icon} hecho"
+
+#: src/iac_code/ui/components/parallel_tabs.py
+#, python-brace-format
+msgid "{name}: {icon} Failed [{completed}/{total}]"
+msgstr "{name}: {icon} error [{completed}/{total}]"
+
+#: src/iac_code/ui/components/parallel_tabs.py
+#, python-brace-format
+msgid "━━ {name}: execution failed ━━\n"
+msgstr "━━ {name}: ejecución fallida ━━\n"
+
+#: src/iac_code/ui/components/parallel_tabs.py
+#, python-brace-format
+msgid "Failure reason: {error}\n"
+msgstr "Motivo del error: {error}\n"
+
+#: src/iac_code/ui/components/parallel_tabs.py
+msgid "Waiting for output...\n"
+msgstr "Esperando salida...\n"
 
 #: src/iac_code/ui/core/prompt_input.py
 msgid "Image in clipboard · ctrl+v to paste"
@@ -3409,6 +4447,10 @@ msgid ""
 msgstr ""
 "  Opción 2 - si no puedes acceder a github.com, ejecuta esto para "
 "instalar vía npmmirror:"
+
+#: src/iac_code/utils/public_errors.py
+msgid "Stack trace omitted from public event; see error_id."
+msgstr "La traza de pila se omitió del evento público; consulta error_id."
 
 #~ msgid "toggle preview"
 #~ msgstr "alternar vista previa"

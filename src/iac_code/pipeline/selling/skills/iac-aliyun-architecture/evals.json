@@ -1,0 +1,177 @@
+{
+  "skill_name": "iac-aliyun-architecture",
+  "description": "验证架构规划技能是否按需生成方案：简单需求不过度设计，复杂需求提供有意义的差异化选择",
+  "evals": [
+    {
+      "id": 1,
+      "name": "simple-vpc-only",
+      "prompt": "帮我创建一个VPC",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "网络基础设施",
+        "core_requirements": ["VPC"],
+        "non_functional": {"high_availability": false, "security_level": "basic"},
+        "scale_hint": null,
+        "budget_constraint": null,
+        "additional_notes": "用户仅需要一个VPC，未提及其他资源"
+      },
+      "expected_behavior": "只输出1个方案，不添加ECS/RDS等用户未提及的资源",
+      "assertions": [
+        {"name": "single_candidate", "check": "candidates数组长度为1"},
+        {"name": "no_extra_resources", "check": "products中只包含VPC相关资源（VPC/VSwitch/SecurityGroup），不含ECS/RDS/SLB等"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "simple-oss-bucket",
+      "prompt": "创建一个OSS bucket用来存放图片",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "对象存储",
+        "core_requirements": ["OSS"],
+        "non_functional": {"high_availability": false, "security_level": "basic"},
+        "scale_hint": null,
+        "budget_constraint": null,
+        "additional_notes": "用户只需要一个OSS存储桶"
+      },
+      "expected_behavior": "只输出1个方案，products只含OSS",
+      "assertions": [
+        {"name": "single_candidate", "check": "candidates数组长度为1"},
+        {"name": "no_extra_resources", "check": "products中只有OSS，不含CDN/ECS等用户未要求的"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "complex-ecommerce",
+      "prompt": "我想搭建一个电商网站，预计日活1万用户",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "电商",
+        "core_requirements": ["VPC", "ECS", "RDS", "SLB", "OSS"],
+        "non_functional": {"high_availability": true, "security_level": "standard", "performance": "medium"},
+        "scale_hint": "中小企业",
+        "budget_constraint": null,
+        "additional_notes": "电商场景，需要考虑高可用和数据安全"
+      },
+      "expected_behavior": "输出2-3个差异化方案，差异维度可以是成本/可用性/架构模式等",
+      "assertions": [
+        {"name": "multiple_candidates", "check": "candidates数组长度为2或3"},
+        {"name": "meaningful_diff", "check": "方案之间的products组合或topology有实质差异，不是仅规格不同"},
+        {"name": "has_cost_range", "check": "每个方案都有monthly_cost_range且不为空"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "complex-microservices",
+      "prompt": "搭建一套微服务架构，预计日活10万，需要消息队列和服务发现",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "微服务",
+        "core_requirements": ["VPC", "ECS", "SLB", "RDS", "Redis", "RocketMQ"],
+        "non_functional": {"high_availability": true, "security_level": "high", "performance": "high"},
+        "scale_hint": "中小企业",
+        "budget_constraint": null,
+        "additional_notes": "需要消息队列和服务发现，微服务场景"
+      },
+      "expected_behavior": "输出2-3个方案，差异可能体现在容器化vs传统ECS、托管vs自建中间件等",
+      "assertions": [
+        {"name": "multiple_candidates", "check": "candidates数组长度为2或3"},
+        {"name": "architecture_variety", "check": "方案间存在架构模式差异（如K8s vs ECS，或Serverless vs传统）"},
+        {"name": "includes_mq", "check": "所有方案都包含消息队列相关产品"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "simple-redis-cache",
+      "prompt": "我需要一个Redis缓存",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "缓存服务",
+        "core_requirements": ["Redis"],
+        "non_functional": {"high_availability": false, "security_level": "basic"},
+        "scale_hint": null,
+        "budget_constraint": null,
+        "additional_notes": "用户只需要Redis缓存，未提及具体用途和规模"
+      },
+      "expected_behavior": "1个方案即可（Tair/Redis），不要为了凑数加ECS/RDS",
+      "assertions": [
+        {"name": "minimal_candidates", "check": "candidates数组长度为1"},
+        {"name": "redis_focused", "check": "products主要是Redis/Tair相关，不含不相关的ECS/RDS/SLB"}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "ambiguous-blog",
+      "prompt": "我想部署一个个人博客",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "博客",
+        "core_requirements": ["ECS"],
+        "non_functional": {"high_availability": false, "security_level": "basic", "performance": "low"},
+        "scale_hint": "个人项目",
+        "budget_constraint": null,
+        "additional_notes": "个人博客，流量较小"
+      },
+      "expected_behavior": "可以出2个方案（如传统ECS vs Serverless/轻量应用服务器），但不要硬凑3个",
+      "assertions": [
+        {"name": "reasonable_count", "check": "candidates数组长度为1或2"},
+        {"name": "lightweight", "check": "方案不应包含RDS集群、SLB等对个人博客过重的组件"}
+      ]
+    },
+    {
+      "id": 7,
+      "name": "complex-data-platform",
+      "prompt": "搭建数据分析平台，每天处理50GB日志，需要实时和离线两条链路",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "数据分析",
+        "core_requirements": ["MaxCompute", "DataHub", "Flink", "OSS", "EMR"],
+        "non_functional": {"high_availability": true, "security_level": "standard", "performance": "high"},
+        "scale_hint": "中小企业",
+        "budget_constraint": null,
+        "additional_notes": "实时链路和离线链路，50GB/天日志量"
+      },
+      "expected_behavior": "输出2-3个方案，差异体现在全托管vs半自建、Flink vs Spark等技术选型",
+      "assertions": [
+        {"name": "multiple_candidates", "check": "candidates数组长度为2或3"},
+        {"name": "data_focused", "check": "方案围绕数据处理产品，不偏离到Web应用架构"},
+        {"name": "dual_pipeline", "check": "至少一个方案同时覆盖实时和离线处理"}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "budget-constrained",
+      "prompt": "部署一个API服务，月预算500元以内",
+      "intent_context": {
+        "is_infra_intent": true,
+        "confidence": "high",
+        "cloud_platform": "aliyun",
+        "business_type": "API服务",
+        "core_requirements": ["ECS", "VPC"],
+        "non_functional": {"high_availability": false, "security_level": "basic", "performance": "medium"},
+        "scale_hint": "创业团队",
+        "budget_constraint": "月预算500元以内",
+        "additional_notes": "有明确预算约束"
+      },
+      "expected_behavior": "在预算约束下给出1-2个方案（如ECS vs FC），所有方案费用不应超出预算",
+      "assertions": [
+        {"name": "within_budget", "check": "所有方案的monthly_cost_range上限不超过500 CNY"},
+        {"name": "no_overengineering", "check": "不包含SLB集群、多可用区等超出预算的高可用配置"}
+      ]
+    }
+  ]
+}

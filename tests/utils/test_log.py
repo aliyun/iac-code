@@ -23,7 +23,7 @@ def test_setup_logging_debug_level(tmp_path, monkeypatch):
 
     log_file = tmp_path / "logs" / "test123.log"
     assert log_file.exists()
-    content = log_file.read_text()
+    content = log_file.read_text(encoding="utf-8")
     assert "debug detail" in content
     assert "info message" in content
 
@@ -41,7 +41,7 @@ def test_setup_logging_info_level(tmp_path, monkeypatch):
 
     log_file = tmp_path / "logs" / "test456.log"
     assert log_file.exists()
-    content = log_file.read_text()
+    content = log_file.read_text(encoding="utf-8")
     assert "should be skipped" not in content
     assert "should be present" in content
 
@@ -83,7 +83,7 @@ def test_debug_env_var_is_ignored(tmp_path, monkeypatch):
     logger.debug("should not appear")
     logger.info("should appear")
     logger.complete()
-    content = (tmp_path / "logs" / "envskip.log").read_text()
+    content = (tmp_path / "logs" / "envskip.log").read_text(encoding="utf-8")
     assert "should not appear" not in content
     assert "should appear" in content
 
@@ -101,7 +101,7 @@ def test_enable_then_disable_debug_at_runtime(tmp_path, monkeypatch):
     assert is_debug_enabled() is True
     logger.debug("after enable")
     logger.complete()
-    content = log_path.read_text()
+    content = log_path.read_text(encoding="utf-8")
     assert "after enable" in content
 
     disable_debug_at_runtime()
@@ -109,7 +109,7 @@ def test_enable_then_disable_debug_at_runtime(tmp_path, monkeypatch):
     logger.debug("debug-post-disable")
     logger.info("info-post-disable")
     logger.complete()
-    content = log_path.read_text()
+    content = log_path.read_text(encoding="utf-8")
     assert "debug-post-disable" not in content
     assert "info-post-disable" in content
 
@@ -129,7 +129,7 @@ def test_disable_debug_drops_debug_from_startup_handler(tmp_path, monkeypatch):
     logger.debug("should not appear")
     logger.info("should appear")
     logger.complete()
-    content = (tmp_path / "logs" / "rt2.log").read_text()
+    content = (tmp_path / "logs" / "rt2.log").read_text(encoding="utf-8")
     assert "should not appear" not in content
     assert "should appear" in content
 
@@ -147,6 +147,6 @@ def test_enable_debug_at_runtime_is_idempotent(tmp_path, monkeypatch):
 
     logger.debug("once")
     logger.complete()
-    content = (tmp_path / "logs" / "rt3.log").read_text()
+    content = (tmp_path / "logs" / "rt3.log").read_text(encoding="utf-8")
     # Should have exactly one "once" entry (not duplicated)
     assert content.count("once") == 1

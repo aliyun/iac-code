@@ -23,6 +23,7 @@ from iac_code.acp.version import negotiate_version
 from iac_code.commands import LocalCommand, create_default_registry
 from iac_code.config import DEFAULT_MODEL, get_active_provider_key, load_saved_model
 from iac_code.i18n import _
+from iac_code.pipeline.config import RunMode, get_run_mode
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
@@ -32,9 +33,11 @@ from iac_code.utils.project_paths import (
     format_resume_command,
     same_project_path,
 )
+from iac_code.utils.public_errors import public_error_from_exception
 
 SESSION_IDLE_TIMEOUT = 3600  # 1 hour
 CLEANUP_INTERVAL = 300  # 5 minutes
+_ACP_PIPELINE_MODE_UNSUPPORTED_TEXT = "ACP does not support pipeline mode."
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +186,7 @@ class ACPServer:
         mcp_servers: list[MCPServer] | None = None,
         **kwargs: Any,
     ) -> acp.NewSessionResponse:
+        _reject_pipeline_mode_for_acp()
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
 
@@ -199,13 +203,9 @@ class ACPServer:
             self.conn,
             runtime.session_id,
         )
-        session = ACPSession(
-            runtime.session_id,
-            runtime.agent_loop,
-            self.conn,
+        session = self._create_acp_session_from_runtime(
+            runtime=runtime,
             mcp_configs=mcp_configs,
-            metrics=self.metrics,
-            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[session.id] = session
         self.metrics.record_session_created()
@@ -309,6 +309,7 @@ class ACPServer:
         agent runtime is created, and history events are replayed as ACP
         ``session_update`` notifications so the client can rebuild its UI.
         """
+        _reject_pipeline_mode_for_acp()
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
 
@@ -343,13 +344,9 @@ class ACPServer:
             runtime.agent_loop.context_manager.load_messages(history)
 
         # 4. Register session
-        session = ACPSession(
-            session_id,
-            runtime.agent_loop,
-            self.conn,
+        session = self._create_acp_session_from_runtime(
+            runtime=runtime,
             mcp_configs=mcp_configs,
-            metrics=self.metrics,
-            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[session_id] = session
         self.metrics.record_session_created()
@@ -377,6 +374,7 @@ class ACPServer:
         session with a fresh ``session_id``.  The client can then continue
         the conversation on the fork without affecting the original.
         """
+        _reject_pipeline_mode_for_acp()
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
 
@@ -414,13 +412,9 @@ class ACPServer:
             runtime.agent_loop.context_manager.load_messages(history)
 
         # 4. Register the forked session
-        session = ACPSession(
-            new_session_id,
-            runtime.agent_loop,
-            self.conn,
+        session = self._create_acp_session_from_runtime(
+            runtime=runtime,
             mcp_configs=mcp_configs,
-            metrics=self.metrics,
-            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[new_session_id] = session
         self.metrics.record_session_created()
@@ -444,6 +438,7 @@ class ACPServer:
         mcp_servers: list[MCPServer] | None = None,
         **kwargs: Any,
     ) -> acp.schema.ResumeSessionResponse:
+        _reject_pipeline_mode_for_acp()
         cwd = self._validate_cwd(cwd)
 
         # 1. If session is still active in memory by exact id, enforce project ownership before returning.
@@ -480,14 +475,14 @@ class ACPServer:
 
         resolved_session_id = entry.session_id
         if entry.cwd and not same_project_path(entry.cwd, cwd):
-            hint = _resume_command(entry.cwd, resolved_session_id)
+            hint = _public_resume_command(resolved_session_id)
             message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
             raise _invalid_params(
                 message,
                 {
                     "session_id": session_id,
                     "resolved_session_id": resolved_session_id,
-                    "cwd": entry.cwd,
+                    "cwd": _PUBLIC_CWD,
                     "hint": hint,
                 },
             )
@@ -526,13 +521,9 @@ class ACPServer:
             runtime.agent_loop.context_manager.load_messages(history)
 
         # 4. Register the resumed session
-        session = ACPSession(
-            resolved_session_id,
-            runtime.agent_loop,
-            self.conn,
+        session = self._create_acp_session_from_runtime(
+            runtime=runtime,
             mcp_configs=mcp_configs,
-            metrics=self.metrics,
-            memory_manager=_runtime_command_memory_manager(runtime),
         )
         self.sessions[resolved_session_id] = session
         self.metrics.record_session_created()
@@ -543,6 +534,24 @@ class ACPServer:
     # ------------------------------------------------------------------
     # Runtime creation helper
     # ------------------------------------------------------------------
+
+    def _create_acp_session_from_runtime(
+        self,
+        *,
+        runtime: Any,
+        mcp_configs: list[dict],
+    ) -> ACPSession:
+        if self.conn is None:
+            raise acp.RequestError.internal_error({"error": "ACP client not connected"})
+
+        return ACPSession(
+            runtime.session_id,
+            runtime.agent_loop,
+            self.conn,
+            mcp_configs=mcp_configs,
+            metrics=self.metrics,
+            memory_manager=_runtime_command_memory_manager(runtime),
+        )
 
     @staticmethod
     def _create_runtime_with_auth_check(
@@ -563,7 +572,14 @@ class ACPServer:
                         "code": "auth_required",
                     }
                 ) from exc
-            raise
+            logger.exception("ACP runtime creation failed")
+            failure = public_error_from_exception(exc)
+            raise acp.RequestError.internal_error(
+                {
+                    "error": failure.summary,
+                    "error_id": failure.error_id,
+                }
+            ) from exc
 
     # ------------------------------------------------------------------
     # Model state & available commands helpers
@@ -739,8 +755,20 @@ def _invalid_params(message: str, data: dict[str, Any] | None = None) -> acp.Req
     return acp.RequestError(-32602, message, data)
 
 
+def _reject_pipeline_mode_for_acp() -> None:
+    if get_run_mode() == RunMode.PIPELINE:
+        raise _invalid_params(_ACP_PIPELINE_MODE_UNSUPPORTED_TEXT)
+
+
+_PUBLIC_CWD = "[PATH]"
+
+
 def _resume_command(cwd: str, session_id: str) -> str:
     return format_resume_command(cwd, session_id)
+
+
+def _public_resume_command(session_id: str) -> str:
+    return format_resume_command(_PUBLIC_CWD, session_id)
 
 
 def _active_session_cwd(session: ACPSession) -> str | None:
@@ -754,14 +782,14 @@ def _active_session_project_error(
     active_cwd = _active_session_cwd(session)
     if not active_cwd or same_project_path(active_cwd, cwd):
         return None
-    hint = _resume_command(active_cwd, resolved_session_id)
+    hint = _public_resume_command(resolved_session_id)
     message = _("Session belongs to another project. Run: {hint}").format(hint=hint)
     return _invalid_params(
         message,
         {
             "session_id": session_id,
             "resolved_session_id": resolved_session_id,
-            "cwd": active_cwd,
+            "cwd": _PUBLIC_CWD,
             "hint": hint,
         },
     )
@@ -771,8 +799,8 @@ def _resume_candidate_data(entry: SessionEntry) -> dict[str, str | None]:
     return {
         "session_id": entry.session_id,
         "name": entry.name,
-        "cwd": entry.cwd,
-        "command": _resume_command(entry.cwd, entry.session_id),
+        "cwd": _PUBLIC_CWD,
+        "command": _public_resume_command(entry.session_id),
     }
 
 

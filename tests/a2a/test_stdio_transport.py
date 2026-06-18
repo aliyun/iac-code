@@ -1,9 +1,16 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
 from iac_code.a2a.transports.dispatcher import create_runtime_components
-from iac_code.a2a.transports.stdio import StdioA2AClient, StdioA2AServer, decode_frame, encode_frame
+from iac_code.a2a.transports.stdio import (
+    StdioA2AClient,
+    StdioA2AServer,
+    decode_frame,
+    encode_frame,
+    is_streaming_request,
+)
 from iac_code.types.stream_events import TextDeltaEvent
 
 from .fakes import FakeAgentLoop, FakeRuntime
@@ -37,6 +44,10 @@ def test_encode_decode_frame_round_trip() -> None:
     payload = {"jsonrpc": "2.0", "id": "1", "result": {"ok": True}}
 
     assert decode_frame(encode_frame(payload)) == payload
+
+
+def test_send_streaming_message_is_streaming_request() -> None:
+    assert is_streaming_request({"method": "SendStreamingMessage"}) is True
 
 
 @pytest.mark.asyncio
@@ -75,6 +86,70 @@ async def test_stdio_server_handles_unary_request(monkeypatch, tmp_path) -> None
     client_writer.close()
     await task
     await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stdio_server_sanitizes_outer_dispatch_errors() -> None:
+    client_to_server, client_writer = make_stream_pair()
+    server_to_client, server_writer = make_stream_pair()
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    server = StdioA2AServer(components=components, reader=client_to_server, writer=server_writer)
+    server._dispatcher.dispatch = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError(
+            "dispatch failed at /Users/alice/.iac-code/a2a.sock; Authorization: Bearer sk-stdiosecret123"
+        )
+    )
+    task = asyncio.create_task(server.serve())
+
+    client_writer.write(encode_frame({"jsonrpc": "2.0", "id": "1", "method": "ping"}))
+
+    response = decode_frame(await asyncio.wait_for(server_to_client.readline(), timeout=1))
+    assert response["id"] == "1"
+    error = response["error"]
+    assert error["code"] == -32603
+    assert "dispatch failed" in error["message"]
+    assert "sk-stdiosecret123" not in error["message"]
+    assert "Authorization: Bearer" not in error["message"]
+    assert "/Users/alice" not in error["message"]
+    assert "[REDACTED]" in error["message"]
+    assert "[PATH]" in error["message"]
+
+    client_writer.close()
+    await task
+    await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stdio_streaming_request_emits_final_frame_and_client_finishes() -> None:
+    client_to_server, client_writer = make_stream_pair()
+    server_to_client, server_writer = make_stream_pair()
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    server = StdioA2AServer(components=components, reader=client_to_server, writer=server_writer)
+
+    async def dispatch_stream(payload):
+        yield {"jsonrpc": "2.0", "id": payload["id"], "result": {"status": {"state": "completed"}}}
+
+    server._dispatcher.dispatch_stream = dispatch_stream  # type: ignore[method-assign]
+    server_task = asyncio.create_task(server.serve())
+    client = StdioA2AClient(reader=server_to_client, writer=client_writer)
+
+    async def collect():
+        return [
+            event
+            async for event in client.stream({"jsonrpc": "2.0", "id": "stream-1", "method": "SendStreamingMessage"})
+        ]
+
+    try:
+        events = await asyncio.wait_for(collect(), timeout=1)
+    finally:
+        client_writer.close()
+        await server_task
+        await components.aclose()
+
+    assert events == [
+        {"jsonrpc": "2.0", "id": "stream-1", "result": {"status": {"state": "completed"}}},
+        {"jsonrpc": "2.0", "id": "stream-1", "final": True},
+    ]
 
 
 @pytest.mark.asyncio

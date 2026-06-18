@@ -58,6 +58,7 @@ a2a-grpc = [
 a2a-redis = [
     "redis>=5.0.0",
 ]
+diagram = ["termaid>=0.1; python_version >= '3.11'"]
 
 [dependency-groups]
 dev = [

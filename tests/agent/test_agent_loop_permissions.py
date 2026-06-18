@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
@@ -86,4 +88,40 @@ async def test_agent_loop_emits_permission_request_before_write_tool() -> None:
         isinstance(event, ToolResultEvent) and event.is_error and event.result == "Permission denied."
         for event in events
     )
+    assert tool.executed is False
+
+
+@pytest.mark.asyncio
+async def test_cancelled_permission_request_resolves_future_as_denied() -> None:
+    tool = WriteTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    loop = AgentLoop(
+        provider_manager=FakeProviderManager(),
+        system_prompt="system",
+        tool_registry=registry,
+        max_turns=1,
+    )
+    permission_ready = asyncio.Event()
+    captured_future: asyncio.Future[bool] | None = None
+
+    async def consume() -> None:
+        nonlocal captured_future
+        async for event in loop.run_streaming("write"):
+            if isinstance(event, PermissionRequestEvent):
+                assert event.response_future is not None
+                captured_future = event.response_future
+                permission_ready.set()
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(permission_ready.wait(), timeout=1)
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert captured_future is not None
+    assert captured_future.done()
+    assert captured_future.cancelled() is False
+    assert captured_future.result() is False
     assert tool.executed is False

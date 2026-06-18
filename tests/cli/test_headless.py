@@ -101,6 +101,48 @@ async def test_json_output():
 
 
 @pytest.mark.asyncio
+async def test_json_output_reports_sanitized_runtime_creation_error():
+    """Creation-time failures should be represented in the machine-readable JSON output."""
+    buf = io.StringIO()
+    runner = _make_runner(OutputFormat.JSON, buf)
+
+    with patch.object(
+        runner,
+        "_create_agent_loop",
+        side_effect=RuntimeError("DB_PASSWORD=hunter2 at /Users/alice/.iac-code/settings.yml"),
+    ):
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_ERROR
+    parsed = json.loads(buf.getvalue())
+    assert "error" in parsed
+    assert parsed["error_id"]
+    assert "hunter2" not in parsed["error"]
+    assert "/Users/alice" not in parsed["error"]
+
+
+@pytest.mark.asyncio
+async def test_stream_json_output_reports_sanitized_runtime_creation_error():
+    """Creation-time failures should be represented in the machine-readable stream-json output."""
+    buf = io.StringIO()
+    runner = _make_runner(OutputFormat.STREAM_JSON, buf)
+
+    with patch.object(
+        runner,
+        "_create_agent_loop",
+        side_effect=RuntimeError("DB_PASSWORD=hunter2 at /Users/alice/.iac-code/settings.yml"),
+    ):
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_ERROR
+    parsed = json.loads(buf.getvalue())
+    assert parsed["type"] == "error"
+    assert parsed["error_id"]
+    assert "hunter2" not in parsed["error"]
+    assert "/Users/alice" not in parsed["error"]
+
+
+@pytest.mark.asyncio
 async def test_permission_auto_approved():
     """PermissionRequestEvent future is auto-approved with True."""
     buf = io.StringIO()
@@ -210,6 +252,19 @@ class TestCLIFlags:
             mock_runner.assert_called_once()
             mock_instance.run.assert_called_once_with("hello")
             update_checker.assert_not_called()
+
+    def test_prompt_flag_rejects_pipeline_mode(self, monkeypatch):
+        from iac_code.cli.main import app
+
+        monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            result = runner_cli.invoke(app, ["-p", "hello"])
+
+        assert result.exit_code == 1
+        assert "Pipeline mode requires the interactive REPL" in result.output
+        assert "--prompt" in result.output
+        assert "IAC_CODE_MODE=normal" in result.output
+        mock_runner.assert_not_called()
 
     def test_acp_server_does_not_start_update_checker(self):
         import sys
@@ -746,6 +801,8 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
+    import iac_code.skills.management  # noqa: F401
+
     monkeypatch.setattr("iac_code.config._load_yaml", lambda path: creds)
     monkeypatch.setattr("iac_code.config.get_credentials_path", lambda: Path("/tmp/creds.yml"))
     monkeypatch.setattr("iac_code.config.get_config_dir", lambda: fake_session_dir)
@@ -910,3 +967,90 @@ async def test_no_api_key_prints_friendly_error():
     err_output = err_buf.getvalue()
     assert "No API key configured for provider" in err_output
     assert "/auth" in err_output
+
+
+@pytest.mark.asyncio
+async def test_provider_not_configured_sanitizes_public_stderr():
+    """Provider setup errors may include paths or secrets; stderr must keep only public details."""
+    buf = io.StringIO()
+    err_buf = io.StringIO()
+    runner = _make_runner(OutputFormat.TEXT, buf)
+
+    async def _raise_on_stream(prompt):
+        raise ProviderNotConfiguredError(
+            "Cannot load provider from /Users/alice/.iac-code/settings.yml; Authorization: Bearer sk-headlesssecret123"
+        )
+        yield  # make it an async generator
+
+    with patch.object(runner, "_create_agent_loop") as mock_create:
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = _raise_on_stream
+        mock_create.return_value = mock_loop
+
+        with patch("sys.stderr", err_buf):
+            exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_ERROR
+    err_output = err_buf.getvalue()
+    assert "Cannot load provider" in err_output
+    assert "sk-headlesssecret123" not in err_output
+    assert "Authorization: Bearer" not in err_output
+    assert "/Users/alice" not in err_output
+    assert "[REDACTED]" in err_output
+    assert "[PATH]" in err_output
+    assert "/auth" in err_output
+
+
+@pytest.mark.asyncio
+async def test_provider_not_configured_during_runtime_creation_sanitizes_public_stderr():
+    buf = io.StringIO()
+    err_buf = io.StringIO()
+    runner = _make_runner(OutputFormat.TEXT, buf)
+
+    with patch.object(
+        runner,
+        "_create_agent_loop",
+        side_effect=ProviderNotConfiguredError(
+            r"Cannot load provider from C:\Users\Alice Smith\.iac-code\settings.yml; "
+            "api_key=sk-createagentsecret123"
+        ),
+    ):
+        with patch("sys.stderr", err_buf):
+            exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_ERROR
+    err_output = err_buf.getvalue()
+    assert "Cannot load provider" in err_output
+    assert "sk-createagentsecret123" not in err_output
+    assert r"C:\Users" not in err_output
+    assert r"Alice Smith\.iac-code" not in err_output
+    assert "[REDACTED]" in err_output
+    assert "[PATH]" in err_output
+    assert "/auth" in err_output
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_during_runtime_creation_sanitizes_public_stderr():
+    buf = io.StringIO()
+    err_buf = io.StringIO()
+    runner = _make_runner(OutputFormat.TEXT, buf)
+
+    with patch.object(
+        runner,
+        "_create_agent_loop",
+        side_effect=RuntimeError(
+            r"runtime failed from C:\Users\Alice Smith\.iac-code\settings.yml; "
+            '{"api_key": "plain-secret"}'
+        ),
+    ):
+        with patch("sys.stderr", err_buf):
+            exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_ERROR
+    err_output = err_buf.getvalue()
+    assert "runtime failed" in err_output
+    assert "plain-secret" not in err_output
+    assert r"C:\Users" not in err_output
+    assert r"Alice Smith\.iac-code" not in err_output
+    assert "[REDACTED]" in err_output
+    assert "[PATH]" in err_output

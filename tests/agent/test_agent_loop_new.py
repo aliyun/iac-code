@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -916,6 +917,47 @@ class TestAgentLoopStreaming:
             for message in loop.context_manager.get_messages()
         )
 
+    async def test_cancelled_tool_execution_cancels_execute_batch(self, mock_provider, mock_registry):
+        execute_started = asyncio.Event()
+        execute_cancelled = asyncio.Event()
+        execute_released = asyncio.Event()
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
+            yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
+            yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+
+        async def execute_batch(requests, context):
+            execute_started.set()
+            try:
+                await execute_released.wait()
+            except asyncio.CancelledError:
+                execute_cancelled.set()
+                raise
+            return [ToolResult(content="late result", is_error=False)]
+
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [SimpleNamespace(name="read_file", description="Read", input_schema={})]
+        mock_registry.get.return_value = None
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._tool_executor.execute_batch = execute_batch
+
+        async def consume():
+            async for _event in loop.run_streaming("Hi"):
+                pass
+
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(execute_started.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        try:
+            await asyncio.wait_for(execute_cancelled.wait(), timeout=0.1)
+        finally:
+            execute_released.set()
+
     async def test_system_prompt_refresher_updates_each_provider_round_and_tools(self, mock_provider, mock_registry):
         captured_systems: list[str] = []
 
@@ -1140,6 +1182,57 @@ class TestAgentLoopStreaming:
         user_texts = [message.get_text() for message in loop.context_manager.get_messages() if message.role == "user"]
         assert user_texts == ["Hi"]
 
+    async def test_react_step_span_records_round_output_when_debug_content_enabled(self, mock_provider, mock_registry):
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield MessageStartEvent(message_id="m1")
+            yield TextDeltaEvent(text="final")
+            yield TextDeltaEvent(text=" answer")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class CapturedSpan:
+            def __init__(self, name, attrs):
+                self.name = name
+                self.attrs = dict(attrs or {})
+
+            def set_attribute(self, key, value):
+                self.attrs[key] = value
+
+        class CapturedContext:
+            def __init__(self, span):
+                self.span = span
+
+            def __enter__(self):
+                return self.span
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        captured = []
+
+        def capture_span(name, attrs=None):
+            span = CapturedSpan(name, attrs)
+            captured.append(span)
+            return CapturedContext(span)
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        with (
+            patch("iac_code.services.telemetry.start_span", side_effect=capture_span),
+            patch("iac_code.services.telemetry.get_session_id", return_value="sess"),
+            patch("iac_code.services.telemetry.get_user_id", return_value="user"),
+            patch("iac_code.services.telemetry.log_event"),
+            patch("iac_code.services.telemetry.add_metric"),
+            patch("iac_code.services.telemetry.config.should_capture_content_on_span", return_value=True),
+        ):
+            events = [event async for event in loop.run_streaming("Hi")]
+
+        assert any(isinstance(event, MessageEndEvent) for event in events)
+        react_span = next(span for span in captured if span.name == "react step")
+        output = json.loads(react_span.attrs["gen_ai.output.messages"])
+        assert output[0]["parts"][0]["content"] == "final answer"
+        assert output[0]["finish_reason"] == "end_turn"
+
     async def test_does_not_record_zero_message_end_usage(self, mock_provider, mock_registry, tmp_path):
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
             yield MessageStartEvent(message_id="m1")
@@ -1204,6 +1297,38 @@ class TestAgentLoopStreaming:
         assert loop.get_session_usage().input_tokens == 7
         assert loop.get_session_usage().output_tokens == 8
         assert loop.get_session_usage().total_tokens == 15
+
+    async def test_refresh_session_usage_reloads_external_usage_totals(self, mock_provider, mock_registry, tmp_path):
+        from iac_code.services.session_usage import SessionUsageStore
+
+        store = SessionUsageStore(projects_dir=tmp_path)
+        store.append("/tmp/status-project", "usage-session", Usage(input_tokens=1, output_tokens=2))
+
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="usage-session",
+            cwd="/tmp/status-project",
+            session_usage_store=store,
+        )
+
+        assert loop.get_session_usage().total_tokens == 3
+
+        store.append(
+            "/tmp/status-project",
+            "usage-session",
+            Usage(input_tokens=7, output_tokens=8, cache_read_input_tokens=4),
+        )
+
+        assert loop.get_session_usage().total_tokens == 3
+        loop.refresh_session_usage()
+
+        totals = loop.get_session_usage()
+        assert totals.input_tokens == 8
+        assert totals.output_tokens == 10
+        assert totals.cache_read_input_tokens == 4
+        assert totals.total_tokens == 18
 
     async def test_replace_session_resets_memory_recall_stats(self, mock_provider, mock_registry):
         class FakeRecallService:
@@ -1544,6 +1669,57 @@ class TestAgentLoopStreaming:
         loop.context_manager.add_raw_message.assert_called_once_with({"role": "system", "content": "injected"})
         assert modifier_called
         assert loop._allowed_tool_rules == ["read:*"]
+
+    async def test_terminal_error_step_result_metadata_stops_streaming(self, mock_provider, mock_registry):
+        from iac_code.pipeline.engine.types import StepResult, StepStatus
+
+        calls = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal calls
+            calls += 1
+            yield MessageStartEvent(message_id=f"m{calls}")
+            if calls == 1:
+                yield ToolUseStartEvent(tool_use_id="done_1", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="done_1",
+                    name="complete_step",
+                    input={"conclusion": {"bad": "data"}},
+                )
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+            yield TextDeltaEvent(text="should not continue")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        failed_step = StepResult(
+            step_id="intent_parsing",
+            status=StepStatus.FAILED,
+            error="Schema validation failed after 2 attempts",
+        )
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [
+            SimpleNamespace(name="complete_step", description="Complete", input_schema={})
+        ]
+        mock_registry.get.return_value = None
+
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._tool_executor.execute_batch = AsyncMock(
+            return_value=[
+                ToolResult(
+                    content="conclusion 校验失败（已超过最大重试次数 1）",
+                    is_error=True,
+                    metadata={"step_result": failed_step},
+                )
+            ]
+        )
+
+        events = [event async for event in loop.run_streaming("Hi")]
+
+        tool_results = [event for event in events if isinstance(event, ToolResultEvent)]
+        assert len(tool_results) == 1
+        assert tool_results[0].is_error is True
+        assert tool_results[0].metadata == {"step_result": failed_step}
+        assert calls == 1
 
     async def test_run_streaming_tombstone_discards_partial_turn(self, mock_provider, mock_registry):
         from iac_code.types.stream_events import TombstoneEvent

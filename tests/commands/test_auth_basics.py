@@ -47,7 +47,7 @@ class TestProvidersMetadata:
         assert entry["name"] == "DashScope Token Plan"
         assert entry["display_name"] == "Alibaba Cloud Bailian Token Plan"
         assert entry["api_base"] == ("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
-        assert entry["default_model"] == "qwen3.6-plus"
+        assert entry["default_model"] == "qwen3.7-max"
         models = set(entry["models"])
-        for expected in ("qwen3.6-plus", "deepseek-v3.2", "glm-5", "MiniMax-M2.5"):
+        for expected in ("qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "deepseek-v3.2", "glm-5", "MiniMax-M2.5"):
             assert expected in models

@@ -1,0 +1,77 @@
+{
+  "skill_name": "iac-aliyun-template-generating",
+  "description": "验证 ROS 模板生成技能是否正确地将架构方案转化为可部署的 ROS YAML 模板",
+  "evals": [
+    {
+      "id": 1,
+      "name": "simple-vpc-ecs",
+      "prompt": "根据架构方案生成 ROS 模板：VPC + 1台 ECS 实例部署 Nginx",
+      "candidate_context": {
+        "name": "轻量 Nginx 方案",
+        "products": ["VPC", "ECS"],
+        "topology": "单可用区，VPC 内一台 ECS 部署 Nginx"
+      },
+      "expected_behavior": "生成 ROS YAML 模板，包含 VPC、VSwitch、SecurityGroup、ECS InstanceGroup，ZoneId/InstanceType/ImageId 等库存属性参数化为 Parameters",
+      "assertions": [
+        {"name": "is_ros_yaml", "check": "输出为 ROS YAML 格式，包含 ROSTemplateFormatVersion"},
+        {"name": "has_vpc_resources", "check": "包含 ALIYUN::ECS::VPC 和 ALIYUN::ECS::VSwitch 资源"},
+        {"name": "has_ecs_resource", "check": "包含 ALIYUN::ECS::InstanceGroup 或 ALIYUN::ECS::Instance 资源"},
+        {"name": "inventory_params", "check": "ZoneId、InstanceType、ImageId 定义为 Parameters"},
+        {"name": "no_terraform", "check": "不包含 Terraform 相关内容（如 provider、resource block、.tf 格式）"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "web-app-with-rds",
+      "prompt": "根据架构方案生成 ROS 模板：VPC + ECS + RDS MySQL",
+      "candidate_context": {
+        "name": "Web 应用标准方案",
+        "products": ["VPC", "ECS", "RDS"],
+        "topology": "单可用区，VPC 内 ECS 运行应用，RDS 提供 MySQL 数据库"
+      },
+      "expected_behavior": "生成 ROS 模板，ECS 和 RDS 的库存相关属性均参数化，使用 Ref/GetAtt 关联资源",
+      "assertions": [
+        {"name": "is_ros_yaml", "check": "包含 ROSTemplateFormatVersion"},
+        {"name": "has_rds", "check": "包含 ALIYUN::RDS::DBInstance 资源"},
+        {"name": "rds_params", "check": "RDS 的 ZoneId、DBInstanceClass、DBInstanceStorageType 参数化"},
+        {"name": "resource_refs", "check": "使用 Ref 或 GetAtt 引用 VPC/VSwitch，而非硬编码"},
+        {"name": "has_outputs", "check": "包含 Outputs 段且输出变量有 Label"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "ha-slb-ecs",
+      "prompt": "根据架构方案生成 ROS 模板：SLB + 2台 ECS 实现高可用",
+      "candidate_context": {
+        "name": "高可用 Web 方案",
+        "products": ["VPC", "ECS", "SLB"],
+        "topology": "单可用区，SLB 负载均衡到 2 台 ECS"
+      },
+      "expected_behavior": "生成 ROS 模板，ECS 通过 MaxAmount=2 创建多实例，SLB ZoneId 参数化",
+      "assertions": [
+        {"name": "is_ros_yaml", "check": "包含 ROSTemplateFormatVersion"},
+        {"name": "multi_ecs", "check": "ECS InstanceGroup 的 MaxAmount >= 2"},
+        {"name": "has_slb", "check": "包含 ALIYUN::SLB 相关资源"},
+        {"name": "slb_zone_param", "check": "SLB 的 ZoneId 定义为 Parameter"},
+        {"name": "no_hardcoded_names", "check": "资源名称不包含 'ros'、'terraform' 等工具名"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "redis-cache",
+      "prompt": "根据架构方案生成 ROS 模板：VPC + Redis 缓存实例",
+      "candidate_context": {
+        "name": "缓存服务方案",
+        "products": ["VPC", "Redis"],
+        "topology": "单可用区，VPC 内部署 Redis 实例"
+      },
+      "expected_behavior": "生成 ROS 模板，Redis 的 ZoneId 和 InstanceClass 参数化",
+      "assertions": [
+        {"name": "is_ros_yaml", "check": "包含 ROSTemplateFormatVersion"},
+        {"name": "has_redis", "check": "包含 ALIYUN::REDIS::Instance 资源"},
+        {"name": "redis_params", "check": "Redis 的 ZoneId 和 InstanceClass 定义为 Parameters"},
+        {"name": "has_association_property", "check": "Parameters 中包含 AssociationProperty 定义"}
+      ]
+    }
+  ]
+}

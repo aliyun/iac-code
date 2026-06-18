@@ -18,9 +18,9 @@ class TestGlobBasics:
 
     @pytest.mark.asyncio
     async def test_match_py_files(self, tool, tmp_path):
-        (tmp_path / "a.py").write_text("")
-        (tmp_path / "b.py").write_text("")
-        (tmp_path / "c.txt").write_text("")
+        (tmp_path / "a.py").write_text("", encoding="utf-8")
+        (tmp_path / "b.py").write_text("", encoding="utf-8")
+        (tmp_path / "c.txt").write_text("", encoding="utf-8")
         context = ToolContext(cwd=str(tmp_path))
         result = await tool.execute(tool_input={"pattern": "*.py", "path": str(tmp_path)}, context=context)
         assert result.is_error is False
@@ -48,7 +48,7 @@ class TestGlobBasics:
     @pytest.mark.asyncio
     async def test_path_not_a_directory(self, tool, tmp_path):
         file_path = tmp_path / "file.txt"
-        file_path.write_text("x")
+        file_path.write_text("x", encoding="utf-8")
         context = ToolContext(cwd=str(tmp_path))
         result = await tool.execute(tool_input={"pattern": "*.py", "path": str(file_path)}, context=context)
         assert result.is_error is True
@@ -56,7 +56,7 @@ class TestGlobBasics:
 
     @pytest.mark.asyncio
     async def test_relative_path_resolved(self, tool, tmp_path):
-        (tmp_path / "a.py").write_text("")
+        (tmp_path / "a.py").write_text("", encoding="utf-8")
         context = ToolContext(cwd=str(tmp_path))
         result = await tool.execute(tool_input={"pattern": "*.py", "path": "."}, context=context)
         assert result.is_error is False

@@ -2,6 +2,7 @@
 
 import pytest
 
+from iac_code.services.telemetry.client import TelemetryClient
 from iac_code.services.telemetry.config import (
     ContentCaptureMode,
     PrivacyLevel,
@@ -17,6 +18,15 @@ from iac_code.services.telemetry.config import (
 def _clear_env(monkeypatch):
     monkeypatch.delenv("DISABLE_TELEMETRY", raising=False)
     monkeypatch.delenv("IAC_CODE_DISABLE_NONESSENTIAL_TRAFFIC", raising=False)
+    monkeypatch.delenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", raising=False)
+    monkeypatch.delenv("IAC_CODE_TELEMETRY_ENDPOINT", raising=False)
+    monkeypatch.delenv("IAC_CODE_TELEMETRY_TRACES_ENDPOINT", raising=False)
+    monkeypatch.delenv("IAC_CODE_TELEMETRY_METRICS_ENDPOINT", raising=False)
+    monkeypatch.delenv("IAC_CODE_TELEMETRY_LOGS_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
     monkeypatch.delenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", raising=False)
     monkeypatch.delenv("DEBUG", raising=False)
     monkeypatch.delenv("IAC_CODE_TELEMETRY_DEBUG", raising=False)
@@ -75,6 +85,101 @@ def test_local_build_disables_telemetry(monkeypatch, blank):
     # Privacy level itself reflects only env vars, not the build stamp.
     assert get_privacy_level() == PrivacyLevel.DEFAULT
     assert is_essential_traffic_only() is False
+
+
+def test_local_build_allows_explicit_local_telemetry_opt_in(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+
+    assert is_telemetry_disabled() is False
+
+
+def test_local_build_opt_in_requires_local_telemetry_endpoint(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.delenv("IAC_CODE_TELEMETRY_ENDPOINT", raising=False)
+    monkeypatch.delenv("IAC_CODE_TELEMETRY_TRACES_ENDPOINT", raising=False)
+
+    assert is_telemetry_disabled() is True
+    assert TelemetryClient._default_traces_enabled() is False
+
+
+def test_local_build_opt_in_rejects_remote_default_endpoint(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_ENDPOINT", "https://telemetry.example.com")
+
+    assert is_telemetry_disabled() is True
+    assert TelemetryClient._default_traces_enabled() is False
+
+
+def test_local_build_opt_in_only_enables_explicit_local_signal_endpoints(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_METRICS_ENDPOINT", "http://127.0.0.1:4318/v1/metrics")
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_TRACES_ENDPOINT", "https://telemetry.example.com/v1/traces")
+
+    assert is_telemetry_disabled() is False
+    assert TelemetryClient._default_metrics_enabled() is True
+    assert TelemetryClient._default_traces_enabled() is False
+
+
+def test_local_build_opt_in_rejects_remote_user_otlp_endpoint(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://telemetry.example.com")
+
+    assert TelemetryClient._user_otlp_enabled() is False
+
+
+def test_local_build_opt_in_allows_local_user_otlp_endpoint(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+
+    assert is_telemetry_disabled() is False
+    assert TelemetryClient._user_otlp_enabled() is True
+    assert TelemetryClient._default_traces_enabled() is False
+
+
+@pytest.mark.parametrize(
+    ("env_name", "method_name", "expected"),
+    [
+        ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "_user_traces_endpoint", "http://127.0.0.1:4318/v1/traces"),
+        ("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "_user_metrics_endpoint", "http://127.0.0.1:4318/v1/metrics"),
+        ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "_user_logs_endpoint", "http://127.0.0.1:4318/v1/logs"),
+    ],
+)
+def test_local_build_user_otlp_ignores_remote_signal_overrides(monkeypatch, env_name, method_name, expected):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv(env_name, "https://telemetry.example.com/v1/signal")
+
+    assert getattr(TelemetryClient, method_name)() == expected
+
+
+@pytest.mark.parametrize(
+    ("env_name", "method_name", "endpoint"),
+    [
+        ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "_user_traces_endpoint", "http://127.0.0.1:4318/v1/traces"),
+        ("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "_user_metrics_endpoint", "http://127.0.0.1:4318/v1/metrics"),
+        ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "_user_logs_endpoint", "http://127.0.0.1:4318/v1/logs"),
+    ],
+)
+def test_local_build_user_otlp_allows_local_signal_endpoint_when_base_remote(
+    monkeypatch, env_name, method_name, endpoint
+):
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://telemetry.example.com")
+    monkeypatch.setenv(env_name, endpoint)
+
+    assert is_telemetry_disabled() is False
+    assert TelemetryClient._user_otlp_enabled() is True
+    assert getattr(TelemetryClient, method_name)() == endpoint
 
 
 def test_released_build_with_no_env_vars_enables_telemetry(monkeypatch):

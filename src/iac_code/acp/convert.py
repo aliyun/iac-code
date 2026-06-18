@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any, Literal
 
 import acp
 
-from iac_code.acp.state import TurnState
+from iac_code.a2a.artifacts import sanitize_public_tool_output_data
+from iac_code.acp.state import TurnState, display_tool_title
 from iac_code.acp.types import ACPContentBlock
 from iac_code.types.stream_events import (
     CompactionEvent,
@@ -25,6 +27,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
+from iac_code.utils.public_errors import sanitize_public_text
 
 # ``acp.schema`` exposes individual session-update message classes
 # (``AgentMessageChunk``, ``ToolCallStart``, ...) but not a single
@@ -193,7 +196,7 @@ class ACPEventConverter:
                     acp.schema.ToolCallStart(
                         session_update="tool_call",
                         tool_call_id=self.acp_tool_call_id(tool_use_id),
-                        title=name,
+                        title=display_tool_title(name),
                         kind=_tool_kind(name),
                         status="pending",
                     )
@@ -218,17 +221,18 @@ class ACPEventConverter:
                     acp.schema.ToolCallProgress(
                         session_update="tool_call_update",
                         tool_call_id=self.acp_tool_call_id(tool_use_id),
-                        title=name,
+                        title=display_tool_title(name),
                         status="in_progress",
                         content=[_text_tool_content(str(input))],
                     )
                 ]
             case ToolResultEvent(tool_use_id=tool_use_id, tool_name=tool_name, result=result, is_error=is_error):
+                visible_result = _public_tool_result_text(result)
                 content: list[
                     acp.schema.ContentToolCallContent
                     | acp.schema.FileEditToolCallContent
                     | acp.schema.TerminalToolCallContent
-                ] = [_text_tool_content(result)]
+                ] = [_text_tool_content(visible_result)]
                 meta: dict[str, Any] | None = None
                 if tool_name in self._terminal_tool_names:
                     meta = {"already_displayed": True}
@@ -268,7 +272,7 @@ class ACPEventConverter:
                 return [
                     acp.schema.AgentMessageChunk(
                         session_update="agent_message_chunk",
-                        content=acp.schema.TextContentBlock(type="text", text=f"[Error] {error}"),
+                        content=acp.schema.TextContentBlock(type="text", text=f"[Error] {sanitize_public_text(error)}"),
                     )
                 ]
             case PlanEvent(steps=steps):
@@ -320,6 +324,13 @@ def _text_tool_content(text: str) -> acp.schema.ContentToolCallContent:
         type="content",
         content=acp.schema.TextContentBlock(type="text", text=text),
     )
+
+
+def _public_tool_result_text(value: Any) -> str:
+    sanitized = sanitize_public_tool_output_data(value)
+    if isinstance(sanitized, str):
+        return sanitized
+    return json.dumps(sanitized, ensure_ascii=False, default=str)
 
 
 # ---------------------------------------------------------------------------

@@ -163,6 +163,33 @@ class Events:
     MEMORY_COMPACT_SUCCEEDED = "iac.memory.compact.succeeded"
     MEMORY_COMPACT_FAILED = "iac.memory.compact.failed"
 
+    # --- Pipeline (7) ---
+    PIPELINE_STARTED = "iac.pipeline.started"
+    PIPELINE_COMPLETED = "iac.pipeline.completed"
+    PIPELINE_RESUMED = "iac.pipeline.resumed"
+    PIPELINE_USER_ABORTED = "iac.pipeline.user_aborted"
+    PIPELINE_STEP_STARTED = "iac.pipeline.step.started"
+    PIPELINE_STEP_COMPLETED = "iac.pipeline.step.completed"
+    PIPELINE_STEP_FAILED = "iac.pipeline.step.failed"
+    PIPELINE_ROLLBACK = "iac.pipeline.rollback"
+
+    # --- Pipeline (nested / critical paths) ---
+    PIPELINE_SUB_PIPELINE_STARTED = "iac.pipeline.sub_pipeline.started"
+    PIPELINE_SUB_PIPELINE_COMPLETED = "iac.pipeline.sub_pipeline.completed"
+    PIPELINE_SUB_PIPELINE_FAILED = "iac.pipeline.sub_pipeline.failed"
+    PIPELINE_SUB_STEP_STARTED = "iac.pipeline.sub_step.started"
+    PIPELINE_SUB_STEP_COMPLETED = "iac.pipeline.sub_step.completed"
+    PIPELINE_SUB_STEP_FAILED = "iac.pipeline.sub_step.failed"
+    PIPELINE_CANDIDATE_CANCELLED = "iac.pipeline.candidate.cancelled"
+    PIPELINE_STEP_NUDGED = "iac.pipeline.step.nudged"
+    PIPELINE_HARD_INTERRUPT = "iac.pipeline.hard_interrupt"
+    PIPELINE_SIDECAR_FAILED = "iac.pipeline.sidecar.failed"
+    PIPELINE_USER_INPUT_REQUIRED = "iac.pipeline.user_input.required"
+    PIPELINE_USER_INPUT_RECEIVED = "iac.pipeline.user_input.received"
+    PIPELINE_SELECTION_MADE = "iac.pipeline.selection.made"
+    PIPELINE_CANDIDATES_EVALUATED = "iac.pipeline.candidates.evaluated"
+    PIPELINE_FUNNEL_STEP = "iac.pipeline.funnel.step"
+
     # --- Crash / error (3) ---
     EXCEPTION_UNCAUGHT = "iac.exception.uncaught"
     EXCEPTION_UNHANDLED = "iac.exception.unhandled"
@@ -187,6 +214,19 @@ class Metrics:
     ALIYUN_API_CALLED_DURATION = "iac.aliyun.api.called.duration"
     TERRAFORM_PROVIDER_OBSERVED_COUNT = "iac.terraform.provider.observed.count"
 
+    # Pipeline
+    PIPELINE_STEP_DURATION = "iac.pipeline.step.duration"
+    PIPELINE_ROLLBACK_COUNT = "iac.pipeline.rollback.count"
+    PIPELINE_COMPLETION_TIME = "iac.pipeline.completion.time"
+    PIPELINE_SUB_PIPELINE_DURATION = "iac.pipeline.sub_pipeline.duration"
+    PIPELINE_SUB_STEP_DURATION = "iac.pipeline.sub_step.duration"
+    PIPELINE_CANDIDATE_CANCELLED_COUNT = "iac.pipeline.candidate.cancelled.count"
+    PIPELINE_USER_INPUT_WAIT_DURATION = "iac.pipeline.user_input.wait.duration"
+    PIPELINE_CANDIDATE_COUNT = "iac.pipeline.candidate.count"
+    PIPELINE_CANDIDATE_SUCCESS_COUNT = "iac.pipeline.candidate.success.count"
+    PIPELINE_CANDIDATE_FAILED_COUNT = "iac.pipeline.candidate.failed.count"
+    PIPELINE_FUNNEL_STEP_COUNT = "iac.pipeline.funnel.step.count"
+
 
 class Spans:
     """Span name constants (ARMS LLM convention: '{operation} {identifier}')."""
@@ -197,3 +237,9 @@ class Spans:
     REACT_STEP = "react step"
     SKILL_EXECUTE = "iac.skill.execute"
     TEMPLATE_VALIDATE = "iac.template.validate"
+
+    # Pipeline
+    PIPELINE_RUN = "iac.pipeline.run"
+    PIPELINE_STEP = "iac.pipeline.step"
+    PIPELINE_SUB_PIPELINE = "iac.pipeline.sub_pipeline"
+    PIPELINE_SUB_STEP = "iac.pipeline.sub_step"

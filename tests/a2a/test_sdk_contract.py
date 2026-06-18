@@ -1,5 +1,8 @@
+import asyncio
 import sys
 from pathlib import Path
+
+import pytest
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -62,8 +65,22 @@ def test_a2a_sdk_server_contract_imports() -> None:
     assert "data" in Part.DESCRIPTOR.fields_by_name
 
 
+@pytest.mark.asyncio
+async def test_a2a_active_task_private_fields_used_by_dispatcher() -> None:
+    from a2a.server.agent_execution.active_task import ActiveTask
+
+    active_task = ActiveTask(agent_executor=object(), task_id="task-1", task_manager=object())
+
+    try:
+        assert isinstance(active_task._lock, asyncio.Lock)
+        assert active_task._reference_count == 0
+    finally:
+        await active_task._event_queue_agent.close(immediate=True)
+        await active_task._event_queue_subscribers.close(immediate=True)
+
+
 def test_a2a_extra_includes_server_runner_dependency() -> None:
-    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
     a2a_extra = pyproject["project"]["optional-dependencies"]["a2a"]
 
@@ -72,7 +89,7 @@ def test_a2a_extra_includes_server_runner_dependency() -> None:
 
 
 def test_runtime_transport_extras_match_dependency_errors() -> None:
-    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 
     optional_dependencies = pyproject["project"]["optional-dependencies"]
 

@@ -139,7 +139,8 @@ class TestAliyunCredentialsLoadFromEnv:
                         }
                     ],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         env = {
             "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
@@ -173,7 +174,8 @@ class TestAliyunCredentialsLoadFromEnv:
                         }
                     ],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         cloud_creds_file = tmp_path / ".cloud-credentials.yml"
         cloud_creds_file.write_text(
@@ -186,7 +188,8 @@ class TestAliyunCredentialsLoadFromEnv:
                         "region_id": "cn-beijing",
                     }
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         env = {
             "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
@@ -213,7 +216,7 @@ class TestAliyunCredentialsLoadFromEnv:
                 "region_id": "cn-beijing",
             }
         }
-        cloud_creds_file.write_text(yaml.dump(data))
+        cloud_creds_file.write_text(yaml.dump(data), encoding="utf-8")
 
         env = {
             "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
@@ -272,7 +275,7 @@ class TestAliyunCredentialsLoadFromEnv:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         env = {
             "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
@@ -301,7 +304,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
@@ -336,7 +339,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
@@ -373,7 +376,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
@@ -424,7 +427,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
                 },
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
@@ -450,7 +453,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
         assert cred is not None
@@ -474,7 +477,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
                 },
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
 
@@ -493,7 +496,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
     )
     def test_load_from_aliyun_cli_returns_none_without_valid_default_profile(self, tmp_path, profiles):
         config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({"current": "default", "profiles": profiles}))
+        config_file.write_text(json.dumps({"current": "default", "profiles": profiles}), encoding="utf-8")
 
         cred = AliyunCredentials.load_from_aliyun_cli(config_path=str(config_file))
 
@@ -517,7 +520,7 @@ class TestAliyunCredentialsLoadFromAliyunCli:
             "region_id": "cn-hangzhou",
             field_name: "not-an-int",
         }
-        config_file.write_text(json.dumps({"current": "default", "profiles": [profile]}))
+        config_file.write_text(json.dumps({"current": "default", "profiles": [profile]}), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
@@ -540,7 +543,7 @@ class TestAliyunCredentialsLoadFromIacCode:
                 "region_id": "cn-beijing",
             }
         }
-        cloud_creds_file.write_text(yaml.dump(data))
+        cloud_creds_file.write_text(yaml.dump(data), encoding="utf-8")
 
         with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
             cred = AliyunCredentials._load_from_iac_code_config()
@@ -567,7 +570,7 @@ class TestAliyunCredentialsLoadFromIacCode:
                 "sts_expiration": 1798794000,
             }
         }
-        cloud_creds_file.write_text(yaml.dump(data))
+        cloud_creds_file.write_text(yaml.dump(data), encoding="utf-8")
 
         with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
             cred = AliyunCredentials._load_from_iac_code_config()
@@ -605,7 +608,7 @@ class TestAliyunCredentialsLoadFromIacCode:
                 "region_id": "cn-shanghai",
             }
         }
-        cloud_creds_file.write_text(yaml.dump(data))
+        cloud_creds_file.write_text(yaml.dump(data), encoding="utf-8")
 
         with patch("iac_code.services.providers.aliyun.get_cloud_credentials_path", return_value=cloud_creds_file):
             cred = AliyunCredentials._load_from_iac_code_config()
@@ -625,7 +628,7 @@ class TestAliyunCredentialsLoadFromIacCode:
                 "region_id": "cn-beijing",
             }
         }
-        cloud_creds_file.write_text(yaml.dump(iac_data))
+        cloud_creds_file.write_text(yaml.dump(iac_data), encoding="utf-8")
 
         # Set up aliyun CLI config
         cli_config_file = tmp_path / "config.json"
@@ -641,7 +644,7 @@ class TestAliyunCredentialsLoadFromIacCode:
                 }
             ],
         }
-        cli_config_file.write_text(json.dumps(cli_config))
+        cli_config_file.write_text(json.dumps(cli_config), encoding="utf-8")
 
         with (
             patch.dict(os.environ, {}, clear=False),
@@ -674,7 +677,7 @@ class TestAliyunCredentialsSave:
             AliyunCredentials.save(cred)
 
         assert cloud_creds_file.exists()
-        data = yaml.safe_load(cloud_creds_file.read_text())
+        data = yaml.safe_load(cloud_creds_file.read_text(encoding="utf-8"))
         assert data["aliyun"]["mode"] == "AK"
         assert data["aliyun"]["access_key_id"] == "new_id"
         assert data["aliyun"]["access_key_secret"] == "new_secret"
@@ -694,7 +697,7 @@ class TestAliyunCredentialsSave:
             )
             AliyunCredentials.save(cred)
 
-        data = yaml.safe_load(cloud_creds_file.read_text())
+        data = yaml.safe_load(cloud_creds_file.read_text(encoding="utf-8"))
         assert data["aliyun"]["mode"] == "RamRoleArn"
         assert data["aliyun"]["ram_role_arn"] == "acs:ram::123:role/test"
         assert data["aliyun"]["ram_session_name"] == "session1"
@@ -718,7 +721,7 @@ class TestAliyunCredentialsSave:
             )
             AliyunCredentials.save(cred)
 
-        data = yaml.safe_load(cloud_creds_file.read_text())
+        data = yaml.safe_load(cloud_creds_file.read_text(encoding="utf-8"))
         assert data["aliyun"] == {
             "mode": "OAuth",
             "region_id": "cn-hangzhou",
@@ -745,7 +748,7 @@ class TestAliyunCredentialsSave:
         AliyunCredentials.save(cred, config_path=str(config_file))
 
         assert config_file.exists()
-        data = json.loads(config_file.read_text())
+        data = json.loads(config_file.read_text(encoding="utf-8"))
         assert data["current"] == "default"
         profiles = {p["name"]: p for p in data["profiles"]}
         assert "default" in profiles
@@ -775,7 +778,7 @@ class TestAliyunCredentialsSave:
                 },
             ],
         }
-        config_file.write_text(json.dumps(existing_config))
+        config_file.write_text(json.dumps(existing_config), encoding="utf-8")
 
         cred = AliyunCredential(
             access_key_id="updated_id",
@@ -784,7 +787,7 @@ class TestAliyunCredentialsSave:
         )
         AliyunCredentials.save(cred, config_path=str(config_file))
 
-        data = json.loads(config_file.read_text())
+        data = json.loads(config_file.read_text(encoding="utf-8"))
         profiles = {p["name"]: p for p in data["profiles"]}
 
         # Default profile updated
@@ -1105,7 +1108,7 @@ class TestAliyunCredentialsIsConfigured:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)

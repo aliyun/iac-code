@@ -81,6 +81,12 @@ class TestCommandProvider:
         items = provider.provide(token)
         assert items == []
 
+    def test_prompt_command_is_hidden_from_suggestions(self, provider):
+        """/prompt remains executable but should not appear in input suggestions."""
+        token = make_token("/pro")
+        items = provider.provide(token)
+        assert all(item.display_text != "prompt" for item in items)
+
     def test_source_and_icon(self, provider):
         """All items have source='command' and icon='/'."""
         token = make_token("/")

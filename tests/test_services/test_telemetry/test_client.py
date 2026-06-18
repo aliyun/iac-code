@@ -74,6 +74,43 @@ def test_bootstrap_with_no_default_endpoint_does_not_crash(tmp_path, monkeypatch
     client.bootstrap()
 
 
+def test_user_otlp_exporters_receive_filtered_local_endpoints(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("iac_code.__release_date__", "")
+    monkeypatch.delenv("DISABLE_TELEMETRY", raising=False)
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://telemetry.example.com/v1/traces")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "https://telemetry.example.com/v1/metrics")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "https://telemetry.example.com/v1/logs")
+    metric_exporter = MagicMock(return_value="metric-exporter")
+    metric_reader = MagicMock(return_value="metric-reader")
+    log_exporter = MagicMock(return_value="log-exporter")
+    log_processor = MagicMock(return_value="log-processor")
+    span_exporter = MagicMock(return_value="span-exporter")
+    span_processor = MagicMock(return_value="span-processor")
+    monkeypatch.setattr("iac_code.services.telemetry.client.OTLPMetricExporter", metric_exporter)
+    monkeypatch.setattr("iac_code.services.telemetry.client.PeriodicExportingMetricReader", metric_reader)
+    monkeypatch.setattr("iac_code.services.telemetry.client.OTLPLogExporter", log_exporter)
+    monkeypatch.setattr("iac_code.services.telemetry.client.BatchLogRecordProcessor", log_processor)
+    monkeypatch.setattr("iac_code.services.telemetry.client.OTLPSpanExporter", span_exporter)
+    monkeypatch.setattr("iac_code.services.telemetry.client.BatchSpanProcessor", span_processor)
+    client = TelemetryClient()
+    readers = []
+    provider = MagicMock()
+
+    client._maybe_append_user_metric_reader(readers)
+    client._maybe_append_user_log_processor(provider)
+    client._maybe_append_user_span_processor(provider)
+
+    metric_exporter.assert_called_once_with(endpoint="http://127.0.0.1:4318/v1/metrics")
+    log_exporter.assert_called_once_with(endpoint="http://127.0.0.1:4318/v1/logs")
+    span_exporter.assert_called_once_with(endpoint="http://127.0.0.1:4318/v1/traces")
+    assert readers == ["metric-reader"]
+    provider.add_log_record_processor.assert_called_once_with("log-processor")
+    provider.add_span_processor.assert_called_once_with("span-processor")
+
+
 def test_bootstrap_emits_iac_init_on_first_run(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     # Need the privacy gate open so iac.init reaches the emitter.

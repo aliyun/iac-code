@@ -1,0 +1,95 @@
+{
+  "skill_name": "iac-aliyun-cost",
+  "description": "验证成本预估技能：正确调用 GetTemplateEstimateCost API、参数平铺格式、模板校验修复、错误处理",
+  "evals": [
+    {
+      "id": 1,
+      "name": "simple-ecs-cost",
+      "prompt": "预估这个 ROS 模板的部署费用",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-hangzhou-k\n  InstanceType:\n    Type: String\n    Default: ecs.g7.large\n  ImageId:\n    Type: String\n    Default: centos_stream_9_x64_20G_alibase_20260414.vhd\n  SystemDiskCategory:\n    Type: String\n    Default: cloud_essd\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n    Properties:\n      CidrBlock: 192.168.0.0/16\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n    Properties:\n      VpcId: !Ref Vpc\n      ZoneId: !Ref ZoneId\n      CidrBlock: 192.168.1.0/24\n  Ecs:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      ZoneId: !Ref ZoneId\n      InstanceType: !Ref InstanceType\n      ImageId: !Ref ImageId\n      SystemDiskCategory: !Ref SystemDiskCategory\n      MaxAmount: 1",
+        "file_path": "templates/1-simple-ecs.yml",
+        "region": "cn-hangzhou"
+      },
+      "expected_behavior": "直接调用 GetTemplateEstimateCost，参数按 Parameters.<N>.ParameterKey/ParameterValue 平铺传递",
+      "assertions": [
+        {"name": "uses_estimate_cost_api", "check": "调用了 GetTemplateEstimateCost API"},
+        {"name": "params_flattened", "check": "参数使用 Parameters.1.ParameterKey / Parameters.1.ParameterValue 格式平铺"},
+        {"name": "uses_template_url", "check": "通过 TemplateURL 传递模板文件路径而非内联模板内容"},
+        {"name": "outputs_monthly_estimate", "check": "conclusion 中包含 monthly_estimate 和 resources 费用明细"},
+        {"name": "no_doc_search", "check": "不调用 aliyun_doc_search 或搜索定价文档"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "ecs-rds-cost",
+      "prompt": "预估 ECS + RDS 模板的月度费用",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-beijing-h\n  InstanceType:\n    Type: String\n    Default: ecs.g7.large\n  ImageId:\n    Type: String\n    Default: centos_stream_9_x64_20G_alibase_20260414.vhd\n  SystemDiskCategory:\n    Type: String\n    Default: cloud_essd\n  DBInstanceClass:\n    Type: String\n    Default: mysql.n2.medium.1\n  DBInstanceStorageType:\n    Type: String\n    Default: cloud_essd\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n    Properties:\n      CidrBlock: 10.0.0.0/16\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n    Properties:\n      VpcId: !Ref Vpc\n      ZoneId: !Ref ZoneId\n      CidrBlock: 10.0.1.0/24\n  Ecs:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      ZoneId: !Ref ZoneId\n      InstanceType: !Ref InstanceType\n      ImageId: !Ref ImageId\n      SystemDiskCategory: !Ref SystemDiskCategory\n      MaxAmount: 1\n  Rds:\n    Type: ALIYUN::RDS::DBInstance\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      ZoneId: !Ref ZoneId\n      DBInstanceClass: !Ref DBInstanceClass\n      DBInstanceStorageType: !Ref DBInstanceStorageType\n      Engine: MySQL\n      EngineVersion: '8.0'\n      DBInstanceStorage: 20\n      DBInstanceNetType: Intranet",
+        "file_path": "templates/2-ecs-rds.yml",
+        "region": "cn-beijing"
+      },
+      "expected_behavior": "ECS 和 RDS 的参数都通过平铺格式传入询价 API，费用明细分别列出",
+      "assertions": [
+        {"name": "uses_estimate_cost_api", "check": "调用了 GetTemplateEstimateCost API"},
+        {"name": "all_params_included", "check": "所有 6 个参数（ZoneId、InstanceType、ImageId、SystemDiskCategory、DBInstanceClass、DBInstanceStorageType）都传入 API"},
+        {"name": "multi_resource_breakdown", "check": "费用明细中分别列出了 ECS 和 RDS 的费用"},
+        {"name": "no_self_estimate", "check": "不自行估算费用数字，完全基于 API 返回"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "template-needs-fix",
+      "prompt": "预估费用，模板可能有问题",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-hangzhou-k\n  InstanceType:\n    Type: String\n    Default: ecs.g7.large\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n    Properties:\n      CidrBlock: 192.168.0.0/16\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n    Properties:\n      VpcId: !Ref Vpc\n      ZoneId: !Ref ZoneId\n  Ecs:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      ZoneId: !Ref ZoneId\n      InstanceType: !Ref InstanceType\n      ImageId: !Ref NonExistentParam\n      MaxAmount: 1",
+        "file_path": "templates/3-broken-template.yml",
+        "region": "cn-hangzhou",
+        "description": "VSwitch 缺少 CidrBlock，ImageId 引用了不存在的参数"
+      },
+      "expected_behavior": "先校验发现模板问题，修复（补 CidrBlock、修正 ImageId 参数引用），再询价",
+      "assertions": [
+        {"name": "validates_first", "check": "先调用 ValidateTemplate 校验模板"},
+        {"name": "fixes_template", "check": "修复了模板中的错误（VSwitch CidrBlock、ImageId 参数引用）"},
+        {"name": "writes_back", "check": "修复后将模板写回文件"},
+        {"name": "retries_after_fix", "check": "修复后重新校验或直接询价"},
+        {"name": "template_fixed_true", "check": "conclusion 中 template_fixed 为 true 且包含 fix_summary"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "pricing-api-failure",
+      "prompt": "预估这个模板的费用",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-shanghai-b\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n    Properties:\n      CidrBlock: 172.16.0.0/16\n  Bucket:\n    Type: ALIYUN::OSS::Bucket\n    Properties:\n      BucketName: my-test-bucket",
+        "file_path": "templates/4-oss-only.yml",
+        "region": "cn-shanghai",
+        "description": "仅 VPC+OSS 的模板，OSS 可能不支持询价"
+      },
+      "expected_behavior": "询价 API 可能返回错误（OSS 不支持询价），应报告错误而不编造费用",
+      "assertions": [
+        {"name": "attempts_pricing", "check": "尝试调用了 GetTemplateEstimateCost API"},
+        {"name": "reports_error_honestly", "check": "如果 API 返回错误，如实报告错误原因"},
+        {"name": "no_fabricated_cost", "check": "不编造费用数据"},
+        {"name": "error_in_conclusion", "check": "conclusion 中包含 error 字段说明失败原因"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "ha-slb-ecs-cost",
+      "prompt": "预估高可用方案（SLB + 2台 ECS）的费用",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-hangzhou-i\n  InstanceType:\n    Type: String\n    Default: ecs.c7.xlarge\n  ImageId:\n    Type: String\n    Default: centos_stream_9_x64_20G_alibase_20260414.vhd\n  SystemDiskCategory:\n    Type: String\n    Default: cloud_essd\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n    Properties:\n      CidrBlock: 10.0.0.0/16\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n    Properties:\n      VpcId: !Ref Vpc\n      ZoneId: !Ref ZoneId\n      CidrBlock: 10.0.1.0/24\n  SecurityGroup:\n    Type: ALIYUN::ECS::SecurityGroup\n    Properties:\n      VpcId: !Ref Vpc\n  EcsGroup:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      SecurityGroupId: !Ref SecurityGroup\n      ZoneId: !Ref ZoneId\n      InstanceType: !Ref InstanceType\n      ImageId: !Ref ImageId\n      SystemDiskCategory: !Ref SystemDiskCategory\n      MaxAmount: 2\n  Slb:\n    Type: ALIYUN::SLB::LoadBalancer\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      LoadBalancerSpec: slb.s1.small\n      PayType: PayOnDemand",
+        "file_path": "templates/5-ha-slb-ecs.yml",
+        "region": "cn-hangzhou"
+      },
+      "expected_behavior": "正确处理多资源模板，费用明细包含 ECS（x2）和 SLB",
+      "assertions": [
+        {"name": "uses_estimate_cost_api", "check": "调用了 GetTemplateEstimateCost API"},
+        {"name": "includes_ecs_and_slb", "check": "费用明细中包含 ECS 和 SLB 的费用"},
+        {"name": "ecs_count_reflected", "check": "ECS 费用描述中体现了 2 台实例（MaxAmount=2）"},
+        {"name": "no_terraform", "check": "整个过程不涉及 Terraform 相关内容"}
+      ]
+    }
+  ]
+}

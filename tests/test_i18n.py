@@ -38,6 +38,39 @@ MEMORY_COMMAND_MSGIDS = {
     "Saved memory",
 }
 
+PIPELINE_USER_VISIBLE_MSGIDS = {
+    "Waiting for candidate data...",
+    "Cost details",
+    "Pipeline completed. Normal chat is now active.",
+    "Judging your input...",
+    "Interrupt handling",
+    (
+        "Complete the current step by calling this tool to submit the conclusion. "
+        "If you need to roll back to an earlier step, set rollback_request."
+    ),
+    (
+        "Optional iac-code pipeline event extension for state snapshots, replay, interrupts, "
+        "and parallel candidate streams."
+    ),
+    "Selling",
+    "Intent parsing",
+    "Architecture planning",
+    "Evaluate candidates",
+    "Confirm and select",
+    "Deploying",
+    "Evaluate candidate",
+    "Template generation",
+    "Review",
+    "Cost estimation",
+    "Current step",
+    "Complete step",
+    "Ask user question",
+    "Show architecture diagram",
+    "Show candidate details",
+    'Generated the architecture diagram for "{candidate_name}".',
+    'Displayed details for "{candidate_name}".',
+}
+
 
 def _get_all_msgids_from_pot(pot_file: Path) -> set[str]:
     """Extract all msgids from a .pot template file.
@@ -343,6 +376,31 @@ def test_memory_command_translations_are_complete():
         po_file = lang_dir / "LC_MESSAGES" / "messages.po"
         translations = _get_all_translations_from_po(po_file)
         for msgid in sorted(MEMORY_COMMAND_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+
+    assert not errors, "\n".join(errors)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_pipeline_user_visible_translations_are_complete():
+    """Pipeline UI/tool strings are visible in the terminal and must be localized."""
+    assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = PIPELINE_USER_VISIBLE_MSGIDS - pot_msgids
+    assert not missing_from_pot, f"Pipeline msgids missing from messages.pot: {sorted(missing_from_pot)}"
+
+    language_dirs = _discover_language_dirs()
+    assert language_dirs, "No language directories found"
+
+    errors = []
+    for lang_dir in language_dirs:
+        po_file = lang_dir / "LC_MESSAGES" / "messages.po"
+        translations = _get_all_translations_from_po(po_file)
+        for msgid in sorted(PIPELINE_USER_VISIBLE_MSGIDS):
             msgstr = translations.get(msgid, "").strip()
             if not msgstr:
                 errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")

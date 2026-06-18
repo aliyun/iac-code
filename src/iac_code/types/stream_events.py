@@ -103,6 +103,7 @@ class ErrorEvent:
 
     error: str
     is_retryable: bool
+    error_id: str | None = None
     type: Literal["error"] = "error"
 
 
@@ -117,6 +118,7 @@ class ToolResultEvent:
     tool_name: str
     result: str
     is_error: bool = False
+    metadata: dict[str, Any] | None = None
     type: Literal["tool_result"] = "tool_result"
 
 
@@ -173,8 +175,22 @@ class SubAgentToolEvent:
     type: Literal["subagent_tool"] = "subagent_tool"
 
 
+class ToolEmittedEvent:
+    """Marker base class for events emitted by tool execution.
+
+    Subclasses (StackProgressEvent, StackInstancesProgressEvent, DiagramEvent,
+    CandidateDetailEvent) inherit from this so AgentLoop can dispatch
+    tool-emitted events to the event_queue polymorphically via
+    `isinstance(item, ToolEmittedEvent)` checks (see agent_loop.py).
+
+    Do not remove — this class is intentionally minimal.
+    """
+
+    pass
+
+
 @dataclass
-class StackProgressEvent:
+class StackProgressEvent(ToolEmittedEvent):
     """Real-time progress from a stack lifecycle operation."""
 
     stack_id: str
@@ -187,7 +203,7 @@ class StackProgressEvent:
 
 
 @dataclass
-class StackInstancesProgressEvent:
+class StackInstancesProgressEvent(ToolEmittedEvent):
     """Real-time progress from a StackGroup instances operation."""
 
     stack_group_name: str
@@ -216,6 +232,53 @@ class PlanEvent:
     type: Literal["plan"] = "plan"
 
 
+@dataclass
+class SubPipelineStreamEvent:
+    """Wraps a StreamEvent to route it to a specific sub-pipeline candidate's tab."""
+
+    sub_pipeline_id: str
+    candidate_index: int
+    inner: "StreamEvent"
+    type: Literal["sub_pipeline_stream"] = "sub_pipeline_stream"
+
+
+@dataclass
+class DiagramEvent(ToolEmittedEvent):
+    """Architecture diagram for rendering by the frontend."""
+
+    candidate_name: str
+    template_content: str
+    mermaid_source: str
+    candidate_index: int | None = None
+    type: Literal["diagram"] = "diagram"
+
+
+@dataclass
+class CandidateDetailEvent(ToolEmittedEvent):
+    """Structured candidate detail for rendering in the selection UI."""
+
+    tool_use_id: str  # U-I14: distinguish multiple tool calls in same parallel step
+    candidate_name: str
+    summary: str
+    cost_items: list[dict]
+    total_monthly_cost: str
+    candidate_index: int | None = None
+    type: Literal["candidate_detail"] = "candidate_detail"
+
+
+@dataclass
+class AskUserQuestionEvent(ToolEmittedEvent):
+    """A tool-emitted prompt that asks the user to choose an option or type details."""
+
+    tool_use_id: str
+    question: str
+    options: list[dict[str, Any]]
+    allow_free_text: bool = True
+    free_text_prompt: str = ""
+    response_future: asyncio.Future[dict[str, str] | None] | None = field(default=None)
+    type: Literal["ask_user_question"] = "ask_user_question"
+
+
 StreamEvent = Union[
     MessageStartEvent,
     TextDeltaEvent,
@@ -235,4 +298,8 @@ StreamEvent = Union[
     StackProgressEvent,
     StackInstancesProgressEvent,
     PlanEvent,
+    SubPipelineStreamEvent,
+    DiagramEvent,
+    CandidateDetailEvent,
+    AskUserQuestionEvent,
 ]

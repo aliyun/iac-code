@@ -30,7 +30,7 @@ class TestCloudCredentialsHasProvider:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)
@@ -84,7 +84,7 @@ class TestCloudCredentialsGetProvider:
                 }
             ],
         }
-        config_file.write_text(json.dumps(config))
+        config_file.write_text(json.dumps(config), encoding="utf-8")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ALIBABA_CLOUD_ACCESS_KEY_ID", None)

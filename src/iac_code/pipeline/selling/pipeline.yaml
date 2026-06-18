@@ -1,0 +1,258 @@
+name: selling
+emit_stack_events: true
+
+# --- User escape 门控（控制 pipeline 运行中用户能否绕开走 chat 之外的路径）---
+# 三个开关默认 false（不声明也一样），pipeline 完全主导对话。
+# 声明 true 才允许对应触发器。
+allow_user_escapes:
+  skill: false      # 控制 $skill_name <prompt>
+  command: false    # 控制 /xxx（白名单 /exit /help /status /resume 永远可用）
+  shell: false      # 控制 !cmd
+
+on_complete:
+  action: switch_to_normal
+  apply_on:
+    - completed
+    - early_exit
+    - failed
+    - canceled
+  handoff_context:
+    include:
+      - intent
+      - architecture
+      - evaluated_candidates
+      - selected_plan
+      - deployment
+
+# --- Base Prompt Sections ---
+# 控制注入到每个 step system prompt 前的通用 section。
+# 可用 section: identity, system, env, cloud_config, tools, doing_tasks, actions, output_style
+# 解析规则: include 为空 = 全部可用 section; exclude 从中移除指定项。
+# 不配置此字段时，默认: [identity, system, env, cloud_config, tools]
+# Step 级同名字段可覆盖（整体替换，非合并）。
+base_prompt_sections:
+  include: [identity, system, env, cloud_config, tools, doing_tasks, actions, output_style]
+  exclude: []
+
+feature_flags:
+  enable_reviewing:
+    default: false
+    env: IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING
+
+context_dependencies:
+  intent: []
+  architecture: [intent]
+  evaluated_candidates: [architecture]
+  selected_plan: [evaluated_candidates]
+  deployment: [selected_plan]
+
+max_rollbacks: 3
+
+# --- Tools 配置说明 ---
+# tools.include: 为空 = 全量 base 工具; 有值 = 仅指定工具
+# tools.exclude: 从结果集中移除
+# complete_step 工具始终自动注入，无需手动声明
+# 不配置 tools = 全量 base 工具
+
+sub_pipelines:
+  evaluate_candidate:
+    max_rollbacks: 5
+    context_fields_from_parent: [intent]
+    iterate_over: architecture.candidates
+    steps:
+      - id: template_generating
+        description: "根据候选架构生成 IaC 模板代码"
+        conclusion_field: template
+        a2a_artifacts:
+          - path: conclusion.file_path
+            content: conclusion.template
+            media_type: auto
+        forward: reviewing
+        skill: iac-aliyun-template-generating
+        prompt: prompts/template_generating.md
+        context_fields: [candidate]
+
+      - id: reviewing
+        description: "审查模板的安全性和最佳实践"
+        enabled_when: enable_reviewing
+        conclusion_field: review
+        forward: cost_estimating
+        skill: iac-aliyun-review
+        prompt: prompts/reviewing.md
+        context_fields: [template]
+        tools:
+          include: [-]
+          exclude: []
+        rollback:
+          - target: template_generating
+            condition: template_issue
+
+      - id: cost_estimating
+        description: "评估模板的资源成本"
+        conclusion_field: cost
+        a2a_artifacts:
+          - path: conclusion.file_path
+            content: conclusion.template
+            media_type: auto
+        forward: null
+        skill: iac-aliyun-cost
+        prompt: prompts/cost_estimating.md
+        context_fields: [template]
+        tools:
+          include: []
+          exclude: [bash]
+
+steps:
+  - id: intent_parsing
+    description: "解析用户意图，提取云服务需求和约束条件"
+    conclusion_field: intent
+    forward: architecture_planning
+    skill: iac-aliyun-intent
+    prompt: prompts/intent_parsing.md
+    exit_condition:
+      field: is_infra_intent
+      value: false
+    tools:
+      include: [-]
+      exclude: []
+    inject_tools: [ask_user_question]
+    completion_guards:
+      - require_tool: ask_user_question
+        when_user_message_matches_any:
+          - "(项目|需求|应用|服务|网站|小程序|后端).*(上线|部署)"
+          - "(上线|部署).*(项目|需求|应用|服务|网站|小程序|后端)"
+          - "(做|建|搭建|开发).*(网站|应用|小程序|后端)"
+        unless_user_message_matches_any:
+          - "(ECS|RDS|OSS|VPC|SLB|ALB|NAT|Redis|Kafka|CDN|K8s|Kubernetes|阿里云|AWS|Azure|GCP|服务器|数据库|负载均衡|容器)"
+        required_conclusion_any_of: [clarification_choice, clarification_text]
+        copy_tool_result_to_conclusion:
+          selected_id: clarification_choice
+          free_text: clarification_text
+        message: "这个输入仍缺少明确的云资源、部署目标或运维约束，需要先向用户澄清。"
+      - require_tool: ask_user_question
+        when_user_message_matches_any:
+          - "(AWS|Amazon Web Services|Azure|GCP|Google Cloud|GoogleCloud|腾讯云|华为云|火山引擎|UCloud|EC2|S3|Lambda|CloudFormation|EKS|AKS|GKE)"
+        required_conclusion_any_of: [clarification_choice, clarification_text]
+        copy_tool_result_to_conclusion:
+          selected_id: clarification_choice
+          free_text: clarification_text
+        message: "当前流程只支持阿里云部署需求；非阿里云需求需要先让用户改成阿里云目标或确认暂不处理。"
+      - require_tool: ask_user_question
+        when_conclusion_field_equals:
+          confidence: low
+        required_conclusion_any_of: [clarification_choice, clarification_text]
+        copy_tool_result_to_conclusion:
+          selected_id: clarification_choice
+          free_text: clarification_text
+        message: "low 置信度意图不能直接完成，需要先向用户澄清。"
+      - require_tool: ask_user_question
+        when_conclusion_field_equals:
+          category: chat
+        required_conclusion_any_of: [clarification_choice, clarification_text]
+        copy_tool_result_to_conclusion:
+          selected_id: clarification_choice
+          free_text: clarification_text
+        message: "这个输入不是部署/云资源需求，需要先让用户重新输入部署目标或确认暂不处理。"
+      - require_tool: ask_user_question
+        when_conclusion_field_equals:
+          category: code_request
+        required_conclusion_any_of: [clarification_choice, clarification_text]
+        copy_tool_result_to_conclusion:
+          selected_id: clarification_choice
+          free_text: clarification_text
+        message: "这个输入不是部署/云资源需求，需要先让用户重新输入部署目标或确认暂不处理。"
+      - require_tool: ask_user_question
+        when_conclusion_field_equals:
+          category: knowledge_question
+        required_conclusion_any_of: [clarification_choice, clarification_text]
+        copy_tool_result_to_conclusion:
+          selected_id: clarification_choice
+          free_text: clarification_text
+        message: "这个输入不是部署/云资源需求，需要先让用户重新输入部署目标或确认暂不处理。"
+    base_prompt_sections:
+      include: [identity, system, env, cloud_config, output_style]
+      exclude: []
+
+  - id: architecture_planning
+    description: "根据意图设计多个候选架构方案"
+    conclusion_field: architecture
+    forward: evaluate_candidates
+    skill: iac-aliyun-architecture
+    prompt: prompts/architecture_planning.md
+    context_fields: [intent]
+    tools:
+      include: [read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
+      exclude: []
+    rollback:
+      - target: intent_parsing
+        condition: intent_unclear
+
+  - id: evaluate_candidates
+    description: "并行生成各候选方案的 IaC 模板并评估成本"
+    type: parallel_sub_pipeline
+    sub_pipeline: evaluate_candidate
+    conclusion_field: evaluated_candidates
+    forward: confirm_and_select
+    prompt: prompts/evaluate_candidates.md
+
+  - id: confirm_and_select
+    description: "展示方案详情，等待用户选择"
+    conclusion_field: selected_plan
+    forward: deploying
+    prompt: prompts/confirm_and_select.md
+    context_fields: [evaluated_candidates]
+    auto_advance: false
+    ui_mode: candidate_selection
+    inject_tools: [show_architecture_diagram, show_candidate_detail]
+    tools:
+      include: [read_file]
+      exclude: []
+    conclusion_schema:
+      type: object
+      required: [user_prompt, options]
+      additionalProperties: false
+      properties:
+        user_prompt:
+          type: string
+          description: 展示给用户的选择提示
+        options:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [name, summary, candidate_index]
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+              summary:
+                type: string
+              candidate_index:
+                type: integer
+        user_input:
+          type: string
+          description: 用户选择方案时输入的原始文本；首次展示方案时可省略
+        selected_candidate_name:
+          type: string
+          description: 用户最终选择的候选方案名称；首次展示方案时可省略
+        selected_candidate_index:
+          type: integer
+          description: 用户最终选择的候选方案在 evaluated_candidates 中的 0 基下标；首次展示方案时可省略
+    rollback:
+      - target: architecture_planning
+        condition: want_different_plans
+
+  - id: deploying
+    description: "执行用户选定方案的部署"
+    conclusion_field: deployment
+    forward: null
+    skill: iac-aliyun-deploying
+    prompt: prompts/deploying.md
+    interrupt_judge_failure: pause
+    context_fields: [selected_plan, evaluated_candidates]
+    hooks_file: hooks/deploying.py
+    rollback:
+      - target: confirm_and_select
+        condition: invalid_selection
+      - target: architecture_planning
+        condition: need_different_architecture

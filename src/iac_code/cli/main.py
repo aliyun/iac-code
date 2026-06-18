@@ -178,6 +178,15 @@ def main(
             typer.echo(_("Invalid --output-format '{}'. Valid values: {}").format(output_format, valid), err=True)
             raise typer.Exit(1) from exc
 
+        from iac_code.pipeline.config import RunMode, get_run_mode
+
+        if get_run_mode() == RunMode.PIPELINE:
+            typer.echo(
+                _("Pipeline mode requires the interactive REPL. Remove --prompt or set IAC_CODE_MODE=normal."),
+                err=True,
+            )
+            raise typer.Exit(1)
+
     # Priority: CLI parameter > saved config > default
     if not model:
         try:
@@ -249,7 +258,7 @@ def main(
             loop.default_exception_handler(context)
 
         async def _run_with_handler(coro):
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loop.set_exception_handler(_async_excepthook)
             return await coro
 
@@ -356,7 +365,7 @@ def main(
             loop.default_exception_handler(context)
 
         async def _run_with_handler(coro):
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loop.set_exception_handler(_async_excepthook)
             return await coro
 

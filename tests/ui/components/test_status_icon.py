@@ -41,6 +41,26 @@ class TestStatusIcon:
         result = icon.render()
         assert "◐" in result.plain
 
+    def test_legacy_windows_success_icon_uses_ascii(self, monkeypatch):
+        monkeypatch.setattr("iac_code.ui.components.status_icon.use_ascii_symbols", lambda: True)
+        icon = StatusIcon(Status.SUCCESS)
+        result = icon.render()
+        assert result.plain == "OK"
+
+    def test_legacy_windows_all_icons_are_ascii(self, monkeypatch):
+        monkeypatch.setattr("iac_code.ui.components.status_icon.use_ascii_symbols", lambda: True)
+
+        rendered = {status: StatusIcon(status).render().plain for status in Status}
+
+        assert rendered == {
+            Status.SUCCESS: "OK",
+            Status.ERROR: "X",
+            Status.WARNING: "!",
+            Status.INFO: "i",
+            Status.PENDING: ".",
+            Status.RUNNING: "*",
+        }
+
     def test_all_statuses_renderable(self):
         for status in Status:
             icon = StatusIcon(status)

@@ -89,7 +89,8 @@ class TestLoadSavedModel:
                     "activeProvider": "bailian",
                     "providers": {"bailian": {"model": "qwen3-max"}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         with patch("iac_code.config.Path.home", return_value=tmp_path):
@@ -105,7 +106,7 @@ class TestLoadSavedModel:
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir()
         settings = config_dir / "settings.yml"
-        settings.write_text(yaml.dump({"otherKey": "value"}))
+        settings.write_text(yaml.dump({"otherKey": "value"}), encoding="utf-8")
 
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import load_saved_model
@@ -118,7 +119,7 @@ class TestLoadSavedModel:
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir()
         settings = config_dir / "settings.yml"
-        settings.write_text("not: valid: yaml: [")
+        settings.write_text("not: valid: yaml: [", encoding="utf-8")
 
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import load_saved_model
@@ -145,7 +146,7 @@ class TestLoadSavedEffort:
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir()
         settings = config_dir / "settings.yml"
-        settings.write_text(yaml.dump({"effort": "high"}))
+        settings.write_text(yaml.dump({"effort": "high"}), encoding="utf-8")
 
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import load_saved_effort
@@ -166,7 +167,8 @@ class TestLoadSavedEffort:
                     "activeProvider": "bailian",
                     "providers": {"bailian": {"model": "qwen3-max"}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         with patch("iac_code.config.Path.home", return_value=tmp_path):
@@ -180,7 +182,7 @@ class TestLoadSavedEffort:
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir()
         settings = config_dir / "settings.yml"
-        settings.write_text("not: valid: yaml: [")
+        settings.write_text("not: valid: yaml: [", encoding="utf-8")
 
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import load_saved_effort
@@ -204,7 +206,7 @@ class TestYamlHelpers:
         import yaml
 
         path = tmp_path / "test.yml"
-        path.write_text(yaml.dump({"key": "value", "num": 42}))
+        path.write_text(yaml.dump({"key": "value", "num": 42}), encoding="utf-8")
 
         from iac_code.config import _load_yaml
 
@@ -222,7 +224,7 @@ class TestYamlHelpers:
         _save_yaml(path, {"key": "value", "num": 42})
 
         assert path.exists()
-        content = yaml.safe_load(path.read_text())
+        content = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert content == {"key": "value", "num": 42}
 
     def test_save_yaml_delegates_to_atomic_write_text(self, monkeypatch, tmp_path):

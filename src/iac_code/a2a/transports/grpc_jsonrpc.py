@@ -10,6 +10,7 @@ from typing import Any
 
 from iac_code.a2a.transports.base import A2ATransportDependencyError
 from iac_code.a2a.transports.dispatcher import A2ARuntimeComponents
+from iac_code.utils.public_errors import public_error_from_exception
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,11 @@ class _JsonRpcServicer:
         self._dispatcher = A2AJsonRpcDispatcher(components)
 
     async def Send(self, request: JsonRpcEnvelope, context: Any) -> JsonRpcEnvelope:  # noqa: N802
-        response = await self._dispatcher.dispatch(_from_envelope(request))
+        payload = _from_envelope(request)
+        try:
+            response = await self._dispatcher.dispatch(payload)
+        except Exception as exc:
+            return _to_envelope(_jsonrpc_public_error(payload.get("id"), exc))
         return _to_envelope(response)
 
     async def Stream(  # noqa: N802
@@ -82,13 +87,17 @@ class _JsonRpcServicer:
         request: JsonRpcEnvelope,
         context: Any,
     ) -> AsyncIterator[JsonRpcEnvelope]:
+        payload = _from_envelope(request)
         try:
-            async for event in self._dispatcher.dispatch_stream(_from_envelope(request)):
+            async for event in self._dispatcher.dispatch_stream(payload):
                 yield _to_envelope(event)
+            yield _to_envelope({"jsonrpc": "2.0", "id": payload.get("id")}, final=True)
         except asyncio.CancelledError:
             if _context_cancelled(context):
                 return
             raise
+        except Exception as exc:
+            yield _to_envelope(_jsonrpc_public_error(payload.get("id"), exc), final=True)
 
     async def aclose(self) -> None:
         await self._dispatcher.aclose()
@@ -122,8 +131,23 @@ GrpcJsonRpcA2AServer = GrpcA2AServer
 GrpcJsonRpcA2AClient = GrpcA2AClient
 
 
-def _to_envelope(payload: dict[str, Any], *, envelope_cls: Any = JsonRpcEnvelope) -> Any:
-    return envelope_cls(payload=json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+def _to_envelope(payload: dict[str, Any], *, final: bool = False, envelope_cls: Any = JsonRpcEnvelope) -> Any:
+    return envelope_cls(
+        payload=json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), final=final
+    )
+
+
+def _jsonrpc_public_error(request_id: Any, exc: BaseException) -> dict[str, Any]:
+    failure = public_error_from_exception(exc)
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {
+            "code": -32603,
+            "message": failure.summary,
+            "data": {"error_id": failure.error_id},
+        },
+    }
 
 
 def _from_envelope(envelope: JsonRpcEnvelope) -> dict[str, Any]:

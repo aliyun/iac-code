@@ -14,6 +14,7 @@ from iac_code.i18n import _
 from iac_code.memory.memory_manager import MemoryManager
 from iac_code.memory.project_memory import ProjectMemoryRuntime, is_auto_memory_enabled, save_auto_memory_enabled
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
+from iac_code.utils.public_errors import sanitize_public_text
 
 MEMORY_USAGE = _("Usage: /memory-folder [<name>|search <query>|delete <name>|help]")
 _RESERVED_SUBCOMMANDS = {"search", "delete", "help"}
@@ -71,7 +72,7 @@ def execute_memory_command(memory_manager: MemoryManager, args: list[str]) -> st
                 return _("Memory '{name}' not found.").format(name=name)
             memory_manager.delete(name)
         except ValueError as exc:
-            return str(exc)
+            return sanitize_public_text(exc)
         return _("Memory '{name}' deleted.").format(name=name)
 
     if len(args) != 1 or action in _RESERVED_SUBCOMMANDS:
@@ -81,7 +82,7 @@ def execute_memory_command(memory_manager: MemoryManager, args: list[str]) -> st
     try:
         memory = memory_manager.load(name)
     except ValueError as exc:
-        return str(exc)
+        return sanitize_public_text(exc)
     if memory is None:
         return _("Memory '{name}' not found.").format(name=name)
     return _format_memory(memory)

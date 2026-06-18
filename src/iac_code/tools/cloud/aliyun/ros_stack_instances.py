@@ -90,6 +90,9 @@ class RosStackInstances(Tool):
     def is_read_only(self, input: dict | None = None) -> bool:
         return False
 
+    def needs_event_queue(self) -> bool:
+        return True
+
     def is_concurrency_safe(self, tool_input: dict[str, Any]) -> bool:
         return False
 

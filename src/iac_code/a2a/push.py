@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass
 from ipaddress import ip_address
@@ -21,11 +22,35 @@ from a2a.utils.proto_utils import to_stream_response
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
-from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.persistence import A2APersistenceStore, _protocol_id_file_stem
 from iac_code.a2a.push_queue import A2APushJob, A2APushQueue, LocalFileA2APushQueue
 from iac_code.a2a.push_secrets import A2APushSecretKeyring
 from iac_code.a2a.types import validate_protocol_id
 from iac_code.utils.file_security import restrict_file_permissions, safe_replace
+from iac_code.utils.public_errors import public_exception_summary
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _safe_glob_json(path: Path) -> list[Path]:
+    try:
+        return list(path.glob("*.json"))
+    except OSError:
+        return []
+
+
+def _unlink_legacy_missing_ok(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 class InvalidPushNotificationConfigError(ValueError):
@@ -123,36 +148,62 @@ class A2APushConfigStore(PushNotificationConfigStore):
     async def delete_info(self, task_id: str, context: ServerCallContext, config_id: str | None = None) -> None:
         owner = _owner(context)
         task_id = validate_protocol_id(task_id)
+        owner_dir = self._owner_dir(owner)
+        encoded_task_dir = owner_dir / _protocol_id_file_stem(task_id)
+        legacy_task_dir = owner_dir / task_id
         if config_id:
-            path = self._config_path(owner, task_id, validate_protocol_id(config_id))
-            path.unlink(missing_ok=True)
+            config_id = validate_protocol_id(config_id)
+            encoded_filename = f"{_protocol_id_file_stem(config_id)}.json"
+            legacy_filename = f"{config_id}.json"
+
+            (encoded_task_dir / encoded_filename).unlink(missing_ok=True)
+            legacy_paths = []
+            if legacy_filename != encoded_filename:
+                legacy_paths.append(encoded_task_dir / legacy_filename)
+            if legacy_task_dir != encoded_task_dir:
+                legacy_paths.append(legacy_task_dir / encoded_filename)
+                if legacy_filename != encoded_filename:
+                    legacy_paths.append(legacy_task_dir / legacy_filename)
+            for path in legacy_paths:
+                _unlink_legacy_missing_ok(path)
             return
-        task_dir = self._owner_dir(owner) / task_id
-        if not task_dir.exists():
-            return
-        for path in task_dir.glob("*.json"):
-            path.unlink(missing_ok=True)
+        if encoded_task_dir.exists():
+            for path in sorted(encoded_task_dir.glob("*.json")):
+                path.unlink(missing_ok=True)
+        if legacy_task_dir != encoded_task_dir and _safe_path_exists(legacy_task_dir):
+            for path in _safe_glob_json(legacy_task_dir):
+                _unlink_legacy_missing_ok(path)
 
     def _load_configs_for_owner(
         self, owner: str, task_id: str, *, owner_is_hashed: bool = False
     ) -> list[TaskPushNotificationConfig]:
         owner_dir = self._root / owner if owner_is_hashed else self._owner_dir(owner)
-        task_dir = owner_dir / task_id
-        if not task_dir.exists():
-            return []
         configs: list[TaskPushNotificationConfig] = []
-        for path in sorted(task_dir.glob("*.json")):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                config = TaskPushNotificationConfig()
-                ParseDict(self._config_from_storage(data), config, ignore_unknown_fields=True)
-            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        seen_ids: set[str] = set()
+        for task_dir in self._task_dirs_for_id(owner, task_id, owner_dir=owner_dir):
+            if not _safe_path_exists(task_dir):
                 continue
-            configs.append(config)
+            for path in sorted(_safe_glob_json(task_dir)):
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    config = TaskPushNotificationConfig()
+                    ParseDict(self._config_from_storage(data), config, ignore_unknown_fields=True)
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    continue
+                if config.id in seen_ids:
+                    continue
+                seen_ids.add(config.id)
+                configs.append(config)
         return configs
 
     def _config_path(self, owner: str, task_id: str, config_id: str) -> Path:
-        return self._owner_dir(owner) / task_id / f"{config_id}.json"
+        return self._owner_dir(owner) / _protocol_id_file_stem(task_id) / f"{_protocol_id_file_stem(config_id)}.json"
+
+    def _task_dirs_for_id(self, owner: str, task_id: str, *, owner_dir: Path | None = None) -> list[Path]:
+        owner_dir = owner_dir or self._owner_dir(owner)
+        encoded = owner_dir / _protocol_id_file_stem(task_id)
+        legacy = owner_dir / task_id
+        return [encoded] if encoded == legacy else [encoded, legacy]
 
     def _owner_dir(self, owner: str) -> Path:
         return self._root / hashlib.sha256(owner.encode("utf-8")).hexdigest()
@@ -213,17 +264,37 @@ class A2APushSender(PushNotificationSender):
         self._metrics = metrics or NoOpA2AMetrics()
 
     async def send_notification(self, task_id: str, event: PushNotificationEvent) -> None:
-        configs = await self._config_store.get_info_for_dispatch(validate_protocol_id(task_id))
+        try:
+            configs = await self._config_store.get_info_for_dispatch(validate_protocol_id(task_id))
+        except Exception as exc:
+            logger.warning(
+                "Failed to load A2A push configs for task %s: %s",
+                task_id,
+                public_exception_summary(exc, max_chars=500),
+                exc_info=True,
+            )
+            return
         payload = MessageToDict(to_stream_response(event), preserving_proto_field_name=False)
         for config in configs:
-            await self._queue.enqueue(
-                A2APushJob(
-                    task_id=task_id,
-                    config_id=config.id or task_id,
-                    url=validate_push_callback_url(config.url),
-                    payload=payload,
+            config_id = config.id or task_id
+            try:
+                await self._queue.enqueue(
+                    A2APushJob(
+                        task_id=task_id,
+                        config_id=config_id,
+                        url=validate_push_callback_url(config.url),
+                        payload=payload,
+                    )
                 )
-            )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to enqueue A2A push notification for task %s config %s: %s",
+                    task_id,
+                    config_id,
+                    public_exception_summary(exc, max_chars=500),
+                    exc_info=True,
+                )
+                continue
             self._metrics.record_push_enqueued()
 
     async def aclose(self) -> None:
@@ -247,16 +318,21 @@ class A2APushNotifier:
         self._retry_delay_seconds = max(0.0, retry_delay_seconds)
 
     def save_config(self, config: A2APushConfig) -> None:
+        task_id = validate_protocol_id(config.task_id)
         self._push_dir.mkdir(parents=True, exist_ok=True)
-        _write_json_atomic(self._push_dir / f"{config.task_id}.json", asdict(config))
+        _write_json_atomic(self._push_config_path(task_id), asdict(config))
 
     def load_config(self, task_id: str) -> A2APushConfig | None:
-        path = self._push_dir / f"{task_id}.json"
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return A2APushConfig(**data)
-        except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            return None
+        task_id = validate_protocol_id(task_id)
+        for path in self._push_config_paths(task_id):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return A2APushConfig(**data)
+            except FileNotFoundError:
+                continue
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                return None
+        return None
 
     async def notify_task_state(self, *, task_id: str, context_id: str, state: str) -> bool:
         config = self.load_config(task_id)
@@ -282,6 +358,14 @@ class A2APushNotifier:
         close = getattr(self._http_client, "aclose", None)
         if close is not None:
             await close()
+
+    def _push_config_path(self, task_id: str) -> Path:
+        return self._push_dir / f"{_protocol_id_file_stem(task_id)}.json"
+
+    def _push_config_paths(self, task_id: str) -> list[Path]:
+        encoded_path = self._push_config_path(task_id)
+        legacy_path = self._push_dir / f"{task_id}.json"
+        return [encoded_path] if encoded_path == legacy_path else [encoded_path, legacy_path]
 
 
 def _notification_headers(config: TaskPushNotificationConfig) -> dict[str, str]:

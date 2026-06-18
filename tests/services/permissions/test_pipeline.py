@@ -73,7 +73,7 @@ class TestPipeline:
         project.mkdir()
         outside.mkdir()
         target = outside / "notes.txt"
-        target.write_text("outside")
+        target.write_text("outside", encoding="utf-8")
 
         r = await check_tool_permission(
             ReadFileTool(),
@@ -90,7 +90,7 @@ class TestPipeline:
         project.mkdir()
         outside.mkdir()
         target = outside / "notes.txt"
-        target.write_text("outside")
+        target.write_text("outside", encoding="utf-8")
 
         r = await check_tool_permission(
             ReadFileTool(),
@@ -133,7 +133,7 @@ class TestPipeline:
         outside = tmp_path / "outside"
         project.mkdir()
         outside.mkdir()
-        (outside / "secret.txt").write_text("secret")
+        (outside / "secret.txt").write_text("secret", encoding="utf-8")
 
         r = await check_tool_permission(
             GlobTool(),
@@ -151,7 +151,7 @@ class TestPipeline:
         outside = tmp_path / "outside"
         project.mkdir()
         outside.mkdir()
-        (outside / "secret.txt").write_text("secret")
+        (outside / "secret.txt").write_text("secret", encoding="utf-8")
         (project / "link-outside").symlink_to(outside, target_is_directory=True)
 
         r = await check_tool_permission(
@@ -170,7 +170,7 @@ class TestPipeline:
         outside = tmp_path / "outside"
         project.mkdir()
         outside.mkdir()
-        (outside / "allowed.txt").write_text("allowed")
+        (outside / "allowed.txt").write_text("allowed", encoding="utf-8")
         (project / "link-outside").symlink_to(outside, target_is_directory=True)
 
         r = await check_tool_permission(
@@ -195,7 +195,7 @@ class TestPipeline:
         project.mkdir()
         outside.mkdir()
         target = outside / "target.txt"
-        target.write_text("before")
+        target.write_text("before", encoding="utf-8")
 
         r = await check_tool_permission(
             tool,
@@ -219,7 +219,7 @@ class TestPipeline:
         project = tmp_path / "project"
         project.mkdir()
         target = project / "notes.txt"
-        target.write_text("inside")
+        target.write_text("inside", encoding="utf-8")
 
         if tool.name == "read_file":
             tool_input = {"path": str(target)}
@@ -292,7 +292,7 @@ class TestPipeline:
         project.mkdir()
         outside.mkdir()
         target = outside / "target.txt"
-        target.write_text("outside")
+        target.write_text("outside", encoding="utf-8")
 
         if tool.name == "bash":
             tool_input = {"command": "cat {}".format(target)}

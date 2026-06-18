@@ -8,7 +8,9 @@ from google.protobuf.json_format import MessageToDict
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.metrics import NoOpA2AMetrics
-from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
+from iac_code.a2a.pipeline_journal import A2APipelineJournal
+from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent, ToolResultEvent
 
@@ -17,6 +19,11 @@ from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntim
 
 def dump(event):
     return MessageToDict(event, preserving_proto_field_name=False)
+
+
+@pytest.fixture(autouse=True)
+def default_normal_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("IAC_CODE_MODE", raising=False)
 
 
 @pytest.mark.asyncio
@@ -256,7 +263,7 @@ async def test_executor_creates_missing_workspace(monkeypatch: pytest.MonkeyPatc
 @pytest.mark.asyncio
 async def test_executor_rejects_workspace_path_pointing_at_file(tmp_path: Path) -> None:
     file_path = tmp_path / "not-a-dir"
-    file_path.write_text("blocker")
+    file_path.write_text("blocker", encoding="utf-8")
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
     queue = FakeEventQueue()
@@ -323,6 +330,156 @@ async def test_executor_rejects_empty_prompt_before_creating_runtime(
     dumped = dump(queue.events[-1])
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     assert dumped["status"]["message"]["parts"][0]["text"] == "A2A server currently accepts text input only."
+
+
+@pytest.mark.asyncio
+async def test_executor_delegates_pipeline_mode_after_validation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    calls = []
+
+    class SpyPipelineExecutor:
+        def __init__(self, **kwargs):
+            calls.append(("init", kwargs))
+
+        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, prompt):
+            calls.append(("execute", {"task_id": task_id, "context_id": context_id, "cwd": cwd, "prompt": prompt}))
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", SpyPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+
+    assert calls[-1] == (
+        "execute",
+        {"task_id": "task-1", "context_id": "ctx-1", "cwd": str(tmp_path), "prompt": "hello"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_executor_hydrates_running_pipeline_task_id_from_sidecar(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    persistence = A2APersistenceStore(tmp_path / "a2a-state")
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+    journal = A2APipelineJournal(a2a_pipeline_dir_for_session(cwd=str(tmp_path), session_id="session-1"))
+    journal.append(
+        {
+            "schemaVersion": "1.0",
+            "eventId": "evt-running",
+            "sequence": 1,
+            "eventType": "step_started",
+            "scope": "step",
+            "pipelineRunId": "ctx-1",
+            "pipelineName": "selling",
+            "contextId": "ctx-1",
+            "taskId": "task-1",
+            "status": "working",
+            "data": {},
+        }
+    )
+    calls = []
+
+    class SpyPipelineExecutor:
+        def __init__(self, **kwargs):
+            calls.append(("init", kwargs))
+
+        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, prompt):
+            calls.append(("execute", {"task_id": task_id, "context_id": context_id, "cwd": cwd, "prompt": prompt}))
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", SpyPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="",
+            context_id="ctx-1",
+            text="继续",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert calls[-1] == (
+        "execute",
+        {"task_id": "task-1", "context_id": "ctx-1", "cwd": str(tmp_path), "prompt": "继续"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_executor_empty_prompt_takes_precedence_over_pipeline_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    def fail_if_called(options):  # noqa: ARG001
+        raise AssertionError("runtime should not be created for empty prompt")
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fail_if_called)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(text="   ", metadata={"iac_code": {"cwd": str(tmp_path)}})
+
+    await executor.execute(context, queue)
+
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    assert dumped["status"]["message"]["parts"][0]["text"] == "A2A server currently accepts text input only."
+
+
+@pytest.mark.asyncio
+async def test_executor_workspace_errors_take_precedence_over_pipeline_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    def fail_if_called(options):  # noqa: ARG001
+        raise AssertionError("runtime should not be created for invalid workspace")
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fail_if_called)
+
+    file_path = tmp_path / "not-a-dir"
+    file_path.write_text("blocker", encoding="utf-8")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(file_path)}})
+
+    await executor.execute(context, queue)
+
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    assert "workspace" in dumped["status"]["message"]["parts"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_executor_runs_normal_mode_when_iac_code_mode_is_normal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "normal")
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    assert loop.prompts == ["hello"]
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -580,6 +737,139 @@ async def test_executor_resumes_messages_after_restart(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.agent.message import Message
+    from iac_code.services.session_storage import SessionStorage
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    session_id = "session-handoff"
+    context_id = "ctx-handoff"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
+        {
+            "normalHandoff": {
+                "action": "switch_to_normal",
+                "targetMode": "normal",
+                "summary": "[Pipeline Handoff Context]\nPipeline: selling",
+            }
+        }
+    )
+    SessionStorage().append(str(cwd), session_id, Message(role="user", content="[Pipeline Handoff Context]"))
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
+    seen_resume: list[object | None] = []
+
+    def fake_factory(options):
+        seen_resume.append(options.resume_messages)
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    class FailingPipelineExecutor:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def execute(self, **kwargs) -> None:
+            raise AssertionError("pipeline executor should not be used after normal handoff")
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_factory)
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", FailingPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    context = FakeRequestContext(
+        task_id="task-followup",
+        context_id=context_id,
+        text="继续解释一下",
+        metadata={"iac_code": {"cwd": str(cwd)}},
+    )
+    await executor.execute(context, FakeEventQueue())
+
+    assert loop.prompts == ["继续解释一下"]
+    assert store._contexts[context_id].session_id == session_id
+    assert seen_resume and seen_resume[0] is not None
+    assert any(getattr(message, "content", "") == "[Pipeline Handoff Context]" for message in seen_resume[0])
+
+
+@pytest.mark.asyncio
+async def test_pipeline_handoff_context_is_backfilled_from_snapshot_when_session_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.services.session_storage import SessionStorage
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    session_id = "session-handoff"
+    context_id = "ctx-handoff"
+    summary = "[Pipeline Handoff Context]\nPipeline: selling"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
+        {
+            "normalHandoff": {
+                "action": "switch_to_normal",
+                "targetMode": "normal",
+                "summary": summary,
+            }
+        }
+    )
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
+    seen_resume: list[object | None] = []
+
+    def fake_factory(options):
+        seen_resume.append(options.resume_messages)
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    class FailingPipelineExecutor:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def execute(self, **kwargs) -> None:
+            raise AssertionError("pipeline executor should not be used after normal handoff")
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_factory)
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", FailingPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-followup",
+            context_id=context_id,
+            text="继续解释一下",
+            metadata={"iac_code": {"cwd": str(cwd)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert loop.prompts == ["继续解释一下"]
+    assert seen_resume and seen_resume[0] is not None
+    assert any(getattr(message, "content", "") == summary for message in seen_resume[0])
+    loaded = SessionStorage().load(str(cwd), session_id)
+    assert loaded is not None
+    assert any(getattr(message, "content", "") == summary for message in loaded)
+
+
+@pytest.mark.asyncio
 async def test_auth_error_is_sanitized(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     def raise_auth_error(options):
         raise ValueError("provider not configured: secret internal detail")
@@ -645,7 +935,7 @@ async def test_retryable_setup_error_returns_input_required(tmp_path: Path) -> N
 async def test_unexpected_error_surfaces_type_and_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class ExplodingLoop:
         async def run_streaming(self, prompt: str):
-            raise RuntimeError("internal path /secret/config.yml leaked")
+            raise RuntimeError("Authorization: Bearer sk-live at /Users/alice/.iac-code/settings.yml")
             yield TextDeltaEvent(text="never")
 
     runtime = FakeRuntime(agent_loop=ExplodingLoop(), session_id="session-1")
@@ -662,7 +952,8 @@ async def test_unexpected_error_surfaces_type_and_message(monkeypatch: pytest.Mo
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     text = dumped["status"]["message"]["parts"][0]["text"]
     assert text.startswith("RuntimeError:")
-    assert "internal path /secret/config.yml leaked" in text
+    assert "sk-live" not in text
+    assert "/Users/alice" not in text
 
 
 @pytest.mark.asyncio

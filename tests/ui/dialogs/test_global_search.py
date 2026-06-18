@@ -22,8 +22,8 @@ class TestGlobalSearch:
 
     def test_search_finds_hello(self, tmp_path):
         """Searching 'hello' in a sample tree should return items matching main.py."""
-        (tmp_path / "main.py").write_text("print('hello world')\nx = 1\n")
-        (tmp_path / "other.py").write_text("y = 2\n")
+        (tmp_path / "main.py").write_text("print('hello world')\nx = 1\n", encoding="utf-8")
+        (tmp_path / "other.py").write_text("y = 2\n", encoding="utf-8")
 
         gs = GlobalSearch(
             root_dir=str(tmp_path),
@@ -37,7 +37,7 @@ class TestGlobalSearch:
 
     def test_search_empty_query_returns_empty(self, tmp_path):
         """Empty query should return no items."""
-        (tmp_path / "main.py").write_text("hello")
+        (tmp_path / "main.py").write_text("hello", encoding="utf-8")
         gs = GlobalSearch(
             root_dir=str(tmp_path),
             on_select=lambda result: None,
@@ -67,7 +67,7 @@ class TestGlobalSearch:
 
     def test_search_no_match(self, tmp_path):
         """Searching for a non-existent string should return empty list."""
-        (tmp_path / "main.py").write_text("print('hello')\n")
+        (tmp_path / "main.py").write_text("print('hello')\n", encoding="utf-8")
         gs = GlobalSearch(
             root_dir=str(tmp_path),
             on_select=lambda result: None,
@@ -201,7 +201,7 @@ class TestGlobalSearch:
 
     def test_run_search_uses_grep_when_rg_unavailable(self, tmp_path):
         """_run_search should use grep when rg is not on PATH."""
-        (tmp_path / "sample.txt").write_text("grep me please\n")
+        (tmp_path / "sample.txt").write_text("grep me please\n", encoding="utf-8")
 
         gs = GlobalSearch(
             root_dir=str(tmp_path),
@@ -263,7 +263,7 @@ class TestGlobalSearch:
     def test_render_preview_returns_panel(self, tmp_path):
         """_render_preview should return a Panel containing a Syntax object."""
         py_file = tmp_path / "hello.py"
-        py_file.write_text("line1\nline2\nline3\nhello\nline5\nline6\nline7\n")
+        py_file.write_text("line1\nline2\nline3\nhello\nline5\nline6\nline7\n", encoding="utf-8")
 
         gs = GlobalSearch(
             root_dir=str(tmp_path),
@@ -284,7 +284,7 @@ class TestGlobalSearch:
         """Panel title should include relative path and line number."""
         py_file = tmp_path / "src" / "main.py"
         py_file.parent.mkdir()
-        py_file.write_text("a\nb\nc\nhello\ne\n")
+        py_file.write_text("a\nb\nc\nhello\ne\n", encoding="utf-8")
 
         gs = GlobalSearch(
             root_dir=str(tmp_path),
@@ -341,7 +341,7 @@ class TestGlobalSearch:
     def test_render_preview_no_extension(self, tmp_path):
         """_render_preview should handle files without an extension gracefully."""
         no_ext_file = tmp_path / "Makefile"
-        no_ext_file.write_text("all:\n\techo done\n")
+        no_ext_file.write_text("all:\n\techo done\n", encoding="utf-8")
 
         gs = GlobalSearch(
             root_dir=str(tmp_path),
@@ -359,7 +359,7 @@ class TestGlobalSearch:
     def test_render_preview_lineno_near_start(self, tmp_path):
         """_render_preview should clip start line to 1 when lineno < 6."""
         py_file = tmp_path / "short.py"
-        py_file.write_text("a\nb\nhello\n")
+        py_file.write_text("a\nb\nhello\n", encoding="utf-8")
 
         gs = GlobalSearch(
             root_dir=str(tmp_path),

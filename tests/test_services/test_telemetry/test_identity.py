@@ -38,7 +38,7 @@ def test_user_id_persists_across_instances(settings_path):
 def test_user_id_persists_to_settings_yml(settings_path):
     user_id = Identity(settings_path).get_user_id()
     assert settings_path.exists()
-    data = yaml.safe_load(settings_path.read_text())
+    data = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
     assert data["userID"] == user_id
 
 

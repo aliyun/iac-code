@@ -67,6 +67,19 @@ class TestAliyunDocSearchProperties:
     def test_render_tool_use_message(self, tool: AliyunDocSearch) -> None:
         assert tool.render_tool_use_message({"keywords": "ECS"}) == "ECS"
 
+    def test_render_tool_result_message_recovers_summary_from_persisted_output(self, tool: AliyunDocSearch) -> None:
+        output = "\n".join(
+            [
+                "1. API概览",
+                "   其他资源 API 标题 API概述",
+                "",
+                "找到 10 篇文档（共 1773 篇）",
+                "如需要，请使用 web_fetch 工具读取完整文档内容。",
+            ]
+        )
+
+        assert tool.render_tool_result_message(output) == "找到 10 篇文档（共 1773 篇）"
+
     def test_get_activity_description(self, tool: AliyunDocSearch) -> None:
         desc = tool.get_activity_description({"keywords": "VPC"})
         assert "VPC" in desc

@@ -31,6 +31,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
 )
 from iac_code.utils.background_housekeeping import start_background_housekeeping
+from iac_code.utils.public_errors import public_error_from_exception, sanitize_public_text
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -113,8 +114,17 @@ class HeadlessRunner:
             "  Fix: run  iac-code  then type /auth\n"
             "   or: set  IAC_CODE_API_KEY=<your-key>\n"
             "  Docs: https://aliyun.github.io/iac-code/docs/configuration/authentication\n"
-        ).format(error=exc)
+        ).format(error=sanitize_public_text(exc))
         print(hint, file=sys.stderr)
+
+    def _print_unexpected_error(self, exc: Exception) -> None:
+        logger.error("Headless execution failed: {}", exc)
+        print(_("Error: {error}").format(error=sanitize_public_text(exc)), file=sys.stderr)
+
+    def _record_structured_error(self, writer: Any, exc: Exception) -> None:
+        if self._output_format != OutputFormat.TEXT:
+            failure = public_error_from_exception(exc)
+            writer.handle(ErrorEvent(error=failure.summary, is_retryable=False, error_id=failure.error_id))
 
     def _create_agent_loop(self) -> Any:
         """Create and return a fully configured AgentLoop."""
@@ -139,7 +149,6 @@ class HeadlessRunner:
         started = time.monotonic()
         start_background_housekeeping()
 
-        agent_loop = self._create_agent_loop()
         writer = create_writer(self._output_format, self._output_stream)
         progress_writer = _ProgressWriter(self._progress_stream) if self._verbose else None
 
@@ -147,6 +156,7 @@ class HeadlessRunner:
         hit_max_turns = False
 
         try:
+            agent_loop = self._create_agent_loop()
             async for event in agent_loop.run_streaming(prompt):
                 if isinstance(event, PermissionRequestEvent):
                     if event.response_future is not None:
@@ -175,6 +185,11 @@ class HeadlessRunner:
                 writer.handle(event)
         except ProviderNotConfiguredError as exc:
             self._print_provider_not_configured(exc)
+            self._record_structured_error(writer, exc)
+            has_error = True
+        except Exception as exc:
+            self._print_unexpected_error(exc)
+            self._record_structured_error(writer, exc)
             has_error = True
 
         writer.finalize()

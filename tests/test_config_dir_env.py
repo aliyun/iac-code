@@ -173,7 +173,7 @@ class TestUserSkillsFollowEnv:
         user_skills = target / "skills"
         skill_dir = user_skills / "my-skill"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("---\ndescription: Sample skill\n---\nBody.\n")
+        (skill_dir / "SKILL.md").write_text("---\ndescription: Sample skill\n---\nBody.\n", encoding="utf-8")
 
         # Use a cwd with no project skills so the only USER skill found
         # must come from <env>/skills/.

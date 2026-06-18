@@ -65,7 +65,11 @@ def same_project_path(left: str, right: str) -> bool:
 def format_resume_command(cwd: str, session_id: str, *, platform: str | None = None) -> str:
     """Build a copy-paste resume command for the current platform."""
     if (platform or sys.platform).startswith("win"):
-        return 'cd /d "{}" && iac-code --resume {}'.format(_escape_cmd_double_quotes(cwd), session_id)
+        escaped_cwd = _escape_cmd_double_quotes(cwd)
+        escaped_session_id = _escape_cmd_double_quotes(session_id)
+        if _is_windows_unc_path(cwd):
+            return 'pushd "{}" && iac-code --resume "{}" & popd'.format(escaped_cwd, escaped_session_id)
+        return 'cd /d "{}" && iac-code --resume "{}"'.format(escaped_cwd, escaped_session_id)
     return "cd {cwd} && iac-code --resume {session_id}".format(
         cwd=shlex.quote(cwd),
         session_id=shlex.quote(session_id),
@@ -88,8 +92,12 @@ def _looks_like_windows_path(value: str) -> bool:
     return bool(_WINDOWS_DRIVE_PATH.match(value)) or value.startswith(("\\\\", "//"))
 
 
+def _is_windows_unc_path(value: str) -> bool:
+    return value.startswith(("\\\\", "//"))
+
+
 def _escape_cmd_double_quotes(value: str) -> str:
-    return value.replace('"', '\\"')
+    return value.replace("^", "^^").replace("%", "^%").replace("!", "^!").replace('"', '\\"')
 
 
 def _resolve_git_dir(worktree_root: str) -> str | None:

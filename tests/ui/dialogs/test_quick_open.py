@@ -20,11 +20,11 @@ class TestQuickOpen:
     def test_builds_items(self, tmp_path):
         """Sample tree should produce items containing expected files."""
         # Create a small file tree
-        (tmp_path / "main.py").write_text("print('hello')")
-        (tmp_path / "utils.py").write_text("def helper(): pass")
+        (tmp_path / "main.py").write_text("print('hello')", encoding="utf-8")
+        (tmp_path / "utils.py").write_text("def helper(): pass", encoding="utf-8")
         sub = tmp_path / "subdir"
         sub.mkdir()
-        (sub / "module.py").write_text("x = 1")
+        (sub / "module.py").write_text("x = 1", encoding="utf-8")
 
         qo = QuickOpen(
             root_dir=str(tmp_path),
@@ -40,10 +40,10 @@ class TestQuickOpen:
 
     def test_excludes_hidden_dirs(self, tmp_path):
         """Excluded dirs like .git and __pycache__ should not appear."""
-        (tmp_path / "main.py").write_text("x")
+        (tmp_path / "main.py").write_text("x", encoding="utf-8")
         git_dir = tmp_path / ".git"
         git_dir.mkdir()
-        (git_dir / "config").write_text("bare = false")
+        (git_dir / "config").write_text("bare = false", encoding="utf-8")
         cache_dir = tmp_path / "__pycache__"
         cache_dir.mkdir()
         (cache_dir / "main.cpython-312.pyc").write_bytes(b"")
@@ -62,7 +62,7 @@ class TestQuickOpen:
 
     def test_metadata_is_absolute_path(self, tmp_path):
         """Item metadata should be the absolute path."""
-        (tmp_path / "hello.txt").write_text("hi")
+        (tmp_path / "hello.txt").write_text("hi", encoding="utf-8")
         qo = QuickOpen(
             root_dir=str(tmp_path),
             on_select=lambda path: None,
@@ -79,7 +79,7 @@ class TestQuickOpen:
 
     def test_run_returns_path_on_select(self, tmp_path, monkeypatch):
         """run() should return the absolute path when a file is selected."""
-        (tmp_path / "foo.py").write_text("x = 1")
+        (tmp_path / "foo.py").write_text("x = 1", encoding="utf-8")
 
         selected_refs: list[str] = []
 
@@ -118,7 +118,7 @@ class TestQuickOpen:
 
     def test_run_returns_none_on_cancel(self, tmp_path, monkeypatch):
         """run() should return None and invoke on_cancel when cancelled."""
-        (tmp_path / "bar.py").write_text("y = 2")
+        (tmp_path / "bar.py").write_text("y = 2", encoding="utf-8")
 
         cancel_called: list[bool] = []
 
@@ -182,7 +182,7 @@ class TestQuickOpen:
 
         content = "line1\nline2\nline3\n"
         f = tmp_path / "sample.py"
-        f.write_text(content)
+        f.write_text(content, encoding="utf-8")
 
         qo = QuickOpen(
             root_dir=str(tmp_path),
@@ -203,7 +203,7 @@ class TestQuickOpen:
 
         lines = [f"line{i}\n" for i in range(30)]
         f = tmp_path / "big.txt"
-        f.write_text("".join(lines))
+        f.write_text("".join(lines), encoding="utf-8")
 
         qo = QuickOpen(
             root_dir=str(tmp_path),
@@ -244,7 +244,7 @@ class TestQuickOpen:
         from iac_code.ui.components.fuzzy_picker import PickerItem
 
         f = tmp_path / "Makefile"
-        f.write_text("all:\n\techo done\n")
+        f.write_text("all:\n\techo done\n", encoding="utf-8")
 
         qo = QuickOpen(
             root_dir=str(tmp_path),

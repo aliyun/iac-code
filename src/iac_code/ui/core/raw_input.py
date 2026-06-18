@@ -35,6 +35,9 @@ else:
     _MODIFIED_SPECIAL_KEY_RE = re.compile(r"\[(\d+);(\d+)~")
 
     _ENTER_CODEPOINTS = {10, 13}
+    _ESC_INITIAL_TIMEOUT = 0.15
+    _ESC_CONTINUATION_TIMEOUT = 0.15
+    _ESC_MAX_SEQUENCE_BYTES = 64
 
     def query_cursor_row(fd: int, timeout: float = 0.1) -> int | None:
         """Send Device Status Report 6 and parse the cursor's 1-indexed row.
@@ -103,14 +106,18 @@ else:
                 event = cap.read_key(timeout=1.0)
         """
 
-        def __init__(self, fd: int | None = None) -> None:
+        def __init__(self, fd: int | None = None, use_cbreak: bool = False) -> None:
             self._fd = fd if fd is not None else sys.stdin.fileno()
             self._old_settings: Optional[list] = None
+            self._use_cbreak = use_cbreak
 
         def __enter__(self) -> "RawInputCapture":
             try:
                 self._old_settings = termios.tcgetattr(self._fd)
-                tty.setraw(self._fd)
+                if self._use_cbreak:
+                    tty.setcbreak(self._fd)
+                else:
+                    tty.setraw(self._fd)
                 # Enable bracket paste mode so we can distinguish pasted text from typed input
                 os.write(self._fd, b"\033[?2004h")
                 # Enable focus reporting so we can detect terminal focus changes
@@ -166,15 +173,10 @@ else:
 
             # Escape — may begin a multi-byte sequence
             if b == 27:
-                ready, _, _ = select.select([self._fd], [], [], 0.05)
-
-                if not ready:
+                rest = self._read_escape_sequence_bytes()
+                if rest is None:
                     # Standalone ESC
                     return self._byte_to_key_event(27)
-
-                # 64 bytes is enough for any reasonable single sequence
-                # including SGR mouse events at large coordinates.
-                rest = os.read(self._fd, 64)
 
                 # Bracket paste start: ESC [200~ — check raw bytes before decoding
                 # to avoid splitting multi-byte UTF-8 characters
@@ -199,6 +201,52 @@ else:
                 return self._read_utf8_char(first)
 
             return self._byte_to_key_event(b)
+
+        def _read_byte_with_timeout(self, timeout: float) -> bytes:
+            """Read available bytes after waiting up to timeout seconds."""
+            import select as _select
+
+            ready, _, _ = _select.select([self._fd], [], [], timeout)
+            if not ready:
+                return b""
+            try:
+                return os.read(self._fd, 1)
+            except OSError:
+                return b""
+
+        @staticmethod
+        def _is_csi_final_byte(value: int) -> bool:
+            """Return whether value is a CSI final byte."""
+            return 0x40 <= value <= 0x7E
+
+        def _read_escape_sequence_bytes(self) -> bytes | None:
+            """Read bytes following ESC without mistaking slow sequences for ESC."""
+            first = self._read_byte_with_timeout(_ESC_INITIAL_TIMEOUT)
+            if not first:
+                return None
+
+            # ESC [ and ESC O are terminal sequence initiators; if they time
+            # out incomplete, parse them as unknown rather than Alt+[ or Alt+O.
+            if first.startswith(b"["):
+                buf = first
+                while len(buf) < _ESC_MAX_SEQUENCE_BYTES and not any(
+                    self._is_csi_final_byte(value) for value in buf[1:]
+                ):
+                    chunk = self._read_byte_with_timeout(_ESC_CONTINUATION_TIMEOUT)
+                    if not chunk:
+                        break
+                    buf += chunk
+                return buf[:_ESC_MAX_SEQUENCE_BYTES]
+
+            if first.startswith(b"O"):
+                if len(first) > 1:
+                    return first
+                second = self._read_byte_with_timeout(_ESC_CONTINUATION_TIMEOUT)
+                if second:
+                    return first + second
+                return first
+
+            return first
 
         def _read_bracketed_paste(self, initial: bytes) -> str:
             """Read pasted content until the bracket paste end sequence ESC [201~.
@@ -332,6 +380,9 @@ else:
                 # Other mouse events (clicks, motion) — pass through as a
                 # generic ``mouse`` event so callers can ignore them.
                 return KeyEvent(key="mouse", char="")
+
+            if seq.startswith("["):
+                return KeyEvent(key="unknown", char="")
 
             # Single printable char → alt+char
             if len(seq) == 1 and 32 <= ord(seq) <= 126:

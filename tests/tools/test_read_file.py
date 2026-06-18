@@ -29,7 +29,7 @@ class TestReadFileTool:
     async def test_read_normal_file(self, tmp_path, read_file_tool):
         """Test reading a normal file."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello, world!\nLine 2\nLine 3\n")
+        test_file.write_text("Hello, world!\nLine 2\nLine 3\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(
@@ -47,7 +47,7 @@ class TestReadFileTool:
         """Test reading a file with start_line and end_line."""
         test_file = tmp_path / "test.txt"
         lines = "\n".join([f"Line {i}" for i in range(1, 11)])
-        test_file.write_text(lines)
+        test_file.write_text(lines, encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(
@@ -79,7 +79,7 @@ class TestReadFileTool:
     async def test_read_empty_file(self, tmp_path, read_file_tool):
         """Test reading an empty file."""
         test_file = tmp_path / "empty.txt"
-        test_file.write_text("")
+        test_file.write_text("", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(
@@ -94,7 +94,7 @@ class TestReadFileTool:
     async def test_read_relative_path(self, tmp_path, read_file_tool):
         """Test reading a file with relative path."""
         test_file = tmp_path / "relative.txt"
-        test_file.write_text("Relative path content")
+        test_file.write_text("Relative path content", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(
@@ -111,7 +111,7 @@ class TestReadFileTool:
         subdir = tmp_path / "subdir"
         subdir.mkdir()
         test_file = subdir / "nested.txt"
-        test_file.write_text("Nested content")
+        test_file.write_text("Nested content", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(
@@ -127,7 +127,7 @@ class TestReadFileTool:
         """Test reading with only start_line specified."""
         test_file = tmp_path / "test.txt"
         lines = "\n".join([f"Line {i}" for i in range(1, 6)])
-        test_file.write_text(lines)
+        test_file.write_text(lines, encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(
@@ -145,7 +145,7 @@ class TestReadFileTool:
         """Test reading with only end_line specified."""
         test_file = tmp_path / "test.txt"
         lines = "\n".join([f"Line {i}" for i in range(1, 6)])
-        test_file.write_text(lines)
+        test_file.write_text(lines, encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(
@@ -162,7 +162,7 @@ class TestReadFileTool:
     async def test_read_file_truncates_at_max_lines(self, tmp_path, read_file_tool, monkeypatch):
         monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_LINES", 3)
         test_file = tmp_path / "long.txt"
-        test_file.write_text("one\ntwo\nthree\nfour\nfive\n")
+        test_file.write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
@@ -176,7 +176,7 @@ class TestReadFileTool:
     async def test_read_file_truncates_at_max_bytes(self, tmp_path, read_file_tool, monkeypatch):
         monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_BYTES", 8)
         test_file = tmp_path / "long.txt"
-        test_file.write_text("12345\n67890\n")
+        test_file.write_text("12345\n67890\n", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
@@ -203,7 +203,7 @@ class TestReadFileTool:
     async def test_read_file_streaming_does_not_preload_whole_file(self, tmp_path, read_file_tool, monkeypatch):
         monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_LINES", 1)
         target = tmp_path / "stream.txt"
-        target.write_text("unused")
+        target.write_text("unused", encoding="utf-8")
 
         class NoPreloadFile:
             def __init__(self):
@@ -272,7 +272,7 @@ class TestReadFilePermissions:
         project = tmp_path / "project"
         project.mkdir()
         target = project / "main.tf"
-        target.write_text("resource x")
+        target.write_text("resource x", encoding="utf-8")
 
         result = await read_file_tool.check_permissions(
             {"path": str(target)},
@@ -288,7 +288,7 @@ class TestReadFilePermissions:
         project.mkdir()
         outside.mkdir()
         target = outside / "secret.txt"
-        target.write_text("nope")
+        target.write_text("nope", encoding="utf-8")
 
         result = await read_file_tool.check_permissions(
             {"path": str(target)},
@@ -304,7 +304,7 @@ class TestReadFilePermissions:
         project = tmp_path / "project"
         project.mkdir()
         target = project / ".env"
-        target.write_text("TOKEN=fake")
+        target.write_text("TOKEN=fake", encoding="utf-8")
 
         result = await read_file_tool.check_permissions(
             {"path": str(target)},
@@ -322,7 +322,7 @@ class TestReadFilePermissions:
         project.mkdir()
         trusted.mkdir()
         target = trusted / ".env"
-        target.write_text("TOKEN=fake")
+        target.write_text("TOKEN=fake", encoding="utf-8")
 
         result = await read_file_tool.check_permissions(
             {"path": str(target)},
@@ -336,7 +336,7 @@ class TestReadFilePermissions:
         project = tmp_path / "project"
         project.mkdir()
         target = project / "main.tf"
-        target.write_text("resource x")
+        target.write_text("resource x", encoding="utf-8")
 
         result = await read_file_tool.check_permissions(
             {"file_path": str(target)},
@@ -363,7 +363,7 @@ class TestReadFilePermissions:
         project.mkdir()
         shared.mkdir()
         target = shared / "vars.tf"
-        target.write_text("variable x")
+        target.write_text("variable x", encoding="utf-8")
 
         result = await read_file_tool.check_permissions(
             {"path": str(target)},
@@ -383,7 +383,7 @@ class TestReadFileErrors:
     @pytest.mark.asyncio
     async def test_permission_error(self, tmp_path, read_file_tool, monkeypatch):
         file_path = tmp_path / "x.txt"
-        file_path.write_text("abc")
+        file_path.write_text("abc", encoding="utf-8")
 
         def boom(*a, **kw):
             raise PermissionError("denied")
@@ -411,7 +411,7 @@ class TestReadFileErrors:
     @pytest.mark.asyncio
     async def test_generic_exception(self, tmp_path, read_file_tool, monkeypatch):
         file_path = tmp_path / "x.txt"
-        file_path.write_text("abc")
+        file_path.write_text("abc", encoding="utf-8")
 
         def boom(*a, **kw):
             raise RuntimeError("unexpected")

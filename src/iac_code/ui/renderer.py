@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import copy
 import os
+import re
 import sys
 import threading
 import time
@@ -24,6 +25,7 @@ if sys.platform != "win32":
 else:
     termios = None  # type: ignore[assignment]
 
+from loguru import logger
 from rich._loop import loop_first
 from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.live import Live
@@ -38,7 +40,9 @@ from iac_code.services.telemetry import add_metric, log_event
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.tools.cloud.types import translate_status
 from iac_code.types.stream_events import (
+    AskUserQuestionEvent,
     CompactionEvent,
+    DiagramEvent,
     ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -66,6 +70,14 @@ from iac_code.utils.json_utils import extract_partial_string_fields
 if TYPE_CHECKING:
     from iac_code.state.app_state import AppStateStore
     from iac_code.tools.base import ToolRegistry
+
+
+def _display_tool_name(tool_name: str, candidate: str | None = None) -> str:
+    if candidate and candidate != tool_name:
+        return candidate
+    from iac_code.pipeline.display_names import known_tool_display_name
+
+    return known_tool_display_name(tool_name) or candidate or tool_name
 
 
 def _windows_msvcrt_reader_loop(
@@ -120,6 +132,9 @@ class _DashMarkdown(Markdown):
     elements = {**Markdown.elements, "list_item_open": _DashListItem}
 
 
+_INTERNAL_SKILL_CONTEXT_RE = re.compile(r"^\s*<skill-name>[^<]+</skill-name>(?:\s|\Z)")
+
+
 class _CropTop:
     """Rich renderable that crops content from the **top** to fit *max_height*.
 
@@ -146,41 +161,9 @@ class _CropTop:
 
 # ── Turn-buffer data structures ─────────────────────────────────────
 
-
-@dataclass
-class _SubAgentChild:
-    """A child tool call made by a sub-agent."""
-
-    tool_name: str
-    tool_input: dict
-    is_done: bool = False
-    is_error: bool = False
-
-
-@dataclass
-class _ToolCallRecord:
-    """One tool invocation (use + optional result)."""
-
-    tool_name: str
-    tool_input: dict
-    partial_input: str = ""
-    result: str | None = None
-    is_error: bool = False
-    done: bool = False
-    children: list[_SubAgentChild] | None = None
-    start_time: float = 0.0
-    progress_renderable: Any = None  # For stack progress display
-
-
-@dataclass
-class _Segment:
-    """One segment of turn output — markdown text, a tool call, or a
-    collapsed thinking-summary line."""
-
-    kind: str  # "text" | "tool" | "thinking_summary"
-    text: str = ""
-    tool: _ToolCallRecord | None = None
-    elapsed_seconds: float = 0.0  # for thinking_summary only
+from iac_code.ui.stream_accumulator import RenderSegment as _Segment  # noqa: E402
+from iac_code.ui.stream_accumulator import SubAgentChild as _SubAgentChild  # noqa: E402
+from iac_code.ui.stream_accumulator import ToolCallRecord as _ToolCallRecord  # noqa: E402
 
 
 @dataclass
@@ -572,6 +555,22 @@ class Renderer:
             )
         return Group(title, table)
 
+    def _render_diagram(self, event: DiagramEvent) -> Group:
+        """Render an architecture diagram using termaid or fallback to code block."""
+        title = Text(f"▀ {event.candidate_name}", style="bold cyan")
+        try:
+            from importlib import import_module
+
+            render_rich = import_module("termaid").render_rich
+            diagram = render_rich(event.mermaid_source)
+            return Group(title, Text(""), diagram, Text(""))
+        except ImportError:
+            pass  # Silent degrade — termaid optional dependency missing.
+        except Exception as exc:
+            logger.warning("termaid render failed: {}", exc)
+        code_block = _DashMarkdown(f"```mermaid\n{event.mermaid_source}\n```")
+        return Group(title, Text(""), code_block, Text(""))
+
     def _has_verbose_content(self, rec: _ToolCallRecord) -> bool:
         """True if rendering this tool in verbose mode would differ from compact.
 
@@ -612,7 +611,8 @@ class Renderer:
             if preview_fields:
                 effective_input = extract_partial_string_fields(rec.partial_input, set(preview_fields))
 
-        tool_name = tool.user_facing_name(effective_input) if tool else rec.tool_name
+        raw_tool_name = rec.tool_name
+        tool_name = _display_tool_name(raw_tool_name, tool.user_facing_name(effective_input) if tool else raw_tool_name)
         detail = tool.render_tool_use_message(effective_input, verbose=self._verbose) if tool else None
 
         line = Text()
@@ -661,7 +661,10 @@ class Renderer:
 
                 for i, child in enumerate(visible):
                     tool_obj = self._tool_registry.get(child.tool_name)
-                    child_display = tool_obj.user_facing_name(child.tool_input) if tool_obj else child.tool_name
+                    child_display = _display_tool_name(
+                        child.tool_name,
+                        tool_obj.user_facing_name(child.tool_input) if tool_obj else child.tool_name,
+                    )
                     child_detail = ""
                     if tool_obj:
                         d = tool_obj.render_tool_use_message(child.tool_input, verbose=self._verbose)
@@ -759,8 +762,14 @@ class Renderer:
         task_spinner: ShimmerSpinner | None = None,
         *,
         thinking_buffer: str = "",
+        embedded: bool = False,
     ) -> Group | _CropTop:
-        """Render all buffered segments + current spinner into a Group."""
+        """Render all buffered segments + current spinner into a Group.
+
+        When *embedded* is True (used by parallel tabs), the verbose hint
+        and text_flushed continuation state are suppressed since the caller
+        manages its own display lifecycle.
+        """
         parts: list[Any] = []
         has_content = False
 
@@ -797,14 +806,15 @@ class Renderer:
         if text_buffer:
             if has_content:
                 parts.append(Text())  # blank line before ✦ block
-            parts.extend(self._render_text_block(text_buffer, continuation=self._text_flushed))
+            continuation = self._text_flushed if not embedded else False
+            parts.extend(self._render_text_block(text_buffer, continuation=continuation))
 
         # Current spinner (thinking)
         if spinner:
             parts.append(spinner.render())
 
         # Verbose-mode hint — only when some tool actually has more to show.
-        if not self._verbose and self._any_segment_has_verbose(segments):
+        if not embedded and not self._verbose and self._any_segment_has_verbose(segments):
             parts.append(Text("  " + _("(ctrl+o to expand)"), style="dim"))
 
         # Task-level spinner with elapsed time (always shown while processing)
@@ -836,8 +846,17 @@ class Renderer:
         events: AsyncGenerator[StreamEvent, None],
         permission_handler: Callable[[PermissionRequestEvent], Awaitable[bool]],
         streaming_input: StreamingInputBuffer | None = None,
+        *,
+        live_header: Callable[[], Any] | None = None,
+        suppress_scrollback_on_cancel: bool = False,
+        on_escape: Callable[[], None] | None = None,
     ) -> StreamingOutputResult:
-        """Consume the event stream and render everything."""
+        """Consume the event stream and render everything.
+
+        When *live_header* is provided (a callable returning a Rich renderable),
+        it is called every frame and rendered above the streaming content inside
+        the Live context. It is NOT printed to scrollback when Live stops.
+        """
         self._last_streaming_errors = []
         self.console.print()  # blank line between user input and agent response
         live: Live | None = None
@@ -849,6 +868,7 @@ class Renderer:
         thinking_buffer: str = ""
         thinking_start_time: float | None = None
         segments: list[_Segment] = []
+        interrupted = False
         turn_start_time: float = time.monotonic()
         input_buffer = streaming_input or StreamingInputBuffer()
         previous_streaming_input = self._streaming_input
@@ -877,6 +897,8 @@ class Renderer:
                 content = self._render_segments(
                     segments, spinner, text_buffer, task_spinner, thinking_buffer=thinking_buffer
                 )
+                if live_header is not None:
+                    content = Group(content, live_header())
                 live.update(self._with_footer(content))
 
         def _request_interrupt() -> None:
@@ -896,6 +918,7 @@ class Renderer:
                     streaming_input=input_buffer,
                     on_input_changed=_update_live,
                     on_interrupt=_request_interrupt,
+                    on_escape=on_escape,
                 )
             )
 
@@ -934,6 +957,7 @@ class Renderer:
                         lambda: text_buffer,
                         lambda: task_spinner,
                         lambda: thinking_buffer,
+                        live_header=live_header,
                     )
                 )
             # Already handled; don't let the main-loop reset block redo it.
@@ -944,6 +968,21 @@ class Renderer:
 
         # Turn-level token usage accumulator (summed across MessageEndEvents)
         turn_usage = Usage()
+
+        if live_header is not None:
+            _ensure_live()
+            _update_live()
+            refresh_task = asyncio.create_task(
+                self._refresh_loop(
+                    live,
+                    segments,
+                    spinner,
+                    lambda: text_buffer,
+                    lambda: task_spinner,
+                    lambda: thinking_buffer,
+                    live_header=live_header,
+                )
+            )
 
         try:
             async for event in events:
@@ -984,6 +1023,7 @@ class Renderer:
                                 lambda: text_buffer,
                                 lambda: task_spinner,
                                 lambda: thinking_buffer,
+                                live_header=live_header,
                             )
                         )
 
@@ -1011,6 +1051,7 @@ class Renderer:
                                 lambda: text_buffer,
                                 lambda: task_spinner,
                                 lambda: thinking_buffer,
+                                live_header=live_header,
                             )
                         )
                     if key_task is None or key_task.done():
@@ -1074,6 +1115,7 @@ class Renderer:
                                     lambda: text_buffer,
                                     lambda: task_spinner,
                                     lambda: thinking_buffer,
+                                    live_header=live_header,
                                 )
                             )
                             if key_task is None or key_task.done():
@@ -1123,7 +1165,13 @@ class Renderer:
                     await self._stop_refresh(refresh_task)
                     refresh_task = asyncio.create_task(
                         self._refresh_loop(
-                            live, segments, spinner, lambda: text_buffer, lambda: task_spinner, lambda: thinking_buffer
+                            live,
+                            segments,
+                            spinner,
+                            lambda: text_buffer,
+                            lambda: task_spinner,
+                            lambda: thinking_buffer,
+                            live_header=live_header,
                         )
                     )
                     if key_task is None or key_task.done():
@@ -1146,12 +1194,10 @@ class Renderer:
                 # ── Tool result ─────────────────────────────────
                 elif isinstance(event, ToolResultEvent):
                     rec = tool_records.get(event.tool_use_id)
-                    if rec is None:
-                        # Fallback: match by tool_name for any unfinished tool
-                        for r in tool_records.values():
-                            if r.tool_name == event.tool_name and not r.done:
-                                rec = r
-                                break
+                    if rec is None and not event.tool_use_id:
+                        matches = [r for r in tool_records.values() if r.tool_name == event.tool_name and not r.done]
+                        if len(matches) == 1:
+                            rec = matches[0]
                     if rec:
                         rec.result = event.result
                         rec.is_error = event.is_error
@@ -1208,6 +1254,7 @@ class Renderer:
                                 lambda: text_buffer,
                                 lambda: task_spinner,
                                 lambda: thinking_buffer,
+                                live_header=live_header,
                             )
                         )
                     _update_live()
@@ -1230,6 +1277,38 @@ class Renderer:
                     _ensure_live()
                     _update_live()
 
+                # ── Architecture diagram ──────────────────────
+                elif isinstance(event, DiagramEvent):
+                    await self._stop_refresh(refresh_task)
+                    refresh_task = None
+                    if live:
+                        self._quiet_stop_live(live)
+                        live = None
+                    if text_buffer:
+                        self._print_segments_to_scrollback([], text_buffer)
+                        text_buffer = ""
+                    diagram_renderable = self._render_diagram(event)
+                    self.console.print(diagram_renderable)
+                    # U-I5: restart Live + refresh loop so the progress bar
+                    # and any subsequent live-updating widgets keep
+                    # animating for the rest of the step. Without this the
+                    # UI goes silent until an event handler that calls
+                    # ``_ensure_live()`` happens to fire next.
+                    _ensure_live()
+                    _update_live()
+                    if live is not None:
+                        refresh_task = asyncio.create_task(
+                            self._refresh_loop(
+                                live,
+                                segments,
+                                spinner,
+                                lambda: text_buffer,
+                                lambda: task_spinner,
+                                lambda: thinking_buffer,
+                                live_header=live_header,
+                            )
+                        )
+
                 # ── Permission request ──────────────────────────
                 elif isinstance(event, PermissionRequestEvent):
                     # Must stop Live to interact with user
@@ -1247,7 +1326,10 @@ class Renderer:
                     text_buffer = ""
                     # Handle permission
                     allowed = await permission_handler(event)
-                    if event.response_future is not None:
+                    # done() guard: future may already be resolved or cancelled by
+                    # task cancellation during a pipeline interrupt; mirrors the
+                    # defensive pattern in agent_tool / acp/session.
+                    if event.response_future is not None and not event.response_future.done():
                         if allowed:
                             log_event(
                                 Events.TOOL_USE_GRANTED_IN_PROMPT,
@@ -1272,6 +1354,39 @@ class Renderer:
                                 },
                             )
                         event.response_future.set_result(allowed)
+
+                # ── User question request ─────────────────────
+                elif isinstance(event, AskUserQuestionEvent):
+                    try:
+                        # Must stop Live to interact with user
+                        await self._stop_refresh(refresh_task)
+                        refresh_task = None
+                        await self._stop_refresh(key_task)
+                        key_task = None
+                        if live:
+                            self._quiet_stop_live(live)
+                            live = None
+                        spinner = None
+                        # Print current state to scrollback
+                        self._print_segments_to_scrollback(segments, text_buffer)
+                        segments.clear()
+                        text_buffer = ""
+                        answer = await self.prompt_user_question(event)
+                    except asyncio.CancelledError:
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(None)
+                        raise
+                    except KeyboardInterrupt:
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(None)
+                        raise
+                    except Exception:
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(None)
+                        raise
+                    else:
+                        if event.response_future is not None and not event.response_future.done():
+                            event.response_future.set_result(answer)
 
                 # ── Compaction ────────────────────────────────
                 elif isinstance(event, CompactionEvent):
@@ -1381,7 +1496,9 @@ class Renderer:
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             input_buffer.interrupted = True
-            self.console.print(Text(_("Operation cancelled."), style="yellow"))
+            interrupted = True
+            if not suppress_scrollback_on_cancel:
+                self.console.print(Text(_("Operation cancelled."), style="yellow"))
         except Exception as e:
             error_msg = str(e)
             if "No key found" in error_msg or "api_key" in error_msg.lower() or "API key" in error_msg.lower():
@@ -1415,8 +1532,8 @@ class Renderer:
             if live:
                 self._quiet_stop_live(live)
                 live = None
-            # Print any remaining segments
-            if segments:
+            # Print any remaining segments (suppress on interrupt if requested)
+            if segments and not (interrupted and suppress_scrollback_on_cancel):
                 self._print_segments_to_scrollback(segments, text_buffer)
                 segments.clear()
             # Print completion message with random verb and duration
@@ -1453,7 +1570,7 @@ class Renderer:
             return False
 
         tool = self._tool_registry.get(tool_name)
-        tool_display = tool.user_facing_name(event.tool_input) if tool else tool_name
+        tool_display = _display_tool_name(tool_name, tool.user_facing_name(event.tool_input) if tool else tool_name)
         detail = None
         if tool:
             detail = tool.render_tool_use_message(event.tool_input)
@@ -1513,7 +1630,7 @@ class Renderer:
             visible_count=len(options),
         )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, select.run)
 
         if result is None:
@@ -1552,6 +1669,51 @@ class Renderer:
             record_permission(cache, tool_name, "always_deny")
             return False
         return False
+
+    async def prompt_user_question(self, event: AskUserQuestionEvent) -> dict[str, str] | None:
+        """Inline user question prompt that accepts either a choice or free text."""
+        self.console.print(Text(event.question, style="bold"))
+
+        options = list(event.options)
+        option_by_id = {str(option.get("id", "")): option for option in options}
+        option_by_label = {str(option.get("label", "")): option for option in options if option.get("label")}
+        option_by_number = {str(index): option for index, option in enumerate(options, start=1)}
+        for index, option in enumerate(options, start=1):
+            label = str(option.get("label", option.get("id", "")))
+            self.console.print(Text(f"{index}. {label}", style="cyan"))
+            description = str(option.get("description", "")).strip()
+            if description:
+                self.console.print(Text(f"   {description}", style="dim"))
+
+        prompt = (event.free_text_prompt or "").strip() if event.allow_free_text else ""
+        if prompt:
+            self.console.print(Text(prompt, style="dim"))
+
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                raw_answer = await loop.run_in_executor(None, self.console.input, "  > ")
+            except EOFError:
+                return None
+
+            answer = raw_answer.strip()
+            if not answer:
+                return None
+
+            selected = option_by_number.get(answer) or option_by_id.get(answer) or option_by_label.get(answer)
+            free_text = ""
+            if selected is None:
+                if not event.allow_free_text:
+                    continue
+                return {"selected_id": "", "selected_label": "", "free_text": answer}
+
+            selected_id = str(selected.get("id", ""))
+            selected = option_by_id.get(str(selected_id), {})
+            return {
+                "selected_id": str(selected_id),
+                "selected_label": str(selected.get("label", selected_id)),
+                "free_text": free_text.strip(),
+            }
 
     # ── Scrollback finalization ──────────────────────────────────────
 
@@ -1650,6 +1812,8 @@ class Renderer:
             if is_recalled_memory_message(msg):
                 continue
             if msg.role == "user":
+                if self.is_internal_skill_context_message(msg):
+                    continue
                 is_tool_result_only = isinstance(msg.content, list) and all(
                     isinstance(b, ToolResultBlock) for b in msg.content
                 )
@@ -1694,6 +1858,11 @@ class Renderer:
                         Text(f"✻ {random_completion_verb()} {_format_elapsed(msg.elapsed_seconds)}", style="dim italic")
                     )
 
+    @staticmethod
+    def is_internal_skill_context_message(message: Any) -> bool:
+        content = getattr(message, "content", None)
+        return isinstance(content, str) and bool(_INTERNAL_SKILL_CONTEXT_RE.match(content))
+
     # ── Background tasks ────────────────────────────────────────────
 
     async def _refresh_loop(
@@ -1704,6 +1873,7 @@ class Renderer:
         get_text: Callable[[], str],
         get_task_spinner: Callable[[], ShimmerSpinner | None] | None = None,
         get_thinking: Callable[[], str] | None = None,
+        live_header: Callable[[], Any] | None = None,
     ) -> None:
         """Background task: update Live with spinner frames at ~20fps."""
         try:
@@ -1712,6 +1882,8 @@ class Renderer:
                 ts = get_task_spinner() if get_task_spinner else None
                 tb = get_thinking() if get_thinking else ""
                 content = self._render_segments(segments, spinner, get_text(), ts, thinking_buffer=tb)
+                if live_header is not None:
+                    content = Group(content, live_header())
                 live.update(self._with_footer(content))
         except asyncio.CancelledError:
             pass
@@ -1781,12 +1953,17 @@ class Renderer:
         streaming_input: StreamingInputBuffer | None = None,
         on_input_changed: Callable[[], None] | None = None,
         on_interrupt: Callable[[], None] | None = None,
+        on_escape: Callable[[], None] | None = None,
     ) -> None:
         """Background task: listen for streaming keys.
 
         Uses loop.add_reader for proper asyncio integration on Unix (clears
         IEXTEN to prevent macOS from intercepting Ctrl+O as VDISCARD).
         On Windows, uses a daemon thread with msvcrt for key reading.
+
+        Owns stdin during streaming — must be the SOLE stdin reader to
+        avoid byte-level races. Callers needing Esc detection pass an
+        ``on_escape`` callback rather than spinning up a second reader.
         """
         fd = sys.stdin.fileno()
         loop = asyncio.get_running_loop()
@@ -1840,6 +2017,9 @@ class Renderer:
                 if event.ctrl and event.key == "o":  # Ctrl+O — break out and open transcript view
                     show_transcript_after = True
                     break
+                if event.key == "escape" and on_escape is not None:
+                    on_escape()
+                    continue
                 if streaming_input is None:
                     if event.key == "escape":
                         break

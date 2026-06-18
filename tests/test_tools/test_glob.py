@@ -31,13 +31,13 @@ class TestGlobTool:
     async def test_match_py_files_recursive(self, tmp_path, glob_tool):
         """Test matching **/*.py files in a temp directory."""
         # Create some Python files
-        (tmp_path / "main.py").write_text("# main")
-        (tmp_path / "utils.py").write_text("# utils")
+        (tmp_path / "main.py").write_text("# main", encoding="utf-8")
+        (tmp_path / "utils.py").write_text("# utils", encoding="utf-8")
         subdir = tmp_path / "subdir"
         subdir.mkdir()
-        (subdir / "helper.py").write_text("# helper")
+        (subdir / "helper.py").write_text("# helper", encoding="utf-8")
         # Create a non-Python file
-        (tmp_path / "readme.txt").write_text("readme")
+        (tmp_path / "readme.txt").write_text("readme", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await glob_tool.execute(
@@ -56,10 +56,10 @@ class TestGlobTool:
         """Test matching files in a specific subdirectory."""
         subdir = tmp_path / "src"
         subdir.mkdir()
-        (subdir / "app.py").write_text("# app")
-        (subdir / "config.py").write_text("# config")
+        (subdir / "app.py").write_text("# app", encoding="utf-8")
+        (subdir / "config.py").write_text("# config", encoding="utf-8")
         # File outside subdir should not match
-        (tmp_path / "other.py").write_text("# other")
+        (tmp_path / "other.py").write_text("# other", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await glob_tool.execute(
@@ -88,9 +88,9 @@ class TestGlobTool:
         """Test search with explicit path parameter."""
         search_dir = tmp_path / "search_root"
         search_dir.mkdir()
-        (search_dir / "found.py").write_text("# found")
+        (search_dir / "found.py").write_text("# found", encoding="utf-8")
         # File outside search_dir
-        (tmp_path / "outside.py").write_text("# outside")
+        (tmp_path / "outside.py").write_text("# outside", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await glob_tool.execute(
@@ -105,7 +105,7 @@ class TestGlobTool:
     @pytest.mark.asyncio
     async def test_returns_relative_paths(self, tmp_path, glob_tool):
         """Test that results are relative paths."""
-        (tmp_path / "file.py").write_text("# file")
+        (tmp_path / "file.py").write_text("# file", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await glob_tool.execute(
@@ -125,10 +125,10 @@ class TestGlobTool:
         import time
 
         old_file = tmp_path / "old.py"
-        old_file.write_text("# old")
+        old_file.write_text("# old", encoding="utf-8")
         time.sleep(0.01)
         new_file = tmp_path / "new.py"
-        new_file.write_text("# new")
+        new_file.write_text("# new", encoding="utf-8")
 
         context = ToolContext(cwd=str(tmp_path))
         result = await glob_tool.execute(

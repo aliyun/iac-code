@@ -254,6 +254,30 @@ class TestSelectExtras:
 
         assert result is None
 
+    def test_run_raises_keyboard_interrupt_on_ctrl_c(self):
+        """run() should treat Ctrl+C as a hard interrupt, not a silent cancel."""
+        options = make_text_options()
+        sel = Select(options)
+
+        ctrl_c_event = KeyEvent(key="c", char="\x03", ctrl=True)
+        mock_cap = MagicMock()
+        mock_cap.__enter__ = MagicMock(return_value=mock_cap)
+        mock_cap.__exit__ = MagicMock(return_value=False)
+        mock_cap.read_key.side_effect = [ctrl_c_event, None]
+
+        with patch("iac_code.ui.core.raw_input.RawInputCapture", return_value=mock_cap):
+            with patch("rich.console.Console") as mock_console_cls:
+                mock_console = MagicMock()
+                mock_console_cls.return_value = mock_console
+                try:
+                    sel.run()
+                except KeyboardInterrupt:
+                    interrupted = True
+                else:
+                    interrupted = False
+
+        assert interrupted is True
+
     def test_run_skips_none_key_events(self):
         """run() should continue looping when read_key returns None."""
         options = make_text_options()
@@ -433,3 +457,15 @@ class TestSelectExtras:
         sel = Select(make_text_options())
         result = sel.handle_key(key("escape"))
         assert result is True
+
+    def test_ctrl_c_marks_interrupt_and_cancels(self):
+        """Ctrl+C should end the select loop distinctly from Escape."""
+        cancelled = []
+        sel = Select(make_text_options())
+        sel._on_cancel = lambda: cancelled.append(True)
+
+        result = sel.handle_key(key("c", ctrl=True))
+
+        assert result is True
+        assert cancelled == [True]
+        assert sel._interrupted is True

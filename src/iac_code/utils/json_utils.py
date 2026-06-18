@@ -11,11 +11,71 @@ Design:
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from typing import Any
 
 from loguru import logger
+
+
+@functools.lru_cache(maxsize=64)
+def _key_value_pattern(key: str) -> re.Pattern:
+    """Compiled regex matching ``"key"\\s*:\\s*"`` — bounded LRU cache so a
+    pathological caller passing unbounded distinct keys can't leak memory."""
+    return re.compile(rf'"{re.escape(key)}"\s*:\s*"')
+
+
+def extract_json_string_value(accumulated: str, key: str, *, allow_partial: bool = False) -> str | None:
+    """Extract a string value from partially-accumulated JSON.
+
+    When *allow_partial* is True and the closing quote hasn't arrived yet,
+    return whatever text has been accumulated so far (useful for streaming
+    the ``summary`` field while the LLM is still generating it).
+    """
+    m = _key_value_pattern(key).search(accumulated)
+    if not m:
+        return None
+    start = m.end()
+    i = start
+    while i < len(accumulated):
+        if accumulated[i] == "\\" and i + 1 < len(accumulated):
+            i += 2
+            continue
+        if accumulated[i] == '"':
+            raw = accumulated[start:i]
+            try:
+                return json.loads(f'"{raw}"')
+            except (json.JSONDecodeError, ValueError):
+                return raw
+        i += 1
+    if not allow_partial:
+        return None
+    raw = accumulated[start:]
+    try:
+        return json.loads(f'"{raw}"')
+    except (json.JSONDecodeError, ValueError):
+        return raw
+
+
+@functools.lru_cache(maxsize=64)
+def _key_int_pattern(key: str) -> re.Pattern:
+    return re.compile(rf'"{re.escape(key)}"\s*:\s*(-?\d+)')
+
+
+def extract_json_int_value(accumulated: str, key: str) -> int | None:
+    """Extract a completed integer value from partially-accumulated JSON."""
+    m = _key_int_pattern(key).search(accumulated)
+    if not m:
+        return None
+    if m.end() >= len(accumulated):
+        return None
+    if accumulated[m.end()] not in ",}] \t\r\n":
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
 
 
 def safe_parse_json(raw: str | None) -> Any | None:
@@ -29,7 +89,7 @@ def safe_parse_json(raw: str | None) -> Any | None:
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        logger.error("Failed to parse JSON, raw=%s", raw[:200])
+        logger.error("Failed to parse JSON, raw={}", raw[:200])
         return None
 
 

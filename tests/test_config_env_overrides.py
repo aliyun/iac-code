@@ -149,7 +149,7 @@ class TestGetActiveProviderKeyEnv:
 
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir()
-        (config_dir / "settings.yml").write_text("activeProvider: openai\n")
+        (config_dir / "settings.yml").write_text("activeProvider: openai\n", encoding="utf-8")
 
         monkeypatch.setenv("IAC_CODE_PROVIDER", "Anthropic")
         with patch("iac_code.config.Path.home", return_value=tmp_path):
@@ -163,7 +163,7 @@ class TestGetActiveProviderKeyEnv:
         monkeypatch.delenv("IAC_CODE_PROVIDER", raising=False)
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir()
-        (config_dir / "settings.yml").write_text("activeProvider: openai\n")
+        (config_dir / "settings.yml").write_text("activeProvider: openai\n", encoding="utf-8")
 
         with patch("iac_code.config.Path.home", return_value=tmp_path):
             from iac_code.config import get_active_provider_key
@@ -184,7 +184,7 @@ class TestGetProviderConfigEnv:
     def _write_settings(self, tmp_path, content: str) -> None:
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir(exist_ok=True)
-        (config_dir / "settings.yml").write_text(content)
+        (config_dir / "settings.yml").write_text(content, encoding="utf-8")
 
     def test_model_env_overlays_active_provider(self, monkeypatch, tmp_path):
         from unittest.mock import patch
@@ -280,9 +280,9 @@ class TestLoadCredentials:
         config_dir = tmp_path / ".iac-code"
         config_dir.mkdir(exist_ok=True)
         if settings:
-            (config_dir / "settings.yml").write_text(settings)
+            (config_dir / "settings.yml").write_text(settings, encoding="utf-8")
         if creds:
-            (config_dir / ".credentials.yml").write_text(creds)
+            (config_dir / ".credentials.yml").write_text(creds, encoding="utf-8")
 
     def test_returns_empty_when_no_files(self, monkeypatch, tmp_path):
         from unittest.mock import patch
@@ -457,8 +457,8 @@ class TestDashScopeTokenPlanCredSlot:
     def _write(tmp_path, settings: str = "", creds: str = ""):
         cfg_dir = tmp_path / ".iac-code"
         cfg_dir.mkdir()
-        (cfg_dir / "settings.yml").write_text(settings)
-        (cfg_dir / ".credentials.yml").write_text(creds)
+        (cfg_dir / "settings.yml").write_text(settings, encoding="utf-8")
+        (cfg_dir / ".credentials.yml").write_text(creds, encoding="utf-8")
 
     def test_credentials_includes_token_plan_slot(self, monkeypatch, tmp_path):
         from unittest.mock import patch

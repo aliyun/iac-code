@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from iac_code.utils.json_utils import extract_partial_string_fields, parse_concatenated_json, safe_parse_json
+from iac_code.utils.json_utils import (
+    extract_json_int_value,
+    extract_partial_string_fields,
+    parse_concatenated_json,
+    safe_parse_json,
+)
 
 
 class TestSafeParseJson:
@@ -30,6 +35,20 @@ class TestParseConcatenatedJson:
     def test_stops_after_invalid_tail(self):
         raw = '{"a":1} trailing'
         assert parse_concatenated_json(raw) == [{"a": 1}]
+
+
+class TestExtractJsonIntValue:
+    def test_extracts_integer_when_delimited_by_comma(self):
+        assert extract_json_int_value('{"candidate_index": 10, "summary": "x"', "candidate_index") == 10
+
+    def test_extracts_integer_when_delimited_by_object_end(self):
+        assert extract_json_int_value('{"candidate_index": 10}', "candidate_index") == 10
+
+    def test_extracts_integer_when_delimited_by_whitespace(self):
+        assert extract_json_int_value('{"candidate_index": 10 ', "candidate_index") == 10
+
+    def test_does_not_extract_unfinished_digit_prefix(self):
+        assert extract_json_int_value('{"candidate_index": 1', "candidate_index") is None
 
 
 class TestExtractPartialStringFields:

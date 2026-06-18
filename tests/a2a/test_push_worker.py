@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from iac_code.a2a.metrics import NoOpA2AMetrics
@@ -50,6 +52,22 @@ class RecordingConnector:
     async def post(self, url: str, *, json, headers, timeout):
         self.posts.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
         return FakeResponse(self.status_code)
+
+
+class RaisingConnector:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    async def post(self, url: str, *, json, headers, timeout):
+        raise self.exc
+
+
+class RecordingAlertSink:
+    def __init__(self) -> None:
+        self.jobs: list[A2APushJob] = []
+
+    async def dead_lettered(self, job: A2APushJob) -> None:
+        self.jobs.append(job)
 
 
 @pytest.mark.asyncio
@@ -325,6 +343,42 @@ async def test_push_worker_retries_transient_failure_with_backoff(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_push_worker_retry_stores_public_error_summary(tmp_path) -> None:
+    queue = LocalFileA2APushQueue(tmp_path)
+    connector = RaisingConnector(
+        TimeoutError("Authorization: Bearer sk-live Cookie=session-secret at /Users/alice/.iac-code/settings.yml")
+    )
+    worker = A2APushDeliveryWorker(
+        queue=queue,
+        connector=connector,
+        metrics=NoOpA2AMetrics(),
+        retry_policy=A2APushRetryPolicy(initial_delay_seconds=0.0, jitter_ratio=0.0, max_attempts=2),
+        clock=lambda: 100.0,
+    )
+    await queue.enqueue(
+        A2APushJob(
+            job_id="job-1",
+            task_id="task-1",
+            config_id="cfg-1",
+            url="https://callback.example/a2a?token=callback-secret",
+            payload={"ok": True},
+            headers={},
+        )
+    )
+
+    delivered = await worker.run_once()
+
+    assert delivered is False
+    retried = await queue.claim(now=100.0)
+    assert retried is not None
+    assert retried.last_error.startswith("TimeoutError:")
+    assert "sk-live" not in retried.last_error
+    assert "session-secret" not in retried.last_error
+    assert "/Users/alice" not in retried.last_error
+    assert "[REDACTED]" in retried.last_error
+
+
+@pytest.mark.asyncio
 async def test_push_worker_dead_letters_permanent_failure(tmp_path) -> None:
     queue = LocalFileA2APushQueue(tmp_path)
     connector = RecordingConnector(status_code=400)
@@ -349,6 +403,68 @@ async def test_push_worker_dead_letters_permanent_failure(tmp_path) -> None:
 
     assert delivered is False
     assert (tmp_path / "dead" / "job-1.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_push_worker_dead_letter_stores_public_error_summary(tmp_path) -> None:
+    queue = LocalFileA2APushQueue(tmp_path)
+    alert_sink = RecordingAlertSink()
+    connector = RaisingConnector(
+        RuntimeError("Authorization: Bearer sk-live Cookie=session-secret at /Users/alice/.iac-code/settings.yml")
+    )
+    worker = A2APushDeliveryWorker(
+        queue=queue,
+        connector=connector,
+        metrics=NoOpA2AMetrics(),
+        alert_sink=alert_sink,
+    )
+    await queue.enqueue(
+        A2APushJob(
+            job_id="job-1",
+            task_id="task-1",
+            config_id="cfg-1",
+            url="https://user:pass@callback.example/a2a?token=callback-secret#frag",
+            payload={"ok": True},
+            headers={},
+        )
+    )
+
+    delivered = await worker.run_once()
+
+    assert delivered is False
+    assert alert_sink.jobs
+    dead = alert_sink.jobs[0]
+    assert dead.last_error.startswith("RuntimeError:")
+    assert "sk-live" not in dead.last_error
+    assert "session-secret" not in dead.last_error
+    assert "/Users/alice" not in dead.last_error
+    assert "[REDACTED]" in dead.last_error
+
+
+@pytest.mark.asyncio
+async def test_logging_push_alert_sink_sanitizes_url_and_error(caplog) -> None:
+    sink = LoggingA2APushAlertSink()
+    job = A2APushJob(
+        job_id="job-1",
+        task_id="task-1",
+        config_id="cfg-1",
+        url="https://user:pass@callback.example:8443/a2a?token=callback-secret#frag",
+        payload={"ok": True},
+        headers={"Authorization": "Bearer raw-header"},
+        last_error="Authorization: Bearer sk-live Cookie=session-secret at /Users/alice/.iac-code/settings.yml",
+    )
+
+    with caplog.at_level(logging.ERROR, logger="iac_code.a2a.push_worker"):
+        await sink.dead_lettered(job)
+
+    record = caplog.records[-1]
+    assert record.url == "https://callback.example:8443/a2a"
+    assert "callback-secret" not in record.url
+    assert "user:pass" not in record.url
+    assert "sk-live" not in record.last_error
+    assert "session-secret" not in record.last_error
+    assert "/Users/alice" not in record.last_error
+    assert record.headers == {"Authorization": "[redacted]"}
 
 
 @pytest.mark.asyncio

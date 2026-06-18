@@ -78,6 +78,22 @@ class FakeRuntime:
         self.tool_registry = None
 
 
+class _NamedMemoryManager:
+    def __init__(self, name: str, description: str) -> None:
+        self.name = name
+        self.description = description
+
+    def list_memories(self):
+        return [
+            {
+                "name": self.name,
+                "type": "user",
+                "description": self.description,
+                "content": "remembered",
+            }
+        ]
+
+
 def test_runtime_command_memory_manager_prefers_legacy_manager() -> None:
     legacy = object()
     project = object()
@@ -86,6 +102,34 @@ def test_runtime_command_memory_manager_prefers_legacy_manager() -> None:
 
     assert _runtime_command_memory_manager(runtime) is legacy
     assert _runtime_command_memory_manager(type("Runtime", (), {"memory_manager": project})()) is project
+
+
+@pytest.mark.asyncio
+async def test_acp_memory_folder_session_uses_runtime_command_memory_manager() -> None:
+    legacy = _NamedMemoryManager("legacy-memory", "Legacy")
+    project = _NamedMemoryManager("project-memory", "Project")
+    runtime = type(
+        "Runtime",
+        (),
+        {
+            "session_id": "s-memory",
+            "agent_loop": FakeLoop(),
+            "legacy_memory_manager": legacy,
+            "memory_manager": project,
+        },
+    )()
+    server = ACPServer()
+    server.conn = FakeConn()
+
+    session = server._create_acp_session_from_runtime(runtime=runtime, mcp_configs=[])
+
+    response = await session.prompt([acp.schema.TextContentBlock(type="text", text="/memory-folder")])
+
+    assert response.stop_reason == "end_turn"
+    assert server.conn.updates
+    text = server.conn.updates[0][1].content.text
+    assert "legacy-memory - Legacy" in text
+    assert "project-memory" not in text
 
 
 def _patch_server(monkeypatch, session_id: str = "test-session") -> None:
@@ -314,16 +358,16 @@ async def test_fork_session_from_storage_loads_history(monkeypatch, tmp_path) ->
 
 
 # ===========================================================================
-# _create_runtime_with_auth_check - line 397 (non-auth exception re-raise)
+# _create_runtime_with_auth_check - non-auth exception sanitization
 # ===========================================================================
 
 
 @pytest.mark.asyncio
-async def test_create_runtime_non_auth_exception_reraises(monkeypatch) -> None:
-    """Non-auth exception in create_agent_runtime is re-raised directly (line 397)."""
+async def test_create_runtime_non_auth_exception_returns_public_error(monkeypatch) -> None:
+    """Non-auth runtime creation errors are returned as sanitized ACP errors."""
 
     def _raise_generic(options):
-        raise RuntimeError("disk full")
+        raise RuntimeError("disk full for sk-live-secret at /Users/alice/.iac-code/settings.yml")
 
     monkeypatch.setattr("iac_code.acp.server.load_saved_model", lambda: "fake-model")
     monkeypatch.setattr("iac_code.acp.server.create_agent_runtime", _raise_generic)
@@ -333,8 +377,13 @@ async def test_create_runtime_non_auth_exception_reraises(monkeypatch) -> None:
     server = ACPServer()
     server.on_connect(FakeConn())
 
-    with pytest.raises(RuntimeError, match="disk full"):
+    with pytest.raises(acp.RequestError) as exc_info:
         await server.new_session(cwd="/tmp")
+
+    rendered = str(exc_info.value.data)
+    assert "sk-live-secret" not in rendered
+    assert "/Users/alice" not in rendered
+    assert exc_info.value.data["error_id"]
 
 
 # ===========================================================================
@@ -715,7 +764,7 @@ class TestValidateCwd:
             lambda: [tmp_path],
         )
         regular_file = tmp_path / "file.txt"
-        regular_file.write_text("content")
+        regular_file.write_text("content", encoding="utf-8")
         server = ACPServer()
         with pytest.raises(acp.RequestError):
             server._validate_cwd(str(regular_file))

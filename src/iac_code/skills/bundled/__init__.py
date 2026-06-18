@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillContext, SkillDefinition
 from iac_code.types.skill_source import SkillSource
+
+_BUNDLED_ROOT = Path(__file__).parent
 
 # Global bundled skill list
 _bundled_skills: list[SkillDefinition] = []

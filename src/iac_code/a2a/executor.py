@@ -19,6 +19,9 @@ from iac_code.a2a.events import make_text_part, publish_stream_event
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.parts import allowed_cwd_roots, is_relative_to, parts_to_prompt
+from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, recoverable_task_id_from_sidecar
+from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session
+from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
@@ -26,9 +29,13 @@ from iac_code.a2a.types import (
     TASK_STATE_INPUT_REQUIRED,
     TASK_STATE_WORKING,
 )
+from iac_code.agent.message import Message as AgentMessage
+from iac_code.i18n import _
+from iac_code.pipeline.config import RunMode, get_run_mode
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import use_session_id, use_user_id
+from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -36,10 +43,7 @@ _ERROR_TEXT_MAX_CHARS = 1000
 
 
 def _format_exception(exc: BaseException) -> str:
-    message = str(exc)
-    if not message:
-        return type(exc).__name__
-    return f"{type(exc).__name__}: {message[:_ERROR_TEXT_MAX_CHARS]}"
+    return public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS)
 
 
 A2APermissionResolver: TypeAlias = Callable[[Any], "bool | Awaitable[bool]"]
@@ -76,20 +80,32 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        task_id = context.task_id or "task-" + uuid.uuid4().hex[:12]
+        requested_task_id = context.task_id or None
+        task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         context_id = context.context_id or "ctx-" + uuid.uuid4().hex[:12]
         task = None
         try:
-            task = await self._task_store.get_or_create_task(task_id=task_id, context_id=context_id)
-            if not isinstance(getattr(context, "current_task", None), Task):
-                await self._publish_initial_task(event_queue, task_id=task_id, context_id=context_id, context=context)
-            await self._task_store.ensure_task_not_expired(task.task_id)
             metadata = getattr(context, "metadata", None) or getattr(
                 getattr(context, "message", None), "metadata", None
             )
             cwd = self._resolve_cwd(metadata)
             user_id = self._resolve_user_id(metadata)
             prompt = self._prompt_from_context(context, cwd=cwd)
+            pipeline_mode = get_run_mode() == RunMode.PIPELINE
+            if pipeline_mode and requested_task_id is None:
+                recovered_task_id = await self._recoverable_pipeline_task_id_for_context(context_id=context_id, cwd=cwd)
+                if recovered_task_id is not None:
+                    task_id = recovered_task_id
+            owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
+            task = await self._task_store.get_or_create_task(
+                task_id=task_id,
+                context_id=context_id,
+                owner=owner,
+                restore_interrupted=not pipeline_mode,
+            )
+            if not isinstance(getattr(context, "current_task", None), Task):
+                await self._publish_initial_task(event_queue, task_id=task_id, context_id=context_id, context=context)
+            await self._task_store.ensure_task_not_expired(task.task_id)
         except Exception as exc:
             if _is_retryable_executor_error(exc):
                 await self._publish_status(
@@ -110,7 +126,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 task_id=task_id,
                 context_id=context_id,
                 state=TaskState.TASK_STATE_FAILED,
-                text=str(exc),
+                text=sanitize_public_text(str(exc)),
             )
             if task is not None:
                 task.state = TASK_STATE_FAILED
@@ -133,6 +149,34 @@ class IacCodeA2AExecutor(AgentExecutor):
             self._metrics.record_task_failed()
             return
 
+        route_pipeline_handoff_to_normal = pipeline_mode and await self._should_route_pipeline_handoff_to_normal(
+            context_id=context_id,
+            cwd=cwd,
+        )
+        if pipeline_mode and not route_pipeline_handoff_to_normal:
+            pipeline_executor = IacCodeA2APipelineExecutor(
+                task_store=self._task_store,
+                model=self._model,
+                metrics=self._metrics,
+                artifact_store=self._artifact_store,
+                push_notifier=self._push_notifier,
+                permission_resolver=self._permission_resolver,
+                auto_approve_permissions=self._auto_approve_permissions,
+                thinking_exposure_types=self._thinking_exposure_types,
+            )
+            await pipeline_executor.execute(
+                context=context,
+                event_queue=event_queue,
+                task=task,
+                task_id=task_id,
+                context_id=context_id,
+                cwd=cwd,
+                prompt=prompt,
+            )
+            return
+        if route_pipeline_handoff_to_normal:
+            await self._ensure_pipeline_handoff_context_in_session(context_id=context_id, cwd=cwd)
+
         def runtime_factory(session_id: str) -> Any:
             session_storage = SessionStorage()
             resume_messages = None
@@ -154,6 +198,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                 cwd=cwd,
                 runtime_factory=runtime_factory,
             )
+            if not hasattr(ctx.runtime, "agent_loop"):
+                ctx.runtime = runtime_factory(ctx.session_id)
+                self._task_store.mirror_context(ctx)
         except Exception as exc:
             await self._publish_status(
                 event_queue,
@@ -178,7 +225,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 task_id=task_id,
                 context_id=context_id,
                 state=TaskState.TASK_STATE_FAILED,
-                text="Task is already working.",
+                text=_("Task is already working."),
             )
             self._task_store.mirror_task(task)
             await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -195,7 +242,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 task_id=task_id,
                 context_id=context_id,
                 state=TaskState.TASK_STATE_FAILED,
-                text="Task is already working.",
+                text=_("Task is already working."),
             )
             self._task_store.mirror_task(task)
             await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -256,7 +303,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_CANCELED,
-                    text="Task canceled.",
+                    text=_("Task canceled."),
                 )
                 self._task_store.mirror_task(task)
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -382,6 +429,64 @@ class IacCodeA2AExecutor(AgentExecutor):
             return "Authentication required. Please configure your API credentials."
         logger.exception("Unhandled A2A executor error")
         return _format_exception(exc)
+
+    async def _should_route_pipeline_handoff_to_normal(self, *, context_id: str, cwd: str) -> bool:
+        try:
+            ctx = await self._task_store.get_context_record(context_id)
+        except Exception:
+            return False
+        if ctx.cwd != cwd:
+            return False
+        snapshot = A2APipelineSnapshotStore(
+            existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=ctx.session_id)
+        ).load()
+        if not isinstance(snapshot, dict):
+            return False
+        handoff = snapshot.get("normalHandoff")
+        if not isinstance(handoff, dict):
+            return False
+        return handoff.get("action") == "switch_to_normal" and handoff.get("targetMode") == "normal"
+
+    async def _ensure_pipeline_handoff_context_in_session(self, *, context_id: str, cwd: str) -> None:
+        try:
+            ctx = await self._task_store.get_context_record(context_id)
+        except Exception:
+            return
+        if ctx.cwd != cwd:
+            return
+        snapshot = A2APipelineSnapshotStore(
+            existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=ctx.session_id)
+        ).load()
+        if not isinstance(snapshot, dict):
+            return
+        handoff = snapshot.get("normalHandoff")
+        if not isinstance(handoff, dict):
+            return
+        summary = handoff.get("summary")
+        if not isinstance(summary, str) or not summary:
+            return
+
+        session_storage = SessionStorage()
+        messages = session_storage.load(cwd, ctx.session_id)
+        if any(
+            getattr(message, "role", None) == "user" and getattr(message, "content", None) == summary
+            for message in messages
+        ):
+            return
+        session_storage.append(cwd, ctx.session_id, AgentMessage(role="user", content=summary))
+
+    async def _recoverable_pipeline_task_id_for_context(self, *, context_id: str, cwd: str) -> str | None:
+        try:
+            ctx = await self._task_store.get_context_record(context_id)
+        except Exception:
+            return None
+        if ctx.cwd != cwd:
+            return None
+        try:
+            return recoverable_task_id_from_sidecar(cwd=cwd, session_id=ctx.session_id, context_id=context_id)
+        except Exception:
+            logger.debug("Failed to recover A2A pipeline task id", exc_info=True)
+            return None
 
     async def _publish_status(
         self,
