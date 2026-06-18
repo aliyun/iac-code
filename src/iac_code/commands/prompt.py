@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from iac_code.agent.message import RECALLED_MEMORY_MARKER
+from iac_code.agent.message import Message as AgentMessage
 from iac_code.agent.system_prompt import DYNAMIC_BOUNDARY
 from iac_code.i18n import _
 from iac_code.utils.file_security import ensure_private_file
@@ -83,6 +84,14 @@ def build_prompt_snapshot(repl: object) -> dict[str, Any]:
         if "provider_messages" in last_request
         else _provider_messages(agent_loop)
     )
+    cleanup_messages = _cleanup_prompt_messages(repl, agent_loop)
+    provider_messages = _with_cleanup_prompt_messages(
+        repl,
+        agent_loop,
+        provider_messages,
+        cleanup_messages=cleanup_messages,
+    )
+    cleanup_prompts = _cleanup_prompt_snapshots(cleanup_messages)
     tools = list(last_request.get("tools") or []) if "tools" in last_request else _tool_definitions(agent_loop)
     status = _status_snapshot(repl)
     metadata = {
@@ -98,12 +107,22 @@ def build_prompt_snapshot(repl: object) -> dict[str, Any]:
         "system_prompt": system_prompt,
         "system_sections": _split_system_prompt(system_prompt),
         "provider_messages": provider_messages,
+        "cleanup_prompts": cleanup_prompts,
         "tools": tools,
         "memory_sections": _memory_sections(repl),
     }
 
 
 def _pipeline_prompt_snapshot(repl: object) -> dict[str, Any] | None:
+    runtime_getter = getattr(repl, "_get_runtime_mode", None)
+    if callable(runtime_getter):
+        try:
+            runtime_mode = runtime_getter()
+        except Exception:
+            runtime_mode = None
+        if str(getattr(runtime_mode, "value", runtime_mode)) != "pipeline":
+            return None
+
     pipeline = getattr(repl, "_pipeline", None)
     get_prompt_contexts = getattr(pipeline, "get_prompt_contexts", None)
     if not callable(get_prompt_contexts):
@@ -220,6 +239,14 @@ def render_prompt_html(snapshot: dict[str, Any]) -> str:
     provider_messages = "\n".join(
         _message_card(index, message) for index, message in enumerate(snapshot.get("provider_messages", []), start=1)
     )
+    cleanup_messages = list(snapshot.get("cleanup_prompts") or [])
+    if not cleanup_messages:
+        cleanup_messages = [
+            message for message in snapshot.get("provider_messages", []) if _is_cleanup_prompt_snapshot(message)
+        ]
+    cleanup_prompts = "\n".join(
+        _message_card(index, message) for index, message in enumerate(cleanup_messages, start=1)
+    )
     tools = "\n".join(_tool_card(tool) for tool in snapshot.get("tools", []))
     raw_system_prompt = _content_card(
         _("Raw Full System Prompt"),
@@ -232,7 +259,10 @@ def render_prompt_html(snapshot: dict[str, Any]) -> str:
         raw_system_prompt=raw_system_prompt,
     )
     messages_tab = provider_messages or '<p class="empty">{}</p>'.format(escape(_("No provider messages yet.")))
+    cleanup_tab = cleanup_prompts or '<p class="empty">{}</p>'.format(escape(_("No cleanup prompts in this snapshot.")))
     tools_tab = tools or '<p class="empty">{}</p>'.format(escape(_("No tools are currently registered.")))
+    cleanup_tab_button = _tab_button("cleanup", _("Cleanup Prompts")) if cleanup_messages else ""
+    cleanup_panel = _tab_panel("cleanup", cleanup_tab) if cleanup_messages else ""
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -431,11 +461,13 @@ pre {{
     {all_tab_button}
     {system_tab_button}
     {messages_tab_button}
+    {cleanup_tab_button}
     {tools_tab_button}
   </nav>
   {all_panel}
   {system_panel}
   {messages_panel}
+  {cleanup_panel}
   {tools_panel}
 </main>
 <script>
@@ -474,10 +506,12 @@ for (const link of document.querySelectorAll("[data-open-tab]")) {{
         all_tab_button=_tab_button("all", _("ALL"), selected=True),
         system_tab_button=_tab_button("system", _("System Prompt")),
         messages_tab_button=_tab_button("messages", _("Provider Messages")),
+        cleanup_tab_button=cleanup_tab_button,
         tools_tab_button=_tab_button("tools", _("Tools")),
         all_panel=_tab_panel("all", all_tab, active=True),
         system_panel=_tab_panel("system", system_tab),
         messages_panel=_tab_panel("messages", messages_tab),
+        cleanup_panel=cleanup_panel,
         tools_panel=_tab_panel("tools", tools_tab),
     )
 
@@ -511,6 +545,231 @@ def _provider_messages(agent_loop: object) -> list[dict[str, Any]]:
     except Exception:
         return []
     return [_message_snapshot(message) for message in messages]
+
+
+def _is_cleanup_prompt_snapshot(message: Mapping[str, Any]) -> bool:
+    badge = str(message.get("badge") or "")
+    cleanup_badge = _("cleanup prompt")
+    return badge == cleanup_badge or badge.startswith("{} · ".format(cleanup_badge))
+
+
+def _cleanup_prompt_snapshots(cleanup_messages: list[AgentMessage]) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    for cleanup_message in cleanup_messages:
+        snapshot = _message_snapshot(cleanup_message)
+        if not _message_identity(snapshot):
+            continue
+        snapshot["badge"] = _("cleanup prompt")
+        snapshots.append(snapshot)
+    return snapshots
+
+
+def _with_cleanup_prompt_messages(
+    repl: object,
+    agent_loop: object,
+    provider_messages: list[dict[str, Any]],
+    *,
+    cleanup_messages: list[AgentMessage] | None = None,
+) -> list[dict[str, Any]]:
+    messages = [dict(message) for message in provider_messages]
+    cleanup_messages = cleanup_messages if cleanup_messages is not None else _cleanup_prompt_messages(repl, agent_loop)
+    session_messages = _raw_session_messages(repl)
+    ordered_cleanup_messages = _session_ordered_cleanup_messages(session_messages, cleanup_messages)
+    ordered_cleanup_ids = {_raw_cleanup_prompt_identity(message) for message in ordered_cleanup_messages}
+
+    for cleanup_message in ordered_cleanup_messages:
+        _insert_or_mark_cleanup_prompt_message(cleanup_message, session_messages, messages)
+
+    for cleanup_message in cleanup_messages:
+        if _raw_cleanup_prompt_identity(cleanup_message) in ordered_cleanup_ids:
+            continue
+        _mark_existing_cleanup_prompt_message(cleanup_message, messages)
+    return messages
+
+
+def _session_ordered_cleanup_messages(
+    session_messages: list[AgentMessage], cleanup_messages: list[AgentMessage]
+) -> list[AgentMessage]:
+    from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
+    allowed = {_raw_cleanup_prompt_identity(message) for message in cleanup_messages}
+    ordered: list[AgentMessage] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for message in session_messages:
+        if not is_cleanup_prompt_message(message):
+            continue
+        identity = _raw_cleanup_prompt_identity(message)
+        if identity not in allowed or identity in seen:
+            continue
+        ordered.append(message)
+        seen.add(identity)
+    return ordered
+
+
+def _insert_or_mark_cleanup_prompt_message(
+    cleanup_message: AgentMessage,
+    session_messages: list[AgentMessage],
+    provider_messages: list[dict[str, Any]],
+) -> None:
+    if _mark_existing_cleanup_prompt_message(cleanup_message, provider_messages):
+        return
+    insert_at = _removed_cleanup_prompt_insert_index(cleanup_message, session_messages, provider_messages)
+    if insert_at is None:
+        return
+    snapshot = _message_snapshot(cleanup_message)
+    snapshot["badge"] = _("cleanup prompt · 已移除")
+    provider_messages.insert(insert_at, snapshot)
+
+
+def _mark_existing_cleanup_prompt_message(
+    cleanup_message: AgentMessage, provider_messages: list[dict[str, Any]]
+) -> bool:
+    cleanup_identity = _message_identity(_message_snapshot(cleanup_message))
+    if cleanup_identity is None:
+        return False
+    marked = False
+    for message in provider_messages:
+        if _message_identity(message) != cleanup_identity:
+            continue
+        message["badge"] = _("cleanup prompt")
+        marked = True
+    return marked
+
+
+def _removed_cleanup_prompt_insert_index(
+    cleanup_message: AgentMessage,
+    session_messages: list[AgentMessage],
+    provider_messages: list[dict[str, Any]],
+) -> int | None:
+    cleanup_raw_identity = _raw_cleanup_prompt_identity(cleanup_message)
+    try:
+        session_index = next(
+            index
+            for index, message in enumerate(session_messages)
+            if _raw_cleanup_prompt_identity(message) == cleanup_raw_identity
+        )
+    except StopIteration:
+        return None
+
+    provider_positions = _unique_provider_message_positions(provider_messages)
+    previous_position = _nearest_session_anchor_position(
+        session_messages[:session_index],
+        provider_positions,
+        reverse=True,
+    )
+    next_position = _nearest_session_anchor_position(
+        session_messages[session_index + 1 :],
+        provider_positions,
+        reverse=False,
+    )
+    if previous_position is None or next_position is None or previous_position >= next_position:
+        return None
+    return next_position
+
+
+def _unique_provider_message_positions(provider_messages: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
+    positions: dict[tuple[str, str], int] = {}
+    for index, message in enumerate(provider_messages):
+        identity = _message_identity(message)
+        if identity is None or _is_cleanup_prompt_snapshot(message):
+            continue
+        counts[identity] = counts.get(identity, 0) + 1
+        positions[identity] = index
+    return {identity: positions[identity] for identity, count in counts.items() if count == 1}
+
+
+def _nearest_session_anchor_position(
+    session_messages: list[AgentMessage],
+    provider_positions: dict[tuple[str, str], int],
+    *,
+    reverse: bool,
+) -> int | None:
+    from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
+    iterable = reversed(session_messages) if reverse else iter(session_messages)
+    for message in iterable:
+        if is_cleanup_prompt_message(message):
+            continue
+        identity = _message_identity(_message_snapshot(message))
+        if identity is None:
+            continue
+        position = provider_positions.get(identity)
+        if position is not None:
+            return position
+    return None
+
+
+def _cleanup_prompt_messages(repl: object, agent_loop: object) -> list[AgentMessage]:
+    from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
+    found: list[AgentMessage] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for message in _raw_context_messages(agent_loop) + _raw_session_messages(repl):
+        if not is_cleanup_prompt_message(message):
+            continue
+        identity = _raw_cleanup_prompt_identity(message)
+        if identity in seen:
+            continue
+        found.append(message)
+        seen.add(identity)
+    return found
+
+
+def _raw_context_messages(agent_loop: object) -> list[AgentMessage]:
+    context_manager = getattr(agent_loop, "context_manager", None)
+    getter = getattr(context_manager, "get_messages", None)
+    if not callable(getter):
+        return []
+    try:
+        messages = getter()
+    except Exception:
+        return []
+    return [message for message in list(messages or []) if isinstance(message, AgentMessage)]
+
+
+def _raw_session_messages(repl: object) -> list[AgentMessage]:
+    session_storage = getattr(repl, "_session_storage", None)
+    loader = getattr(session_storage, "load", None)
+    if not callable(loader):
+        return []
+    cwd = getattr(repl, "_original_cwd", None)
+    session_id = getattr(repl, "_session_id", None)
+    if not isinstance(cwd, str) or not isinstance(session_id, str):
+        return []
+    try:
+        messages = loader(cwd, session_id)
+    except Exception:
+        return []
+    return [message for message in list(messages or []) if isinstance(message, AgentMessage)]
+
+
+def _raw_cleanup_prompt_identity(message: AgentMessage) -> tuple[str, str, str, str]:
+    metadata = getattr(message, "metadata", {}) or {}
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    return (
+        str(getattr(message, "role", "") or ""),
+        _content_identity(getattr(message, "content", "")),
+        str(metadata.get("cleanupLedgerPath") or metadata.get("cleanup_ledger_path") or ""),
+        str(metadata.get("cleanupStatus") or metadata.get("cleanup_status") or ""),
+    )
+
+
+def _message_identity(message: dict[str, Any]) -> tuple[str, str] | None:
+    content = _content_identity(message.get("content", ""))
+    if not content:
+        return None
+    return (str(message.get("role") or ""), content)
+
+
+def _content_identity(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    try:
+        return json.dumps(content, sort_keys=True, ensure_ascii=False)
+    except TypeError:
+        return str(content)
 
 
 def _last_provider_request(agent_loop: object) -> dict[str, Any]:
@@ -677,6 +936,9 @@ def _render_all_tab(snapshot: dict[str, Any]) -> str:
     system_sections = list(snapshot.get("system_sections") or [])
     provider_messages = list(snapshot.get("provider_messages") or [])
     tools = list(snapshot.get("tools") or [])
+    cleanup_messages = list(snapshot.get("cleanup_prompts") or [])
+    if not cleanup_messages:
+        cleanup_messages = [message for message in provider_messages if _is_cleanup_prompt_snapshot(message)]
     has_recalled_memory = any(_is_recalled_memory_content(message.get("content", "")) for message in provider_messages)
     recalled_line = (
         _("Present in Provider Messages as a hidden conversation <system-reminder>.")
@@ -697,6 +959,7 @@ def _render_all_tab(snapshot: dict[str, Any]) -> str:
             _("   Details: Provider Messages tab"),
             _("   Messages: {count}").format(count=len(provider_messages)),
             _("   Recalled memory: {status}").format(status=recalled_line),
+            _("   Cleanup prompts: {count}").format(count=len(cleanup_messages)),
             "",
             _("3. Tools"),
             _("   Provider field: tools"),
@@ -723,6 +986,17 @@ def _render_all_tab(snapshot: dict[str, Any]) -> str:
                     count=len(provider_messages),
                     status=_("present") if has_recalled_memory else _("not present"),
                 ),
+            )
+            + (
+                _assembly_step(
+                    _("Cleanup Prompts"),
+                    "cleanup",
+                    _("Cleanup Prompts"),
+                    _("Rollback cleanup prompts are also shown separately for quick inspection."),
+                    _("{count} cleanup prompts").format(count=len(cleanup_messages)),
+                )
+                if cleanup_messages
+                else ""
             )
             + _assembly_step(
                 _("3. Tools"),
@@ -760,7 +1034,9 @@ def _message_card(index: int, message: dict[str, Any]) -> str:
     content = message.get("content", "")
     if not isinstance(content, str):
         content = json.dumps(content, indent=2, ensure_ascii=False)
-    badge = _("recalled memory") if _is_recalled_memory_content(message.get("content", "")) else _("message")
+    badge = str(message.get("badge") or "")
+    if not badge:
+        badge = _("recalled memory") if _is_recalled_memory_content(message.get("content", "")) else _("message")
     return _content_card("#{index} {role}".format(index=index, role=role), content, badge=badge)
 
 

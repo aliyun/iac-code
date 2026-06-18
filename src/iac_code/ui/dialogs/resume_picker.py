@@ -28,6 +28,7 @@ from rich.text import Text
 
 from iac_code.agent.message import Message, ToolResultBlock, is_recalled_memory_message
 from iac_code.i18n import _, ngettext
+from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.ui.components.fuzzy_picker import fuzzy_match
 from iac_code.ui.components.search_box import SearchBox
@@ -676,7 +677,7 @@ class ResumePicker:
         """Minimal renderer used in tests / when no live renderer is provided."""
         first = True
         for msg in messages:
-            if is_recalled_memory_message(msg):
+            if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             if not first:
                 console.print()

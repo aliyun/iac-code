@@ -41,6 +41,7 @@ from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_ru
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import use_session_id
 from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent
+from iac_code.utils.public_errors import sanitize_public_text
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -958,16 +959,21 @@ class IacCodeA2APipelineExecutor:
             logger.warning("Failed to build A2A pipeline normal handoff event", exc_info=True)
             return
 
+        data = {
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": outcome,
+            "summary": summary,
+        }
+        cleanup = _pipeline_cleanup_handoff_data(pipeline)
+        if cleanup is not None:
+            data["cleanup"] = cleanup
+
         published = await publisher.publish_manual(
             "pipeline_handoff_ready",
             "pipeline",
             status=_handoff_status_from_outcome(outcome),
-            data={
-                "action": "switch_to_normal",
-                "targetMode": "normal",
-                "outcome": outcome,
-                "summary": summary,
-            },
+            data=data,
         )
         if published is not None:
             _persist_normal_handoff_summary(pipeline, summary)
@@ -1611,6 +1617,54 @@ def _persist_normal_handoff_summary(pipeline: Any, summary: str) -> None:
         append(cwd, session_id, AgentMessage(role="user", content=summary))
     except Exception:
         logger.warning("Failed to persist A2A pipeline normal handoff summary", exc_info=True)
+
+
+def _pipeline_cleanup_handoff_data(pipeline: Any) -> dict[str, Any] | None:
+    cleanup_ledger = getattr(pipeline, "cleanup_ledger", None)
+    if not callable(cleanup_ledger):
+        return None
+    try:
+        ledger = cleanup_ledger()
+        build_pending_prompt = getattr(ledger, "build_pending_prompt", None)
+        if not callable(build_pending_prompt):
+            return None
+        prompt = build_pending_prompt()
+    except Exception:
+        logger.warning("Failed to build A2A pipeline cleanup handoff data", exc_info=True)
+        return None
+    if prompt is None:
+        return None
+
+    resources = list(getattr(prompt, "resources", []) or [])
+    if not resources:
+        return None
+    return {
+        "status": "pending",
+        "resourceCount": len(resources),
+        "statusMessage": str(getattr(prompt, "status_message", "") or ""),
+        "resources": [_cleanup_resource_handoff_data(resource) for resource in resources],
+    }
+
+
+def _cleanup_resource_handoff_data(resource: Any) -> dict[str, Any]:
+    return {
+        "provider": str(getattr(resource, "provider", "") or ""),
+        "resourceType": str(getattr(resource, "resource_type", "") or ""),
+        "resourceId": str(getattr(resource, "resource_id", "") or ""),
+        "resourceName": str(getattr(resource, "resource_name", "") or ""),
+        "regionId": str(getattr(resource, "region_id", "") or ""),
+        "sourceStepId": str(getattr(resource, "source_step_id", "") or ""),
+        "cleanupStatus": str(getattr(resource, "cleanup_status", "") or ""),
+        "progressStatus": getattr(resource, "progress_status", None),
+        "lastError": _public_cleanup_error(getattr(resource, "last_error", None)),
+    }
+
+
+def _public_cleanup_error(value: Any) -> str | None:
+    if not value:
+        return None
+    text = sanitize_public_text(value)
+    return text[:1000] + "..." if len(text) > 1000 else text
 
 
 async def _maybe_await(value: Any) -> Any:

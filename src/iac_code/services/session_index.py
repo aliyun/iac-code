@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE
+from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, read_session_metadata
 from iac_code.utils.project_paths import (
     get_project_dir,
@@ -161,12 +162,20 @@ def _is_recalled_memory_text(text: str | None) -> bool:
     return bool(text and RECALLED_MEMORY_MARKER in text)
 
 
-def _is_recalled_memory_row(obj: dict) -> bool:
+def _is_cleanup_prompt_text(text: str | None) -> bool:
+    return bool(
+        text and text.startswith("检测到 pipeline rollback 后仍需要清理的云资源。") and "DELETE_COMPLETE" in text
+    )
+
+
+def _is_hidden_prompt_row(obj: dict) -> bool:
     metadata = obj.get("metadata")
     if isinstance(metadata, dict) and metadata.get("type") == RECALLED_MEMORY_METADATA_TYPE:
         return True
+    if isinstance(metadata, dict) and metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE:
+        return True
     content = obj.get("content")
-    return isinstance(content, str) and _is_recalled_memory_text(content)
+    return isinstance(content, str) and (_is_recalled_memory_text(content) or _is_cleanup_prompt_text(content))
 
 
 def _extract_first_user_text(head: str) -> str | None:
@@ -187,7 +196,7 @@ def _extract_first_user_text(head: str) -> str | None:
             continue
         if not isinstance(obj, dict) or obj.get("role") != "user":
             continue
-        if _is_recalled_memory_row(obj):
+        if _is_hidden_prompt_row(obj):
             continue
         content = obj.get("content")
         if isinstance(content, str) and content.strip():
@@ -227,7 +236,7 @@ def read_lite_metadata(path: Path) -> LiteMetadata:
         head, "git_branch"
     )
     last_prompt = extract_last_json_string_field(tail, "last_prompt")
-    if _is_recalled_memory_text(last_prompt):
+    if _is_recalled_memory_text(last_prompt) or _is_cleanup_prompt_text(last_prompt):
         last_prompt = None
     first_prompt = _extract_first_user_text(head)
     return LiteMetadata(

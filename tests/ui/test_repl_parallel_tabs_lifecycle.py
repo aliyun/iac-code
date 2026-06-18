@@ -153,6 +153,97 @@ async def test_outer_event_stream_closed_before_recursive_render(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_candidate_selection_clears_waiting_flag_before_recursive_render(monkeypatch):
+    from io import StringIO
+
+    from rich.console import Console
+
+    from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+    from iac_code.types.stream_events import DiagramEvent
+    from iac_code.ui.core.key_event import KeyEvent
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.renderer = MagicMock()
+    repl.renderer.console = Console(file=StringIO(), width=120, force_terminal=True)
+    repl.store = MagicMock()
+    repl._pipeline_waiting_input = False
+    repl._render_interrupt_feedback_inline = MagicMock()
+    repl._render_pipeline_event = MagicMock()
+
+    recursive_waiting_flags: list[bool] = []
+
+    async def fake_render_pipeline_stream(_stream):
+        recursive_waiting_flags.append(repl._pipeline_waiting_input)
+
+    repl._render_pipeline_stream = fake_render_pipeline_stream
+
+    pipeline = MagicMock()
+    pipeline.resume = MagicMock(return_value=MagicMock(name="new_stream_after_resume"))
+    pipeline.state_machine = MagicMock(is_complete=False)
+    pipeline.pause_agent_loops = MagicMock()
+    pipeline.resume_agent_loops = MagicMock()
+    repl._pipeline = pipeline
+
+    class FakeLive:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def update(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("iac_code.ui.repl.Live", FakeLive)
+
+    class FakeCapture:
+        def __init__(self, *args, **kwargs):
+            self._fired = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read_key(self, timeout):
+            if self._fired:
+                if timeout:
+                    time.sleep(min(timeout, 0.05))
+                return None
+            deadline = time.time() + (timeout if timeout else 1.0)
+            while time.time() < deadline:
+                if repl._pipeline_waiting_input:
+                    self._fired = True
+                    return KeyEvent(key="enter", char="")
+                time.sleep(0.01)
+            return None
+
+    monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+    async def stream():
+        yield DiagramEvent(
+            candidate_name="c1",
+            template_content="ROSTemplateFormatVersion: '2015-09-01'",
+            mermaid_source="graph TD; A-->B",
+        )
+        yield PipelineEvent(
+            type=PipelineEventType.USER_INPUT_REQUIRED,
+            step_id="confirm_and_select",
+            timestamp=time.time(),
+            data={"options": [{"name": "c1"}]},
+        )
+
+    await asyncio.wait_for(repl._render_candidate_selection_tabs(stream()), timeout=5.0)
+
+    assert recursive_waiting_flags == [False]
+
+
+@pytest.mark.asyncio
 async def test_user_input_required_escape_empty_input_returns_to_candidate_selection(monkeypatch):
     """ESC in candidate selection opens supplement input; empty ESC cancels back to selection."""
     from io import StringIO

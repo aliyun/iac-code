@@ -915,6 +915,112 @@ async def test_pipeline_handoff_context_is_backfilled_from_snapshot_when_session
 
 
 @pytest.mark.asyncio
+async def test_pipeline_handoff_context_routes_and_backfills_public_summary_from_journal_when_snapshot_corrupt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
+    from iac_code.services.session_storage import SessionStorage
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    session_id = "session-handoff"
+    context_id = "ctx-handoff"
+    summary = "[Pipeline Handoff Context]\nPipeline: selling"
+    cleanup_prompt = "cleanup prompt for stack-123"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+    (pipeline_dir / "a2a-snapshot.json").write_text("{broken", encoding="utf-8")
+    A2APipelineJournal(pipeline_dir).append(
+        {
+            "schemaVersion": "1.0",
+            "eventId": "evt-handoff",
+            "sequence": 1,
+            "createdAt": "2026-01-01T00:00:00Z",
+            "eventType": "pipeline_handoff_ready",
+            "scope": "pipeline",
+            "pipelineRunId": context_id,
+            "taskId": "task-pipeline",
+            "contextId": context_id,
+            "pipelineName": "selling",
+            "status": "completed",
+            "data": {
+                "action": "switch_to_normal",
+                "targetMode": "normal",
+                "summary": summary,
+                "cleanup": {
+                    "status": "pending",
+                    "resourceCount": 1,
+                    "prompt": cleanup_prompt,
+                    "resources": [{"resourceId": "stack-123", "regionId": "cn-hangzhou"}],
+                },
+            },
+        }
+    )
+    ledger = CleanupLedger(SessionStorage().session_dir(str(cwd), session_id) / "pipeline" / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                region_id="cn-hangzhou",
+                cleanup_status="completed",
+                progress_status="DELETE_COMPLETE",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
+    seen_resume: list[object | None] = []
+
+    def fake_factory(options):
+        seen_resume.append(options.resume_messages)
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    class FailingPipelineExecutor:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def execute(self, **kwargs) -> None:
+            raise AssertionError("pipeline executor should not be used after normal handoff")
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_factory)
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", FailingPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-followup",
+            context_id=context_id,
+            text="继续解释一下",
+            metadata={"iac_code": {"cwd": str(cwd)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert loop.prompts == ["继续解释一下"]
+    assert seen_resume and seen_resume[0] is not None
+    assert any(getattr(message, "content", "") == summary for message in seen_resume[0])
+    assert not any(getattr(message, "content", "") == cleanup_prompt for message in seen_resume[0])
+    loaded = SessionStorage().load(str(cwd), session_id)
+    assert loaded is not None
+    assert any(getattr(message, "content", "") == summary for message in loaded)
+    assert not any(getattr(message, "content", "") == cleanup_prompt for message in loaded)
+
+
+@pytest.mark.asyncio
 async def test_auth_error_is_sanitized(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     def raise_auth_error(options):
         raise ValueError("provider not configured: secret internal detail")

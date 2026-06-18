@@ -10,7 +10,7 @@ import pytest
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
-from iac_code.types.stream_events import StackProgressEvent
+from iac_code.types.stream_events import ResourceObservedEvent, StackProgressEvent
 
 
 class MockCloudStack(BaseCloudStack):
@@ -214,6 +214,36 @@ class TestBaseCloudStackExecute:
         first = progress_events[0]
         assert first.stack_id == "stack-id-123"
         assert first.stack_name == "test-stack"
+
+    @pytest.mark.asyncio
+    async def test_execute_emits_resource_observed_before_progress(self, stack: MockCloudStack) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        context = ToolContext(event_queue=queue, tool_use_id="toolu-create")
+
+        await stack.execute(
+            tool_input={
+                "action": "CreateStack",
+                "params": {"StackName": "test", "TemplateBody": "secret template", "DbPassword": "super-secret"},
+                "region_id": "cn-hangzhou",
+            },
+            context=context,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(await queue.get())
+
+        assert isinstance(events[0], ResourceObservedEvent)
+        assert events[0].provider == "mock"
+        assert events[0].resource_type == "stack"
+        assert events[0].resource_id == "stack-id-123"
+        assert events[0].resource_name == "test"
+        assert events[0].region_id == "cn-hangzhou"
+        assert events[0].action == "CreateStack"
+        assert events[0].tool_name == "mock_stack"
+        assert events[0].tool_use_id == "toolu-create"
+        assert events[0].metadata == {}
+        assert any(isinstance(event, StackProgressEvent) for event in events[1:])
 
     @pytest.mark.asyncio
     async def test_execute_invalid_action_returns_error(self, stack: MockCloudStack, context: ToolContext) -> None:

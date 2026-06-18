@@ -75,12 +75,17 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario rollback-step2 \
   --scenario rollback-step3 \
   --scenario rollback-step4 \
-  --scenario rollback-step5
+  --scenario rollback-step5 \
+  --scenario rollback-step5-cleanup \
+  --scenario rollback-step5-cleanup-recovery
 ```
 
 Provider, tool, and cloud execution scenarios are guarded by default. Use
 `--allow-real-cloud` only when you intentionally want to run against real
 providers and Alibaba Cloud credentials.
+The rollback step5 cleanup scenarios intentionally leave the second stack in
+ROS as proof that cleanup only removed the rollback leftover; delete that stack
+after you finish inspecting the run.
 
 ## What Each Scenario Covers
 
@@ -101,6 +106,8 @@ the rest of the tests.
 | `normal-running` | Normal-chat response streaming after pipeline handoff | `继续`, then history check | Normal-chat task recovery keeps same `contextId` history. |
 | `cancel-step1` ... `cancel-step5` | Active pipeline task is canceled at the named step | Normal-chat follow-up after cancel, then restart and history check | Canceled snapshot stays canceled; normal-chat history survives restart. |
 | `rollback-step1` ... `rollback-step5` | Step 3 receives rollback to `intent_parsing`, then the named post-rollback step is killed | `继续`, plus selection when needed | Post-rollback pipeline completes as a security-group task, not VSwitch. |
+| `rollback-step5-cleanup` | First step5 stack is observed, then rollback creates a second stack and hands off to normal chat | A normal-chat follow-up triggers cleanup | First rollback stack reaches cleanup complete and is deleted in ROS; second stack remains. |
+| `rollback-step5-cleanup-recovery` | Same as `rollback-step5-cleanup`, then the server is killed after cleanup starts | `继续` in normal chat after restart | Cleanup is triggered again after restart; first stack is deleted and second stack remains. |
 | `fault-after-snapshot` | Deterministic crash after A2A pipeline snapshot persistence | `继续`, plus selection when needed | `GetTask` / `ListTasks` expose the recovered task and the pipeline completes. |
 
 ## Representative Inputs
@@ -148,6 +155,7 @@ When stabilizing changes, run the smaller or more diagnostic cases first:
 6. `normal-running`
 7. `cancel-step1` through `cancel-step5`
 8. `rollback-step1` through `rollback-step5`
+9. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
 
 ## Preflight
 

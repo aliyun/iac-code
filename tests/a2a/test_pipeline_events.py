@@ -58,6 +58,36 @@ def test_pipeline_started_has_stable_envelope() -> None:
     assert envelope["data"]["totalSteps"] == 4
 
 
+def test_manual_cleanup_event_normalizes_cleanup_data_keys() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    event = translator.manual_event(
+        "cleanup_started",
+        "cleanup",
+        data={
+            "resource_count": 1,
+            "status_message": "检测到 1 个回滚残留资源，开始清理流程。",
+            "resource_id": "stack-123",
+            "region_id": "cn-hangzhou",
+            "stack_status": "DELETE_IN_PROGRESS",
+            "cleanup_tool_use_id": "toolu-get",
+            "progress_percentage": 60,
+            "last_error": "DELETE_FAILED",
+        },
+    )
+
+    assert event["eventType"] == "cleanup_started"
+    assert event["scope"] == "cleanup"
+    assert event["data"]["resourceCount"] == 1
+    assert event["data"]["statusMessage"] == "检测到 1 个回滚残留资源，开始清理流程。"
+    assert event["data"]["resourceId"] == "stack-123"
+    assert event["data"]["regionId"] == "cn-hangzhou"
+    assert event["data"]["stackStatus"] == "DELETE_IN_PROGRESS"
+    assert event["data"]["cleanupToolUseId"] == "toolu-get"
+    assert event["data"]["progressPercentage"] == 60
+    assert event["data"]["lastError"] == "DELETE_FAILED"
+
+
 def test_parent_step_attempt_increments_after_rollback() -> None:
     translator = PipelineEventTranslator(_ctx())
     translator.translate(
@@ -964,7 +994,7 @@ def test_stack_current_changed_emits_after_successful_ros_create_stack() -> None
     }
 
 
-def test_stack_current_changed_clears_current_stack_after_successful_delete() -> None:
+def test_stack_current_changed_keeps_current_stack_after_statusless_successful_delete() -> None:
     ctx = _ctx()
     ctx.emit_stack_events = True
     translator = PipelineEventTranslator(ctx)
@@ -993,6 +1023,48 @@ def test_stack_current_changed_clears_current_stack_after_successful_delete() ->
     assert stack_event["eventType"] == "stack_current_changed"
     assert stack_event["data"]["action"] == "DeleteStack"
     assert stack_event["data"]["stackId"] == "stack-123"
+    assert stack_event["data"]["stackStatus"] == "DELETE_REQUESTED"
+    assert stack_event["data"]["current"] is True
+    assert "cleared" not in stack_event["data"]
+
+
+def test_stack_current_changed_clears_current_stack_after_delete_complete() -> None:
+    ctx = _ctx()
+    ctx.emit_stack_events = True
+    translator = PipelineEventTranslator(ctx)
+    translator.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-delete",
+            name="ros_stack",
+            input={
+                "action": "DeleteStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123", "StackName": "demo"},
+            },
+        )
+    )
+
+    envelopes = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-delete",
+            tool_name="ros_stack",
+            result=json.dumps(
+                {
+                    "stack_id": "stack-123",
+                    "stack_name": "demo",
+                    "status": "DELETE_COMPLETE",
+                    "is_success": True,
+                }
+            ),
+            is_error=False,
+        )
+    )
+
+    stack_event = envelopes[0]
+    assert stack_event["eventType"] == "stack_current_changed"
+    assert stack_event["data"]["action"] == "DeleteStack"
+    assert stack_event["data"]["stackId"] == "stack-123"
+    assert stack_event["data"]["stackStatus"] == "DELETE_COMPLETE"
     assert stack_event["data"]["current"] is False
     assert stack_event["data"]["cleared"] is True
 

@@ -7,6 +7,7 @@ import pytest
 from rich.console import Console
 
 from iac_code.agent.message import Message, create_recalled_memory_message
+from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.stream_events import StackInstancesProgressEvent, StackProgressEvent
@@ -180,6 +181,26 @@ class TestRendererHelpers:
         assert "visible answer" in output
         assert "Prefer ROS YAML" not in output
         assert "Relevant persistent memories" not in output
+
+    def test_replay_history_hides_pipeline_cleanup_prompt(self):
+        renderer = make_renderer()
+
+        renderer.replay_history(
+            [
+                Message(role="user", content="visible question"),
+                Message(
+                    role="user",
+                    content="hidden cleanup prompt",
+                    metadata={"type": CLEANUP_PROMPT_METADATA_TYPE},
+                ),
+                Message(role="assistant", content="visible answer"),
+            ]
+        )
+
+        output = renderer.console.file.getvalue()
+        assert "visible question" in output
+        assert "visible answer" in output
+        assert "hidden cleanup prompt" not in output
 
     def test_any_segment_has_verbose_content(self):
         renderer = make_renderer()

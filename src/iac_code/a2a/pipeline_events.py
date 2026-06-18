@@ -40,11 +40,24 @@ _TOP_LEVEL_DATA_KEY_ALIASES = {
     "from_step": "fromStep",
     "parent_step_id": "parentStepId",
     "pipeline_type": "pipelineType",
+    "progress_status": "progressStatus",
     "rollback_target": "rollbackTarget",
+    "cleanup_status": "cleanupStatus",
+    "cleanup_tool_use_id": "cleanupToolUseId",
+    "last_error": "lastError",
+    "progress_percentage": "progressPercentage",
+    "resource_count": "resourceCount",
+    "resource_id": "resourceId",
+    "resource_name": "resourceName",
+    "resource_type": "resourceType",
+    "region_id": "regionId",
     "selected_index": "selectedIndex",
     "selected_option": "selectedOption",
     "selected_value": "selectedValue",
+    "source_step_id": "sourceStepId",
     "stale_fields": "staleFields",
+    "stack_status": "stackStatus",
+    "status_message": "statusMessage",
     "step_id": "stepId",
     "step_index": "stepIndex",
     "step_names": "stepNames",
@@ -662,6 +675,11 @@ class PipelineEventTranslator:
         if stack_id is None:
             return None
 
+        stack_status = _first_string_from_sources((result,), ("StackStatus", "stackStatus", "status"))
+        is_delete_complete = action in _STACK_CLEAR_ACTIONS and is_success and stack_status == "DELETE_COMPLETE"
+        if action in _STACK_CLEAR_ACTIONS and is_success and stack_status is None:
+            stack_status = "DELETE_REQUESTED"
+
         data: dict[str, Any] = {
             "toolName": event.tool_name,
             "toolUseId": event.tool_use_id,
@@ -670,11 +688,11 @@ class PipelineEventTranslator:
             "regionId": operation["regionId"],
             "stackId": stack_id,
             "stackName": _first_string_from_sources((result, params), ("StackName", "stackName", "stack_name", "name")),
-            "stackStatus": _first_string_from_sources((result,), ("StackStatus", "stackStatus", "status")),
+            "stackStatus": stack_status,
             "isSuccess": is_success,
-            "current": False if action in _STACK_CLEAR_ACTIONS and is_success else True,
+            "current": False if is_delete_complete else True,
         }
-        if action in _STACK_CLEAR_ACTIONS and is_success:
+        if is_delete_complete:
             data["cleared"] = True
         return {key: value for key, value in data.items() if value is not None}
 

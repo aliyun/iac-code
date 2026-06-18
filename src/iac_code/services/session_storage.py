@@ -51,6 +51,25 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _cleanup_prompt_identity(message: Message) -> str:
+    metadata = message.metadata
+    if metadata.get("type") == "pipeline_cleanup_prompt":
+        metadata = {
+            "type": metadata.get("type"),
+            "source": metadata.get("source"),
+            "cleanupLedgerPath": metadata.get("cleanupLedgerPath") or metadata.get("cleanup_ledger_path"),
+        }
+    return json.dumps(
+        {
+            "role": message.role,
+            "content": message.to_dict().get("content"),
+            "metadata": metadata,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
 class SessionStorage:
     """Persist conversation sessions partitioned by working directory."""
 
@@ -157,6 +176,7 @@ class SessionStorage:
         git_branch: str | None = None,
     ) -> None:
         """Overwrite the session file with the given messages."""
+        messages = self._merge_preserved_cleanup_prompts(cwd, session_id, messages)
         path = self._session_path(cwd, session_id)
         ensure_private_dir(path.parent)
         with open(path, "w", encoding="utf-8") as f:
@@ -164,6 +184,30 @@ class SessionStorage:
                 data = self._stamp(msg.to_dict(), cwd, session_id, git_branch)
                 f.write(json.dumps(data, ensure_ascii=False) + "\n")
         ensure_private_file(path)
+
+    def _merge_preserved_cleanup_prompts(
+        self,
+        cwd: str,
+        session_id: str,
+        messages: list[Message],
+    ) -> list[Message]:
+        try:
+            from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+        except Exception:
+            return messages
+
+        path = self._session_path(cwd, session_id)
+        if not path.exists():
+            return messages
+        existing = self.load(cwd, session_id)
+        preserved = [message for message in existing if is_cleanup_prompt_message(message)]
+        if not preserved:
+            return messages
+        existing_keys = {
+            _cleanup_prompt_identity(message) for message in messages if is_cleanup_prompt_message(message)
+        }
+        missing = [message for message in preserved if _cleanup_prompt_identity(message) not in existing_keys]
+        return [*messages, *missing] if missing else messages
 
     # ------------------------------------------------------------------
     # Read

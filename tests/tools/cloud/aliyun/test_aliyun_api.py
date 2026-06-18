@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +13,7 @@ from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAu
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun import aliyun_api as aliyun_api_module
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
+from iac_code.types.stream_events import ResourceObservedEvent
 
 
 @pytest.fixture
@@ -362,6 +364,50 @@ class TestAliyunApiExecute:
         data = json.loads(result.content)
         assert data == {"Instances": []}
         mock_client.call_api.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ros_create_stack_emits_resource_observed_event(self, api: AliyunApi, mock_credentials) -> None:
+        queue: asyncio.Queue = asyncio.Queue()
+        context = ToolContext(event_queue=queue, tool_use_id="toolu-create")
+        mock_client = MagicMock()
+        mock_client.call_api.return_value = {
+            "body": {
+                "RequestId": "req-1",
+                "StackId": "stack-id-123",
+            }
+        }
+
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client):
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "CreateStack",
+                    "params": {
+                        "StackName": "iac-e2e-stack",
+                        "TemplateBody": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n",
+                    },
+                    "region_id": "cn-hangzhou",
+                },
+                context=context,
+            )
+
+        assert result.is_error is False
+        events = []
+        while not queue.empty():
+            events.append(await queue.get())
+
+        assert len(events) == 1
+        event = events[0]
+        assert isinstance(event, ResourceObservedEvent)
+        assert event.provider == "ros"
+        assert event.resource_type == "stack"
+        assert event.resource_id == "stack-id-123"
+        assert event.resource_name == "iac-e2e-stack"
+        assert event.region_id == "cn-hangzhou"
+        assert event.action == "CreateStack"
+        assert event.tool_name == "aliyun_api"
+        assert event.tool_use_id == "toolu-create"
+        assert event.metadata == {}
 
     @pytest.mark.asyncio
     async def test_explicit_version(self, api: AliyunApi, context: ToolContext, mock_credentials) -> None:

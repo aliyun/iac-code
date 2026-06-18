@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from iac_code.agent.message import Message, ToolResultBlock, create_recalled_memory_message
+from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
 from iac_code.state.app_state import AppState, AppStateStore
 from iac_code.ui.repl import InlineREPL
 
@@ -25,6 +26,7 @@ def test_count_user_turns_ignores_recalled_memory_messages() -> None:
     messages = [
         Message(role="user", content="first"),
         create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
+        create_cleanup_prompt_message("cleanup hidden prompt"),
         Message(role="assistant", content="answer"),
         Message(role="user", content="second"),
     ]
@@ -68,6 +70,7 @@ def test_status_snapshot_uses_agent_loop_and_original_cwd(monkeypatch) -> None:
     }
     repl._agent_loop.context_manager.get_messages.return_value = [
         Message(role="user", content="first"),
+        create_cleanup_prompt_message("cleanup hidden prompt"),
         Message(role="assistant", content="answer"),
     ]
 

@@ -245,6 +245,56 @@ async def test_startup_waiting_candidate_selection_reenters_selection_ui(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_startup_waiting_candidate_selection_starts_cleanup_after_terminal_handoff(
+    monkeypatch,
+    repl_for_sidecar_restore,
+):
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    from iac_code.pipeline.config import RunMode
+    from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+    from iac_code.ui.repl import InlineREPL
+
+    repl_for_sidecar_restore._runtime_mode = RunMode.PIPELINE
+    terminal_event = PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=1.0,
+        data={"total_steps": 1},
+    )
+    pipeline = MagicMock()
+    pipeline.sidecar_restore_result = MagicMock(ok=True, status="waiting_input", reason=None)
+    pipeline.restore_from_sidecar = AsyncMock()
+    pipeline.resume = MagicMock(return_value=_empty_stream())
+    pipeline.run = MagicMock(return_value=_empty_stream())
+    pipeline.continue_from_sidecar = MagicMock(return_value=_empty_stream())
+    pipeline.state_machine.current_step.step_id = "confirm_and_select"
+    pipeline.state_machine.current_step.ui_mode = "candidate_selection"
+    pipeline.state_machine.is_complete = True
+    pipeline.sidecar_status = "completed"
+    pipeline.should_switch_to_normal = MagicMock(return_value=True)
+    pipeline.build_normal_handoff_summary = MagicMock(return_value="handoff summary")
+    pipeline.mark_normal_handoff = MagicMock()
+    pipeline.mark_user_aborted = MagicMock()
+    pipeline.display_transcript_path = None
+    repl_for_sidecar_restore.current_git_branch = MagicMock(return_value="main")
+    repl_for_sidecar_restore._agent_loop = MagicMock()
+    repl_for_sidecar_restore._agent_loop.context_manager = MagicMock()
+    repl_for_sidecar_restore._agent_loop.context_manager.add_raw_message = MagicMock(
+        return_value=Message(role="user", content="handoff summary")
+    )
+    repl_for_sidecar_restore._render_pipeline_display_replay_on_startup = MagicMock()
+    repl_for_sidecar_restore._resume_waiting_candidate_selection_from_sidecar = AsyncMock(return_value=terminal_event)
+    repl_for_sidecar_restore._maybe_start_pipeline_cleanup = AsyncMock(return_value=True)
+    _seed_sidecar(repl_for_sidecar_restore, "waiting_input")
+
+    with patch("iac_code.pipeline.create_pipeline", return_value=pipeline):
+        handled = await InlineREPL._resume_pipeline_sidecar_on_startup(repl_for_sidecar_restore)
+
+    assert handled is True
+    repl_for_sidecar_restore._maybe_start_pipeline_cleanup.assert_awaited_once_with(pipeline)
+
+
+@pytest.mark.asyncio
 async def test_startup_running_pipeline_replays_history_without_continuing(monkeypatch, repl_for_sidecar_restore):
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     from iac_code.pipeline.config import RunMode

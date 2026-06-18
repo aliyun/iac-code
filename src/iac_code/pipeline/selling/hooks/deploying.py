@@ -1,10 +1,15 @@
 """Hook for the deploying step."""
 
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.ui_contract import SelectedCandidate, parse_selected_candidate
+from iac_code.types.stream_events import ResourceObservedEvent
+
+_DEPLOYING_STEP_ID = "deploying"
 
 
 @dataclass(frozen=True)
@@ -104,3 +109,63 @@ def on_enter(ctx: PipelineContext) -> None:
         evaluated_candidates if isinstance(evaluated_candidates, list) else [],
     )
     ctx.set_conclusion("selected_plan", normalized)
+
+
+def on_resource_observed(
+    ctx: PipelineContext,
+    event: ResourceObservedEvent,
+    *,
+    ledger: CleanupLedger,
+    step_id: str,
+    attempt_id: str | None,
+) -> ObservedResource | None:
+    """Persist only ROS stacks created by the deploying step."""
+    _ = ctx
+    if step_id != _DEPLOYING_STEP_ID:
+        return None
+    if event.provider.lower() != "ros" or event.resource_type.lower() != "stack":
+        return None
+    if event.action != "CreateStack" or not event.resource_id:
+        return None
+
+    observed = ObservedResource(
+        provider="ros",
+        resource_type="stack",
+        resource_id=event.resource_id,
+        resource_name=event.resource_name,
+        region_id=event.region_id,
+        source_step_id=step_id,
+        source_attempt_id=attempt_id,
+        observed_action=event.action,
+        observed_at=time.time(),
+        metadata={
+            "tool_name": event.tool_name,
+            "tool_use_id": event.tool_use_id,
+        },
+    )
+    return observed
+
+
+def on_rollback_cleanup_required(
+    ctx: PipelineContext,
+    *,
+    ledger: CleanupLedger,
+    from_step: str,
+    from_attempt_id: str | None,
+    to_step: str,
+    reason: str,
+) -> list[CleanupResource]:
+    """Mark deploying-created ROS stacks for cleanup when deploying rolls back."""
+    _ = (ctx, to_step)
+    if from_step != _DEPLOYING_STEP_ID or not from_attempt_id:
+        return []
+    resources = [
+        CleanupResource.from_observed(resource, reason=reason)
+        for resource in ledger.observed_resources()
+        if resource.source_step_id == _DEPLOYING_STEP_ID
+        and resource.source_attempt_id == from_attempt_id
+        and resource.provider.lower() == "ros"
+        and resource.resource_type.lower() == "stack"
+        and resource.observed_action == "CreateStack"
+    ]
+    return resources

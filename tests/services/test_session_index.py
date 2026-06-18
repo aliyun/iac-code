@@ -8,6 +8,7 @@ import time
 import pytest
 
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, create_recalled_memory_message
+from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
 from iac_code.services.session_index import (
     SessionIndex,
     extract_first_json_string_field,
@@ -131,6 +132,37 @@ class TestLiteMetadata:
 
         assert meta.first_prompt == "real prompt"
 
+    def test_cleanup_prompt_last_prompt_meta_is_ignored(self, storage):
+        cwd = "/proj/cp-last"
+        storage.append(cwd, "scp-last", Message(role="user", content="real prompt"), git_branch=None)
+        storage.append_meta(
+            cwd,
+            "scp-last",
+            {
+                "type": "last-prompt",
+                "last_prompt": "检测到 pipeline rollback 后仍需要清理的云资源。只有确认 DELETE_COMPLETE 才算完成。",
+            },
+        )
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-last"))
+
+        assert meta.last_prompt is None
+        assert meta.first_prompt == "real prompt"
+
+    def test_skips_cleanup_prompt_user_messages(self, storage):
+        cwd = "/proj/cp-first"
+        storage.append(
+            cwd,
+            "scp-first",
+            create_cleanup_prompt_message("cleanup hidden prompt"),
+            git_branch=None,
+        )
+        storage.append(cwd, "scp-first", Message(role="user", content="real prompt"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-first"))
+
+        assert meta.first_prompt == "real prompt"
+
 
 # ---------------------------------------------------------------------------
 # SessionIndex
@@ -178,6 +210,16 @@ class TestSessionIndex:
         assert entry.title == "deploy-prod"
         assert entry.auto_title == "first prompt"
         assert entry.is_legacy is False
+
+    def test_user_prompt_mentioning_cleanup_terms_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "How does pipeline rollback verify DELETE_COMPLETE?"
+        storage.append("/p", "cleanup-terms", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
 
     def test_legacy_session_still_indexed(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)

@@ -132,7 +132,8 @@ class ContextManager:
         """Add a raw message dict (e.g. from ToolResult.new_messages) to the conversation."""
         role = raw_msg.get("role", "user")
         content = raw_msg.get("content", "")
-        msg = Message(role=role, content=content)
+        metadata = raw_msg.get("metadata")
+        msg = Message(role=role, content=content, metadata=dict(metadata) if isinstance(metadata, dict) else {})
         self._conversation.messages.append(msg)
         msg.token_count = self._token_counter.count_message(msg.to_api_format())
         return msg
@@ -146,6 +147,15 @@ class ContextManager:
 
     def get_messages(self) -> list[Message]:
         return self._conversation.messages
+
+    def remove_cleanup_prompt_messages(self) -> int:
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
+        kept = [message for message in self._conversation.messages if not is_cleanup_prompt_message(message)]
+        removed = len(self._conversation.messages) - len(kept)
+        if removed:
+            self._conversation.replace_messages(kept)
+        return removed
 
     def get_api_messages(self) -> list[dict[str, Any]]:
         return self._conversation.to_api_messages()
@@ -248,13 +258,15 @@ class ContextManager:
 
     def build_compaction_prompt(self) -> str:
         """Build compaction prompt from old messages only (recent are preserved)."""
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
         old_messages, _recent = self._split_messages_for_compaction()
         if not old_messages:
             return ""
 
         conversation_text = []
         for msg in old_messages:
-            if is_recalled_memory_message(msg):
+            if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             role = msg.role.upper()
             text = msg.get_text()
@@ -278,14 +290,17 @@ class ContextManager:
 
     def apply_compaction(self, summary: str) -> tuple[int, int]:
         """Replace old messages with summary, keep recent messages intact."""
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
         original_tokens = self._conversation.get_total_tokens()
 
-        _old, recent = self._split_messages_for_compaction()
+        old, recent = self._split_messages_for_compaction()
+        preserved_hidden = [msg for msg in old if is_cleanup_prompt_message(msg)]
 
         summary_msg = Message(role="user", content=f"[Conversation Summary]\n{summary}")
         summary_msg.token_count = self._token_counter.count_message(summary_msg.to_api_format())
 
-        self._conversation.replace_messages([summary_msg] + recent)
+        self._conversation.replace_messages([summary_msg] + preserved_hidden + recent)
         new_tokens = self._conversation.get_total_tokens()
         logger.info(f"Compaction: {original_tokens} -> {new_tokens} tokens")
         return (original_tokens, new_tokens)

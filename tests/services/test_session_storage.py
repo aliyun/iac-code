@@ -11,6 +11,7 @@ from iac_code.agent.message import (
     create_recalled_memory_message,
     get_recalled_memory_files,
 )
+from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE, create_cleanup_prompt_message
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.session_usage import SessionUsageStore
@@ -105,6 +106,60 @@ class TestSessionStorage:
         tool_uses = loaded[2].get_tool_use_blocks()
         assert len(tool_uses) == 1
         assert tool_uses[0].name == "read_file"
+
+    def test_save_preserves_existing_cleanup_prompt_message(self, storage):
+        cleanup = create_cleanup_prompt_message("cleanup hidden prompt")
+        storage.append(CWD, "cleanup-save", cleanup, git_branch="main")
+
+        storage.save(
+            CWD,
+            "cleanup-save",
+            [Message(role="user", content="later"), Message(role="assistant", content="done")],
+            git_branch="main",
+        )
+
+        loaded = storage.load(CWD, "cleanup-save")
+        assert [message.content for message in loaded] == ["later", "done", "cleanup hidden prompt"]
+        assert loaded[-1].metadata["type"] == CLEANUP_PROMPT_METADATA_TYPE
+
+    def test_save_does_not_duplicate_existing_cleanup_prompt_message(self, storage):
+        cleanup = create_cleanup_prompt_message("cleanup hidden prompt")
+        storage.append(CWD, "cleanup-save-once", cleanup, git_branch="main")
+
+        storage.save(
+            CWD,
+            "cleanup-save-once",
+            [cleanup, Message(role="assistant", content="done")],
+            git_branch="main",
+        )
+
+        loaded = storage.load(CWD, "cleanup-save-once")
+        cleanup_messages = [
+            message for message in loaded if message.metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE
+        ]
+        assert len(cleanup_messages) == 1
+
+    def test_save_updates_cleanup_prompt_status_without_represerving_pending_prompt(self, storage, tmp_path):
+        cleanup = create_cleanup_prompt_message(
+            "cleanup hidden prompt",
+            cleanup_ledger_path=tmp_path / "cleanup.yaml",
+            cleanup_status="pending",
+        )
+        storage.append(CWD, "cleanup-status", cleanup, git_branch="main")
+
+        completed = create_cleanup_prompt_message(
+            "cleanup hidden prompt",
+            cleanup_ledger_path=tmp_path / "cleanup.yaml",
+            cleanup_status="completed",
+        )
+        storage.save(CWD, "cleanup-status", [completed, Message(role="assistant", content="done")], git_branch="main")
+
+        loaded = storage.load(CWD, "cleanup-status")
+        cleanup_messages = [
+            message for message in loaded if message.metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE
+        ]
+        assert len(cleanup_messages) == 1
+        assert cleanup_messages[0].metadata["cleanupStatus"] == "completed"
 
     def test_find_session_anywhere(self, storage):
         storage.append("/tmp/a", "id-aa", Message(role="user", content="from a"), git_branch=None)

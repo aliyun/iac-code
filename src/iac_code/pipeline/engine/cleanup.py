@@ -1,0 +1,730 @@
+"""Cleanup ledger and observer for pipeline rollback leftovers."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import tempfile
+import time
+from dataclasses import asdict, dataclass, field, replace
+from pathlib import Path
+from typing import Any, Literal, cast
+
+import yaml
+
+from iac_code.agent.message import Message
+from iac_code.i18n import _
+from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
+from iac_code.utils.public_errors import sanitize_public_text
+
+logger = logging.getLogger(__name__)
+
+CLEANUP_PROMPT_METADATA_TYPE = "pipeline_cleanup_prompt"
+CleanupStatus = Literal["pending", "started", "in_progress", "completed", "failed", "skipped"]
+_LOAD_FAILED_KEY = "_load_failed"
+_LOAD_ERROR_KEY = "_load_error"
+_RETRYABLE_CLEANUP_STATUSES = {"pending", "failed"}
+_ACTIVE_CLEANUP_STATUSES = {"started", "in_progress"}
+_FOLLOWUP_CLEANUP_STATUSES = _RETRYABLE_CLEANUP_STATUSES | _ACTIVE_CLEANUP_STATUSES
+_TERMINAL_CLEANUP_STATUSES = {"completed", "skipped"}
+_DELETE_COMPLETE_STATUSES = {"DELETE_COMPLETE"}
+_DELETE_FAILED_STATUSES = {"DELETE_FAILED"}
+
+
+@dataclass(frozen=True)
+class ObservedResource:
+    provider: str
+    resource_type: str
+    resource_id: str
+    resource_name: str = ""
+    region_id: str = ""
+    source_step_id: str = ""
+    source_attempt_id: str | None = None
+    observed_action: str = ""
+    observed_at: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def key(self) -> str:
+        return _resource_key(self.provider, self.resource_type, self.resource_id, self.region_id)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ObservedResource":
+        return cls(
+            provider=str(data.get("provider") or ""),
+            resource_type=str(data.get("resource_type") or ""),
+            resource_id=str(data.get("resource_id") or ""),
+            resource_name=str(data.get("resource_name") or ""),
+            region_id=str(data.get("region_id") or ""),
+            source_step_id=str(data.get("source_step_id") or ""),
+            source_attempt_id=_optional_str(data.get("source_attempt_id")),
+            observed_action=str(data.get("observed_action") or ""),
+            observed_at=_float_value(data.get("observed_at")),
+            metadata=dict(data.get("metadata") or {}),
+        )
+
+
+@dataclass(frozen=True)
+class CleanupResource:
+    provider: str
+    resource_type: str
+    resource_id: str
+    resource_name: str = ""
+    region_id: str = ""
+    source_step_id: str = ""
+    source_attempt_id: str | None = None
+    cleanup_reason: str = ""
+    cleanup_required: bool = True
+    cleanup_status: CleanupStatus = "pending"
+    cleanup_tool_use_id: str | None = None
+    cleanup_action: str | None = None
+    progress_status: str | None = None
+    progress_percentage: float | None = None
+    last_error: str | None = None
+    observed_at: float = 0.0
+    updated_at: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def key(self) -> str:
+        return _resource_key(self.provider, self.resource_type, self.resource_id, self.region_id)
+
+    @classmethod
+    def from_observed(cls, resource: ObservedResource, *, reason: str) -> "CleanupResource":
+        now = time.time()
+        return cls(
+            provider=resource.provider,
+            resource_type=resource.resource_type,
+            resource_id=resource.resource_id,
+            resource_name=resource.resource_name,
+            region_id=resource.region_id,
+            source_step_id=resource.source_step_id,
+            source_attempt_id=resource.source_attempt_id,
+            cleanup_reason=reason,
+            observed_at=resource.observed_at,
+            updated_at=now,
+            metadata=dict(resource.metadata),
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CleanupResource":
+        status = str(data.get("cleanup_status") or "pending")
+        if status not in {"pending", "started", "in_progress", "completed", "failed", "skipped"}:
+            status = "pending"
+        return cls(
+            provider=str(data.get("provider") or ""),
+            resource_type=str(data.get("resource_type") or ""),
+            resource_id=str(data.get("resource_id") or ""),
+            resource_name=str(data.get("resource_name") or ""),
+            region_id=str(data.get("region_id") or ""),
+            source_step_id=str(data.get("source_step_id") or ""),
+            source_attempt_id=_optional_str(data.get("source_attempt_id")),
+            cleanup_reason=str(data.get("cleanup_reason") or ""),
+            cleanup_required=bool(data.get("cleanup_required", True)),
+            cleanup_status=cast(CleanupStatus, status),
+            cleanup_tool_use_id=_optional_str(data.get("cleanup_tool_use_id")),
+            cleanup_action=_optional_str(data.get("cleanup_action")),
+            progress_status=_optional_str(data.get("progress_status")),
+            progress_percentage=_optional_float(data.get("progress_percentage")),
+            last_error=_optional_str(data.get("last_error")),
+            observed_at=_float_value(data.get("observed_at")),
+            updated_at=_float_value(data.get("updated_at")),
+            metadata=dict(data.get("metadata") or {}),
+        )
+
+
+@dataclass(frozen=True)
+class CleanupPrompt:
+    resources: list[CleanupResource]
+    prompt: str
+    status_message: str
+
+
+class CleanupLedger:
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def observed_resources(self) -> list[ObservedResource]:
+        data = self._load()
+        return [ObservedResource.from_dict(item) for item in _dict_list(data.get("observed_resources"))]
+
+    def cleanup_resources(self) -> list[CleanupResource]:
+        data = self._load()
+        return [CleanupResource.from_dict(item) for item in _dict_list(data.get("cleanup_resources"))]
+
+    def history_entries(self) -> list[dict[str, Any]]:
+        data = self._load()
+        return [dict(item) for item in _dict_list(data.get("history"))]
+
+    def pending_resources(self, *, include_failed: bool = True, include_active: bool = True) -> list[CleanupResource]:
+        if include_failed and include_active:
+            statuses = set(_FOLLOWUP_CLEANUP_STATUSES)
+        else:
+            statuses = set(_RETRYABLE_CLEANUP_STATUSES if include_failed else {"pending"})
+            if include_active:
+                statuses.update(_ACTIVE_CLEANUP_STATUSES)
+        return [
+            resource
+            for resource in self.cleanup_resources()
+            if resource.cleanup_required and resource.cleanup_status in statuses
+        ]
+
+    def load_failed(self) -> bool:
+        return bool(self._load().get(_LOAD_FAILED_KEY))
+
+    def load_error(self) -> str | None:
+        error = self._load().get(_LOAD_ERROR_KEY)
+        return error if isinstance(error, str) and error else None
+
+    def active_resources(self) -> list[CleanupResource]:
+        return [
+            resource
+            for resource in self.cleanup_resources()
+            if resource.cleanup_required and resource.cleanup_status in _ACTIVE_CLEANUP_STATUSES
+        ]
+
+    def record_observed(self, resource: ObservedResource) -> None:
+        if not resource.resource_id:
+            return
+        data = self._load_for_write()
+        if data is None:
+            return
+        observed = {
+            ObservedResource.from_dict(item).key: ObservedResource.from_dict(item)
+            for item in _dict_list(data.get("observed_resources"))
+        }
+        observed[resource.key] = resource
+        data["observed_resources"] = [asdict(item) for item in observed.values()]
+        self._save(data)
+
+    def mark_cleanup_required(
+        self,
+        resources: list[CleanupResource],
+        *,
+        source_step_id: str,
+        reason: str,
+    ) -> None:
+        if not resources:
+            return
+        data = self._load_for_write()
+        if data is None:
+            return
+        cleanup = {
+            CleanupResource.from_dict(item).key: CleanupResource.from_dict(item)
+            for item in _dict_list(data.get("cleanup_resources"))
+        }
+        now = time.time()
+        changed_count = 0
+        for resource in resources:
+            if not resource.resource_id:
+                continue
+            existing = cleanup.get(resource.key)
+            if existing is not None and existing.cleanup_status in _TERMINAL_CLEANUP_STATUSES:
+                continue
+            cleanup[resource.key] = replace(
+                resource,
+                cleanup_required=True,
+                cleanup_reason=resource.cleanup_reason or reason,
+                source_step_id=resource.source_step_id or source_step_id,
+                updated_at=now,
+            )
+            changed_count += 1
+        if changed_count == 0:
+            return
+        data["cleanup_resources"] = [asdict(item) for item in cleanup.values()]
+        self._append_history(
+            data,
+            {
+                "type": "cleanup_required",
+                "source_step_id": source_step_id,
+                "reason": reason,
+                "resource_count": changed_count,
+                "timestamp": now,
+            },
+        )
+        self._save(data)
+
+    def update_resource(
+        self,
+        *,
+        provider: str,
+        resource_type: str,
+        resource_id: str,
+        region_id: str | None = None,
+        cleanup_status: CleanupStatus | None = None,
+        cleanup_tool_use_id: str | None = None,
+        cleanup_action: str | None = None,
+        progress_status: str | None = None,
+        progress_percentage: float | None = None,
+        last_error: str | None = None,
+        clear_last_error: bool = False,
+    ) -> bool:
+        if self.load_failed():
+            return False
+        data = self._load_for_write()
+        if data is None:
+            return False
+        changed = False
+        history_entries: list[dict[str, Any]] = []
+        updated_items: list[CleanupResource] = []
+        for item in _dict_list(data.get("cleanup_resources")):
+            resource = CleanupResource.from_dict(item)
+            if not _matches_resource(resource, provider, resource_type, resource_id, region_id):
+                updated_items.append(resource)
+                continue
+            if resource.cleanup_status in _TERMINAL_CLEANUP_STATUSES and cleanup_status != resource.cleanup_status:
+                updated_items.append(resource)
+                continue
+            updates: dict[str, Any] = {"updated_at": time.time()}
+            if cleanup_status is not None:
+                updates["cleanup_status"] = cleanup_status
+            if cleanup_tool_use_id is not None:
+                updates["cleanup_tool_use_id"] = cleanup_tool_use_id
+            if cleanup_action is not None:
+                updates["cleanup_action"] = cleanup_action
+            if progress_status is not None:
+                updates["progress_status"] = progress_status
+            if progress_percentage is not None:
+                updates["progress_percentage"] = progress_percentage
+            if last_error is not None:
+                updates["last_error"] = _safe_history_error(last_error)
+            elif clear_last_error:
+                updates["last_error"] = None
+            updated = replace(resource, **updates)
+            updated_items.append(updated)
+            changed = True
+            if _cleanup_lifecycle_state(updated) != _cleanup_lifecycle_state(resource):
+                history_entries.append(_cleanup_lifecycle_history_entry(updated))
+        if changed:
+            data["cleanup_resources"] = [asdict(item) for item in updated_items]
+            for entry in history_entries:
+                self._append_history(data, entry)
+            self._save(data)
+        return changed
+
+    def record_prompt_queued(self, prompt: CleanupPrompt, *, ui_surface: str) -> None:
+        data = self._load_for_write()
+        if data is None:
+            return
+        resources = list(prompt.resources or [])
+        self._append_history(
+            data,
+            {
+                "type": "cleanup_prompt_queued",
+                "ui_surface": ui_surface,
+                "resource_count": len(resources),
+                "resources": [_cleanup_resource_history_data(resource) for resource in resources],
+                "timestamp": time.time(),
+            },
+        )
+        self._save(data)
+
+    def build_pending_prompt(self) -> CleanupPrompt | None:
+        resources = self.pending_resources()
+        if not resources:
+            return None
+        count = len(resources)
+        lines = [
+            _("检测到 pipeline rollback 后仍需要清理的云资源。请立即清理这些资源，并持续检查直到删除完成。"),
+            "",
+            _("要求："),
+            _("- 清理范围是严格白名单：只能删除下面“待清理资源”列表中的 id。"),
+            _("- 不要删除、修改或回滚任何未列入“待清理资源”的 stack 或云资源。"),
+            _(
+                "- 不要根据 pipeline handoff、deployment.stack_id、current stack 或 resources_created "
+                "额外推断清理对象；这些可能是最终成功交付的资源。"
+            ),
+            _("- 即使本轮还有用户追问、继续指令或 pipeline handoff 上下文，也不能扩大清理范围。"),
+            _("- 优先使用可用的 ROS stack 工具删除；如果改用 aliyun_api，请先 DeleteStack，再反复 GetStack 检查状态。"),
+            _("- 如果资源已经处于删除中，请先 GetStack 检查当前状态，再决定是否需要重新 DeleteStack。"),
+            _("- 只有确认 DELETE_COMPLETE 才算清理完成；DELETE_FAILED 或无法确认时要向用户说明失败原因和下一步。"),
+            _("- 列表内资源全部 DELETE_COMPLETE 后，立刻停止本轮清理；不要继续删除或检查任何其他 stack。"),
+            _("- 清理过程中向用户简短同步进度。"),
+            "",
+            _("待清理资源："),
+        ]
+        for index, resource in enumerate(resources, start=1):
+            label = resource.resource_name or resource.resource_id
+            lines.append(
+                _(
+                    "{index}. provider={provider}, type={resource_type}, id={resource_id}, name={name}, region={region}"
+                ).format(
+                    index=index,
+                    provider=resource.provider,
+                    resource_type=resource.resource_type,
+                    resource_id=resource.resource_id,
+                    name=label,
+                    region=resource.region_id or "unknown",
+                )
+            )
+        return CleanupPrompt(
+            resources=resources,
+            prompt="\n".join(lines),
+            status_message=_("检测到 {count} 个回滚残留资源，开始清理流程。").format(count=count),
+        )
+
+    def _load(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return _empty_ledger_data()
+        try:
+            loaded = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            logger.warning("Failed to load cleanup ledger %s: %s", self.path, exc)
+            return _failed_ledger_data(str(exc))
+        if not isinstance(loaded, dict):
+            logger.warning(
+                "Failed to load cleanup ledger %s: expected mapping, got %s",
+                self.path,
+                type(loaded).__name__,
+            )
+            return _failed_ledger_data(f"expected mapping, got {type(loaded).__name__}")
+        loaded.setdefault("schema_version", 1)
+        loaded.setdefault("observed_resources", [])
+        loaded.setdefault("cleanup_resources", [])
+        loaded.setdefault("history", [])
+        return loaded
+
+    def _load_for_write(self) -> dict[str, Any] | None:
+        data = self._load()
+        if not data.get(_LOAD_FAILED_KEY):
+            return data
+        return None
+
+    def _save(self, data: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{self.path.name}.", suffix=".tmp", dir=str(self.path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                yaml.safe_dump(data, handle, allow_unicode=True, sort_keys=False)
+            os.replace(tmp_name, self.path)
+        finally:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
+
+    @staticmethod
+    def _append_history(data: dict[str, Any], entry: dict[str, Any]) -> None:
+        history = data.setdefault("history", [])
+        if isinstance(history, list):
+            history.append(entry)
+
+
+class CleanupObserver:
+    def __init__(self, ledger: CleanupLedger) -> None:
+        self._ledger = ledger
+        self._tool_inputs: dict[str, dict[str, Any]] = {}
+
+    def observe(self, event: Any) -> None:
+        if isinstance(event, ToolUseEndEvent):
+            self._observe_tool_use(event)
+        elif isinstance(event, ToolResultEvent):
+            self._observe_tool_result(event)
+        elif isinstance(event, StackProgressEvent):
+            self._observe_stack_progress(event)
+
+    def _observe_tool_use(self, event: ToolUseEndEvent) -> None:
+        self._tool_inputs[event.tool_use_id] = {"tool_name": event.name, "input": dict(event.input)}
+        operation = _stack_operation_from_tool_input(event.name, event.input)
+        if operation is None or operation["action"] != "DeleteStack":
+            return
+        stack_id = _stack_id_from_sources(operation["params"])
+        if stack_id is None:
+            return
+        self._ledger.update_resource(
+            provider=operation["provider"],
+            resource_type="stack",
+            resource_id=stack_id,
+            region_id=operation["region_id"],
+            cleanup_status="started",
+            cleanup_tool_use_id=event.tool_use_id,
+            cleanup_action="DeleteStack",
+            progress_status="DELETE_STARTED",
+            clear_last_error=True,
+        )
+
+    def _observe_tool_result(self, event: ToolResultEvent) -> None:
+        record = self._tool_inputs.get(event.tool_use_id)
+        if not isinstance(record, dict):
+            return
+        tool_name = str(record.get("tool_name") or event.tool_name)
+        tool_input = record.get("input")
+        if not isinstance(tool_input, dict):
+            return
+        operation = _stack_operation_from_tool_input(tool_name, tool_input)
+        if operation is None or operation["action"] not in {"DeleteStack", "GetStack"}:
+            return
+        result = _json_object(event.result) or {}
+        stack_id = _stack_id_from_sources(result, operation["params"])
+        if stack_id is None:
+            return
+        status = _status_from_result(result)
+        if operation["action"] == "DeleteStack" and status is None and not event.is_error:
+            self._ledger.update_resource(
+                provider=operation["provider"],
+                resource_type="stack",
+                resource_id=stack_id,
+                region_id=operation["region_id"],
+                cleanup_status="in_progress",
+                cleanup_tool_use_id=event.tool_use_id,
+                cleanup_action="DeleteStack",
+                progress_status="DELETE_REQUESTED",
+                clear_last_error=True,
+            )
+            return
+        cleanup_status = _cleanup_status_from_stack_status(status, event.is_error)
+        self._ledger.update_resource(
+            provider=operation["provider"],
+            resource_type="stack",
+            resource_id=stack_id,
+            region_id=operation["region_id"],
+            cleanup_status=cleanup_status,
+            cleanup_tool_use_id=event.tool_use_id,
+            cleanup_action=operation["action"],
+            progress_status=status,
+            last_error=event.result if cleanup_status == "failed" else None,
+            clear_last_error=cleanup_status != "failed",
+        )
+
+    def _observe_stack_progress(self, event: StackProgressEvent) -> None:
+        status = event.status
+        self._ledger.update_resource(
+            provider="ros",
+            resource_type="stack",
+            resource_id=event.stack_id,
+            cleanup_status=_cleanup_status_from_stack_status(status, False),
+            progress_status=status,
+            progress_percentage=event.progress_percentage,
+            last_error=status if status in _DELETE_FAILED_STATUSES else None,
+            clear_last_error=status not in _DELETE_FAILED_STATUSES,
+        )
+
+
+def create_cleanup_prompt_message(
+    prompt: str,
+    *,
+    cleanup_ledger_path: str | Path | None = None,
+    cleanup_status: str | None = None,
+) -> Message:
+    metadata = {"type": CLEANUP_PROMPT_METADATA_TYPE, "source": "pipeline_cleanup"}
+    if cleanup_ledger_path is not None:
+        metadata["cleanupLedgerPath"] = str(cleanup_ledger_path)
+    if cleanup_status is not None:
+        metadata["cleanupStatus"] = cleanup_status
+    return Message(role="user", content=prompt, metadata=metadata)
+
+
+def is_cleanup_prompt_message(message: Message) -> bool:
+    return message.metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE
+
+
+def cleanup_prompt_ledger_path(message: Message) -> str | None:
+    if not is_cleanup_prompt_message(message):
+        return None
+    value = message.metadata.get("cleanupLedgerPath") or message.metadata.get("cleanup_ledger_path")
+    return value if isinstance(value, str) and value else None
+
+
+def is_active_cleanup_prompt_message(message: Message) -> bool:
+    if not is_cleanup_prompt_message(message):
+        return False
+    status = message.metadata.get("cleanupStatus") or message.metadata.get("cleanup_status")
+    return status not in {"completed", "skipped"}
+
+
+def mark_cleanup_prompt_message_completed(message: Message, *, cleanup_ledger_path: str | Path | None = None) -> bool:
+    if not is_cleanup_prompt_message(message):
+        return False
+    if cleanup_ledger_path is not None:
+        existing_path = cleanup_prompt_ledger_path(message)
+        if existing_path is not None and existing_path != str(cleanup_ledger_path):
+            return False
+    if message.metadata.get("cleanupStatus") == "completed":
+        return False
+    message.metadata = {**message.metadata, "cleanupStatus": "completed"}
+    return True
+
+
+def _resource_key(provider: str, resource_type: str, resource_id: str, region_id: str) -> str:
+    return "|".join([provider.strip().lower(), resource_type.strip().lower(), region_id.strip(), resource_id.strip()])
+
+
+def _matches_resource(
+    resource: CleanupResource,
+    provider: str,
+    resource_type: str,
+    resource_id: str,
+    region_id: str | None,
+) -> bool:
+    if resource.provider.lower() != provider.lower():
+        return False
+    if resource.resource_type.lower() != resource_type.lower():
+        return False
+    if resource.resource_id != resource_id:
+        return False
+    return not region_id or not resource.region_id or resource.region_id == region_id
+
+
+def _stack_operation_from_tool_input(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:
+    params = _dict_value(tool_input.get("params") or tool_input.get("parameters"))
+    normalized_tool_name = tool_name.lower()
+    if normalized_tool_name == "ros_stack":
+        action = _first_string(tool_input, ("action", "Action"))
+    elif normalized_tool_name == "aliyun_api":
+        product = _first_string(tool_input, ("product", "Product", "service", "Service"))
+        if product is None or product.lower() != "ros":
+            return None
+        action = _first_string(tool_input, ("action", "Action"))
+    else:
+        return None
+    if action not in {"CreateStack", "UpdateStack", "ContinueCreateStack", "DeleteStack", "GetStack"}:
+        return None
+    return {
+        "provider": "ros",
+        "action": action,
+        "params": params,
+        "region_id": _first_string(tool_input, ("region_id", "regionId", "RegionId"))
+        or _first_string(params, ("region_id", "regionId", "RegionId"))
+        or "",
+    }
+
+
+def _cleanup_status_from_stack_status(status: str | None, is_error: bool) -> CleanupStatus:
+    if status in _DELETE_COMPLETE_STATUSES:
+        return "completed"
+    if status in _DELETE_FAILED_STATUSES or is_error:
+        return "failed"
+    return "in_progress"
+
+
+def _cleanup_lifecycle_state(resource: CleanupResource) -> tuple[Any, ...]:
+    return (
+        resource.cleanup_status,
+        resource.cleanup_tool_use_id,
+        resource.cleanup_action,
+        resource.progress_status,
+        resource.progress_percentage,
+        resource.last_error,
+    )
+
+
+def _cleanup_lifecycle_history_entry(resource: CleanupResource) -> dict[str, Any]:
+    event_type = {
+        "started": "cleanup_started",
+        "in_progress": "cleanup_progress",
+        "completed": "cleanup_completed",
+        "failed": "cleanup_failed",
+        "skipped": "cleanup_skipped",
+        "pending": "cleanup_pending",
+    }.get(resource.cleanup_status, "cleanup_progress")
+    entry = {
+        "type": event_type,
+        "resource": _cleanup_resource_history_data(resource),
+        "cleanup_status": resource.cleanup_status,
+        "cleanup_tool_use_id": resource.cleanup_tool_use_id,
+        "cleanup_action": resource.cleanup_action,
+        "progress_status": resource.progress_status,
+        "progress_percentage": resource.progress_percentage,
+        "last_error": _safe_history_error(resource.last_error),
+        "timestamp": resource.updated_at or time.time(),
+    }
+    return {key: value for key, value in entry.items() if value is not None}
+
+
+def _cleanup_resource_history_data(resource: CleanupResource) -> dict[str, Any]:
+    return {
+        "provider": resource.provider,
+        "resource_type": resource.resource_type,
+        "resource_id": resource.resource_id,
+        "resource_name": resource.resource_name,
+        "region_id": resource.region_id,
+        "source_step_id": resource.source_step_id,
+        "source_attempt_id": resource.source_attempt_id,
+        "cleanup_status": resource.cleanup_status,
+        "progress_status": resource.progress_status,
+    }
+
+
+def _safe_history_error(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = sanitize_public_text(value)
+    return text[:1000] + "..." if len(text) > 1000 else text
+
+
+def _status_from_result(result: dict[str, Any]) -> str | None:
+    nested = _dict_value(result.get("Stack") or result.get("stack"))
+    return _first_string(
+        result,
+        ("StackStatus", "stackStatus", "stack_status", "Status", "status"),
+    ) or _first_string(nested, ("StackStatus", "stackStatus", "stack_status", "Status", "status"))
+
+
+def _stack_id_from_sources(*sources: dict[str, Any]) -> str | None:
+    for source in sources:
+        stack_id = _first_string(source, ("StackId", "stackId", "stack_id"))
+        if stack_id:
+            return stack_id
+        nested = _dict_value(source.get("Stack") or source.get("stack"))
+        stack_id = _first_string(nested, ("StackId", "stackId", "stack_id"))
+        if stack_id:
+            return stack_id
+    return None
+
+
+def _json_object(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _empty_ledger_data() -> dict[str, Any]:
+    return {"schema_version": 1, "observed_resources": [], "cleanup_resources": [], "history": []}
+
+
+def _failed_ledger_data(reason: str) -> dict[str, Any]:
+    data = _empty_ledger_data()
+    data[_LOAD_FAILED_KEY] = True
+    data[_LOAD_ERROR_KEY] = reason
+    return data
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first_string(data: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _optional_str(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _float_value(value: Any) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, int | float):
+        return float(value)
+    return 0.0
+
+
+def _optional_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None

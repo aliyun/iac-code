@@ -459,7 +459,9 @@ class InlineREPL:
             pass  # Windows or restricted environment
 
         if initial_prompt is None:
-            await self._resume_pipeline_sidecar_on_startup()
+            resumed_pipeline = await self._resume_pipeline_sidecar_on_startup()
+            if not resumed_pipeline:
+                await self._maybe_start_normal_chat_cleanup_on_startup()
 
         first_turn = True
         last_ctrl_c_time: float = 0.0
@@ -774,6 +776,7 @@ class InlineREPL:
     def _history_search_messages(self) -> list[dict[str, str]]:
         """Build searchable user-history rows from prompt history and conversation context."""
         from iac_code.agent.message import RECALLED_MEMORY_MARKER, is_recalled_memory_message
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         entries: list[str] = []
         seen: set[str] = set()
@@ -802,7 +805,11 @@ class InlineREPL:
         for msg in context_messages:
             if getattr(msg, "role", None) != "user":
                 continue
-            if is_recalled_memory_message(msg) or Renderer.is_internal_skill_context_message(msg):
+            if (
+                is_recalled_memory_message(msg)
+                or is_cleanup_prompt_message(msg)
+                or Renderer.is_internal_skill_context_message(msg)
+            ):
                 continue
             get_text = getattr(msg, "get_text", None)
             if callable(get_text):
@@ -1188,7 +1195,13 @@ class InlineREPL:
 
     @classmethod
     def _pipeline_visible_resume_messages(cls, messages: list[Message]) -> list[Message]:
-        return [message for message in messages if not cls._is_pipeline_handoff_context_message(message)]
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
+        return [
+            message
+            for message in messages
+            if not cls._is_pipeline_handoff_context_message(message) and not is_cleanup_prompt_message(message)
+        ]
 
     @staticmethod
     def _is_pipeline_handoff_context_message(message: Message) -> bool:
@@ -1305,12 +1318,17 @@ class InlineREPL:
             logger.error("_handle_chat_continue called in pipeline mode; this is a bug")
             return []
 
+        if self._block_if_cleanup_ledger_unreadable():
+            return []
+
         self.store.set_state(is_busy=True)
         try:
             streaming_input = StreamingInputBuffer()
-            events = self._agent_loop.run_streaming(
-                "",
-                queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+            events = self._wrap_cleanup_observer(
+                self._agent_loop.run_streaming(
+                    "",
+                    queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+                )
             )
             result = await self.renderer.run_streaming_output(
                 events,
@@ -1327,7 +1345,760 @@ class InlineREPL:
                     self._streaming_error_log.append((err, msg_count))
             return queued_inputs
         finally:
+            self._prune_cleanup_prompts_if_no_pending_cleanup()
             self.store.set_state(is_busy=False)
+
+    def _cleanup_ledger_for_pipeline(self, pipeline: object | None):
+        if pipeline is None:
+            return None
+        from iac_code.pipeline.engine.cleanup import CleanupLedger
+
+        getter = getattr(pipeline, "cleanup_ledger", None)
+        if not callable(getter):
+            return None
+        try:
+            ledger = getter()
+        except Exception:
+            logger.warning("Failed to load pipeline cleanup ledger", exc_info=True)
+            return None
+        return ledger if isinstance(ledger, CleanupLedger) else None
+
+    def _cleanup_ledger_for_normal_chat(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import CleanupLedger
+
+        prompt_path = self._cleanup_ledger_path_from_active_prompt()
+        if prompt_path is not None:
+            return CleanupLedger(prompt_path)
+
+        explicit_path = getattr(self, "_pipeline_cleanup_ledger_path", None)
+        if explicit_path:
+            ledger = CleanupLedger(Path(explicit_path))
+            has_active_prompt = self._cleanup_prompt_exists_anywhere()
+            if has_active_prompt:
+                return ledger
+            if not ledger.path.exists():
+                self._clear_pipeline_cleanup_ledger_path(ledger.path)
+                return None
+            if ledger.load_failed():
+                return ledger
+            if ledger.pending_resources():
+                return ledger
+            self._clear_pipeline_cleanup_ledger_path(ledger.path)
+            return None
+
+        has_active_prompt = self._cleanup_prompt_exists_anywhere()
+
+        candidate_cwds: list[str] = []
+        try:
+            from iac_code.pipeline.config import get_working_directory
+
+            pipeline_cwd = get_working_directory()
+            if pipeline_cwd:
+                candidate_cwds.append(pipeline_cwd)
+        except Exception:
+            pass
+        original_cwd = getattr(self, "_original_cwd", None)
+        if original_cwd:
+            candidate_cwds.append(original_cwd)
+
+        session_storage = getattr(self, "_session_storage", None)
+        session_id = getattr(self, "_session_id", None)
+        if session_storage is None or not isinstance(session_id, str) or not session_id:
+            return None
+
+        seen: set[str] = set()
+        completed_prompt_ledger = None
+        for cwd in candidate_cwds:
+            if cwd in seen:
+                continue
+            seen.add(cwd)
+            try:
+                path = Path(session_storage.session_dir(cwd, session_id)) / "pipeline" / "cleanup.yaml"
+            except Exception:
+                continue
+            if path.exists():
+                ledger = CleanupLedger(path)
+                if ledger.load_failed():
+                    continue
+                if ledger.pending_resources():
+                    return ledger
+                if has_active_prompt and completed_prompt_ledger is None:
+                    completed_prompt_ledger = ledger
+        return completed_prompt_ledger
+
+    def _cleanup_ledger_for_resume_summary(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import CleanupLedger
+
+        prompt_path = self._cleanup_ledger_path_from_any_cleanup_prompt()
+        if prompt_path is not None:
+            return CleanupLedger(prompt_path)
+
+        explicit_path = getattr(self, "_pipeline_cleanup_ledger_path", None)
+        if explicit_path:
+            return CleanupLedger(Path(explicit_path))
+
+        return None
+
+    def _clear_pipeline_cleanup_ledger_path(self, path=None) -> None:
+        from pathlib import Path
+
+        explicit_path = getattr(self, "_pipeline_cleanup_ledger_path", None)
+        if explicit_path is None:
+            return
+        if path is not None:
+            try:
+                if Path(explicit_path) != Path(path):
+                    return
+            except TypeError:
+                return
+        try:
+            delattr(self, "_pipeline_cleanup_ledger_path")
+        except AttributeError:
+            pass
+
+    def _cleanup_ledger_path_from_active_prompt(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import cleanup_prompt_ledger_path, is_active_cleanup_prompt_message
+
+        for message in [*self._cleanup_prompt_messages_from_context(), *self._cleanup_prompt_messages_from_session()]:
+            if not is_active_cleanup_prompt_message(message):
+                continue
+            ledger_path = cleanup_prompt_ledger_path(message)
+            if ledger_path:
+                return Path(ledger_path)
+        return None
+
+    def _cleanup_ledger_path_from_any_cleanup_prompt(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import cleanup_prompt_ledger_path, is_cleanup_prompt_message
+
+        for message in [*self._cleanup_prompt_messages_from_context(), *self._cleanup_prompt_messages_from_session()]:
+            if not is_cleanup_prompt_message(message):
+                continue
+            ledger_path = cleanup_prompt_ledger_path(message)
+            if ledger_path:
+                return Path(ledger_path)
+        return None
+
+    def _wrap_cleanup_observer(self, events, *, ledger=None):
+        from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupObserver
+
+        cleanup_ledger = ledger or self._cleanup_ledger_for_normal_chat()
+        if not isinstance(cleanup_ledger, CleanupLedger):
+            return events
+        if cleanup_ledger.load_failed():
+            return events
+
+        async def observed_stream():
+            observer = CleanupObserver(cleanup_ledger)
+            previous = self._cleanup_resource_state_map(cleanup_ledger)
+            async for event in events:
+                observer.observe(event)
+                previous = self._print_cleanup_status_changes(cleanup_ledger, previous)
+                yield event
+
+        return observed_stream()
+
+    @staticmethod
+    def _cleanup_resource_state(resource) -> tuple[object, ...]:
+        return (
+            getattr(resource, "cleanup_status", None),
+            getattr(resource, "progress_status", None),
+            getattr(resource, "progress_percentage", None),
+            getattr(resource, "cleanup_tool_use_id", None),
+            getattr(resource, "last_error", None),
+        )
+
+    def _cleanup_resource_state_map(self, ledger) -> dict[str, tuple[object, ...]]:
+        try:
+            resources = ledger.cleanup_resources()
+        except Exception:
+            return {}
+        return {resource.key: self._cleanup_resource_state(resource) for resource in resources}
+
+    def _print_cleanup_status_changes(
+        self,
+        ledger,
+        previous: dict[str, tuple[object, ...]],
+    ) -> dict[str, tuple[object, ...]]:
+        try:
+            resources = ledger.cleanup_resources()
+        except Exception:
+            return previous
+        current = {resource.key: self._cleanup_resource_state(resource) for resource in resources}
+        printer = getattr(getattr(self, "renderer", None), "print_system_message", None)
+        if not callable(printer):
+            return current
+        for resource in resources:
+            state = current.get(resource.key)
+            if state is None or previous.get(resource.key) == state:
+                continue
+            message = self._cleanup_resource_status_message(resource)
+            if not message:
+                continue
+            printer(message, style=self._cleanup_status_style(getattr(resource, "cleanup_status", "")))
+        return current
+
+    @staticmethod
+    def _cleanup_status_style(status: str) -> str:
+        if status == "failed":
+            return "red"
+        if status in {"completed", "skipped"}:
+            return "green"
+        return "yellow"
+
+    @staticmethod
+    def _cleanup_resource_status_message(resource) -> str:
+        status = str(getattr(resource, "cleanup_status", "") or "pending")
+        resource_id = str(getattr(resource, "resource_id", "") or "")
+        label = str(getattr(resource, "resource_name", "") or resource_id)
+        region = str(getattr(resource, "region_id", "") or "unknown")
+        progress = str(getattr(resource, "progress_status", "") or status)
+        last_error = str(getattr(resource, "last_error", "") or "")
+        badge = InlineREPL._cleanup_status_badge(status, progress)
+        detail = InlineREPL._cleanup_status_detail(status, progress)
+        parts = [
+            _("↺ 回滚清理 [{badge}] {label}").format(badge=badge, label=label),
+            _("{kind} {resource_id}").format(
+                kind=InlineREPL._cleanup_resource_kind_label(resource),
+                resource_id=InlineREPL._short_cleanup_resource_id(resource_id),
+            ),
+            region,
+            detail,
+        ]
+        if last_error:
+            parts.append(_("错误：{error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
+        return " · ".join(part for part in parts if part)
+
+    @staticmethod
+    def _cleanup_status_badge(status: str, progress: str) -> str:
+        if status == "started":
+            return _("删除中")
+        if status == "completed":
+            return _("完成")
+        if status == "failed":
+            return _("失败")
+        if status == "skipped":
+            return _("跳过")
+        if status == "pending":
+            return _("待处理")
+        if progress and not progress.startswith("DELETE"):
+            return _("检查")
+        if progress in {"DELETE_REQUESTED", "DELETE_STARTED", "DELETE_IN_PROGRESS"}:
+            return _("删除中")
+        return _("进度")
+
+    @staticmethod
+    def _cleanup_status_detail(status: str, progress: str) -> str:
+        if status == "started":
+            if progress:
+                return _("DeleteStack 已提交，等待删除完成（{progress}）").format(progress=progress)
+            return _("DeleteStack 已提交，等待删除完成")
+        if status == "completed":
+            return progress or "completed"
+        if status == "failed":
+            return progress or "failed"
+        if status == "skipped":
+            return _("已跳过")
+        if progress == "DELETE_IN_PROGRESS":
+            return _("正在删除（{progress}）").format(progress=progress)
+        if progress in {"DELETE_REQUESTED", "DELETE_STARTED"}:
+            return _("DeleteStack 已提交，等待删除完成（{progress}）").format(progress=progress)
+        if progress and not progress.startswith("DELETE"):
+            return _("{progress}，需要删除").format(progress=progress)
+        return progress or status
+
+    @staticmethod
+    def _cleanup_resource_kind_label(resource) -> str:
+        provider = str(getattr(resource, "provider", "") or "").lower()
+        resource_type = str(getattr(resource, "resource_type", "") or "").lower()
+        if provider == "ros" and resource_type == "stack":
+            return _("资源栈")
+        return _("资源")
+
+    @staticmethod
+    def _short_cleanup_resource_id(resource_id: str) -> str:
+        if len(resource_id) <= 18:
+            return resource_id
+        return "{}…{}".format(resource_id[:8], resource_id[-4:])
+
+    @staticmethod
+    def _safe_cleanup_error(error: str) -> str:
+        from iac_code.utils.public_errors import sanitize_public_text
+
+        sanitized = sanitize_public_text(error)
+        return sanitized[:1000] + "..." if len(sanitized) > 1000 else sanitized
+
+    def _remove_cleanup_prompts_from_context(self) -> int:
+        context_manager = getattr(getattr(self, "_agent_loop", None), "context_manager", None)
+        remover = getattr(context_manager, "remove_cleanup_prompt_messages", None)
+        if not callable(remover):
+            return 0
+        try:
+            removed = remover()
+        except Exception:
+            logger.warning("Failed to remove pipeline cleanup prompt from context", exc_info=True)
+            return 0
+        return removed if isinstance(removed, int) else 0
+
+    def _warn_cleanup_ledger_load_failed(self, ledger) -> None:
+        if getattr(self, "_cleanup_ledger_load_failed_warning_printed", False):
+            return
+        self._cleanup_ledger_load_failed_warning_printed = True
+        load_error = ""
+        get_load_error = getattr(ledger, "load_error", None)
+        if callable(get_load_error):
+            try:
+                load_error = get_load_error() or ""
+            except Exception:
+                load_error = ""
+        if load_error:
+            logger.warning("Pipeline cleanup ledger is unreadable: %s", load_error)
+        else:
+            ledger_path = getattr(ledger, "path", None)
+            if ledger_path:
+                logger.warning("Pipeline cleanup ledger is unavailable: %s", ledger_path)
+        self.renderer.print_system_message(
+            _("无法读取回滚清理记录，已保留清理提示，请稍后继续或手动检查。"),
+            style="yellow",
+        )
+
+    def _prune_cleanup_prompts_if_no_pending_cleanup(self, ledger=None) -> None:
+        cleanup_ledger = ledger or self._cleanup_ledger_for_normal_chat()
+        if self._cleanup_ledger_unavailable_with_prompt(cleanup_ledger):
+            self._warn_cleanup_ledger_load_failed(cleanup_ledger)
+            return
+        if cleanup_ledger is not None:
+            load_failed = getattr(cleanup_ledger, "load_failed", None)
+            if callable(load_failed) and load_failed():
+                self._warn_cleanup_ledger_load_failed(cleanup_ledger)
+                return
+        if cleanup_ledger is None or not cleanup_ledger.pending_resources():
+            if cleanup_ledger is not None:
+                self._mark_cleanup_prompts_completed(cleanup_ledger)
+                self._clear_pipeline_cleanup_ledger_path(getattr(cleanup_ledger, "path", None))
+            self._remove_cleanup_prompts_from_context()
+
+    def _print_cleanup_resume_summary(self) -> None:
+        ledger = self._cleanup_ledger_for_resume_summary()
+        if ledger is None:
+            return
+        load_failed = getattr(ledger, "load_failed", None)
+        if callable(load_failed) and load_failed():
+            return
+        ledger_path = str(getattr(ledger, "path", "") or "")
+        printed_paths = getattr(self, "_cleanup_resume_summary_printed_paths", set())
+        if ledger_path and ledger_path in printed_paths:
+            return
+        try:
+            resume_resources = self._cleanup_resume_resources(ledger)
+        except Exception:
+            return
+        if not resume_resources:
+            return
+        printer = getattr(getattr(self, "renderer", None), "print_system_message", None)
+        if not callable(printer):
+            return
+        printer(
+            self._cleanup_resume_summary_message(resume_resources),
+            style=self._cleanup_resume_summary_style(resume_resources),
+        )
+        detail_resources = [
+            resource for resource in resume_resources if self._cleanup_resume_should_show_detail(resource)
+        ]
+        visible_resources = detail_resources[-5:]
+        for resource in visible_resources:
+            printer(
+                self._cleanup_resume_resource_line(resource),
+                style=self._cleanup_status_style(str(getattr(resource, "cleanup_status", "") or "")),
+            )
+        if len(detail_resources) > 5:
+            printer(_("还有 {count} 个需要关注的资源未显示。").format(count=len(detail_resources) - 5), style="yellow")
+        if ledger_path:
+            printed_paths = set(printed_paths)
+            printed_paths.add(ledger_path)
+            self._cleanup_resume_summary_printed_paths = printed_paths
+
+    @staticmethod
+    def _cleanup_resume_resources(ledger) -> list[Any]:
+        resources = ledger.cleanup_resources()
+        history_resources = InlineREPL._cleanup_resume_history_resources(ledger)
+        if not history_resources:
+            return resources
+
+        history_by_key = {resource.key: resource for resource in history_resources}
+        merged: list[Any] = []
+        seen: set[str] = set()
+        for resource in resources:
+            key = resource.key
+            merged.append(history_by_key.get(key, resource))
+            seen.add(key)
+        for resource in history_resources:
+            if resource.key not in seen:
+                merged.append(resource)
+        return merged
+
+    @staticmethod
+    def _cleanup_resume_summary_message(resources: list[Any]) -> str:
+        total = len(resources)
+        counts = InlineREPL._cleanup_resume_status_counts(resources)
+        if total > 0 and counts["completed"] == total:
+            return _("↺ 回滚清理恢复：{count} 条记录均已完成。").format(count=total)
+
+        parts: list[str] = []
+        for key, label in (
+            ("failed", _("失败")),
+            ("pending", _("待处理")),
+            ("active", _("进行中")),
+            ("completed", _("已完成")),
+            ("skipped", _("已跳过")),
+        ):
+            count = counts[key]
+            if count:
+                parts.append(_("{count} 条{label}").format(count=count, label=label))
+        if parts:
+            return _("↺ 回滚清理恢复：{count} 条记录，{summary}。").format(
+                count=total,
+                summary="，".join(parts),
+            )
+        return _("↺ 回滚清理恢复：{count} 条记录。").format(count=total)
+
+    @staticmethod
+    def _cleanup_resume_status_counts(resources: list[Any]) -> dict[str, int]:
+        counts = {
+            "pending": 0,
+            "active": 0,
+            "completed": 0,
+            "failed": 0,
+            "skipped": 0,
+        }
+        for resource in resources:
+            status = str(getattr(resource, "cleanup_status", "") or "pending")
+            if status in {"started", "in_progress"}:
+                counts["active"] += 1
+            elif status in counts:
+                counts[status] += 1
+            else:
+                counts["pending"] += 1
+        return counts
+
+    @staticmethod
+    def _cleanup_resume_summary_style(resources: list[Any]) -> str:
+        if resources and all(
+            str(getattr(resource, "cleanup_status", "") or "pending") in {"completed", "skipped"}
+            for resource in resources
+        ):
+            return "green"
+        return "yellow"
+
+    @staticmethod
+    def _cleanup_resume_should_show_detail(resource) -> bool:
+        status = str(getattr(resource, "cleanup_status", "") or "pending")
+        return status not in {"completed", "skipped"}
+
+    @staticmethod
+    def _cleanup_resume_history_resources(ledger) -> list[Any]:
+        from iac_code.pipeline.engine.cleanup import CleanupResource
+
+        get_history = getattr(ledger, "history_entries", None)
+        if not callable(get_history):
+            return []
+        resources_by_key = {}
+        for entry in get_history():
+            event_type = str(entry.get("type") or "")
+            if event_type not in {
+                "cleanup_started",
+                "cleanup_progress",
+                "cleanup_completed",
+                "cleanup_failed",
+                "cleanup_skipped",
+                "cleanup_pending",
+            }:
+                continue
+            resource_data = dict(entry.get("resource") or {})
+            if not resource_data:
+                continue
+            for key in (
+                "cleanup_status",
+                "cleanup_tool_use_id",
+                "cleanup_action",
+                "progress_status",
+                "progress_percentage",
+                "last_error",
+            ):
+                if entry.get(key) is not None:
+                    resource_data[key] = entry[key]
+            if entry.get("timestamp") is not None:
+                resource_data["updated_at"] = entry["timestamp"]
+            resource = CleanupResource.from_dict(resource_data)
+            if resource.resource_id:
+                resources_by_key.pop(resource.key, None)
+                resources_by_key[resource.key] = resource
+        return list(resources_by_key.values())
+
+    @staticmethod
+    def _cleanup_resume_resource_line(resource) -> str:
+        status = str(getattr(resource, "cleanup_status", "") or "pending")
+        resource_id = str(getattr(resource, "resource_id", "") or "")
+        label = str(getattr(resource, "resource_name", "") or resource_id)
+        region = str(getattr(resource, "region_id", "") or "unknown")
+        progress = str(getattr(resource, "progress_status", "") or status)
+        last_error = str(getattr(resource, "last_error", "") or "")
+        badge = InlineREPL._cleanup_status_badge(status, progress)
+        detail = InlineREPL._cleanup_status_detail(status, progress)
+        parts = [
+            _("  [{badge}] {label}").format(badge=badge, label=label),
+            _("{kind} {resource_id}").format(
+                kind=InlineREPL._cleanup_resource_kind_label(resource),
+                resource_id=InlineREPL._short_cleanup_resource_id(resource_id),
+            ),
+            region,
+            detail,
+        ]
+        if last_error:
+            parts.append(_("错误：{error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
+        return " · ".join(part for part in parts if part)
+
+    async def _maybe_start_normal_chat_cleanup_on_startup(self) -> bool:
+        from iac_code.pipeline.config import RunMode
+
+        if self._get_runtime_mode() != RunMode.NORMAL:
+            return False
+        self._print_cleanup_resume_summary()
+        ledger = self._cleanup_ledger_for_normal_chat()
+        if self._cleanup_ledger_unavailable_with_prompt(ledger):
+            self._warn_cleanup_ledger_load_failed(ledger)
+            return False
+        if ledger is None:
+            self._remove_cleanup_prompts_from_context()
+            return False
+        if ledger.load_failed():
+            self._warn_cleanup_ledger_load_failed(ledger)
+            return False
+        if not ledger.pending_resources():
+            self._prune_cleanup_prompts_if_no_pending_cleanup(ledger)
+            return False
+        return await self._start_pipeline_cleanup_from_ledger(ledger)
+
+    async def _maybe_start_pipeline_cleanup(self, pipeline: object | None) -> bool:
+        from iac_code.pipeline.config import RunMode
+
+        if pipeline is None or self._get_runtime_mode() != RunMode.NORMAL:
+            return False
+        ledger = self._cleanup_ledger_for_pipeline(pipeline)
+        if ledger is None:
+            return False
+        return await self._start_pipeline_cleanup_from_ledger(ledger)
+
+    async def _start_pipeline_cleanup_from_ledger(self, ledger) -> bool:
+        from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
+
+        load_failed = getattr(ledger, "load_failed", None)
+        if callable(load_failed) and load_failed():
+            self._warn_cleanup_ledger_load_failed(ledger)
+            return False
+        cleanup_prompt = ledger.build_pending_prompt()
+        if cleanup_prompt is None:
+            return False
+
+        self._pipeline_cleanup_ledger_path = ledger.path
+        ledger.record_prompt_queued(cleanup_prompt, ui_surface="repl")
+        self.renderer.print_system_message("\n" + cleanup_prompt.status_message, style="yellow")
+        session_prompt_exists = self._cleanup_prompt_exists_in_session(cleanup_prompt.prompt)
+        self._remove_cleanup_prompts_from_context()
+        message = create_cleanup_prompt_message(
+            cleanup_prompt.prompt,
+            cleanup_ledger_path=ledger.path,
+            cleanup_status="pending",
+        )
+        try:
+            injected = self._agent_loop.context_manager.add_raw_message(message.to_dict())
+            if not session_prompt_exists:
+                self._session_storage.append(
+                    self._original_cwd,
+                    self._session_id,
+                    injected,
+                    git_branch=self.current_git_branch(),
+                )
+        except Exception as exc:
+            logger.warning("Failed to inject pipeline cleanup prompt: %s", exc)
+            self.renderer.print_system_message(
+                _("Detected rollback cleanup resources, but cleanup prompt injection failed."),
+                style="yellow",
+            )
+            return False
+
+        self.store.set_state(is_busy=True)
+        try:
+            streaming_input = StreamingInputBuffer()
+            events = self._wrap_cleanup_observer(self._agent_loop.continue_streaming(), ledger=ledger)
+            result = await self.renderer.run_streaming_output(
+                events,
+                permission_handler=self.renderer.prompt_permission,
+                streaming_input=streaming_input,
+            )
+            elapsed, queued_inputs, draft_input = self._normalize_streaming_output_result(result)
+            self._streaming_draft_input = draft_input
+            if elapsed >= 1.0:
+                self._agent_loop.stamp_last_turn_elapsed(elapsed)
+            if queued_inputs:
+                self._streaming_draft_input = "\n".join([*queued_inputs, draft_input]).strip()
+            if self.renderer._last_streaming_errors:
+                msg_count = len(self._agent_loop.context_manager.get_messages())
+                for err in self.renderer._last_streaming_errors:
+                    self._streaming_error_log.append((err, msg_count))
+        finally:
+            self._prune_cleanup_prompts_if_no_pending_cleanup(ledger)
+            self.store.set_state(is_busy=False)
+        return True
+
+    def _cleanup_prompt_messages_from_context(self):
+        context_manager = getattr(getattr(self, "_agent_loop", None), "context_manager", None)
+        get_messages = getattr(context_manager, "get_messages", None)
+        if not callable(get_messages):
+            return []
+        try:
+            messages = get_messages()
+        except Exception:
+            return []
+        return messages if isinstance(messages, list) else []
+
+    def _cleanup_prompt_messages_from_session(self):
+        session_storage = getattr(self, "_session_storage", None)
+        load = getattr(session_storage, "load", None)
+        if not callable(load):
+            return []
+        original_cwd = getattr(self, "_original_cwd", None)
+        session_id = getattr(self, "_session_id", None)
+        if not isinstance(original_cwd, str) or not isinstance(session_id, str):
+            return []
+        try:
+            messages = load(original_cwd, session_id)
+        except Exception:
+            return []
+        return messages if isinstance(messages, list) else []
+
+    def _mark_cleanup_prompts_completed(self, ledger) -> None:
+        from iac_code.pipeline.engine.cleanup import mark_cleanup_prompt_message_completed
+
+        ledger_path = getattr(ledger, "path", None)
+        for message in self._cleanup_prompt_messages_from_context():
+            mark_cleanup_prompt_message_completed(message, cleanup_ledger_path=ledger_path)
+
+        session_storage = getattr(self, "_session_storage", None)
+        save = getattr(session_storage, "save", None)
+        if not callable(save):
+            return
+        messages = self._cleanup_prompt_messages_from_session()
+        changed = False
+        for message in messages:
+            changed = mark_cleanup_prompt_message_completed(message, cleanup_ledger_path=ledger_path) or changed
+        if not changed:
+            return
+        original_cwd = getattr(self, "_original_cwd", None)
+        session_id = getattr(self, "_session_id", None)
+        if not isinstance(original_cwd, str) or not isinstance(session_id, str):
+            return
+        try:
+            save(
+                original_cwd,
+                session_id,
+                messages,
+                git_branch=self.current_git_branch(),
+            )
+        except Exception:
+            logger.warning("Failed to mark pipeline cleanup prompt completed in session", exc_info=True)
+
+    def _cleanup_prompt_exists_in_context(self, prompt: str) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) and message.content == prompt
+            for message in self._cleanup_prompt_messages_from_context()
+        )
+
+    def _cleanup_prompt_exists_in_session(self, prompt: str) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) and message.content == prompt
+            for message in self._cleanup_prompt_messages_from_session()
+        )
+
+    def _context_has_cleanup_prompt(self) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) for message in self._cleanup_prompt_messages_from_context()
+        )
+
+    def _session_has_cleanup_prompt(self) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) for message in self._cleanup_prompt_messages_from_session()
+        )
+
+    def _cleanup_prompt_exists_anywhere(self) -> bool:
+        return self._context_has_cleanup_prompt() or self._session_has_cleanup_prompt()
+
+    def _cleanup_ledger_unavailable_with_prompt(self, ledger) -> bool:
+        if not self._cleanup_prompt_exists_anywhere():
+            return False
+        if ledger is None:
+            return True
+        path = getattr(ledger, "path", None)
+        try:
+            if path is not None and not path.exists():
+                return True
+        except Exception:
+            return True
+        load_failed = getattr(ledger, "load_failed", None)
+        return bool(callable(load_failed) and load_failed())
+
+    def _block_if_cleanup_ledger_unreadable(self) -> bool:
+        ledger = self._cleanup_ledger_for_normal_chat()
+        if not self._cleanup_ledger_unavailable_with_prompt(ledger):
+            return False
+        self._warn_cleanup_ledger_load_failed(ledger)
+        return True
+
+    async def _run_pending_cleanup_before_normal_turn(self, *, draft_text: str) -> bool:
+        ledger = self._cleanup_ledger_for_normal_chat()
+        if self._cleanup_ledger_unavailable_with_prompt(ledger):
+            self._warn_cleanup_ledger_load_failed(ledger)
+            self._streaming_draft_input = draft_text
+            return False
+        if ledger is None:
+            return True
+        if ledger.load_failed():
+            if self._context_has_cleanup_prompt():
+                self._warn_cleanup_ledger_load_failed(ledger)
+                self._streaming_draft_input = draft_text
+                return False
+            return True
+        if not ledger.pending_resources():
+            self._mark_cleanup_prompts_completed(ledger)
+            self._remove_cleanup_prompts_from_context()
+            return True
+
+        if not await self._start_pipeline_cleanup_from_ledger(ledger):
+            self._streaming_draft_input = draft_text
+            return False
+        if ledger.load_failed() or ledger.pending_resources():
+            self._streaming_draft_input = draft_text
+            self.renderer.print_system_message(
+                _("Rollback cleanup is still in progress. Please continue after cleanup completes."),
+                style="yellow",
+            )
+            return False
+        return True
 
     async def _handle_chat(self, user_input: PromptInputResult | str) -> list[str]:
         """Send the user message to the agent loop and stream output."""
@@ -1345,6 +2116,10 @@ class InlineREPL:
                         style="yellow",
                     )
             await self._handle_pipeline_chat(text)
+            return []
+
+        draft_text = user_input.text if isinstance(user_input, PromptInputResult) else user_input
+        if not await self._run_pending_cleanup_before_normal_turn(draft_text=draft_text):
             return []
 
         from iac_code.utils.image.processor import process_user_input
@@ -1367,9 +2142,11 @@ class InlineREPL:
         self.renderer.record_user_turn(record_text)
         try:
             streaming_input = StreamingInputBuffer()
-            events = self._agent_loop.run_streaming(
-                payload,
-                queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+            events = self._wrap_cleanup_observer(
+                self._agent_loop.run_streaming(
+                    payload,
+                    queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+                )
             )
             result = await self.renderer.run_streaming_output(
                 events,
@@ -1386,6 +2163,7 @@ class InlineREPL:
                     self._streaming_error_log.append((err, msg_count))
             return queued_inputs
         finally:
+            self._prune_cleanup_prompts_if_no_pending_cleanup()
             self.store.set_state(is_busy=False)
 
     async def _flush_pipeline_telemetry(self) -> None:
@@ -1625,6 +2403,7 @@ class InlineREPL:
             self._finalize_pipeline_after_render(terminal_event)
             if pipeline_for_flush is not None:
                 await self._flush_pipeline_telemetry()
+                await self._maybe_start_pipeline_cleanup(pipeline_for_flush)
 
     def _pipeline_current_step_is_candidate_selection(self) -> bool:
         pipeline = getattr(self, "_pipeline", None)
@@ -1658,7 +2437,11 @@ class InlineREPL:
                 self._pipeline_waiting_input = True
         finally:
             self.store.set_state(is_busy=False)
+            pipeline_for_flush = self._pipeline
             self._finalize_pipeline_after_render(terminal_event)
+            if pipeline_for_flush is not None:
+                await self._flush_pipeline_telemetry()
+                await self._maybe_start_pipeline_cleanup(pipeline_for_flush)
         return True
 
     def _render_pipeline_display_replay_on_startup(self) -> None:
@@ -2675,6 +3458,7 @@ class InlineREPL:
             return terminal_event
 
         if selected and self._pipeline is not None:
+            self._pipeline_waiting_input = False
             selected_name = selected.selected_candidate_name
             selected_label = selected.display_label or selected_name
             self._record_pipeline_display_candidate_selected(
@@ -3698,12 +4482,13 @@ class InlineREPL:
     @staticmethod
     def _count_user_turns(messages: list) -> int:
         from iac_code.agent.message import ToolResultBlock, is_recalled_memory_message
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         turns = 0
         for message in messages:
             if getattr(message, "role", None) != "user":
                 continue
-            if is_recalled_memory_message(message):
+            if is_recalled_memory_message(message) or is_cleanup_prompt_message(message):
                 continue
             content = getattr(message, "content", "")
             if isinstance(content, list) and any(isinstance(block, ToolResultBlock) for block in content):
@@ -3729,6 +4514,7 @@ class InlineREPL:
         new_messages = self._with_terminal_pipeline_abort_notice(new_messages, pipeline_cwd, new_session_id)
         self._agent_loop.replace_session(new_session_id, new_messages or None)
         self._session_id = new_session_id
+        self._clear_pipeline_cleanup_ledger_path()
         self._was_resumed = True
         self._session_name = self._load_current_session_name()
 
@@ -3752,6 +4538,8 @@ class InlineREPL:
                 session_name=self._session_name,
             )
         )
+        self._print_cleanup_resume_summary()
+        self._prune_cleanup_prompts_if_no_pending_cleanup()
         if new_messages:
             self._replay_resume_messages(new_messages)
             self.console.print()
@@ -3945,11 +4733,12 @@ class InlineREPL:
     def _extract_last_user_text(messages: list) -> str:
         """Walk messages from newest to oldest, return first plain user text."""
         from iac_code.agent.message import RECALLED_MEMORY_MARKER, TextBlock, is_recalled_memory_message
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         for msg in reversed(messages):
             if msg.role != "user":
                 continue
-            if is_recalled_memory_message(msg):
+            if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             content = msg.content
             if isinstance(content, str):

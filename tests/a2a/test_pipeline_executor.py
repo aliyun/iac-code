@@ -17,6 +17,7 @@ from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.types.stream_events import AskUserQuestionEvent, TextDeltaEvent
 
@@ -252,6 +253,96 @@ async def test_executor_publishes_normal_handoff_ready_after_completed_pipeline(
     messages = SessionStorage().load(str(tmp_path), session_id)
     assert messages[-1].role == "user"
     assert messages[-1].content == "[Pipeline Handoff Context]\nPipeline: selling"
+
+
+@pytest.mark.asyncio
+async def test_executor_publishes_normal_handoff_ready_with_cleanup_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    session_dir = tmp_path / "sidecar"
+    ledger = CleanupLedger(session_dir / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                resource_name="selling-stack",
+                region_id="cn-hangzhou",
+                source_step_id="deploying",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback from deploying",
+    )
+    fake_pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=session_dir,
+    )
+    fake_pipeline.handoff_enabled = True
+    fake_pipeline.handoff_summary = "[Pipeline Handoff Context]\nPipeline: selling"
+    fake_pipeline.cleanup_ledger = lambda: ledger
+
+    def fake_create_pipeline(*args, **kwargs):
+        fake_pipeline._session_storage = kwargs["session_storage"]
+        fake_pipeline._session_id = kwargs["session_id"]
+        fake_pipeline._cwd = kwargs["cwd"]
+        return fake_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    pipeline_events = [
+        dump(event)["metadata"]["iac_code"]["pipeline"]
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and "pipeline" in dump(event).get("metadata", {}).get("iac_code", {})
+    ]
+    handoff = pipeline_events[-1]
+    cleanup = handoff["data"]["cleanup"]
+    assert cleanup["status"] == "pending"
+    assert cleanup["resourceCount"] == 1
+    assert cleanup["statusMessage"] == "检测到 1 个回滚残留资源，开始清理流程。"
+    assert "prompt" not in cleanup
+    assert "ledgerPath" not in cleanup
+    assert cleanup["resources"] == [
+        {
+            "provider": "ros",
+            "resourceType": "stack",
+            "resourceId": "stack-123",
+            "resourceName": "selling-stack",
+            "regionId": "cn-hangzhou",
+            "sourceStepId": "deploying",
+            "cleanupStatus": "pending",
+            "progressStatus": None,
+            "lastError": None,
+        }
+    ]
+
+    snapshot = A2APipelineSnapshotStore(session_dir).load()
+    assert snapshot is not None
+    assert snapshot["cleanup"]["status"] == "pending"
+    assert snapshot["cleanup"]["resourceCount"] == 1
+    assert snapshot["normalHandoff"]["data"]["cleanup"]["resourceCount"] == 1
+    assert "prompt" not in snapshot["cleanup"]
+    assert "ledgerPath" not in snapshot["cleanup"]
+    assert "prompt" not in snapshot["normalHandoff"]["data"]["cleanup"]
+    assert "ledgerPath" not in snapshot["normalHandoff"]["data"]["cleanup"]
 
 
 @pytest.mark.asyncio

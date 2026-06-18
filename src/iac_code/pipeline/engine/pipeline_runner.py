@@ -16,6 +16,7 @@ from typing import Any, cast
 
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
@@ -31,7 +32,7 @@ from iac_code.pipeline.engine.step_spec import AllowUserEscapes, LoadedPipeline,
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.pipeline.engine.ui_contract import PipelineStepType
-from iac_code.types.stream_events import StreamEvent
+from iac_code.types.stream_events import ResourceObservedEvent, StreamEvent
 from iac_code.utils.public_errors import sanitize_public_text
 
 logger = logging.getLogger(__name__)
@@ -382,6 +383,84 @@ class PipelineRunner:
         if self.session is None:
             return None
         return self.session.session_dir / DISPLAY_TRANSCRIPT_FILENAME
+
+    def cleanup_ledger(self) -> CleanupLedger | None:
+        session = getattr(self, "session", None)
+        if session is None:
+            return None
+        session_dir = getattr(session, "session_dir", None)
+        if not isinstance(session_dir, (str, Path)):
+            return None
+        return CleanupLedger(Path(session_dir) / "cleanup.yaml")
+
+    def _handle_resource_observed(
+        self,
+        step: StepSpec,
+        event: ResourceObservedEvent,
+        *,
+        attempt_id: str | None,
+    ) -> None:
+        hook = getattr(step, "on_resource_observed", None)
+        ledger = self.cleanup_ledger()
+        if ledger is None or not callable(hook):
+            return
+        try:
+            result = hook(
+                self.context,
+                event,
+                ledger=ledger,
+                step_id=step.step_id,
+                attempt_id=attempt_id,
+            )
+        except Exception:
+            logger.warning("Pipeline resource-observed hook failed: step_id=%s", step.step_id, exc_info=True)
+            return
+        for observed in self._observed_resources_from_hook_result(result):
+            ledger.record_observed(observed)
+
+    def _mark_rollback_cleanup_required(
+        self,
+        step: StepSpec,
+        to_step: str,
+        reason: str,
+        *,
+        from_attempt_id: str | None,
+    ) -> None:
+        hook = getattr(step, "on_rollback_cleanup_required", None)
+        ledger = self.cleanup_ledger()
+        if ledger is None or not callable(hook):
+            return
+        try:
+            result = hook(
+                self.context,
+                ledger=ledger,
+                from_step=step.step_id,
+                from_attempt_id=from_attempt_id,
+                to_step=to_step,
+                reason=reason,
+            )
+        except Exception:
+            logger.warning("Pipeline rollback cleanup hook failed: step_id=%s", step.step_id, exc_info=True)
+            return
+        resources = self._cleanup_resources_from_hook_result(result)
+        if resources:
+            ledger.mark_cleanup_required(resources, source_step_id=step.step_id, reason=reason)
+
+    @staticmethod
+    def _observed_resources_from_hook_result(result: object) -> list[ObservedResource]:
+        if isinstance(result, ObservedResource):
+            return [result]
+        if isinstance(result, list):
+            return [item for item in result if isinstance(item, ObservedResource)]
+        return []
+
+    @staticmethod
+    def _cleanup_resources_from_hook_result(result: object) -> list[CleanupResource]:
+        if isinstance(result, CleanupResource):
+            return [result]
+        if isinstance(result, list):
+            return [item for item in result if isinstance(item, CleanupResource)]
+        return []
 
     def _build_pipeline_identity(self, pipeline_dir: Path) -> PipelineIdentity:
         yaml_path = pipeline_dir / "pipeline.yaml"
@@ -1931,6 +2010,7 @@ class PipelineRunner:
                 return False
             verdict = replace(verdict, rollback_target=target, reason=fallback_reason)
 
+        cleanup_from_step = self.state_machine.current_step
         self.state_machine.interrupt_rollback(target, verdict.reason)
         current_attempt_id = self._execution.get("active_attempt_id")
         self._mark_attempt_status(current_attempt_id, "discarded")
@@ -1940,6 +2020,12 @@ class PipelineRunner:
             self.context.mark_stale(target_field)
         self._rollback_context = verdict.rollback_context
         self._set_current_step_user_input(verdict.rollback_context)
+        self._mark_rollback_cleanup_required(
+            cleanup_from_step,
+            target,
+            verdict.reason,
+            from_attempt_id=current_attempt_id if isinstance(current_attempt_id, str) else None,
+        )
         self._save_rollback_sync(from_step, target, verdict.reason)
         hard_interrupt_attrs = {
             "rollback_scope": "parent",
@@ -2518,6 +2604,12 @@ class PipelineRunner:
                     if isinstance(event, StepResult):
                         step_result = event
                     else:
+                        if isinstance(event, ResourceObservedEvent):
+                            self._handle_resource_observed(
+                                step,
+                                event,
+                                attempt_id=attempt.get("attempt_id"),
+                            )
                         yield event
 
             if (
@@ -2709,6 +2801,12 @@ class PipelineRunner:
                 stale = self.context.mark_stale(target_field) if target_field else []
                 emit_step_success_observability()
                 self._set_current_step_user_input(None)
+                self._mark_rollback_cleanup_required(
+                    step,
+                    target,
+                    reason,
+                    from_attempt_id=current_attempt_id if isinstance(current_attempt_id, str) else None,
+                )
                 await self._save_rollback(step.step_id, target, reason)
                 self._observability.rollback(
                     from_step=step.step_id,

@@ -1,0 +1,549 @@
+from __future__ import annotations
+
+import json
+
+from iac_code.pipeline.engine.cleanup import (
+    CleanupLedger,
+    CleanupObserver,
+    CleanupResource,
+    ObservedResource,
+    cleanup_prompt_ledger_path,
+    create_cleanup_prompt_message,
+    is_active_cleanup_prompt_message,
+    mark_cleanup_prompt_message_completed,
+)
+from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
+
+
+def _observed_stack() -> ObservedResource:
+    return ObservedResource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-123",
+        resource_name="demo",
+        region_id="cn-hangzhou",
+        source_step_id="deploying",
+        source_attempt_id="att_0001",
+        observed_action="CreateStack",
+        observed_at=1.0,
+        metadata={"tool_name": "ros_stack"},
+    )
+
+
+def test_ledger_persists_observed_and_required_resources(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    observed = _observed_stack()
+
+    ledger.record_observed(observed)
+    ledger.mark_cleanup_required(
+        [CleanupResource.from_observed(observed, reason="rollback requested")],
+        source_step_id="deploying",
+        reason="rollback requested",
+    )
+
+    restored = CleanupLedger(tmp_path / "cleanup.yaml")
+    assert restored.observed_resources()[0] == observed
+    pending = restored.pending_resources()
+    assert len(pending) == 1
+    assert pending[0].provider == "ros"
+    assert pending[0].resource_type == "stack"
+    assert pending[0].resource_id == "stack-123"
+    assert pending[0].resource_name == "demo"
+    assert pending[0].region_id == "cn-hangzhou"
+    assert pending[0].cleanup_status == "pending"
+    assert pending[0].cleanup_required is True
+
+
+def test_pending_prompt_includes_active_resources_after_restart(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resources = [
+        CleanupResource(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-started",
+            region_id="cn-hangzhou",
+            cleanup_status="started",
+            progress_status="DELETE_STARTED",
+        ),
+        CleanupResource(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-progress",
+            region_id="cn-hangzhou",
+            cleanup_status="in_progress",
+            progress_status="DELETE_IN_PROGRESS",
+        ),
+        CleanupResource(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-complete",
+            region_id="cn-hangzhou",
+            cleanup_status="completed",
+            progress_status="DELETE_COMPLETE",
+        ),
+    ]
+    ledger.mark_cleanup_required(resources, source_step_id="deploying", reason="rollback requested")
+
+    prompt = ledger.build_pending_prompt()
+
+    assert prompt is not None
+    assert [resource.resource_id for resource in prompt.resources] == ["stack-started", "stack-progress"]
+    assert "stack-started" in prompt.prompt
+    assert "stack-progress" in prompt.prompt
+    assert "stack-complete" not in prompt.prompt
+    assert "严格白名单" in prompt.prompt
+    assert "只能删除下面“待清理资源”列表中的 id" in prompt.prompt
+    assert "不要删除、修改或回滚任何未列入“待清理资源”的 stack 或云资源" in prompt.prompt
+    assert (
+        "不要根据 pipeline handoff、deployment.stack_id、current stack 或 resources_created 额外推断清理对象"
+        in prompt.prompt
+    )
+    assert "即使本轮还有用户追问、继续指令或 pipeline handoff 上下文，也不能扩大清理范围" in prompt.prompt
+    assert "列表内资源全部 DELETE_COMPLETE 后，立刻停止本轮清理；不要继续删除或检查任何其他 stack" in prompt.prompt
+
+
+def test_ledger_records_prompt_queued_history(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    prompt = ledger.build_pending_prompt()
+    assert prompt is not None
+
+    ledger.record_prompt_queued(prompt, ui_surface="repl")
+
+    history = ledger._load()["history"]
+    assert [entry["type"] for entry in history] == ["cleanup_required", "cleanup_prompt_queued"]
+    assert history[-1]["ui_surface"] == "repl"
+    assert history[-1]["resource_count"] == 1
+    assert history[-1]["resources"][0]["resource_id"] == "stack-123"
+    assert "prompt" not in history[-1]
+
+
+def test_cleanup_prompt_message_tracks_ledger_path_and_completion(tmp_path) -> None:
+    path = tmp_path / "cleanup.yaml"
+    message = create_cleanup_prompt_message(
+        "cleanup hidden prompt",
+        cleanup_ledger_path=path,
+        cleanup_status="pending",
+    )
+
+    assert cleanup_prompt_ledger_path(message) == str(path)
+    assert is_active_cleanup_prompt_message(message)
+
+    assert mark_cleanup_prompt_message_completed(message, cleanup_ledger_path=path) is True
+
+    assert message.metadata["cleanupStatus"] == "completed"
+    assert not is_active_cleanup_prompt_message(message)
+
+
+def test_observer_marks_ros_stack_delete_complete(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-delete",
+            name="ros_stack",
+            input={
+                "action": "DeleteStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123", "StackName": "demo"},
+            },
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-delete",
+            tool_name="ros_stack",
+            result=json.dumps(
+                {
+                    "stack_id": "stack-123",
+                    "stack_name": "demo",
+                    "status": "DELETE_COMPLETE",
+                    "is_success": True,
+                }
+            ),
+            is_error=False,
+        )
+    )
+
+    [updated] = ledger.cleanup_resources()
+    assert updated.cleanup_status == "completed"
+    assert updated.cleanup_tool_use_id == "toolu-delete"
+    assert updated.progress_status == "DELETE_COMPLETE"
+
+
+def test_observer_keeps_statusless_delete_stack_result_in_progress(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-delete",
+            name="ros_stack",
+            input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-123"}},
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-delete",
+            tool_name="ros_stack",
+            result=json.dumps({"stack_id": "stack-123", "is_success": True}),
+            is_error=False,
+        )
+    )
+
+    [updated] = ledger.cleanup_resources()
+    assert updated.cleanup_status == "in_progress"
+    assert updated.progress_status == "DELETE_REQUESTED"
+    assert ledger.build_pending_prompt() is not None
+
+
+def test_observer_marks_ros_stack_delete_failed(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-delete",
+            name="ros_stack",
+            input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-123"}},
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-delete",
+            tool_name="ros_stack",
+            result=json.dumps({"stack_id": "stack-123", "status": "DELETE_FAILED", "is_success": False}),
+            is_error=True,
+        )
+    )
+
+    [updated] = ledger.cleanup_resources()
+    assert updated.cleanup_status == "failed"
+    assert updated.progress_status == "DELETE_FAILED"
+    assert updated.last_error
+
+
+def test_update_resource_sanitizes_durable_last_error(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-123",
+        region_id="cn-hangzhou",
+        cleanup_status="failed",
+        progress_status="DELETE_FAILED",
+        last_error=(
+            "AccessKeySecret=super-secret token=sk-live-1234567890 "
+            "Authorization: Bearer bearer-secret at /Users/alice/.iac-code/settings.yml"
+        ),
+    )
+
+    data = ledger._load()
+    resource_error = data["cleanup_resources"][0]["last_error"]
+    history_error = data["history"][-1]["last_error"]
+    for value in (resource_error, history_error):
+        assert "super-secret" not in value
+        assert "sk-live" not in value
+        assert "bearer-secret" not in value
+        assert "/Users/alice" not in value
+        assert "[REDACTED]" in value or "[PATH]" in value
+
+
+def test_observer_tracks_aliyun_api_delete_then_get_stack_polling(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-delete",
+            name="aliyun_api",
+            input={
+                "product": "ros",
+                "action": "DeleteStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123"},
+            },
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-delete",
+            tool_name="aliyun_api",
+            result=json.dumps({"RequestId": "req-1"}),
+            is_error=False,
+        )
+    )
+    [started] = ledger.cleanup_resources()
+    assert started.cleanup_status == "in_progress"
+    assert started.progress_status == "DELETE_REQUESTED"
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-get-1",
+            name="aliyun_api",
+            input={
+                "product": "ros",
+                "action": "GetStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123"},
+            },
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-get-1",
+            tool_name="aliyun_api",
+            result=json.dumps({"StackId": "stack-123", "Status": "DELETE_IN_PROGRESS"}),
+            is_error=False,
+        )
+    )
+    [progress] = ledger.cleanup_resources()
+    assert progress.cleanup_status == "in_progress"
+    assert progress.progress_status == "DELETE_IN_PROGRESS"
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-get-2",
+            name="aliyun_api",
+            input={
+                "product": "ros",
+                "action": "GetStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123"},
+            },
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-get-2",
+            tool_name="aliyun_api",
+            result=json.dumps({"StackId": "stack-123", "Status": "DELETE_COMPLETE"}),
+            is_error=False,
+        )
+    )
+    [completed] = ledger.cleanup_resources()
+    assert completed.cleanup_status == "completed"
+    assert completed.progress_status == "DELETE_COMPLETE"
+
+
+def test_observer_clears_previous_error_after_retry_success(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-123",
+        region_id="cn-hangzhou",
+        cleanup_status="failed",
+        last_error="DELETE_FAILED",
+    )
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-get",
+            name="aliyun_api",
+            input={
+                "product": "ros",
+                "action": "GetStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123"},
+            },
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-get",
+            tool_name="aliyun_api",
+            result=json.dumps({"StackId": "stack-123", "Status": "DELETE_COMPLETE"}),
+            is_error=False,
+        )
+    )
+
+    [completed] = ledger.cleanup_resources()
+    assert completed.cleanup_status == "completed"
+    assert completed.progress_status == "DELETE_COMPLETE"
+    assert completed.last_error is None
+
+
+def test_terminal_cleanup_resource_ignores_late_nonterminal_or_failed_events(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-123",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+        progress_status="DELETE_COMPLETE",
+    )
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-late-delete",
+            name="ros_stack",
+            input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-123"}},
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-late-delete",
+            tool_name="ros_stack",
+            result=json.dumps({"stack_id": "stack-123", "is_success": True}),
+            is_error=False,
+        )
+    )
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-late-get",
+            name="aliyun_api",
+            input={
+                "product": "ros",
+                "action": "GetStack",
+                "region_id": "cn-hangzhou",
+                "params": {"StackId": "stack-123"},
+            },
+        )
+    )
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-late-get",
+            tool_name="aliyun_api",
+            result=json.dumps({"StackId": "stack-123", "Status": "DELETE_FAILED"}),
+            is_error=True,
+        )
+    )
+
+    [completed] = ledger.cleanup_resources()
+    assert completed.cleanup_status == "completed"
+    assert completed.progress_status == "DELETE_COMPLETE"
+    assert completed.cleanup_tool_use_id is None
+    assert completed.last_error is None
+    assert ledger.build_pending_prompt() is None
+
+
+def test_mark_cleanup_required_skips_terminal_resources_without_history(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-completed",
+                region_id="cn-hangzhou",
+                cleanup_status="completed",
+            ),
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-skipped",
+                region_id="cn-hangzhou",
+                cleanup_status="skipped",
+            ),
+        ],
+        source_step_id="deploying",
+        reason="rollback requested",
+    )
+    history_before = list(ledger._load()["history"])
+
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-completed",
+                region_id="cn-hangzhou",
+                cleanup_status="pending",
+            ),
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-skipped",
+                region_id="cn-hangzhou",
+                cleanup_status="pending",
+            ),
+        ],
+        source_step_id="deploying",
+        reason="rollback requested again",
+    )
+
+    assert ledger._load()["history"] == history_before
+    assert [resource.cleanup_status for resource in ledger.cleanup_resources()] == ["completed", "skipped"]
+
+
+def test_corrupt_ledger_non_empty_writes_do_not_mutate_or_replace_file(tmp_path) -> None:
+    path = tmp_path / "cleanup.yaml"
+    path.write_text("[broken", encoding="utf-8")
+    ledger = CleanupLedger(path)
+
+    ledger.record_observed(_observed_stack())
+    ledger.mark_cleanup_required(
+        [CleanupResource.from_observed(_observed_stack(), reason="rollback requested")],
+        source_step_id="deploying",
+        reason="rollback requested",
+    )
+
+    assert path.read_text(encoding="utf-8") == "[broken"
+    assert not list(tmp_path.glob("cleanup.yaml.corrupt*"))
+    assert ledger.load_failed() is True
+    assert ledger.observed_resources() == []
+    assert ledger.cleanup_resources() == []
+
+
+def test_corrupt_ledger_update_does_not_write_empty_replacement(tmp_path) -> None:
+    path = tmp_path / "cleanup.yaml"
+    path.write_text("[broken", encoding="utf-8")
+    ledger = CleanupLedger(path)
+
+    assert ledger.load_failed() is True
+    assert ledger.load_error()
+
+    changed = ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-123",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+    )
+
+    assert changed is False
+    assert path.exists()
+    assert path.read_text(encoding="utf-8") == "[broken"
+    assert not list(tmp_path.glob("cleanup.yaml.corrupt*"))
+
+
+def test_observer_updates_progress_from_stack_progress_event(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    observer = CleanupObserver(ledger)
+
+    observer.observe(
+        StackProgressEvent(
+            stack_id="stack-123",
+            stack_name="demo",
+            status="DELETE_IN_PROGRESS",
+            progress_percentage=60,
+            resources=[],
+            elapsed_seconds=12,
+        )
+    )
+
+    [updated] = ledger.cleanup_resources()
+    assert updated.cleanup_status == "in_progress"
+    assert updated.progress_status == "DELETE_IN_PROGRESS"
+    assert updated.progress_percentage == 60

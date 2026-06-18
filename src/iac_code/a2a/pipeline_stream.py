@@ -38,6 +38,8 @@ class PipelineA2AEventPublisher:
         snapshot_store: A2APipelineSnapshotStore,
         artifact_store: Any | None = None,
         exposure_types: Any = None,
+        delivery_task_id: str | None = None,
+        delivery_context_id: str | None = None,
     ) -> None:
         self.event_queue = event_queue
         self.translator = translator
@@ -45,6 +47,8 @@ class PipelineA2AEventPublisher:
         self.snapshot_store = snapshot_store
         self.artifact_store = artifact_store
         self.exposure_types = normalize_a2a_exposure_types(exposure_types)
+        self.delivery_task_id = delivery_task_id
+        self.delivery_context_id = delivery_context_id
         self._sequence_lock = asyncio.Lock()
         self._last_sequence = 0
         self.last_envelope: dict[str, Any] | None = None
@@ -196,6 +200,7 @@ class PipelineA2AEventPublisher:
         status: str = "working",
         data: dict[str, Any] | None = None,
         coordinates: dict[str, Any] | None = None,
+        require_durable_metadata: bool = False,
     ) -> dict[str, Any] | None:
         envelope = self.translator.manual_event(event_type, scope, status=status, data=data)
         if coordinates:
@@ -203,7 +208,11 @@ class PipelineA2AEventPublisher:
                 value = coordinates.get(key)
                 if isinstance(value, dict):
                     envelope[key] = dict(value)
-        return envelope if await self._persist_and_enqueue(envelope) else None
+        return (
+            envelope
+            if await self._persist_and_enqueue(envelope, require_durable_metadata=require_durable_metadata)
+            else None
+        )
 
     def _next_snapshot(self, envelope: dict[str, Any]) -> dict[str, Any]:
         existing_snapshot = self.snapshot_store.load()
@@ -244,6 +253,7 @@ class PipelineA2AEventPublisher:
         require_durable_metadata: bool = False,
     ) -> bool:
         async with self._sequence_lock:
+            self._annotate_delivery_alias(envelope)
             try:
                 self._ensure_monotonic_sequence(envelope)
             except _SequenceHighWaterUnavailableError:
@@ -280,6 +290,14 @@ class PipelineA2AEventPublisher:
             await self._enqueue_status(safe_envelope)
             self.last_envelope = safe_envelope
             return True
+
+    def _annotate_delivery_alias(self, envelope: dict[str, Any]) -> None:
+        delivery_task_id = self._delivery_task_id(envelope)
+        delivery_context_id = self._delivery_context_id(envelope)
+        if delivery_task_id != str(envelope.get("taskId")):
+            envelope["deliveryTaskId"] = delivery_task_id
+        if delivery_context_id != str(envelope.get("contextId")):
+            envelope["deliveryContextId"] = delivery_context_id
 
     def _ensure_monotonic_sequence(self, envelope: dict[str, Any]) -> None:
         current = _int_value(envelope.get("sequence"), 0)
@@ -359,8 +377,8 @@ class PipelineA2AEventPublisher:
     async def _enqueue_artifact_update(self, envelope: dict[str, Any], artifact_metadata: dict[str, Any]) -> None:
         await self.event_queue.enqueue_event(
             _artifact_update_event(
-                task_id=str(envelope["taskId"]),
-                context_id=str(envelope["contextId"]),
+                task_id=self._delivery_task_id(envelope),
+                context_id=self._delivery_context_id(envelope),
                 metadata=artifact_metadata,
             )
         )
@@ -391,16 +409,24 @@ class PipelineA2AEventPublisher:
         return approved
 
     async def _enqueue_status(self, envelope: dict[str, Any]) -> None:
+        task_id = self._delivery_task_id(envelope)
+        context_id = self._delivery_context_id(envelope)
         update = TaskStatusUpdateEvent(
-            task_id=str(envelope["taskId"]),
-            context_id=str(envelope["contextId"]),
+            task_id=task_id,
+            context_id=context_id,
             status=TaskStatus(
                 state=_a2a_task_state_name(envelope),
-                message=_message_for_envelope(envelope),
+                message=_message_for_envelope(envelope, task_id=task_id, context_id=context_id),
             ),
         )
         ParseDict({"iac_code": {"pipeline": envelope}}, update.metadata)
         await self.event_queue.enqueue_event(update)
+
+    def _delivery_task_id(self, envelope: dict[str, Any]) -> str:
+        return self.delivery_task_id or str(envelope["taskId"])
+
+    def _delivery_context_id(self, envelope: dict[str, Any]) -> str:
+        return self.delivery_context_id or str(envelope["contextId"])
 
 
 def _permission_request_from(event: Any) -> PermissionRequestEvent | None:
@@ -433,14 +459,20 @@ def _maybe_inject_test_fault(point: str) -> None:
     os._exit(97)
 
 
-def _message_for_envelope(envelope: dict[str, Any]) -> Message | None:
+def _message_for_envelope(
+    envelope: dict[str, Any],
+    *,
+    task_id: str | None = None,
+    context_id: str | None = None,
+) -> Message | None:
     if envelope.get("eventType") != "text_delta":
         return None
 
+    message_task_id = task_id or str(envelope["taskId"])
     return Message(
-        message_id=f"{envelope['taskId']}-pipeline-{envelope['sequence']}",
-        task_id=str(envelope["taskId"]),
-        context_id=str(envelope["contextId"]),
+        message_id=f"{message_task_id}-pipeline-{envelope['sequence']}",
+        task_id=message_task_id,
+        context_id=context_id or str(envelope["contextId"]),
         role=Role.ROLE_AGENT,
         parts=[make_text_part(_text_from_envelope(envelope))],
     )

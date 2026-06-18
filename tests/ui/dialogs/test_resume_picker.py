@@ -10,6 +10,7 @@ import pytest
 from rich.console import Console as RichConsole
 
 from iac_code.agent.message import Message, create_recalled_memory_message
+from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
 from iac_code.services.session_index import SessionEntry, SessionIndex
 from iac_code.services.session_storage import SessionStorage
 from iac_code.ui.core.key_event import KeyEvent
@@ -116,6 +117,7 @@ class TestResumePickerLoad:
             [
                 Message(role="user", content="visible question"),
                 create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
+                create_cleanup_prompt_message("cleanup hidden prompt"),
                 Message(role="assistant", content="visible answer"),
             ],
         )
@@ -125,6 +127,7 @@ class TestResumePickerLoad:
         assert "visible answer" in output
         assert "Prefer ROS YAML" not in output
         assert "Relevant persistent memories" not in output
+        assert "cleanup hidden prompt" not in output
 
     def test_supplied_entries_are_not_reloaded_when_toggling_all_projects(self):
         index = MagicMock()

@@ -14,14 +14,32 @@ from iac_code.a2a.artifacts import (
     sanitize_public_tool_output_data,
 )
 from iac_code.a2a.pipeline_journal import to_json_safe
+from iac_code.utils.public_errors import sanitize_public_text
 
 SNAPSHOT_SCHEMA_VERSION = "1.1"
 logger = logging.getLogger(__name__)
+_PUBLIC_TEXT_MAX_CHARS = 1000
 
 _TERMINAL_STATUS_BY_EVENT_TYPE = {
     "pipeline_completed": "completed",
     "pipeline_failed": "failed",
     "pipeline_canceled": "canceled",
+}
+_CLEANUP_STATUS_BY_EVENT_TYPE = {
+    "cleanup_started": "started",
+    "cleanup_progress": "in_progress",
+    "cleanup_completed": "completed",
+    "cleanup_failed": "failed",
+}
+_KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
+_CLEANUP_ERROR_KEYS = {
+    "error",
+    "errorMessage",
+    "errorSummary",
+    "error_message",
+    "error_summary",
+    "lastError",
+    "last_error",
 }
 
 
@@ -32,7 +50,7 @@ class A2APipelineSnapshotStore:
 
     def save(self, snapshot: dict[str, Any]) -> bool:
         previous = self.load()
-        next_snapshot = copy.deepcopy(snapshot)
+        next_snapshot = _sanitize_public_snapshot_private_cleanup_fields(snapshot)
         next_snapshot["snapshotVersion"] = _snapshot_version(previous) + 1
         next_snapshot = to_json_safe(next_snapshot)
         if not isinstance(next_snapshot, dict):
@@ -71,7 +89,7 @@ class A2APipelineSnapshotStore:
                 type(value).__name__,
             )
             return None
-        return value
+        return _sanitize_public_snapshot_private_cleanup_fields(value)
 
 
 def reduce_pipeline_events(
@@ -109,6 +127,21 @@ def sanitize_pipeline_artifact_uris(value: Any) -> Any:
     return sanitized
 
 
+def sanitize_pipeline_cleanup_private_fields(value: Any) -> Any:
+    if isinstance(value, list):
+        return [sanitize_pipeline_cleanup_private_fields(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    sanitized = _sanitize_cleanup_private_fields(value)
+    event_type = _string_or_none(sanitized.get("eventType")) or ""
+    if event_type in _CLEANUP_STATUS_BY_EVENT_TYPE or sanitized.get("scope") == "cleanup":
+        data = _dict_or_none(sanitized.get("data"))
+        if data is not None:
+            sanitized["data"] = _sanitize_cleanup_private_fields(data, root_is_cleanup=True)
+    return sanitized
+
+
 class _PipelineSnapshotReducer:
     def __init__(self, existing_snapshot: dict[str, Any] | None = None) -> None:
         self._snapshot = _snapshot_from_existing(existing_snapshot)
@@ -129,6 +162,7 @@ class _PipelineSnapshotReducer:
         self._candidate_restart_keys: set[str] = set()
         self._handoff_history_keys: set[str] = set()
         self._stack_history_keys: set[str] = set()
+        self._cleanup_history_keys: set[str] = set()
         self._skip_sequences_through = 0
         self._hydrate_existing_snapshot(existing_snapshot)
 
@@ -179,6 +213,7 @@ class _PipelineSnapshotReducer:
         self._hydrate_candidate_restarts()
         self._hydrate_control_history("handoffHistory", self._handoff_history_keys)
         self._hydrate_stack_history()
+        self._hydrate_cleanup_history()
 
     def _hydrate_steps(self) -> None:
         valid_steps: list[dict[str, Any]] = []
@@ -336,6 +371,24 @@ class _PipelineSnapshotReducer:
                 self._seen_event_ids.add(event_id)
         stacks["history"] = unique_history
 
+    def _hydrate_cleanup_history(self) -> None:
+        cleanup = self._snapshot["cleanup"]
+        unique_history: list[dict[str, Any]] = []
+        for item in cleanup["history"]:
+            if not isinstance(item, dict):
+                continue
+            event_id = _string_or_none(item.get("eventId"))
+            key = event_id or str(_sequence_value(item))
+            if key in self._cleanup_history_keys:
+                if event_id is not None:
+                    self._seen_event_ids.add(event_id)
+                continue
+            self._cleanup_history_keys.add(key)
+            unique_history.append(item)
+            if event_id is not None:
+                self._seen_event_ids.add(event_id)
+        cleanup["history"] = unique_history
+
     def _is_legacy_replay_event(self, event: dict[str, Any]) -> bool:
         return self._skip_sequences_through > 0 and _sequence_value(event) <= self._skip_sequences_through
 
@@ -357,13 +410,16 @@ class _PipelineSnapshotReducer:
         self._snapshot["lastSequence"] = max(self._snapshot["lastSequence"], _sequence_value(event))
         self._merge_pipeline_identity(event)
 
-        data = _dict_or_empty(event.get("data"))
+        data = _sanitize_cleanup_private_fields(_dict_or_empty(event.get("data")))
         if event_type == "pipeline_started":
             self._apply_pipeline_started(data)
         elif event_type == "pipeline_handoff_ready":
             handoff = _normal_handoff(event)
             self._snapshot["normalHandoff"] = handoff
             self._append_control_history("handoffHistory", self._handoff_history_keys, handoff)
+            cleanup_data = _dict_or_none(data.get("cleanup"))
+            if cleanup_data is not None:
+                self._apply_cleanup_data(cleanup_data, event)
 
         step = self._upsert_step(event.get("step"), event)
         candidate = self._upsert_candidate(step, event.get("candidate"), event)
@@ -396,6 +452,8 @@ class _PipelineSnapshotReducer:
             self._upsert_tool_result_item(event)
         elif event_type == "stack_current_changed":
             self._apply_stack_current_changed(event)
+        elif event_type in _CLEANUP_STATUS_BY_EVENT_TYPE:
+            self._apply_cleanup_event(event)
         elif event_type == "rollback_completed":
             self._append_rollback(event)
         elif event_type == "candidate_restart_requested":
@@ -412,7 +470,7 @@ class _PipelineSnapshotReducer:
             self._snapshot["status"] = terminal_status
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
-        elif event_type not in {"input_required", "input_received"} and not (
+        elif event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE} and not (
             event_type == "pipeline_handoff_ready" and self._snapshot["status"] in {"completed", "failed", "canceled"}
         ):
             self._apply_event_status(event)
@@ -745,6 +803,82 @@ class _PipelineSnapshotReducer:
         else:
             stacks["current"] = copy.deepcopy(existing)
 
+    def _apply_cleanup_event(self, event: dict[str, Any]) -> None:
+        data = _sanitize_cleanup_private_fields(copy.deepcopy(_dict_or_empty(event.get("data"))), root_is_cleanup=True)
+        event_type = _string_or_none(event.get("eventType")) or ""
+        data.setdefault("status", _CLEANUP_STATUS_BY_EVENT_TYPE.get(event_type, "pending"))
+        self._apply_cleanup_data(data, event)
+
+    def _apply_cleanup_data(self, data: dict[str, Any], event: dict[str, Any]) -> None:
+        cleanup = self._snapshot["cleanup"]
+        status = _string_or_none(data.get("status"))
+        if status is not None:
+            cleanup["status"] = status
+
+        resources = _dict_list(data.get("resources"))
+        if resources:
+            cleanup["resources"] = copy.deepcopy(resources)
+        else:
+            self._merge_cleanup_resource(cleanup, data)
+
+        resource_count = _int_or_none(data.get("resourceCount"))
+        if resource_count is not None:
+            cleanup["resourceCount"] = resource_count
+        elif cleanup["resources"]:
+            cleanup["resourceCount"] = len(cleanup["resources"])
+        cleanup["status"] = _aggregate_cleanup_status(cleanup["resources"], fallback=status or cleanup.get("status"))
+
+        for key in ("statusMessage",):
+            if key in data:
+                cleanup[key] = copy.deepcopy(data[key])
+
+        key = _string_or_none(event.get("eventId")) or str(_sequence_value(event))
+        if key in self._cleanup_history_keys:
+            return
+        self._cleanup_history_keys.add(key)
+        entry = {
+            "eventType": _string_or_none(event.get("eventType")),
+            "eventId": _string_or_none(event.get("eventId")),
+            "sequence": _sequence_value(event),
+            "createdAt": _string_or_none(event.get("createdAt")),
+            "scope": _string_or_none(event.get("scope")) or "cleanup",
+            "status": cleanup["status"],
+            "data": copy.deepcopy(data),
+        }
+        _merge_event_coordinates(entry, event)
+        cleanup["history"].append(entry)
+
+    @staticmethod
+    def _merge_cleanup_resource(cleanup: dict[str, Any], data: dict[str, Any]) -> None:
+        resource_id = _string_or_none(data.get("resourceId"))
+        if resource_id is None:
+            return
+        provider = _string_or_none(data.get("provider"))
+        resource_type = _string_or_none(data.get("resourceType")) or _string_or_none(data.get("resource_type"))
+        region_id = _string_or_none(data.get("regionId"))
+        resources = cleanup["resources"]
+
+        def optional_field_matches(resource: dict[str, Any], *keys: str, incoming: str | None) -> bool:
+            existing = None
+            for key in keys:
+                existing = _string_or_none(resource.get(key))
+                if existing is not None:
+                    break
+            return incoming is None or existing is None or existing == incoming
+
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            if (
+                resource.get("resourceId") == resource_id
+                and optional_field_matches(resource, "provider", incoming=provider)
+                and optional_field_matches(resource, "resourceType", "resource_type", incoming=resource_type)
+                and optional_field_matches(resource, "regionId", incoming=region_id)
+            ):
+                resource.update(copy.deepcopy(data))
+                return
+        resources.append(copy.deepcopy(data))
+
     def _upsert_display_record(
         self,
         display_key: str,
@@ -832,7 +966,7 @@ class _PipelineSnapshotReducer:
 
 
 def _normal_handoff(event: dict[str, Any]) -> dict[str, Any]:
-    data = copy.deepcopy(_dict_or_empty(event.get("data")))
+    data = _sanitize_cleanup_private_fields(copy.deepcopy(_dict_or_empty(event.get("data"))))
     handoff = {
         "eventType": _string_or_none(event.get("eventType")),
         "eventId": _string_or_none(event.get("eventId")),
@@ -924,6 +1058,12 @@ def _empty_snapshot() -> dict[str, Any]:
             "byId": {},
             "history": [],
         },
+        "cleanup": {
+            "status": "none",
+            "resourceCount": 0,
+            "resources": [],
+            "history": [],
+        },
         "normalHandoff": None,
         "pendingInput": None,
         "control": {
@@ -936,6 +1076,32 @@ def _empty_snapshot() -> dict[str, Any]:
         },
         "seenEventIds": [],
     }
+
+
+def _cleanup_resource_status(resource: dict[str, Any]) -> str | None:
+    status = (
+        _string_or_none(resource.get("cleanupStatus"))
+        or _string_or_none(resource.get("cleanup_status"))
+        or _string_or_none(resource.get("status"))
+    )
+    return status if status in _KNOWN_CLEANUP_STATUSES else None
+
+
+def _aggregate_cleanup_status(resources: list[dict[str, Any]], *, fallback: Any = None) -> str:
+    fallback_status = _string_or_none(fallback) or "none"
+    statuses = [_cleanup_resource_status(resource) for resource in resources if isinstance(resource, dict)]
+    statuses = [status for status in statuses if status is not None]
+    if not statuses:
+        return fallback_status
+    if "failed" in statuses:
+        return "failed"
+    if "in_progress" in statuses:
+        return "in_progress"
+    if "started" in statuses:
+        return "started"
+    if "pending" in statuses:
+        return "pending"
+    return "completed"
 
 
 def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -969,9 +1135,27 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
         else {},
         "history": _dict_list(stacks.get("history")),
     }
+    normal_handoff = snapshot.get("normalHandoff")
     snapshot["normalHandoff"] = (
-        copy.deepcopy(snapshot.get("normalHandoff")) if isinstance(snapshot.get("normalHandoff"), dict) else None
+        _sanitize_cleanup_private_fields(normal_handoff) if isinstance(normal_handoff, dict) else None
     )
+    cleanup = snapshot.get("cleanup")
+    if not isinstance(cleanup, dict):
+        cleanup = {}
+    cleanup = _sanitize_cleanup_private_fields(cleanup, root_is_cleanup=True)
+    cleanup_resources = _dict_list(cleanup.get("resources"))
+    cleanup_count = _int_or_none(cleanup.get("resourceCount"))
+    if cleanup_count is None:
+        cleanup_count = len(cleanup_resources)
+    snapshot["cleanup"] = {
+        "status": _string_or_none(cleanup.get("status")) or "none",
+        "resourceCount": cleanup_count,
+        "resources": cleanup_resources,
+        "history": _dict_list(cleanup.get("history")),
+    }
+    for key in ("statusMessage",):
+        if key in cleanup:
+            snapshot["cleanup"][key] = copy.deepcopy(cleanup[key])
 
     control = snapshot.get("control")
     if not isinstance(control, dict):
@@ -996,6 +1180,58 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
     )
     snapshot["lastSequence"] = _sequence_number(snapshot.get("lastSequence"))
     return snapshot
+
+
+def _sanitize_public_snapshot_private_cleanup_fields(value: dict[str, Any]) -> dict[str, Any]:
+    sanitized = copy.deepcopy(value)
+    normal_handoff = sanitized.get("normalHandoff")
+    if isinstance(normal_handoff, dict):
+        sanitized["normalHandoff"] = _sanitize_cleanup_private_fields(normal_handoff)
+    cleanup = sanitized.get("cleanup")
+    if isinstance(cleanup, dict):
+        sanitized["cleanup"] = _sanitize_cleanup_private_fields(cleanup, root_is_cleanup=True)
+    control = sanitized.get("control")
+    if isinstance(control, dict):
+        handoff_history = control.get("handoffHistory")
+        if isinstance(handoff_history, list):
+            control["handoffHistory"] = [
+                _sanitize_cleanup_private_fields(item) if isinstance(item, dict) else item for item in handoff_history
+            ]
+    return sanitized
+
+
+def _sanitize_cleanup_private_fields(value: dict[str, Any], *, root_is_cleanup: bool = False) -> dict[str, Any]:
+    sanitized = copy.deepcopy(value)
+    _drop_cleanup_private_fields(sanitized, inside_cleanup=root_is_cleanup)
+    return sanitized
+
+
+def _drop_cleanup_private_fields(value: Any, *, inside_cleanup: bool) -> None:
+    if isinstance(value, dict):
+        if inside_cleanup:
+            for key in ("prompt", "ledgerPath", "ledger_path"):
+                value.pop(key, None)
+            for key in _CLEANUP_ERROR_KEYS & value.keys():
+                value[key] = _sanitize_cleanup_error_value(value[key])
+        for item in value.values():
+            _drop_cleanup_private_fields(item, inside_cleanup=inside_cleanup)
+        cleanup = value.get("cleanup")
+        if cleanup is not None:
+            _drop_cleanup_private_fields(cleanup, inside_cleanup=True)
+    elif isinstance(value, list):
+        for item in value:
+            _drop_cleanup_private_fields(item, inside_cleanup=inside_cleanup)
+
+
+def _sanitize_cleanup_error_value(value: Any) -> Any:
+    if isinstance(value, str):
+        text = sanitize_public_text(value)
+        return text[:_PUBLIC_TEXT_MAX_CHARS] + "..." if len(text) > _PUBLIC_TEXT_MAX_CHARS else text
+    if isinstance(value, dict):
+        return {key: _sanitize_cleanup_error_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_cleanup_error_value(item) for item in value]
+    return value
 
 
 def _merge_coordinate(target: dict[str, Any], coordinate: dict[str, Any]) -> None:
@@ -1212,4 +1448,9 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-__all__ = ["A2APipelineSnapshotStore", "SNAPSHOT_SCHEMA_VERSION", "reduce_pipeline_events"]
+__all__ = [
+    "A2APipelineSnapshotStore",
+    "SNAPSHOT_SCHEMA_VERSION",
+    "reduce_pipeline_events",
+    "sanitize_pipeline_cleanup_private_fields",
+]

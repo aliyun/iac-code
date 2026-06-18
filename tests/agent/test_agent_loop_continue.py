@@ -4,6 +4,8 @@ import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.message import Message
+from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE, create_cleanup_prompt_message
+from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.stream_events import MessageEndEvent, TextDeltaEvent, Usage
 
@@ -54,3 +56,25 @@ async def test_continue_streaming_uses_existing_context_without_appending_user_m
     assert provider.calls[0]["messages"][0].content == "already persisted prompt"
     appended_roles = [message.role for _cwd, _sid, message, _branch in storage.appended]
     assert appended_roles == ["assistant"]
+
+
+def test_stamp_last_turn_elapsed_preserves_cleanup_prompt_in_session(tmp_path):
+    storage = SessionStorage(projects_dir=tmp_path)
+    cwd = "/repo"
+    session_id = "session-cleanup"
+    storage.append(cwd, session_id, create_cleanup_prompt_message("cleanup hidden prompt"))
+    loop = AgentLoop(
+        provider_manager=FakeProviderManager(),
+        system_prompt="system",
+        tool_registry=ToolRegistry(),
+        session_storage=storage,
+        session_id=session_id,
+        resume_messages=[Message(role="user", content="later"), Message(role="assistant", content="done")],
+        cwd=cwd,
+    )
+
+    loop.stamp_last_turn_elapsed(1.5)
+
+    loaded = storage.load(cwd, session_id)
+    assert [message.content for message in loaded] == ["later", "done", "cleanup hidden prompt"]
+    assert loaded[-1].metadata["type"] == CLEANUP_PROMPT_METADATA_TYPE

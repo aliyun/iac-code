@@ -449,6 +449,375 @@ def test_swap_session_refreshes_session_name_and_renders_banner():
     repl.console.print.assert_called_once_with("banner")
 
 
+def test_swap_session_marks_completed_cleanup_prompt(tmp_path: Path):
+    from iac_code.agent.message import Message
+    from iac_code.pipeline.engine.cleanup import (
+        CleanupLedger,
+        CleanupResource,
+        create_cleanup_prompt_message,
+    )
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.ui.repl import InlineREPL
+
+    cwd = str(tmp_path / "repo")
+    Path(cwd).mkdir()
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    new_session_id = "new-session"
+    ledger = CleanupLedger(storage.session_dir(cwd, new_session_id) / "pipeline" / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-deleted",
+                region_id="cn-hangzhou",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    cleanup_prompt = ledger.build_pending_prompt()
+    assert cleanup_prompt is not None
+    storage.append(
+        cwd,
+        new_session_id,
+        create_cleanup_prompt_message(cleanup_prompt.prompt, cleanup_ledger_path=ledger.path, cleanup_status="pending"),
+    )
+    storage.append(cwd, new_session_id, Message(role="assistant", content="cleanup finished"))
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-deleted",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+        progress_status="DELETE_COMPLETE",
+    )
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = cwd
+    repl._session_id = "old-session"
+    repl._session_storage = storage
+    repl._agent_loop = SimpleNamespace(replace_session=Mock())
+    repl._load_current_session_name = Mock(return_value=None)
+    repl._load_pipeline_display_replay_model = Mock(return_value=None)
+    repl.current_git_branch = Mock(return_value="main")
+    repl.store = SimpleNamespace(get_state=Mock(return_value=SimpleNamespace(model="test-model", cwd=cwd)))
+    repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
+    repl.renderer = SimpleNamespace(replay_history=Mock())
+
+    repl.swap_session(new_session_id)
+
+    messages = storage.load(cwd, new_session_id)
+    cleanup_messages = [message for message in messages if message.metadata.get("type") == "pipeline_cleanup_prompt"]
+    assert cleanup_messages[0].metadata["cleanupStatus"] == "completed"
+
+
+def test_swap_session_prints_cleanup_resume_summary(tmp_path: Path):
+    from iac_code.agent.message import Message
+    from iac_code.pipeline.engine.cleanup import (
+        CleanupLedger,
+        CleanupResource,
+        create_cleanup_prompt_message,
+    )
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.ui.repl import InlineREPL
+
+    cwd = str(tmp_path / "repo")
+    Path(cwd).mkdir()
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    new_session_id = "new-session"
+    ledger = CleanupLedger(storage.session_dir(cwd, new_session_id) / "pipeline" / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-deleted",
+                resource_name="demo-stack",
+                region_id="cn-hangzhou",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    cleanup_prompt = ledger.build_pending_prompt()
+    assert cleanup_prompt is not None
+    storage.append(
+        cwd,
+        new_session_id,
+        create_cleanup_prompt_message(cleanup_prompt.prompt, cleanup_ledger_path=ledger.path, cleanup_status="pending"),
+    )
+    storage.append(cwd, new_session_id, Message(role="assistant", content="cleanup finished"))
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-deleted",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+        progress_status="DELETE_COMPLETE",
+    )
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = cwd
+    repl._session_id = "old-session"
+    repl._session_storage = storage
+    repl._agent_loop = SimpleNamespace(replace_session=Mock())
+    repl._load_current_session_name = Mock(return_value=None)
+    repl._load_pipeline_display_replay_model = Mock(return_value=None)
+    repl.current_git_branch = Mock(return_value="main")
+    repl.store = SimpleNamespace(get_state=Mock(return_value=SimpleNamespace(model="test-model", cwd=cwd)))
+    repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
+    repl.renderer = SimpleNamespace(replay_history=Mock(), print_system_message=Mock())
+
+    repl.swap_session(new_session_id)
+
+    rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
+    assert "↺ 回滚清理恢复：1 条记录均已完成。" in rendered
+    assert "回滚清理 [完成] demo-stack" not in rendered
+    assert "stack-deleted" not in rendered
+    assert "status=" not in rendered
+    assert "progress=" not in rendered
+    replayed = repl.renderer.replay_history.call_args.args[0]
+    assert all(message.metadata.get("type") != "pipeline_cleanup_prompt" for message in replayed)
+
+
+def test_swap_session_prints_cleanup_resume_summary_for_completed_prompt(tmp_path: Path):
+    from iac_code.agent.message import Message
+    from iac_code.pipeline.engine.cleanup import (
+        CleanupLedger,
+        CleanupResource,
+        create_cleanup_prompt_message,
+    )
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.ui.repl import InlineREPL
+
+    cwd = str(tmp_path / "repo")
+    Path(cwd).mkdir()
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    new_session_id = "new-session"
+    ledger = CleanupLedger(storage.session_dir(cwd, new_session_id) / "pipeline" / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-deleted",
+                resource_name="demo-stack",
+                region_id="cn-hangzhou",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    cleanup_prompt = ledger.build_pending_prompt()
+    assert cleanup_prompt is not None
+    storage.append(
+        cwd,
+        new_session_id,
+        create_cleanup_prompt_message(
+            cleanup_prompt.prompt,
+            cleanup_ledger_path=ledger.path,
+            cleanup_status="completed",
+        ),
+    )
+    storage.append(cwd, new_session_id, Message(role="assistant", content="cleanup finished"))
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-deleted",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+        progress_status="DELETE_COMPLETE",
+    )
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = cwd
+    repl._session_id = "old-session"
+    repl._session_storage = storage
+    repl._agent_loop = SimpleNamespace(replace_session=Mock())
+    repl._load_current_session_name = Mock(return_value=None)
+    repl._load_pipeline_display_replay_model = Mock(return_value=None)
+    repl.current_git_branch = Mock(return_value="main")
+    repl.store = SimpleNamespace(get_state=Mock(return_value=SimpleNamespace(model="test-model", cwd=cwd)))
+    repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
+    repl.renderer = SimpleNamespace(replay_history=Mock(), print_system_message=Mock())
+
+    repl.swap_session(new_session_id)
+
+    rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
+    assert "↺ 回滚清理恢复：1 条记录均已完成。" in rendered
+    assert "回滚清理 [完成] demo-stack" not in rendered
+    assert "DELETE_COMPLETE" not in rendered
+
+
+def test_swap_session_prints_failed_cleanup_resume_summary(tmp_path: Path):
+    from iac_code.agent.message import Message
+    from iac_code.pipeline.engine.cleanup import (
+        CleanupLedger,
+        CleanupResource,
+        create_cleanup_prompt_message,
+    )
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.ui.repl import InlineREPL
+
+    cwd = str(tmp_path / "repo")
+    Path(cwd).mkdir()
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    new_session_id = "new-session"
+    ledger = CleanupLedger(storage.session_dir(cwd, new_session_id) / "pipeline" / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-failed",
+                resource_name="failed-stack",
+                region_id="cn-hangzhou",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    cleanup_prompt = ledger.build_pending_prompt()
+    assert cleanup_prompt is not None
+    storage.append(
+        cwd,
+        new_session_id,
+        create_cleanup_prompt_message(cleanup_prompt.prompt, cleanup_ledger_path=ledger.path, cleanup_status="pending"),
+    )
+    storage.append(cwd, new_session_id, Message(role="assistant", content="cleanup failed"))
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-failed",
+        region_id="cn-hangzhou",
+        cleanup_status="failed",
+        progress_status="DELETE_FAILED",
+        last_error="DELETE_FAILED: stack still has dependency",
+    )
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = cwd
+    repl._session_id = "old-session"
+    repl._session_storage = storage
+    repl._agent_loop = SimpleNamespace(replace_session=Mock())
+    repl._load_current_session_name = Mock(return_value=None)
+    repl._load_pipeline_display_replay_model = Mock(return_value=None)
+    repl.current_git_branch = Mock(return_value="main")
+    repl.store = SimpleNamespace(get_state=Mock(return_value=SimpleNamespace(model="test-model", cwd=cwd)))
+    repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
+    repl.renderer = SimpleNamespace(replay_history=Mock(), print_system_message=Mock())
+
+    repl.swap_session(new_session_id)
+
+    rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
+    assert "↺ 回滚清理恢复：1 条记录，1 条失败。" in rendered
+    assert "  [失败] failed-stack" in rendered
+    assert "↺ 回滚清理 [失败] failed-stack" not in rendered
+    assert "资源栈 stack-failed · cn-hangzhou" in rendered
+    assert "DELETE_FAILED" in rendered
+    assert "dependency" in rendered
+    assert "status=" not in rendered
+    assert "progress=" not in rendered
+    replayed = repl.renderer.replay_history.call_args.args[0]
+    assert all(message.metadata.get("type") != "pipeline_cleanup_prompt" for message in replayed)
+
+
+def test_pipeline_visible_resume_messages_hides_pending_cleanup_prompt():
+    from iac_code.agent.message import Message
+    from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
+    from iac_code.ui.repl import InlineREPL
+
+    cleanup = create_cleanup_prompt_message("hidden cleanup prompt", cleanup_status="pending")
+    messages = [Message(role="user", content="visible"), cleanup, Message(role="assistant", content="answer")]
+
+    visible = InlineREPL._pipeline_visible_resume_messages(messages)
+
+    assert [message.content for message in visible] == ["visible", "answer"]
+
+
+def test_swap_session_clears_stale_cleanup_ledger_path_before_pruning(tmp_path: Path):
+    from iac_code.agent.message import Message
+    from iac_code.pipeline.engine.cleanup import (
+        CleanupLedger,
+        CleanupResource,
+        ObservedResource,
+        create_cleanup_prompt_message,
+    )
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.ui.repl import InlineREPL
+
+    cwd = str(tmp_path / "repo")
+    Path(cwd).mkdir()
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+
+    old_ledger = CleanupLedger(tmp_path / "old-cleanup.yaml")
+    old_ledger.record_observed(
+        ObservedResource(
+            provider="ros",
+            resource_type="stack",
+            resource_id="old-stack",
+            region_id="cn-hangzhou",
+            observed_action="CreateStack",
+        )
+    )
+
+    new_session_id = "new-session"
+    new_ledger = CleanupLedger(storage.session_dir(cwd, new_session_id) / "pipeline" / "cleanup.yaml")
+    new_ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-deleted",
+                region_id="cn-hangzhou",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    cleanup_prompt = new_ledger.build_pending_prompt()
+    assert cleanup_prompt is not None
+    storage.append(
+        cwd,
+        new_session_id,
+        create_cleanup_prompt_message(
+            cleanup_prompt.prompt,
+            cleanup_ledger_path=new_ledger.path,
+            cleanup_status="pending",
+        ),
+    )
+    storage.append(cwd, new_session_id, Message(role="assistant", content="cleanup finished"))
+    new_ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-deleted",
+        region_id="cn-hangzhou",
+        cleanup_status="completed",
+        progress_status="DELETE_COMPLETE",
+    )
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = cwd
+    repl._session_id = "old-session"
+    repl._pipeline_cleanup_ledger_path = old_ledger.path
+    repl._session_storage = storage
+    repl._agent_loop = SimpleNamespace(replace_session=Mock())
+    repl._load_current_session_name = Mock(return_value=None)
+    repl._load_pipeline_display_replay_model = Mock(return_value=None)
+    repl.current_git_branch = Mock(return_value="main")
+    repl.store = SimpleNamespace(get_state=Mock(return_value=SimpleNamespace(model="test-model", cwd=cwd)))
+    repl.console = SimpleNamespace(file=SimpleNamespace(write=Mock(), flush=Mock()), print=Mock())
+    repl.renderer = SimpleNamespace(replay_history=Mock())
+
+    repl.swap_session(new_session_id)
+
+    messages = storage.load(cwd, new_session_id)
+    cleanup_messages = [message for message in messages if message.metadata.get("type") == "pipeline_cleanup_prompt"]
+    assert cleanup_messages[0].metadata["cleanupStatus"] == "completed"
+    assert not hasattr(repl, "_pipeline_cleanup_ledger_path")
+
+
 def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tmp_path):
     from iac_code.state.app_state import AppState
     from iac_code.types.permissions import ToolPermissionContext
@@ -494,6 +863,7 @@ def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tm
 
 def test_extract_last_user_text_skips_recalled_memory_message():
     from iac_code.agent.message import Message, create_recalled_memory_message
+    from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
     from iac_code.ui.repl import InlineREPL
 
     text = InlineREPL._extract_last_user_text(
@@ -501,6 +871,7 @@ def test_extract_last_user_text_skips_recalled_memory_message():
             Message(role="user", content="real prompt"),
             Message(role="assistant", content="answer"),
             create_recalled_memory_message("# Recalled Memory\nhidden prompt", ["topic.md"]),
+            create_cleanup_prompt_message("cleanup hidden prompt"),
         ]
     )
 
@@ -509,6 +880,7 @@ def test_extract_last_user_text_skips_recalled_memory_message():
 
 def test_history_search_messages_skips_recalled_memory_messages_and_leaked_entries():
     from iac_code.agent.message import RECALLED_MEMORY_MARKER, Message, create_recalled_memory_message
+    from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
     from iac_code.ui.repl import InlineREPL
 
     repl = InlineREPL.__new__(InlineREPL)
@@ -525,6 +897,7 @@ def test_history_search_messages_skips_recalled_memory_messages_and_leaked_entri
             get_messages=Mock(
                 return_value=[
                     create_recalled_memory_message("# Recalled Memory\nhidden context", ["topic.md"]),
+                    create_cleanup_prompt_message("cleanup hidden prompt"),
                     Message(role="user", content="context prompt"),
                 ]
             )

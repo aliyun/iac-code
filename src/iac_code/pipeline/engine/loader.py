@@ -321,7 +321,7 @@ def _find_next_enabled(all_steps: list[StepSpec], start_id: str, enabled_ids: se
 
 
 def _bind_hooks(steps: list[StepSpec], pipeline_dir: Path) -> None:
-    """Load hook files and bind on_enter/on_exit callables."""
+    """Load hook files and bind optional step hook callables."""
     for step in steps:
         if not step.hooks_file:
             continue
@@ -333,6 +333,10 @@ def _bind_hooks(steps: list[StepSpec], pipeline_dir: Path) -> None:
             step.on_enter = module.on_enter
         if hasattr(module, "on_exit"):
             step.on_exit = module.on_exit
+        if hasattr(module, "on_resource_observed"):
+            step.on_resource_observed = module.on_resource_observed
+        if hasattr(module, "on_rollback_cleanup_required"):
+            step.on_rollback_cleanup_required = module.on_rollback_cleanup_required
 
 
 def _load_module_from_file(path: Path, module_name: str) -> ModuleType:

@@ -63,6 +63,8 @@ class StepSpec:
     hooks_file: str | None = None
     on_enter: Callable[[PipelineContext], None] | None = None
     on_exit: Callable[[PipelineContext, dict], None] | None = None
+    on_resource_observed: Callable[..., object] | None = None
+    on_rollback_cleanup_required: Callable[..., object] | None = None
     base_prompt_sections: IncludeExcludeConfig | None = None
     inject_tools: list[str] = field(default_factory=list)
     ui_mode: str | None = None
