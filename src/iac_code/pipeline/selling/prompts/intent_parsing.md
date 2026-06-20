@@ -28,4 +28,5 @@
 - 若 `free_text` 包含阿里云部署目标，基于补充文本重新提取意图，并将 `free_text` 写入 `clarification_text`。
 - 若用户选择的选项表示“暂不处理”“不是部署需求”或“仍使用非阿里云平台”，填写 `is_infra_intent: false`，说明原因，并将 `selected_id` 写入 `clarification_choice`。
 - 调用 `complete_step` 的参数必须是 `{"conclusion": {...}}`。不要把 `is_infra_intent`、`confidence` 等结论字段放在工具参数顶层，全部放进 `conclusion` 内。
+- 如用户指定“资源栈名称”“StackName”或 ROS 资源栈名称，必须将精确名称写入 `non_functional.stack_name`；如用户指定 VPC ID、ZoneId、CidrBlock、已有网络资源或多个网段关系，写入 `non_functional.network_constraints`。
 - 不要回退或重启 step 来做澄清；也不要在没有明确澄清需要时额外确认。

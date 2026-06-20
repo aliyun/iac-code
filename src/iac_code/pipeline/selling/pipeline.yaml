@@ -44,7 +44,7 @@ context_dependencies:
   architecture: [intent]
   evaluated_candidates: [architecture]
   selected_plan: [evaluated_candidates]
-  deployment: [selected_plan]
+  deployment: [intent, selected_plan]
 
 max_rollbacks: 3
 
@@ -249,7 +249,7 @@ steps:
     skill: iac-aliyun-deploying
     prompt: prompts/deploying.md
     interrupt_judge_failure: pause
-    context_fields: [selected_plan, evaluated_candidates]
+    context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py
     rollback:
       - target: confirm_and_select

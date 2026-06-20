@@ -331,11 +331,15 @@ class CleanupLedger:
             _("要求："),
             _("- 清理范围是严格白名单：只能删除下面“待清理资源”列表中的 id。"),
             _("- 不要删除、修改或回滚任何未列入“待清理资源”的 stack 或云资源。"),
+            _("- 不要调用 ListStacks 或按名称搜索其它 stack；待清理资源 id 已完整列出。"),
+            _("- 每次调用 GetStack/DeleteStack 前，必须核对 StackId 精确等于“待清理资源”列表中的某个 id。"),
+            _("- 如果 StackId 不在“待清理资源”列表中，禁止调用 DeleteStack，即使它是当前 handoff 或刚创建的 stack。"),
             _(
                 "- 不要根据 pipeline handoff、deployment.stack_id、current stack 或 resources_created "
                 "额外推断清理对象；这些可能是最终成功交付的资源。"
             ),
             _("- 即使本轮还有用户追问、继续指令或 pipeline handoff 上下文，也不能扩大清理范围。"),
+            _("- 恢复或继续清理时仍只处理当前提示列出的资源；不要检查或删除其它资源。"),
             _("- 优先使用可用的 ROS stack 工具删除；如果改用 aliyun_api，请先 DeleteStack，再反复 GetStack 检查状态。"),
             _("- 如果资源已经处于删除中，请先 GetStack 检查当前状态，再决定是否需要重新 DeleteStack。"),
             _("- 只有确认 DELETE_COMPLETE 才算清理完成；DELETE_FAILED 或无法确认时要向用户说明失败原因和下一步。"),

@@ -17,6 +17,7 @@ repository root with `uv run python ...` unless a script-specific README says ot
 | `observability/local_observe/` | Local observe server implementation and static web UI. |
 | `observability/local_observe.md` | Manual usage notes for the local observe tool. |
 | `rendering/test_diagram_render.py` | Manual diagram rendering check. |
+| `repl/e2e/` | Real PTY-driven REPL pipeline end-to-end scenario runner. |
 
 ## Common Commands
 
@@ -24,6 +25,7 @@ repository root with `uv run python ...` unless a script-specific README says ot
 uv run python scripts/a2a/debugger.py --help
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py --help
 uv run python scripts/observability/local_observe.py --help
+uv run python scripts/repl/e2e/run_pipeline_scenarios.py --help
 ```
 
 Pytest tests for these helpers live under `tests/`; the executable scripts here are kept for local debugging,

@@ -94,11 +94,16 @@ def test_pending_prompt_includes_active_resources_after_restart(tmp_path) -> Non
     assert "严格白名单" in prompt.prompt
     assert "只能删除下面“待清理资源”列表中的 id" in prompt.prompt
     assert "不要删除、修改或回滚任何未列入“待清理资源”的 stack 或云资源" in prompt.prompt
+    assert "不要调用 ListStacks 或按名称搜索其它 stack" in prompt.prompt
+    assert "必须核对 StackId 精确等于“待清理资源”列表中的某个 id" in prompt.prompt
+    assert "如果 StackId 不在“待清理资源”列表中，禁止调用 DeleteStack" in prompt.prompt
     assert (
         "不要根据 pipeline handoff、deployment.stack_id、current stack 或 resources_created 额外推断清理对象"
         in prompt.prompt
     )
     assert "即使本轮还有用户追问、继续指令或 pipeline handoff 上下文，也不能扩大清理范围" in prompt.prompt
+    assert "恢复或继续清理时仍只处理当前提示列出的资源" in prompt.prompt
+    assert "如果用户只说“继续”" not in prompt.prompt
     assert "列表内资源全部 DELETE_COMPLETE 后，立刻停止本轮清理；不要继续删除或检查任何其他 stack" in prompt.prompt
 
 
