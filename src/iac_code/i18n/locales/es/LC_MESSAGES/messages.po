@@ -2242,6 +2242,26 @@ msgstr ""
 " esté en \"Recursos por limpiar\"."
 
 #: src/iac_code/pipeline/engine/cleanup.py
+msgid "- 不要调用 ListStacks 或按名称搜索其它 stack；待清理资源 id 已完整列出。"
+msgstr ""
+"- No llames a ListStacks ni busques otros stacks por nombre; los id de "
+"recursos pendientes de limpieza ya estan listados por completo."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "- 每次调用 GetStack/DeleteStack 前，必须核对 StackId 精确等于“待清理资源”列表中的某个 id。"
+msgstr ""
+"- Antes de cada llamada a GetStack/DeleteStack, debes comprobar que "
+"StackId coincida exactamente con algun id de la lista de recursos "
+"pendientes de limpieza."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "- 如果 StackId 不在“待清理资源”列表中，禁止调用 DeleteStack，即使它是当前 handoff 或刚创建的 stack。"
+msgstr ""
+"- Si StackId no esta en la lista de recursos pendientes de limpieza, esta"
+" prohibido llamar a DeleteStack, aunque sea el stack del handoff actual o"
+" recien creado."
+
+#: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
 "- 不要根据 pipeline handoff、deployment.stack_id、current stack 或 "
 "resources_created 额外推断清理对象；这些可能是最终成功交付的资源。"
@@ -2256,6 +2276,12 @@ msgstr ""
 "- Aunque haya preguntas del usuario, instrucciones para continuar o "
 "contexto de pipeline handoff en esta ronda, no amplíe el alcance de "
 "limpieza."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "- 恢复或继续清理时仍只处理当前提示列出的资源；不要检查或删除其它资源。"
+msgstr ""
+"- Al reanudar o continuar la limpieza, procesa solo los recursos listados"
+" en este aviso; no compruebes ni elimines otros recursos."
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid "- 优先使用可用的 ROS stack 工具删除；如果改用 aliyun_api，请先 DeleteStack，再反复 GetStack 检查状态。"
