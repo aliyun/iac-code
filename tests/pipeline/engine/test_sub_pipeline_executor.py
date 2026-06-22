@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from iac_code.agent.message import ImageBlock, Message, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.state_machine import StateMachine
@@ -187,6 +188,85 @@ class TestSubPipelineExecutor:
                 "template": {"body": "already generated"},
             }
         ]
+
+    @pytest.mark.asyncio
+    async def test_execute_streaming_appends_explicit_resume_messages_to_repaired_transcript(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "template.md").write_text("Generate template", encoding="utf-8")
+        sub_spec = SubPipelineSpec(
+            name="evaluate_candidate",
+            steps=[
+                StepSpec(
+                    step_id="template_generating",
+                    conclusion_field="template",
+                    forward=None,
+                    prompt_file="prompts/template.md",
+                    skill="iac_aliyun",
+                    context_fields=["candidate", "intent"],
+                )
+            ],
+            max_rollbacks=2,
+            iterate_over="architecture.candidates",
+            context_fields_from_parent=["intent"],
+        )
+        repaired = [
+            Message(
+                role="assistant",
+                content=[ToolUseBlock(id="toolu_1", name="ask_user_question", input={"question": "q"})],
+            )
+        ]
+        tool_result = Message(
+            role="user",
+            content=[ToolResultBlock(tool_use_id="toolu_1", content='{"free_text":"see image"}', is_error=False)],
+        )
+        image_message = [ImageBlock(media_type="image/png", data="aGVsbG8=")]
+        captured = {}
+
+        class FakeStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, user_message=None, **kwargs):
+                captured["resume_messages"] = kwargs["resume_messages"]
+                captured["user_message"] = user_message
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=LoadedPipeline(
+                name="test",
+                steps=[],
+                context_dependencies={"intent": []},
+                max_rollbacks=3,
+                skills={"iac_aliyun": "# IaC Skill", "iac-aliyun-cost": "# Cost Skill"},
+            ),
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: FakeStepExecutor())
+        parent_ctx = PipelineContext({"intent": []})
+        parent_ctx.set_conclusion("intent", {"type": "test"})
+
+        async for _event in executor.execute_streaming(
+            sub_spec=sub_spec,
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=parent_ctx,
+            session_id="test_session",
+            user_message=image_message,
+            resume_messages=[tool_result],
+            resume_state={
+                "current_sub_step": "template_generating",
+                "active_attempt_id": "att_1",
+                "transcript_id": "transcript_1",
+                "resume_messages": repaired,
+            },
+        ):
+            pass
+
+        assert captured["resume_messages"] == [*repaired, tool_result]
+        assert captured["user_message"] == image_message
 
     @pytest.mark.asyncio
     async def test_completed_sub_step_resume_state_starts_at_next_sub_step(self, tmp_path, monkeypatch):

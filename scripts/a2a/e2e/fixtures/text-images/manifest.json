@@ -1,0 +1,44 @@
+{
+  "initial": {
+    "filename": "initial.png",
+    "text": "选择一个已有vpc，创建一个vswitch",
+    "mediaType": "image/png",
+    "byteSize": 12697,
+    "sha256": "2f773773c5b528cb7fdafde969d464b19d4d3022c1e6f2ad85b162f98f7ff82e"
+  },
+  "selection": {
+    "filename": "selection.png",
+    "text": "你随便选一个方案。",
+    "mediaType": "image/png",
+    "byteSize": 9907,
+    "sha256": "3aa92a48eed5c37115f18dc89a058ebbb06ac5eeea59f2870d4d58b355ac924b"
+  },
+  "normal-followup": {
+    "filename": "normal-followup.png",
+    "text": "你刚才创建了什么",
+    "mediaType": "image/png",
+    "byteSize": 8684,
+    "sha256": "03a9b1006f840c0bb8ef4f2bd75819033489f4e4f14d92abd7e12b591dd9c26d"
+  },
+  "ask-first-answer": {
+    "filename": "ask-first-answer.png",
+    "text": "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。",
+    "mediaType": "image/png",
+    "byteSize": 35073,
+    "sha256": "499fd5648baafe7d9904259a1eb3408b65556a39a778b2a2a89b89058bcd61b0"
+  },
+  "ask-second-answer": {
+    "filename": "ask-second-answer.png",
+    "text": "选择一个已有 VPC，创建一个 VSwitch；地域、可用区和网段你按低成本默认值推荐。",
+    "mediaType": "image/png",
+    "byteSize": 32302,
+    "sha256": "0fdb1c4d4fce2038f9e5a4107ba8a7e96658a3ca2c705c834c4c93ca23b93dc5"
+  },
+  "rollback-interrupt": {
+    "filename": "rollback-interrupt.png",
+    "text": "回退到 intent_parsing，选择一个已有vpc，创建一个安全组",
+    "mediaType": "image/png",
+    "byteSize": 20967,
+    "sha256": "1dfa25bba58757704b27a7ee8f44a42f4e69045730bba5320986194c873a5937"
+  }
+}

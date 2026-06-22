@@ -167,7 +167,7 @@ class AgentLoop:
         self._result_storage = ResultStorage(
             storage_dir=os.path.join(str(get_config_dir()), "tool-results", self._session_id),
         )
-        self._pending_injections: deque[str] = deque()
+        self._pending_injections: deque[str | list[ContentBlock]] = deque()
         self._current_turn_text: str = ""
         self._accepting_injected_user_messages = False
         self._pause_event = pause_event
@@ -176,7 +176,7 @@ class AgentLoop:
     def current_turn_text(self) -> str:
         return self._current_turn_text
 
-    def inject_user_message(self, msg: str) -> None:
+    def inject_user_message(self, msg: str | list[ContentBlock]) -> None:
         """Schedule a user message to be injected before the next LLM turn."""
         self._pending_injections.append(msg)
 
@@ -185,12 +185,26 @@ class AgentLoop:
         """Whether a queued supplement can still be consumed by this run."""
         return self._accepting_injected_user_messages
 
-    def try_inject_user_message(self, msg: str) -> bool:
+    def try_inject_user_message(self, msg: str | list[ContentBlock]) -> bool:
         """Queue a supplement only when this loop still has a consumable turn."""
         if not self.can_accept_injected_user_message:
             return False
         self.inject_user_message(msg)
         return True
+
+    def _drain_pending_injections(self) -> None:
+        while self._pending_injections:
+            injected = self._pending_injections.popleft()
+            self.context_manager.add_user_message(injected)
+            if self._session_storage:
+                from iac_code.agent.message import Message
+
+                self._session_storage.append(
+                    self._cwd,
+                    self._session_id,
+                    Message(role="user", content=injected),
+                    git_branch=self._current_git_branch,
+                )
 
     def set_provider(self, provider_manager: Any, system_prompt: str | None = None) -> None:
         """Swap the provider manager in place, preserving conversation history.
@@ -765,8 +779,7 @@ class AgentLoop:
             # inject supplemental user text before the next provider call.
             if self._pause_event is not None:
                 await self._pause_event.wait()
-            while self._pending_injections:
-                self.context_manager.add_user_message(self._pending_injections.popleft())
+            self._drain_pending_injections()
             self._accepting_injected_user_messages = False
             self._current_turn_text = ""
 

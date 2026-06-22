@@ -293,6 +293,79 @@ async def test_parallel_tabs_ctrl_c_key_cancels_parent(monkeypatch, fake_live):
 
 
 @pytest.mark.asyncio
+async def test_parallel_tabs_escape_interrupt_forwards_pipeline_user_input(monkeypatch, fake_live):
+    from iac_code.agent.message import ImageBlock, TextBlock
+    from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
+    from iac_code.ui.core.key_event import KeyEvent
+
+    image_input = PipelineUserInput(
+        content=[
+            TextBlock(text="change"),
+            ImageBlock(media_type="image/png", data="aGVsbG8="),
+        ],
+        display_text="change [Image #1]",
+        has_images=True,
+    )
+
+    repl = _make_repl(prompt_result=True)
+    repl._pipeline_waiting_input = False
+    repl._read_pipeline_interrupt_input = AsyncMock(return_value=image_input)
+    repl._handle_mid_pipeline_message = AsyncMock(return_value=(False, "feedback"))
+
+    pause_called = asyncio.Event()
+    repl._pipeline.pause_agent_loops = MagicMock(side_effect=pause_called.set)
+    repl._pipeline.resume_agent_loops = MagicMock()
+
+    class FakeCapture:
+        def __init__(self, *args, **kwargs):
+            self._sent = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read_key(self, timeout):
+            if self._sent:
+                if timeout:
+                    time.sleep(min(timeout, 0.05))
+                return None
+            self._sent = True
+            return KeyEvent(key="escape", char="\x1b")
+
+    monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+    async def stream():
+        yield PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "sub_test_escape",
+                "candidate_index": 0,
+                "candidate_name": "方案1",
+                "total_steps": 1,
+                "sub_pipeline_name": "test",
+            },
+        )
+        await asyncio.wait_for(pause_called.wait(), timeout=1.0)
+        yield PipelineEvent(
+            type=PipelineEventType.STEP_COMPLETED,
+            step_id=None,
+            timestamp=time.time(),
+            data={},
+        )
+
+    interrupted = await asyncio.wait_for(repl._render_parallel_tabs(stream()), timeout=5.0)
+
+    assert interrupted is False
+    repl._read_pipeline_interrupt_input.assert_awaited_once()
+    repl._handle_mid_pipeline_message.assert_awaited_once_with(image_input, suppress_render=True)
+
+
+@pytest.mark.asyncio
 async def test_parallel_permission_prompt_exception_denies_and_resumes_ui(fake_live, key_reader_tasks):
     repl = _make_repl(prompt_result=True)
     repl.renderer.prompt_permission = AsyncMock(side_effect=RuntimeError("prompt failed"))

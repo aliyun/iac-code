@@ -251,6 +251,7 @@ async def test_user_input_required_escape_empty_input_returns_to_candidate_selec
     from rich.console import Console
 
     from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
     from iac_code.types.stream_events import DiagramEvent
     from iac_code.ui.core.key_event import KeyEvent
     from iac_code.ui.repl import InlineREPL
@@ -260,6 +261,9 @@ async def test_user_input_required_escape_empty_input_returns_to_candidate_selec
     repl.renderer.console = Console(file=StringIO(), width=120, force_terminal=True)
     repl.store = MagicMock()
     repl._pipeline_waiting_input = False
+    repl._read_pipeline_interrupt_input = AsyncMock(
+        return_value=PipelineUserInput(content="", display_text="", has_images=False)
+    )
     repl._handle_mid_pipeline_message = AsyncMock(return_value=(False, ""))
     repl._render_pipeline_stream = AsyncMock()
 
@@ -298,7 +302,6 @@ async def test_user_input_required_escape_empty_input_returns_to_candidate_selec
     key_events = deque(
         [
             ("key:escape:selection", KeyEvent(key="escape", char="\x1b")),
-            ("key:escape:input_cancel", KeyEvent(key="escape", char="\x1b")),
             ("key:enter:selection", KeyEvent(key="enter", char="")),
         ]
     )
@@ -344,14 +347,14 @@ async def test_user_input_required_escape_empty_input_returns_to_candidate_selec
     )
 
     repl._handle_mid_pipeline_message.assert_not_awaited()
+    repl._read_pipeline_interrupt_input.assert_awaited_once()
     pipeline.pause_agent_loops.assert_called()
     pipeline.resume_agent_loops.assert_called()
     pipeline.resume.assert_called_once()
     assert resumed_payloads == [{"selected_candidate_name": "c1", "selected_candidate_index": None}]
 
     assert events.index("key:escape:selection") < events.index("pause")
-    assert events.index("pause") < events.index("key:escape:input_cancel")
-    assert events.index("key:escape:input_cancel") < events.index("resume")
+    assert events.index("pause") < events.index("resume")
     assert events.index("resume") < events.index("key:enter:selection")
     assert events.index("key:enter:selection") < events.index("pipeline_resume")
 
@@ -363,6 +366,7 @@ async def test_user_input_required_hard_interrupt_clears_waiting_flag(monkeypatc
     from rich.console import Console
 
     from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
     from iac_code.types.stream_events import DiagramEvent
     from iac_code.ui.core.key_event import KeyEvent
     from iac_code.ui.repl import InlineREPL
@@ -372,6 +376,8 @@ async def test_user_input_required_hard_interrupt_clears_waiting_flag(monkeypatc
     repl.renderer.console = Console(file=StringIO(), width=120, force_terminal=True)
     repl.store = MagicMock()
     repl._pipeline_waiting_input = False
+    interrupt_input = PipelineUserInput(content="换", display_text="换", has_images=False)
+    repl._read_pipeline_interrupt_input = AsyncMock(return_value=interrupt_input)
     repl._handle_mid_pipeline_message = AsyncMock(return_value=(True, "已切换方案"))
     repl._render_interrupt_feedback_inline = MagicMock()
 
@@ -399,8 +405,6 @@ async def test_user_input_required_hard_interrupt_clears_waiting_flag(monkeypatc
     key_events = deque(
         [
             KeyEvent(key="escape", char="\x1b"),
-            KeyEvent(key="x", char="换"),
-            KeyEvent(key="enter", char=""),
         ]
     )
 
@@ -441,9 +445,108 @@ async def test_user_input_required_hard_interrupt_clears_waiting_flag(monkeypatc
 
     assert result is True
     assert repl._pipeline_waiting_input is False
+    repl._handle_mid_pipeline_message.assert_awaited_once_with(interrupt_input, suppress_render=True)
     pipeline.resume.assert_not_called()
     pipeline.pause_agent_loops.assert_called()
     pipeline.resume_agent_loops.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_user_input_required_escape_interrupt_forwards_pipeline_user_input(monkeypatch):
+    from io import StringIO
+
+    from rich.console import Console
+
+    from iac_code.agent.message import ImageBlock, TextBlock
+    from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
+    from iac_code.types.stream_events import DiagramEvent
+    from iac_code.ui.core.key_event import KeyEvent
+    from iac_code.ui.repl import InlineREPL
+
+    image_input = PipelineUserInput(
+        content=[
+            TextBlock(text="change"),
+            ImageBlock(media_type="image/png", data="aGVsbG8="),
+        ],
+        display_text="change [Image #1]",
+        has_images=True,
+    )
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.renderer = MagicMock()
+    repl.renderer.console = Console(file=StringIO(), width=120, force_terminal=True)
+    repl.store = MagicMock()
+    repl._pipeline_waiting_input = False
+    repl._read_pipeline_interrupt_input = AsyncMock(return_value=image_input)
+    repl._handle_mid_pipeline_message = AsyncMock(return_value=(False, "feedback"))
+    repl._render_pipeline_stream = AsyncMock()
+
+    pipeline = MagicMock()
+    pipeline.resume = MagicMock(return_value=MagicMock(name="resumed_stream_after_selection"))
+    pipeline.pause_agent_loops = MagicMock()
+    pipeline.resume_agent_loops = MagicMock()
+    repl._pipeline = pipeline
+
+    class FakeLive:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def update(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("iac_code.ui.repl.Live", FakeLive)
+
+    key_events = deque(
+        [
+            KeyEvent(key="escape", char="\x1b"),
+            KeyEvent(key="enter", char=""),
+        ]
+    )
+
+    class FakeCapture:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read_key(self, timeout):
+            deadline = time.time() + (timeout if timeout else 1.0)
+            while time.time() < deadline:
+                if repl._pipeline_waiting_input and key_events:
+                    return key_events.popleft()
+                time.sleep(0.01)
+            return None
+
+    monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+    async def stream():
+        yield DiagramEvent(
+            candidate_name="c1",
+            template_content="ROSTemplateFormatVersion: '2015-09-01'",
+            mermaid_source="graph TD; A-->B",
+        )
+        yield PipelineEvent(
+            type=PipelineEventType.USER_INPUT_REQUIRED,
+            step_id=None,
+            timestamp=time.time(),
+            data={"candidates": [{"name": "c1"}]},
+        )
+
+    await asyncio.wait_for(repl._render_candidate_selection_tabs(stream()), timeout=5.0)
+
+    repl._read_pipeline_interrupt_input.assert_awaited_once()
+    repl._handle_mid_pipeline_message.assert_awaited_once_with(image_input, suppress_render=True)
 
 
 @pytest.mark.asyncio

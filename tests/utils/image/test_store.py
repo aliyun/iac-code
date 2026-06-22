@@ -24,6 +24,28 @@ def test_store_writes_per_session_file_with_0o600(tmp_path, monkeypatch):
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
 
 
+def test_get_path_discovers_cached_file_after_store_recreated(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "image-cache")
+    first = ImageStore(session_id="sess-a")
+    pc = PastedContent(id=7, type="image", content="aGVsbG8=", media_type="image/png")
+    path = first.store(pc)
+    assert path is not None
+
+    restored = ImageStore(session_id="sess-a")
+
+    assert restored.get_path(7) == path
+
+
+def test_next_image_id_skips_existing_cached_files_after_store_recreated(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "image-cache")
+    first = ImageStore(session_id="sess-a")
+    assert first.store(PastedContent(id=1, type="image", content="MQ==", media_type="image/png")) is not None
+
+    restored = ImageStore(session_id="sess-a")
+
+    assert restored.next_image_id() == 2
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes are not meaningful on Windows")
 def test_store_directories_are_owner_only(tmp_path, monkeypatch):
     monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "image-cache")

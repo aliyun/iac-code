@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from iac_code.agent.message import Message, ToolResultBlock
+from iac_code.agent.message import ImageBlock, Message, TextBlock, ToolResultBlock
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 
@@ -467,6 +467,40 @@ async def test_continue_from_sidecar_reuses_persisted_current_step_user_input(tm
             break
 
     assert seen_user_messages == ["选择一个已有vpc，创建一个vswitch"]
+
+
+@pytest.mark.asyncio
+async def test_continue_from_sidecar_reuses_persisted_current_step_image_input(tmp_path):
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
+
+    image_input = PipelineUserInput(
+        content=[
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ],
+        display_text="参考这张图",
+        has_images=True,
+    )
+    runner = _build_two_step_runner(tmp_path)
+    runner._set_current_step_user_input(image_input)
+    await runner._save_running("s1", reason="step started")
+
+    runner2 = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
+    seen_user_messages = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **_kwargs):
+        seen_user_messages.append(user_message)
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner2._step_executor.execute = fake_execute
+
+    async for _event in runner2.continue_from_sidecar():
+        if seen_user_messages:
+            break
+
+    assert seen_user_messages == [image_input.content]
 
 
 @pytest.mark.asyncio

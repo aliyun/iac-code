@@ -25,6 +25,7 @@ from iac_code.pipeline.engine.interrupt import InterruptController, InterruptVer
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.observability import PipelineObservability
 from iac_code.pipeline.engine.public_errors import public_error, public_error_from_exception
+from iac_code.pipeline.engine.resume_recovery import reconcile_resume_messages, user_message_already_in_resume
 from iac_code.pipeline.engine.session import PipelineIdentity, PipelineSession, RestoreResult
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_executor import StepExecutor
@@ -32,6 +33,11 @@ from iac_code.pipeline.engine.step_spec import AllowUserEscapes, LoadedPipeline,
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.pipeline.engine.ui_contract import PipelineStepType
+from iac_code.pipeline.engine.user_input import (
+    PipelineInputContent,
+    PipelineUserInput,
+    normalize_pipeline_user_input,
+)
 from iac_code.types.stream_events import ResourceObservedEvent, StreamEvent
 from iac_code.utils.public_errors import sanitize_public_text
 
@@ -39,6 +45,10 @@ logger = logging.getLogger(__name__)
 
 _TERMINAL_SIDECAR_STATUSES = {"completed", "user_aborted", "failed", "discarded"}
 _CURRENT_STEP_USER_INPUT_KEY = "current_step_user_input"
+_CURRENT_STEP_USER_INPUT_CONTENT_KEY = "current_step_user_input_content"
+_CURRENT_STEP_RESUME_MESSAGES_KEY = "current_step_resume_messages"
+_CURRENT_STEP_PRECOMPLETED_TOOLS_KEY = "current_step_precompleted_tools"
+_PENDING_ASK_USER_QUESTION_RESUME_KEY = "pending_ask_user_question_resume"
 _PENDING_INPUT_KIND_KEY = "pending_input_kind"
 _PIPELINE_PAUSE_CONFIRMATION_KIND = "pipeline_pause_confirmation"
 _REAL_RESTORE_FAILURE_REASONS = {
@@ -56,19 +66,21 @@ def _string_answer_value(value: Any) -> str:
 
 
 def _user_input_received_data(
-    user_input: str,
+    user_input: PipelineUserInput,
     *,
     ui_mode: str | None,
     selected_index: int | None,
     waiting_options: list[Any],
 ) -> dict[str, Any]:
-    data: dict[str, Any] = {"user_input_length": len(user_input)}
+    data: dict[str, Any] = {"user_input_length": len(user_input.display_text)}
+    if user_input.has_images:
+        data["has_images"] = True
     if ui_mode != "candidate_selection":
         return data
     data.update(
         {
             "kind": "candidate_selection",
-            "selected_value": user_input,
+            "selected_value": user_input.display_text,
         }
     )
     if selected_index is not None:
@@ -80,10 +92,85 @@ def _user_input_received_data(
     return data
 
 
-def _pipeline_pause_input_received_data(user_input: str) -> dict[str, Any]:
-    return {
+def _pipeline_pause_input_received_data(user_input: PipelineUserInput) -> dict[str, Any]:
+    data: dict[str, Any] = {
         "kind": _PIPELINE_PAUSE_CONFIRMATION_KIND,
-        "user_input_length": len(user_input),
+        "user_input_length": len(user_input.display_text),
+    }
+    if user_input.has_images:
+        data["has_images"] = True
+    return data
+
+
+def _serialize_pipeline_input_content(content: PipelineInputContent) -> str | list[dict[str, Any]]:
+    dumped = Message(role="user", content=content).to_dict()["content"]
+    return cast(str | list[dict[str, Any]], dumped)
+
+
+def _deserialize_pipeline_input_content(value: Any) -> PipelineInputContent | None:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return None
+    try:
+        content = Message(role="user", content=value).content
+    except Exception:
+        return None
+    return content if isinstance(content, list) else None
+
+
+def _serialize_pipeline_messages(messages: list[Message]) -> list[dict[str, Any]]:
+    return [message.to_dict() for message in messages]
+
+
+def _deserialize_pipeline_messages(value: Any) -> list[Message] | None:
+    if not isinstance(value, list):
+        return None
+    messages: list[Message] = []
+    try:
+        for item in value:
+            if not isinstance(item, dict):
+                return None
+            messages.append(Message.from_dict(item))
+    except Exception:
+        return None
+    return messages
+
+
+def _deserialize_precompleted_tools(value: Any) -> dict[str, dict[str, Any]] | None:
+    if not isinstance(value, dict):
+        return None
+    tools: dict[str, dict[str, Any]] = {}
+    for name, payload in value.items():
+        if isinstance(name, str) and isinstance(payload, dict):
+            tools[name] = dict(payload)
+    return tools
+
+
+def _serialize_ask_user_question_resume_state(
+    *,
+    user_message: PipelineInputContent,
+    resume_messages: list[Message] | None,
+    precompleted_tools: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any]:
+    state: dict[str, Any] = {"user_message": _serialize_pipeline_input_content(user_message)}
+    if resume_messages is not None:
+        state["resume_messages"] = _serialize_pipeline_messages(resume_messages)
+    if precompleted_tools is not None:
+        state["precompleted_tools"] = precompleted_tools
+    return state
+
+
+def _deserialize_ask_user_question_resume_state(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    user_message = _deserialize_pipeline_input_content(value.get("user_message"))
+    if user_message is None:
+        return None
+    return {
+        "user_message": user_message,
+        "resume_messages": _deserialize_pipeline_messages(value.get("resume_messages")),
+        "precompleted_tools": _deserialize_precompleted_tools(value.get("precompleted_tools")),
     }
 
 
@@ -194,6 +281,7 @@ class RestartInfo:
     start_from_step: str | None
     preserved_conclusions: dict[str, Any]
     rollback_context: str | None = None
+    rollback_input: PipelineInputContent | None = None
 
 
 @dataclass
@@ -248,7 +336,9 @@ class PipelineRunner:
         self._sidecar_status: str | None = None
         self._sidecar_restore_result: RestoreResult | None = None
         self._current_step_user_input: str | None = None
-        self._restored_current_step_user_input: str | None = None
+        self._restored_current_step_user_input: PipelineUserInput | None = None
+        self._restored_current_step_resume_messages: list[Message] | None = None
+        self._restored_current_step_precompleted_tools: dict[str, dict[str, Any]] | None = None
         self._last_applied_interrupt_verdict: InterruptVerdict | None = None
         self._waiting_input_started_at: dict[str, float] = {}
         self._waiting_input_options_by_step: dict[str, list[Any]] = {}
@@ -308,7 +398,11 @@ class PipelineRunner:
         self._active_candidates: dict[int, Any] = {}
         self._pending_candidate_restarts: dict[int, RestartInfo] = {}
         self._rollback_context: str | None = None
-        self._restored_supplement: dict[str, str | None] | None = None
+        self._rollback_input: PipelineInputContent | None = None
+        self._current_step_user_input_content: PipelineInputContent | None = None
+        self._current_step_resume_messages: list[Message] | None = None
+        self._current_step_precompleted_tools: dict[str, dict[str, Any]] | None = None
+        self._restored_supplement: dict[str, Any] | None = None
         # Total candidate count for the currently-executing parallel sub-pipeline
         # step. 0 when no parallel step is in flight. Used by apply_hard_interrupt
         # to detect scope="all" with partial completion and escalate to parent
@@ -569,9 +663,7 @@ class PipelineRunner:
             max_rollbacks=self._loaded.max_rollbacks,
         )
         self._step_attempts = self._step_attempts_from_snapshot(result.state_machine_snapshot)
-        restored_user_input = result.state_machine_snapshot.get(_CURRENT_STEP_USER_INPUT_KEY)
-        self._restored_current_step_user_input = restored_user_input if isinstance(restored_user_input, str) else None
-        self._current_step_user_input = self._restored_current_step_user_input
+        self._restore_current_step_user_input_from_snapshot(result.state_machine_snapshot)
         self.context = PipelineContext.from_snapshot(result.context_snapshot, self._loaded.context_dependencies)
         if result.execution is not None:
             self._execution = dict(result.execution)
@@ -600,15 +692,17 @@ class PipelineRunner:
         return self.restore_from_sidecar_sync()
 
     def continue_from_sidecar(
-        self, user_input: str | None = None
+        self, user_input: str | list[ContentBlock] | PipelineUserInput | None = None
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         if not user_input:
             return self._continue_from_current(resume_running_step=True)
         return self._continue_from_sidecar_with_input(user_input)
 
     async def _continue_from_sidecar_with_input(
-        self, user_input: str
+        self, user_input: str | list[ContentBlock] | PipelineUserInput
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+        pipeline_input = normalize_pipeline_user_input(user_input)
+        user_text = pipeline_input.display_text
         was_pause_confirmation = self.has_pending_pipeline_pause_confirmation()
         if was_pause_confirmation:
             self._set_pending_input_kind(None)
@@ -618,34 +712,35 @@ class PipelineRunner:
                 type=PipelineEventType.USER_INPUT_RECEIVED,
                 step_id=step_id,
                 timestamp=time.time(),
-                data=_pipeline_pause_input_received_data(user_input),
+                data=_pipeline_pause_input_received_data(pipeline_input),
             )
-            if user_input.strip().lower() == "continue":
+            if user_text.strip().lower() == "continue":
                 self.resume_agent_loops()
                 async for event in self._continue_from_current(user_input=None, resume_running_step=True):
                     yield event
                 return
         try:
-            verdict = await self._interrupt_controller.judge(user_input)
+            judge_input: str | PipelineUserInput = pipeline_input if pipeline_input.has_images else user_text
+            verdict = await self._interrupt_controller.judge(judge_input)
         except Exception as exc:
             logger.warning("Interrupt judge failed during sidecar continuation: %s", exc, exc_info=True)
             verdict = self._apply_interrupt_judge_failure_policy(
                 InterruptVerdict(action="continue", reason=f"judge failed: {exc}")
             )
-            async for event in self._continue_after_sidecar_judgment_failure(verdict, user_input=user_input):
+            async for event in self._continue_after_sidecar_judgment_failure(verdict, user_input=pipeline_input):
                 yield event
             return
 
         if self._is_judgment_error_verdict(verdict):
             verdict = self._apply_interrupt_judge_failure_policy(verdict)
-            async for event in self._continue_after_sidecar_judgment_failure(verdict, user_input=user_input):
+            async for event in self._continue_after_sidecar_judgment_failure(verdict, user_input=pipeline_input):
                 yield event
             return
         if verdict.action == "supplement":
             self.resume_agent_loops()
             if self._current_step_is_parallel_sub_pipeline():
                 self._restored_supplement = {
-                    "message": user_input,
+                    "message": pipeline_input.content,
                     "target": verdict.supplement_target,
                 }
                 try:
@@ -654,11 +749,14 @@ class PipelineRunner:
                 finally:
                     self._restored_supplement = None
                 return
-            async for event in self._continue_from_current(user_input=user_input, resume_running_step=True):
+            async for event in self._continue_from_current(
+                **self._continue_input_kwargs(pipeline_input),
+                resume_running_step=True,
+            ):
                 yield event
             return
         if verdict.action == "hard_interrupt":
-            async for event in self._continue_after_sidecar_hard_interrupt(verdict):
+            async for event in self._continue_after_sidecar_hard_interrupt(verdict, source_input=pipeline_input):
                 yield event
             return
 
@@ -667,23 +765,29 @@ class PipelineRunner:
             yield event
 
     async def _continue_after_sidecar_judgment_failure(
-        self, verdict: InterruptVerdict, *, user_input: str
+        self, verdict: InterruptVerdict, *, user_input: PipelineUserInput
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         if verdict.paused:
             yield await self._save_and_emit_interrupt_pause(verdict)
             return
         if verdict.action == "hard_interrupt":
-            async for event in self._continue_after_sidecar_hard_interrupt(verdict):
+            async for event in self._continue_after_sidecar_hard_interrupt(verdict, source_input=user_input):
                 yield event
             return
         self.resume_agent_loops()
-        async for event in self._continue_from_current(user_input=user_input, resume_running_step=True):
+        async for event in self._continue_from_current(
+            **self._continue_input_kwargs(user_input),
+            resume_running_step=True,
+        ):
             yield event
 
     async def _continue_after_sidecar_hard_interrupt(
-        self, verdict: InterruptVerdict
+        self, verdict: InterruptVerdict, *, source_input: PipelineUserInput | None = None
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
-        parent_rollback = self.apply_hard_interrupt(verdict)
+        if source_input is not None and source_input.has_images:
+            parent_rollback = self.apply_hard_interrupt(verdict, source_input=source_input)
+        else:
+            parent_rollback = self.apply_hard_interrupt(verdict)
         if self.sidecar_status == "failed":
             current_step = getattr(self.state_machine, "current_step", None)
             yield PipelineEvent(
@@ -796,10 +900,12 @@ class PipelineRunner:
         preserved_conclusions = restart.get("preserved_conclusions")
         if not isinstance(preserved_conclusions, dict):
             preserved_conclusions = {}
+        rollback_input = _deserialize_pipeline_input_content(restart.get("rollback_input"))
         return RestartInfo(
             start_from_step=start_from_step,
             preserved_conclusions=preserved_conclusions,
             rollback_context=rollback_context,
+            rollback_input=rollback_input,
         )
 
     def _persisted_parallel_candidate_indices(self) -> list[int]:
@@ -840,15 +946,90 @@ class PipelineRunner:
         current_step_user_input = getattr(self, "_current_step_user_input", None)
         if current_step_user_input is not None:
             snapshot[_CURRENT_STEP_USER_INPUT_KEY] = current_step_user_input
+        current_step_user_input_content = getattr(self, "_current_step_user_input_content", None)
+        if current_step_user_input_content is not None:
+            snapshot[_CURRENT_STEP_USER_INPUT_CONTENT_KEY] = _serialize_pipeline_input_content(
+                current_step_user_input_content
+            )
+        current_step_resume_messages = getattr(self, "_current_step_resume_messages", None)
+        if current_step_resume_messages is not None:
+            snapshot[_CURRENT_STEP_RESUME_MESSAGES_KEY] = _serialize_pipeline_messages(current_step_resume_messages)
+        current_step_precompleted_tools = getattr(self, "_current_step_precompleted_tools", None)
+        if current_step_precompleted_tools is not None:
+            snapshot[_CURRENT_STEP_PRECOMPLETED_TOOLS_KEY] = current_step_precompleted_tools
         return snapshot
 
-    def _set_current_step_user_input(self, user_input: str | list[ContentBlock] | None) -> None:
-        self._current_step_user_input = user_input if isinstance(user_input, str) else None
+    def _restore_current_step_user_input_from_snapshot(self, snapshot: dict[str, Any]) -> None:
+        restored_display_text = snapshot.get(_CURRENT_STEP_USER_INPUT_KEY)
+        if not isinstance(restored_display_text, str):
+            restored_display_text = None
+        restored_content = _deserialize_pipeline_input_content(snapshot.get(_CURRENT_STEP_USER_INPUT_CONTENT_KEY))
+        if restored_content is None:
+            restored_content = restored_display_text
+        self._restored_current_step_user_input = (
+            normalize_pipeline_user_input(restored_content, display_text=restored_display_text)
+            if restored_content is not None
+            else None
+        )
+        self._current_step_user_input = restored_display_text
+        self._current_step_user_input_content = (
+            self._restored_current_step_user_input.content
+            if self._restored_current_step_user_input is not None and self._restored_current_step_user_input.has_images
+            else None
+        )
+        self._restored_current_step_resume_messages = _deserialize_pipeline_messages(
+            snapshot.get(_CURRENT_STEP_RESUME_MESSAGES_KEY)
+        )
+        self._restored_current_step_precompleted_tools = _deserialize_precompleted_tools(
+            snapshot.get(_CURRENT_STEP_PRECOMPLETED_TOOLS_KEY)
+        )
+        self._current_step_resume_messages = self._restored_current_step_resume_messages
+        self._current_step_precompleted_tools = self._restored_current_step_precompleted_tools
 
-    def _consume_restored_current_step_user_input(self) -> str | None:
+    def _set_current_step_user_input(
+        self,
+        user_input: str | list[ContentBlock] | PipelineUserInput | None,
+        *,
+        display_text: str | None = None,
+    ) -> None:
+        if user_input is None:
+            self._current_step_user_input = None
+            self._current_step_user_input_content = None
+            self._set_current_step_resume_state()
+            return
+        pipeline_input = normalize_pipeline_user_input(user_input, display_text=display_text)
+        self._current_step_user_input = display_text if display_text is not None else pipeline_input.display_text
+        self._current_step_user_input_content = pipeline_input.content if pipeline_input.has_images else None
+
+    def _set_current_step_resume_state(
+        self,
+        *,
+        resume_messages: list[Message] | None = None,
+        precompleted_tools: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        self._current_step_resume_messages = list(resume_messages) if resume_messages is not None else None
+        self._current_step_precompleted_tools = dict(precompleted_tools) if precompleted_tools is not None else None
+
+    @staticmethod
+    def _continue_input_kwargs(user_input: PipelineUserInput) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"user_input": user_input.content}
+        if not isinstance(user_input.content, str) or user_input.display_text != user_input.content:
+            kwargs["user_input_display_text"] = user_input.display_text
+        return kwargs
+
+    def _consume_restored_current_step_user_input(self) -> PipelineUserInput | None:
         user_input = self._restored_current_step_user_input
         self._restored_current_step_user_input = None
         return user_input
+
+    def _consume_restored_current_step_resume_state(
+        self,
+    ) -> tuple[list[Message] | None, dict[str, dict[str, Any]] | None]:
+        resume_messages = self._restored_current_step_resume_messages
+        precompleted_tools = self._restored_current_step_precompleted_tools
+        self._restored_current_step_resume_messages = None
+        self._restored_current_step_precompleted_tools = None
+        return resume_messages, precompleted_tools
 
     def _step_attempts_from_snapshot(self, snapshot: dict[str, Any]) -> dict[str, int]:
         attempts = snapshot.get("step_attempts", {})
@@ -1583,14 +1764,17 @@ class PipelineRunner:
             sub_pipeline_id=sub_pipeline_id,
         )
 
-    async def run(self, user_input: str) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+    async def run(
+        self, user_input: str | list[ContentBlock] | PipelineUserInput
+    ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Start the pipeline from the first step."""
+        pipeline_input = normalize_pipeline_user_input(user_input)
         self._session_storage.append_meta(
             self._cwd,
             self._session_id,
             {"type": "pipeline_init", "pipeline_type": self._loaded.name},
         )
-        self._set_current_step_user_input(user_input)
+        self._set_current_step_user_input(pipeline_input)
         await self._save_running(self.state_machine.current_step.step_id, reason="pipeline started")
         self._observability.pipeline_started(
             total_steps=self.state_machine.total_steps,
@@ -1607,16 +1791,20 @@ class PipelineRunner:
             },
         )
         with self._observability.pipeline_run_span(total_steps=self.state_machine.total_steps):
-            async for event in self._continue_from_current(user_input=user_input):
+            async for event in self._continue_from_current(**self._continue_input_kwargs(pipeline_input)):
                 yield event
 
-    async def resume(self, user_input: str) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+    async def resume(
+        self, user_input: str | list[ContentBlock] | PipelineUserInput
+    ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Resume after user input at a USER_INPUT_REQUIRED pause."""
         if self.has_pending_pipeline_pause_confirmation():
             async for event in self._continue_from_sidecar_with_input(user_input):
                 yield event
             return
 
+        pipeline_input = normalize_pipeline_user_input(user_input)
+        user_text = pipeline_input.display_text
         step = self.state_machine.current_step
         step_index = self.state_machine.current_step_index + 1
         step_attempt = self._current_step_attempt(step.step_id)
@@ -1637,11 +1825,11 @@ class PipelineRunner:
             step_attempt=step_attempt,
             total_steps=self.state_machine.total_steps,
             ui_mode=step.ui_mode,
-            user_input=user_input,
+            user_input=user_text,
             wait_duration_ms=wait_duration_ms,
         )
         if step.ui_mode == "candidate_selection":
-            selected_index = self._infer_selected_index(user_input, waiting_options)
+            selected_index = self._infer_selected_index(user_text, waiting_options)
             if selected_index is None:
                 logger.debug(
                     "Pipeline candidate selection did not match a unique option: step_id=%s option_count=%d",
@@ -1655,9 +1843,9 @@ class PipelineRunner:
                     ui_mode=step.ui_mode,
                     option_count=len(waiting_options),
                     selected_index=selected_index,
-                    selected_value=user_input,
+                    selected_value=user_text,
                 )
-        current_conclusion["user_input"] = user_input
+        current_conclusion["user_input"] = user_text
         self.context.set_conclusion(step.conclusion_field, current_conclusion)
 
         yield PipelineEvent(
@@ -1665,14 +1853,17 @@ class PipelineRunner:
             step_id=step.step_id,
             timestamp=time.time(),
             data=_user_input_received_data(
-                user_input,
+                pipeline_input,
                 ui_mode=step.ui_mode,
                 selected_index=selected_index,
                 waiting_options=waiting_options,
             ),
         )
 
-        async for event in self._continue_from_current(user_input=user_input, resume_waiting_step=True):
+        async for event in self._continue_from_current(
+            **self._continue_input_kwargs(pipeline_input),
+            resume_waiting_step=True,
+        ):
             yield event
 
     async def resume_ask_user_question(
@@ -1681,6 +1872,7 @@ class PipelineRunner:
         *,
         tool_use_id: str,
         pending_input: dict[str, Any] | None = None,
+        supplemental_input: str | list[ContentBlock] | PipelineUserInput | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Resume an in-step ask_user_question after process restart."""
         payload = {
@@ -1700,16 +1892,32 @@ class PipelineRunner:
             content=json.dumps(payload, ensure_ascii=False),
             is_error=False,
         )
+        supplemental = normalize_pipeline_user_input(supplemental_input) if supplemental_input is not None else None
+        if supplemental is not None and not supplemental.has_images:
+            supplemental = None
+        tool_result_message = Message(role="user", content=[tool_result])
+        user_message: str | list[ContentBlock] | None = (
+            supplemental.content if supplemental is not None else [tool_result]
+        )
         candidate_index = _candidate_index_from_pending_input(pending_input)
         if candidate_index is not None:
             step = self.state_machine.current_step
             if step.step_type == PipelineStepType.PARALLEL_SUB_PIPELINE.value:
                 previous = getattr(self, "_restored_ask_user_question", None)
+                candidate_resume_messages = [tool_result_message] if supplemental is not None else None
+                candidate_precompleted_tools = {"ask_user_question": payload}
                 self._restored_ask_user_question = {
                     "candidate_index": candidate_index,
-                    "user_message": [tool_result],
-                    "precompleted_tools": {"ask_user_question": payload},
+                    "user_message": user_message,
+                    "resume_messages": candidate_resume_messages,
+                    "precompleted_tools": candidate_precompleted_tools,
                 }
+                self._set_candidate_ask_user_question_resume_state(
+                    candidate_index,
+                    user_message=user_message,
+                    resume_messages=candidate_resume_messages,
+                    precompleted_tools=candidate_precompleted_tools,
+                )
                 try:
                     async for event in self._continue_from_current(resume_running_step=True):
                         yield event
@@ -1721,8 +1929,19 @@ class PipelineRunner:
                         self._restored_ask_user_question = previous
                 return
 
+        if supplemental is not None:
+            async for event in self._continue_from_current(
+                **self._continue_input_kwargs(supplemental),
+                resume_messages=[*resume_messages, tool_result_message],
+                precompleted_tools={"ask_user_question": payload},
+                resume_waiting_step=True,
+            ):
+                yield event
+            return
+
+        resume_kwargs: dict[str, Any] = {"user_input": user_message}
         async for event in self._continue_from_current(
-            user_input=[tool_result],
+            **resume_kwargs,
             resume_messages=resume_messages,
             precompleted_tools={"ask_user_question": payload},
             resume_waiting_step=True,
@@ -1846,16 +2065,20 @@ class PipelineRunner:
 
         return state
 
-    async def handle_user_interrupt(self, message: str) -> InterruptVerdict:
+    async def handle_user_interrupt(self, message: str | list[ContentBlock] | PipelineUserInput) -> InterruptVerdict:
         """Engine-layer interrupt entry point. All clients call this uniformly."""
 
-        verdict = await self._interrupt_controller.judge(message)
+        pipeline_input = normalize_pipeline_user_input(message)
+        judge_input: str | PipelineUserInput = (
+            pipeline_input if pipeline_input.has_images else pipeline_input.display_text
+        )
+        verdict = await self._interrupt_controller.judge(judge_input)
 
         if self._is_judgment_error_verdict(verdict):
             return self._apply_interrupt_judge_failure_policy(verdict)
 
         if verdict.action == "supplement":
-            injected = self._inject_supplement(verdict, message)
+            injected = self._inject_supplement(verdict, pipeline_input.content)
             if not injected:
                 # Don't silently lose the user's message — flag it via reason
                 # prefix so the UI can render a clear "supplement was dropped"
@@ -1908,7 +2131,25 @@ class PipelineRunner:
         """
         self._agent_pause_event.set()
 
-    def apply_hard_interrupt(self, verdict: InterruptVerdict) -> bool:
+    @staticmethod
+    def _input_for_interrupt_verdict(
+        verdict: InterruptVerdict,
+        source_input: str | list[ContentBlock] | PipelineUserInput | None,
+    ) -> PipelineUserInput | None:
+        source = normalize_pipeline_user_input(source_input) if source_input is not None else None
+        rollback_context = verdict.rollback_context or ""
+        if source is None:
+            return normalize_pipeline_user_input(rollback_context) if rollback_context else None
+        if rollback_context:
+            return source.with_prepended_text(rollback_context)
+        return source
+
+    def apply_hard_interrupt(
+        self,
+        verdict: InterruptVerdict,
+        *,
+        source_input: str | list[ContentBlock] | PipelineUserInput | None = None,
+    ) -> bool:
         """Execute state rollback after hard interrupt.
 
         Returns True if a parent-level rollback was performed (caller should
@@ -1923,6 +2164,7 @@ class PipelineRunner:
                 getattr(self, "_session_id", ""),
             )
             self._rollback_context = None
+            self._rollback_input = None
             return False
 
         target = verdict.rollback_target or self.state_machine.current_step.step_id
@@ -1968,7 +2210,10 @@ class PipelineRunner:
                 target = self.state_machine.current_step.step_id
 
         if is_candidate_restart:
-            self._schedule_candidate_restart(verdict)
+            if source_input is None:
+                self._schedule_candidate_restart(verdict)
+            else:
+                self._schedule_candidate_restart(verdict, source_input=source_input)
             self._emit_hard_interrupt_telemetry(
                 rollback_scope="candidate",
                 from_step=from_step,
@@ -2007,6 +2252,7 @@ class PipelineRunner:
                 logger.warning("Cannot apply hard interrupt fallback target %r: %s", target, validation_error)
                 self._save_failed_sync(from_step, fallback_reason)
                 self._rollback_context = None
+                self._rollback_input = None
                 return False
             verdict = replace(verdict, rollback_target=target, reason=fallback_reason)
 
@@ -2018,8 +2264,10 @@ class PipelineRunner:
         target_field = next((s.conclusion_field for s in self._loaded.steps if s.step_id == target), None)
         if target_field:
             self.context.mark_stale(target_field)
-        self._rollback_context = verdict.rollback_context
-        self._set_current_step_user_input(verdict.rollback_context)
+        rollback_input = self._input_for_interrupt_verdict(verdict, source_input)
+        self._rollback_context = rollback_input.display_text if rollback_input is not None else None
+        self._rollback_input = rollback_input.content if rollback_input is not None else None
+        self._set_current_step_user_input(rollback_input)
         self._mark_rollback_cleanup_required(
             cleanup_from_step,
             target,
@@ -2116,19 +2364,26 @@ class PipelineRunner:
 
     def continue_after_interrupt(self) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Create a new event stream after interrupt rollback."""
+        rollback_input = self._rollback_input
         context = self._rollback_context
+        self._rollback_input = None
         self._rollback_context = None
+        if rollback_input is not None:
+            kwargs: dict[str, Any] = {"user_input": rollback_input}
+            if not isinstance(rollback_input, str) or context != rollback_input:
+                kwargs["user_input_display_text"] = context
+            return self._continue_from_current(**kwargs)
         return self._continue_from_current(user_input=context)
 
     @staticmethod
-    def _try_inject_into_agent_loop(agent_loop: object | None, message: str) -> bool:
+    def _try_inject_into_agent_loop(agent_loop: object | None, message: PipelineInputContent) -> bool:
         if agent_loop is None:
             return False
 
         if inspect.getattr_static(agent_loop, "try_inject_user_message", None) is not None:
             try_inject = getattr(agent_loop, "try_inject_user_message", None)
             if callable(try_inject):
-                return bool(try_inject(message))
+                return try_inject(message) is not False
 
         can_accept = getattr(agent_loop, "can_accept_injected_user_message", True)
         if can_accept is False:
@@ -2140,7 +2395,7 @@ class PipelineRunner:
         inject(message)
         return True
 
-    def _inject_supplement(self, verdict: InterruptVerdict, message: str) -> bool:
+    def _inject_supplement(self, verdict: InterruptVerdict, message: PipelineInputContent) -> bool:
         """Inject supplement message into the correct AgentLoop.
 
         Returns True if the message was injected into at least one AgentLoop,
@@ -2182,6 +2437,39 @@ class PipelineRunner:
         return False
 
     @staticmethod
+    def _candidate_target_from_pending_question_envelope(envelope: dict[str, Any] | None) -> str | None:
+        if not isinstance(envelope, dict):
+            return None
+        candidate = envelope.get("candidate")
+        if not isinstance(candidate, dict):
+            return None
+        for key in ("index", "candidateIndex", "candidate_index"):
+            value = candidate.get(key)
+            if isinstance(value, int):
+                return f"candidate:{value}"
+            if isinstance(value, str):
+                try:
+                    return f"candidate:{int(value)}"
+                except ValueError:
+                    continue
+        return None
+
+    def inject_pending_question_supplement(
+        self,
+        message: PipelineInputContent,
+        *,
+        envelope: dict[str, Any] | None = None,
+    ) -> bool:
+        """Inject image/text supplied alongside an active ask_user_question answer."""
+        target = self._candidate_target_from_pending_question_envelope(envelope)
+        verdict = InterruptVerdict(
+            action="supplement",
+            reason="ask_user_question supplemental input",
+            supplement_target=target,
+        )
+        return self._inject_supplement(verdict, message)
+
+    @staticmethod
     def _candidate_index_from_target(target: str | None) -> int | None:
         if not target or not (target.startswith("candidate:") or target.startswith("candidate_index:")):
             return None
@@ -2189,6 +2477,59 @@ class PipelineRunner:
             return int(target.split(":", 1)[1])
         except (ValueError, IndexError):
             return None
+
+    def _candidate_execution_state_for_resume(self, candidate_index: int) -> dict[str, Any] | None:
+        execution = getattr(self, "_execution", None)
+        if not isinstance(execution, dict):
+            return None
+        candidates = execution.get("candidates")
+        if not isinstance(candidates, dict):
+            return None
+        for key in (str(candidate_index), candidate_index):
+            state = candidates.get(key)
+            if isinstance(state, dict):
+                return state
+        return None
+
+    def _set_candidate_ask_user_question_resume_state(
+        self,
+        candidate_index: int,
+        *,
+        user_message: PipelineInputContent,
+        resume_messages: list[Message] | None,
+        precompleted_tools: dict[str, dict[str, Any]] | None,
+    ) -> None:
+        execution = self._execution if isinstance(self._execution, dict) else {}
+        candidates = execution.setdefault("candidates", {})
+        if not isinstance(candidates, dict):
+            candidates = {}
+            execution["candidates"] = candidates
+        state = candidates.setdefault(str(candidate_index), {})
+        if not isinstance(state, dict):
+            state = {}
+            candidates[str(candidate_index)] = state
+        state[_PENDING_ASK_USER_QUESTION_RESUME_KEY] = _serialize_ask_user_question_resume_state(
+            user_message=user_message,
+            resume_messages=resume_messages,
+            precompleted_tools=precompleted_tools,
+        )
+        self._execution = execution
+
+    def _candidate_ask_user_question_resume_state(self, candidate_index: int) -> dict[str, Any] | None:
+        restored_ask = getattr(self, "_restored_ask_user_question", None)
+        if isinstance(restored_ask, dict) and restored_ask.get("candidate_index") == candidate_index:
+            return restored_ask
+        active_state = getattr(self, "_active_candidates", {}).get(candidate_index)
+        if isinstance(active_state, dict):
+            restored = _deserialize_ask_user_question_resume_state(
+                active_state.get(_PENDING_ASK_USER_QUESTION_RESUME_KEY)
+            )
+            if restored is not None:
+                return restored
+        state = self._candidate_execution_state_for_resume(candidate_index)
+        if state is None:
+            return None
+        return _deserialize_ask_user_question_resume_state(state.get(_PENDING_ASK_USER_QUESTION_RESUME_KEY))
 
     def _candidate_user_message_for_restored_supplement(
         self,
@@ -2208,20 +2549,24 @@ class PipelineRunner:
         self,
         candidate_index: int,
     ) -> list[ContentBlock] | None:
-        restored_ask = getattr(self, "_restored_ask_user_question", None)
-        if not isinstance(restored_ask, dict) or restored_ask.get("candidate_index") != candidate_index:
-            return None
-        user_message = restored_ask.get("user_message")
+        restored_ask = self._candidate_ask_user_question_resume_state(candidate_index)
+        user_message = restored_ask.get("user_message") if restored_ask is not None else None
         return user_message if isinstance(user_message, list) else None
+
+    def _candidate_resume_messages_for_restored_ask_user_question(
+        self,
+        candidate_index: int,
+    ) -> list[Message] | None:
+        restored_ask = self._candidate_ask_user_question_resume_state(candidate_index)
+        resume_messages = restored_ask.get("resume_messages") if restored_ask is not None else None
+        return resume_messages if isinstance(resume_messages, list) else None
 
     def _candidate_precompleted_tools_for_restored_ask_user_question(
         self,
         candidate_index: int,
     ) -> dict[str, dict[str, Any]] | None:
-        restored_ask = getattr(self, "_restored_ask_user_question", None)
-        if not isinstance(restored_ask, dict) or restored_ask.get("candidate_index") != candidate_index:
-            return None
-        precompleted_tools = restored_ask.get("precompleted_tools")
+        restored_ask = self._candidate_ask_user_question_resume_state(candidate_index)
+        precompleted_tools = restored_ask.get("precompleted_tools") if restored_ask is not None else None
         return precompleted_tools if isinstance(precompleted_tools, dict) else None
 
     def _requested_candidate_indices(self, scope: str | None) -> list[int]:
@@ -2277,12 +2622,18 @@ class PipelineRunner:
 
         return None
 
-    def _schedule_candidate_restart(self, verdict: InterruptVerdict) -> None:
+    def _schedule_candidate_restart(
+        self,
+        verdict: InterruptVerdict,
+        *,
+        source_input: str | list[ContentBlock] | PipelineUserInput | None = None,
+    ) -> None:
         """Cancel specified candidate(s) and schedule restart."""
         target_step = verdict.rollback_target
         indices = self._requested_candidate_indices(verdict.candidate_scope)
         current_step = self.state_machine.current_step
         sub_spec = self._loaded.sub_pipelines.get(current_step.sub_pipeline_name or "")
+        rollback_input = self._input_for_interrupt_verdict(verdict, source_input)
 
         for idx in indices:
             state = self._active_candidates.get(idx)
@@ -2296,7 +2647,10 @@ class PipelineRunner:
             self._pending_candidate_restarts[idx] = RestartInfo(
                 start_from_step=target_step,
                 preserved_conclusions=preserved,
-                rollback_context=verdict.rollback_context,
+                rollback_context=rollback_input.display_text
+                if rollback_input is not None
+                else verdict.rollback_context,
+                rollback_input=rollback_input.content if rollback_input is not None else None,
             )
             if target_step and sub_spec:
                 sub_pipeline_id = state.get("sub_pipeline_id") or f"{sub_spec.name}_candidate_{idx}"
@@ -2336,6 +2690,15 @@ class PipelineRunner:
                     for stale_step in sub_spec.steps[target_index:]:
                         sub_context.mark_stale(stale_step.conclusion_field)
                     context_snapshot = sub_context.to_snapshot()
+                pending_restart: dict[str, Any] = {
+                    "start_from_step": target_step,
+                    "preserved_conclusions": preserved,
+                    "rollback_context": rollback_input.display_text
+                    if rollback_input is not None
+                    else verdict.rollback_context,
+                }
+                if rollback_input is not None and rollback_input.has_images:
+                    pending_restart["rollback_input"] = _serialize_pipeline_input_content(rollback_input.content)
                 entry = {
                     "status": "running",
                     "candidate": state.get("candidate", state.get("raw_candidate", {})),
@@ -2347,11 +2710,7 @@ class PipelineRunner:
                     "active_attempt_id": new_attempt["attempt_id"],
                     "transcript_id": new_attempt["transcript_id"],
                     "conclusions": preserved,
-                    "pending_restart": {
-                        "start_from_step": target_step,
-                        "preserved_conclusions": preserved,
-                        "rollback_context": verdict.rollback_context,
-                    },
+                    "pending_restart": pending_restart,
                 }
                 existing_candidate = self._execution.get("candidates", {}).get(str(idx), {}).get("candidate")
                 if existing_candidate is not None:
@@ -2383,6 +2742,7 @@ class PipelineRunner:
         self,
         user_input: str | list[ContentBlock] | None = None,
         *,
+        user_input_display_text: str | None = None,
         resume_messages: list[Message] | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         resume_waiting_step: bool = False,
@@ -2392,8 +2752,35 @@ class PipelineRunner:
         terminal_pipeline_telemetry_emitted = False
         step_result: StepResult | None = None
         restored_step_user_input = self._consume_restored_current_step_user_input() if user_input is None else None
-        first_step_user_input = user_input if user_input is not None else restored_step_user_input
+        restored_resume_messages, restored_precompleted_tools = (
+            self._consume_restored_current_step_resume_state() if user_input is None else (None, None)
+        )
+        first_step_user_input = (
+            user_input
+            if user_input is not None
+            else restored_step_user_input.content
+            if restored_step_user_input is not None
+            else None
+        )
+        first_step_user_input_display_text = (
+            user_input_display_text
+            if user_input is not None
+            else restored_step_user_input.display_text
+            if restored_step_user_input is not None
+            else None
+        )
         first_step_user_input_is_restored = user_input is None and restored_step_user_input is not None
+        first_step_resume_messages = resume_messages if resume_messages is not None else restored_resume_messages
+        first_step_precompleted_tools = (
+            precompleted_tools if precompleted_tools is not None else restored_precompleted_tools
+        )
+        if first_step_resume_messages is not None or first_step_precompleted_tools is not None:
+            self._set_current_step_resume_state(
+                resume_messages=first_step_resume_messages,
+                precompleted_tools=first_step_precompleted_tools,
+            )
+        elif user_input is not None:
+            self._set_current_step_resume_state()
 
         def emit_pipeline_completed(*, failed: bool, early_exit: bool) -> None:
             nonlocal terminal_pipeline_telemetry_emitted
@@ -2409,7 +2796,8 @@ class PipelineRunner:
         while not self.state_machine.is_complete:
             step = self.state_machine.current_step
             step_user_message = first_step_user_input if is_first_step else None
-            self._set_current_step_user_input(step_user_message)
+            step_user_display_text = first_step_user_input_display_text if is_first_step else None
+            self._set_current_step_user_input(step_user_message, display_text=step_user_display_text)
             step_start = time.time()
             step_started_at = self._observability.now()
             step_index = self.state_machine.current_step_index + 1
@@ -2560,20 +2948,23 @@ class PipelineRunner:
             ):
                 first_step = is_first_step
                 is_first_step = False
-                step_resume_messages = resume_messages if first_step else None
-                step_precompleted_tools = precompleted_tools if first_step else None
-                if (
-                    step_resume_messages is None
-                    and self._transcript_storage is not None
-                    and attempt.get("status") == "running"
-                ):
+                step_resume_messages = first_step_resume_messages if first_step else None
+                step_precompleted_tools = first_step_precompleted_tools if first_step else None
+                if self._transcript_storage is not None and attempt.get("status") == "running":
                     loaded = self._transcript_storage.load(self._cwd, attempt["transcript_id"])
-                    step_resume_messages = self._transcript_storage.repair_interrupted(loaded)
+                    repaired_resume_messages = self._transcript_storage.repair_interrupted(loaded)
+                    step_resume_messages = reconcile_resume_messages(
+                        repaired_resume_messages,
+                        step_resume_messages,
+                    )
                 if (
                     first_step
                     and first_step_user_input_is_restored
-                    and isinstance(step_user_message, str)
                     and step_resume_messages
+                    and (
+                        isinstance(step_user_message, str)
+                        or user_message_already_in_resume(step_user_message, step_resume_messages)
+                    )
                 ):
                     step_user_message = None
                 execute_kwargs: dict[str, Any] = {
@@ -3000,6 +3391,12 @@ class PipelineRunner:
             conclusions = payload.get("conclusions")
             if conclusions is not None:
                 entry["conclusions"] = conclusions
+            active_state = self._active_candidates.get(i)
+            pending_ask_resume = (
+                active_state.get(_PENDING_ASK_USER_QUESTION_RESUME_KEY) if isinstance(active_state, dict) else None
+            )
+            if pending_ask_resume is not None and entry["status"] == "running":
+                entry[_PENDING_ASK_USER_QUESTION_RESUME_KEY] = pending_ask_resume
             self._execution.setdefault("candidates", {})[str(i)] = entry
             await self._save_running(step.step_id, reason=reason or "parallel sub-pipeline running")
 
@@ -3063,6 +3460,9 @@ class PipelineRunner:
                 "active_attempt_id": (resume_state or {}).get("active_attempt_id"),
                 "transcript_id": (resume_state or {}).get("transcript_id"),
             }
+            pending_ask_resume = (resume_state or {}).get(_PENDING_ASK_USER_QUESTION_RESUME_KEY)
+            if pending_ask_resume is not None:
+                state[_PENDING_ASK_USER_QUESTION_RESUME_KEY] = pending_ask_resume
             self._active_candidates[i] = state
 
             def allocate_sub_step_attempt(request: dict[str, Any]) -> dict[str, Any]:
@@ -3107,11 +3507,14 @@ class PipelineRunner:
                 start_from_step = restart_info.start_from_step if restart_info else None
                 preserved_conclusions = restart_info.preserved_conclusions if restart_info else None
                 candidate_user_message = (
-                    restart_info.rollback_context
+                    restart_info.rollback_input
+                    if restart_info and restart_info.rollback_input is not None
+                    else restart_info.rollback_context
                     if restart_info
                     else self._candidate_user_message_for_restored_supplement(i, user_message)
                 )
                 ask_user_message = self._candidate_user_message_for_restored_ask_user_question(i)
+                candidate_resume_messages = self._candidate_resume_messages_for_restored_ask_user_question(i)
                 candidate_precompleted_tools = self._candidate_precompleted_tools_for_restored_ask_user_question(i)
                 if ask_user_message is not None:
                     candidate_user_message = ask_user_message
@@ -3128,6 +3531,8 @@ class PipelineRunner:
                     }
                     if "precompleted_tools" in parameters or has_var_keyword:
                         recovery_kwargs["precompleted_tools"] = candidate_precompleted_tools
+                    if "resume_messages" in parameters or has_var_keyword:
+                        recovery_kwargs["resume_messages"] = candidate_resume_messages
                     event_stream = execute_streaming(
                         sub_spec=sub_spec,
                         candidate=candidate,

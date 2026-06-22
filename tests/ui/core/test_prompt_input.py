@@ -520,6 +520,39 @@ class TestPromptInputLoop:
         assert aggregator.updated == [("h", 1), ("hi", 2)]
         assert out.getvalue().endswith("\n")
 
+    def test_input_loop_initializes_next_image_id_from_store(self, monkeypatch):
+        import iac_code.ui.core.prompt_input as prompt_mod
+
+        events = iter([_key("enter")])
+
+        class FakeCapture:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read_key(self):
+                return next(events, None)
+
+        class FakeImageStore:
+            def next_image_id(self):
+                return 8
+
+        out = StringIO()
+        monkeypatch.setattr(prompt_mod, "sys", SimpleNamespace(stdout=out))
+        monkeypatch.setattr(
+            prompt_mod.shutil,
+            "get_terminal_size",
+            lambda *args, **kwargs: os.terminal_size((40, 24)),
+        )
+        monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+        inp = make_input(image_store=FakeImageStore())
+
+        assert inp._input_loop("❯ ") == ""
+        assert inp.next_paste_id() == 8
+
     def test_input_loop_returns_none_on_ctrl_c_with_empty_buffer(self, monkeypatch):
         import iac_code.ui.core.prompt_input as prompt_mod
 

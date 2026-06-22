@@ -17,8 +17,11 @@ from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.agent.message import ImageBlock
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.interrupt import InterruptVerdict
+from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.types.stream_events import AskUserQuestionEvent, TextDeltaEvent
 
 from .fakes import FakeEventQueue, FakeRequestContext
@@ -29,6 +32,18 @@ AUTH_TEXT = "Authentication required. Configure credentials and retry."
 
 def dump(event):
     return MessageToDict(event, preserving_proto_field_name=False)
+
+
+def image_interrupt_input() -> PipelineUserInput:
+    return PipelineUserInput(
+        content=[ImageBlock(media_type="image/png", data="aGVsbG8=")],
+        display_text="[Image input]",
+        has_images=True,
+    )
+
+
+def _display_text(value):
+    return value.display_text if isinstance(value, PipelineUserInput) else value
 
 
 class FakePipeline:
@@ -47,14 +62,14 @@ class FakePipeline:
         self.handoff_summary = "handoff summary"
 
     async def run(self, prompt: str):
-        self.run_prompts.append(prompt)
+        self.run_prompts.append(_display_text(prompt))
         for event in self.events:
             if isinstance(event, BaseException):
                 raise event
             yield event
 
     async def resume(self, prompt: str):
-        self.resume_prompts.append(prompt)
+        self.resume_prompts.append(_display_text(prompt))
         for event in self.events:
             if isinstance(event, BaseException):
                 raise event
@@ -62,7 +77,7 @@ class FakePipeline:
 
     def continue_from_sidecar(self, user_input: str | None = None):
         self.continue_calls += 1
-        self.continue_inputs.append(user_input)
+        self.continue_inputs.append(_display_text(user_input))
         return self.run(user_input or "continued")
 
     def clear_sidecar(self) -> None:
@@ -3033,7 +3048,7 @@ async def test_active_task_route_does_not_treat_finished_pending_question_as_int
         task_id="task-1",
         context_id="ctx-1",
         cwd=str(tmp_path),
-        prompt="Nginx 网站",
+        pipeline_input="Nginx 网站",
         preserve_task_record=True,
     )
 
@@ -3126,7 +3141,7 @@ async def test_active_task_route_answers_pending_question_without_marking_input_
         task_id="task-1",
         context_id="ctx-1",
         cwd=str(tmp_path),
-        prompt="Nginx 网站",
+        pipeline_input="Nginx 网站",
         preserve_task_record=True,
     )
 
@@ -4374,3 +4389,363 @@ async def test_same_task_non_interruptible_active_context_preserves_active_recor
     final_status = _status_events(queue)[-1]["status"]
     assert final_status["state"] == "TASK_STATE_FAILED"
     assert final_status["message"]["parts"][0]["text"] == "Task is already working."
+
+
+@pytest.mark.asyncio
+async def test_active_pipeline_interrupt_receives_structured_image_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.active_task = asyncio.current_task()
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: _fake_runtime(),
+    )
+    ctx.active_task_id = "task-1"
+    received = []
+
+    class InterruptPipeline(FakePipeline):
+        async def handle_user_interrupt(self, message):
+            received.append(message)
+            return InterruptVerdict(action="continue", reason="keep going")
+
+        def pause_agent_loops(self) -> None:
+            pass
+
+        def resume_agent_loops(self) -> None:
+            pass
+
+    pipeline = InterruptPipeline([], session_dir=tmp_path / "pipeline")
+    publisher = SimpleNamespace(
+        publish_interrupt_received=AsyncMock(),
+        publish_interrupt=AsyncMock(),
+        journal=A2APipelineJournal(tmp_path / "pipeline"),
+        snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline"),
+    )
+    ctx.runtime = SimpleNamespace(
+        agent_runtime=_fake_runtime(),
+        pipeline=pipeline,
+        publisher=publisher,
+        current_stream=None,
+        restart_after_interrupt=False,
+        pause_after_interrupt=False,
+        restart_requested=asyncio.Event(),
+    )
+    store.mirror_context(ctx)
+    pipeline_input = image_interrupt_input()
+
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    await executor.execute(
+        context=FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=FakeEventQueue(),
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input=pipeline_input,
+    )
+
+    assert received == [pipeline_input]
+    publisher.publish_interrupt_received.assert_awaited_once_with(prompt="[Image input]")
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_answer_preserves_image_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+
+    future = asyncio.get_running_loop().create_future()
+    injected = []
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            injected.append((message, envelope))
+
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="Upload diagram",
+                options=[],
+                response_future=future,
+            ),
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        ),
+        pipeline=Pipeline(),
+        publisher=SimpleNamespace(
+            publish_manual=AsyncMock(return_value=object()),
+        ),
+    )
+    pipeline_input = image_interrupt_input()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    result = await executor._route_pending_question_answer(runtime, pipeline_input)
+
+    assert result == "answered"
+    answer = future.result()
+    assert answer == {"selected_id": "", "selected_label": "", "free_text": "[Image input]"}
+    assert injected == [(pipeline_input.content, {"scope": "pipeline", "inputId": "ask-toolu_1"})]
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_image_injection_failure_is_not_marked_answered(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+
+    future = asyncio.get_running_loop().create_future()
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            return False
+
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="Upload diagram",
+                options=[],
+                response_future=future,
+            ),
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        ),
+        pipeline=Pipeline(),
+        publisher=SimpleNamespace(
+            publish_manual=AsyncMock(return_value=object()),
+        ),
+    )
+    pipeline_input = image_interrupt_input()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    with pytest.raises(RuntimeError, match="image supplement could not be delivered"):
+        await executor._route_pending_question_answer(runtime, pipeline_input)
+
+    assert future.done() is False
+    assert runtime.pending_question is not None
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_image_injection_failure_restores_snapshot_pending_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    future = asyncio.get_running_loop().create_future()
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            return False
+
+    publisher = PipelineA2AEventPublisher(
+        event_queue=FakeEventQueue(),
+        translator=PipelineEventTranslator(
+            PipelineA2AContext(
+                pipeline_run_id="ctx-1",
+                task_id="task-1",
+                context_id="ctx-1",
+                pipeline_name="selling",
+            )
+        ),
+        journal=A2APipelineJournal(tmp_path / "pipeline"),
+        snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline"),
+    )
+    await publisher.publish_manual(
+        "input_required",
+        "pipeline",
+        status="input_required",
+        data={
+            "kind": "ask_user_question",
+            "inputId": "ask-toolu_1",
+            "toolUseId": "toolu_1",
+            "question": "Upload diagram",
+            "prompt": "Upload diagram",
+            "options": [],
+            "required": True,
+        },
+    )
+    assert publisher.snapshot_store.load()["pendingInput"]["inputId"] == "ask-toolu_1"
+
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="Upload diagram",
+                options=[],
+                response_future=future,
+            ),
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        ),
+        pipeline=Pipeline(),
+        publisher=publisher,
+    )
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    with pytest.raises(RuntimeError, match="image supplement could not be delivered"):
+        await executor._route_pending_question_answer(runtime, image_interrupt_input())
+
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot["status"] == "waiting_input"
+    assert snapshot["pendingInput"]["inputId"] == "ask-toolu_1"
+    assert future.done() is False
+    assert runtime.pending_question is not None
+
+
+@pytest.mark.asyncio
+async def test_execute_reports_active_pending_question_image_injection_failure(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import (
+        A2APipelineRuntime,
+        IacCodeA2APipelineExecutor,
+        _PendingAskUserQuestion,
+    )
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    future = asyncio.get_running_loop().create_future()
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            return False
+
+    queue = FakeEventQueue()
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(
+            PipelineA2AContext(
+                pipeline_run_id="ctx-1",
+                task_id="task-1",
+                context_id="ctx-1",
+                pipeline_name="selling",
+            )
+        ),
+        journal=A2APipelineJournal(tmp_path / "pipeline"),
+        snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline"),
+    )
+    publisher.publish_manual = AsyncMock(return_value=object())  # type: ignore[method-assign]
+    runtime = A2APipelineRuntime(agent_runtime=_fake_runtime(), pipeline=Pipeline(), publisher=publisher)
+    runtime.pending_question = _PendingAskUserQuestion(
+        event=AskUserQuestionEvent(
+            tool_use_id="toolu_1",
+            question="Upload diagram",
+            options=[],
+            response_future=future,
+        ),
+        envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+    )
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: _fake_runtime(),
+    )
+    ctx.runtime = runtime
+    ctx.active_task_id = "task-1"
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    await executor.execute(
+        context=FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        event_queue=queue,
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input=image_interrupt_input(),
+    )
+
+    states = [dump(event)["status"]["state"] for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert "TASK_STATE_FAILED" in states
+    assert future.done() is False
+    assert runtime.pending_question is not None
+
+
+@pytest.mark.asyncio
+async def test_pending_ask_user_question_resume_preserves_image_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _resume_pending_ask_user_question_stream
+
+    pipeline_input = image_interrupt_input()
+    received = {}
+
+    class AskPipeline(FakePipeline):
+        sidecar_status = "waiting_input"
+
+        async def resume_ask_user_question(self, answer, **kwargs):
+            received["answer"] = answer
+            received["supplemental_input"] = kwargs.get("supplemental_input")
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id="ask",
+                timestamp=0.0,
+                data={"total_steps": 1},
+            )
+
+    pending_input = {
+        "kind": "ask_user_question",
+        "toolUseId": "toolu_1",
+        "inputId": "ask-toolu_1",
+    }
+    pipeline = AskPipeline([], session_dir=tmp_path / "pipeline")
+    publisher = SimpleNamespace(
+        snapshot_store=SimpleNamespace(load=lambda: {"status": "waiting_input"}),
+        publish_manual=AsyncMock(return_value=object()),
+    )
+
+    stream = _resume_pending_ask_user_question_stream(
+        pipeline=pipeline,
+        publisher=publisher,
+        pending_input=pending_input,
+        prompt="[Image input]",
+        pipeline_input=pipeline_input,
+    )
+    events = [event async for event in stream]
+
+    assert events
+    assert received["supplemental_input"] == pipeline_input

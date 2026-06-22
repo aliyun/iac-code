@@ -48,6 +48,7 @@ class ImageBlock(BaseModel):
     type: Literal["image"] = "image"
     media_type: str  # 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
     data: str  # base64
+    ref_id: int | None = None
 
 
 # Union type for all content blocks

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from iac_code.agent.message import Message
+from iac_code.pipeline.engine.user_input import PipelineUserInput
 
 
 @pytest.fixture
@@ -141,7 +142,9 @@ async def test_restored_waiting_input_routes_current_message_to_resume(monkeypat
     with patch("iac_code.pipeline.create_pipeline", return_value=pipeline):
         await repl_for_sidecar_restore._handle_pipeline_chat("方案一")
 
-    pipeline.resume.assert_called_once_with("方案一")
+    pipeline.resume.assert_called_once_with(
+        PipelineUserInput(content="方案一", display_text="方案一", has_images=False)
+    )
     pipeline.run.assert_not_called()
     pipeline.continue_from_sidecar.assert_not_called()
 
@@ -346,7 +349,9 @@ async def test_restored_running_routes_to_continue_without_user_prompt(monkeypat
     with patch("iac_code.pipeline.create_pipeline", return_value=pipeline):
         await repl_for_sidecar_restore._handle_pipeline_chat("hello after crash")
 
-    pipeline.continue_from_sidecar.assert_called_once_with(user_input="hello after crash")
+    pipeline.continue_from_sidecar.assert_called_once_with(
+        user_input=PipelineUserInput(content="hello after crash", display_text="hello after crash", has_images=False)
+    )
     pipeline.run.assert_not_called()
     pipeline.resume.assert_not_called()
 
@@ -375,7 +380,9 @@ async def test_restored_running_uses_pipeline_working_directory(monkeypatch, tmp
         await repl_for_sidecar_restore._handle_pipeline_chat("hello after crash")
 
     pipeline.restore_from_sidecar.assert_awaited_once()
-    pipeline.continue_from_sidecar.assert_called_once_with(user_input="hello after crash")
+    pipeline.continue_from_sidecar.assert_called_once_with(
+        user_input=PipelineUserInput(content="hello after crash", display_text="hello after crash", has_images=False)
+    )
     pipeline.run.assert_not_called()
     pipeline.resume.assert_not_called()
 
@@ -394,7 +401,7 @@ async def test_corrupt_sidecar_starts_fresh(monkeypatch, repl_for_sidecar_restor
     with patch("iac_code.pipeline.create_pipeline", return_value=pipeline):
         await repl_for_sidecar_restore._handle_pipeline_chat("fresh")
 
-    pipeline.run.assert_called_once_with("fresh")
+    pipeline.run.assert_called_once_with(PipelineUserInput(content="fresh", display_text="fresh", has_images=False))
     repl_for_sidecar_restore.renderer.print_system_message.assert_called()
 
 
@@ -413,7 +420,7 @@ async def test_discarded_sidecar_starts_fresh_without_restore(monkeypatch, repl_
         await repl_for_sidecar_restore._handle_pipeline_chat("fresh")
 
     pipeline.restore_from_sidecar.assert_not_called()
-    pipeline.run.assert_called_once_with("fresh")
+    pipeline.run.assert_called_once_with(PipelineUserInput(content="fresh", display_text="fresh", has_images=False))
 
 
 def _seed_sidecar(repl, status: str) -> None:

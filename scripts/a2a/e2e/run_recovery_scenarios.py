@@ -11,6 +11,9 @@ directory, then validates recovery behavior.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import io
 import json
 import os
 import signal
@@ -27,6 +30,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import yaml
+from PIL import Image, ImageDraw, ImageFont
 
 E2E_SCRIPTS_DIR = Path(__file__).resolve().parent
 A2A_SCRIPTS_DIR = E2E_SCRIPTS_DIR.parent
@@ -78,6 +82,10 @@ ASK_SECOND_ANSWER = "选择一个已有 VPC，创建一个 VSwitch；地域、�
 INTERVENING_ASK_ANSWER = "使用默认配置（可用区和网段自动规划），继续。"
 ROLLBACK_PROMPT = "回退到 intent_parsing，选择一个已有vpc，创建一个安全组"
 CONTINUE_PROMPT = "继续"
+CLEANUP_RECOVERY_PROMPT = (
+    "请只回复“OK，继续”。不要调用任何工具，不要查询任何云资源，不要删除任何资源。"
+    "如果系统有后台 cleanup 恢复流程，请让它自行完成。"
+)
 CLEANUP_PROMPT_METADATA_TYPE = "pipeline_cleanup_prompt"
 CLEANUP_EVENT_TYPES = frozenset(
     {
@@ -88,6 +96,16 @@ CLEANUP_EVENT_TYPES = frozenset(
     }
 )
 CLEANUP_ACTIVE_STATUSES = frozenset({"pending", "started", "in_progress", "failed"})
+IMAGE_TEXT_PROMPT = "请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"
+STATIC_TEXT_IMAGE_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "text-images"
+STATIC_TEXT_IMAGE_FIXTURES = {
+    "initial": DEFAULT_INITIAL_PROMPT,
+    "selection": DEFAULT_SELECTION_PROMPT,
+    "normal-followup": DEFAULT_NORMAL_FOLLOWUP_PROMPT,
+    "ask-first-answer": ASK_FIRST_ANSWER,
+    "ask-second-answer": ASK_SECOND_ANSWER,
+    "rollback-interrupt": ROLLBACK_PROMPT,
+}
 
 VSWITCH_MARKERS = ("ALIYUN::ECS::VSwitch", "VSwitchId", "vsw-", "VSwitch", "交换机")
 SECURITY_GROUP_MARKERS = ("ALIYUN::ECS::SecurityGroup", "SecurityGroupId", "sg-", "安全组")
@@ -115,6 +133,127 @@ class EventMatch:
     summary: StreamSummary
 
 
+class TextImageFixtureStore:
+    def __init__(self, root: Path, static_root: Path = STATIC_TEXT_IMAGE_FIXTURE_ROOT) -> None:
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.manifest_path = self.root / "manifest.json"
+        self.static_root = static_root
+
+    def part(self, key: str, text: str) -> dict[str, Any]:
+        safe_key = _safe_fixture_key(key)
+        path = self._static_fixture_path(safe_key, text)
+        source = "static"
+        if path is None:
+            path = self.root / f"{safe_key}.png"
+            source = "generated"
+            if not path.exists():
+                path.write_bytes(_render_text_png(text))
+        raw = path.read_bytes()
+        self._record_manifest(safe_key, text=text, path=path, byte_size=len(raw), source=source)
+        return {
+            "filename": path.name,
+            "mediaType": "image/png",
+            "bytes": base64.b64encode(raw).decode("ascii"),
+        }
+
+    def _static_fixture_path(self, key: str, text: str) -> Path | None:
+        try:
+            manifest = json.loads((self.static_root / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(manifest, dict):
+            return None
+        entry = manifest.get(key)
+        if not isinstance(entry, dict) or entry.get("text") != text or entry.get("mediaType") != "image/png":
+            return None
+        filename = entry.get("filename")
+        if not isinstance(filename, str) or not filename:
+            return None
+        path = self.static_root / filename
+        return path if path.is_file() else None
+
+    def _record_manifest(self, key: str, *, text: str, path: Path, byte_size: int, source: str) -> None:
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        if not isinstance(manifest, dict):
+            manifest = {}
+        manifest[key] = {
+            "text": text,
+            "path": str(path),
+            "mediaType": "image/png",
+            "byteSize": byte_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "source": source,
+        }
+        _write_json(self.manifest_path, manifest)
+
+
+def _safe_fixture_key(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value.strip().lower())
+    return safe.strip("-") or "input"
+
+
+def _render_text_png(text: str) -> bytes:
+    font = _load_text_image_font(size=34)
+    lines = _wrap_text_for_image(text)
+    padding = 40
+    line_spacing = 12
+    probe = Image.new("RGB", (1, 1), "white")
+    draw = ImageDraw.Draw(probe)
+    boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    text_width = int(max((right - left for left, _top, right, _bottom in boxes), default=360))
+    line_heights = [int(bottom - top) for _left, top, _right, bottom in boxes] or [40]
+    width = int(max(760, min(1600, text_width + padding * 2)))
+    height = int(max(220, sum(line_heights) + line_spacing * max(0, len(lines) - 1) + padding * 2))
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    y = padding
+    for line, line_height in zip(lines, line_heights, strict=False):
+        draw.text((padding, y), line, fill=(16, 24, 39), font=font)
+        y += line_height + line_spacing
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _wrap_text_for_image(text: str, *, max_chars: int = 26) -> list[str]:
+    lines: list[str] = []
+    for raw_line in text.splitlines() or [text]:
+        line = raw_line.strip()
+        if not line:
+            lines.append("")
+            continue
+        while len(line) > max_chars:
+            lines.append(line[:max_chars])
+            line = line[max_chars:]
+        if line:
+            lines.append(line)
+    return lines or [""]
+
+
+def _load_text_image_font(*, size: int) -> Any:
+    candidates = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            try:
+                return ImageFont.truetype(candidate, size=size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
 class BackgroundStream:
     def __init__(
         self,
@@ -127,6 +266,7 @@ class BackgroundStream:
         timeout: float,
         context_id: str = "",
         task_id: str = "",
+        images: list[dict[str, Any]] | None = None,
         redaction_env: dict[str, str] | None = None,
     ) -> None:
         self.server_url = server_url
@@ -137,6 +277,7 @@ class BackgroundStream:
         self.timeout = timeout
         self.context_id = context_id
         self.task_id = task_id
+        self.images = images
         self.redaction_env = redaction_env
         self.summary = StreamSummary(name=name, prompt=prompt, request_task_id=task_id)
         self.events: list[Any] = []
@@ -195,6 +336,7 @@ class BackgroundStream:
             task_id=self.task_id,
             request_id=str(uuid.uuid4()),
             message_id=str(uuid.uuid4()),
+            images=self.images,
         )
         _append_jsonl(
             self.run_dir / "requests.jsonl",
@@ -243,6 +385,7 @@ class ScenarioHarness:
         self.server_cwd = str(Path(args.server_cwd).expanduser().resolve())
         self.run_dir = _scenario_run_dir(args, scenario)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.image_fixtures = TextImageFixtureStore(self.run_dir / "image-fixtures")
         self.workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else self.run_dir / "workspace"
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.cwd = str(self.workspace_dir)
@@ -327,6 +470,7 @@ class ScenarioHarness:
         name: str,
         context_id: str | None = None,
         task_id: str | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> StreamSummary:
         summary = stream_message(
             server_url=self.server_url,
@@ -337,11 +481,30 @@ class ScenarioHarness:
             name=name,
             run_dir=self.run_dir,
             timeout=self.args.stream_timeout,
+            images=images,
             redaction_env=self.server_env,
         )
         self._remember_identity(summary)
         self.summaries[name] = summary
         return summary
+
+    def stream_image_text(
+        self,
+        *,
+        text: str,
+        image_key: str,
+        name: str,
+        context_id: str | None = None,
+        task_id: str | None = None,
+        prompt: str = IMAGE_TEXT_PROMPT,
+    ) -> StreamSummary:
+        return self.stream(
+            prompt=prompt,
+            name=name,
+            context_id=context_id,
+            task_id=task_id,
+            images=[self.image_fixtures.part(image_key, text)],
+        )
 
     def start_stream(
         self,
@@ -350,6 +513,7 @@ class ScenarioHarness:
         name: str,
         context_id: str | None = None,
         task_id: str | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> BackgroundStream:
         stream = BackgroundStream(
             server_url=self.server_url,
@@ -360,6 +524,7 @@ class ScenarioHarness:
             name=name,
             run_dir=self.run_dir,
             timeout=self.args.stream_timeout,
+            images=images,
             redaction_env=self.server_env,
         )
         stream.start()
@@ -371,6 +536,24 @@ class ScenarioHarness:
         self._remember_identity(stream.summary)
         self.summaries[name] = stream.summary
         return stream
+
+    def start_stream_image_text(
+        self,
+        *,
+        text: str,
+        image_key: str,
+        name: str,
+        context_id: str | None = None,
+        task_id: str | None = None,
+        prompt: str = IMAGE_TEXT_PROMPT,
+    ) -> BackgroundStream:
+        return self.start_stream(
+            prompt=prompt,
+            name=name,
+            context_id=context_id,
+            task_id=task_id,
+            images=[self.image_fixtures.part(image_key, text)],
+        )
 
     def fetch_state(self, name: str) -> Any:
         snapshot = fetch_pipeline_state(
@@ -726,6 +909,164 @@ def run_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
     return _run_with_harness(args, scenario, callback)
 
 
+def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream_image_text(
+            text=args.initial_prompt,
+            image_key="initial",
+            name="01-initial-image",
+            context_id="",
+            task_id="",
+        )
+        initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial-image")
+        h.checks["image initial reached step4 input_required"] = (
+            initial.last_input_required_step_id == "confirm_and_select"
+        )
+        selection = h.stream(prompt=args.selection_prompt, name="02-select-candidate")
+        h.checks["image initial selection completed pipeline"] = _pipeline_completed(selection)
+        h.checks["image initial VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream(prompt=ASK_TRIGGER_PROMPT, name="01-ask-trigger", context_id="", task_id="")
+        h.checks["initial reached input_required"] = _reached_input_required(initial)
+        h.checks["input_required is ask_user_question"] = (
+            _latest_pending_kind(h.run_dir / "01-ask-trigger.events.jsonl") == "ask_user_question"
+        )
+        h.kill9_and_restart()
+        snapshot = h.fetch_state("after-restart")
+        h.checks["snapshot still waiting input"] = _snapshot_value(snapshot, "status") == "waiting_input"
+        h.checks["pending input is ask_user_question"] = _pending_kind(snapshot) == "ask_user_question"
+        answer = h.stream_image_text(
+            text=ASK_FIRST_ANSWER,
+            image_key="ask-first-answer",
+            name="02-answer-first-ask-image",
+            task_id="",
+        )
+        _add_hydrated_task_checks(h, answer, "first ask image answer")
+        final_summary = answer
+        if answer.last_input_required_step_id:
+            second = h.stream_image_text(
+                text=ASK_SECOND_ANSWER,
+                image_key="ask-second-answer",
+                name="03-answer-second-ask-image",
+            )
+            _add_same_task_checks(h, second, "second ask image answer")
+            _finish_pipeline_after_possible_input(h, second, args)
+            final_summary = second
+        else:
+            _finish_pipeline_after_possible_input(h, answer, args)
+        h.checks["pipeline completed after ask image recovery"] = _completed_snapshot_or_stream(h, final_summary)
+        h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
+        initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
+        h.checks["initial reached step4 input_required"] = initial.last_input_required_step_id == "confirm_and_select"
+        h.kill9_and_restart()
+        snapshot = h.fetch_state("after-restart")
+        h.checks["snapshot still waiting input"] = _snapshot_value(snapshot, "status") == "waiting_input"
+        h.checks["pending input is confirm_and_select"] = _pending_step_id(snapshot) == "confirm_and_select"
+        selection = h.stream_image_text(
+            text=args.selection_prompt,
+            image_key="selection",
+            name="02-select-after-restart-image",
+            task_id="",
+        )
+        _add_hydrated_task_checks(h, selection, "selection image answer")
+        h.checks["selection image completed pipeline"] = _pipeline_completed(selection)
+        h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        _complete_pipeline(h, args)
+        normal = h.stream_image_text(
+            text=args.normal_followup_prompt,
+            image_key="normal-followup",
+            name="03-normal-followup-image",
+            task_id="",
+        )
+        h.checks["normal image follow-up stayed in same context"] = normal.context_id == h.context_id
+        h.checks["normal image follow-up used a new task"] = (
+            bool(normal.task_id) and normal.task_id != h.pipeline_task_id
+        )
+        h.checks["normal image follow-up finished turn"] = _normal_turn_finished(normal)
+        h.checks["normal image follow-up produced text"] = bool(normal.text.strip())
+        h.kill9_and_restart()
+        h.snapshots["after_restart"] = h.fetch_state("after-restart")
+        _add_completed_snapshot_checks(
+            h.checks,
+            "after-restart state",
+            h.snapshots["after_restart"],
+            context_id=h.context_id,
+            task_id=h.pipeline_task_id,
+        )
+        recovery = h.stream(prompt=args.recovery_prompt, name="04-recovery-question", task_id="")
+        h.checks["normal image recovery stayed in same context"] = recovery.context_id == h.context_id
+        h.checks["normal image recovery finished turn"] = _normal_turn_finished(recovery)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.start_stream(prompt=args.initial_prompt, name="01-initial-running", context_id="", task_id="")
+        observed_streams = _wait_for_with_intervening_ask_inputs(
+            h,
+            [initial],
+            _candidate_started,
+            description="candidate started before image interrupt",
+            timeout=args.event_timeout,
+            name_prefix="initial-running",
+        )
+        rollback = h.start_stream_image_text(
+            text=ROLLBACK_PROMPT,
+            image_key="rollback-interrupt",
+            name="02-rollback-image-interrupt",
+        )
+        _wait_any(
+            [*observed_streams, rollback],
+            _event_type("rollback_completed"),
+            description="image rollback_completed",
+            timeout=args.event_timeout,
+        )
+        streams_to_join = [*observed_streams, rollback]
+        _wait_any(
+            [*observed_streams, rollback],
+            _step_started("intent_parsing"),
+            description="post-image-rollback step_started(intent_parsing)",
+            timeout=args.event_timeout,
+        )
+        h.fetch_state("before-kill")
+        h.kill9_and_restart()
+        for stream in streams_to_join:
+            _join_after_kill(stream, h)
+        snapshot = h.fetch_state("after-restart")
+        h.checks["state endpoint returned snapshot after image interrupt restart"] = _snapshot(snapshot) is not None
+        resumed = h.stream(prompt=CONTINUE_PROMPT, name="03-continue-after-restart")
+        _finish_pipeline_after_possible_input(h, resumed, args)
+        h.checks["pipeline completed after image interrupt recovery"] = _completed_snapshot_or_stream(h, resumed)
+        final_state = h.fetch_state("after-image-interrupt-completion")
+        final_deploying = _final_deployment_evidence(final_state)
+        h.checks["final deploying target is security group"] = _has_any_marker(
+            final_deploying,
+            SECURITY_GROUP_MARKERS,
+        )
+        h.checks["final deploying target is not VSwitch"] = not _has_any_marker(final_deploying, VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
 def run_rollback(args: argparse.Namespace, scenario: str) -> int:
     target_step = _ROLLBACK_SCENARIOS[scenario]
 
@@ -998,7 +1339,7 @@ def _run_rollback_step5_cleanup(
             h.kill9_and_restart()
             _join_after_kill(cleanup_stream, h)
             h.snapshots["after_cleanup_restart"] = h.fetch_state("after-cleanup-restart")
-            cleanup_summary = h.stream(prompt=CONTINUE_PROMPT, name="06-cleanup-after-restart", task_id="")
+            cleanup_summary = h.stream(prompt=CLEANUP_RECOVERY_PROMPT, name="06-cleanup-after-restart", task_id="")
             h.checks["cleanup retriggered after restart"] = _events_file_has_cleanup_event(
                 h.run_dir / "06-cleanup-after-restart.events.jsonl",
                 stack_id=first_stack_id,
@@ -2179,6 +2520,11 @@ _CANCEL_SCENARIOS = {
 }
 _REAL_CLOUD_SCENARIOS = {
     "fault-after-snapshot",
+    "image-ask-waiting",
+    "image-initial",
+    "image-interrupt",
+    "image-normal-handoff",
+    "image-selection-waiting",
     "scenario1",
     "normal-running",
     "ask-waiting",
@@ -2190,6 +2536,11 @@ _REAL_CLOUD_SCENARIOS = {
     *_CANCEL_SCENARIOS,
 }
 _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
+    "image-ask-waiting": run_image_ask_waiting,
+    "image-initial": run_image_initial,
+    "image-interrupt": run_image_interrupt,
+    "image-normal-handoff": run_image_normal_handoff,
+    "image-selection-waiting": run_image_selection_waiting,
     "scenario1": run_scenario1,
     "normal-running": run_normal_running,
     "ask-waiting": run_ask_waiting,

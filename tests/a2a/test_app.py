@@ -850,7 +850,7 @@ def test_pipeline_streaming_starts_with_task_before_status_update(monkeypatch, t
     assert fake_pipeline.prompts == ["选择一个已有vpc，创建一个vswitch"]
 
 
-def test_pipeline_streaming_workspace_error_returns_failed_task_event(monkeypatch, tmp_path: Path) -> None:
+def test_pipeline_streaming_workspace_error_returns_request_error(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     allowed = tmp_path / "allowed"
     outside = tmp_path / "outside"
@@ -884,8 +884,10 @@ def test_pipeline_streaming_workspace_error_returns_failed_task_event(monkeypatc
 
     assert response.status_code == 200
     assert "Agent should enqueue Task before TaskStatusUpdateEvent event" not in body
-    assert "workspace" in body.lower()
-    assert "failed" in body.lower()
+    data = response.json()
+    assert data["error"]["code"] == -32602
+    assert data["error"]["message"] == "Invalid A2A workspace metadata."
+    assert data["error"]["data"][0]["reason"] == "INVALID_PARAMS"
 
 
 def test_follow_up_message_through_sdk_route_updates_existing_task(monkeypatch, tmp_path) -> None:

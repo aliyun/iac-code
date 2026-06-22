@@ -118,11 +118,24 @@ def _install_flow_fake_pty(
 
         def expect_optional(self, patterns, *, description, timeout):
             actions.append(("expect_optional", description))
+            if description == "second ask question after image answer":
+                return False
             return True
 
         def send(self, text, *, label="send"):
             actions.append((label, text))
             self.events.append({"type": label, "text": text, "transcript_offset": 0})
+
+        def paste_image_fixture(self, image_key: str):
+            actions.append(("paste-image-fixture", image_key))
+            self.events.append(
+                {
+                    "type": "paste-image-fixture",
+                    "image_key": image_key,
+                    "path": f"/repo/scripts/a2a/e2e/fixtures/text-images/{image_key}.png",
+                    "transcript_offset": 0,
+                }
+            )
 
         def terminate(self, *, force=False):
             actions.append(("terminate", str(force)))
@@ -304,6 +317,11 @@ def test_all_regression_scenarios_are_parseable() -> None:
         "scenario1",
         "ask-waiting",
         "ask-waiting-resume",
+        "image-initial",
+        "image-ask-waiting-resume",
+        "image-selection-waiting-resume",
+        "image-normal-handoff",
+        "image-interrupt",
         "selection-waiting-resume",
         "selection-invalid-then-valid",
         "evaluate-resume",
@@ -319,6 +337,23 @@ def test_all_regression_scenarios_are_parseable() -> None:
     )
 
     assert runner._selected_scenarios(args) == expected
+
+
+def test_repl_image_fixture_paths_reuse_static_pngs() -> None:
+    runner = _load_runner()
+
+    for image_key in [
+        "initial",
+        "ask-first-answer",
+        "ask-second-answer",
+        "selection",
+        "normal-followup",
+        "rollback-interrupt",
+    ]:
+        path = runner._text_image_fixture_path(image_key)
+        assert path.is_file()
+        assert path.suffix == ".png"
+        assert path.parent.name == "text-images"
 
 
 def test_run_dir_requires_single_scenario() -> None:
@@ -1831,6 +1866,183 @@ def test_scenario1_runs_expected_terminal_flow(monkeypatch, tmp_path: Path) -> N
     assert ("select-default-candidate", f"{runner.DEFAULT_SELECTION_PROMPT}\r") in actions
     assert ("sendline", runner.DEFAULT_NORMAL_FOLLOWUP_PROMPT) in actions
     assert ("sendline", "/exit") in actions
+
+
+def test_image_initial_pastes_static_prompt_image(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    actions: list[tuple[str, str]] = []
+    transcript = "● Confirm and select (4/5)\n✔ Pipeline completed\n交换机 ID   vsw-bp1234567890\n"
+    _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="image-initial")
+
+    assert runner.run_image_initial(args, "image-initial") == 0
+
+    ordered_actions = [
+        (kind, value)
+        for kind, value in actions
+        if kind in {"expect", "sendline", "paste-image-fixture", "select-default-candidate"}
+    ]
+    assert ordered_actions == [
+        ("expect", "initial prompt"),
+        ("expect", "prompt input ready"),
+        ("paste-image-fixture", "initial"),
+        ("sendline", runner._stack_name_constraint(tmp_path, "image-initial")),
+        ("expect", "pipeline started"),
+        ("expect", "candidate selection visible"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
+        ("expect", "pipeline completed after image initial"),
+        ("sendline", "/exit"),
+    ]
+    assert ("sendline", args.initial_prompt) not in actions
+
+
+def test_image_ask_waiting_resume_pastes_static_answer_image(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    actions: list[tuple[str, str]] = []
+    transcript = (
+        "● Ask user question\n"
+        "● Ask user question\n"
+        "● Confirm and select (4/5)\n"
+        "✔ Pipeline completed\n"
+        "交换机 ID   vsw-bp1234567890\n"
+    )
+    _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="image-ask-waiting-resume")
+
+    assert runner.run_image_ask_waiting_resume(args, "image-ask-waiting-resume") == 0
+
+    ordered_actions = [
+        (kind, value)
+        for kind, value in actions
+        if kind in {"expect", "spawn", "terminate", "sendline", "paste-image-fixture", "select-default-candidate"}
+    ]
+    assert ordered_actions == [
+        ("spawn", ""),
+        ("expect", "initial prompt"),
+        ("expect", "prompt input ready"),
+        ("sendline", args.ask_prompt),
+        ("expect", "ask question visible before kill"),
+        ("terminate", "True"),
+        ("spawn", "--continue"),
+        ("expect", "ask question replayed"),
+        ("expect", "ask image answer input ready after resume"),
+        ("paste-image-fixture", "ask-first-answer"),
+        ("sendline", runner._stack_name_constraint(tmp_path, "image-ask-waiting-resume")),
+        ("expect", "pipeline continued after ask image resume"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
+        ("expect", "pipeline completed after ask image resume"),
+        ("sendline", "/exit"),
+        ("terminate", "False"),
+    ]
+    assert ("sendline", args.ask_answer) not in actions
+
+
+def test_image_selection_waiting_resume_starts_with_image_and_recovers_selection(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    actions: list[tuple[str, str]] = []
+    transcript = (
+        "● Confirm and select (4/5)\n● Confirm and select (4/5)\n✔ Pipeline completed\n交换机 ID   vsw-bp1234567890\n"
+    )
+    _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="image-selection-waiting-resume")
+
+    assert runner.run_image_selection_waiting_resume(args, "image-selection-waiting-resume") == 0
+
+    ordered_actions = [
+        (kind, value)
+        for kind, value in actions
+        if kind in {"expect", "spawn", "terminate", "sendline", "paste-image-fixture", "select-default-candidate"}
+    ]
+    assert ordered_actions == [
+        ("spawn", ""),
+        ("expect", "initial prompt"),
+        ("expect", "prompt input ready"),
+        ("paste-image-fixture", "initial"),
+        ("sendline", runner._stack_name_constraint(tmp_path, "image-selection-waiting-resume")),
+        ("expect", "candidate selection visible before image resume kill"),
+        ("terminate", "True"),
+        ("spawn", "--continue"),
+        ("expect", "candidate selection replayed after image resume"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
+        ("expect", "pipeline completed after image selection resume"),
+        ("sendline", "/exit"),
+        ("terminate", "False"),
+    ]
+
+
+def test_image_normal_handoff_pastes_static_followup_image(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    actions: list[tuple[str, str]] = []
+    transcript = (
+        "● Confirm and select (4/5)\n"
+        "✔ Pipeline completed\n"
+        "Pipeline completed. Normal chat is now active.\n"
+        "[Image #1]\n"
+        "刚才创建了一个 VSwitch 交换机。\n"
+        "交换机 ID   vsw-bp1234567890\n"
+    )
+    _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="image-normal-handoff")
+    stack_owned_initial = runner._stack_creating_prompt(args.initial_prompt, tmp_path, "image-normal-handoff")
+
+    assert runner.run_image_normal_handoff(args, "image-normal-handoff") == 0
+
+    ordered_actions = [
+        (kind, value)
+        for kind, value in actions
+        if kind in {"expect", "sendline", "paste-image-fixture", "submit-image", "select-default-candidate"}
+    ]
+    assert ordered_actions == [
+        ("expect", "initial prompt"),
+        ("expect", "prompt input ready"),
+        ("sendline", stack_owned_initial),
+        ("expect", "pipeline started"),
+        ("expect", "candidate selection visible"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
+        ("expect", "pipeline fully completed"),
+        ("expect", "normal prompt input ready"),
+        ("paste-image-fixture", "normal-followup"),
+        ("submit-image", "\r"),
+        ("expect", "normal image follow-up answered created VSwitch"),
+        ("sendline", "/exit"),
+    ]
+    assert ("sendline", args.normal_followup_prompt) not in actions
+
+
+def test_image_interrupt_pastes_static_rollback_image(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    actions: list[tuple[str, str]] = []
+    transcript = (
+        "● Evaluate candidates (3/5)\n"
+        "[Image #1]\n"
+        "● Intent parsing (1/5)\n"
+        "目标资源为 ALIYUN::ECS::SecurityGroup 安全组。\n"
+    )
+    _install_flow_fake_pty(monkeypatch, runner, transcript, actions, scenario="image-interrupt")
+
+    assert runner.run_image_interrupt(args, "image-interrupt") == 0
+
+    ordered_actions = [
+        (kind, value)
+        for kind, value in actions
+        if kind in {"expect", "send-esc", "sendline", "paste-image-fixture", "submit-image"}
+    ]
+    assert ordered_actions == [
+        ("expect", "initial prompt"),
+        ("expect", "prompt input ready"),
+        ("sendline", args.initial_prompt),
+        ("expect", "candidate evaluation visible"),
+        ("expect", "parallel interrupt input ready"),
+        ("send-esc", "\x1b"),
+        ("expect", "parallel interrupt text input ready"),
+        ("paste-image-fixture", "rollback-interrupt"),
+        ("submit-image", "\r"),
+        ("expect", "post-rollback pipeline progress visible"),
+        ("expect", "post-rollback security group target visible"),
+        ("sendline", "/exit"),
+    ]
+    assert ("sendline", args.rollback_prompt) not in actions
 
 
 def test_rollback_step3_sends_rollback_prompt_without_waiting_for_visible_interrupt(

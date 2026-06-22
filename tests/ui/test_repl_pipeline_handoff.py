@@ -22,6 +22,7 @@ from iac_code.pipeline.engine.cleanup import (
     create_cleanup_prompt_message,
 )
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
 
 
@@ -1642,7 +1643,7 @@ async def test_handoff_injection_failure_still_switches_to_normal_and_preserves_
     )
     pipeline.clear_sidecar.assert_not_called()
     pipeline.mark_user_aborted.assert_not_called()
-    pipeline.resume.assert_called_once_with("start")
+    pipeline.resume.assert_called_once_with(PipelineUserInput(content="start", display_text="start", has_images=False))
     pipeline.run.assert_not_called()
     assert repl._pipeline is None
     assert repl._pipeline_waiting_input is False

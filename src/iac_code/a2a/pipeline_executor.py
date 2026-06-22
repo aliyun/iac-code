@@ -37,6 +37,7 @@ from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_out
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.public_errors import public_error
 from iac_code.pipeline.engine.session import PipelineSession
+from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import use_session_id
@@ -159,8 +160,13 @@ class IacCodeA2APipelineExecutor:
         task_id: str,
         context_id: str,
         cwd: str,
-        prompt: str,
+        pipeline_input: PipelineUserInput | str | None = None,
+        prompt: str | None = None,
     ) -> None:
+        if pipeline_input is None:
+            pipeline_input = prompt or ""
+        pipeline_input = normalize_pipeline_user_input(pipeline_input)
+        prompt = pipeline_input.display_text
         session_storage = SessionStorage()
 
         def runtime_factory(session_id: str) -> Any:
@@ -195,7 +201,7 @@ class IacCodeA2APipelineExecutor:
                     task_id=task_id,
                     context_id=context_id,
                     cwd=cwd,
-                    prompt=prompt,
+                    pipeline_input=pipeline_input,
                     preserve_task_record=preserve_active_task,
                 )
                 if routed:
@@ -270,6 +276,7 @@ class IacCodeA2APipelineExecutor:
                 selected = self._select_stream(
                     pipeline,
                     prompt,
+                    pipeline_input=pipeline_input,
                     publisher=publisher,
                     task_id=task_id,
                     context_id=context_id,
@@ -294,7 +301,7 @@ class IacCodeA2APipelineExecutor:
                         if not stream_result.restart_requested:
                             break
 
-                        stream = self._continue_after_interrupt_stream(pipeline, prompt)
+                        stream = self._continue_after_interrupt_stream(pipeline, pipeline_input)
 
                 terminal_status_published = False
                 terminal_sidecar = _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None))
@@ -395,15 +402,29 @@ class IacCodeA2APipelineExecutor:
         task_id: str,
         context_id: str,
         cwd: str,
-        prompt: str,
+        pipeline_input: PipelineUserInput,
         preserve_task_record: bool,
     ) -> bool:
+        pipeline_input = normalize_pipeline_user_input(pipeline_input)
+        prompt = pipeline_input.display_text
         runtime = ctx.runtime
         pipeline = getattr(runtime, "pipeline", None)
         if pipeline is None:
             return False
 
-        pending_question_route = await self._route_pending_question_answer(runtime, prompt)
+        try:
+            pending_question_route = await self._route_pending_question_answer(runtime, pipeline_input)
+        except Exception as exc:
+            await self._publish_exception_status(
+                event_queue,
+                task=task,
+                task_id=task_id,
+                context_id=context_id,
+                exc=exc,
+                preserve_task_record=preserve_task_record,
+                pipeline_publisher=getattr(runtime, "publisher", None),
+            )
+            return True
         if pending_question_route == _PENDING_QUESTION_ANSWERED:
             task.state = TASK_STATE_WORKING
             self._task_store.mirror_task(task)
@@ -445,7 +466,7 @@ class IacCodeA2APipelineExecutor:
                 task_id=task_id,
                 context_id=context_id,
                 session_id=ctx.session_id,
-                prompt=prompt,
+                pipeline_input=pipeline_input,
                 preserve_task_record=preserve_task_record,
             )
             return True
@@ -468,12 +489,21 @@ class IacCodeA2APipelineExecutor:
                 await _maybe_await(pause_agent_loops())
                 paused = True
 
-            verdict = await _maybe_await(handler(prompt))
+            runner_input = _pipeline_runner_input(pipeline_input)
+            verdict = await _maybe_await(handler(runner_input))
             parent_rollback: bool | None = None
             if getattr(verdict, "action", "") == "hard_interrupt":
                 apply_hard_interrupt = getattr(pipeline, "apply_hard_interrupt", None)
                 if callable(apply_hard_interrupt):
-                    parent_rollback = bool(await _maybe_await(apply_hard_interrupt(verdict)))
+                    parameters = inspect.signature(apply_hard_interrupt).parameters
+                    if pipeline_input.has_images and (
+                        "source_input" in parameters
+                        or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+                    ):
+                        applied = apply_hard_interrupt(verdict, source_input=runner_input)
+                    else:
+                        applied = apply_hard_interrupt(verdict)
+                    parent_rollback = bool(await _maybe_await(applied))
                     if parent_rollback:
                         runtime.restart_after_interrupt = True
                         _restart_requested_event(runtime).set()
@@ -540,9 +570,11 @@ class IacCodeA2APipelineExecutor:
         task_id: str,
         context_id: str,
         session_id: str,
-        prompt: str,
+        pipeline_input: PipelineUserInput,
         preserve_task_record: bool,
     ) -> None:
+        pipeline_input = normalize_pipeline_user_input(pipeline_input)
+        prompt = pipeline_input.display_text
         owner_task = asyncio.current_task()
         task.active_task = owner_task
         ctx.active_task_id = task_id
@@ -555,7 +587,10 @@ class IacCodeA2APipelineExecutor:
         self._task_store.mirror_task(task)
         self._task_store.mirror_context(ctx)
         try:
-            stream = pipeline.continue_from_sidecar(user_input=prompt) if prompt else pipeline.continue_from_sidecar()
+            if prompt:
+                stream = pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input))
+            else:
+                stream = pipeline.continue_from_sidecar()
             task.state = TASK_STATE_WORKING
             self._task_store.mirror_task(task)
             with use_session_id(session_id):
@@ -568,7 +603,7 @@ class IacCodeA2APipelineExecutor:
                     )
                     if not stream_result.restart_requested:
                         break
-                    stream = self._continue_after_interrupt_stream(pipeline, prompt)
+                    stream = self._continue_after_interrupt_stream(pipeline, pipeline_input)
 
             snapshot = publisher.snapshot_store.load() or {}
             task.state = _task_state_from_pipeline(pipeline, snapshot)
@@ -623,11 +658,11 @@ class IacCodeA2APipelineExecutor:
         except Exception:
             logger.warning("A2A pipeline telemetry correlation setup failed", exc_info=True)
 
-    def _continue_after_interrupt_stream(self, pipeline: Any, prompt: str) -> AsyncIterator[Any]:
+    def _continue_after_interrupt_stream(self, pipeline: Any, pipeline_input: PipelineUserInput) -> AsyncIterator[Any]:
         continue_after_interrupt = getattr(pipeline, "continue_after_interrupt", None)
         if callable(continue_after_interrupt):
             return continue_after_interrupt()
-        return pipeline.run(prompt)
+        return pipeline.run(_pipeline_runner_input(pipeline_input))
 
     async def _consume_stream_until_restart(
         self,
@@ -760,6 +795,7 @@ class IacCodeA2APipelineExecutor:
         pipeline: Any,
         prompt: str,
         *,
+        pipeline_input: PipelineUserInput,
         publisher: PipelineA2AEventPublisher,
         task_id: str,
         context_id: str,
@@ -770,7 +806,10 @@ class IacCodeA2APipelineExecutor:
             _raise_if_sidecar_restore_failed(pipeline, status)
             if not _sidecar_matches_task(publisher, task_id=task_id, context_id=context_id, sidecar_status=status):
                 pipeline = self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
-                return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.run(prompt))
+                return _SelectedPipelineStream(
+                    pipeline=pipeline,
+                    stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+                )
             pending_ask = _pending_ask_input_from_sidecar(
                 publisher,
                 task_id=task_id,
@@ -784,6 +823,7 @@ class IacCodeA2APipelineExecutor:
                         publisher=publisher,
                         pending_input=pending_ask,
                         prompt=prompt,
+                        pipeline_input=pipeline_input,
                     ),
                 )
             pending_pause = _pending_pipeline_pause_input_from_sidecar(
@@ -793,15 +833,23 @@ class IacCodeA2APipelineExecutor:
             )
             if pending_pause is not None:
                 stream = (
-                    pipeline.continue_from_sidecar(user_input=prompt) if prompt else pipeline.continue_from_sidecar()
+                    pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input))
+                    if prompt
+                    else pipeline.continue_from_sidecar()
                 )
                 return _SelectedPipelineStream(pipeline=pipeline, stream=stream)
-            return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.resume(prompt))
+            return _SelectedPipelineStream(
+                pipeline=pipeline,
+                stream=pipeline.resume(_pipeline_runner_input(pipeline_input)),
+            )
         if status == "running":
             _raise_if_sidecar_restore_failed(pipeline, status)
             if not _sidecar_matches_task(publisher, task_id=task_id, context_id=context_id, sidecar_status=status):
                 pipeline = self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
-                return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.run(prompt))
+                return _SelectedPipelineStream(
+                    pipeline=pipeline,
+                    stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+                )
             pending_ask = _pending_ask_input_from_sidecar(
                 publisher,
                 task_id=task_id,
@@ -815,6 +863,7 @@ class IacCodeA2APipelineExecutor:
                         publisher=publisher,
                         pending_input=pending_ask,
                         prompt=prompt,
+                        pipeline_input=pipeline_input,
                     ),
                 )
             pending_pause = _pending_pipeline_pause_input_from_sidecar(
@@ -824,20 +873,29 @@ class IacCodeA2APipelineExecutor:
             )
             if pending_pause is not None:
                 stream = (
-                    pipeline.continue_from_sidecar(user_input=prompt) if prompt else pipeline.continue_from_sidecar()
+                    pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input))
+                    if prompt
+                    else pipeline.continue_from_sidecar()
                 )
                 return _SelectedPipelineStream(pipeline=pipeline, stream=stream)
             if prompt:
                 return _SelectedPipelineStream(
-                    pipeline=pipeline, stream=pipeline.continue_from_sidecar(user_input=prompt)
+                    pipeline=pipeline,
+                    stream=pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input)),
                 )
             return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.continue_from_sidecar())
         if status in _TERMINAL_SIDECAR_STATUSES:
             if _terminal_sidecar_matches_task(publisher, status, task_id=task_id, context_id=context_id):
                 return _SelectedPipelineStream(pipeline=pipeline, stream=_empty_stream())
             pipeline = self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
-            return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.run(prompt))
-        return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.run(prompt))
+            return _SelectedPipelineStream(
+                pipeline=pipeline,
+                stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+            )
+        return _SelectedPipelineStream(
+            pipeline=pipeline,
+            stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+        )
 
     def _fresh_pipeline_after_sidecar_mismatch(
         self,
@@ -994,7 +1052,9 @@ class IacCodeA2APipelineExecutor:
             return
         runtime.pending_question = _PendingAskUserQuestion(event=question, envelope=dict(envelope))
 
-    async def _route_pending_question_answer(self, runtime: Any, prompt: str) -> str:
+    async def _route_pending_question_answer(self, runtime: Any, pipeline_input: PipelineUserInput) -> str:
+        pipeline_input = normalize_pipeline_user_input(pipeline_input)
+        prompt = pipeline_input.display_text
         pending = getattr(runtime, "pending_question", None)
         if not isinstance(pending, _PendingAskUserQuestion):
             return _PENDING_QUESTION_NOT_ROUTED
@@ -1006,11 +1066,12 @@ class IacCodeA2APipelineExecutor:
             return _PENDING_QUESTION_STALE_FINISHED
 
         publisher = getattr(runtime, "publisher", None)
-        if not isinstance(publisher, PipelineA2AEventPublisher):
+        publish_manual = getattr(publisher, "publish_manual", None)
+        if not callable(publish_manual):
             return _PENDING_QUESTION_NOT_ROUTED
 
         answer = _ask_user_question_answer_from_prompt(question, prompt)
-        published = await publisher.publish_manual(
+        published = await publish_manual(
             "input_received",
             str(pending.envelope.get("scope") or "pipeline"),
             status="working",
@@ -1028,9 +1089,55 @@ class IacCodeA2APipelineExecutor:
         if published is None:
             return _PENDING_QUESTION_NOT_ROUTED
 
+        if pipeline_input.has_images:
+            inject_pending_question_supplement = getattr(
+                getattr(runtime, "pipeline", None),
+                "inject_pending_question_supplement",
+                None,
+            )
+            if callable(inject_pending_question_supplement):
+                try:
+                    injected = inject_pending_question_supplement(pipeline_input.content, envelope=pending.envelope)
+                    if inspect.isawaitable(injected):
+                        injected = await injected
+                except Exception:
+                    await self._restore_pending_question_input_required(runtime, pending)
+                    raise
+                if injected is False:
+                    await self._restore_pending_question_input_required(runtime, pending)
+                    raise RuntimeError("A2A ask_user_question image supplement could not be delivered.")
+            else:
+                await self._restore_pending_question_input_required(runtime, pending)
+                raise RuntimeError("A2A pipeline cannot accept ask_user_question image supplement.")
         future.set_result(answer)
         runtime.pending_question = None
         return _PENDING_QUESTION_ANSWERED
+
+    async def _restore_pending_question_input_required(self, runtime: Any, pending: "_PendingAskUserQuestion") -> None:
+        publisher = getattr(runtime, "publisher", None)
+        publish_manual = getattr(publisher, "publish_manual", None)
+        if not callable(publish_manual):
+            return
+        question = pending.event
+        envelope = pending.envelope if isinstance(pending.envelope, dict) else {}
+        data = {
+            "kind": "ask_user_question",
+            "inputId": _pending_input_id(envelope, question),
+            "toolUseId": question.tool_use_id,
+            "question": question.question,
+            "prompt": question.question,
+            "options": question.options if isinstance(question.options, list) else [],
+            "allowFreeText": question.allow_free_text,
+            "freeTextPrompt": question.free_text_prompt,
+            "required": True,
+        }
+        await publish_manual(
+            "input_required",
+            str(envelope.get("scope") or "pipeline"),
+            status="input_required",
+            data=data,
+            coordinates=_coordinates_from_envelope(envelope),
+        )
 
     async def _fail_already_active(
         self,
@@ -1151,13 +1258,19 @@ async def _empty_stream() -> AsyncIterator[Any]:
         yield None
 
 
+def _pipeline_runner_input(pipeline_input: PipelineUserInput) -> PipelineUserInput | str:
+    return pipeline_input if pipeline_input.has_images else pipeline_input.display_text
+
+
 async def _resume_pending_ask_user_question_stream(
     *,
     pipeline: Any,
     publisher: PipelineA2AEventPublisher,
     pending_input: dict[str, Any],
     prompt: str,
+    pipeline_input: PipelineUserInput,
 ) -> AsyncIterator[Any]:
+    pipeline_input = normalize_pipeline_user_input(pipeline_input)
     resume_ask_user_question = getattr(pipeline, "resume_ask_user_question", None)
     if not callable(resume_ask_user_question):
         raise RuntimeError("Pipeline cannot resume pending ask_user_question input.")
@@ -1188,6 +1301,8 @@ async def _resume_pending_ask_user_question_stream(
 
     parameters = inspect.signature(resume_ask_user_question).parameters
     resume_kwargs: dict[str, Any] = {"tool_use_id": tool_use_id}
+    if pipeline_input.has_images:
+        resume_kwargs["supplemental_input"] = pipeline_input
     if "pending_input" in parameters or any(
         parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
     ):

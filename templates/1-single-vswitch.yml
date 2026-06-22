@@ -1,5 +1,4 @@
 ROSTemplateFormatVersion: '2015-09-01'
-Description: 在已有 VPC 中创建一个新的 VSwitch
 Metadata:
   ALIYUN::ROS::Interface:
     ParameterGroups:
@@ -12,16 +11,14 @@ Metadata:
 Parameters:
   VpcId:
     Type: String
-    Description: 已有 VPC 的 ID
     Label:
-      en: VPC ID
-      zh-cn: 专有网络 ID
+      en: VPC
+      zh-cn: 专有网络
     AssociationProperty: ALIYUN::ECS::VPC::VPCId
     AssociationPropertyMetadata:
       RegionId: ${ALIYUN::Region}
   ZoneId:
     Type: String
-    Description: VSwitch 所在的可用区
     Label:
       en: Zone ID
       zh-cn: 可用区
@@ -30,13 +27,10 @@ Parameters:
       RegionId: ${ALIYUN::Region}
   CidrBlock:
     Type: String
-    Description: VSwitch 的 CIDR 网段，如 172.16.0.0/24
     Label:
       en: CIDR Block
-      zh-cn: 子网网段
-    AssociationProperty: ALIYUN::VPC::VSwitch::CidrBlock
-    AssociationPropertyMetadata:
-      VpcId: ${VpcId}
+      zh-cn: 交换机网段
+    Description: 交换机的 CIDR 网段，必须属于所属 VPC 的 CIDR 范围
 Resources:
   VSwitch:
     Type: ALIYUN::ECS::VSwitch
@@ -44,11 +38,17 @@ Resources:
       VpcId: !Ref VpcId
       ZoneId: !Ref ZoneId
       CidrBlock: !Ref CidrBlock
-      VSwitchName: vswitch-new
+      VSwitchName: app-vswitch
 Outputs:
   VSwitchId:
-    Description: 创建的 VSwitch ID
-    Value: !Ref VSwitch
+    Description: 创建的交换机 ID
+    Value: !GetAtt VSwitch.VSwitchId
     Label:
       en: VSwitch ID
       zh-cn: 交换机 ID
+  CidrBlock:
+    Description: 交换机的 CIDR 网段
+    Value: !GetAtt VSwitch.CidrBlock
+    Label:
+      en: CIDR Block
+      zh-cn: 交换机网段

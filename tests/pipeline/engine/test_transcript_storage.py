@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from iac_code import __version__
-from iac_code.agent.message import Message, TextBlock, ToolUseBlock
+from iac_code.agent.message import ImageBlock, Message, TextBlock, ToolUseBlock
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 
 
@@ -24,6 +24,21 @@ def test_append_and_load_roundtrip(tmp_path: Path):
     assert [message.role for message in messages] == ["user", "assistant"]
     assert messages[0].content == "hello"
     assert messages[1].get_text() == "hi"
+
+
+def test_pipeline_transcript_round_trips_image_blocks(tmp_path: Path):
+    storage = PipelineTranscriptStorage(tmp_path / "pipeline")
+    messages = [
+        Message(
+            role="user",
+            content=[TextBlock(text="diagram"), ImageBlock(media_type="image/png", data="aGVsbG8=")],
+        )
+    ]
+
+    storage.save("/repo", "transcript_att_0001", messages)
+    loaded = storage.load("/repo", "transcript_att_0001")
+
+    assert loaded == messages
 
 
 def test_transcript_lives_inside_sidecar(tmp_path: Path):

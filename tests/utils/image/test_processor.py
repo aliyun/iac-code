@@ -26,6 +26,7 @@ def test_image_at_arbitrary_position_produces_interleaved_blocks():
     assert len(blocks) == 3
     assert isinstance(blocks[0], TextBlock) and blocks[0].text == "look at "
     assert isinstance(blocks[1], ImageBlock)
+    assert blocks[1].ref_id == 1
     assert isinstance(blocks[2], TextBlock) and blocks[2].text == " please"
 
 

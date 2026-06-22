@@ -75,7 +75,7 @@ def serve_handler(handler_cls: type[BaseHTTPRequestHandler]) -> Iterator[str]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        host, port = server.server_address
+        host, port = server.server_address[:2]
         yield f"http://{host}:{port}"
     finally:
         server.shutdown()
@@ -100,7 +100,7 @@ def start_debugger_server(debugger, *, default_cwd: str = "/workspace/demo"):
     server = debugger.create_server(config)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    host, port = server.server_address
+    host, port = server.server_address[:2]
 
     class RunningServer:
         url = f"http://{host}:{port}"
@@ -124,7 +124,7 @@ def start_logged_debugger_server(debugger, *, log_dir: Path, default_cwd: str = 
     server = debugger.create_server(config)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    host, port = server.server_address
+    host, port = server.server_address[:2]
 
     class RunningServer:
         url = f"http://{host}:{port}"
@@ -222,6 +222,61 @@ def test_build_message_stream_payload_uses_a2a_v1_method_and_cwd_metadata() -> N
     assert message["contextId"] == "ctx-demo"
     assert message["taskId"] == "task-demo"
     assert payload["params"]["configuration"] == {"acceptedOutputModes": ["text/plain"]}
+
+
+def test_build_message_stream_payload_adds_image_data_parts() -> None:
+    debugger = load_debugger_module()
+
+    payload = debugger.build_message_stream_payload(
+        cwd="/workspace/demo",
+        prompt="inspect this topology",
+        context_id="ctx-demo",
+        task_id="task-demo",
+        request_id="req-1",
+        message_id="msg-1",
+        images=[
+            {
+                "filename": "topology.png",
+                "mediaType": "image/png",
+                "bytes": "iVBORw0KGgo=",
+            }
+        ],
+    )
+
+    assert payload["params"]["message"]["parts"] == [
+        {"text": "inspect this topology"},
+        {
+            "data": {"filename": "topology.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
+
+
+def test_build_message_stream_payload_allows_image_only_parts() -> None:
+    debugger = load_debugger_module()
+
+    payload = debugger.build_message_stream_payload(
+        cwd="/workspace/demo",
+        prompt="",
+        context_id="ctx-demo",
+        task_id="task-demo",
+        request_id="req-1",
+        message_id="msg-1",
+        images=[
+            {
+                "filename": "topology.png",
+                "mediaType": "image/png",
+                "bytes": "iVBORw0KGgo=",
+            }
+        ],
+    )
+
+    assert payload["params"]["message"]["parts"] == [
+        {
+            "data": {"filename": "topology.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
 
 
 def test_build_message_stream_payload_omits_blank_context_id() -> None:
@@ -357,6 +412,8 @@ def test_index_html_contains_debugger_controls_and_raw_panels(tmp_path: Path) ->
         'id="context-id"',
         'id="task-id"',
         'id="prompt"',
+        'id="image-input"',
+        'id="image-summary"',
         'id="stream-button"',
         'id="fetch-state-button"',
         'id="cancel-button"',
@@ -1915,6 +1972,30 @@ class EmptySseTargetHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+class JsonRpcErrorTargetHandler(BaseHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        return None
+
+    def do_POST(self) -> None:
+        raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0") or "0"))
+        assert raw_body
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "1",
+                "error": {
+                    "code": -32602,
+                    "message": "Current model text-only-model does not support image input.",
+                },
+            }
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def test_message_stream_route_forwards_sse_and_uses_stream_payload() -> None:
     debugger = load_debugger_module()
     SseTargetHandler.requests = []
@@ -1944,6 +2025,81 @@ def test_message_stream_route_forwards_sse_and_uses_stream_payload() -> None:
     assert sent["params"]["message"]["contextId"] == "ctx-1"
     assert sent["params"]["message"]["taskId"] == "task-1"
     assert sent["params"]["message"]["metadata"] == {"iac_code": {"cwd": "/workspace/demo"}}
+
+
+def test_message_stream_route_forwards_image_parts() -> None:
+    debugger = load_debugger_module()
+    SseTargetHandler.requests = []
+
+    with serve_handler(SseTargetHandler) as target_url:
+        running = start_debugger_server(debugger)
+        try:
+            status, body = post_raw(
+                f"{running.url}/api/message/stream",
+                {
+                    "serverUrl": target_url,
+                    "cwd": "/workspace/demo",
+                    "contextId": "ctx-1",
+                    "prompt": "inspect this diagram",
+                    "images": [
+                        {
+                            "filename": "diagram.png",
+                            "mediaType": "image/png",
+                            "bytes": "iVBORw0KGgo=",
+                        }
+                    ],
+                },
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "data: " in body
+    sent = json.loads(SseTargetHandler.requests[0]["body"])
+    assert sent["params"]["message"]["parts"] == [
+        {"text": "inspect this diagram"},
+        {
+            "data": {"filename": "diagram.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
+
+
+def test_message_stream_route_allows_image_only_prompt() -> None:
+    debugger = load_debugger_module()
+    SseTargetHandler.requests = []
+
+    with serve_handler(SseTargetHandler) as target_url:
+        running = start_debugger_server(debugger)
+        try:
+            status, body = post_raw(
+                f"{running.url}/api/message/stream",
+                {
+                    "serverUrl": target_url,
+                    "cwd": "/workspace/demo",
+                    "contextId": "ctx-1",
+                    "prompt": "",
+                    "images": [
+                        {
+                            "filename": "diagram.png",
+                            "mediaType": "image/png",
+                            "bytes": "iVBORw0KGgo=",
+                        }
+                    ],
+                },
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "data: " in body
+    sent = json.loads(SseTargetHandler.requests[0]["body"])
+    assert sent["params"]["message"]["parts"] == [
+        {
+            "data": {"filename": "diagram.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
 
 
 def test_message_stream_route_writes_sse_debugger_log(tmp_path: Path) -> None:
@@ -2001,6 +2157,33 @@ def test_message_stream_route_logs_empty_upstream_stream(tmp_path: Path) -> None
     records = read_jsonl(tmp_path / "sse-events.jsonl")
     assert records[-1]["parsedEventType"] == "stream_empty"
     assert records[-1]["raw"] == {"type": "stream_empty", "statusCode": 200}
+
+
+def test_message_stream_route_converts_jsonrpc_error_to_sse_error(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+
+    with serve_handler(JsonRpcErrorTargetHandler) as target_url:
+        running = start_logged_debugger_server(debugger, log_dir=tmp_path)
+        try:
+            status, body = post_raw(
+                f"{running.url}/api/message/stream",
+                {
+                    "serverUrl": target_url,
+                    "cwd": "/workspace/demo",
+                    "contextId": "ctx-1",
+                    "prompt": "inspect image",
+                },
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "data: " in body
+    assert "Current model text-only-model does not support image input." in body
+    records = read_jsonl(tmp_path / "sse-events.jsonl")
+    assert records[-1]["parsedEventType"] == "error"
+    assert records[-1]["raw"]["type"] == "error"
+    assert records[-1]["raw"]["body"]["error"]["code"] == -32602
 
 
 def test_message_stream_route_ignores_client_disconnect_without_traceback(capsys: pytest.CaptureFixture[str]) -> None:

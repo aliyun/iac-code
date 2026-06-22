@@ -14,12 +14,19 @@ import httpx
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import Message, Role, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
+from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.events import make_text_part, publish_stream_event
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
-from iac_code.a2a.parts import allowed_cwd_roots, is_relative_to, parts_to_prompt, resolve_workspace_path
+from iac_code.a2a.parts import (
+    allowed_cwd_roots,
+    is_relative_to,
+    parts_to_pipeline_input,
+    parts_to_prompt,
+    resolve_workspace_path,
+)
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -34,6 +41,7 @@ from iac_code.a2a.types import (
     TASK_STATE_WORKING,
 )
 from iac_code.agent.message import Message as AgentMessage
+from iac_code.config import get_active_provider_key, get_provider_config, load_credentials
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
 from iac_code.pipeline.engine.cleanup import (
@@ -45,7 +53,9 @@ from iac_code.pipeline.engine.cleanup import (
     is_active_cleanup_prompt_message,
     mark_cleanup_prompt_message_completed,
 )
+from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+from iac_code.services.capabilities.multimodal import is_model_multimodal
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, use_aliyun_credential
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import use_session_id, use_user_id
@@ -754,8 +764,23 @@ class IacCodeA2AExecutor(AgentExecutor):
             metadata_model = self._resolve_model(metadata)
             model = metadata_model or self._model
             aliyun_credential = self._resolve_aliyun_credential(metadata)
-            prompt = self._prompt_from_context(context, cwd=cwd)
             pipeline_mode = get_run_mode() == RunMode.PIPELINE
+            route_pipeline_handoff_to_normal = False
+            if pipeline_mode:
+                route_pipeline_handoff_to_normal = await self._should_route_pipeline_handoff_to_normal(
+                    context_id=context_id,
+                    cwd=cwd,
+                )
+            pipeline_input: PipelineUserInput | None = None
+            if pipeline_mode and not route_pipeline_handoff_to_normal:
+                try:
+                    pipeline_input = self._pipeline_input_from_context(context, cwd=cwd)
+                except ValueError as exc:
+                    raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
+                prompt = pipeline_input.display_text
+                self._validate_pipeline_request_input(pipeline_input, model=model)
+            else:
+                prompt = self._prompt_from_context(context, cwd=cwd)
             if pipeline_mode and requested_task_id is None:
                 recovered_task_id = await self._recoverable_pipeline_task_id_for_context(context_id=context_id, cwd=cwd)
                 if recovered_task_id is not None:
@@ -769,6 +794,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             await publish_initial_task_if_missing()
             await self._task_store.ensure_task_not_expired(task.task_id)
+        except InvalidParamsError:
+            raise
         except Exception as exc:
             await publish_initial_task_if_missing()
             if _is_retryable_executor_error(exc):
@@ -800,7 +827,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             self._metrics.record_task_failed()
             return
 
-        if not prompt.strip():
+        if not (pipeline_mode and not route_pipeline_handoff_to_normal) and not prompt.strip():
             task.state = TASK_STATE_FAILED
             await self._publish_status(
                 event_queue,
@@ -814,11 +841,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             self._metrics.record_task_failed()
             return
 
-        route_pipeline_handoff_to_normal = pipeline_mode and await self._should_route_pipeline_handoff_to_normal(
-            context_id=context_id,
-            cwd=cwd,
-        )
         if pipeline_mode and not route_pipeline_handoff_to_normal:
+            assert pipeline_input is not None
             pipeline_executor = IacCodeA2APipelineExecutor(
                 task_store=self._task_store,
                 model=model,
@@ -836,7 +860,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 task_id=task_id,
                 context_id=context_id,
                 cwd=cwd,
-                prompt=prompt,
+                pipeline_input=pipeline_input,
             )
             return
         if route_pipeline_handoff_to_normal:
@@ -1157,6 +1181,43 @@ class IacCodeA2AExecutor(AgentExecutor):
         if not isinstance(message, Message):
             return context.get_user_input()
         return parts_to_prompt(message.parts, cwd=cwd)
+
+    def _pipeline_input_from_context(self, context: RequestContext, *, cwd: str) -> PipelineUserInput:
+        message = getattr(context, "message", None)
+        if not isinstance(message, Message):
+            return normalize_pipeline_user_input(context.get_user_input())
+        return parts_to_pipeline_input(message.parts, cwd=cwd)
+
+    def validate_pipeline_message_request(self, message: Message) -> None:
+        metadata = getattr(message, "metadata", None)
+        try:
+            cwd = self._resolve_cwd(metadata)
+            pipeline_input = parts_to_pipeline_input(message.parts, cwd=cwd)
+        except ValueError as exc:
+            raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
+        model = self._resolve_model(metadata) or self._model
+        self._validate_pipeline_request_input(pipeline_input, model=model)
+
+    def _validate_pipeline_request_input(self, pipeline_input: PipelineUserInput, *, model: str | None = None) -> None:
+        if pipeline_input.is_empty:
+            raise InvalidParamsError("A2A server received empty input.")
+        model = model or self._model
+        if pipeline_input.has_images and not self._model_supports_image_input(model=model):
+            raise InvalidParamsError(f"Current model {model} does not support image input.")
+
+    def _model_supports_image_input(self, *, model: str | None = None) -> bool:
+        model = model or self._model
+        provider_key = get_active_provider_key()
+        provider_config = get_provider_config(provider_key) if provider_key else {}
+        api_base = provider_config.get("apiBase") if isinstance(provider_config.get("apiBase"), str) else None
+        credentials = load_credentials(model=model)
+        api_key = credentials.get(provider_key, "") if provider_key else None
+        return is_model_multimodal(
+            model,
+            provider_key=provider_key,
+            base_url=api_base,
+            api_key=api_key,
+        )
 
     def _sanitize_error(self, exc: Exception) -> str:
         if isinstance(exc, ValueError):

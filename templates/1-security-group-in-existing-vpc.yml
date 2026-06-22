@@ -1,0 +1,48 @@
+ROSTemplateFormatVersion: '2015-09-01'
+Description: 在已有 VPC 中创建安全组
+Metadata:
+  ALIYUN::ROS::Interface:
+    ParameterGroups:
+      - Parameters:
+          - VpcId
+        Label:
+          default: 网络配置
+Parameters:
+  VpcId:
+    Type: String
+    Label:
+      en: VPC ID
+      zh-cn: 专有网络
+    AssociationProperty: ALIYUN::ECS::VPC::VPCId
+    AssociationPropertyMetadata:
+      RegionId: ${ALIYUN::Region}
+Resources:
+  SecurityGroup:
+    Type: ALIYUN::ECS::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      SecurityGroupName: app-security-group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          PortRange: 80/80
+          SourceCidrIp: 0.0.0.0/0
+          Priority: 1
+          Description: HTTP
+        - IpProtocol: tcp
+          PortRange: 443/443
+          SourceCidrIp: 0.0.0.0/0
+          Priority: 1
+          Description: HTTPS
+      SecurityGroupEgress:
+        - IpProtocol: all
+          PortRange: '-1/-1'
+          DestCidrIp: 0.0.0.0/0
+          Priority: 1
+          Description: Allow all outbound
+Outputs:
+  SecurityGroupId:
+    Description: 创建的安全组 ID
+    Value: !Ref SecurityGroup
+    Label:
+      en: Security Group ID
+      zh-cn: 安全组 ID

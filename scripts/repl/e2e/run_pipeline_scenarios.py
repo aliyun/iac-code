@@ -39,6 +39,15 @@ except ImportError:  # pragma: no cover - PyYAML is part of the project runtime
 RUN_LOG_ROOT_NAME = "iac-code-repl-e2e-runs"
 PTY_SEND_CHUNK_SIZE = 512
 PTY_SEND_CHUNK_DELAY_SECONDS = 0.01
+TEXT_IMAGE_FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "a2a" / "e2e" / "fixtures" / "text-images"
+TEXT_IMAGE_FIXTURE_FILENAMES = {
+    "initial": "initial.png",
+    "selection": "selection.png",
+    "normal-followup": "normal-followup.png",
+    "ask-first-answer": "ask-first-answer.png",
+    "ask-second-answer": "ask-second-answer.png",
+    "rollback-interrupt": "rollback-interrupt.png",
+}
 DEFAULT_INITIAL_PROMPT = "选择一个已有vpc，创建一个vswitch"
 DEFAULT_SELECTION_PROMPT = "1"
 DEFAULT_ASK_PROMPT = "我有个产品要上线"
@@ -163,6 +172,10 @@ STACK_CREATING_SCENARIOS = frozenset(
         "scenario1",
         "ask-waiting",
         "ask-waiting-resume",
+        "image-initial",
+        "image-ask-waiting-resume",
+        "image-selection-waiting-resume",
+        "image-normal-handoff",
         "selection-waiting-resume",
         "selection-invalid-then-valid",
         "evaluate-resume",
@@ -437,6 +450,23 @@ class ReplPty:
                 "at": _utc_now(),
             }
         )
+
+    def paste_image_fixture(self, image_key: str) -> Path:
+        path = _text_image_fixture_path(image_key)
+        transcript_offset = len(self.transcript)
+        child = self._require_child()
+        child.send(f"\x1b[200~{path}\x1b[201~")
+        _drain_child_output(child, capture=self._capture_child_output_force)
+        self.events.append(
+            {
+                "type": "paste-image-fixture",
+                "image_key": image_key,
+                "path": _redact_sensitive_text(str(path), self.env),
+                "transcript_offset": transcript_offset,
+                "at": _utc_now(),
+            }
+        )
+        return path
 
     def expect_any(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> str:
         child = self._require_child()
@@ -751,6 +781,10 @@ def _has_sendline_event(events: list[dict[str, Any]], text: str) -> bool:
     return any(event.get("type") == "sendline" and event.get("text") == text for event in events)
 
 
+def _has_image_fixture_event(events: list[dict[str, Any]], image_key: str) -> bool:
+    return any(event.get("type") == "paste-image-fixture" and event.get("image_key") == image_key for event in events)
+
+
 def _has_vswitch_business_evidence(transcript: str) -> bool:
     if _has_any_pattern(transcript, VSWITCH_EVIDENCE_PATTERNS):
         return True
@@ -810,6 +844,23 @@ def _suffix_after_sendline_text(
     return suffix
 
 
+def _suffix_after_image_fixture(
+    transcript: str,
+    events: list[dict[str, Any]],
+    image_key: str,
+) -> str:
+    offset: int | None = None
+    for event in events:
+        if event.get("type") != "paste-image-fixture" or event.get("image_key") != image_key:
+            continue
+        raw_offset = event.get("transcript_offset")
+        if isinstance(raw_offset, int) and raw_offset >= 0:
+            offset = raw_offset
+    if offset is None:
+        return ""
+    return _normalize_transcript(transcript[offset:])
+
+
 def _add_acceptance_check(checks: dict[str, bool], name: str, passed: bool) -> None:
     checks[f"acceptance: {name}"] = bool(passed)
 
@@ -826,11 +877,31 @@ def _scenario_stack_name(run_dir: Path, scenario: str) -> str:
     return f"iac-e2e-{suffix[:12]}-{safe_scenario}"[:128]
 
 
-def _stack_creating_prompt(text: str, run_dir: Path, scenario: str) -> str:
+def _stack_name_constraint(run_dir: Path, scenario: str) -> str:
     stack_name = _scenario_stack_name(run_dir, scenario)
-    return (
-        f"{text}。本次 CreateStack 的 params.StackName 必须精确等于 `{stack_name}`，禁止使用默认或自动生成 StackName。"
-    )
+    return f"本次 CreateStack 的 params.StackName 必须精确等于 `{stack_name}`，禁止使用默认或自动生成 StackName。"
+
+
+def _stack_creating_prompt(text: str, run_dir: Path, scenario: str) -> str:
+    return f"{text}。{_stack_name_constraint(run_dir, scenario)}"
+
+
+def _text_image_fixture_path(image_key: str) -> Path:
+    filename = TEXT_IMAGE_FIXTURE_FILENAMES.get(image_key)
+    if not filename:
+        raise KeyError(f"unknown text image fixture: {image_key}")
+    path = (TEXT_IMAGE_FIXTURE_ROOT / filename).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"text image fixture not found: {path}")
+    return path
+
+
+def _submit_image_fixture(pty: ReplPty, image_key: str, *, caption: str = "") -> None:
+    pty.paste_image_fixture(image_key)
+    if caption:
+        pty.sendline(caption)
+    else:
+        pty.send("\r", label="submit-image")
 
 
 def _cleanup_network_target_from_args(args: argparse.Namespace) -> CleanupNetworkTarget | None:
@@ -1692,6 +1763,105 @@ def _apply_acceptance_checks(
             "normal follow-up answered created VSwitch",
             _has_vswitch_answer_evidence(normal_answer),
         )
+    elif scenario == "image-initial":
+        _add_acceptance_check(checks, "initial image fixture was pasted", _has_image_fixture_event(events, "initial"))
+        _add_acceptance_check(
+            checks,
+            "candidate selection was shown",
+            _has_any_pattern(transcript, CANDIDATE_SELECTION_PATTERNS),
+        )
+        _add_acceptance_check(checks, "pipeline completed", _has_any_pattern(transcript, PIPELINE_COMPLETED_PATTERNS))
+        _add_acceptance_check(
+            checks,
+            "VSwitch evidence found in PTY transcript",
+            _has_vswitch_business_evidence(transcript),
+        )
+    elif scenario == "image-ask-waiting-resume":
+        after_answer = _suffix_after_image_fixture(raw_transcript, events, "ask-first-answer")
+        _add_acceptance_check(
+            checks,
+            "ask user question was replayed after resume",
+            _count_pattern(transcript, ASK_USER_QUESTION_HEADING_PATTERNS) >= 2,
+        )
+        _add_acceptance_check(checks, "resume used --continue", bool(_resume_spawns(events)))
+        _add_acceptance_check(
+            checks,
+            "ask answer image fixture was pasted",
+            _has_image_fixture_event(events, "ask-first-answer"),
+        )
+        _add_acceptance_check(
+            checks,
+            "ask image answer advanced pipeline after resume",
+            _has_any_pattern(after_answer or transcript, CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS),
+        )
+        _add_acceptance_check(
+            checks,
+            "VSwitch evidence found in PTY transcript",
+            _has_vswitch_business_evidence(transcript),
+        )
+    elif scenario == "image-selection-waiting-resume":
+        _add_acceptance_check(checks, "initial image fixture was pasted", _has_image_fixture_event(events, "initial"))
+        _add_acceptance_check(
+            checks,
+            "candidate selection was replayed after resume",
+            _count_pattern(transcript, CANDIDATE_SELECTION_PATTERNS) >= 2,
+        )
+        _add_acceptance_check(checks, "resume used --continue", bool(_resume_spawns(events)))
+        _add_acceptance_check(
+            checks,
+            "pipeline completed after resume",
+            _has_any_pattern(transcript, PIPELINE_COMPLETED_PATTERNS),
+        )
+        _add_acceptance_check(
+            checks,
+            "VSwitch evidence found in PTY transcript",
+            _has_vswitch_business_evidence(transcript),
+        )
+    elif scenario == "image-normal-handoff":
+        normal_answer = _suffix_after_image_fixture(raw_transcript, events, "normal-followup")
+        _add_acceptance_check(
+            checks,
+            "candidate selection was shown",
+            _has_any_pattern(transcript, CANDIDATE_SELECTION_PATTERNS),
+        )
+        _add_acceptance_check(checks, "pipeline completed", _has_any_pattern(transcript, PIPELINE_COMPLETED_PATTERNS))
+        _add_acceptance_check(
+            checks,
+            "normal follow-up image fixture was pasted",
+            _has_image_fixture_event(events, "normal-followup"),
+        )
+        _add_acceptance_check(
+            checks,
+            "normal image follow-up answered created VSwitch",
+            _has_vswitch_answer_evidence(normal_answer),
+        )
+    elif scenario == "image-interrupt":
+        after_rollback = _suffix_after_image_fixture(raw_transcript, events, "rollback-interrupt")
+        _add_acceptance_check(
+            checks,
+            "rollback image fixture was pasted",
+            _has_image_fixture_event(events, "rollback-interrupt"),
+        )
+        _add_acceptance_check(
+            checks,
+            "rollback reached evaluate_candidates step",
+            _has_any_pattern(transcript, EVALUATE_CANDIDATES_HEADING_PATTERNS),
+        )
+        _add_acceptance_check(
+            checks,
+            "rollback image produced post-interrupt pipeline progress",
+            _has_any_pattern(after_rollback, POST_ROLLBACK_PROGRESS_PATTERNS),
+        )
+        _add_acceptance_check(
+            checks,
+            "post-rollback target is security group",
+            _has_security_group_target_evidence(after_rollback),
+        )
+        _add_acceptance_check(
+            checks,
+            "post-rollback target is not VSwitch",
+            not _has_positive_vswitch_target_evidence(after_rollback),
+        )
     elif scenario == "ask-waiting":
         after_answer = _normalize_transcript(
             _last_event_suffix(raw_transcript, events, event_type="sendline", text=args.ask_answer)
@@ -2012,6 +2182,159 @@ def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
     return _run_with_pty(args, scenario, callback)
 
 
+def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
+    def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
+        _expect_initial_prompt(pty, args)
+        _submit_image_fixture(pty, "initial", caption=_stack_name_constraint(pty.run_dir, scenario))
+        checks["initial image fixture pasted"] = True
+        pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
+        checks["pipeline started"] = True
+        _expect_candidate_selection(pty, args, description="candidate selection visible")
+        checks["candidate selection became visible"] = True
+        _select_default_candidate(pty, args)
+        checks["candidate selection input sent"] = True
+        pty.expect_any(
+            PIPELINE_COMPLETED_PATTERNS,
+            description="pipeline completed after image initial",
+            timeout=args.stream_timeout,
+        )
+        checks["pipeline completed after image initial"] = True
+        pty.sendline("/exit")
+
+    return _run_with_pty(args, scenario, callback)
+
+
+def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
+    def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
+        _expect_initial_prompt(pty, args)
+        pty.sendline(args.ask_prompt)
+        pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
+        checks["ask question became visible before kill"] = True
+        pty.terminate(force=True)
+        checks["first process killed"] = True
+        pty.spawn(extra_args=["--continue"])
+        pty.expect_any(ASK_PATTERNS, description="ask question replayed", timeout=args.stream_timeout)
+        checks["ask question replayed"] = True
+        _expect_raw_input_ready(pty, args, description="ask image answer input ready after resume")
+        checks["ask image answer input ready after resume"] = True
+        _submit_image_fixture(pty, "ask-first-answer", caption=_stack_name_constraint(pty.run_dir, scenario))
+        checks["ask first answer image fixture pasted after resume"] = True
+        if pty.expect_optional(
+            ASK_PATTERNS,
+            description="second ask question after image answer",
+            timeout=min(args.timeout, 30.0),
+        ):
+            _expect_raw_input_ready(pty, args, description="second ask image answer input ready")
+            _submit_image_fixture(pty, "ask-second-answer", caption=_stack_name_constraint(pty.run_dir, scenario))
+            checks["ask second answer image fixture pasted"] = True
+        matched = pty.expect_any(
+            CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
+            description="pipeline continued after ask image resume",
+            timeout=args.stream_timeout,
+        )
+        checks["pipeline continued beyond ask image after resume"] = True
+        _finish_vswitch_pipeline_after_possible_selection(
+            pty,
+            args,
+            checks,
+            matched,
+            selection_check="candidate selection input sent after ask image resume",
+            completion_check="pipeline completed after ask image resume",
+            completion_description="pipeline completed after ask image resume",
+        )
+        pty.sendline("/exit")
+
+    return _run_with_pty(args, scenario, callback)
+
+
+def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
+    def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
+        _expect_initial_prompt(pty, args)
+        _submit_image_fixture(pty, "initial", caption=_stack_name_constraint(pty.run_dir, scenario))
+        checks["initial image fixture pasted"] = True
+        _expect_candidate_selection(pty, args, description="candidate selection visible before image resume kill")
+        checks["candidate selection became visible before kill"] = True
+        pty.terminate(force=True)
+        checks["first process killed"] = True
+        pty.spawn(extra_args=["--continue"])
+        _expect_candidate_selection(pty, args, description="candidate selection replayed after image resume")
+        checks["candidate selection replayed after resume"] = True
+        _select_default_candidate(pty, args)
+        checks["candidate selection input sent after resume"] = True
+        pty.expect_any(
+            PIPELINE_COMPLETED_PATTERNS,
+            description="pipeline completed after image selection resume",
+            timeout=args.stream_timeout,
+        )
+        checks["pipeline completed after image selection resume"] = True
+        pty.sendline("/exit")
+
+    return _run_with_pty(args, scenario, callback)
+
+
+def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
+    def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
+        _expect_initial_prompt(pty, args)
+        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
+        checks["pipeline started"] = True
+        _expect_candidate_selection(pty, args, description="candidate selection visible")
+        checks["candidate selection became visible"] = True
+        _select_default_candidate(pty, args)
+        checks["candidate selection input sent"] = True
+        pty.expect_any(
+            PIPELINE_FULLY_COMPLETED_PATTERNS,
+            description="pipeline fully completed",
+            timeout=args.stream_timeout,
+        )
+        checks["pipeline completed"] = True
+        _expect_raw_input_ready(pty, args, description="normal prompt input ready")
+        checks["normal prompt input ready"] = True
+        _submit_image_fixture(pty, "normal-followup")
+        checks["normal follow-up image fixture pasted"] = True
+        pty.expect_any(
+            VSWITCH_MENTION_PATTERNS,
+            description="normal image follow-up answered created VSwitch",
+            timeout=min(args.stream_timeout, 120.0),
+        )
+        checks["normal image follow-up answered created VSwitch"] = True
+        pty.sendline("/exit")
+
+    return _run_with_pty(args, scenario, callback)
+
+
+def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
+    def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
+        _expect_initial_prompt(pty, args)
+        pty.sendline(args.initial_prompt)
+        pty.expect_any(
+            CANDIDATE_EVALUATION_PATTERNS,
+            description="candidate evaluation visible",
+            timeout=args.stream_timeout,
+        )
+        checks["candidate evaluation reached"] = True
+        _expect_parallel_interrupt_ready(pty, args)
+        checks["parallel interrupt input ready"] = True
+        pty.send("\x1b", label="send-esc")
+        checks["esc sent"] = True
+        pty.expect_any(
+            REPL_INPUT_READY_PATTERNS, description="parallel interrupt text input ready", timeout=args.timeout
+        )
+        checks["parallel interrupt text input ready"] = True
+        _submit_image_fixture(pty, "rollback-interrupt")
+        checks["rollback interrupt image fixture pasted"] = True
+        pty.expect_any(
+            POST_ROLLBACK_PROGRESS_PATTERNS,
+            description="post-rollback pipeline progress visible",
+            timeout=args.stream_timeout,
+        )
+        checks["post-rollback pipeline progress visible"] = True
+        _expect_post_rollback_security_group_target(pty, args, checks)
+        pty.sendline("/exit")
+
+    return _run_with_pty(args, scenario, callback)
+
+
 def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
@@ -2326,6 +2649,11 @@ _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
     "scenario1": run_scenario1,
     "ask-waiting": run_ask_waiting,
     "ask-waiting-resume": run_ask_waiting_resume,
+    "image-initial": run_image_initial,
+    "image-ask-waiting-resume": run_image_ask_waiting_resume,
+    "image-selection-waiting-resume": run_image_selection_waiting_resume,
+    "image-normal-handoff": run_image_normal_handoff,
+    "image-interrupt": run_image_interrupt,
     "evaluate-resume": run_evaluate_resume,
     "selection-invalid-then-valid": run_selection_invalid_then_valid,
     "selection-waiting-resume": run_selection_waiting_resume,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -65,6 +66,111 @@ def test_normal_running_recovery_prompt_ignores_continue() -> None:
     assert "内容等于“继续”" in runner.DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT
     assert "请完成当前步骤" in runner.DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT
     assert "更早的方案选择消息" in runner.DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT
+
+
+def test_text_image_fixture_store_writes_png_and_manifest(tmp_path: Path) -> None:
+    runner = _load_runner()
+    store = runner.TextImageFixtureStore(tmp_path / "image-fixtures")
+
+    part = store.part("runtime-only", runner.DEFAULT_INITIAL_PROMPT)
+
+    assert part["filename"] == "runtime-only.png"
+    assert part["mediaType"] == "image/png"
+    assert base64.b64decode(part["bytes"]).startswith(b"\x89PNG\r\n\x1a\n")
+    assert (tmp_path / "image-fixtures" / "runtime-only.png").is_file()
+    manifest = json.loads((tmp_path / "image-fixtures" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runtime-only"]["text"] == runner.DEFAULT_INITIAL_PROMPT
+    assert manifest["runtime-only"]["mediaType"] == "image/png"
+    assert manifest["runtime-only"]["source"] == "generated"
+
+
+def test_static_text_image_fixtures_cover_fixed_image_prompts() -> None:
+    runner = _load_runner()
+    manifest = json.loads((runner.STATIC_TEXT_IMAGE_FIXTURE_ROOT / "manifest.json").read_text(encoding="utf-8"))
+
+    assert set(manifest) == set(runner.STATIC_TEXT_IMAGE_FIXTURES)
+    for key, text in runner.STATIC_TEXT_IMAGE_FIXTURES.items():
+        entry = manifest[key]
+        fixture_path = runner.STATIC_TEXT_IMAGE_FIXTURE_ROOT / entry["filename"]
+        assert entry["text"] == text
+        assert entry["mediaType"] == "image/png"
+        assert fixture_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_text_image_fixture_store_prefers_static_fixture(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    store = runner.TextImageFixtureStore(tmp_path / "image-fixtures")
+    static_manifest = json.loads((runner.STATIC_TEXT_IMAGE_FIXTURE_ROOT / "manifest.json").read_text(encoding="utf-8"))
+
+    def fail_render(_text: str) -> bytes:
+        raise AssertionError("static fixtures should avoid runtime image rendering")
+
+    monkeypatch.setattr(runner, "_render_text_png", fail_render)
+
+    part = store.part("initial", runner.STATIC_TEXT_IMAGE_FIXTURES["initial"])
+
+    static_path = runner.STATIC_TEXT_IMAGE_FIXTURE_ROOT / static_manifest["initial"]["filename"]
+    assert part["filename"] == static_path.name
+    assert part["mediaType"] == "image/png"
+    assert base64.b64decode(part["bytes"]) == static_path.read_bytes()
+    manifest = json.loads((tmp_path / "image-fixtures" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["initial"]["source"] == "static"
+    assert manifest["initial"]["path"] == str(static_path)
+
+
+def test_scenario_harness_stream_passes_image_parts(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    captured: dict[str, object] = {}
+
+    args = SimpleNamespace(
+        server_cwd=str(tmp_path),
+        cwd="",
+        port=0,
+        host="127.0.0.1",
+        no_auto_approve_permissions=False,
+        provider="",
+        model="",
+        api_base="",
+        deterministic=False,
+        fault_at="",
+        stream_timeout=1,
+        run_dir=str(tmp_path / "run"),
+        run_root=str(tmp_path / "runs"),
+        python=sys.executable,
+        leave_server_running=False,
+    )
+    harness = runner.ScenarioHarness(args, scenario="image-initial")
+    image = {"filename": "initial.png", "mediaType": "image/png", "bytes": "iVBORw0KGgo="}
+
+    def fake_stream_message(**kwargs):
+        captured.update(kwargs)
+        return runner.StreamSummary(
+            name=kwargs["name"],
+            prompt=kwargs["prompt"],
+            request_task_id=kwargs["task_id"],
+            task_id="task-1",
+            context_id="ctx-1",
+        )
+
+    monkeypatch.setattr(runner, "stream_message", fake_stream_message)
+
+    harness.stream(prompt=runner.IMAGE_TEXT_PROMPT, name="01-image", context_id="", task_id="", images=[image])
+
+    assert captured["images"] == [image]
+
+
+def test_image_recovery_scenarios_are_registered() -> None:
+    runner = _load_runner()
+
+    for scenario in [
+        "image-initial",
+        "image-ask-waiting",
+        "image-selection-waiting",
+        "image-normal-handoff",
+        "image-interrupt",
+    ]:
+        assert scenario in runner._SCENARIOS
+        assert scenario in runner._REAL_CLOUD_SCENARIOS
 
 
 def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path) -> None:
@@ -773,6 +879,167 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
     assert harness.checks["ROS second stack retained"] is True
 
 
+def test_rollback_step5_cleanup_recovery_uses_tool_safe_recovery_prompt(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    fake_harnesses = []
+
+    class FakeStream:
+        def __init__(self, summary: object, events: list[dict] | None = None) -> None:
+            self.summary = summary
+            self.name = summary.name
+            self.events = events or []
+
+        def wait_for(self, *_args, **_kwargs):
+            return None
+
+        def join(self, timeout: float):
+            return self.summary
+
+    class FakeHarness:
+        def __init__(self) -> None:
+            self.args = SimpleNamespace(stream_timeout=1, event_timeout=1)
+            self.run_dir = tmp_path
+            self.server_env = {}
+            self.cwd = str(tmp_path)
+            self.context_id = "ctx-1"
+            self.pipeline_task_id = "task-1"
+            self.checks: dict[str, bool] = {}
+            self.notes: list[str] = []
+            self.summaries = {}
+            self.snapshots = {}
+            self.stream_calls: list[dict] = []
+
+        def stream(self, *, prompt: str, name: str, task_id: str | None = None, **_kwargs):
+            self.stream_calls.append({"prompt": prompt, "name": name, "task_id": task_id})
+            is_initial = name == "01-initial"
+            summary = runner.StreamSummary(
+                name=name,
+                prompt=prompt,
+                request_task_id=self.pipeline_task_id if task_id is None else task_id,
+                context_id=self.context_id,
+                task_id="normal-task" if task_id == "" else self.pipeline_task_id,
+                status_states=["TASK_STATE_INPUT_REQUIRED"] if is_initial else ["TASK_STATE_COMPLETED"],
+                pipeline_event_types=["input_required"] if is_initial else ["pipeline_completed"],
+                last_input_required_step_id="confirm_and_select" if is_initial else "",
+                normal_handoff_ready=True,
+                text="done",
+            )
+            self.summaries[name] = summary
+            return summary
+
+        def start_stream(self, *, prompt: str, name: str, task_id: str | None = None, **_kwargs):
+            summary = runner.StreamSummary(
+                name=name,
+                prompt=prompt,
+                request_task_id=self.pipeline_task_id if task_id is None else task_id,
+                context_id=self.context_id,
+                task_id="normal-task" if task_id == "" else self.pipeline_task_id,
+                status_states=["TASK_STATE_COMPLETED"],
+                pipeline_event_types=["pipeline_completed"],
+                normal_handoff_ready=True,
+                text="done",
+            )
+            self.summaries[name] = summary
+            events = []
+            if name == "04-select-second-stack":
+                events.append(
+                    _stack_current_changed_event(
+                        action="CreateStack",
+                        stack_id="stack-2",
+                        status="CREATE_COMPLETE",
+                        is_success=True,
+                    )
+                )
+            return FakeStream(summary, events=events)
+
+        def fetch_state(self, name: str):
+            snapshot = {
+                "snapshot": {
+                    "status": "completed",
+                    "cleanup": {
+                        "status": "completed",
+                        "resources": [
+                            {
+                                "provider": "ros",
+                                "resourceType": "stack",
+                                "resourceId": "stack-1",
+                                "regionId": "cn-hangzhou",
+                                "cleanupStatus": "completed",
+                                "stackStatus": "DELETE_COMPLETE",
+                            }
+                        ],
+                    },
+                    "stacks": {
+                        "current": {"stackId": "stack-2", "regionId": "cn-hangzhou", "current": True},
+                        "byId": {"stack-2": {"stackId": "stack-2", "current": True}},
+                    },
+                }
+            }
+            self.snapshots[name] = snapshot
+            return snapshot
+
+        def kill9_and_restart(self) -> None:
+            self.notes.append("restarted")
+
+    def fake_run_with_harness(_args, _scenario, callback):
+        harness = FakeHarness()
+        fake_harnesses.append(harness)
+        callback(harness)
+        return 0 if all(harness.checks.values()) else 1
+
+    cleanup_ledger_items = [
+        {
+            "provider": "ros",
+            "resource_type": "stack",
+            "resource_id": "stack-1",
+            "region_id": "cn-hangzhou",
+            "cleanup_required": True,
+        }
+    ]
+
+    monkeypatch.setattr(runner, "_run_with_harness", fake_run_with_harness)
+    monkeypatch.setattr(runner, "_answer_intervening_ask_inputs", lambda _h, summary, **_kwargs: summary)
+    monkeypatch.setattr(runner, "_wait_for_created_stack", lambda *_args, **_kwargs: "stack-1")
+    monkeypatch.setattr(runner, "_wait_any", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_finish_pipeline_after_possible_input", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_wait_for_cleanup_started", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_join_after_kill", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        runner,
+        "_events_file_has_cleanup_event",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_cleanup_ledger_items",
+        lambda _h, key: cleanup_ledger_items if key == "cleanup_resources" else [],
+    )
+    monkeypatch.setattr(
+        runner,
+        "_capture_ros_stack_states",
+        lambda _h, stack_ids, name: {
+            "stack-1": {"status": "DELETE_COMPLETE"},
+            "stack-2": {"status": "CREATE_COMPLETE"},
+        },
+    )
+
+    args = SimpleNamespace(
+        event_timeout=1,
+        initial_prompt=runner.DEFAULT_INITIAL_PROMPT,
+        selection_prompt=runner.DEFAULT_SELECTION_PROMPT,
+        normal_followup_prompt=runner.DEFAULT_NORMAL_FOLLOWUP_PROMPT,
+    )
+
+    assert runner.run_rollback_step5_cleanup_recovery(args, "rollback-step5-cleanup-recovery") == 0
+    recovery_prompt = next(
+        call["prompt"] for call in fake_harnesses[0].stream_calls if call["name"] == "06-cleanup-after-restart"
+    )
+    assert recovery_prompt != runner.CONTINUE_PROMPT
+    assert "不要调用任何工具" in recovery_prompt
+    assert "不要查询" in recovery_prompt
+    assert "不要删除" in recovery_prompt
+
+
 def test_rollback_step5_cleanup_flow_fails_when_any_cleanup_stack_is_left(monkeypatch, tmp_path: Path) -> None:
     runner = _load_runner()
 
@@ -1090,7 +1357,7 @@ def test_rollback_step5_cleanup_recovery_kills_and_retriggers_cleanup(monkeypatc
         "task_id": "",
     }
     assert harness.stream_calls[-1] == {
-        "prompt": runner.CONTINUE_PROMPT,
+        "prompt": runner.CLEANUP_RECOVERY_PROMPT,
         "name": "06-cleanup-after-restart",
         "task_id": "",
     }

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from types import SimpleNamespace
 
 import pytest
@@ -77,6 +78,54 @@ async def test_dispatcher_stream_yields_events(monkeypatch, tmp_path) -> None:
 
     assert any(event["result"]["status"]["state"] == "working" for event in events)
     assert events[-1]["result"]["status"]["state"] == "input-required"
+    await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_rejects_pipeline_image_before_executor_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setattr(
+        "iac_code.a2a.parts.maybe_resize_and_downsample",
+        lambda raw: SimpleNamespace(data=raw, media_type="image/png"),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.is_model_multimodal", lambda *args, **kwargs: False)
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("executor should not run for invalid image input")
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2AExecutor.execute", fail_if_called)
+    components = create_runtime_components(model="text-only-model", host="127.0.0.1", port=41242)
+    dispatcher = A2AJsonRpcDispatcher(components)
+
+    response = await dispatcher.dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": "image-invalid",
+            "method": "SendStreamingMessage",
+            "params": {
+                "message": {
+                    "messageId": "msg-image-invalid",
+                    "contextId": "ctx-image-invalid",
+                    "role": "ROLE_USER",
+                    "parts": [
+                        {
+                            "data": {
+                                "filename": "initial.png",
+                                "bytes": base64.b64encode(b"fake image").decode("ascii"),
+                            },
+                            "mediaType": "image/png",
+                        }
+                    ],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                },
+                "configuration": {"acceptedOutputModes": ["text/plain"]},
+            },
+        }
+    )
+
+    assert response["id"] == "image-invalid"
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == "Current model text-only-model does not support image input."
     await components.aclose()
 
 

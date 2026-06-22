@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from iac_code.pipeline.config import RunMode
+from iac_code.pipeline.engine.user_input import PipelineUserInput
 
 
 def _make_repl_with_pipeline(tmp_path: Path, session_id_old: str, session_id_new: str):
@@ -297,7 +298,9 @@ async def test_swap_session_running_resume_routes_next_message_to_interrupt_judg
 
     await repl._handle_pipeline_chat("change the plan")
 
-    fake_pipeline.continue_from_sidecar.assert_called_once_with(user_input="change the plan")
+    fake_pipeline.continue_from_sidecar.assert_called_once_with(
+        user_input=PipelineUserInput(content="change the plan", display_text="change the plan", has_images=False)
+    )
     fake_pipeline.resume.assert_not_called()
 
 
@@ -337,7 +340,9 @@ async def test_swap_session_waiting_input_resume_routes_next_message_to_resume(t
 
     await repl._handle_pipeline_chat("option A")
 
-    fake_pipeline.resume.assert_called_once_with("option A")
+    fake_pipeline.resume.assert_called_once_with(
+        PipelineUserInput(content="option A", display_text="option A", has_images=False)
+    )
     fake_pipeline.continue_from_sidecar.assert_not_called()
 
 

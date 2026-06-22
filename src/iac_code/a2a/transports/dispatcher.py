@@ -237,11 +237,13 @@ class IacCodeRequestHandler(DefaultRequestHandler):
 
     async def on_message_send(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
+        self._validate_pipeline_message_request(params)
         await self._hydrate_recoverable_pipeline_task_id(params)
         return await super().on_message_send(params, context)
 
     async def on_message_send_stream(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
+        self._validate_pipeline_message_request(params)
         await self._hydrate_recoverable_pipeline_task_id(params)
         task_id = params.message.task_id or None
         if task_id and isinstance(self.task_store, A2ATaskStore) and await self.task_store.is_task_active(task_id):
@@ -494,6 +496,13 @@ class IacCodeRequestHandler(DefaultRequestHandler):
     ) -> None:
         self._validate_extensions(context)
         await super().on_delete_task_push_notification_config(params, context)
+
+    def _validate_pipeline_message_request(self, params: SendMessageRequest) -> None:
+        if get_run_mode() != RunMode.PIPELINE:
+            return
+        executor = getattr(self, "agent_executor", None)
+        if isinstance(executor, IacCodeA2AExecutor):
+            executor.validate_pipeline_message_request(params.message)
 
     def _validate_extensions(self, context) -> None:
         requested = set(getattr(context, "requested_extensions", set()) or set())

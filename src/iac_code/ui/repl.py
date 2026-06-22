@@ -91,6 +91,7 @@ if TYPE_CHECKING:
     from iac_code.pipeline import PipelineRunner
     from iac_code.pipeline.config import RunMode
     from iac_code.pipeline.engine.events import PipelineEvent
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
 
 termios: ModuleType | None
 try:
@@ -261,6 +262,8 @@ class InlineREPL:
             self.tool_registry,
             status_callback=self._status_text,
             app_state_store=self.store,
+            image_path_resolver=self._image_store.get_path,
+            image_block_path_resolver=self._image_store.store_block,
         )
 
         self._pipeline: PipelineRunner | None = None
@@ -1276,6 +1279,8 @@ class InlineREPL:
             self.tool_registry,
             status_callback=self._status_text,
             app_state_store=self.store,
+            image_path_resolver=self._image_store.get_path,
+            image_block_path_resolver=self._image_store.store_block,
         )
         temp_renderer.replay_history(messages)
         rendered = stream.getvalue().rstrip()
@@ -2105,17 +2110,7 @@ class InlineREPL:
         from iac_code.pipeline.config import RunMode
 
         if self._get_runtime_mode() == RunMode.PIPELINE:
-            # Pipeline mode doesn't accept multimodal input — flatten to text.
-            text = user_input.text if isinstance(user_input, PromptInputResult) else user_input
-            # U-I4: warn user if we're about to drop pasted image content.
-            if isinstance(user_input, PromptInputResult) and user_input.pasted_contents:
-                has_image = any(pc.type == "image" for pc in user_input.pasted_contents.values())
-                if has_image:
-                    self.renderer.print_system_message(
-                        _("Note: images are not supported in pipeline mode and will be ignored."),
-                        style="yellow",
-                    )
-            await self._handle_pipeline_chat(text)
+            await self._handle_pipeline_chat(self._pipeline_user_input_from_repl_input(user_input))
             return []
 
         draft_text = user_input.text if isinstance(user_input, PromptInputResult) else user_input
@@ -2318,12 +2313,41 @@ class InlineREPL:
         self._pipeline_waiting_input = restored.status == "waiting_input"
         return True
 
-    async def _handle_pipeline_chat(self, user_input: str) -> None:
+    def _pipeline_user_input_from_repl_input(
+        self, user_input: PromptInputResult | str | "PipelineUserInput" | None
+    ) -> "PipelineUserInput":
+        """Convert REPL input to the pipeline wrapper used by model-facing entry points."""
+        from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
+        from iac_code.utils.image.processor import process_user_input
+
+        if isinstance(user_input, PromptInputResult):
+            blocks = process_user_input(user_input.text, pasted_contents=user_input.pasted_contents)
+            content: str | list[ContentBlock]
+            if any(isinstance(block, ImageBlock) for block in blocks):
+                content = blocks
+            else:
+                content = user_input.text
+            return normalize_pipeline_user_input(content, display_text=user_input.text)
+        return normalize_pipeline_user_input(user_input)
+
+    async def _read_pipeline_interrupt_input(self) -> "PipelineUserInput":
+        user_input = await self._prompt_input.get_input(prompt="✎ ", transient=True)
+        if user_input is not None:
+            make_result = getattr(self._prompt_input, "make_result", None)
+            if callable(make_result):
+                result = make_result()
+                if isinstance(result, PromptInputResult):
+                    return self._pipeline_user_input_from_repl_input(result)
+        return self._pipeline_user_input_from_repl_input(user_input)
+
+    async def _handle_pipeline_chat(self, user_input: str | "PipelineUserInput") -> None:
         """Drive the pipeline and render output."""
         from iac_code.pipeline import create_pipeline
         from iac_code.pipeline.config import get_pipeline_name, get_working_directory
+        from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
 
-        self.renderer.record_user_turn(user_input)
+        pipeline_input = normalize_pipeline_user_input(user_input)
+        self.renderer.record_user_turn(pipeline_input.display_text)
 
         if self._pipeline is None:
             pipeline_cwd = get_working_directory() or self._original_cwd
@@ -2358,13 +2382,13 @@ class InlineREPL:
                 if self._pipeline_current_step_is_candidate_selection() is True:
                     resume_waiting_candidate_selection = True
                 else:
-                    event_stream = self._pipeline.resume(user_input)
+                    event_stream = cast(Any, self._pipeline).resume(pipeline_input)
             elif restored and restored.ok and restored.status == "running":
                 self._pipeline_waiting_input = False
-                event_stream = self._pipeline.continue_from_sidecar(user_input=user_input)
+                event_stream = cast(Any, self._pipeline).continue_from_sidecar(user_input=pipeline_input)
             else:
-                self._persist_pipeline_visible_user_turn(user_input)
-                event_stream = self._pipeline.run(user_input)
+                self._persist_pipeline_visible_user_turn(pipeline_input)
+                event_stream = cast(Any, self._pipeline).run(pipeline_input)
         else:
             self._refresh_pipeline_display_recorder()
             self._pipeline_waiting_input = False
@@ -2373,14 +2397,14 @@ class InlineREPL:
             resume_waiting_candidate_selection = False
             event_stream = None
             if restored_status == "running":
-                event_stream = self._pipeline.continue_from_sidecar(user_input=user_input)
+                event_stream = cast(Any, self._pipeline).continue_from_sidecar(user_input=pipeline_input)
             elif restored_status == "waiting_input":
                 if self._pipeline_current_step_is_candidate_selection() is True:
                     resume_waiting_candidate_selection = True
                 else:
-                    event_stream = self._pipeline.resume(user_input)
+                    event_stream = cast(Any, self._pipeline).resume(pipeline_input)
             else:
-                event_stream = self._pipeline.resume(user_input)
+                event_stream = cast(Any, self._pipeline).resume(pipeline_input)
 
         # No except for CancelledError/KeyboardInterrupt here: Ctrl+C must
         # propagate to the run() loop's single handler (which keeps the REPL
@@ -2650,7 +2674,9 @@ class InlineREPL:
             )
         return "succeeded"
 
-    async def _handle_mid_pipeline_message(self, msg: str, suppress_render: bool = False) -> tuple[bool, str]:
+    async def _handle_mid_pipeline_message(
+        self, msg: PromptInputResult | str | "PipelineUserInput", suppress_render: bool = False
+    ) -> tuple[bool, str]:
         """Process a user message received during pipeline execution via judge.
 
         Returns (needs_restart, feedback_text). When suppress_render is True,
@@ -2659,6 +2685,10 @@ class InlineREPL:
         """
         if self._pipeline is None:
             return False, ""
+        pipeline_input = self._pipeline_user_input_from_repl_input(msg)
+        if pipeline_input.is_empty:
+            return False, ""
+        display_text = pipeline_input.display_text
 
         from rich.spinner import Spinner
 
@@ -2668,11 +2698,11 @@ class InlineREPL:
             refresh_per_second=10,
             transient=True,
         ):
-            verdict = await self._pipeline.handle_user_interrupt(msg)
+            verdict = await cast(Any, self._pipeline).handle_user_interrupt(pipeline_input)
 
         self._last_interrupt_paused = bool(getattr(verdict, "paused", False))
         if verdict.action == "continue":
-            feedback = self._format_interrupt_feedback("continue", msg, verdict)
+            feedback = self._format_interrupt_feedback("continue", display_text, verdict)
             if getattr(verdict, "paused", False):
                 save_interrupt_pause = getattr(self._pipeline, "save_interrupt_pause", None)
                 if callable(save_interrupt_pause):
@@ -2688,27 +2718,30 @@ class InlineREPL:
                     style="yellow",
                 )
             if not suppress_render:
-                self._render_interrupt_feedback("continue", msg, verdict)
+                self._render_interrupt_feedback("continue", display_text, verdict)
             return False, feedback
         if verdict.action == "supplement":
-            feedback = self._format_interrupt_feedback("supplement", msg, verdict)
+            feedback = self._format_interrupt_feedback("supplement", display_text, verdict)
             if not suppress_render:
-                self._render_interrupt_feedback("supplement", msg, verdict)
+                self._render_interrupt_feedback("supplement", display_text, verdict)
             return False, feedback
         if verdict.action == "hard_interrupt":
-            is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict)
+            if pipeline_input.has_images:
+                is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict, source_input=pipeline_input)
+            else:
+                is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict)
             applied_verdict = getattr(self._pipeline, "last_applied_interrupt_verdict", None)
             feedback_verdict = (
                 applied_verdict if getattr(applied_verdict, "action", None) == "hard_interrupt" else verdict
             )
             if not is_parent_rollback:
-                feedback = self._format_interrupt_feedback("hard_interrupt_candidate", msg, feedback_verdict)
+                feedback = self._format_interrupt_feedback("hard_interrupt_candidate", display_text, feedback_verdict)
                 if not suppress_render:
-                    self._render_interrupt_feedback("hard_interrupt_candidate", msg, feedback_verdict)
+                    self._render_interrupt_feedback("hard_interrupt_candidate", display_text, feedback_verdict)
                 return False, feedback
-            feedback = self._format_interrupt_feedback("hard_interrupt_parent", msg, feedback_verdict)
+            feedback = self._format_interrupt_feedback("hard_interrupt_parent", display_text, feedback_verdict)
             if not suppress_render:
-                self._render_interrupt_feedback("hard_interrupt_parent", msg, feedback_verdict)
+                self._render_interrupt_feedback("hard_interrupt_parent", display_text, feedback_verdict)
             return True, feedback
         return False, ""
 
@@ -2929,10 +2962,10 @@ class InlineREPL:
                             self._pipeline.pause_agent_loops()
                         try:
                             had_renderer = await _stop_renderer()
-                            user_input = await self._prompt_input.get_input(prompt="✎ ", transient=True)
-                            if user_input and user_input.strip():
+                            user_input = await self._read_pipeline_interrupt_input()
+                            if not user_input.is_empty:
                                 needs_restart, feedback = await self._handle_mid_pipeline_message(
-                                    user_input.strip(), suppress_render=True
+                                    user_input, suppress_render=True
                                 )
                                 if needs_restart and self._pipeline:
                                     event_stream = await self._restart_pipeline_stream_after_interrupt(
@@ -3191,9 +3224,6 @@ class InlineREPL:
 
         stop_keys = asyncio.Event()
         interrupt_requested = asyncio.Event()
-        input_mode = False
-        input_chars: list[str] = []
-        input_done = asyncio.Event()
         parent_task = asyncio.current_task()
 
         def _request_pipeline_cancel() -> None:
@@ -3203,7 +3233,6 @@ class InlineREPL:
                 parent_task.cancel()
 
         async def key_reader():
-            nonlocal input_mode
             loop = asyncio.get_running_loop()
             try:
                 with RawInputCapture(use_cbreak=True) as cap:
@@ -3215,26 +3244,6 @@ class InlineREPL:
                         if key_event.ctrl and key_event.key == "c":
                             _request_pipeline_cancel()
                             return
-
-                        if input_mode:
-                            if key_event.key == "enter":
-                                input_done.set()
-                                return
-                            if key_event.key == "escape":
-                                input_chars.clear()
-                                input_done.set()
-                                return
-                            if key_event.key == "backspace":
-                                if input_chars:
-                                    input_chars.pop()
-                            elif key_event.key == "paste":
-                                if key_event.char:
-                                    input_chars.extend(key_event.char)
-                            elif key_event.char and key_event.char.isprintable():
-                                input_chars.append(key_event.char)
-                            tabs.set_status_message(f"✎ {''.join(input_chars)}█")
-                            _live_update(tabs.render())
-                            continue
 
                         if key_event.key == "escape":
                             interrupt_requested.set()
@@ -3254,26 +3263,24 @@ class InlineREPL:
                 pass
 
         async def _handle_esc_interrupt() -> bool:
-            """Handle ESC interrupt inline (no live.stop). Returns True if pipeline restarted."""
-            nonlocal input_mode, interrupt_feedback
+            """Handle ESC interrupt prompt. Returns True if pipeline restarted."""
+            nonlocal interrupt_feedback
             if self._pipeline:
                 self._last_interrupt_paused = False
                 self._pipeline.pause_agent_loops()
+            live_stopped = False
             try:
-                input_mode = True
-                input_chars.clear()
-                input_done.clear()
-                tabs.set_status_message("✎ █")
+                await _cancel_key_task()
+                tabs.set_status_message("✎")
                 _live_update(tabs.render())
 
-                nonlocal key_task
-                key_task = asyncio.create_task(key_reader())
-                await input_done.wait()
+                live.stop()
+                live_stopped = True
+                user_input = await self._read_pipeline_interrupt_input()
+                live.start()
+                live_stopped = False
 
-                user_input = "".join(input_chars).strip()
-                input_mode = False
-
-                if user_input:
+                if not user_input.is_empty:
                     tabs.set_status_message(_("Judging your input..."))
                     _live_update(tabs.render())
                     needs_restart, feedback = await self._handle_mid_pipeline_message(user_input, suppress_render=True)
@@ -3287,6 +3294,8 @@ class InlineREPL:
                 else:
                     tabs.set_status_message("")
             finally:
+                if live_stopped:
+                    live.start()
                 if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
                     self._pipeline.resume_agent_loops()
             interrupt_requested.clear()
@@ -3529,9 +3538,6 @@ class InlineREPL:
 
         stop_keys = asyncio.Event()
         interrupt_requested = asyncio.Event()
-        input_mode = False
-        input_chars: list[str] = []
-        input_done = asyncio.Event()
         parent_task = asyncio.current_task()
 
         def _request_pipeline_cancel() -> None:
@@ -3541,7 +3547,6 @@ class InlineREPL:
                 parent_task.cancel()
 
         async def key_reader():
-            nonlocal input_mode
             loop = asyncio.get_running_loop()
             try:
                 with RawInputCapture(use_cbreak=True) as cap:
@@ -3553,27 +3558,6 @@ class InlineREPL:
                         if key_event.ctrl and key_event.key == "c":
                             _request_pipeline_cancel()
                             return
-
-                        if input_mode:
-                            if key_event.key == "enter":
-                                input_done.set()
-                                return
-                            if key_event.key == "escape":
-                                input_chars.clear()
-                                input_done.set()
-                                return
-                            if key_event.key == "backspace":
-                                if input_chars:
-                                    input_chars.pop()
-                            elif key_event.key == "paste":
-                                if key_event.char:
-                                    input_chars.extend(key_event.char)
-                            elif key_event.char and key_event.char.isprintable():
-                                input_chars.append(key_event.char)
-                            if tabs_renderer:
-                                tabs_renderer.set_input_line("".join(input_chars))
-                            _update_live()
-                            continue
 
                         if key_event.key == "escape":
                             interrupt_requested.set()
@@ -3631,7 +3615,7 @@ class InlineREPL:
         key_task: asyncio.Task | None = None
 
         async def _prompt_child_permission(sub_id: str, inner: PermissionRequestEvent) -> None:
-            nonlocal input_mode, key_task, live
+            nonlocal key_task, live
             response_future = inner.response_future
             if response_future is None or response_future.done():
                 return
@@ -3639,9 +3623,6 @@ class InlineREPL:
             allowed = False
             try:
                 await _stop_key_reader()
-                input_mode = False
-                input_chars.clear()
-                input_done.clear()
                 if tabs_renderer:
                     tabs_renderer.set_input_line(None)
                 live.stop()
@@ -3671,22 +3652,22 @@ class InlineREPL:
                     if self._pipeline:
                         self._last_interrupt_paused = False
                         self._pipeline.pause_agent_loops()
+                    live_stopped = False
                     try:
-                        input_mode = True
-                        input_chars.clear()
-                        input_done.clear()
+                        await _cancel_key_task()
                         if tabs_renderer:
-                            tabs_renderer.set_input_line("")
+                            tabs_renderer.set_input_line("✎")
                         _update_live()
-                        key_task = asyncio.create_task(key_reader())
-                        await input_done.wait()
 
-                        user_input = "".join(input_chars).strip()
-                        input_mode = False
+                        live.stop()
+                        live_stopped = True
+                        user_input = await self._read_pipeline_interrupt_input()
+                        live.start()
+                        live_stopped = False
                         if tabs_renderer:
                             tabs_renderer.set_input_line(None)
 
-                        if user_input:
+                        if not user_input.is_empty:
                             if tabs_renderer:
                                 tabs_renderer.set_input_line(_("Judging your input..."))
                             _update_live()
@@ -3713,6 +3694,8 @@ class InlineREPL:
                                 for acc in accumulators.values():
                                     acc.text_buffer += "\n" + feedback + "\n"
                     finally:
+                        if live_stopped:
+                            live.start()
                         if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
                             self._pipeline.resume_agent_loops()
                     interrupt_requested.clear()
@@ -4238,12 +4221,16 @@ class InlineREPL:
             logger.warning("Failed to inspect terminal pipeline sidecar: {}", exc)
             return None
 
-    def _persist_pipeline_visible_user_turn(self, user_input: str) -> None:
+    def _persist_pipeline_visible_user_turn(self, user_input: str | "PipelineUserInput") -> None:
         """Persist the user-visible pipeline prompt into the root session."""
-        if not isinstance(user_input, str) or not user_input.strip():
+        from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
+
+        pipeline_input = normalize_pipeline_user_input(user_input)
+        if pipeline_input.is_empty:
             return
+        visible_input = pipeline_input.content if pipeline_input.has_images else pipeline_input.display_text
         try:
-            injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": user_input})
+            injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": visible_input})
             self._session_storage.append(
                 self._original_cwd,
                 self._session_id,

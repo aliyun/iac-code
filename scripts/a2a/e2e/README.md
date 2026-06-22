@@ -60,6 +60,11 @@ uv run python scripts/a2a/e2e/run_recovery_scenarios.py \
   --scenario scenario1 \
   --scenario selection-waiting \
   --scenario ask-waiting \
+  --scenario image-initial \
+  --scenario image-ask-waiting \
+  --scenario image-selection-waiting \
+  --scenario image-normal-handoff \
+  --scenario image-interrupt \
   --scenario step1-running \
   --scenario step2-running \
   --scenario step3-running \
@@ -93,11 +98,16 @@ after you finish inspecting the run.
 not a separate runner or a special mode; it lives in the same scenario matrix as
 the rest of the tests.
 
-| Scenario | Where the server is killed | Recovery input | Main assertion |
+| Scenario | Cut point / special condition | Recovery input | Main assertion |
 | --- | --- | --- | --- |
 | `scenario1` | After pipeline completion and one normal-chat follow-up | Ask what the previous normal-chat question was | Normal-chat history survives restart; VSwitch evidence exists. |
 | `selection-waiting` | Step 4 waits for candidate selection | `你随便选一个方案。` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
 | `ask-waiting` | `ask_user_question` waits for user input | Clarification answers without `taskId` | Pending ask input is recovered and pipeline completes; VSwitch evidence exists. |
+| `image-initial` | Initial user message is the static `initial.png` image fixture | Candidate selection text | The image starts the pipeline, reaches step4 selection, completes, and produces VSwitch evidence. |
+| `image-ask-waiting` | `ask_user_question` waits for user input, then the server restarts | Static `ask-first-answer.png` / `ask-second-answer.png` image fixtures without `taskId` | Pending ask input is recovered, image answers hydrate the recovered task, and the pipeline completes with VSwitch evidence. |
+| `image-selection-waiting` | Step 4 waits for candidate selection, then the server restarts | Static `selection.png` image fixture without `taskId` | Waiting step4 task is recovered, the image selection is accepted, and VSwitch evidence exists. |
+| `image-normal-handoff` | Pipeline completes and hands off to normal chat; the normal follow-up is static `normal-followup.png`, then the server restarts | Normal-chat recovery question without `taskId` | Image follow-up stays in the same `contextId`, uses a new normal-chat task, and completed handoff state survives restart. |
+| `image-interrupt` | Step 3 receives static `rollback-interrupt.png` as an image rollback to `intent_parsing`, then the server restarts | `继续`, plus selection when needed | The image interrupt is recognized, the pipeline completes as a security-group task, and final deployment evidence is not VSwitch. |
 | `step1-running` | `intent_parsing` running | `继续` | Running pipeline task is recovered and completes; VSwitch evidence exists. |
 | `step2-running` | `architecture_planning` running | `继续` | Running pipeline task is recovered and completes; VSwitch evidence exists. |
 | `step3-running` | `evaluate_candidates` candidate/sub-pipeline running | `继续` | Sub-pipeline state is recovered and completes; VSwitch evidence exists. |
@@ -143,6 +153,12 @@ Rollback scenarios interrupt step 3 with:
 回退到 intent_parsing，选择一个已有vpc，创建一个安全组
 ```
 
+Image scenarios send a small text prompt plus static PNG fixtures from
+`scripts/a2a/e2e/fixtures/text-images/`. The fixture manifest pins the text,
+file name, media type, byte size, and SHA-256 hash. A scenario run also writes
+`image-fixtures/manifest.json`; fixed prompts should show `source: static`.
+Only ad-hoc or CLI-overridden text falls back to runtime image rendering.
+
 ## Recommended Order
 
 When stabilizing changes, run the smaller or more diagnostic cases first:
@@ -151,11 +167,13 @@ When stabilizing changes, run the smaller or more diagnostic cases first:
 2. `scenario1`
 3. `selection-waiting`
 4. `ask-waiting`
-5. `step1-running` through `step5-running`
-6. `normal-running`
-7. `cancel-step1` through `cancel-step5`
-8. `rollback-step1` through `rollback-step5`
-9. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
+5. `image-initial`, `image-ask-waiting`, and `image-selection-waiting`
+6. `image-normal-handoff` and `image-interrupt`
+7. `step1-running` through `step5-running`
+8. `normal-running`
+9. `cancel-step1` through `cancel-step5`
+10. `rollback-step1` through `rollback-step5`
+11. `rollback-step5-cleanup`, then `rollback-step5-cleanup-recovery`
 
 ## Preflight
 
@@ -232,6 +250,7 @@ Important files:
 - `*.task-get.json` and `*.task-list.json`: redacted `GetTask` / `ListTasks` artifacts when captured by the scenario.
 - `server-1.*.log` and `server-2.*.log`: server logs before and after restart.
 - `a2a-server.yml`: generated server config.
+- `image-fixtures/manifest.json`: image input fixture usage for image scenarios, including whether each image came from a static repository fixture or runtime rendering.
 - `workspace/`: default A2A metadata cwd and generated tool outputs unless `--cwd` is provided.
 - `preflight.json`: provider preflight result unless `--skip-preflight` is used.
 

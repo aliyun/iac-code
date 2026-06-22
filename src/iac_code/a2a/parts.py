@@ -13,6 +13,10 @@ from urllib.request import url2pathname
 
 from google.protobuf.json_format import MessageToDict
 
+from iac_code.agent.message import ContentBlock, ImageBlock, TextBlock
+from iac_code.pipeline.engine.user_input import PipelineUserInput, content_display_text, content_has_images
+from iac_code.utils.image.resizer import maybe_resize_and_downsample
+
 MAX_INLINE_BYTES = 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024
 MAX_BINARY_INLINE_BYTES = 5 * 1024 * 1024
@@ -38,6 +42,7 @@ DEFAULT_MULTIMODAL_MIME_TYPES = (
 )
 TEXT_LIKE_MIME_TYPES = frozenset(DEFAULT_TEXT_LIKE_MIME_TYPES)
 MULTIMODAL_MIME_TYPES = frozenset(DEFAULT_MULTIMODAL_MIME_TYPES)
+SUPPORTED_IMAGE_MIME_TYPES = frozenset(("image/png", "image/jpeg", "image/webp", "image/gif"))
 SUPPORTED_INPUT_MIME_TYPES = [*DEFAULT_TEXT_LIKE_MIME_TYPES, *DEFAULT_MULTIMODAL_MIME_TYPES]
 
 
@@ -106,6 +111,66 @@ def _has_symlink_component(path: Path) -> bool:
 def parts_to_prompt(message_parts: Iterable[Any], *, cwd: str | Path) -> str:
     values = [part_to_prompt(part, cwd=cwd) for part in message_parts]
     return "\n".join(value for value in values if value)
+
+
+def parts_to_pipeline_input(message_parts: Iterable[Any], *, cwd: str | Path) -> PipelineUserInput:
+    blocks: list[ContentBlock] = []
+    for part in message_parts:
+        converted = part_to_pipeline_block(part, cwd=cwd)
+        if isinstance(converted, list):
+            blocks.extend(converted)
+        elif converted:
+            blocks.append(TextBlock(text=converted))
+    if content_has_images(blocks):
+        return PipelineUserInput(
+            content=blocks,
+            display_text=content_display_text(blocks),
+            has_images=True,
+        )
+    text = "\n".join(block.text for block in blocks if isinstance(block, TextBlock))
+    return PipelineUserInput(content=text, display_text=text, has_images=False)
+
+
+def part_to_pipeline_block(part: Any, *, cwd: str | Path) -> str | list[ContentBlock]:
+    media_type = _media_type(part)
+    if _has_field(part, "text"):
+        _ensure_text_like(media_type)
+        return str(part.text)
+    if _has_field(part, "data"):
+        if media_type in SUPPORTED_IMAGE_MIME_TYPES:
+            return [_image_block_from_binary(_binary_data_part_bytes(part), requested_media_type=media_type)]
+        if _is_multimodal(media_type):
+            raise ValueError("A2A pipeline input has unsupported image media type.")
+        if media_type != "application/json":
+            raise ValueError("A2A data parts must use application/json media type.")
+        data = MessageToDict(part.data, preserving_proto_field_name=False)
+        serialized = json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        _ensure_size(serialized.encode("utf-8"), limit=MAX_INLINE_BYTES, label="A2A data part")
+        return serialized
+    if _has_field(part, "raw"):
+        raw = bytes(part.raw)
+        if media_type in SUPPORTED_IMAGE_MIME_TYPES:
+            _ensure_size(raw, limit=MAX_BINARY_INLINE_BYTES, label="A2A binary raw part")
+            return [_image_block_from_binary(raw, requested_media_type=media_type)]
+        if _is_multimodal(media_type):
+            raise ValueError("A2A pipeline input has unsupported image media type.")
+        _ensure_text_like(media_type)
+        _ensure_size(raw, limit=MAX_INLINE_BYTES, label="A2A raw part")
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("A2A raw parts must contain valid UTF-8.") from exc
+    if _has_field(part, "url"):
+        if media_type in SUPPORTED_IMAGE_MIME_TYPES:
+            path = _safe_file_url_path(str(part.url), cwd=Path(cwd))
+            if path.stat().st_size > MAX_BINARY_FILE_BYTES:
+                raise ValueError("A2A binary file URL part content is too large.")
+            return [_image_block_from_binary(path.read_bytes(), requested_media_type=media_type)]
+        if _is_multimodal(media_type):
+            raise ValueError("A2A pipeline input has unsupported image media type.")
+        _ensure_text_like(media_type)
+        return _read_file_url_part(str(part.url), cwd=Path(cwd))
+    raise ValueError("A2A server supports text, JSON data, raw text, or workspace file URL parts only.")
 
 
 def part_to_prompt(part: Any, *, cwd: str | Path) -> str:
@@ -191,6 +256,20 @@ def _binary_data_part_to_manifest(part: Any, *, media_type: str) -> str:
     data = MessageToDict(part.data, preserving_proto_field_name=False)
     if not isinstance(data, dict):
         raise ValueError("A2A binary data parts must contain an object.")
+    content = _binary_data_part_bytes(part)
+    filename = str(data.get("filename") or _filename(part) or "inline")
+    return _multimodal_manifest(
+        filename=os.path.basename(filename),
+        media_type=media_type,
+        content=content,
+        source="data",
+    )
+
+
+def _binary_data_part_bytes(part: Any) -> bytes:
+    data = MessageToDict(part.data, preserving_proto_field_name=False)
+    if not isinstance(data, dict):
+        raise ValueError("A2A binary data parts must contain an object.")
     encoded = data.get("bytes") or data.get("base64")
     if not isinstance(encoded, str):
         raise ValueError("A2A binary data parts must include base64 bytes.")
@@ -199,12 +278,16 @@ def _binary_data_part_to_manifest(part: Any, *, media_type: str) -> str:
     except (ValueError, UnicodeEncodeError) as exc:
         raise ValueError("A2A binary data part bytes must be valid base64.") from exc
     _ensure_size(content, limit=MAX_BINARY_INLINE_BYTES, label="A2A binary data part")
-    filename = str(data.get("filename") or _filename(part) or "inline")
-    return _multimodal_manifest(
-        filename=os.path.basename(filename),
-        media_type=media_type,
-        content=content,
-        source="data",
+    return content
+
+
+def _image_block_from_binary(raw: bytes, *, requested_media_type: str) -> ImageBlock:
+    if requested_media_type not in SUPPORTED_IMAGE_MIME_TYPES:
+        raise ValueError("A2A pipeline input has unsupported image media type.")
+    resized = maybe_resize_and_downsample(raw)
+    return ImageBlock(
+        media_type=resized.media_type,
+        data=base64.b64encode(resized.data).decode("ascii"),
     )
 
 

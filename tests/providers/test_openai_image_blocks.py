@@ -26,6 +26,32 @@ def test_user_image_converts_to_image_url():
     ]
 
 
+def test_judge_style_user_content_blocks_convert_to_image_url():
+    p = OpenAIProvider(model="gpt-5.4", api_key="x")
+    msg = Message(
+        role="user",
+        content=[
+            ContentBlock(type="text", text="judge routing prompt"),
+            ContentBlock(type="image", media_type="image/png", data="aGVsbG8="),
+        ],
+    )
+
+    api = p._convert_messages([msg])
+
+    assert api == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "judge routing prompt"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,aGVsbG8="},
+                },
+            ],
+        }
+    ]
+
+
 def test_text_only_user_message_stays_string():
     p = OpenAIProvider(model="gpt-5.4", api_key="x")
     msg = Message(role="user", content="plain")

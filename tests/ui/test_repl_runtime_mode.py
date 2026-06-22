@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from iac_code.pipeline.config import RunMode
+from iac_code.pipeline.engine.user_input import PipelineUserInput
 
 
 def _make_repl_for_normal_chat():
@@ -35,7 +36,9 @@ async def test_handle_chat_uses_instance_runtime_mode_when_environment_is_normal
 
     await repl._handle_chat("hello")
 
-    repl._handle_pipeline_chat.assert_awaited_once_with("hello")
+    repl._handle_pipeline_chat.assert_awaited_once_with(
+        PipelineUserInput(content="hello", display_text="hello", has_images=False)
+    )
     repl._agent_loop.run_streaming.assert_not_called()
 
 

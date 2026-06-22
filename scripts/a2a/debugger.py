@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import errno
 import html
 import json
@@ -20,6 +21,8 @@ from urllib.request import Request, urlopen
 A2A_VERSION_HEADERS = {"A2A-Version": "1.0"}
 DEBUG_LOG_ROOT_NAME = "iac-code-a2a-debugger-runs"
 _DEBUG_LOG_LOCK = threading.Lock()
+DEBUGGER_SUPPORTED_IMAGE_MEDIA_TYPES = frozenset(("image/png", "image/jpeg", "image/webp", "image/gif"))
+DEBUGGER_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,41 @@ def fetch_json(
         return ProxyResult(status_code=0, data=None, text="", headers={}, error=str(exc))
 
 
+def _normalize_image_part(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("images entries must be objects")
+    media_type = str(
+        raw.get("mediaType") or raw.get("media_type") or raw.get("mimeType") or raw.get("type") or "",
+    ).lower()
+    if media_type not in DEBUGGER_SUPPORTED_IMAGE_MEDIA_TYPES:
+        supported = ", ".join(sorted(DEBUGGER_SUPPORTED_IMAGE_MEDIA_TYPES))
+        raise ValueError(f"images must use one of these mediaType values: {supported}")
+
+    encoded = raw.get("bytes") or raw.get("base64")
+    if not isinstance(encoded, str) or not encoded:
+        raise ValueError("images entries must include base64 bytes")
+    try:
+        decoded = base64.b64decode(encoded.encode("ascii"), validate=True)
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise ValueError("images entries must include valid base64 bytes") from exc
+    if len(decoded) > DEBUGGER_MAX_IMAGE_BYTES:
+        raise ValueError("images entries must be 5 MiB or smaller")
+
+    filename = os.path.basename(str(raw.get("filename") or raw.get("name") or "image"))
+    return {
+        "data": {"filename": filename or "image", "bytes": encoded},
+        "mediaType": media_type,
+    }
+
+
+def _normalize_image_parts(images: Any) -> list[dict[str, Any]]:
+    if images in (None, ""):
+        return []
+    if not isinstance(images, list):
+        raise ValueError("images must be a list")
+    return [_normalize_image_part(image) for image in images]
+
+
 def build_message_stream_payload(
     *,
     cwd: str,
@@ -138,11 +176,16 @@ def build_message_stream_payload(
     task_id: str,
     request_id: str,
     message_id: str,
+    images: Any = None,
 ) -> dict[str, Any]:
+    parts = []
+    if prompt:
+        parts.append({"text": prompt})
+    parts.extend(_normalize_image_parts(images))
     message: dict[str, Any] = {
         "messageId": message_id,
         "role": "ROLE_USER",
-        "parts": [{"text": prompt}],
+        "parts": parts,
         "metadata": {"iac_code": {"cwd": cwd}},
     }
     if context_id:
@@ -527,6 +570,10 @@ def render_index_html(config: DebuggerConfig) -> str:
       outline: none;
     }
 
+    input[type="file"] {
+      padding: 7px 10px;
+    }
+
     input:focus,
     textarea:focus {
       border-color: var(--accent);
@@ -589,6 +636,18 @@ def render_index_html(config: DebuggerConfig) -> str:
       grid-template-columns: minmax(260px, 1fr) auto;
       align-items: end;
       gap: 12px;
+    }
+
+    .prompt-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .image-summary {
+      min-height: 18px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
     }
 
     .debug-log-line {
@@ -1343,9 +1402,15 @@ def render_index_html(config: DebuggerConfig) -> str:
       </div>
       <div id="task-history" class="task-history" aria-label="Task history"></div>
       <div class="prompt-row">
-        <label for="prompt">Prompt
-          <textarea id="prompt" spellcheck="false"></textarea>
-        </label>
+        <div class="prompt-stack">
+          <label for="prompt">Prompt
+            <textarea id="prompt" spellcheck="false"></textarea>
+          </label>
+          <label for="image-input">Images
+            <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
+          </label>
+          <div id="image-summary" class="image-summary">No images selected.</div>
+        </div>
         <div class="button-row" aria-label="Actions">
           <button id="health-button" type="button">Health</button>
           <button id="stream-button" class="primary" type="button">Stream</button>
@@ -1428,6 +1493,8 @@ def render_index_html(config: DebuggerConfig) -> str:
     };
 
     const byId = (id) => document.getElementById(id);
+    const supportedImageMediaTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+    const maxImageBytes = 5 * 1024 * 1024;
 
     function createExecutionTree() {
       return {
@@ -1521,6 +1588,78 @@ def render_index_html(config: DebuggerConfig) -> str:
         activeTaskId: byId("active-task-id").value.trim(),
         prompt: byId("prompt").value
       };
+    }
+
+    function selectedImageFiles() {
+      const input = byId("image-input");
+      if (!input || !input.files) {
+        return [];
+      }
+      return Array.from(input.files);
+    }
+
+    function formatBytes(value) {
+      const bytes = Number(value) || 0;
+      if (bytes < 1024) {
+        return `${bytes} B`;
+      }
+      if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KiB`;
+      }
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+    }
+
+    function updateImageSummary() {
+      const summary = byId("image-summary");
+      if (!summary) {
+        return;
+      }
+      const files = selectedImageFiles();
+      if (!files.length) {
+        summary.textContent = "No images selected.";
+        return;
+      }
+      summary.textContent = files
+        .map((file) => `${file.name || "image"} (${formatBytes(file.size)})`)
+        .join(", ");
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => resolve(String(reader.result || "")));
+        reader.addEventListener("error", () => reject(reader.error || new Error("Failed to read image file.")));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function imageBase64FromDataUrl(dataUrl) {
+      const commaIndex = dataUrl.indexOf(",");
+      if (commaIndex < 0) {
+        throw new Error("Image file did not produce a valid data URL.");
+      }
+      return dataUrl.slice(commaIndex + 1);
+    }
+
+    async function readSelectedImages() {
+      const files = selectedImageFiles();
+      const images = [];
+      for (const file of files) {
+        const mediaType = String(file.type || "").toLowerCase();
+        if (!supportedImageMediaTypes.has(mediaType)) {
+          throw new Error(`${file.name || "Selected image"} uses unsupported image type ${mediaType || "unknown"}.`);
+        }
+        if (file.size > maxImageBytes) {
+          throw new Error(`${file.name || "Selected image"} is larger than 5 MiB.`);
+        }
+        const dataUrl = await readFileAsDataUrl(file);
+        images.push({
+          filename: file.name || "image",
+          mediaType,
+          bytes: imageBase64FromDataUrl(dataUrl)
+        });
+      }
+      return images;
     }
 
     function appendRawEvent(kind, value) {
@@ -4082,6 +4221,7 @@ def render_index_html(config: DebuggerConfig) -> str:
 
     async function streamMessage() {
       const controls = readControls();
+      const images = await readSelectedImages();
       const payload = {
         serverUrl: controls.serverUrl,
         cwd: controls.cwd,
@@ -4089,6 +4229,9 @@ def render_index_html(config: DebuggerConfig) -> str:
         taskId: streamTaskIdForControls(controls),
         prompt: controls.prompt
       };
+      if (images.length) {
+        payload.images = images;
+      }
       const requestRow = appendRawEvent("request", {method: "POST", path: "/api/message/stream", payload});
       state.streamsInFlight += 1;
       state.status = "streaming";
@@ -4147,6 +4290,9 @@ def render_index_html(config: DebuggerConfig) -> str:
               parsed = JSON.parse(raw);
             } catch {
               parsed = raw;
+            }
+            if (parsed && typeof parsed === "object" && (parsed.type === "error" || parsed.error)) {
+              state.status = "error";
             }
             const rawRow = appendRawEvent("sse", parsed);
             if (rawRow) {
@@ -4356,6 +4502,10 @@ def render_index_html(config: DebuggerConfig) -> str:
           element.readOnly = true;
         }
       });
+      const imageInput = byId("image-input");
+      if (imageInput) {
+        imageInput.disabled = true;
+      }
       ["health-button", "stream-button", "fetch-state-button", "cancel-button"].forEach((id) => {
         const button = byId(id);
         if (button) {
@@ -4399,6 +4549,10 @@ def render_index_html(config: DebuggerConfig) -> str:
           element.setAttribute("readonly", "readonly");
         }
       });
+      const imageInput = clone.querySelector("#image-input");
+      if (imageInput) {
+        imageInput.setAttribute("disabled", "disabled");
+      }
       ["health-button", "stream-button", "fetch-state-button", "cancel-button"].forEach((id) => {
         const button = clone.querySelector(`#${cssEscape(id)}`);
         if (button) {
@@ -4483,11 +4637,13 @@ ${clone.outerHTML}`;
     byId("cancel-button").addEventListener("click", (event) => withButtonState(event.currentTarget, cancelTask));
     byId("stream-button").addEventListener("click", (event) => withStreamAction(event.currentTarget, streamMessage));
     byId("export-html-button").addEventListener("click", exportCurrentHtmlSnapshot);
+    byId("image-input").addEventListener("change", updateImageSummary);
 
     if (isExportMode) {
       restoreExportState(exportPayload);
       configureExportMode();
     }
+    updateImageSummary();
     renderPipeline();
     renderRaw();
   </script>
@@ -4643,8 +4799,8 @@ def _message_stream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     task_id = str(body.get("taskId", ""))
     if not cwd:
         raise ValueError("cwd is required")
-    if not prompt:
-        raise ValueError("prompt is required")
+    if not prompt and not body.get("images"):
+        raise ValueError("prompt or image is required")
     payload = build_message_stream_payload(
         cwd=cwd,
         prompt=prompt,
@@ -4652,6 +4808,7 @@ def _message_stream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         task_id=task_id,
         request_id=str(uuid.uuid4()),
         message_id=str(uuid.uuid4()),
+        images=body.get("images"),
     )
     return server_url, payload
 
@@ -4680,6 +4837,34 @@ def _send_sse_error(handler: BaseHTTPRequestHandler, status: int, message: str) 
         if _is_client_disconnect_error(exc):
             return
         raise
+
+
+def _send_sse_event(handler: BaseHTTPRequestHandler, status: int, event: dict[str, Any]) -> None:
+    body = f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+    except OSError as exc:
+        if _is_client_disconnect_error(exc):
+            return
+        raise
+
+
+def _jsonrpc_error_message(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    error = value.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message:
+            return message
+        return json.dumps(error, ensure_ascii=False)
+    if isinstance(error, str) and error:
+        return error
+    return None
 
 
 def create_server(config: DebuggerConfig) -> ThreadingHTTPServer:
@@ -4727,6 +4912,32 @@ def create_server(config: DebuggerConfig) -> ThreadingHTTPServer:
                     server_url, payload = _message_stream_body(body)
                     try:
                         with _open_sse_stream(server_url, payload) as response:
+                            content_type = str(response.headers.get("Content-Type", "")).lower()
+                            if "text/event-stream" not in content_type:
+                                raw = response.read()
+                                data, _text = _decode_json_text(raw)
+                                message = _jsonrpc_error_message(data)
+                                if message:
+                                    event = {
+                                        "type": "error",
+                                        "error": message,
+                                        "statusCode": response.status,
+                                        "body": data,
+                                    }
+                                    append_debug_log(config, "sse", event)
+                                    _send_sse_event(self, 200, event)
+                                    return
+                                append_debug_log(
+                                    config,
+                                    "error",
+                                    {
+                                        "ok": False,
+                                        "error": "Target server returned a non-SSE response",
+                                        "statusCode": response.status,
+                                    },
+                                )
+                                _send_sse_error(self, 502, "Target server returned a non-SSE response")
+                                return
                             self.send_response(response.status)
                             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                             self.end_headers()
@@ -4786,7 +4997,7 @@ def main(argv: list[str] | None = None) -> None:
         replay_export=load_debug_log_export(args.load_log_dir) if args.load_log_dir else None,
     )
     server = create_server(config)
-    host, port = server.server_address
+    host, port = server.server_address[:2]
     print(f"A2A pipeline debugger listening on http://{host}:{port}", flush=True)
     print(f"A2A pipeline debugger logs: {config.log_dir}", flush=True)
     try:
