@@ -601,6 +601,37 @@ async def test_resume_candidate_selection_emits_selected_option_details(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_resume_candidate_selection_extracts_index_from_structured_json(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["s1"] = [
+        {"name": "方案A", "candidate_index": 0},
+        {"name": "方案B", "candidate_index": 1},
+    ]
+
+    async def fake_continue(user_input=None, **kwargs):
+        assert kwargs == {"resume_waiting_step": True}
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+    user_input = json.dumps(
+        {
+            "selected_candidate_index": 1,
+            "parameter_overrides": {"InstanceType": "ecs.g7.large"},
+        },
+        ensure_ascii=False,
+    )
+
+    events = [event async for event in runner.resume(user_input)]
+
+    received = next(event for event in events if isinstance(event, PipelineEvent))
+    assert received.type == PipelineEventType.USER_INPUT_RECEIVED
+    assert received.data["selected_index"] == 1
+    assert received.data["selected_option"] == {"name": "方案B", "candidate_index": 1}
+
+
+@pytest.mark.asyncio
 async def test_resume_candidate_selection_uses_restored_context_options(tmp_path):
     runner = _build_runner(tmp_path)
     runner.state_machine.current_step.ui_mode = "candidate_selection"

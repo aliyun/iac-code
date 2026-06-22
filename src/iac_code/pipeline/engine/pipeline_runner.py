@@ -32,7 +32,7 @@ from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import AllowUserEscapes, LoadedPipeline, OnCompletePolicy, StepSpec
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
 from iac_code.pipeline.engine.types import StepResult, StepStatus
-from iac_code.pipeline.engine.ui_contract import PipelineStepType
+from iac_code.pipeline.engine.ui_contract import PipelineStepType, parse_selected_candidate
 from iac_code.pipeline.engine.user_input import (
     PipelineInputContent,
     PipelineUserInput,
@@ -1708,6 +1708,11 @@ class PipelineRunner:
         return None
 
     def _infer_selected_index(self, selected_value: str, options: list[Any]) -> int | None:
+        structured = parse_selected_candidate(selected_value)
+        if structured is not None and structured.selected_candidate_index is not None:
+            idx = structured.selected_candidate_index
+            if 0 <= idx < len(options):
+                return idx
         matches = [idx for idx, option in enumerate(options) if self._option_display_value(option) == selected_value]
         if len(matches) == 1:
             return matches[0]

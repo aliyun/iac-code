@@ -14,6 +14,18 @@
 
 如果当前用户消息是在选择方案（例如包含“选择方案0”、“方案1”、候选方案名称，或表达“选便宜/高可用/已有VPC”等偏好），不要再次展示所有方案，也不要再次调用展示工具；请直接根据用户输入和上方 `evaluated_candidates` 判断最终选择，并调用 `complete_step` 提交最终结论。
 
+如果当前用户消息是结构化 JSON 选择消息，例如：
+```json
+{
+  "selected_candidate_index": 0,
+  "parameter_overrides": {
+    "ZoneId": "cn-hangzhou-k",
+    "InstanceType": "ecs.g7.large"
+  }
+}
+```
+如果用户选择方案时传入 `parameter_overrides`（或兼容字段 `parameters`），必须原样整理为 `parameter_overrides` 放入最终结论；不要写入模板 Default，也不要在本步骤重新询价。
+
 如果当前没有用户选择消息，按以下流程展示候选方案并等待用户选择。
 
 对每个 `failed` 为 `false` 的方案，依次调用以下两个工具：
@@ -52,6 +64,7 @@
 - `user_input`：用户本次选择的原始文本
 - `selected_candidate_name`：最终选择的候选方案名称，必须取 `candidate.name`
 - `selected_candidate_index`：最终选择的候选方案在 `evaluated_candidates` 数组中的 0 基下标
+- `parameter_overrides`：用户选择方案时传入的部署参数覆盖字典；没有传入时可省略
 
 如果用户输入可以明确映射到某个方案编号（例如“方案0”），按 0 基下标选择对应方案。
 如果用户输入匹配某个候选方案名称，选择该方案。

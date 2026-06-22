@@ -75,6 +75,39 @@ class TestSkillContentRosOnly:
     def test_contains_availability_query(self, body):
         assert "可用性查询" in body
 
+    def test_deploying_uses_parameters_without_preview_recommendation(self, body):
+        assert "部署参数装配" in body
+        assert "selected_plan.effective_deployment_parameters" in body
+        assert "CreateStack" in body
+        assert "GetTemplateParameterConstraints" not in body
+        assert "PreviewStack" not in body
+        assert "Preview-Validated Parameter Set" not in body
+        assert "参数推荐" not in body
+
+    def test_prefers_cost_deployment_parameters(self, body):
+        assert "selected_plan.selected_candidate_result.cost.deployment_parameters" in body
+        assert "按以下优先级" in body
+        assert "前序成本步骤沉淀的 Default" not in body
+
+    def test_prefers_effective_deployment_parameters(self, body):
+        assert "selected_plan.effective_deployment_parameters" in body
+        assert "最终部署参数集" in body
+        assert "GetTemplateEstimateCost" not in body
+
+    def test_availability_conflict_prefers_non_user_parameters_first(self, body):
+        assert "优先调整非用户指定参数" in body
+        assert "仍无法成功创建资源栈" in body
+        assert "才可调整用户指定参数" in body
+
+    def test_skill_omits_discussion_process_terms(self, body):
+        forbidden = ["A2A", "前端", "客户端", "方案 A", "方案 B", "策略 A", "策略 B", "讨论"]
+        for phrase in forbidden:
+            assert phrase not in body
+
+    def test_does_not_mention_stack_instances(self, body):
+        assert "CreateStackInstances" not in body
+        assert "UpdateStackInstances" not in body
+
     def test_contains_template_validation(self, body):
         assert "ValidateTemplate" in body
         assert "模板校验" in body
@@ -113,13 +146,50 @@ class TestSkillContentRosOnly:
         assert "不要再次请求用户确认" in body
         assert "不得用 status: cancelled 表示等待用户确认" in body
 
+    def test_delete_requires_explicit_delete_confirmation(self, body):
+        assert "删除请求本身不等于删除确认" in body
+        assert "`delete_confirmed: true`" in body
+        assert "确认删除" in body
+        assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" in body
+
 
 class TestDeployingPrompt:
     def test_pipeline_confirmed_deploy_is_direct_execution(self):
         body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
         assert "不要再次询问是否确认部署" in body
-        assert "不得用 status: cancelled 表示等待用户确认" in body
-        assert "只有用户明确取消部署时" in body
+        assert "不得用 status: cancelled 表示等待用户确认" not in body
+        assert "只有用户明确取消部署时" not in body
+
+    def test_prompt_defers_parameter_priority_to_skill(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "selected_plan.selected_candidate_result.cost.deployment_parameters" not in body
+        assert "部署参数按以下优先级装配" not in body
+        assert "部署参数装配规则见技能" in body
+
+    def test_prompt_keeps_no_repricing_without_parameter_priority_duplication(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "部署步骤不计算费用" in body
+        assert "selected_plan.effective_deployment_parameters" not in body
+        assert "GetTemplateEstimateCost" not in body
+
+    def test_prompt_does_not_repeat_parameter_adjustment_rules(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "优先调整非用户指定参数" not in body
+        assert "仍无法成功创建资源栈" not in body
+        assert "才可调整用户指定参数" not in body
+        assert "可用区不可用 → 自动更换可用区重试" not in body
+
+    def test_prompt_omits_discussion_process_terms(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        forbidden = ["A2A", "前端", "客户端", "方案 A", "方案 B", "策略 A", "策略 B", "讨论"]
+        for phrase in forbidden:
+            assert phrase not in body
+
+    def test_prompt_delete_requires_explicit_delete_confirmation(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "删除请求本身不等于删除确认" in body
+        assert "`delete_confirmed: true`" in body
+        assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" in body
 
 
 class TestSkillDiscovery:
@@ -195,3 +265,18 @@ class TestEvalsJson:
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
         names = [ev["name"] for ev in data["evals"]]
         assert len(names) == len(set(names))
+
+    def test_delete_evals_split_confirmation_and_execution(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        evals_by_name = {ev["name"]: ev for ev in data["evals"]}
+
+        confirmation_eval = evals_by_name["delete-stack-confirmation"]
+        confirmation_assertions = {assertion["name"] for assertion in confirmation_eval["assertions"]}
+        assert "user_confirmation" in confirmation_assertions
+        assert "uses_delete_stack" not in confirmation_assertions
+        assert "no_delete_without_confirmation" in confirmation_assertions
+
+        confirmed_eval = evals_by_name["delete-stack-confirmed"]
+        confirmed_assertions = {assertion["name"] for assertion in confirmed_eval["assertions"]}
+        assert "确认" in confirmed_eval["prompt"]
+        assert "uses_delete_stack" in confirmed_assertions

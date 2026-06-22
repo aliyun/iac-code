@@ -18,10 +18,31 @@ def test_confirm_options_schema_requires_candidate_index():
     assert option_schema["properties"]["candidate_index"]["type"] == "integer"
 
 
+def test_confirm_schema_accepts_parameter_overrides():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    confirm = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
+    schema = confirm.conclusion_schema
+    assert schema is not None
+
+    assert "parameter_overrides" in schema["properties"]
+    assert schema["properties"]["parameter_overrides"]["type"] == "object"
+
+
 def test_confirm_prompt_tells_model_to_output_candidate_index():
     prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
 
     assert "`options[].candidate_index`" in prompt
+
+
+def test_confirm_prompt_tells_model_to_preserve_parameter_overrides():
+    prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
+
+    assert "`parameter_overrides`" in prompt
+    assert "用户选择方案时传入" in prompt
+    assert "结构化 JSON" in prompt
+    forbidden = ["A2A", "前端", "客户端", "方案 A", "方案 B", "策略 A", "策略 B", "讨论"]
+    for phrase in forbidden:
+        assert phrase not in prompt
 
 
 def test_selling_steps_do_not_expose_static_rollback_rules():

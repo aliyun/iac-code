@@ -1,7 +1,7 @@
 """Hook for the deploying step."""
 
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
@@ -79,7 +79,7 @@ def normalize_selected_plan(
 
     candidates = evaluated_candidates or []
     resolution = resolve_selected_candidate(selected, candidates)
-    plan["selection"] = asdict(selected)
+    plan["selection"] = _selection_dict(selected)
     if resolution.error:
         plan["selection_valid"] = False
         plan["selection_error"] = resolution.error
@@ -88,16 +88,51 @@ def normalize_selected_plan(
     plan["selection_valid"] = True
     plan["selected_candidate"] = resolution.candidate
     plan["selected_candidate_result"] = resolution.result
+    plan["parameter_overrides"] = dict(selected.parameter_overrides)
+    effective_parameters = _effective_deployment_parameters(resolution.result, selected.parameter_overrides)
+    if effective_parameters:
+        plan["effective_deployment_parameters"] = effective_parameters
+    plan["cost_estimate_parameter_overridden"] = bool(selected.parameter_overrides)
     return plan
 
 
 def _selection_payload(plan: dict[str, Any]) -> Any:
     if "selected_candidate_index" in plan or "selected_candidate_name" in plan:
-        return {
+        payload = {
             "selected_candidate_name": plan.get("selected_candidate_name", ""),
             "selected_candidate_index": plan.get("selected_candidate_index"),
         }
+        if "parameter_overrides" in plan:
+            payload["parameter_overrides"] = plan.get("parameter_overrides")
+        elif "parameters" in plan:
+            payload["parameters"] = plan.get("parameters")
+        return payload
     return plan.get("user_input")
+
+
+def _selection_dict(selected: SelectedCandidate) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "selected_candidate_name": selected.selected_candidate_name,
+        "selected_candidate_index": selected.selected_candidate_index,
+    }
+    if selected.parameter_overrides:
+        data["parameter_overrides"] = dict(selected.parameter_overrides)
+    return data
+
+
+def _effective_deployment_parameters(
+    selected_candidate_result: dict[str, Any] | None,
+    parameter_overrides: dict[str, Any],
+) -> dict[str, Any]:
+    parameters: dict[str, Any] = {}
+    if isinstance(selected_candidate_result, dict):
+        cost = selected_candidate_result.get("cost")
+        if isinstance(cost, dict):
+            deployment_parameters = cost.get("deployment_parameters")
+            if isinstance(deployment_parameters, dict):
+                parameters.update(deployment_parameters)
+    parameters.update(parameter_overrides)
+    return parameters
 
 
 def on_enter(ctx: PipelineContext) -> None:
