@@ -478,6 +478,34 @@ class TestInjectToolsParsing:
         assert loaded.steps[0].inject_tools == []
 
 
+class TestSurfaceOverridesParsing:
+    def test_surface_overrides_parse_prompt_and_inject_tools(self, tmp_path):
+        yaml_content = dedent("""\
+            name: test
+            context_dependencies:
+              result: []
+            max_rollbacks: 1
+            steps:
+              - id: confirm
+                conclusion_field: result
+                forward: null
+                prompt: prompts/confirm.md
+                inject_tools: [show_architecture_diagram, show_candidate_detail]
+                surface_overrides:
+                  a2a:
+                    prompt: prompts/confirm.a2a.md
+                    inject_tools: []
+        """)
+        _write_pipeline(tmp_path, yaml_content, {"confirm.md": "C", "confirm.a2a.md": "A2A"})
+
+        loaded = load_pipeline_dir(tmp_path)
+        step = loaded.steps[0]
+
+        assert step.surface_overrides["a2a"].prompt_file == "prompts/confirm.a2a.md"
+        assert step.surface_overrides["a2a"].inject_tools == []
+        assert step.inject_tools == ["show_architecture_diagram", "show_candidate_detail"]
+
+
 class TestUiMode:
     def test_ui_mode_parsed_from_yaml(self, tmp_path):
         yaml_content = dedent("""\

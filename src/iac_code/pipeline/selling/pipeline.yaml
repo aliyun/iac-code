@@ -201,6 +201,10 @@ steps:
     auto_advance: false
     ui_mode: candidate_selection
     inject_tools: [show_architecture_diagram, show_candidate_detail]
+    surface_overrides:
+      a2a:
+        prompt: prompts/confirm_and_select.a2a.md
+        inject_tools: []
     tools:
       include: [read_file]
       exclude: []

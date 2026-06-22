@@ -26,6 +26,14 @@ class A2AArtifactSpec:
     media_type: str = "auto"
 
 
+@dataclass(frozen=True)
+class StepSurfaceOverride:
+    """Per-surface overrides for selected step fields."""
+
+    prompt_file: str | None = None
+    inject_tools: list[str] | None = None
+
+
 @dataclass
 class HandoffContextConfig:
     """Context fields to include when handing off from pipeline to normal chat."""
@@ -73,6 +81,19 @@ class StepSpec:
     description: str = ""
     exit_condition: dict | None = None
     a2a_artifacts: list[A2AArtifactSpec] = field(default_factory=list)
+    surface_overrides: dict[str, StepSurfaceOverride] = field(default_factory=dict)
+
+    def prompt_file_for_surface(self, surface: str | None) -> str:
+        override = self.surface_overrides.get(surface or "")
+        if override is not None and override.prompt_file is not None:
+            return override.prompt_file
+        return self.prompt_file
+
+    def inject_tools_for_surface(self, surface: str | None) -> list[str]:
+        override = self.surface_overrides.get(surface or "")
+        if override is not None and override.inject_tools is not None:
+            return list(override.inject_tools)
+        return list(self.inject_tools)
 
 
 @dataclass

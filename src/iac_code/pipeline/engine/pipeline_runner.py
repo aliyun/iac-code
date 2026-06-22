@@ -314,6 +314,7 @@ class PipelineRunner:
         memory_content_getter: Callable[[], str] | None = None,
         auto_trigger_skills: list[Any] | None = None,
         resume_from_sidecar: bool = False,
+        surface: str = "repl",
     ) -> None:
         self._session_storage = session_storage
         self._session_id = session_id
@@ -321,6 +322,7 @@ class PipelineRunner:
         self._permission_context_getter = permission_context_getter
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
+        self._surface = surface
 
         self._pipeline_dir = pipeline_dir
         self._loaded: LoadedPipeline = load_pipeline_dir(pipeline_dir)
@@ -383,6 +385,7 @@ class PipelineRunner:
             permission_context_getter=self._permission_context_getter,
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
+            surface=self._surface,
         )
         self._apply_telemetry_correlation(self._step_executor)
 
@@ -1622,6 +1625,7 @@ class PipelineRunner:
             permission_context_getter=self._permission_context_getter,
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
+            surface=self._surface,
         )
         self._apply_telemetry_correlation(sub_context_executor)
         sub_context_dependencies = sub_context_executor._sub_context_dependencies(sub_spec)
@@ -1664,6 +1668,7 @@ class PipelineRunner:
                 permission_context_getter=self._permission_context_getter,
                 memory_content_getter=self._memory_content_getter,
                 auto_trigger_skills=self._auto_trigger_skills,
+                surface=self._surface,
             )
             self._apply_telemetry_correlation(step_executor)
             agent_context = step_executor.build_agent_loop_context(
@@ -3339,6 +3344,7 @@ class PipelineRunner:
                 permission_context_getter=self._permission_context_getter,
                 memory_content_getter=self._memory_content_getter,
                 auto_trigger_skills=self._auto_trigger_skills,
+                surface=self._surface,
             )
             for _ in candidates
         ]

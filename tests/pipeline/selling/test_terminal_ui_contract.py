@@ -45,6 +45,45 @@ def test_confirm_prompt_tells_model_to_preserve_parameter_overrides():
         assert phrase not in prompt
 
 
+def test_confirm_prompts_share_selection_contract_structure():
+    repl_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
+    a2a_prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.md").read_text(encoding="utf-8")
+
+    shared_fragments = [
+        "## 首次执行",
+        "### 待选择结论",
+        "`complete_step.conclusion.options`",
+        "`complete_step.conclusion.user_prompt`",
+        "## 收到用户选择",
+        '"selected_candidate_index": 0',
+        "`parameter_overrides`",
+        "`parameters`",
+        "## 约束",
+        "不要在本步骤重新询价",
+        "不要修改模板 Default",
+    ]
+    for fragment in shared_fragments:
+        assert fragment in repl_prompt
+        assert fragment in a2a_prompt
+
+
+def test_confirm_a2a_surface_uses_thin_prompt_without_display_tools():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    confirm = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
+    a2a = confirm.surface_overrides["a2a"]
+
+    assert a2a.prompt_file == "prompts/confirm_and_select.a2a.md"
+    assert a2a.inject_tools == []
+
+    prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.a2a.md").read_text(encoding="utf-8")
+    assert "`selected_candidate_index`" in prompt
+    assert "`parameter_overrides`" in prompt
+    assert "`complete_step.conclusion.user_prompt`" in prompt
+    assert "不要在本步骤重新询价" in prompt
+    assert "show_architecture_diagram" not in prompt
+    assert "show_candidate_detail" not in prompt
+
+
 def test_selling_steps_do_not_expose_static_rollback_rules():
     loaded = load_pipeline_dir(_selling_pipeline_dir())
 

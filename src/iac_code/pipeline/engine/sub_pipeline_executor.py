@@ -72,6 +72,7 @@ class SubPipelineExecutor:
         permission_context_getter: Callable[[], Any] | None = None,
         memory_content_getter: Callable[[], str] | None = None,
         auto_trigger_skills: list[Any] | None = None,
+        surface: str = "repl",
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -83,6 +84,7 @@ class SubPipelineExecutor:
         self._permission_context_getter = permission_context_getter
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
+        self._surface = surface
         self._active_step_executor = None
         self._telemetry_correlation: dict[str, str] = {}
         pipeline_name = getattr(pipeline, "name", "")
@@ -160,6 +162,7 @@ class SubPipelineExecutor:
             permission_context_getter=self._permission_context_getter,
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
+            surface=self._surface,
         )
         self._apply_telemetry_correlation(step_executor)
 
@@ -333,6 +336,7 @@ class SubPipelineExecutor:
             permission_context_getter=self._permission_context_getter,
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
+            surface=self._surface,
         )
         self._apply_telemetry_correlation(executor)
         return executor

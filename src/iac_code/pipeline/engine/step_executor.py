@@ -67,6 +67,7 @@ class StepExecutor:
         permission_context_getter: Callable[[], Any] | None = None,
         memory_content_getter: Callable[[], str] | None = None,
         auto_trigger_skills: list[Any] | None = None,
+        surface: str = "repl",
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -78,6 +79,7 @@ class StepExecutor:
         self._permission_context_getter = permission_context_getter
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
+        self._surface = surface
         self._current_agent_loop = None
         pipeline_name = getattr(pipeline, "name", "")
         if not isinstance(pipeline_name, str):
@@ -406,8 +408,9 @@ class StepExecutor:
             memory_content=memory_content,
         )
 
-        prompt_path = self._pipeline_dir / step.prompt_file
-        step_prompt = prompt_path.read_text(encoding="utf-8") if step.prompt_file else ""
+        prompt_file = step.prompt_file_for_surface(self._surface)
+        prompt_path = self._pipeline_dir / prompt_file
+        step_prompt = prompt_path.read_text(encoding="utf-8") if prompt_file else ""
         rendered_step_prompt = render_prompt(step_prompt, context, step.context_fields)
 
         skill_content = ""
@@ -664,8 +667,9 @@ class StepExecutor:
             )
         )
 
-        if step.inject_tools:
-            self._register_injectable_tools(registry, step.inject_tools, guard_state)
+        inject_tools = step.inject_tools_for_surface(self._surface)
+        if inject_tools:
+            self._register_injectable_tools(registry, inject_tools, guard_state)
 
         return registry
 

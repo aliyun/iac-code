@@ -8,7 +8,7 @@ import pytest
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.step_executor import StepExecutor
-from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec
+from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, StepSurfaceOverride
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import ToolContext, ToolRegistry
 from iac_code.types.stream_events import (
@@ -717,6 +717,38 @@ class TestStepExecutorSkillResolution:
         assert "# Step Prompt Only" in prompt
         assert prompt.endswith("# Step Prompt Only")
 
+    def test_surface_override_uses_surface_prompt_file(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "confirm.md").write_text("# REPL Prompt", encoding="utf-8")
+        (tmp_path / "prompts" / "confirm.a2a.md").write_text("# A2A Prompt", encoding="utf-8")
+
+        step = StepSpec(
+            step_id="confirm_and_select",
+            conclusion_field="selected_plan",
+            forward=None,
+            prompt_file="prompts/confirm.md",
+            surface_overrides={"a2a": StepSurfaceOverride(prompt_file="prompts/confirm.a2a.md")},
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"selected_plan": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a",
+        )
+
+        prompt = executor._build_full_system_prompt(step, PipelineContext({"selected_plan": []}))
+
+        assert "# A2A Prompt" in prompt
+        assert "# REPL Prompt" not in prompt
+
     def test_empty_prompt_file_with_skill(self, tmp_path):
         """When prompt_file is empty string but skill exists, just use skill content."""
         step = StepSpec(
@@ -1015,6 +1047,39 @@ class TestInjectTools:
 
         assert registry.get("show_architecture_diagram") is None
         assert registry.get("ask_user_question") is None
+        assert registry.get("complete_step") is not None
+
+    def test_surface_override_can_disable_injected_tools(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "confirm.md").write_text("Confirm.", encoding="utf-8")
+
+        step = StepSpec(
+            step_id="confirm_and_select",
+            conclusion_field="selected_plan",
+            forward=None,
+            prompt_file="prompts/confirm.md",
+            inject_tools=["show_architecture_diagram"],
+            surface_overrides={"a2a": StepSurfaceOverride(inject_tools=[])},
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"selected_plan": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a",
+        )
+
+        context = PipelineContext({"selected_plan": []})
+        registry = executor._build_step_tools(step, context)
+
+        assert registry.get("show_architecture_diagram") is None
         assert registry.get("complete_step") is not None
 
     @pytest.mark.asyncio

@@ -20,6 +20,7 @@ from iac_code.pipeline.engine.step_spec import (
     LoadedPipeline,
     OnCompletePolicy,
     StepSpec,
+    StepSurfaceOverride,
     SubPipelineSpec,
 )
 
@@ -212,6 +213,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
         else:
             step_sections = None
 
+        step_id = raw.get("id", "?")
         steps.append(
             StepSpec(
                 step_id=raw["id"],
@@ -238,11 +240,53 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 ),
                 completion_guards=raw.get("completion_guards", []),
                 description=raw.get("description", ""),
-                exit_condition=_parse_exit_condition(raw.get("exit_condition"), raw.get("id", "?")),
-                a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), raw.get("id", "?")),
+                exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
+                a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),
+                surface_overrides=_parse_surface_overrides(raw.get("surface_overrides"), step_id),
             )
         )
     return steps
+
+
+def _parse_surface_overrides(raw: object, step_id: str) -> dict[str, StepSurfaceOverride]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Step '{step_id}': surface_overrides must be a mapping, got {raw!r}")
+
+    overrides: dict[str, StepSurfaceOverride] = {}
+    for surface, raw_override in raw.items():
+        if not isinstance(surface, str) or not surface:
+            raise ValueError(f"Step '{step_id}': surface_overrides keys must be non-empty strings, got {surface!r}")
+        if not isinstance(raw_override, dict):
+            raise ValueError(f"Step '{step_id}': surface_overrides.{surface} must be a mapping, got {raw_override!r}")
+        override = cast(dict[str, Any], raw_override)
+        unsupported = set(override) - {"prompt", "inject_tools"}
+        if unsupported:
+            supported = "inject_tools, prompt"
+            unknown = ", ".join(sorted(unsupported))
+            raise ValueError(
+                f"Step '{step_id}': surface_overrides.{surface} contains unsupported key(s): "
+                f"{unknown}; supported: {supported}"
+            )
+
+        prompt = override.get("prompt")
+        if prompt is not None and not isinstance(prompt, str):
+            raise ValueError(f"Step '{step_id}': surface_overrides.{surface}.prompt must be a string")
+
+        inject_tools = override.get("inject_tools")
+        if inject_tools is not None:
+            if not isinstance(inject_tools, list) or not all(isinstance(name, str) for name in inject_tools):
+                raise ValueError(
+                    f"Step '{step_id}': surface_overrides.{surface}.inject_tools must be a list of strings"
+                )
+            inject_tools = cast(list[str], inject_tools)
+
+        overrides[surface] = StepSurfaceOverride(
+            prompt_file=prompt,
+            inject_tools=list(inject_tools) if inject_tools is not None else None,
+        )
+    return overrides
 
 
 def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
@@ -344,11 +388,16 @@ def _load_module_from_file(path: Path, module_name: str) -> ModuleType:
 
 def _validate_prompts_exist(steps: list[StepSpec], pipeline_dir: Path) -> None:
     for step in steps:
-        if not step.prompt_file:
-            continue
-        prompt_path = pipeline_dir / step.prompt_file
-        if not prompt_path.exists():
-            raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+        prompt_files = [step.prompt_file]
+        prompt_files.extend(
+            override.prompt_file for override in step.surface_overrides.values() if override.prompt_file is not None
+        )
+        for prompt_file in prompt_files:
+            if not prompt_file:
+                continue
+            prompt_path = pipeline_dir / prompt_file
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
 
 def _discover_pipeline_tools(pipeline_dir: Path) -> dict[str, type]:

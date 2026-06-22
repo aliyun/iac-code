@@ -378,8 +378,10 @@ async def test_executor_sets_pipeline_telemetry_correlation(
         session_dir=tmp_path / "sidecar",
     )
     fake_pipeline.set_telemetry_correlation = MagicMock()
+    create_pipeline_kwargs = {}
 
     def fake_create_pipeline(*args, **kwargs):
+        create_pipeline_kwargs.update(kwargs)
         fake_pipeline._session_storage = kwargs["session_storage"]
         fake_pipeline._session_id = kwargs["session_id"]
         fake_pipeline._cwd = kwargs["cwd"]
@@ -401,6 +403,7 @@ async def test_executor_sets_pipeline_telemetry_correlation(
         context_id="ctx-1",
         pipeline_run_id="ctx-1",
     )
+    assert create_pipeline_kwargs["surface"] == "a2a"
 
 
 @pytest.mark.asyncio

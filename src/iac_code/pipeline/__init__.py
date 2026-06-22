@@ -33,6 +33,7 @@ def create_pipeline(
     memory_content_getter: Callable[[], str] | None = None,
     auto_trigger_skills: list[Any] | None = None,
     resume_from_sidecar: bool = False,
+    surface: str = "repl",
 ) -> PipelineRunner:
     """Factory: create a pipeline runner by name.
 
@@ -60,6 +61,7 @@ def create_pipeline(
         memory_content_getter=memory_content_getter,
         auto_trigger_skills=auto_trigger_skills,
         resume_from_sidecar=resume_from_sidecar,
+        surface=surface,
     )
 
 

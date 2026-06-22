@@ -12,33 +12,9 @@
 
 ## 首次执行
 
-如果当前没有用户选择消息，按以下流程展示候选方案，并在展示完成后调用 `complete_step` 提交待选择结论，随后流程会等待用户输入。
+如果当前没有用户选择消息，直接调用 `complete_step` 提交待选择结论，随后流程会等待用户输入。
 
-仅展示 `failed` 为 `false` 的方案；失败方案不要调用展示工具，也不要加入 `options`。
-
-### 展示候选方案
-
-对每个 `failed` 为 `false` 的方案，依次调用以下两个工具：
-
-#### 1. 生成架构图
-调用 `show_architecture_diagram` 工具：
-- `file_path`：取 `candidate.output_path`
-- `candidate_name`：取 `candidate.name`
-- `candidate_index`：该方案在 `evaluated_candidates` 数组中的 0 基下标
-
-#### 2. 展示方案详情
-调用 `show_candidate_detail` 工具：
-- `candidate_name`：取 `candidate.name`（必须与架构图的 candidate_name 一致）
-- `candidate_index`：该方案在 `evaluated_candidates` 数组中的 0 基下标
-- `summary`：根据方案内容撰写简洁的方案描述（2-3句话，包含核心产品组合和架构特点）
-- `cost_items`：从 cost 数据中提取费用明细列表，每项包含：
-  - `name`：产品名称（如 "ECS 实例"）
-  - `spec`：规格描述（如 "2核4G"）
-  - `monthly_cost`：月费用（如 "¥200/月"）
-- `total_monthly_cost`：月度总费用（如 "¥1,234/月"）
-
-- 先为所有方案调用 `show_architecture_diagram`，再为所有方案调用 `show_candidate_detail`
-- 不要用文字输出对比表格或方案信息 — 所有展示数据通过上述工具传递
+仅包含 `failed` 为 `false` 的方案；失败方案不要加入 `options`。
 
 ### 待选择结论
 

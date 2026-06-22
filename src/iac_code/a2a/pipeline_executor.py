@@ -647,6 +647,7 @@ class IacCodeA2APipelineExecutor:
             session_id=session_id,
             cwd=cwd,
             resume_from_sidecar=resume_from_sidecar,
+            surface="a2a",
         )
 
     def _set_pipeline_telemetry_correlation(self, pipeline: Any, *, task_id: str, context_id: str) -> None:
