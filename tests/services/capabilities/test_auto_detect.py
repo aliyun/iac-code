@@ -2,7 +2,7 @@ import httpx
 
 from iac_code.services.capabilities.auto_detect import (
     AutoDetectCache,
-    probe_openapi_compatible,
+    probe_openai_compatible,
 )
 
 
@@ -21,7 +21,7 @@ def test_probe_returns_true_when_modalities_include_image():
 
     transport = httpx.MockTransport(handler)
     with httpx.Client(transport=transport) as client:
-        result = probe_openapi_compatible(
+        result = probe_openai_compatible(
             base_url="https://example.com/v1",
             api_key="x",
             model="custom-vl",
@@ -38,7 +38,7 @@ def test_probe_returns_none_on_unknown_schema():
 
     transport = httpx.MockTransport(handler)
     with httpx.Client(transport=transport) as client:
-        result = probe_openapi_compatible(
+        result = probe_openai_compatible(
             base_url="https://example.com/v1",
             api_key="x",
             model="custom-vl",

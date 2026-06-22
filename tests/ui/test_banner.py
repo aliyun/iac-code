@@ -90,12 +90,12 @@ class TestGetProviderDisplay:
             result = self._call()
         assert result != ""
 
-    def test_known_name_openapi_compatible(self):
+    def test_known_name_openai_compatible(self):
         with (
             patch("iac_code.config.get_active_provider_key", return_value="k"),
             patch(
                 "iac_code.config.get_provider_config",
-                return_value={"name": "OpenAPI Compatible"},
+                return_value={"name": "OpenAI Compatible"},
             ),
         ):
             result = self._call()

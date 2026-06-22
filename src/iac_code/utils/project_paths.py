@@ -142,7 +142,7 @@ def find_git_worktree_root(cwd: str) -> Path | None:
     while True:
         git_path = os.path.join(current, ".git")
         if os.path.isdir(git_path) or os.path.isfile(git_path):
-            return Path(current).resolve()
+            return Path(os.path.normpath(current))
         parent = os.path.dirname(current)
         if parent == current:
             return None

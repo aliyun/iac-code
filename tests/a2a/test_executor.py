@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
@@ -258,6 +259,50 @@ async def test_executor_creates_missing_workspace(monkeypatch: pytest.MonkeyPatc
     assert missing.is_dir()
     final_state = dump(queue.events[-1])["status"]["state"]
     assert final_state != "TASK_STATE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_executor_uses_metadata_cwd_when_process_cwd_is_deleted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(tmp_path))
+
+    def deleted_process_cwd() -> str:
+        raise FileNotFoundError("[Errno 2] No such file or directory")
+
+    monkeypatch.setattr("iac_code.a2a.executor.os.getcwd", deleted_process_cwd)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    assert runtime.agent_loop.prompts == ["hello"]
+    final_state = dump(queue.events[-1])["status"]["state"]
+    assert final_state != "TASK_STATE_FAILED"
+
+
+def test_resolve_cwd_returns_logical_metadata_path_for_symlinked_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    physical_root = tmp_path / "mount-root"
+    physical_root.mkdir()
+    logical_root = tmp_path / "workspace"
+    logical_root.symlink_to(physical_root, target_is_directory=True)
+    logical_cwd = logical_root / "ctx-1"
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(logical_root))
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    cwd = executor._resolve_cwd({"iac_code": {"cwd": str(logical_cwd)}})
+
+    assert cwd == str(logical_cwd)
+    assert logical_cwd.is_dir()
+    assert logical_cwd.resolve() == physical_root / "ctx-1"
 
 
 @pytest.mark.asyncio
@@ -932,6 +977,88 @@ async def test_retryable_setup_error_returns_input_required(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_setup_failure_logs_traceback_with_task_context(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    class FailingTaskStore(A2ATaskStore):
+        async def ensure_task_not_expired(self, task_id: str) -> None:
+            raise FileNotFoundError(2, "No such file or directory")
+
+    caplog.set_level(logging.ERROR, logger="iac_code.a2a.executor")
+
+    store = FailingTaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
+
+    await executor.execute(context, queue)
+
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    assert dumped["status"]["message"]["parts"][0]["text"] == "[Errno 2] No such file or directory"
+    assert "A2A executor setup failed" in caplog.text
+    assert "task_id=task-1" in caplog.text
+    assert "context_id=ctx-1" in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "FileNotFoundError: [Errno 2] No such file or directory" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_runtime_creation_failure_logs_traceback_with_task_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    def raise_missing_dependency(options):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    caplog.set_level(logging.ERROR, logger="iac_code.a2a.executor")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", raise_missing_dependency)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
+
+    await executor.execute(context, queue)
+
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    assert dumped["status"]["message"]["parts"][0]["text"].startswith("FileNotFoundError:")
+    assert "A2A executor runtime setup failed" in caplog.text
+    assert "task_id=task-1" in caplog.text
+    assert "context_id=ctx-1" in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "FileNotFoundError: [Errno 2] No such file or directory" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_streaming_failure_logs_traceback_with_task_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    class ExplodingLoop:
+        async def run_streaming(self, prompt: str):
+            raise FileNotFoundError(2, "No such file or directory")
+            yield TextDeltaEvent(text="never")
+
+    caplog.set_level(logging.ERROR, logger="iac_code.a2a.executor")
+    runtime = FakeRuntime(agent_loop=ExplodingLoop(), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
+
+    await executor.execute(context, queue)
+
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    assert dumped["status"]["message"]["parts"][0]["text"].startswith("FileNotFoundError:")
+    assert "A2A executor streaming failed" in caplog.text
+    assert "task_id=task-1" in caplog.text
+    assert "context_id=ctx-1" in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "FileNotFoundError: [Errno 2] No such file or directory" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_unexpected_error_surfaces_type_and_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class ExplodingLoop:
         async def run_streaming(self, prompt: str):
@@ -1101,6 +1228,63 @@ class TestResolveUserId:
         assert executor._resolve_user_id({"iac_code": {"user_id": 12345}}) is None
 
 
+class TestResolveAliyunCredential:
+    def _make_executor(self) -> IacCodeA2AExecutor:
+        store = A2ATaskStore(metrics=NoOpA2AMetrics())
+        return IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    def test_extracts_aliyun_credential_from_iac_code_metadata(self) -> None:
+        executor = self._make_executor()
+
+        result = executor._resolve_aliyun_credential(
+            {
+                "iac_code": {
+                    "alibaba_cloud_access_key_id": "client-id",
+                    "alibaba_cloud_access_key_secret": "client-secret",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                    "alibaba_cloud_security_token": "client-sts",
+                }
+            }
+        )
+
+        assert result is not None
+        assert result.mode == "StsToken"
+        assert result.access_key_id == "client-id"
+        assert result.access_key_secret == "client-secret"
+        assert result.region_id == "cn-beijing"
+        assert result.sts_token == "client-sts"
+
+    def test_uses_default_region_when_metadata_region_is_missing(self) -> None:
+        executor = self._make_executor()
+
+        result = executor._resolve_aliyun_credential(
+            {
+                "iac_code": {
+                    "alibaba_cloud_access_key_id": "client-id",
+                    "alibaba_cloud_access_key_secret": "client-secret",
+                }
+            }
+        )
+
+        assert result is not None
+        assert result.region_id == "cn-hangzhou"
+        assert result.mode == "AK"
+
+    def test_returns_none_for_incomplete_aliyun_metadata(self) -> None:
+        executor = self._make_executor()
+
+        result = executor._resolve_aliyun_credential(
+            {
+                "iac_code": {
+                    "alibaba_cloud_access_key_id": "client-id",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                }
+            }
+        )
+
+        assert result is None
+
+
 @pytest.mark.asyncio
 async def test_executor_applies_user_id_to_telemetry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from iac_code.services.telemetry.identity import _user_id_override
@@ -1157,3 +1341,197 @@ async def test_executor_no_user_id_override_when_not_specified(monkeypatch: pyte
     await executor.execute(context, queue)
 
     assert captured_user_ids == [None]
+
+
+@pytest.mark.asyncio
+async def test_executor_uses_metadata_iac_code_model_when_creating_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen_models: list[str] = []
+
+    def factory(options):
+        seen_models.append(options.model)
+        return FakeRuntime(
+            agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
+            session_id=options.session_id,
+        )
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="server-default-model")
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path), "iac_code_model": "metadata-model"}})
+
+    await executor.execute(context, FakeEventQueue())
+
+    assert seen_models == ["metadata-model"]
+
+
+@pytest.mark.asyncio
+async def test_executor_reconfigures_cached_runtime_iac_code_model_per_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def reconfigure(self, model, credentials, provider_key_override=None, base_url_override=None):
+            self.calls.append(model)
+
+    provider_manager = FakeProviderManager()
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
+        session_id="session-1",
+        provider_manager=provider_manager,
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="server-default-model")
+
+    await executor.execute(
+        FakeRequestContext(
+            context_id="ctx-1",
+            metadata={"iac_code": {"cwd": str(tmp_path), "iac_code_model": "metadata-model"}},
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(context_id="ctx-1", task_id="task-2", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert provider_manager.calls == ["metadata-model", "server-default-model"]
+
+
+@pytest.mark.asyncio
+async def test_executor_applies_aliyun_metadata_to_task_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredentials
+
+    captured_access_key_ids: list[str | None] = []
+
+    original_run_streaming = FakeAgentLoop.run_streaming
+
+    async def capturing_run_streaming(self, prompt):
+        cred = AliyunCredentials.load()
+        captured_access_key_ids.append(cred.access_key_id if cred else None)
+        async for event in original_run_streaming(self, prompt):
+            yield event
+
+    monkeypatch.setattr(FakeAgentLoop, "run_streaming", capturing_run_streaming)
+
+    env = {
+        "ALIBABA_CLOUD_ACCESS_KEY_ID": "env-id",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env-secret",
+        "ALIBABA_CLOUD_REGION_ID": "cn-shanghai",
+    }
+    loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="sess-aliyun")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    context = FakeRequestContext(
+        metadata={
+            "iac_code": {
+                "cwd": str(tmp_path),
+                "alibaba_cloud_access_key_id": "client-id",
+                "alibaba_cloud_access_key_secret": "client-secret",
+                "alibaba_cloud_region_id": "cn-beijing",
+            }
+        }
+    )
+
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
+    with monkeypatch.context() as m:
+        for key, value in env.items():
+            m.setenv(key, value)
+        await executor.execute(context, FakeEventQueue())
+        after = AliyunCredentials.load()
+
+    assert captured_access_key_ids == ["client-id"]
+    assert after is not None
+    assert after.access_key_id == "env-id"
+
+
+@pytest.mark.asyncio
+async def test_executor_applies_aliyun_metadata_while_creating_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredentials
+
+    captured_access_key_ids: list[str | None] = []
+
+    def factory(options):
+        cred = AliyunCredentials.load()
+        captured_access_key_ids.append(cred.access_key_id if cred else None)
+        return FakeRuntime(
+            agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
+            session_id=options.session_id,
+        )
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    context = FakeRequestContext(
+        metadata={
+            "iac_code": {
+                "cwd": str(tmp_path),
+                "alibaba_cloud_access_key_id": "client-id",
+                "alibaba_cloud_access_key_secret": "client-secret",
+                "alibaba_cloud_region_id": "cn-beijing",
+            }
+        }
+    )
+
+    await executor.execute(context, FakeEventQueue())
+
+    assert captured_access_key_ids == ["client-id"]
+
+
+@pytest.mark.asyncio
+async def test_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen_access_key_ids: list[str | None] = []
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
+        session_id="session-1",
+        tool_registry=object(),
+    )
+
+    def fake_register_cloud_tools(registry, credentials):
+        assert registry is runtime.tool_registry
+        credential = credentials.get_provider("aliyun")
+        seen_access_key_ids.append(credential.access_key_id if credential else None)
+
+    monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", fake_register_cloud_tools)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path.resolve()),
+        runtime_factory=lambda session_id: runtime,
+    )
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    context = FakeRequestContext(
+        context_id="ctx-1",
+        metadata={
+            "iac_code": {
+                "cwd": str(tmp_path),
+                "alibaba_cloud_access_key_id": "client-id",
+                "alibaba_cloud_access_key_secret": "client-secret",
+                "alibaba_cloud_region_id": "cn-beijing",
+            }
+        },
+    )
+
+    await executor.execute(context, FakeEventQueue())
+
+    assert seen_access_key_ids == ["client-id"]

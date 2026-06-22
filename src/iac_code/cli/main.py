@@ -47,6 +47,8 @@ a2a_client_app = typer.Typer(
 )
 app.add_typer(a2a_client_app, name="a2a-client")
 
+_A2A_SERVER_TELEMETRY_USER_ID = "iac_user_a2a_server"
+
 
 def _a2a_client_missing_dependencies_message() -> str:
     return _("A2A client dependencies are missing. Install with: pip install 'iac-code[a2a]'")
@@ -598,6 +600,20 @@ def _format_a2a_route_config(item: Any) -> str:
     return ";".join(parts)
 
 
+def _current_logical_cwd() -> str:
+    pwd = os.environ.get("PWD")
+    physical_cwd = Path.cwd()
+    if pwd:
+        pwd_path = Path(pwd)
+        if pwd_path.is_absolute():
+            try:
+                if pwd_path.resolve() == physical_cwd.resolve():
+                    return os.path.normpath(pwd)
+            except OSError:
+                pass
+    return str(physical_cwd)
+
+
 @app.command(help=_("Run iac-code as an A2A 1.0 server."))
 def a2a(
     ctx: typer.Context,
@@ -613,6 +629,11 @@ def a2a(
         help=_("A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or redis-streams"),
     ),
     debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
+    log_to_stdout: bool = typer.Option(
+        False,
+        "--log-to-stdout/--no-log-to-stdout",
+        help=_("Mirror server logs to stdout"),
+    ),
     thinking_exposure: list[str] | None = typer.Option(
         None,
         "--thinking-exposure",
@@ -654,9 +675,13 @@ def a2a(
     push_consumer_name = config.get("push_consumer_name", "")
     push_lease_timeout_ms = config.get("push_lease_timeout_ms", 300000)
     auto_approve_permissions = config.get("auto_approve_permissions", False)
+    log_to_stdout = _a2a_config_value(ctx, config, "log_to_stdout", log_to_stdout)
     thinking_exposure = _a2a_config_value(ctx, config, "thinking_exposure", thinking_exposure)
     model = load_saved_model() or DEFAULT_MODEL
-    setup_logging(session_id="a2a-server", debug=debug)
+    if transport == "stdio" and log_to_stdout:
+        typer.echo("--log-to-stdout cannot be used with --transport stdio because stdout carries A2A frames.", err=True)
+        raise typer.Exit(1)
+    setup_logging(session_id="a2a-server", debug=debug, stdout=bool(log_to_stdout))
     try:
         from iac_code.a2a.app import (
             resolve_api_key,
@@ -676,19 +701,20 @@ def a2a(
     import signal as _signal_mod
     import time
 
-    from iac_code.services.telemetry import add_metric, bootstrap_telemetry, graceful_shutdown, log_event
+    from iac_code.services.telemetry import add_metric, bootstrap_telemetry, graceful_shutdown, log_event, use_user_id
     from iac_code.services.telemetry.names import Events, Metrics
 
     telemetry_session_id = f"a2a-server-{uuid.uuid4()}"
-    bootstrap_telemetry(session_id=telemetry_session_id)
-    log_event(
-        Events.SESSION_STARTED,
-        {
-            "mode": "a2a-server",
-            "transport": transport,
-        },
-    )
-    add_metric(Metrics.SESSION_COUNT, 1, {})
+    with use_user_id(_A2A_SERVER_TELEMETRY_USER_ID):
+        bootstrap_telemetry(session_id=telemetry_session_id)
+        log_event(
+            Events.SESSION_STARTED,
+            {
+                "mode": "a2a-server",
+                "transport": transport,
+            },
+        )
+        add_metric(Metrics.SESSION_COUNT, 1, {})
 
     started = time.monotonic()
     exit_reason = "normal"
@@ -700,14 +726,15 @@ def a2a(
         _finalized[0] = True
         final_reason = reason_override or exit_reason
         try:
-            log_event(
-                Events.SESSION_EXITED,
-                {
-                    "mode": "a2a-server",
-                    "reason": final_reason,
-                    "duration_s": int(time.monotonic() - started),
-                },
-            )
+            with use_user_id(_A2A_SERVER_TELEMETRY_USER_ID):
+                log_event(
+                    Events.SESSION_EXITED,
+                    {
+                        "mode": "a2a-server",
+                        "reason": final_reason,
+                        "duration_s": int(time.monotonic() - started),
+                    },
+                )
         finally:
             graceful_shutdown()
 
@@ -718,13 +745,14 @@ def a2a(
 
     def _telemetry_excepthook(exc_type, exc_value, traceback_obj):
         try:
-            log_event(
-                Events.EXCEPTION_UNCAUGHT,
-                {
-                    "error_name": exc_type.__name__,
-                    "location": "a2a",
-                },
-            )
+            with use_user_id(_A2A_SERVER_TELEMETRY_USER_ID):
+                log_event(
+                    Events.EXCEPTION_UNCAUGHT,
+                    {
+                        "error_name": exc_type.__name__,
+                        "location": "a2a",
+                    },
+                )
             _finalize_telemetry(f"exception:{exc_type.__name__}")
         finally:
             sys.__excepthook__(exc_type, exc_value, traceback_obj)
@@ -808,6 +836,11 @@ def a2a_call(
     prompt: str = typer.Option(..., "--prompt", "-p", help=_("Prompt to send")),
     cwd: str = typer.Option(".", "--cwd", help=_("Working directory metadata to send with the request")),
     context_id: str = typer.Option("", "--context-id", help=_("A2A context ID to continue")),
+    iac_code_model: str = typer.Option(
+        "",
+        "--iac-code-model",
+        help=_("Model metadata to send with this A2A request"),
+    ),
     token: str = typer.Option("", "--token", help=_("Bearer token for A2A HTTP requests")),
     basic_username: str = typer.Option("", "--basic-username", help=_("Basic auth username for A2A HTTP requests")),
     basic_password: str = typer.Option("", "--basic-password", help=_("Basic auth password for A2A HTTP requests")),
@@ -841,8 +874,9 @@ def a2a_call(
         route_name = _a2a_config_value(ctx, config, "route_name", route_name)
         cwd = _a2a_config_value(ctx, config, "cwd", cwd)
         if cwd in ("", "."):
-            cwd = str(Path.cwd())
+            cwd = _current_logical_cwd()
         context_id = _a2a_config_value(ctx, config, "context_id", context_id)
+        iac_code_model = _a2a_config_value(ctx, config, "iac_code_model", iac_code_model)
         timeout = _a2a_config_value(ctx, config, "timeout", timeout)
         stream = _a2a_config_value(ctx, config, "stream", stream)
         auth_options = _a2a_client_auth_options(
@@ -879,6 +913,7 @@ def a2a_call(
                 prompt=prompt,
                 cwd=cwd,
                 context_id=context_id or None,
+                model=iac_code_model or None,
                 token=auth_options["token"] or None,
                 basic_username=auth_options["basic_username"] or None,
                 basic_password=auth_options["basic_password"] or None,
@@ -1542,6 +1577,7 @@ async def _run_a2a_call(
     prompt: str,
     cwd: str,
     context_id: str | None,
+    model: str | None,
     token: str | None,
     basic_username: str | None,
     basic_password: str | None,
@@ -1574,14 +1610,26 @@ async def _run_a2a_call(
         endpoint_url = client.select_endpoint_url(card, fallback_url=url)
         if stream:
             lines = []
-            async for event in client.stream_message(endpoint_url, prompt, cwd=str(Path(cwd)), context_id=context_id):
+            async for event in client.stream_message(
+                endpoint_url,
+                prompt,
+                cwd=str(Path(cwd)),
+                context_id=context_id,
+                model=model,
+            ):
                 line = _format_a2a_stream_event(event)
                 if stream_callback is not None:
                     stream_callback(line)
                 else:
                     lines.append(line)
             return "\n".join(lines)
-        response = await client.send_message(endpoint_url, prompt, cwd=str(Path(cwd)), context_id=context_id)
+        response = await client.send_message(
+            endpoint_url,
+            prompt,
+            cwd=str(Path(cwd)),
+            context_id=context_id,
+            model=model,
+        )
         return response.text or json.dumps(response.payload, ensure_ascii=False, indent=2, sort_keys=True)
     finally:
         await client.aclose()

@@ -139,6 +139,7 @@ token: your-secret-token
 verify-card-secret: your-card-signing-secret
 require-card-signature: true
 cwd: /path/to/workspace
+iac-code-model: qwen-plus
 ```
 
 Use `a2a-client call` for a direct Phase 1 client call:
@@ -177,7 +178,13 @@ See [Command Reference](./command-reference.md) for every A2A command, including
 
 ## Send a First Message with curl
 
-Pass the workspace directory through `message.metadata.iac_code.cwd`; the path must be absolute, must already exist, and must be inside an allowed workspace root. By default, allowed roots are the server process directory and the system temp directory. Override them with `IACCODE_A2A_ALLOWED_CWDS`.
+Pass the workspace directory through `message.metadata.iac_code.cwd`; the path must be absolute and must resolve inside an allowed workspace root. Existing paths must be directories; missing paths are created under the allowed root. By default, allowed roots are the server process directory and the system temp directory. Override them with `IACCODE_A2A_ALLOWED_CWDS`.
+
+For per-task telemetry attribution, include a non-empty string `user_id` under `message.metadata.iac_code`. This overrides the telemetry user ID for the current task only; it does not change A2A task or context identifiers.
+
+For a per-call LLM override, include a non-empty string `iac_code_model` under `message.metadata.iac_code`. This field is the lowercase form of `IAC_CODE_MODEL`; it overrides `IAC_CODE_MODEL`, `settings.yml`, and the server startup default model only for the current A2A message turn.
+
+For per-request Alibaba Cloud credentials, include `alibaba_cloud_access_key_id`, `alibaba_cloud_access_key_secret`, `alibaba_cloud_region_id`, and optional `alibaba_cloud_security_token` under `message.metadata.iac_code`. These task credentials override the server environment and `.cloud-credentials.yml` for that A2A execution only.
 
 The server accepts text-like parts, JSON data parts, raw UTF-8 text, local workspace `file://` text files, and bounded multimodal attachments. Remote URL ingestion is not supported; `url` parts must be local `file://` URLs inside the allowed workspace.
 

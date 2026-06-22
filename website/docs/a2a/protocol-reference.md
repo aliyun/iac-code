@@ -131,7 +131,11 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
       "role": "ROLE_USER",
       "parts": [{"text": "Create a VPC with two vSwitches."}],
       "metadata": {
-        "iac_code": {"cwd": "/absolute/path/to/project"}
+        "iac_code": {
+          "cwd": "/absolute/path/to/project",
+          "user_id": "client-user-123",
+          "iac_code_model": "qwen-plus"
+        }
       }
     },
     "configuration": {
@@ -149,8 +153,20 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
 | `role` | string | Yes | Use `ROLE_USER` for user input |
 | `parts` | array | Yes | Text-like, JSON data, raw text, local file URL, or bounded multimodal parts |
 | `metadata.iac_code.cwd` | string | Recommended | Absolute workspace path; defaults to the server process directory if omitted |
+| `metadata.iac_code.user_id` | string | Optional | Per-task telemetry user ID override; ignored when blank or non-string |
+| `metadata.iac_code.iac_code_model` | string | Optional | Per-call LLM model override; this is the lowercase form of `IAC_CODE_MODEL` and is ignored when blank or non-string |
+| `metadata.iac_code.alibaba_cloud_access_key_id` | string | Optional | Alibaba Cloud AccessKey ID for this task |
+| `metadata.iac_code.alibaba_cloud_access_key_secret` | string | Optional | Alibaba Cloud AccessKey Secret for this task |
+| `metadata.iac_code.alibaba_cloud_region_id` | string | Optional | Alibaba Cloud region for this task; defaults to `cn-hangzhou` when omitted with task credentials |
+| `metadata.iac_code.alibaba_cloud_security_token` | string | Optional | Alibaba Cloud STS token for this task |
 
-`metadata.iac_code.cwd` must be an existing absolute directory when provided. It must be inside an allowed workspace root. By default, allowed roots are the server process directory and the system temp directory; `IACCODE_A2A_ALLOWED_CWDS` can provide an OS-path-separated allowlist.
+`metadata.iac_code.cwd` must be an absolute directory path when provided. It must resolve inside an allowed workspace root. If it already exists, it must be a directory; if it does not exist, the executor creates it under the allowed root. By default, allowed roots are the server process directory and the system temp directory; `IACCODE_A2A_ALLOWED_CWDS` can provide an OS-path-separated allowlist.
+
+When `metadata.iac_code` includes both `alibaba_cloud_access_key_id` and `alibaba_cloud_access_key_secret`, the A2A executor uses those Alibaba Cloud credentials only for the current task. They take priority over process environment variables and `.cloud-credentials.yml`; if the task metadata is incomplete or absent, normal credential fallback still applies.
+
+`metadata.iac_code.user_id` only affects telemetry identity for the current task. It does not change the A2A `contextId`, `taskId`, or iac-code's internal session ID.
+
+`metadata.iac_code.iac_code_model` only affects the current A2A message turn. It takes priority over `IAC_CODE_MODEL`, `settings.yml`, and the server startup default model. Follow-up turns without this metadata field fall back to the server default model even when they reuse the same `contextId`.
 
 Supported input categories:
 

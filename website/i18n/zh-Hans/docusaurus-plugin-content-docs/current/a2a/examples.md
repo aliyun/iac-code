@@ -137,6 +137,7 @@ iac-code a2a-client --config a2a-client.yml discover
 iac-code a2a-client --config a2a-client.yml call \
   --prompt "Create a ROS VPC template with two vSwitches." \
   --cwd "$PWD" \
+  --iac-code-model qwen-plus \
   --stream
 ```
 
@@ -379,7 +380,7 @@ def handle_iac_metadata(metadata: dict[str, Any]) -> None:
 | 现象 | 修复方式 |
 |---------|-----|
 | HTTP `401` | 在 Agent Card 和 JSON-RPC 请求中都包含已配置的 auth scheme，例如 `Authorization: Bearer <token>`、Basic auth 或 `X-API-Key: <key>` |
-| `Invalid A2A workspace metadata.` | 在 `metadata.iac_code.cwd` 中使用已存在的绝对路径 |
+| `Invalid A2A workspace metadata.` | 在 `metadata.iac_code.cwd` 中使用绝对目录路径，并确保它 resolve 后位于 `IACCODE_A2A_ALLOWED_CWDS` 内 |
 | `A2A server currently accepts text input only.` | 至少发送一个非空 text part |
 | `Task is already working.` | 等待当前轮次完成后，再在同一 context 中发送另一条消息 |
 | 后续消息因不同工作区被拒绝 | 对复用的 `contextId` 保持 `metadata.iac_code.cwd` 不变 |

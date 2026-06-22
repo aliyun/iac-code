@@ -60,10 +60,10 @@ class TestGetEnvOverrides:
         assert _get_env_overrides()["provider_key"] == "dashscope"
 
     def test_provider_mixed_case_accepted(self, monkeypatch):
-        monkeypatch.setenv("IAC_CODE_PROVIDER", "oPeNaPiCoMpAtIbLe")
+        monkeypatch.setenv("IAC_CODE_PROVIDER", "oPeNaIcoMpAtIbLe")
         from iac_code.config import _get_env_overrides
 
-        assert _get_env_overrides()["provider_key"] == "openapi_compatible"
+        assert _get_env_overrides()["provider_key"] == "openai_compatible"
 
     def test_provider_with_surrounding_whitespace_accepted(self, monkeypatch):
         monkeypatch.setenv("IAC_CODE_PROVIDER", "  DashScope  ")
@@ -74,10 +74,10 @@ class TestGetEnvOverrides:
     @pytest.mark.parametrize(
         ("value", "expected"),
         [
-            ("OpenAPI Compatible", "openapi_compatible"),
-            ("openapi-compatible", "openapi_compatible"),
-            ("openapi_compatible", "openapi_compatible"),
-            ("oPeNaPi CoMpAtIbLe", "openapi_compatible"),
+            ("OpenAI Compatible", "openai_compatible"),
+            ("openai-compatible", "openai_compatible"),
+            ("openai_compatible", "openai_compatible"),
+            ("oPeNaI CoMpAtIbLe", "openai_compatible"),
             ("DashScope Token Plan", "dashscope_token_plan"),
             ("dashscope-token-plan", "dashscope_token_plan"),
             ("dashscope_token_plan", "dashscope_token_plan"),
@@ -88,6 +88,13 @@ class TestGetEnvOverrides:
         from iac_code.config import _get_env_overrides
 
         assert _get_env_overrides()["provider_key"] == expected
+
+    @pytest.mark.parametrize("value", ["OpenAPI Compatible", "openapi-compatible", "openapi_compatible"])
+    def test_provider_env_accepts_openai_compatible_as_legacy_alias(self, monkeypatch, value):
+        monkeypatch.setenv("IAC_CODE_PROVIDER", value)
+        from iac_code.config import _get_env_overrides
+
+        assert _get_env_overrides()["provider_key"] == "openai_compatible"
 
     def test_provider_name_lookup_rejects_colliding_normalized_aliases(self, monkeypatch):
         from types import SimpleNamespace
@@ -217,7 +224,20 @@ class TestGetProviderConfigEnv:
 
             assert get_provider_config("bailian")["model"] == "qwen3.6-plus"
 
-    def test_base_url_env_overlays_when_active_is_openapi_compatible(self, monkeypatch, tmp_path):
+    def test_base_url_env_overlays_when_active_is_openai_compatible(self, monkeypatch, tmp_path):
+        from unittest.mock import patch
+
+        self._write_settings(
+            tmp_path,
+            ("activeProvider: openai_compatible\nproviders:\n  openai_compatible:\n    apiBase: https://old/v1\n"),
+        )
+        monkeypatch.setenv("IAC_CODE_BASE_URL", "https://new/v1")
+        with patch("iac_code.config.Path.home", return_value=tmp_path):
+            from iac_code.config import get_provider_config
+
+            assert get_provider_config("openai_compatible")["apiBase"] == "https://new/v1"
+
+    def test_openapi_compatible_settings_key_is_legacy_alias_for_openai_compatible(self, monkeypatch, tmp_path):
         from unittest.mock import patch
 
         self._write_settings(
@@ -226,11 +246,13 @@ class TestGetProviderConfigEnv:
         )
         monkeypatch.setenv("IAC_CODE_BASE_URL", "https://new/v1")
         with patch("iac_code.config.Path.home", return_value=tmp_path):
-            from iac_code.config import get_provider_config
+            from iac_code.config import get_active_provider_key, get_provider_config
 
+            assert get_active_provider_key() == "openai_compatible"
+            assert get_provider_config("openai_compatible")["apiBase"] == "https://new/v1"
             assert get_provider_config("openapi_compatible")["apiBase"] == "https://new/v1"
 
-    def test_base_url_env_ignored_when_active_is_not_openapi_compatible(self, monkeypatch, tmp_path, caplog):
+    def test_base_url_env_ignored_when_active_is_not_openai_compatible(self, monkeypatch, tmp_path, caplog):
         import logging
         from unittest.mock import patch
 
@@ -293,7 +315,7 @@ class TestLoadCredentials:
             from iac_code.config import load_credentials
 
             creds = load_credentials()
-            for key in ("anthropic", "openai", "dashscope", "dashscope_token_plan", "deepseek", "openapi_compatible"):
+            for key in ("anthropic", "openai", "dashscope", "dashscope_token_plan", "deepseek", "openai_compatible"):
                 assert creds[key] == ""
             assert all(v == "" for v in creds.values())
 
@@ -306,7 +328,7 @@ class TestLoadCredentials:
             tmp_path,
             creds=(
                 "anthropic: ak\nopenai: ok\ndashscope: ds\n"
-                "dashscope_token_plan: tp\ndeepseek: dk\nopenapi_compatible: oc\n"
+                "dashscope_token_plan: tp\ndeepseek: dk\nopenai_compatible: oc\n"
             ),
         )
         with patch("iac_code.config.Path.home", return_value=tmp_path):
@@ -318,7 +340,7 @@ class TestLoadCredentials:
             assert creds["dashscope"] == "ds"
             assert creds["dashscope_token_plan"] == "tp"
             assert creds["deepseek"] == "dk"
-            assert creds["openapi_compatible"] == "oc"
+            assert creds["openai_compatible"] == "oc"
 
     def test_bailian_legacy_key_falls_back_to_dashscope_slot(self, monkeypatch, tmp_path):
         from unittest.mock import patch
@@ -330,6 +352,17 @@ class TestLoadCredentials:
             from iac_code.config import load_credentials
 
             assert load_credentials()["dashscope"] == "legacy"
+
+    def test_openapi_compatible_legacy_key_falls_back_to_openai_compatible_slot(self, monkeypatch, tmp_path):
+        from unittest.mock import patch
+
+        for n in ("IAC_CODE_PROVIDER", "IAC_CODE_API_KEY"):
+            monkeypatch.delenv(n, raising=False)
+        self._write(tmp_path, creds="openapi_compatible: legacy-compat\n")
+        with patch("iac_code.config.Path.home", return_value=tmp_path):
+            from iac_code.config import load_credentials
+
+            assert load_credentials()["openai_compatible"] == "legacy-compat"
 
     def test_dashscope_key_takes_precedence_over_bailian_legacy(self, monkeypatch, tmp_path):
         from unittest.mock import patch

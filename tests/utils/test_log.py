@@ -46,6 +46,21 @@ def test_setup_logging_info_level(tmp_path, monkeypatch):
     assert "should be present" in content
 
 
+def test_setup_logging_can_mirror_to_stdout(tmp_path, monkeypatch, capsys):
+    """When requested, log messages should still write the log file and mirror to stdout."""
+    monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)
+    logger.remove()
+
+    setup_logging(session_id="stdout", debug=False, stdout=True)
+
+    logger.info("visible on stdout")
+    logger.complete()
+
+    captured = capsys.readouterr()
+    assert "visible on stdout" in captured.out
+    assert "visible on stdout" in (tmp_path / "logs" / "stdout.log").read_text(encoding="utf-8")
+
+
 def test_setup_logging_creates_latest_symlink(tmp_path, monkeypatch):
     """Should create a 'latest.log' symlink pointing to current log."""
     monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: tmp_path)
@@ -56,6 +71,23 @@ def test_setup_logging_creates_latest_symlink(tmp_path, monkeypatch):
     latest = tmp_path / "logs" / "latest.log"
     assert latest.is_symlink()
     assert latest.resolve() == (tmp_path / "logs" / "sym123.log").resolve()
+
+
+def test_setup_logging_uses_iac_code_log_dir(tmp_path, monkeypatch):
+    """IAC_CODE_LOG_DIR should move log files out of the config directory."""
+    config_dir = tmp_path / "config"
+    log_dir = tmp_path / "runtime-logs"
+    monkeypatch.setattr("iac_code.utils.log.get_config_dir", lambda: config_dir)
+    monkeypatch.setenv("IAC_CODE_LOG_DIR", str(log_dir))
+    logger.remove()
+
+    setup_logging(session_id="custom-dir", debug=False)
+    logger.info("custom log dir")
+    logger.complete()
+
+    assert (log_dir / "custom-dir.log").exists()
+    assert (log_dir / "latest.log").exists()
+    assert not (config_dir / "logs").exists()
 
 
 def test_is_debug_enabled_reflects_setup(tmp_path, monkeypatch):

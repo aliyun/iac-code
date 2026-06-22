@@ -9,6 +9,7 @@ from iac_code.services.providers.aliyun import (
     AliyunCredential,
     AliyunCredentials,
     mask_sensitive,
+    use_aliyun_credential,
 )
 from iac_code.services.providers.aliyun_oauth import AliyunOAuthReloginRequired, OAuthStsCredentials, OAuthToken
 
@@ -103,6 +104,35 @@ class TestMaskSensitive:
 
 
 class TestAliyunCredentialsLoadFromEnv:
+    def test_context_credential_override_takes_priority_over_env(self):
+        env = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "env_secret",
+            "ALIBABA_CLOUD_REGION_ID": "cn-shanghai",
+            "ALIBABA_CLOUD_SECURITY_TOKEN": "env_sts",
+        }
+        override = AliyunCredential(
+            mode="StsToken",
+            access_key_id="client_id",
+            access_key_secret="client_secret",
+            region_id="cn-beijing",
+            sts_token="client_sts",
+        )
+
+        with patch.dict(os.environ, env, clear=False):
+            with use_aliyun_credential(override):
+                cred = AliyunCredentials.load()
+            after = AliyunCredentials.load()
+
+        assert cred is not None
+        assert cred.access_key_id == "client_id"
+        assert cred.access_key_secret == "client_secret"
+        assert cred.region_id == "cn-beijing"
+        assert cred.sts_token == "client_sts"
+        assert cred.mode == "StsToken"
+        assert after is not None
+        assert after.access_key_id == "env_id"
+
     def test_load_from_env_vars_defaults_to_cn_hangzhou(self):
         env = {
             "ALIBABA_CLOUD_ACCESS_KEY_ID": "env_id",

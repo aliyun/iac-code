@@ -39,6 +39,42 @@ def test_project_memory_runtime_defaults_instruction_files_to_agents_md(tmp_path
     assert runtime.memory_manager._memory_dir == runtime.auto_memory_dir
 
 
+def test_project_memory_dir_uses_logical_path_for_symlinked_workspace(tmp_path, monkeypatch):
+    mod = _module()
+    config_dir = tmp_path / "config"
+    physical_root = tmp_path / "mount-root"
+    physical_root.mkdir()
+    logical_root = tmp_path / "workspace"
+    logical_root.symlink_to(physical_root, target_is_directory=True)
+    logical_cwd = logical_root / "ctx-1"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    runtime = mod.ProjectMemoryRuntime(str(logical_cwd))
+
+    expected_key = mod.sanitize_path(str(logical_cwd))
+    assert runtime.auto_memory_dir == config_dir / "projects" / expected_key / "memory"
+    assert runtime.memory_manager._memory_dir == runtime.auto_memory_dir
+
+
+def test_project_memory_dir_uses_logical_git_root_for_symlinked_workspace(tmp_path, monkeypatch):
+    mod = _module()
+    config_dir = tmp_path / "config"
+    physical_root = tmp_path / "mount-root" / "oss" / "bucket"
+    physical_root.mkdir(parents=True)
+    (physical_root / ".git").mkdir()
+    logical_root = tmp_path / "workspace"
+    logical_root.symlink_to(physical_root, target_is_directory=True)
+    logical_cwd = logical_root / "ctx-1"
+    logical_cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    runtime = mod.ProjectMemoryRuntime(str(logical_cwd))
+
+    expected_key = mod.sanitize_path(str(logical_root))
+    assert runtime.project_root == logical_root
+    assert runtime.auto_memory_dir == config_dir / "projects" / expected_key / "memory"
+
+
 def test_project_memory_runtime_allows_instruction_file_env_override(tmp_path, monkeypatch):
     mod = _module()
     config_dir = tmp_path / "config"

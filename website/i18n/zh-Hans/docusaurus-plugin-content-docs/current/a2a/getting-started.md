@@ -139,6 +139,7 @@ token: your-secret-token
 verify-card-secret: your-card-signing-secret
 require-card-signature: true
 cwd: /path/to/workspace
+iac-code-model: qwen-plus
 ```
 
 使用 `a2a-client call` 进行直接的 Phase 1 client 调用：
@@ -177,7 +178,13 @@ iac-code a2a-client route-preview \
 
 ## 使用 curl 发送第一条消息
 
-通过 `message.metadata.iac_code.cwd` 传递工作区目录；该路径必须是绝对路径，必须已经存在，并且必须位于允许的工作区根目录内。默认情况下，允许的根目录是服务器进程目录和系统临时目录。可以用 `IACCODE_A2A_ALLOWED_CWDS` 覆盖它们。
+通过 `message.metadata.iac_code.cwd` 传递工作区目录；该路径必须是绝对路径，并且 resolve 后必须位于允许的工作区根目录内。已存在的路径必须是目录；缺失路径会在允许根目录下创建。默认情况下，允许的根目录是服务器进程目录和系统临时目录。可以用 `IACCODE_A2A_ALLOWED_CWDS` 覆盖它们。
+
+如需按任务覆盖 telemetry attribution，请在 `message.metadata.iac_code` 下传入非空字符串 `user_id`。它只覆盖当前任务的 telemetry user ID，不会改变 A2A task 或 context identifiers。
+
+如需按调用覆盖 LLM，请在 `message.metadata.iac_code` 下传入非空字符串 `iac_code_model`。该字段是 `IAC_CODE_MODEL` 的小写形式；它只在当前 A2A message turn 中覆盖 `IAC_CODE_MODEL`、`settings.yml` 和 server 启动默认 model。
+
+如需按请求传入 Alibaba Cloud 凭据，请在 `message.metadata.iac_code` 下包含 `alibaba_cloud_access_key_id`、`alibaba_cloud_access_key_secret`、`alibaba_cloud_region_id` 和可选的 `alibaba_cloud_security_token`。这些任务凭据只在本次 A2A 执行中覆盖 server 环境和 `.cloud-credentials.yml`。
 
 服务器接受类文本 parts、JSON 数据 parts、原始 UTF-8 文本、本地工作区 `file://` 文本文件和有界多模态附件。不支持远程 URL 摄取；`url` parts 必须是位于允许工作区内的本地 `file://` URLs。
 

@@ -137,6 +137,7 @@ Send a streaming request:
 iac-code a2a-client --config a2a-client.yml call \
   --prompt "Create a ROS VPC template with two vSwitches." \
   --cwd "$PWD" \
+  --iac-code-model qwen-plus \
   --stream
 ```
 
@@ -379,7 +380,7 @@ def handle_iac_metadata(metadata: dict[str, Any]) -> None:
 | Symptom | Fix |
 |---------|-----|
 | HTTP `401` | Include a configured auth scheme, such as `Authorization: Bearer <token>`, Basic auth, or `X-API-Key: <key>`, on both Agent Card and JSON-RPC requests |
-| `Invalid A2A workspace metadata.` | Use an existing absolute path in `metadata.iac_code.cwd` |
+| `Invalid A2A workspace metadata.` | Use an absolute directory path in `metadata.iac_code.cwd` that resolves inside `IACCODE_A2A_ALLOWED_CWDS` |
 | `A2A server currently accepts text input only.` | Send at least one non-empty text part |
 | `Task is already working.` | Wait for the current turn to finish before sending another message in the same context |
 | Follow-up rejected as different workspace | Keep `metadata.iac_code.cwd` unchanged for a reused `contextId` |
