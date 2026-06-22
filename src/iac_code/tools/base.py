@@ -21,11 +21,14 @@ class ToolContext:
 
     cwd: str = field(default_factory=os.getcwd)
     event_queue: asyncio.Queue | None = None
+    additional_directories: list[str] = field(default_factory=list)
+    trusted_read_directories: list[str] = field(default_factory=list)
     # U-I14: tool_use_id of the current tool invocation; lets tools tag emitted
     # events so multiple parallel calls of the same tool can be distinguished
     # downstream (e.g. in the renderer's per-tab accumulator). Populated by the
     # ToolExecutor on each call.
     tool_use_id: str | None = None
+    relative_read_directories: list[str] = field(default_factory=list)
 
 
 @dataclass

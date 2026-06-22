@@ -19,6 +19,13 @@ class TestToolContext:
         ctx = ToolContext(cwd="/tmp")
         assert ctx.cwd == "/tmp"
 
+    def test_tool_use_id_positional_compatibility(self):
+        """Adding fields must not shift the existing tool_use_id positional slot."""
+        ctx = ToolContext("/tmp", None, [], [], "toolu-1")
+
+        assert ctx.tool_use_id == "toolu-1"
+        assert ctx.relative_read_directories == []
+
 
 class TestToolResult:
     """Tests for ToolResult."""

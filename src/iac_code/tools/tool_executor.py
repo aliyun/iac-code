@@ -69,6 +69,9 @@ class ToolExecutor:
         context = ToolContext(
             cwd=context.cwd,
             event_queue=call.event_queue if call.event_queue is not None else context.event_queue,
+            additional_directories=list(context.additional_directories),
+            trusted_read_directories=list(context.trusted_read_directories),
+            relative_read_directories=list(context.relative_read_directories),
             tool_use_id=call.id,
         )
 

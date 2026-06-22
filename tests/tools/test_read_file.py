@@ -123,6 +123,64 @@ class TestReadFileTool:
         assert "Nested content" in result.content
 
     @pytest.mark.asyncio
+    async def test_relative_path_falls_back_to_relative_read_directory(self, tmp_path, read_file_tool):
+        """Skill reference links should resolve from explicit relative read roots when absent from cwd."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        skill_root = tmp_path / "skill"
+        reference = skill_root / "references" / "template-parameters.md"
+        reference.parent.mkdir(parents=True)
+        reference.write_text("Parameter reference content", encoding="utf-8")
+
+        context = ToolContext(cwd=str(workspace), relative_read_directories=[str(skill_root)])
+        result = await read_file_tool.execute(
+            tool_input={"path": "references/template-parameters.md"},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert "Parameter reference content" in result.content
+        assert f"File: {reference}" in result.content
+
+    @pytest.mark.asyncio
+    async def test_relative_path_does_not_fall_back_to_trusted_read_directory(self, tmp_path, read_file_tool):
+        """Trusted read roots should allow explicit reads without changing relative lookup semantics."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        trusted_root = tmp_path / "trusted"
+        reference = trusted_root / "references" / "template-parameters.md"
+        reference.parent.mkdir(parents=True)
+        reference.write_text("Trusted reference content", encoding="utf-8")
+
+        context = ToolContext(cwd=str(workspace), trusted_read_directories=[str(trusted_root)])
+        result = await read_file_tool.execute(
+            tool_input={"path": "references/template-parameters.md"},
+            context=context,
+        )
+
+        assert result.is_error is True
+        assert f"File not found: {workspace / 'references' / 'template-parameters.md'}" in result.content
+
+    @pytest.mark.asyncio
+    async def test_relative_path_does_not_fall_back_to_additional_directory(self, tmp_path, read_file_tool):
+        """Additional directories should not change relative path lookup semantics."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        shared_root = tmp_path / "shared"
+        reference = shared_root / "references" / "template-parameters.md"
+        reference.parent.mkdir(parents=True)
+        reference.write_text("Shared reference content", encoding="utf-8")
+
+        context = ToolContext(cwd=str(workspace), additional_directories=[str(shared_root)])
+        result = await read_file_tool.execute(
+            tool_input={"path": "references/template-parameters.md"},
+            context=context,
+        )
+
+        assert result.is_error is True
+        assert f"File not found: {workspace / 'references' / 'template-parameters.md'}" in result.content
+
+    @pytest.mark.asyncio
     async def test_read_file_start_line_only(self, tmp_path, read_file_tool):
         """Test reading with only start_line specified."""
         test_file = tmp_path / "test.txt"

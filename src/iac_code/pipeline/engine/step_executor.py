@@ -346,6 +346,7 @@ class StepExecutor:
         from iac_code.agent.agent_loop import AgentLoop
 
         agent_session_id = transcript_id or session_id
+        step_skill_roots = self._resolve_step_skill_roots(step)
         agent_loop = AgentLoop(
             provider_manager=self._provider_manager,
             system_prompt=system_prompt,
@@ -358,6 +359,8 @@ class StepExecutor:
             pause_event=self._pause_event,
             permission_context_getter=self._permission_context_getter,
             auto_trigger_skills=self._resolve_auto_trigger_skills(step),
+            tool_context_trusted_read_directories=step_skill_roots,
+            tool_context_relative_read_directories=step_skill_roots,
         )
         return StepAgentLoopContext(
             agent_loop=agent_loop,
@@ -585,6 +588,28 @@ class StepExecutor:
             pass
 
         return None
+
+    def _resolve_step_skill_roots(self, step: StepSpec) -> list[str]:
+        if not step.skill:
+            return []
+        root = self._resolve_skill_root(step.skill)
+        return [root] if root else []
+
+    def _resolve_skill_root(self, skill_name: str) -> str:
+        root = self._pipeline.skill_roots.get(skill_name, "")
+        if root:
+            return root
+
+        try:
+            from iac_code.skills.bundled import get_bundled_skills
+
+            for skill_def in get_bundled_skills():
+                if skill_def.name == skill_name:
+                    return skill_def.skill_root
+        except ImportError:
+            pass
+
+        return ""
 
     @staticmethod
     def _with_skill_base_directory(content: str, skill_root: str) -> str:

@@ -70,6 +70,21 @@ def _bash_turn(tool_use_id: str, command: str, *, text: str = "") -> list:
     return events
 
 
+def _read_file_turn(tool_use_id: str, path: str, *, text: str = "") -> list:
+    """Build a fake LLM turn that calls read_file with the given path."""
+    events = [MessageStartEvent(message_id=f"msg-{tool_use_id}")]
+    if text:
+        events.append(TextDeltaEvent(text=text))
+    events.extend(
+        [
+            ToolUseStartEvent(tool_use_id=tool_use_id, name="read_file"),
+            ToolUseEndEvent(tool_use_id=tool_use_id, name="read_file", input={"path": path}),
+            MessageEndEvent(stop_reason="tool_use", usage=Usage()),
+        ]
+    )
+    return events
+
+
 def _text_turn(text: str) -> list:
     """Build a fake LLM turn that just responds with text (no tool calls)."""
     return [
@@ -125,6 +140,69 @@ class TestSingleCommandPermissionScenarios:
         assert not _has_permission_request(events)
         results = _tool_results(events)
         assert any(not r.is_error for r in results)
+
+    @pytest.mark.asyncio
+    async def test_loop_trusted_read_roots_apply_to_read_file_permissions(self, tmp_path):
+        """Agent loop skill read roots should be available to permission checks and tool execution."""
+        project = tmp_path / "project"
+        skill_root = tmp_path / "skill"
+        project.mkdir()
+        skill_root.mkdir()
+        reference = skill_root / "template-parameters.md"
+        reference.write_text("Skill reference content", encoding="utf-8")
+
+        provider = FakeProvider([_read_file_turn("t1", str(reference)), _text_turn("done")])
+        registry = ToolRegistry()
+        registry.register_default_tools()
+        loop = AgentLoop(
+            provider_manager=provider,
+            system_prompt="test",
+            tool_registry=registry,
+            cwd=str(project),
+            max_turns=2,
+            permission_context=ToolPermissionContext(cwd=str(project)),
+            tool_context_trusted_read_directories=[str(skill_root)],
+        )
+
+        events = await _collect_events(loop, "read skill reference")
+
+        assert not _has_permission_request(events)
+        results = _tool_results(events)
+        assert any("Skill reference content" in result.result for result in results)
+
+    @pytest.mark.asyncio
+    async def test_session_trusted_read_roots_do_not_change_relative_read_lookup(self, tmp_path):
+        """Non-pipeline trusted read roots should not make read_file resolve relative paths from them."""
+        project = tmp_path / "project"
+        session_root = tmp_path / "session-artifacts"
+        project.mkdir()
+        reference = session_root / "references" / "template-parameters.md"
+        reference.parent.mkdir(parents=True)
+        reference.write_text("Session reference content", encoding="utf-8")
+
+        provider = FakeProvider([_read_file_turn("t1", "references/template-parameters.md"), _text_turn("done")])
+        registry = ToolRegistry()
+        registry.register_default_tools()
+        loop = AgentLoop(
+            provider_manager=provider,
+            system_prompt="test",
+            tool_registry=registry,
+            cwd=str(project),
+            max_turns=2,
+            permission_context=ToolPermissionContext(
+                cwd=str(project),
+                trusted_read_directories=[str(session_root)],
+            ),
+        )
+
+        events = await _collect_events(loop, "read session reference")
+
+        assert not _has_permission_request(events)
+        results = _tool_results(events)
+        assert any(result.is_error for result in results)
+        expected_error = f"File not found: {project / 'references' / 'template-parameters.md'}"
+        assert any(expected_error in result.result for result in results)
+        assert not any("Session reference content" in result.result for result in results)
 
     @pytest.mark.asyncio
     async def test_curl_requires_permission(self):

@@ -139,6 +139,30 @@ class TestSkillPromptRendering:
 
         assert f"Base directory for this skill: {SKILL_DIR}" in prompt
 
+    def test_agent_loop_trusts_skill_base_directory_for_tools(self, tmp_path):
+        from iac_code.pipeline.engine.context import PipelineContext
+        from iac_code.pipeline.engine.loader import load_pipeline_dir
+        from iac_code.pipeline.engine.step_executor import StepExecutor
+        from iac_code.tools.base import ToolRegistry
+
+        pipeline_dir = SKILL_DIR.parents[1]
+        loaded = load_pipeline_dir(pipeline_dir)
+        step = next(s for s in loaded.sub_pipelines["evaluate_candidate"].steps if s.step_id == "template_generating")
+        context = PipelineContext({"candidate": []})
+        context.set_conclusion("candidate", {"output_path": "templates/example.yml"})
+
+        agent_context = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=loaded,
+            pipeline_dir=pipeline_dir,
+            cwd=str(tmp_path),
+        ).build_agent_loop_context(step, context, "session-1")
+
+        assert agent_context.agent_loop is not None
+        assert str(SKILL_DIR) in agent_context.agent_loop._tool_context_trusted_read_directories
+        assert str(SKILL_DIR) in agent_context.agent_loop._tool_context_relative_read_directories
+
 
 class TestEvalsJson:
     def test_evals_file_exists(self):

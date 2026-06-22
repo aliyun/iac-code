@@ -15,8 +15,28 @@ MAX_READ_BYTES = 10 * 1024 * 1024
 MAX_READ_LINES = 50_000
 
 
-def _resolve_input_path(path: str, cwd: str) -> str:
-    return resolve_candidate(path, cwd)
+def _path_is_under(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.realpath(path), os.path.realpath(root)]) == os.path.realpath(root)
+    except ValueError:
+        return False
+
+
+def _resolve_input_path(
+    path: str,
+    cwd: str,
+    *,
+    relative_read_directories: list[str] | None = None,
+) -> str:
+    primary = resolve_candidate(path, cwd)
+    if os.path.isabs(os.path.expanduser(path)) or os.path.exists(primary):
+        return primary
+
+    for root in relative_read_directories or []:
+        candidate = resolve_candidate(path, root)
+        if _path_is_under(candidate, root) and os.path.exists(candidate):
+            return candidate
+    return primary
 
 
 class ReadFileTool(Tool):
@@ -85,7 +105,11 @@ class ReadFileTool(Tool):
         return decision.to_permission_result()
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        path = _resolve_input_path(tool_input["path"], context.cwd)
+        path = _resolve_input_path(
+            tool_input["path"],
+            context.cwd,
+            relative_read_directories=context.relative_read_directories,
+        )
         start_line = tool_input.get("start_line")
         end_line = tool_input.get("end_line")
 
