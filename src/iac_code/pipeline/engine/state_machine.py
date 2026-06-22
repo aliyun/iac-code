@@ -14,8 +14,8 @@ class StateMachine:
     """Generic pipeline state machine.
 
     Steps are ordered linearly. Each step's config defines its forward
-    target and rollback rules. The state machine tracks the current
-    position, step statuses, and rollback count.
+    target. The state machine tracks the current position, step statuses,
+    and rollback count.
     """
 
     def __init__(self, steps: list[StepSpec], max_rollbacks: int = 3, max_interrupt_rollbacks: int = 10) -> None:
@@ -63,9 +63,9 @@ class StateMachine:
         self._step_statuses[step.forward] = StepStatus.RUNNING
         return self.current_step
 
-    def rollback(self, target_step_id: str, reason: str, *, allow_completed_non_future: bool = False) -> StepSpec:
+    def rollback(self, target_step_id: str, reason: str) -> StepSpec:
         """Roll back to target step, marking intermediates as stale."""
-        if not self.can_rollback_to(target_step_id, allow_completed_non_future=allow_completed_non_future):
+        if not self.can_rollback_to(target_step_id):
             raise ValueError(f"Cannot rollback from {self.current_step.step_id} to {target_step_id}")
         if self._rollback_count >= self._max_rollbacks:
             raise ValueError(f"Max rollbacks ({self._max_rollbacks}) exceeded")
@@ -81,14 +81,8 @@ class StateMachine:
         self._step_statuses[target_step_id] = StepStatus.RUNNING
         return self.current_step
 
-    def can_rollback_to(self, target_step_id: str, *, allow_completed_non_future: bool = False) -> bool:
-        if allow_completed_non_future:
-            return target_step_id in self.completed_non_future_rollback_targets()
-        step = self.current_step
-        return any(r.target_step == target_step_id for r in step.rollback_rules)
-
-    def get_rollback_options(self) -> list:
-        return self.current_step.rollback_rules
+    def can_rollback_to(self, target_step_id: str) -> bool:
+        return target_step_id in self.completed_non_future_rollback_targets()
 
     def completed_non_future_rollback_targets(self) -> list[str]:
         """Return completed rollback targets at or before the current position."""
@@ -114,7 +108,7 @@ class StateMachine:
         return True, None
 
     def interrupt_rollback(self, target_step_id: str, reason: str) -> StepSpec:
-        """User-interrupt rollback. Not constrained by rollback_rules but has its own limit."""
+        """User-interrupt rollback to current or prior steps with its own limit."""
         ok, error = self.can_interrupt_rollback_to(target_step_id)
         if not ok:
             if error == "unknown_step":

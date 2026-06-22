@@ -208,9 +208,6 @@ def _build_parallel_runner(tmp_path, *, storage=None):
                 forward: null
                 prompt: prompts/cost.md
                 context_fields: [template]
-                rollback:
-                  - target: template_gen
-                    condition: needs_template_rework
         steps:
           - id: arch
             conclusion_field: architecture

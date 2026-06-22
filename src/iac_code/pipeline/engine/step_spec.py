@@ -7,7 +7,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from iac_code.pipeline.engine.context import PipelineContext
-from iac_code.pipeline.engine.types import RollbackRule
 
 
 @dataclass
@@ -55,7 +54,6 @@ class StepSpec:
     step_type: str = "normal"
     sub_pipeline_name: str | None = None
     tools: IncludeExcludeConfig | None = None
-    rollback_rules: list[RollbackRule] = field(default_factory=list)
     auto_advance: bool = True
     max_agent_turns: int = 50
     context_fields: list[str] = field(default_factory=list)

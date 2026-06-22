@@ -6,7 +6,6 @@ from iac_code.pipeline.engine.step_spec import (
     SubPipelineSpec,
     render_prompt,
 )
-from iac_code.pipeline.engine.types import RollbackRule
 
 
 class TestIncludeExcludeConfig:
@@ -93,14 +92,13 @@ class TestStepSpec:
             forward="cost_estimating",
             prompt_file="prompts/reviewing.md",
             skill="iac-aliyun-review",
-            rollback_rules=[RollbackRule(target_step="template_generating", condition="template_issue")],
             context_fields=["template"],
             enabled_when="cost_estimation",
             hooks_file="hooks/deploying.py",
         )
         assert spec.skill == "iac-aliyun-review"
         assert spec.enabled_when == "cost_estimation"
-        assert len(spec.rollback_rules) == 1
+        assert spec.context_fields == ["template"]
 
     def test_parallel_sub_pipeline_step(self):
         spec = StepSpec(

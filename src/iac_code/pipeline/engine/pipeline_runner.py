@@ -3120,7 +3120,7 @@ class PipelineRunner:
                 target, reason = step_result.rollback_request
                 current_attempt_id = attempt.get("attempt_id")
                 try:
-                    self.state_machine.rollback(target, reason, allow_completed_non_future=True)
+                    self.state_machine.rollback(target, reason)
                 except ValueError as exc:
                     valid_targets = self.state_machine.completed_non_future_rollback_targets()
                     error_message = f"Invalid rollback target {target!r}. Valid targets: {valid_targets}. ({exc})"

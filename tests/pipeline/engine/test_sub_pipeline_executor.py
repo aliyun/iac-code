@@ -11,7 +11,7 @@ from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec, SubPipelineSpec
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor, SubPipelineResult
-from iac_code.pipeline.engine.types import RollbackRule, StepResult, StepStatus
+from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.stream_events import ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
 
@@ -450,7 +450,6 @@ class TestSubPipelineExecutor:
                     forward=None,
                     prompt_file="prompts/cost.md",
                     context_fields=["template"],
-                    rollback_rules=[RollbackRule(target_step="template_generating", condition="needs_template_rework")],
                 ),
             ],
             max_rollbacks=2,

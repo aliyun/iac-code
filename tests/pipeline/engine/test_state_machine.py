@@ -2,30 +2,15 @@ import pytest
 
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_spec import StepSpec
-from iac_code.pipeline.engine.types import RollbackRule, StepStatus
+from iac_code.pipeline.engine.types import StepStatus
 
 
 def _make_three_steps():
     """A → B → C pipeline."""
     return [
         StepSpec(step_id="a", conclusion_field="a", forward="b", prompt_file="a.md"),
-        StepSpec(
-            step_id="b",
-            conclusion_field="b",
-            forward="c",
-            prompt_file="b.md",
-            rollback_rules=[RollbackRule(target_step="a", condition="fix")],
-        ),
-        StepSpec(
-            step_id="c",
-            conclusion_field="c",
-            forward=None,
-            prompt_file="c.md",
-            rollback_rules=[
-                RollbackRule(target_step="a", condition="restart"),
-                RollbackRule(target_step="b", condition="revise"),
-            ],
-        ),
+        StepSpec(step_id="b", conclusion_field="b", forward="c", prompt_file="b.md"),
+        StepSpec(step_id="c", conclusion_field="c", forward=None, prompt_file="c.md"),
     ]
 
 
@@ -66,11 +51,11 @@ class TestStateMachineRollback:
         assert sm._step_statuses["b"] == StepStatus.STALE
         assert sm._step_statuses["c"] == StepStatus.STALE
 
-    def test_rollback_to_disallowed_target_raises(self):
+    def test_rollback_to_future_target_raises(self):
         sm = StateMachine(_make_three_steps())
         sm.advance()  # a → b
         with pytest.raises(ValueError, match="Cannot rollback"):
-            sm.rollback("c", "invalid")  # b can only roll back to a
+            sm.rollback("c", "invalid")
 
     def test_max_rollbacks_exceeded(self):
         sm = StateMachine(_make_three_steps(), max_rollbacks=1)
@@ -98,14 +83,11 @@ class TestStateMachineRollback:
         assert sm.can_rollback_to("b")
         assert not sm.can_rollback_to("nonexistent")
 
-    def test_get_rollback_options(self):
+    def test_completed_non_future_rollback_targets(self):
         sm = StateMachine(_make_three_steps())
         sm.advance()
         sm.advance()
-        options = sm.get_rollback_options()
-        assert len(options) == 2
-        targets = {r.target_step for r in options}
-        assert targets == {"a", "b"}
+        assert sm.completed_non_future_rollback_targets() == ["a", "b"]
 
     def test_completed_non_future_rollback_targets_ignore_static_rules(self):
         steps = [
@@ -118,7 +100,7 @@ class TestStateMachineRollback:
         sm.advance()  # b -> c
 
         assert sm.completed_non_future_rollback_targets() == ["a", "b"]
-        step = sm.rollback("b", "revise completed step", allow_completed_non_future=True)
+        step = sm.rollback("b", "revise completed step")
 
         assert step.step_id == "b"
 
@@ -133,7 +115,7 @@ class TestStateMachineRollback:
 
         assert sm.completed_non_future_rollback_targets() == ["a"]
         with pytest.raises(ValueError, match="Cannot rollback"):
-            sm.rollback("c", "future", allow_completed_non_future=True)
+            sm.rollback("c", "future")
 
 
 class TestInterruptRollback:
@@ -183,10 +165,9 @@ class TestInterruptRollback:
         assert step.step_id == "b"
         assert sm._step_statuses["b"] == StepStatus.RUNNING
 
-    def test_interrupt_rollback_ignores_rollback_rules(self):
-        """interrupt_rollback should work even without rollback_rules."""
+    def test_interrupt_rollback_accepts_current_or_prior_step(self):
         sm = StateMachine(_make_three_steps())
-        sm.advance()  # a → b (b can only roll back to a via rules)
+        sm.advance()  # a → b
         sm.advance()  # b → c
         step = sm.interrupt_rollback("b", "no rule needed")
         assert step.step_id == "b"

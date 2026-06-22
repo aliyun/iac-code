@@ -22,7 +22,6 @@ from iac_code.pipeline.engine.step_spec import (
     StepSpec,
     SubPipelineSpec,
 )
-from iac_code.pipeline.engine.types import RollbackRule
 
 logger = logging.getLogger(__name__)
 
@@ -195,10 +194,6 @@ def _parse_sub_pipelines(
 def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
     steps: list[StepSpec] = []
     for raw in raw_steps:
-        rollback_rules = [
-            RollbackRule(target_step=r["target"], condition=r["condition"]) for r in raw.get("rollback", [])
-        ]
-
         raw_tools = raw.get("tools")
         if raw_tools is not None:
             tools = IncludeExcludeConfig(
@@ -227,7 +222,6 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 step_type=raw.get("type", "normal"),
                 sub_pipeline_name=raw.get("sub_pipeline"),
                 tools=tools,
-                rollback_rules=rollback_rules,
                 auto_advance=raw.get("auto_advance", True),
                 max_agent_turns=raw.get("max_agent_turns", 50),
                 context_fields=raw.get("context_fields", []),

@@ -48,6 +48,32 @@ class TestLoadPipelineDir:
         assert loaded.steps[1].context_fields == ["intent"]
         assert loaded.max_rollbacks == 2
 
+    def test_ignores_legacy_step_rollback_section(self, tmp_path):
+        yaml_content = dedent("""\
+            name: test
+            context_dependencies:
+              intent: []
+              architecture: [intent]
+            max_rollbacks: 2
+            steps:
+              - id: step_a
+                conclusion_field: intent
+                forward: step_b
+                prompt: prompts/step_a.md
+              - id: step_b
+                conclusion_field: architecture
+                forward: null
+                prompt: prompts/step_b.md
+                rollback:
+                  - target: step_a
+                    condition: revise_intent
+        """)
+        _write_pipeline(tmp_path, yaml_content, {"step_a.md": "Do A", "step_b.md": "Do B"})
+
+        loaded = load_pipeline_dir(tmp_path)
+
+        assert not hasattr(loaded.steps[1], "rollback_rules")
+
     def test_selling_iac_aliyun_skill_reference_file_uses_bundled_root_fallback(self, tmp_path):
         _write_pipeline(tmp_path, MINIMAL_YAML, {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"})
         skill_dir = tmp_path / "skills" / "iac-aliyun-cost"

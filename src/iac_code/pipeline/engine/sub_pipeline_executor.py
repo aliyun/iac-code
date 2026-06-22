@@ -263,7 +263,7 @@ class SubPipelineExecutor:
                 if step_result.rollback_request:
                     target, reason = step_result.rollback_request
                     try:
-                        state_machine.rollback(target, reason, allow_completed_non_future=True)
+                        state_machine.rollback(target, reason)
                         conclusions = self._conclusions_before_step(sub_spec, target, conclusions)
                         self._mark_rolled_back_fields_stale(sub_context, sub_spec, target)
                     except ValueError as e:
@@ -693,7 +693,7 @@ class SubPipelineExecutor:
                         if step_result.rollback_request:
                             target, reason = step_result.rollback_request
                             try:
-                                state_machine.rollback(target, reason, allow_completed_non_future=True)
+                                state_machine.rollback(target, reason)
                                 conclusions = self._conclusions_before_step(sub_spec, target, conclusions)
                                 self._observability.sub_step_completed(
                                     duration_ms=self._observability.duration_ms(sub_step_started_at),

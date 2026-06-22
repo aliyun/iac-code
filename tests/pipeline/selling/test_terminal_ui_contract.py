@@ -24,12 +24,10 @@ def test_confirm_prompt_tells_model_to_output_candidate_index():
     assert "`options[].candidate_index`" in prompt
 
 
-def test_deploying_can_rollback_to_confirm_and_select_for_invalid_selection():
+def test_selling_steps_do_not_expose_static_rollback_rules():
     loaded = load_pipeline_dir(_selling_pipeline_dir())
-    deploying = next(step for step in loaded.steps if step.step_id == "deploying")
-    rollback_pairs = {(rule.target_step, rule.condition) for rule in deploying.rollback_rules}
 
-    assert ("confirm_and_select", "invalid_selection") in rollback_pairs
+    assert all(not hasattr(step, "rollback_rules") for step in loaded.steps)
 
 
 def test_deploying_pauses_when_interrupt_judge_fails():

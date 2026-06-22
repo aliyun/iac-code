@@ -11,7 +11,7 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import A2AArtifactSpec, LoadedPipeline, StepSpec, SubPipelineSpec, render_prompt
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor, SubPipelineResult
-from iac_code.pipeline.engine.types import RollbackRule, StepConfig, StepResult, StepStatus
+from iac_code.pipeline.engine.types import StepConfig, StepResult, StepStatus
 from iac_code.pipeline.engine.ui_contract import PipelineStepType, PipelineUiMode
 
 __all__ = [
@@ -27,7 +27,6 @@ __all__ = [
     "PipelineSession",
     "PipelineStepType",
     "PipelineUiMode",
-    "RollbackRule",
     "StateMachine",
     "StepConfig",
     "StepExecutor",

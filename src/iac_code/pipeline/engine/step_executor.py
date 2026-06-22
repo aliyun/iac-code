@@ -621,13 +621,10 @@ class StepExecutor:
             step_id=step.step_id,
             conclusion_field=step.conclusion_field,
             forward=step.forward,
-            rollback_rules=step.rollback_rules,
             auto_advance=step.auto_advance,
             max_agent_turns=step.max_agent_turns,
             conclusion_schema=step.conclusion_schema,
-            rollback_targets=rollback_targets
-            if rollback_targets is not None
-            else [r.target_step for r in step.rollback_rules],
+            rollback_targets=rollback_targets if rollback_targets is not None else [],
             max_conclusion_retries=step.max_conclusion_retries,
             rollback_count=rollback_count,
             max_rollbacks=max_rollbacks,

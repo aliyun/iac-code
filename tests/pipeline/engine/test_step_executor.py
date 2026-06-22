@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -8,7 +9,7 @@ from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec
-from iac_code.pipeline.engine.types import RollbackRule, StepResult, StepStatus
+from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.tools.base import ToolContext, ToolRegistry
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
@@ -1575,8 +1576,29 @@ class TestStepExecutorSchemaWiring:
             conclusion_field="intent",
             forward="arch",
             prompt_file="prompts/intent_parsing.md",
-            rollback_rules=[RollbackRule(target_step="prev_step", condition="bad")],
         )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_make_pipeline(),
+            pipeline_dir=tmp_path,
+        )
+        ctx = PipelineContext(SIMPLE_DEPS)
+        tool_reg = executor._build_step_tools(step, ctx, rollback_targets=["prev_step"])
+        complete_tool = tool_reg.get("complete_step")
+        schema = complete_tool.input_schema
+        assert schema["properties"]["rollback_request"]["properties"]["target_step"]["enum"] == ["prev_step"]
+
+    def test_does_not_fallback_to_static_rollback_rules(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "intent_parsing.md").write_text("Parse.", encoding="utf-8")
+        step = StepSpec(
+            step_id="intent_parsing",
+            conclusion_field="intent",
+            forward="arch",
+            prompt_file="prompts/intent_parsing.md",
+        )
+        setattr(step, "rollback_rules", [SimpleNamespace(target_step="legacy_prev", condition="bad")])
         executor = StepExecutor(
             provider_manager=MagicMock(),
             base_tool_registry=ToolRegistry(),
@@ -1586,8 +1608,8 @@ class TestStepExecutorSchemaWiring:
         ctx = PipelineContext(SIMPLE_DEPS)
         tool_reg = executor._build_step_tools(step, ctx)
         complete_tool = tool_reg.get("complete_step")
-        schema = complete_tool.input_schema
-        assert schema["properties"]["rollback_request"]["properties"]["target_step"]["enum"] == ["prev_step"]
+
+        assert "rollback_request" not in complete_tool.input_schema["properties"]
 
 
 class TestSchemaIntegration:
@@ -1595,7 +1617,7 @@ class TestSchemaIntegration:
 
     def test_conclusion_schema_and_rollback_targets_propagate(self, tmp_path):
         """Verify that conclusion_schema from StepSpec reaches the tool's input_schema,
-        and rollback_rules produce correct enum constraint on rollback_request.target_step."""
+        and explicit rollback targets produce correct enum constraint on rollback_request.target_step."""
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "intent_parsing.md").write_text("Do it.", encoding="utf-8")
         step = StepSpec(
@@ -1611,10 +1633,6 @@ class TestSchemaIntegration:
                     "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                 },
             },
-            rollback_rules=[
-                RollbackRule(target_step="prev_step", condition="bad_input"),
-                RollbackRule(target_step="other_step", condition="other_issue"),
-            ],
             max_conclusion_retries=3,
         )
         executor = StepExecutor(
@@ -1624,7 +1642,7 @@ class TestSchemaIntegration:
             pipeline_dir=tmp_path,
         )
         ctx = PipelineContext(SIMPLE_DEPS)
-        tool_reg = executor._build_step_tools(step, ctx)
+        tool_reg = executor._build_step_tools(step, ctx, rollback_targets=["prev_step", "other_step"])
         tool = tool_reg.get("complete_step")
         schema = tool.input_schema
 
@@ -1665,7 +1683,7 @@ class TestSchemaIntegration:
         assert conclusion["type"] == "object"
         assert "description" in conclusion
         assert "properties" not in conclusion
-        # No rollback when no rollback_rules
+        # No rollback unless the runner passes dynamic rollback targets.
         assert "rollback_request" not in schema["properties"]
 
 

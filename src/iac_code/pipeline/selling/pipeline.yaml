@@ -86,9 +86,6 @@ sub_pipelines:
         tools:
           include: [-]
           exclude: []
-        rollback:
-          - target: template_generating
-            condition: template_issue
 
       - id: cost_estimating
         description: "评估模板的资源成本"
@@ -186,9 +183,6 @@ steps:
     tools:
       include: [read_memory, read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
       exclude: []
-    rollback:
-      - target: intent_parsing
-        condition: intent_unclear
 
   - id: evaluate_candidates
     description: "并行生成各候选方案的 IaC 模板并评估成本"
@@ -241,9 +235,6 @@ steps:
         selected_candidate_index:
           type: integer
           description: 用户最终选择的候选方案在 evaluated_candidates 中的 0 基下标；首次展示方案时可省略
-    rollback:
-      - target: architecture_planning
-        condition: want_different_plans
 
   - id: deploying
     description: "执行用户选定方案的部署"
@@ -257,8 +248,3 @@ steps:
     tools:
       include: []
       exclude: [write_memory]
-    rollback:
-      - target: confirm_and_select
-        condition: invalid_selection
-      - target: architecture_planning
-        condition: need_different_architecture
