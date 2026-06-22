@@ -111,6 +111,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/docs/automation/pipeline-mode',
+          label: 'Pipeline',
+          position: 'left',
+        },
+        {
           href: 'https://github.com/aliyun/iac-code',
           label: 'GitHub',
           position: 'right',
@@ -134,6 +139,10 @@ const config: Config = {
             {
               label: 'CLI Overview',
               to: '/docs/cli/usage',
+            },
+            {
+              label: 'Pipeline Mode',
+              to: '/docs/automation/pipeline-mode',
             },
             {
               label: 'Slash Commands',

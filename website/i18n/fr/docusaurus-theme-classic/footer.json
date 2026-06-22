@@ -11,6 +11,10 @@
     "message": "Aperçu CLI",
     "description": "The label of footer link with label=CLI Overview linking to /docs/cli/usage"
   },
+  "link.item.label.Pipeline Mode": {
+    "message": "Mode Pipeline",
+    "description": "The label of footer link with label=Pipeline Mode linking to /docs/automation/pipeline-mode"
+  },
   "link.item.label.Slash Commands": {
     "message": "Commandes slash",
     "description": "The label of footer link with label=Slash Commands linking to /docs/cli/commands"
