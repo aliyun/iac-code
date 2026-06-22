@@ -2120,6 +2120,25 @@ msgstr "Nom de la mémoire à lire. Omettez-le pour tout lister."
 #: src/iac_code/memory/memory_tools.py
 #, python-brace-format
 msgid ""
+"{base}\n"
+"\n"
+"Available memories:\n"
+"{index}\n"
+"\n"
+"Call read_memory again with one of these names, or omit name to list all "
+"memories."
+msgstr ""
+"{base}\n"
+"\n"
+"Mémoires disponibles :\n"
+"{index}\n"
+"\n"
+"Appelez à nouveau read_memory avec l’un de ces noms, ou omettez name pour"
+" lister toutes les mémoires."
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid ""
 "Save a persistent memory. Use when the user explicitly asks you to "
 "remember or preserve information. Choose a concise, stable name, an "
 "appropriate type, a short description, and the useful content to keep. "
