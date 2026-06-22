@@ -71,6 +71,9 @@ sub_pipelines:
         skill: iac-aliyun-template-generating
         prompt: prompts/template_generating.md
         context_fields: [candidate]
+        tools:
+          include: []
+          exclude: [write_memory]
 
       - id: reviewing
         description: "审查模板的安全性和最佳实践"
@@ -100,7 +103,7 @@ sub_pipelines:
         context_fields: [template]
         tools:
           include: []
-          exclude: [bash]
+          exclude: [bash, write_memory]
 
 steps:
   - id: intent_parsing
@@ -113,7 +116,7 @@ steps:
       field: is_infra_intent
       value: false
     tools:
-      include: [-]
+      include: [read_memory]
       exclude: []
     inject_tools: [ask_user_question]
     completion_guards:
@@ -181,7 +184,7 @@ steps:
     prompt: prompts/architecture_planning.md
     context_fields: [intent]
     tools:
-      include: [read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
+      include: [read_memory, read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
       exclude: []
     rollback:
       - target: intent_parsing
@@ -251,6 +254,9 @@ steps:
     interrupt_judge_failure: pause
     context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py
+    tools:
+      include: []
+      exclude: [write_memory]
     rollback:
       - target: confirm_and_select
         condition: invalid_selection

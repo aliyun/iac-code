@@ -937,6 +937,16 @@ class InlineREPL:
         first = user_input.split(None, 1)[0] if user_input else ""
         return first in _PIPELINE_SAFE_COMMANDS
 
+    def _pipeline_memory_content_getter(self) -> None:
+        """Return pipeline prompt memory provider.
+
+        Pipeline steps should not receive all auto-memory topic bodies in the
+        system prompt. They also intentionally do not receive MemoryRecallService,
+        so no side recall is triggered. Relevant topic memories are available
+        through the explicit read_memory tool when a step's tool policy allows it.
+        """
+        return None
+
     def _maybe_block_user_escape(self, user_input: str) -> bool:
         """Return True if the input is a gated escape and we should NOT process it.
 
@@ -2289,7 +2299,7 @@ class InlineREPL:
             session_id=self._session_id,
             cwd=pipeline_cwd,
             permission_context_getter=lambda: self.store.get_state().permission_context,
-            memory_content_getter=(lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""),
+            memory_content_getter=self._pipeline_memory_content_getter(),
             auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
             resume_from_sidecar=True,
         )
@@ -2359,9 +2369,7 @@ class InlineREPL:
                 session_id=self._session_id,
                 cwd=pipeline_cwd,
                 permission_context_getter=lambda: self.store.get_state().permission_context,
-                memory_content_getter=(
-                    lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""
-                ),
+                memory_content_getter=self._pipeline_memory_content_getter(),
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
             )
             self._refresh_pipeline_display_recorder()
@@ -4587,9 +4595,7 @@ class InlineREPL:
                 session_id=new_session_id,
                 cwd=pipeline_cwd,
                 permission_context_getter=lambda: self.store.get_state().permission_context,
-                memory_content_getter=(
-                    lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""
-                ),
+                memory_content_getter=self._pipeline_memory_content_getter(),
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
                 resume_from_sidecar=True,
             )

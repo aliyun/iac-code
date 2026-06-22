@@ -24,3 +24,13 @@ def test_architecture_consumes_intent_resource_lifecycle_contract():
     assert "use_existing/reference 必须作为已有资源引用" in body
     assert "不得生成 VSwitch" in body
     assert "forbidden_resources" not in body
+
+
+def test_architecture_prompt_guides_optional_memory_lookup_for_planning_context():
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert "不要读取项目文件或记忆" not in body
+    assert "read_memory({})" in body
+    assert "架构偏好" in body
+    assert "已有 VPC" in body
+    assert "当前用户意图为准" in body

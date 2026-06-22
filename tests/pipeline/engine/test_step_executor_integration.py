@@ -108,3 +108,25 @@ def test_step_executor_defaults_keep_existing_signatures(tmp_path):
     assert executor._permission_context_getter is None
     assert executor._memory_content_getter is None
     assert executor._auto_trigger_skills == []
+
+
+def test_step_agent_loop_does_not_receive_memory_recall_service(monkeypatch, tmp_path):
+    captured_kwargs = {}
+
+    class FakeAgentLoop:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop)
+
+    executor = _make_executor(
+        tmp_path,
+        memory_content_getter=lambda: "this should not imply side recall",
+    )
+    step = _make_step()
+    ctx = PipelineContext({"x": []})
+
+    agent_context = executor.build_agent_loop_context(step, ctx, "session-1")
+
+    assert agent_context.agent_loop is not None
+    assert "memory_recall_service" not in captured_kwargs

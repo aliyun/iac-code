@@ -49,6 +49,16 @@ def test_intent_prompt_requires_question_before_completion_for_ambiguous_guidabl
     assert "不要把 `is_infra_intent`" in body
 
 
+def test_intent_prompt_guides_optional_memory_lookup_without_overriding_current_input():
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert "不要读取项目文件或记忆" not in body
+    assert "read_memory({})" in body
+    assert "已有资源" in body
+    assert "当前用户输入为准" in body
+    assert "不要因为没有相关记忆而阻塞" in body
+
+
 def test_intent_prompt_pins_extremely_vague_launch_to_detail_request():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 
