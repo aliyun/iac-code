@@ -230,7 +230,7 @@ class BaseCloudStack(Tool):
         except Exception as e:
             return ToolResult.error(f"[{action}] {e}")
 
-        if context.event_queue is not None and action == "CreateStack":
+        if context.event_queue is not None and action == "CreateStack" and stack_id:
             await context.event_queue.put(
                 ResourceObservedEvent(
                     provider=self.provider_name,

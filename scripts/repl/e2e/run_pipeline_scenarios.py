@@ -271,7 +271,7 @@ def _validate_scenario_execution(args: argparse.Namespace, scenario: str) -> Non
 
 
 def _split_python_command(value: str) -> list[str]:
-    parts = shlex.split(value)
+    parts = shlex.split(value, posix=(os.name != "nt"))
     if not parts:
         raise ValueError("--python must not be empty")
     return parts
@@ -389,6 +389,8 @@ def _scenario_run_dir(args: argparse.Namespace, scenario: str) -> Path:
 
 class ReplPty:
     def __init__(self, *, args: argparse.Namespace, run_dir: Path, cwd: Path, env: dict[str, str]) -> None:
+        if os.name == "nt":
+            raise SystemExit("real PTY REPL E2E is POSIX-only")
         if pexpect is None:
             raise RuntimeError("pexpect is required. Install dependencies with: uv sync --all-extras")
         self.args = args

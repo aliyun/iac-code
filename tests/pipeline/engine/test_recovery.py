@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from iac_code.pipeline.engine import completion_guard_state
+from iac_code.pipeline.engine.completion_guard_state import record_completion_guard_tool_result
 from iac_code.pipeline.engine.recovery import (
     last_successful_tool_input,
     reconstruct_completion_guard_state,
@@ -216,3 +219,37 @@ def test_reconstruct_completion_guard_state_records_ros_stack_results_for_comple
             "is_error": False,
         }
     ]
+
+
+def test_completion_guard_state_logs_json_parse_failures(caplog):
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+    state = {}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="ros_stack",
+        tool_input={"action": "CreateStack"},
+        content="{not-json",
+        is_error=False,
+    )
+
+    assert "Failed to parse completion guard state" in caplog.text
+
+
+def test_completion_guard_state_logs_rebuild_failures(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+
+    def fail_record(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(completion_guard_state, "_record_ask_user_question", fail_record)
+
+    record_completion_guard_tool_result(
+        {},
+        tool_name="ask_user_question",
+        tool_input={},
+        content='{"free_text": "ok"}',
+        is_error=False,
+    )
+
+    assert "Failed to rebuild completion guard state" in caplog.text

@@ -336,7 +336,7 @@ class StepExecutor:
             reconstruct_completion_guard_state(repaired_messages)
         )
         if precompleted_tools:
-            completion_guard_state["successful_tools"].update(precompleted_tools)
+            completion_guard_state["successful_tools"].update(precompleted_tools.keys())
             completion_guard_state["tool_results"].update(precompleted_tools)
         if completion_guard_state_seed:
             seed = ensure_completion_guard_state(completion_guard_state_seed)

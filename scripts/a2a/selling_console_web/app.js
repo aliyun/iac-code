@@ -265,11 +265,11 @@
   }
 
   function taskIdOf(source) {
-    return valueOf(source, "taskId", "task_id");
+    return valueOf(source, "deliveryTaskId", "delivery_task_id", "taskId", "task_id");
   }
 
   function contextIdOf(source) {
-    return valueOf(source, "contextId", "context_id");
+    return valueOf(source, "deliveryContextId", "delivery_context_id", "contextId", "context_id");
   }
 
   function sequenceOf(source) {

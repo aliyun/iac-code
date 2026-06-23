@@ -407,6 +407,14 @@ def test_message_stream_route_surfaces_recoverable_task_id_from_jsonrpc_error() 
     assert "task-owner" in text
 
 
+def test_selling_console_web_extracts_delivery_task_aliases() -> None:
+    console = load_module()
+    app_js = (console.WEB_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert '"deliveryTaskId"' in app_js
+    assert '"deliveryContextId"' in app_js
+
+
 def test_message_stream_route_keeps_read_errors_in_sse_body(monkeypatch: pytest.MonkeyPatch) -> None:
     console = load_module()
 

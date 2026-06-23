@@ -82,6 +82,11 @@ class MockDeleteCloudStack(MockCloudStack):
         return action == "DeleteStack" and status.status == "DELETE_COMPLETE"
 
 
+class EmptyStackIdCloudStack(MockCloudStack):
+    async def call_action(self, action: str, params: dict, region: str) -> str:
+        return ""
+
+
 class HookCapturingCloudStack(MockCloudStack):
     def __init__(self) -> None:
         super().__init__()
@@ -244,6 +249,23 @@ class TestBaseCloudStackExecute:
         assert events[0].tool_use_id == "toolu-create"
         assert events[0].metadata == {}
         assert any(isinstance(event, StackProgressEvent) for event in events[1:])
+
+    @pytest.mark.asyncio
+    async def test_execute_does_not_emit_resource_observed_for_empty_stack_id(self) -> None:
+        stack = EmptyStackIdCloudStack()
+        queue: asyncio.Queue = asyncio.Queue()
+        context = ToolContext(cwd="/tmp", event_queue=queue, tool_use_id="toolu-1")
+
+        await stack.execute(
+            tool_input={"action": "CreateStack", "params": {}},
+            context=context,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(await queue.get())
+
+        assert not any(isinstance(event, ResourceObservedEvent) for event in events)
 
     @pytest.mark.asyncio
     async def test_execute_invalid_action_returns_error(self, stack: MockCloudStack, context: ToolContext) -> None:

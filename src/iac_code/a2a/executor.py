@@ -1234,7 +1234,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             raise InvalidParamsError("A2A server received empty input.")
         model = model or self._model
         if pipeline_input.has_images and not self._model_supports_image_input(model=model):
-            raise InvalidParamsError(f"Current model {model} does not support image input.")
+            raise InvalidParamsError(_("Current model {model} does not support image input.").format(model=model))
 
     def _model_supports_image_input(self, *, model: str | None = None) -> bool:
         model = model or self._model

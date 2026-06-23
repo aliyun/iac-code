@@ -9,9 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from iac_code.agent.message import ContentBlock, ImageBlock, TextBlock, ToolResultBlock
+from iac_code.i18n import _
 
 PipelineInputContent = str | list[ContentBlock]
-IMAGE_INPUT_PLACEHOLDER = "[Image input]"
+IMAGE_INPUT_PLACEHOLDER = _("[Image input]")
 
 
 def content_has_images(content: PipelineInputContent | None) -> bool:

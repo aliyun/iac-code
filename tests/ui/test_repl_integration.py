@@ -572,8 +572,8 @@ def test_swap_session_prints_cleanup_resume_summary(tmp_path: Path):
     repl.swap_session(new_session_id)
 
     rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
-    assert "↺ 回滚清理恢复：1 条记录均已完成。" in rendered
-    assert "回滚清理 [完成] demo-stack" not in rendered
+    assert "↺ Rollback cleanup resume: all 1 records are completed." in rendered
+    assert "Rollback cleanup [Completed] demo-stack" not in rendered
     assert "stack-deleted" not in rendered
     assert "status=" not in rendered
     assert "progress=" not in rendered
@@ -645,8 +645,8 @@ def test_swap_session_prints_cleanup_resume_summary_for_completed_prompt(tmp_pat
     repl.swap_session(new_session_id)
 
     rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
-    assert "↺ 回滚清理恢复：1 条记录均已完成。" in rendered
-    assert "回滚清理 [完成] demo-stack" not in rendered
+    assert "↺ Rollback cleanup resume: all 1 records are completed." in rendered
+    assert "Rollback cleanup [Completed] demo-stack" not in rendered
     assert "DELETE_COMPLETE" not in rendered
 
 
@@ -711,10 +711,10 @@ def test_swap_session_prints_failed_cleanup_resume_summary(tmp_path: Path):
     repl.swap_session(new_session_id)
 
     rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
-    assert "↺ 回滚清理恢复：1 条记录，1 条失败。" in rendered
-    assert "  [失败] failed-stack" in rendered
-    assert "↺ 回滚清理 [失败] failed-stack" not in rendered
-    assert "资源栈 stack-failed · cn-hangzhou" in rendered
+    assert "↺ Rollback cleanup resume: 1 records, 1 failed." in rendered
+    assert "  [Failed] failed-stack" in rendered
+    assert "↺ Rollback cleanup [Failed] failed-stack" not in rendered
+    assert "stack stack-failed · cn-hangzhou" in rendered
     assert "DELETE_FAILED" in rendered
     assert "dependency" in rendered
     assert "status=" not in rendered

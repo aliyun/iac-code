@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from iac_code.agent.message import ImageBlock
-from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
+from iac_code.pipeline.engine.user_input import (
+    IMAGE_INPUT_PLACEHOLDER,
+    PipelineUserInput,
+    normalize_pipeline_user_input,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +253,7 @@ class InterruptController:
         # User message
         user_text = pipeline_input.display_text
         if pipeline_input.has_images:
-            user_text = user_text if user_text.strip() else "[Image input]"
+            user_text = user_text if user_text.strip() else IMAGE_INPUT_PLACEHOLDER
             user_text += (
                 "\n\n用户同时提供了图片输入。请检查图片内容，并在 reason 或 rollback_context "
                 "中写出与路由相关的图像信息。"

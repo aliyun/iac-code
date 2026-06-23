@@ -1,3 +1,9 @@
+"""Local web console for A2A selling pipelines.
+
+The bundled web UI currently sends text input only; use the A2A debugger for
+image-part request coverage.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -135,6 +141,9 @@ def _write_sse_error_event(handler: BaseHTTPRequestHandler, message: str) -> Non
 
 
 def create_server(config: SellingConsoleConfig) -> ThreadingHTTPServer:
+    class SellingConsoleHTTPServer(ThreadingHTTPServer):
+        allow_reuse_address = sys.platform != "win32"
+
     class SellingConsoleHandler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
             return None
@@ -236,7 +245,7 @@ def create_server(config: SellingConsoleConfig) -> ThreadingHTTPServer:
                 return
             a2a_debugger._send_json(self, 404, {"ok": False, "error": "Not found"})
 
-    return ThreadingHTTPServer((config.host, config.port), SellingConsoleHandler)
+    return SellingConsoleHTTPServer((config.host, config.port), SellingConsoleHandler)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -255,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
+        server.shutdown()
         server.server_close()
     return 0
 

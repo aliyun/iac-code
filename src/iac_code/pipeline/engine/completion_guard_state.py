@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_completion_guard_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -23,12 +26,15 @@ def record_completion_guard_tool_result(
 ) -> None:
     """Record tool results that completion guards may need later in the same step."""
 
-    ensure_completion_guard_state(state)
-    if tool_name == "ask_user_question":
-        _record_ask_user_question(state, content, is_error=is_error)
-        return
-    if tool_name == "ros_stack":
-        _record_ros_stack(state, tool_input, content, is_error=is_error)
+    try:
+        ensure_completion_guard_state(state)
+        if tool_name == "ask_user_question":
+            _record_ask_user_question(state, content, is_error=is_error)
+            return
+        if tool_name == "ros_stack":
+            _record_ros_stack(state, tool_input, content, is_error=is_error)
+    except Exception:
+        logger.warning("Failed to rebuild completion guard state", exc_info=True)
 
 
 def _record_ask_user_question(state: dict[str, Any], content: Any, *, is_error: bool) -> None:
@@ -72,5 +78,6 @@ def _json_object(value: Any) -> dict[str, Any] | None:
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError:
+        logger.warning("Failed to parse completion guard state", exc_info=True)
         return None
     return parsed if isinstance(parsed, dict) else None

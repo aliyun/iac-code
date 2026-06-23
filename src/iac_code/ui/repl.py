@@ -460,7 +460,7 @@ class InlineREPL:
         try:
             loop.add_signal_handler(signal.SIGINT, _on_sigint)
             _has_sigint_handler = True
-        except (NotImplementedError, OSError):
+        except (NotImplementedError, OSError, RuntimeError):
             pass  # Windows or restricted environment
 
         if initial_prompt is None:
@@ -1581,7 +1581,7 @@ class InlineREPL:
         badge = InlineREPL._cleanup_status_badge(status, progress)
         detail = InlineREPL._cleanup_status_detail(status, progress)
         parts = [
-            _("↺ 回滚清理 [{badge}] {label}").format(badge=badge, label=label),
+            _("↺ Rollback cleanup [{badge}] {label}").format(badge=badge, label=label),
             _("{kind} {resource_id}").format(
                 kind=InlineREPL._cleanup_resource_kind_label(resource),
                 resource_id=InlineREPL._short_cleanup_resource_id(resource_id),
@@ -1590,45 +1590,47 @@ class InlineREPL:
             detail,
         ]
         if last_error:
-            parts.append(_("错误：{error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
+            parts.append(_("Error: {error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
         return " · ".join(part for part in parts if part)
 
     @staticmethod
     def _cleanup_status_badge(status: str, progress: str) -> str:
         if status == "started":
-            return _("删除中")
+            return _("Deleting")
         if status == "completed":
-            return _("完成")
+            return _("Completed")
         if status == "failed":
-            return _("失败")
+            return _("Failed")
         if status == "skipped":
-            return _("跳过")
+            return _("Skipped")
         if status == "pending":
-            return _("待处理")
+            return _("Pending")
         if progress and not progress.startswith("DELETE"):
-            return _("检查")
+            return _("Checking")
         if progress in {"DELETE_REQUESTED", "DELETE_STARTED", "DELETE_IN_PROGRESS"}:
-            return _("删除中")
-        return _("进度")
+            return _("Deleting")
+        return _("Progress")
 
     @staticmethod
     def _cleanup_status_detail(status: str, progress: str) -> str:
         if status == "started":
             if progress:
-                return _("DeleteStack 已提交，等待删除完成（{progress}）").format(progress=progress)
-            return _("DeleteStack 已提交，等待删除完成")
+                return _("DeleteStack submitted; waiting for deletion to complete ({progress})").format(
+                    progress=progress
+                )
+            return _("DeleteStack submitted; waiting for deletion to complete")
         if status == "completed":
             return progress or "completed"
         if status == "failed":
             return progress or "failed"
         if status == "skipped":
-            return _("已跳过")
+            return _("Skipped")
         if progress == "DELETE_IN_PROGRESS":
-            return _("正在删除（{progress}）").format(progress=progress)
+            return _("Deleting ({progress})").format(progress=progress)
         if progress in {"DELETE_REQUESTED", "DELETE_STARTED"}:
-            return _("DeleteStack 已提交，等待删除完成（{progress}）").format(progress=progress)
+            return _("DeleteStack submitted; waiting for deletion to complete ({progress})").format(progress=progress)
         if progress and not progress.startswith("DELETE"):
-            return _("{progress}，需要删除").format(progress=progress)
+            return _("{progress}; deletion required").format(progress=progress)
         return progress or status
 
     @staticmethod
@@ -1636,8 +1638,8 @@ class InlineREPL:
         provider = str(getattr(resource, "provider", "") or "").lower()
         resource_type = str(getattr(resource, "resource_type", "") or "").lower()
         if provider == "ros" and resource_type == "stack":
-            return _("资源栈")
-        return _("资源")
+            return _("stack")
+        return _("resource")
 
     @staticmethod
     def _short_cleanup_resource_id(resource_id: str) -> str:
@@ -1682,7 +1684,7 @@ class InlineREPL:
             if ledger_path:
                 logger.warning("Pipeline cleanup ledger is unavailable: %s", ledger_path)
         self.renderer.print_system_message(
-            _("无法读取回滚清理记录，已保留清理提示，请稍后继续或手动检查。"),
+            _("Could not read rollback cleanup records. The cleanup prompt was kept; retry later or inspect manually."),
             style="yellow",
         )
 
@@ -1736,7 +1738,12 @@ class InlineREPL:
                 style=self._cleanup_status_style(str(getattr(resource, "cleanup_status", "") or "")),
             )
         if len(detail_resources) > 5:
-            printer(_("还有 {count} 个需要关注的资源未显示。").format(count=len(detail_resources) - 5), style="yellow")
+            printer(
+                _("{count} additional resources needing attention were not shown.").format(
+                    count=len(detail_resources) - 5
+                ),
+                style="yellow",
+            )
         if ledger_path:
             printed_paths = set(printed_paths)
             printed_paths.add(ledger_path)
@@ -1766,25 +1773,25 @@ class InlineREPL:
         total = len(resources)
         counts = InlineREPL._cleanup_resume_status_counts(resources)
         if total > 0 and counts["completed"] == total:
-            return _("↺ 回滚清理恢复：{count} 条记录均已完成。").format(count=total)
+            return _("↺ Rollback cleanup resume: all {count} records are completed.").format(count=total)
 
         parts: list[str] = []
         for key, label in (
-            ("failed", _("失败")),
-            ("pending", _("待处理")),
-            ("active", _("进行中")),
-            ("completed", _("已完成")),
-            ("skipped", _("已跳过")),
+            ("failed", _("failed")),
+            ("pending", _("pending")),
+            ("active", _("in progress")),
+            ("completed", _("completed")),
+            ("skipped", _("skipped")),
         ):
             count = counts[key]
             if count:
-                parts.append(_("{count} 条{label}").format(count=count, label=label))
+                parts.append(_("{count} {label}").format(count=count, label=label))
         if parts:
-            return _("↺ 回滚清理恢复：{count} 条记录，{summary}。").format(
+            return _("↺ Rollback cleanup resume: {count} records, {summary}.").format(
                 count=total,
-                summary="，".join(parts),
+                summary=", ".join(parts),
             )
-        return _("↺ 回滚清理恢复：{count} 条记录。").format(count=total)
+        return _("↺ Rollback cleanup resume: {count} records.").format(count=total)
 
     @staticmethod
     def _cleanup_resume_status_counts(resources: list[Any]) -> dict[str, int]:
@@ -1879,7 +1886,7 @@ class InlineREPL:
             detail,
         ]
         if last_error:
-            parts.append(_("错误：{error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
+            parts.append(_("Error: {error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
         return " · ".join(part for part in parts if part)
 
     async def _maybe_start_normal_chat_cleanup_on_startup(self) -> bool:

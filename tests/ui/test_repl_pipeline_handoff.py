@@ -391,7 +391,8 @@ def test_cleanup_resource_status_message_is_single_line_badge_style() -> None:
     message = InlineREPL._cleanup_resource_status_message(resource)
 
     assert message == (
-        "↺ 回滚清理 [检查] basic-vpc-network · 资源栈 9b124deb…2660 · cn-hangzhou · CREATE_COMPLETE，需要删除"
+        "↺ Rollback cleanup [Checking] basic-vpc-network · stack 9b124deb…2660 · "
+        "cn-hangzhou · CREATE_COMPLETE; deletion required"
     )
     assert "\n" not in message
     assert "status=" not in message
@@ -819,9 +820,9 @@ async def test_normal_startup_replays_completed_cleanup_history_before_pruning(t
     assert await repl._maybe_start_normal_chat_cleanup_on_startup() is False
 
     rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
-    assert "↺ 回滚清理恢复：1 条记录均已完成。" in rendered
-    assert "回滚清理 [完成] demo" not in rendered
-    assert "资源栈 stack-123 · cn-hangzhou" not in rendered
+    assert "↺ Rollback cleanup resume: all 1 records are completed." in rendered
+    assert "Rollback cleanup [Completed] demo" not in rendered
+    assert "stack stack-123 · cn-hangzhou" not in rendered
     assert "status=" not in rendered
     assert "progress=" not in rendered
 
@@ -877,10 +878,10 @@ def test_cleanup_resume_summary_collapses_history_to_latest_resource_state(tmp_p
     repl._print_cleanup_resume_summary()
 
     rendered = "\n".join(call.args[0] for call in repl.renderer.print_system_message.call_args_list)
-    assert "↺ 回滚清理恢复：1 条记录，1 条失败。" in rendered
-    assert rendered.count("  [失败] demo-stack") == 1
-    assert "↺ 回滚清理 [失败] demo-stack" not in rendered
-    assert "  [删除中] demo-stack" not in rendered
+    assert "↺ Rollback cleanup resume: 1 records, 1 failed." in rendered
+    assert rendered.count("  [Failed] demo-stack") == 1
+    assert "↺ Rollback cleanup [Failed] demo-stack" not in rendered
+    assert "  [Deleting] demo-stack" not in rendered
     assert "DELETE_FAILED" in rendered
 
 
@@ -949,11 +950,11 @@ def test_cleanup_resume_summary_collapses_completed_resources_and_indents_action
     repl._print_cleanup_resume_summary()
 
     calls = repl.renderer.print_system_message.call_args_list
-    assert calls[0].args[0] == "↺ 回滚清理恢复：3 条记录，1 条失败，1 条进行中，1 条已完成。"
+    assert calls[0].args[0] == "↺ Rollback cleanup resume: 3 records, 1 failed, 1 in progress, 1 completed."
     assert calls[0].kwargs["style"] == "yellow"
     assert not any("completed-stack" in call.args[0] for call in calls[1:])
-    assert any("  [失败] failed-stack" in call.args[0] and call.kwargs["style"] == "red" for call in calls)
-    assert any("  [删除中] running-stack" in call.args[0] and call.kwargs["style"] == "yellow" for call in calls)
+    assert any("  [Failed] failed-stack" in call.args[0] and call.kwargs["style"] == "red" for call in calls)
+    assert any("  [Deleting] running-stack" in call.args[0] and call.kwargs["style"] == "yellow" for call in calls)
 
 
 def test_cleanup_resume_summary_shows_only_pending_detail_when_completed_resources_exist(tmp_path: Path):
@@ -1013,8 +1014,8 @@ def test_cleanup_resume_summary_shows_only_pending_detail_when_completed_resourc
 
     calls = repl.renderer.print_system_message.call_args_list
     rendered = "\n".join(call.args[0] for call in calls)
-    assert calls[0].args[0] == "↺ 回滚清理恢复：3 条记录，1 条待处理，2 条已完成。"
-    assert rendered.count("  [待处理] pending-stack") == 1
+    assert calls[0].args[0] == "↺ Rollback cleanup resume: 3 records, 1 pending, 2 completed."
+    assert rendered.count("  [Pending] pending-stack") == 1
     assert "completed-one" not in rendered
     assert "completed-two" not in rendered
 

@@ -423,27 +423,48 @@ class CleanupLedger:
             return None
         count = len(resources)
         lines = [
-            _("检测到 pipeline rollback 后仍需要清理的云资源。请立即清理这些资源，并持续检查直到删除完成。"),
-            "",
-            _("要求："),
-            _("- 清理范围是严格白名单：只能删除下面“待清理资源”列表中的 id。"),
-            _("- 不要删除、修改或回滚任何未列入“待清理资源”的 stack 或云资源。"),
-            _("- 不要调用 ListStacks 或按名称搜索其它 stack；待清理资源 id 已完整列出。"),
-            _("- 每次调用 GetStack/DeleteStack 前，必须核对 StackId 精确等于“待清理资源”列表中的某个 id。"),
-            _("- 如果 StackId 不在“待清理资源”列表中，禁止调用 DeleteStack，即使它是当前 handoff 或刚创建的 stack。"),
             _(
-                "- 不要根据 pipeline handoff、deployment.stack_id、current stack 或 resources_created "
-                "额外推断清理对象；这些可能是最终成功交付的资源。"
+                "Cloud resources still need cleanup after pipeline rollback. "
+                "Clean them up now and keep checking until deletion completes."
             ),
-            _("- 即使本轮还有用户追问、继续指令或 pipeline handoff 上下文，也不能扩大清理范围。"),
-            _("- 恢复或继续清理时仍只处理当前提示列出的资源；不要检查或删除其它资源。"),
-            _("- 优先使用可用的 ROS stack 工具删除；如果改用 aliyun_api，请先 DeleteStack，再反复 GetStack 检查状态。"),
-            _("- 如果资源已经处于删除中，请先 GetStack 检查当前状态，再决定是否需要重新 DeleteStack。"),
-            _("- 只有确认 DELETE_COMPLETE 才算清理完成；DELETE_FAILED 或无法确认时要向用户说明失败原因和下一步。"),
-            _("- 列表内资源全部 DELETE_COMPLETE 后，立刻停止本轮清理；不要继续删除或检查任何其他 stack。"),
-            _("- 清理过程中向用户简短同步进度。"),
             "",
-            _("待清理资源："),
+            _("Requirements:"),
+            _("- Cleanup scope is a strict allowlist: delete only ids in the cleanup resources list below."),
+            _("- Do not delete, modify, or roll back any stack or cloud resource outside the cleanup resources list."),
+            _("- Do not call ListStacks or search for other stacks by name; cleanup resource ids are fully listed."),
+            _(
+                "- Before every GetStack/DeleteStack call, verify that StackId exactly matches an id in "
+                "the cleanup resources list."
+            ),
+            _(
+                "- If StackId is not in the cleanup resources list, do not call DeleteStack, even if it is "
+                "the current handoff or newly created stack."
+            ),
+            _(
+                "- Do not infer extra cleanup targets from pipeline handoff, deployment.stack_id, current stack, "
+                "or resources_created; those may be final delivered resources."
+            ),
+            _("- Do not expand cleanup scope for user follow-ups, continue instructions, or pipeline handoff context."),
+            _(
+                "- When resuming cleanup, still process only resources listed in this prompt; "
+                "do not inspect or delete others."
+            ),
+            _(
+                "- Prefer available ROS stack tools for deletion; if using aliyun_api, call DeleteStack first, "
+                "then repeatedly call GetStack to check status."
+            ),
+            _(
+                "- If a resource is already deleting, call GetStack first, "
+                "then decide whether DeleteStack is needed again."
+            ),
+            _(
+                "- Cleanup is complete only after DELETE_COMPLETE; for DELETE_FAILED or unknown status, "
+                "tell the user the failure reason and next step."
+            ),
+            _("- After all listed resources are DELETE_COMPLETE, stop this cleanup turn immediately."),
+            _("- Briefly update the user during cleanup."),
+            "",
+            _("Cleanup resources:"),
         ]
         for index, resource in enumerate(resources, start=1):
             label = resource.resource_name or resource.resource_id

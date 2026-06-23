@@ -177,7 +177,6 @@ class AgentLoop:
         self._memory_recall_active_turns = 0
         self._last_provider_request_snapshot: dict[str, Any] | None = None
         self._system_prompt_refresher = system_prompt_refresher
-        self._pipeline_mode = pipeline_mode
 
         model_name = ""
         if hasattr(provider_manager, "get_model_name"):

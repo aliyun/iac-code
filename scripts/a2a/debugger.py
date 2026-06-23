@@ -1814,18 +1814,30 @@ def render_index_html(config: DebuggerConfig) -> str:
         const status = statusUpdate.status && typeof statusUpdate.status === "object" ? statusUpdate.status : {};
         return {
           kind: "status_update",
-          taskId: statusUpdate.taskId || statusUpdate.task_id || "",
-          contextId: statusUpdate.contextId || statusUpdate.context_id || "",
+          taskId: (
+            statusUpdate.deliveryTaskId ||
+            statusUpdate.delivery_task_id ||
+            statusUpdate.taskId ||
+            statusUpdate.task_id ||
+            ""
+          ),
+          contextId: (
+            statusUpdate.deliveryContextId ||
+            statusUpdate.delivery_context_id ||
+            statusUpdate.contextId ||
+            statusUpdate.context_id ||
+            ""
+          ),
           state: status.state || ""
         };
       }
       const task = payload.task && typeof payload.task === "object" ? payload.task : payload;
-      if (task.id || task.taskId || task.task_id) {
+      if (task.id || task.taskId || task.task_id || task.deliveryTaskId || task.delivery_task_id) {
         const status = task.status && typeof task.status === "object" ? task.status : {};
         return {
           kind: "task_submitted",
-          taskId: task.id || task.taskId || task.task_id || "",
-          contextId: task.contextId || task.context_id || "",
+          taskId: task.deliveryTaskId || task.delivery_task_id || task.id || task.taskId || task.task_id || "",
+          contextId: task.deliveryContextId || task.delivery_context_id || task.contextId || task.context_id || "",
           state: status.state || ""
         };
       }
@@ -1839,11 +1851,31 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function recordTaskIdentity(identity, role = "active") {
-      const taskId = String(identity && (identity.taskId || identity.task_id || identity.id) || "");
+      const taskId = String(
+        identity &&
+          (
+            identity.deliveryTaskId ||
+            identity.delivery_task_id ||
+            identity.taskId ||
+            identity.task_id ||
+            identity.id
+          ) ||
+          ""
+      );
       if (!taskId) {
         return null;
       }
-      const contextId = String(identity && (identity.contextId || identity.context_id || state.contextId) || "");
+      const contextId = String(
+        identity &&
+          (
+            identity.deliveryContextId ||
+            identity.delivery_context_id ||
+            identity.contextId ||
+            identity.context_id ||
+            state.contextId
+          ) ||
+          ""
+      );
       const taskState = String(identity && (identity.state || identity.status || "") || "");
       const existing = state.taskHistory.find((item) => item.taskId === taskId);
       const next = {
@@ -3033,8 +3065,22 @@ def render_index_html(config: DebuggerConfig) -> str:
       }
 
       state.status = String(envelope.status || envelope.state || envelope.pipelineStatus || state.status || "running");
-      state.taskId = String(envelope.taskId || envelope.task_id || state.taskId || "");
-      state.contextId = String(envelope.contextId || envelope.context_id || state.contextId || "");
+      state.taskId = String(
+        envelope.deliveryTaskId ||
+          envelope.delivery_task_id ||
+          envelope.taskId ||
+          envelope.task_id ||
+          state.taskId ||
+          ""
+      );
+      state.contextId = String(
+        envelope.deliveryContextId ||
+          envelope.delivery_context_id ||
+          envelope.contextId ||
+          envelope.context_id ||
+          state.contextId ||
+          ""
+      );
       if (state.taskId) {
         if (!state.normalHandoffReady && !state.activeTaskId) {
           state.activeTaskId = state.taskId;

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import codecs
 import os
+import sys
 from typing import Any
 
 from iac_code.i18n import _
@@ -16,10 +17,18 @@ MAX_READ_LINES = 50_000
 
 
 def _path_is_under(path: str, root: str) -> bool:
-    try:
-        return os.path.commonpath([os.path.realpath(path), os.path.realpath(root)]) == os.path.realpath(root)
-    except ValueError:
-        return False
+    path_real = _normalize_for_under_check(os.path.realpath(path))
+    root_real = _normalize_for_under_check(os.path.realpath(root))
+    if path_real == root_real:
+        return True
+    return path_real.startswith(root_real.rstrip("/") + "/")
+
+
+def _normalize_for_under_check(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    if sys.platform == "win32":
+        return normalized.lower()
+    return normalized
 
 
 def _resolve_input_path(

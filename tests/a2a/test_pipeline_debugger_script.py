@@ -2024,6 +2024,15 @@ def test_jsonrpc_error_message_includes_recoverable_task_id() -> None:
     assert "task-owner" in message
 
 
+def test_index_html_extracts_delivery_task_aliases() -> None:
+    script = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "statusUpdate.deliveryTaskId" in script
+    assert "statusUpdate.deliveryContextId" in script
+    assert "task.deliveryTaskId" in script
+    assert "envelope.deliveryTaskId" in script
+
+
 def test_jsonrpc_error_message_does_not_duplicate_resume_guidance() -> None:
     debugger = load_debugger_module()
     value = {
