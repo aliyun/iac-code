@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine.recovery import (
     last_successful_tool_input,
@@ -164,3 +166,53 @@ def test_reconstruct_completion_guard_state_ignores_successful_non_guard_tools()
 
     assert state["successful_tools"] == set()
     assert state["tool_results"] == {}
+
+
+def test_reconstruct_completion_guard_state_records_ros_stack_results_for_completion_guards():
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_stack",
+                    name="ros_stack",
+                    input={"action": "CreateStack", "params": {"StackName": "demo"}},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_stack",
+                    content=json.dumps(
+                        {
+                            "stack_id": "stack-123",
+                            "stack_name": "demo",
+                            "status": "CREATE_COMPLETE",
+                            "is_success": True,
+                        }
+                    ),
+                    is_error=False,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["successful_tools"] == {"ros_stack"}
+    assert state["tool_results"]["ros_stack"]["stack_id"] == "stack-123"
+    assert state["tool_result_records"] == [
+        {
+            "tool_name": "ros_stack",
+            "input": {"action": "CreateStack", "params": {"StackName": "demo"}},
+            "result": {
+                "stack_id": "stack-123",
+                "stack_name": "demo",
+                "status": "CREATE_COMPLETE",
+                "is_success": True,
+            },
+            "is_error": False,
+        }
+    ]

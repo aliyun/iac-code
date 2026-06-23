@@ -252,6 +252,17 @@ steps:
     interrupt_judge_failure: pause
     context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py
+    completion_guards:
+      - when_conclusion_field_equals:
+          status: success
+        required_conclusion_field: stack_id
+        require_tool_result:
+          tool: ros_stack
+          action_in: [CreateStack, ContinueCreateStack]
+          is_success: true
+          status_in: [CREATE_COMPLETE]
+          match_conclusion_field: stack_id
+        message: "部署成功必须等待 ros_stack CreateStack 返回 CREATE_COMPLETE。"
     tools:
       include: []
       exclude: [write_memory]

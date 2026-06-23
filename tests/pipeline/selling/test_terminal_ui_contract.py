@@ -95,3 +95,27 @@ def test_deploying_pauses_when_interrupt_judge_fails():
     deploying = next(step for step in loaded.steps if step.step_id == "deploying")
 
     assert deploying.interrupt_judge_failure == "pause"
+
+
+def test_deploying_success_requires_create_stack_complete_guard():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    deploying = next(step for step in loaded.steps if step.step_id == "deploying")
+
+    guard = next(
+        (
+            item
+            for item in deploying.completion_guards
+            if item.get("when_conclusion_field_equals") == {"status": "success"}
+        ),
+        None,
+    )
+
+    assert guard is not None
+    assert guard["required_conclusion_field"] == "stack_id"
+    assert guard["require_tool_result"] == {
+        "tool": "ros_stack",
+        "action_in": ["CreateStack", "ContinueCreateStack"],
+        "is_success": True,
+        "status_in": ["CREATE_COMPLETE"],
+        "match_conclusion_field": "stack_id",
+    }

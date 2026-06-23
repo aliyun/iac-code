@@ -217,6 +217,176 @@ class TestCompleteStepToolExecute:
 
 
 class TestCompletionGuards:
+    @staticmethod
+    def _deploying_success_guard() -> dict:
+        return {
+            "when_conclusion_field_equals": {"status": "success"},
+            "required_conclusion_field": "stack_id",
+            "require_tool_result": {
+                "tool": "ros_stack",
+                "action_in": ["CreateStack", "ContinueCreateStack"],
+                "is_success": True,
+                "status_in": ["CREATE_COMPLETE"],
+                "match_conclusion_field": "stack_id",
+            },
+            "message": "部署成功必须等待 ros_stack CreateStack 返回 CREATE_COMPLETE。",
+        }
+
+    @staticmethod
+    def _deploying_tool(result_records: list[dict] | None = None) -> CompleteStepTool:
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["status"],
+                "additionalProperties": False,
+                "properties": {
+                    "stack_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["success", "failed", "cancelled"]},
+                    "error": {"type": "string"},
+                },
+            },
+        )
+        return CompleteStepTool(
+            config,
+            completion_guards=[TestCompletionGuards._deploying_success_guard()],
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": list(result_records or []),
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_rejects_deploying_success_without_create_stack_result(self):
+        tool = self._deploying_tool()
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "CreateStack" in result.content
+        assert "CREATE_COMPLETE" in result.content
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_rejects_deploying_success_when_stack_creation_failed(self):
+        tool = self._deploying_tool(
+            [
+                {
+                    "tool_name": "ros_stack",
+                    "input": {"action": "CreateStack", "params": {"StackName": "demo"}},
+                    "result": {"stack_id": "stack-123", "status": "CREATE_FAILED", "is_success": False},
+                    "is_error": True,
+                }
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "CREATE_COMPLETE" in result.content
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_rejects_deploying_success_when_stack_id_mismatches(self):
+        tool = self._deploying_tool(
+            [
+                {
+                    "tool_name": "ros_stack",
+                    "input": {"action": "CreateStack", "params": {"StackName": "demo"}},
+                    "result": {"stack_id": "stack-123", "status": "CREATE_COMPLETE", "is_success": True},
+                    "is_error": False,
+                }
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-other"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "stack_id" in result.content
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_accepts_matching_deploying_success(self):
+        tool = self._deploying_tool(
+            [
+                {
+                    "tool_name": "ros_stack",
+                    "input": {"action": "CreateStack", "params": {"StackName": "demo"}},
+                    "result": {"stack_id": "stack-123", "status": "CREATE_COMPLETE", "is_success": True},
+                    "is_error": False,
+                }
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_accepts_matching_continue_create_stack_success(self):
+        tool = self._deploying_tool(
+            [
+                {
+                    "tool_name": "ros_stack",
+                    "input": {"action": "ContinueCreateStack", "params": {"StackName": "demo"}},
+                    "result": {"stack_id": "stack-123", "status": "CREATE_COMPLETE", "is_success": True},
+                    "is_error": False,
+                }
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_rejects_non_matching_stack_action(self):
+        tool = self._deploying_tool(
+            [
+                {
+                    "tool_name": "ros_stack",
+                    "input": {"action": "UpdateStack", "params": {"StackName": "demo"}},
+                    "result": {"stack_id": "stack-123", "status": "CREATE_COMPLETE", "is_success": True},
+                    "is_error": False,
+                }
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "CreateStack" in result.content
+        assert "ContinueCreateStack" in result.content
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_does_not_block_failed_deploying_conclusion(self):
+        tool = self._deploying_tool()
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "failed", "error": "CREATE_FAILED"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
     @pytest.mark.asyncio
     async def test_required_conclusion_any_of_accepts_clarification_text(self):
         config = StepConfig(step_id="intent_parsing", conclusion_field="intent", forward=None)

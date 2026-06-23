@@ -15,6 +15,10 @@ from typing import Any
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
 from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+from iac_code.pipeline.engine.completion_guard_state import (
+    ensure_completion_guard_state,
+    record_completion_guard_tool_result,
+)
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent
 from iac_code.pipeline.engine.observability import PipelineObservability
@@ -49,6 +53,7 @@ class StepAgentLoopContext:
     agent_loop: Any | None
     initial_prompt: str | list[ContentBlock]
     resume_messages: list[Message]
+    completion_guard_state: dict[str, Any]
     restored_step_result: StepResult | None = None
 
 
@@ -154,8 +159,10 @@ class StepExecutor:
         agent_loop = agent_context.agent_loop
         assert agent_loop is not None
         self._current_agent_loop = agent_loop
+        completion_guard_state = agent_context.completion_guard_state
 
         complete_step_ids: set[str] = set()
+        pending_tool_inputs: dict[str, dict[str, Any]] = {}
         pending_complete_input: dict[str, dict] = {}
         complete_step_input: dict | None = None
         terminal_failed_step_result: StepResult | None = None
@@ -173,17 +180,31 @@ class StepExecutor:
             async for event in stream:
                 if isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
                     complete_step_ids.add(event.tool_use_id)
-                elif isinstance(event, ToolUseEndEvent) and event.tool_use_id in complete_step_ids:
-                    pending_complete_input[event.tool_use_id] = event.input
-                elif isinstance(event, ToolResultEvent) and event.tool_use_id in complete_step_ids:
-                    step_result = (event.metadata or {}).get("step_result")
-                    if isinstance(step_result, StepResult) and step_result.status == StepStatus.FAILED:
-                        terminal_failed_step_result = step_result
-                    if not event.is_error:
-                        complete_step_input = pending_complete_input.get(event.tool_use_id)
-                    else:
-                        last_complete_step_error = event.result
-                        last_complete_step_input = pending_complete_input.get(event.tool_use_id)
+                elif isinstance(event, ToolUseEndEvent):
+                    pending_tool_inputs[event.tool_use_id] = {"tool_name": event.name, "input": dict(event.input)}
+                    if event.tool_use_id in complete_step_ids:
+                        pending_complete_input[event.tool_use_id] = event.input
+                elif isinstance(event, ToolResultEvent):
+                    tool_record = pending_tool_inputs.get(event.tool_use_id)
+                    if isinstance(tool_record, dict):
+                        tool_input_raw = tool_record.get("input")
+                        tool_input: dict[str, Any] = tool_input_raw if isinstance(tool_input_raw, dict) else {}
+                        record_completion_guard_tool_result(
+                            completion_guard_state,
+                            tool_name=str(tool_record.get("tool_name") or event.tool_name),
+                            tool_input=tool_input,
+                            content=event.result,
+                            is_error=event.is_error,
+                        )
+                    if event.tool_use_id in complete_step_ids:
+                        step_result = (event.metadata or {}).get("step_result")
+                        if isinstance(step_result, StepResult) and step_result.status == StepStatus.FAILED:
+                            terminal_failed_step_result = step_result
+                        if not event.is_error:
+                            complete_step_input = pending_complete_input.get(event.tool_use_id)
+                        else:
+                            last_complete_step_error = event.result
+                            last_complete_step_input = pending_complete_input.get(event.tool_use_id)
                 yield event
 
         try:
@@ -249,6 +270,7 @@ class StepExecutor:
                     transcript_id=transcript_id,
                     resume_messages=None,
                     precompleted_tools=None,
+                    completion_guard_state_seed=completion_guard_state,
                     rollback_targets=rollback_targets,
                     rollback_count=rollback_count,
                     max_rollbacks=max_rollbacks,
@@ -301,6 +323,7 @@ class StepExecutor:
         transcript_id: str | None = None,
         resume_messages: list | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
+        completion_guard_state_seed: dict[str, Any] | None = None,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
@@ -309,12 +332,17 @@ class StepExecutor:
         initial_prompt = user_message or f"请完成当前步骤：{step.step_id}。"
 
         repaired_messages = list(resume_messages or [])
-        completion_guard_state: dict[str, Any] = reconstruct_completion_guard_state(repaired_messages)
-        completion_guard_state.setdefault("successful_tools", set())
-        completion_guard_state.setdefault("tool_results", {})
+        completion_guard_state: dict[str, Any] = ensure_completion_guard_state(
+            reconstruct_completion_guard_state(repaired_messages)
+        )
         if precompleted_tools:
             completion_guard_state["successful_tools"].update(precompleted_tools)
             completion_guard_state["tool_results"].update(precompleted_tools)
+        if completion_guard_state_seed:
+            seed = ensure_completion_guard_state(completion_guard_state_seed)
+            completion_guard_state["successful_tools"].update(seed.get("successful_tools", set()))
+            completion_guard_state["tool_results"].update(seed.get("tool_results", {}))
+            completion_guard_state["tool_result_records"].extend(seed.get("tool_result_records", []))
 
         build_tool_kwargs: dict[str, Any] = {
             "rollback_targets": rollback_targets,
@@ -340,6 +368,7 @@ class StepExecutor:
                 agent_loop=None,
                 initial_prompt=initial_prompt,
                 resume_messages=repaired_messages,
+                completion_guard_state=completion_guard_state,
                 restored_step_result=restored_step_result,
             )
 
@@ -368,6 +397,7 @@ class StepExecutor:
             agent_loop=agent_loop,
             initial_prompt=initial_prompt,
             resume_messages=repaired_messages,
+            completion_guard_state=completion_guard_state,
         )
 
     @staticmethod
@@ -382,7 +412,10 @@ class StepExecutor:
 
         normalized_input = copy.deepcopy(complete_step_input)
         complete_step_tool = tool_registry.get("complete_step")
-        if complete_step_tool is not None:
+        if isinstance(complete_step_tool, CompleteStepTool):
+            if complete_step_tool.validate_completion_input(normalized_input) is not None:
+                return None
+        elif complete_step_tool is not None:
             complete_step_tool.normalize_input(normalized_input)
 
         conclusion = normalized_input.get("conclusion", {})
@@ -657,7 +690,9 @@ class StepExecutor:
             rollback_count=rollback_count,
             max_rollbacks=max_rollbacks,
         )
-        guard_state = completion_guard_state if completion_guard_state is not None else {"successful_tools": set()}
+        guard_state = ensure_completion_guard_state(
+            completion_guard_state if completion_guard_state is not None else {}
+        )
         registry.register(
             CompleteStepTool(
                 step_config,

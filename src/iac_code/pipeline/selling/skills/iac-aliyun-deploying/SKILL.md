@@ -24,6 +24,21 @@ conclusion_schema:
     error:
       type: string
       description: 失败原因（status 为 failed 时必填）
+  allOf:
+    - if:
+        properties:
+          status:
+            const: success
+        required: [status]
+      then:
+        required: [stack_id]
+    - if:
+        properties:
+          status:
+            const: failed
+        required: [status]
+      then:
+        required: [error]
 ---
 
 # 阿里云 ROS 部署技能

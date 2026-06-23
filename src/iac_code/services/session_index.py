@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE
-from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, read_session_metadata
 from iac_code.utils.project_paths import (
     get_project_dir,
@@ -25,6 +24,8 @@ from iac_code.utils.project_paths import (
 )
 
 LITE_READ_BUF_SIZE = 64 * 1024
+# Keep in sync with pipeline.engine.cleanup without importing pipeline.engine in normal mode.
+CLEANUP_PROMPT_METADATA_TYPE = "pipeline_cleanup_prompt"
 
 
 @dataclass

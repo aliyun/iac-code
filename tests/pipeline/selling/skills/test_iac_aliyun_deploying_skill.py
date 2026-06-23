@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import jsonschema
 import pytest
 import yaml
 
@@ -54,6 +55,18 @@ class TestSkillFrontmatter:
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
         assert "ROS" in fm["description"]
+
+    def test_conclusion_schema_requires_stack_id_for_success_and_error_for_failed(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+
+        jsonschema.validate({"status": "success", "stack_id": "stack-123"}, schema)
+        jsonschema.validate({"status": "failed", "error": "CREATE_FAILED"}, schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"status": "success"}, schema)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"status": "failed"}, schema)
 
 
 class TestSkillContentRosOnly:
