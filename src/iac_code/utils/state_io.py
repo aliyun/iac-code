@@ -28,6 +28,8 @@ def _path_lock(path: Path) -> threading.RLock:
 
 
 def safe_replace(src: str | Path, dst: str | Path, *, attempts: int = 3, delay: float = 0.05) -> None:
+    if attempts < 1:
+        raise ValueError("attempts must be >= 1")
     for attempt in range(attempts):
         try:
             os.replace(src, dst)
@@ -124,6 +126,7 @@ def _cross_process_append_lock(path: Path) -> Iterator[None]:
             import msvcrt
 
             try:
+                lock_file.seek(0)
                 msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
             except OSError as exc:
                 raise RuntimeError(f"could not acquire append lock for {path}") from exc
@@ -160,9 +163,12 @@ def append_jsonl_locked(
         return
     with _path_lock(target):
         with _cross_process_append_lock(target):
+            created = not target.exists()
             with target.open("ab") as handle:
                 for line in lines:
                     handle.write(line.encode("utf-8"))
                 handle.flush()
                 if durable:
                     os.fsync(handle.fileno())
+            if durable and created:
+                fsync_parent_dir(target)
