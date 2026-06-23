@@ -9,10 +9,11 @@ The review spans A2A pipeline recovery, A2A event durability, cleanup ledger cor
 ## Goals
 
 - Fix every current `Critical`, `Major`, and `Minor` item in `docs/review.md`.
-- Include the historical hardening items listed in `原本就有的问题`, with one explicitly accepted residual risk for sidecar two-file consistency.
+- Include the historical hardening items listed in `原本就有的问题`, with any accepted residual risks explicitly named and justified.
 - Preserve normal mode behavior unless the review item explicitly targets normal mode performance or shared infrastructure.
 - Avoid real LLM, real cloud, or real network requirements in tests.
 - Produce a closure document summarizing each review item as fixed or accepted residual risk.
+- For the historical hardening section, every item must have either an implementation strategy or an explicitly named accepted residual risk.
 
 ## Non-Goals
 
@@ -26,6 +27,8 @@ The review spans A2A pipeline recovery, A2A event durability, cleanup ledger cor
 ## Accepted Residual Risk
 
 `PipelineSession` will continue to store sidecar state in two files: `context.yaml` and `meta.yaml`. This round will improve single-file atomicity through a shared state I/O helper, but it will not add a shared generation/checksum or merge the files. A crash between the two file writes can still leave the pair out of sync. This is accepted for this batch and must be recorded in `docs/review-fix-summary.md`.
+
+Session JSONL concurrent append atomicity on Windows is also an accepted residual risk for this batch. The project model does not support multiple processes appending to the same session file concurrently. The implementation should keep append safe for the single-process runtime and record the cross-process append limitation in the closure summary.
 
 ## Architecture
 
@@ -80,6 +83,8 @@ Durable appends must write, flush, and fsync. Best-effort appends can flush with
 Keep `SessionStorage.save()` as a full-file save API. It still receives the complete message list and writes the complete JSONL session file.
 
 Change the write path from truncate-and-rewrite to atomic replace. Cleanup prompt preservation becomes explicit and opt-in. Normal mode saves should not read the old session file just to scan for cleanup prompts. Preservation should be enabled only from flows that may rewrite or compact context while needing to retain hidden cleanup prompts.
+
+Keep session append as the single-process append path. It does not need a cross-process locking redesign in this round. If review closure mentions Windows `O_APPEND`, mark cross-process append as accepted residual risk and document that concurrent writers for the same session file are unsupported.
 
 ### ToolContext Compatibility
 
@@ -220,6 +225,9 @@ Runtime fixes include:
 - path normalization for `read_file`
 - atomic replace retry and explicit failure surfacing
 - state-file write helper coverage for review-scoped files
+- explicit Windows handling for REPL signal registration: guard unsupported `loop.add_signal_handler` behavior, keep the fallback path intentional, and test or document it
+- image store privacy behavior: apply best-effort restrictive permissions where the platform supports them and document Windows limitations where POSIX `0600` semantics are unavailable
+- Selling Console socket reuse behavior: avoid unsafe Windows `SO_REUSEADDR` semantics by disabling address reuse on Windows or using the platform's exclusive-address option when available
 
 Script and documentation fixes include:
 
@@ -227,6 +235,7 @@ Script and documentation fixes include:
 - mark `pexpect` usage or runner docs as POSIX-only
 - replace hard-coded `/tmp` docs with system temporary directory wording
 - document Windows limitations for real PTY E2E
+- document the single-process assumption for session JSONL append
 
 ### I18n
 
@@ -252,6 +261,8 @@ Fix every documentation gap called out in `docs/review.md`:
 - VSwitch template commit documentation
 - `pexpect` dev dependency mention
 - scripts README entries
+- `conftest.py` tiktoken isolation fixture documentation
+- correction for batch docs that call real ROS template files "test template files"
 
 Add a formal pipeline schema reference covering at least:
 
@@ -272,6 +283,7 @@ Add a formal pipeline schema reference covering at least:
 Fix all remaining Minor items:
 
 - centralize `CLEANUP_PROMPT_METADATA_TYPE`
+- broaden legacy cleanup prompt detection or migrate old cleanup prompts to metadata so localized or older hidden prompts do not appear in session titles
 - guard empty `stack_id` before emitting `ResourceObservedEvent`
 - add useful completion guard logging
 - centralize cleanup event names or enum-like constants
@@ -290,7 +302,7 @@ Create `docs/review-fix-summary.md` after implementation. It should map each rev
 - test coverage
 - accepted residual risk
 
-The sidecar two-file consistency issue must be recorded as accepted residual risk.
+The sidecar two-file consistency issue and the unsupported cross-process Session JSONL append case must be recorded as accepted residual risks.
 
 ## Testing Strategy
 
