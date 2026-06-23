@@ -392,6 +392,7 @@ class StepExecutor:
             auto_trigger_skills=self._resolve_auto_trigger_skills(step),
             tool_context_trusted_read_directories=step_skill_roots,
             tool_context_relative_read_directories=step_skill_roots,
+            pipeline_mode=True,
         )
         return StepAgentLoopContext(
             agent_loop=agent_loop,

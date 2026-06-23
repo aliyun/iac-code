@@ -73,6 +73,7 @@ class ToolExecutor:
             trusted_read_directories=list(context.trusted_read_directories),
             relative_read_directories=list(context.relative_read_directories),
             tool_use_id=call.id,
+            pipeline_mode=context.pipeline_mode,
         )
 
         timeout = tool.timeout if tool.timeout is not None else self._tool_timeout

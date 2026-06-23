@@ -102,6 +102,16 @@ class TestStepExecutorToolSetup:
         tool_reg = executor._build_step_tools(step, ctx)
         assert tool_reg.get("complete_step") is not None
 
+    def test_agent_loop_context_marks_pipeline_mode(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        agent_context = executor.build_agent_loop_context(step, ctx, "test_session")
+
+        assert agent_context.agent_loop is not None
+        assert agent_context.agent_loop._pipeline_mode is True
+
     def test_full_tools_when_step_returns_none(self, tmp_path):
         registry = ToolRegistry()
 

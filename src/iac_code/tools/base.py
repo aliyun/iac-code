@@ -29,6 +29,8 @@ class ToolContext:
     # ToolExecutor on each call.
     tool_use_id: str | None = None
     relative_read_directories: list[str] = field(default_factory=list)
+    # True when this tool call is being executed as part of a pipeline step.
+    pipeline_mode: bool = False
 
 
 @dataclass

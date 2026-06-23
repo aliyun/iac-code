@@ -13,10 +13,7 @@ from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
 from iac_code.types.stream_events import StackProgressEvent
 
-_MINIMAL_TEMPLATE_BODY = (
-    '{"ROSTemplateFormatVersion": "2015-09-01", '
-    '"Resources": {"Vpc": {"Type": "ALIYUN::ECS::VPC", "Properties": {"CidrBlock": "192.168.0.0/16"}}}}'
-)
+_REMOTE_TEMPLATE_URL = "oss://iac-code-test/template.json"
 
 
 @pytest.fixture
@@ -118,7 +115,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ctx,
@@ -143,6 +140,64 @@ class TestRosStackExecute:
         assert len(first.resources) == 1
         assert first.resources[0]["name"] == "Vpc"
         assert first.resources[0]["resource_type"] == "ALIYUN::ECS::VPC"
+
+    @pytest.mark.asyncio
+    async def test_template_body_is_rejected_before_create_stack(self, tool: RosStack, mock_credentials) -> None:
+        mock_client = MagicMock()
+
+        with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
+            mock_factory.create.return_value = mock_client
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(pipeline_mode=True),
+            )
+
+        assert result.is_error is True
+        assert "TemplateBody" in result.content
+        assert "TemplateURL" in result.content
+        mock_client.create_stack.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_template_body_is_allowed_outside_pipeline(self, tool: RosStack, mock_credentials) -> None:
+        mock_client = MagicMock()
+
+        create_response = MagicMock()
+        create_response.body.stack_id = "stack-123"
+        mock_client.create_stack.return_value = create_response
+
+        get_stack_response = MagicMock()
+        get_stack_response.body.to_map.return_value = {
+            "StackId": "stack-123",
+            "StackName": "test",
+            "Status": "CREATE_COMPLETE",
+            "StatusReason": "",
+        }
+        mock_client.get_stack.return_value = get_stack_response
+
+        list_resources_response = MagicMock()
+        list_resources_response.body.to_map.return_value = {"Resources": []}
+        mock_client.list_stack_resources.return_value = list_resources_response
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
+            patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+        ):
+            mock_factory.create.return_value = mock_client
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(),
+            )
+
+        assert result.is_error is False
+        mock_client.create_stack.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_stack_emits_success_telemetry_only_after_terminal_success(
@@ -188,7 +243,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -240,7 +295,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -281,7 +336,7 @@ class TestRosStackExecute:
                 await tool.execute(
                     tool_input={
                         "action": "CreateStack",
-                        "params": {"StackName": "test", "TemplateBody": "{}"},
+                        "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                         "region_id": "cn-hangzhou",
                     },
                     context=ToolContext(),
@@ -337,7 +392,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -382,7 +437,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -393,7 +448,7 @@ class TestRosStackExecute:
 
     @pytest.mark.asyncio
     async def test_create_stack_non_string_resource_type_does_not_prevent_api_call(
-        self, tool: RosStack, mock_credentials
+        self, tool: RosStack, mock_credentials, tmp_path
     ) -> None:
         mock_client = MagicMock()
 
@@ -415,6 +470,8 @@ class TestRosStackExecute:
         mock_client.list_stack_resources.return_value = list_resources_response
 
         template_body = json.dumps({"Resources": {"R": {"Type": 123}}})
+        template_file = tmp_path / "non-string-resource-type.json"
+        template_file.write_text(template_body, encoding="utf-8")
 
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
@@ -424,7 +481,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": template_body},
+                    "params": {"StackName": "test", "TemplateURL": str(template_file)},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -436,7 +493,7 @@ class TestRosStackExecute:
         assert data["status"] == "CREATE_COMPLETE"
 
     @pytest.mark.asyncio
-    async def test_create_stack_none_template_body_does_not_prevent_api_call(
+    async def test_create_stack_template_url_does_not_require_template_body(
         self, tool: RosStack, mock_credentials
     ) -> None:
         mock_client = MagicMock()
@@ -466,7 +523,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": None},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -475,7 +532,7 @@ class TestRosStackExecute:
         assert result.is_error is False
         mock_client.create_stack.assert_called_once()
         request = mock_client.create_stack.call_args.args[0]
-        assert request.template_body is None
+        assert request.to_map()["TemplateURL"] == _REMOTE_TEMPLATE_URL
         data = json.loads(result.content)
         assert data["status"] == "CREATE_COMPLETE"
 
@@ -514,7 +571,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -557,7 +614,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -600,7 +657,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -651,7 +708,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateBody": "{}"},
+                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -707,7 +764,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateBody": "{}"},
+                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -747,7 +804,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateBody": "{}"},
+                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -793,7 +850,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateBody": "{}"},
+                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -804,7 +861,7 @@ class TestRosStackExecute:
 
     @pytest.mark.asyncio
     async def test_update_stack_non_string_resource_type_does_not_prevent_api_call(
-        self, tool: RosStack, mock_credentials
+        self, tool: RosStack, mock_credentials, tmp_path
     ) -> None:
         mock_client = MagicMock()
 
@@ -826,6 +883,8 @@ class TestRosStackExecute:
         mock_client.list_stack_resources.return_value = list_resources_response
 
         template_body = json.dumps({"Resources": {"R": {"Type": 123}}})
+        template_file = tmp_path / "update-non-string-resource-type.json"
+        template_file.write_text(template_body, encoding="utf-8")
 
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
@@ -835,7 +894,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateBody": template_body},
+                    "params": {"StackId": "stack-123", "TemplateURL": str(template_file)},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -847,7 +906,7 @@ class TestRosStackExecute:
         assert data["status"] == "UPDATE_COMPLETE"
 
     @pytest.mark.asyncio
-    async def test_update_stack_none_template_body_does_not_prevent_api_call(
+    async def test_update_stack_template_url_does_not_require_template_body(
         self, tool: RosStack, mock_credentials
     ) -> None:
         mock_client = MagicMock()
@@ -877,7 +936,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateBody": None},
+                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -886,7 +945,7 @@ class TestRosStackExecute:
         assert result.is_error is False
         mock_client.update_stack.assert_called_once()
         request = mock_client.update_stack.call_args.args[0]
-        assert request.template_body is None
+        assert request.to_map()["TemplateURL"] == _REMOTE_TEMPLATE_URL
         data = json.loads(result.content)
         assert data["status"] == "UPDATE_COMPLETE"
 
@@ -925,7 +984,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateBody": "{}"},
+                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -1145,10 +1204,10 @@ class TestRosStackExecute:
         action_response.body.stack_id = "stack-123"
         if stale_action == "CreateStack":
             mock_client.create_stack.return_value = action_response
-            stale_params = {"StackName": "test", "TemplateBody": "{}"}
+            stale_params = {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL}
         else:
             mock_client.update_stack.return_value = action_response
-            stale_params = {"StackId": "stack-123", "TemplateBody": "{}"}
+            stale_params = {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL}
 
         delete_get_stack_response = MagicMock()
         delete_get_stack_response.body.to_map.return_value = {
@@ -1278,7 +1337,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -1325,7 +1384,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -1375,7 +1434,7 @@ class TestRosStackExecute:
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateBody": "{}"},
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -1412,8 +1471,8 @@ class TestRosStackExtra:
     @pytest.mark.parametrize(
         ("action", "params", "sdk_method"),
         [
-            ("CreateStack", {"StackName": "n", "TemplateBody": "{}"}, "create_stack"),
-            ("UpdateStack", {"StackId": "sx", "TemplateBody": "{}"}, "update_stack"),
+            ("CreateStack", {"StackName": "n", "TemplateURL": _REMOTE_TEMPLATE_URL}, "create_stack"),
+            ("UpdateStack", {"StackId": "sx", "TemplateURL": _REMOTE_TEMPLATE_URL}, "update_stack"),
             ("ContinueCreateStack", {"StackId": "sx"}, "continue_create_stack"),
             ("DeleteStack", {"StackId": "sx"}, "delete_stack"),
         ],
@@ -1452,7 +1511,17 @@ class TestRosStackExtra:
         assert result == "stack-fake"
 
     @pytest.mark.asyncio
-    async def test_template_body_dict_to_json(self, stack):
+    async def test_template_body_dict_is_rejected_in_pipeline(self, stack):
+        with pytest.raises(ValueError, match="TemplateURL"):
+            await stack.call_action(
+                "CreateStack",
+                {"StackName": "n", "TemplateBody": {"ROSTemplateFormatVersion": "2015-09-01"}},
+                "cn-hangzhou",
+                pipeline_mode=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_template_body_dict_to_json_outside_pipeline(self, stack):
         result = await stack.call_action(
             "CreateStack",
             {"StackName": "n", "TemplateBody": {"ROSTemplateFormatVersion": "2015-09-01"}},
@@ -1534,7 +1603,7 @@ class TestRosStackExtra:
             "CreateStack",
             {
                 "StackName": "n",
-                "TemplateBody": _MINIMAL_TEMPLATE_BODY,
+                "TemplateURL": _REMOTE_TEMPLATE_URL,
                 "Parameters": [
                     {"ParameterKey": "VpcId", "ParameterValue": "vpc-123"},
                     {"ParameterKey": "ZoneId", "ParameterValue": "cn-hangzhou-h"},
@@ -1562,7 +1631,7 @@ class TestRosStackExtra:
             "CreateStack",
             {
                 "StackName": "n",
-                "TemplateBody": _MINIMAL_TEMPLATE_BODY,
+                "TemplateURL": _REMOTE_TEMPLATE_URL,
                 "Parameters.1.ParameterKey": "VpcId",
                 "Parameters.1.ParameterValue": "vpc-123",
             },
@@ -1587,7 +1656,7 @@ class TestRosStackExtra:
             "UpdateStack",
             {
                 "StackId": "stack-123",
-                "TemplateBody": _MINIMAL_TEMPLATE_BODY,
+                "TemplateURL": _REMOTE_TEMPLATE_URL,
                 "Parameters.1.ParameterKey": "VpcId",
                 "Parameters.1.ParameterValue": "vpc-123",
             },

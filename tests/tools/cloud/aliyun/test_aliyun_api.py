@@ -604,33 +604,27 @@ class TestAliyunApiProductNormalization:
 
 class TestAliyunApiHooks:
     @pytest.mark.asyncio
-    async def test_hook_blocks_validate_with_wrong_resource_types(
+    async def test_ros_template_body_is_rejected_before_cloud_call(
         self, api: AliyunApi, context: ToolContext, mock_credentials
     ) -> None:
-        template = json.dumps(
-            {
-                "ROSTemplateFormatVersion": "2015-09-01",
-                "Resources": {
-                    "Vpc": {"Type": "ALIYUN::VPC::VPC", "Properties": {}},
-                    "VSwitch": {"Type": "ALIYUN::VPC::VSwitch", "Properties": {}},
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient") as mock_open_api_client:
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "ValidateTemplate",
+                    "params": {"TemplateBody": "{}"},
+                    "region_id": "cn-hangzhou",
                 },
-            }
-        )
-        result = await api.execute(
-            tool_input={
-                "product": "ros",
-                "action": "ValidateTemplate",
-                "params": {"TemplateBody": template},
-                "region_id": "cn-hangzhou",
-            },
-            context=context,
-        )
+                context=ToolContext(pipeline_mode=True),
+            )
+
         assert result.is_error is True
-        assert "ALIYUN::ECS::VPC" in result.content
-        assert "ALIYUN::ECS::VSwitch" in result.content
+        assert "TemplateBody" in result.content
+        assert "TemplateURL" in result.content
+        mock_open_api_client.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_hook_passes_correct_resource_types(
+    async def test_ros_template_body_is_allowed_outside_pipeline(
         self, api: AliyunApi, context: ToolContext, mock_credentials
     ) -> None:
         template = json.dumps(
@@ -650,6 +644,65 @@ class TestAliyunApiHooks:
                     "product": "ros",
                     "action": "ValidateTemplate",
                     "params": {"TemplateBody": template},
+                    "region_id": "cn-hangzhou",
+                },
+                context=context,
+            )
+
+        assert result.is_error is False
+        mock_client.call_api.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_hook_blocks_validate_with_wrong_resource_types(
+        self, api: AliyunApi, context: ToolContext, mock_credentials, tmp_path
+    ) -> None:
+        template = json.dumps(
+            {
+                "ROSTemplateFormatVersion": "2015-09-01",
+                "Resources": {
+                    "Vpc": {"Type": "ALIYUN::VPC::VPC", "Properties": {}},
+                    "VSwitch": {"Type": "ALIYUN::VPC::VSwitch", "Properties": {}},
+                },
+            }
+        )
+        template_file = tmp_path / "wrong-resource-types.json"
+        template_file.write_text(template, encoding="utf-8")
+        result = await api.execute(
+            tool_input={
+                "product": "ros",
+                "action": "ValidateTemplate",
+                "params": {"TemplateURL": str(template_file)},
+                "region_id": "cn-hangzhou",
+            },
+            context=context,
+        )
+        assert result.is_error is True
+        assert "ALIYUN::ECS::VPC" in result.content
+        assert "ALIYUN::ECS::VSwitch" in result.content
+
+    @pytest.mark.asyncio
+    async def test_hook_passes_correct_resource_types(
+        self, api: AliyunApi, context: ToolContext, mock_credentials, tmp_path
+    ) -> None:
+        template = json.dumps(
+            {
+                "ROSTemplateFormatVersion": "2015-09-01",
+                "Resources": {
+                    "Vpc": {"Type": "ALIYUN::ECS::VPC", "Properties": {}},
+                },
+            }
+        )
+        template_file = tmp_path / "correct-resource-types.json"
+        template_file.write_text(template, encoding="utf-8")
+        mock_client = MagicMock()
+        mock_client.call_api.return_value = {"body": {"Description": "Valid"}}
+
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client):
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "ValidateTemplate",
+                    "params": {"TemplateURL": str(template_file)},
                     "region_id": "cn-hangzhou",
                 },
                 context=context,

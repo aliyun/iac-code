@@ -22,7 +22,9 @@ from iac_code.services.telemetry.sanitize import (
     sanitize_resource_type,
     sanitize_terraform_provider,
 )
+from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+from iac_code.tools.cloud.aliyun.template_source import reject_template_body_param
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
 
@@ -472,7 +474,12 @@ class RosStack(BaseCloudStack):
         cred = credentials.get_provider("aliyun")
         return RosClientFactory.create(cred, region_id=region)
 
-    async def call_action(self, action: str, params: dict, region: str) -> str:
+    def _call_action_kwargs(self, context: ToolContext) -> dict[str, Any]:
+        return {"pipeline_mode": context.pipeline_mode}
+
+    async def call_action(self, action: str, params: dict, region: str, *, pipeline_mode: bool = False) -> str:
+        if error := reject_template_body_param(params, pipeline_mode=pipeline_mode):
+            raise ValueError(error)
         client = self._get_client(region)
         # Ensure RegionId is always in params for the API request
         if region:
@@ -482,7 +489,7 @@ class RosStack(BaseCloudStack):
         if template_url and not template_url.startswith(_URL_SCHEMES):
             params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
             del params["TemplateURL"]
-        # TemplateBody must be a JSON string; models may pass a dict
+        # TemplateBody must be a JSON string; non-pipeline callers may still pass a dict.
         if isinstance(params.get("TemplateBody"), dict):
             params["TemplateBody"] = json.dumps(params["TemplateBody"], ensure_ascii=False)
 

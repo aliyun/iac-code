@@ -138,6 +138,9 @@ class BaseCloudStack(Tool):
     def _resolve_region(self, input: dict) -> str:
         return input.get("region_id") or self._get_default_region()
 
+    def _call_action_kwargs(self, context: ToolContext) -> dict[str, Any]:
+        return {}
+
     def render_tool_use_message(self, input: dict, *, verbose: bool = False) -> str | None:
         action = input.get("action", "")
         region = self._resolve_region(input)
@@ -223,7 +226,7 @@ class BaseCloudStack(Tool):
         region = self._resolve_region(tool_input)
 
         try:
-            stack_id = await self.call_action(action, params, region)
+            stack_id = await self.call_action(action, params, region, **self._call_action_kwargs(context))
         except Exception as e:
             return ToolResult.error(f"[{action}] {e}")
 

@@ -151,6 +151,7 @@ class AgentLoop:
         pause_event: asyncio.Event | None = None,
         tool_context_trusted_read_directories: list[str] | None = None,
         tool_context_relative_read_directories: list[str] | None = None,
+        pipeline_mode: bool = False,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -165,6 +166,7 @@ class AgentLoop:
         self._permission_context_getter = permission_context_getter
         self._tool_context_trusted_read_directories = list(tool_context_trusted_read_directories or [])
         self._tool_context_relative_read_directories = list(tool_context_relative_read_directories or [])
+        self._pipeline_mode = pipeline_mode
         self._auto_trigger_skills = auto_trigger_skills or []
         self._auto_loaded_skills: set[str] = set()
         self._current_git_branch: str | None = None
@@ -175,6 +177,7 @@ class AgentLoop:
         self._memory_recall_active_turns = 0
         self._last_provider_request_snapshot: dict[str, Any] | None = None
         self._system_prompt_refresher = system_prompt_refresher
+        self._pipeline_mode = pipeline_mode
 
         model_name = ""
         if hasattr(provider_manager, "get_model_name"):
@@ -941,6 +944,7 @@ class AgentLoop:
                     cwd=self._cwd,
                     trusted_read_directories=list(self._tool_context_trusted_read_directories),
                     relative_read_directories=list(self._tool_context_relative_read_directories),
+                    pipeline_mode=self._pipeline_mode,
                 )
 
                 allowed_requests: list[ToolCallRequest] = []

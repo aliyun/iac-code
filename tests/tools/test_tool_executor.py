@@ -226,6 +226,21 @@ class TestToolExecutor:
         assert tool.seen_context_queues == {"first": first_queue, "second": second_queue}
         assert tool._event_queue is None
 
+    async def test_pipeline_mode_is_preserved_in_derived_tool_context(self):
+        class ContextAwareTool(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                return ToolResult.success(str(context.pipeline_mode))
+
+        tool = ContextAwareTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        calls = [ToolCallRequest(id="a", name="read", input={})]
+
+        results = await executor.execute_batch(calls, ToolContext(pipeline_mode=True))
+
+        assert results[0].content == "True"
+
 
 class FakeStrictTool(Tool):
     @property

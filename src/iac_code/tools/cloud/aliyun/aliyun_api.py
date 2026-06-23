@@ -21,6 +21,7 @@ from iac_code.services.telemetry import add_metric, log_event
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.services.telemetry.sanitize import sanitize_error_message
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.cloud.aliyun.template_source import reject_template_body_param
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
 from iac_code.types.stream_events import ResourceObservedEvent
@@ -413,6 +414,8 @@ class AliyunApi(BaseCloudApi):
 
         # ROS: TemplateURL as local file path → read into TemplateBody
         if product == "ros":
+            if error := reject_template_body_param(params, pipeline_mode=context.pipeline_mode):
+                return ToolResult.error(error)
             template_url = params.get("TemplateURL", "")
             if template_url and not template_url.startswith(("http://", "https://", "oss://")):
                 params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
