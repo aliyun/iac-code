@@ -137,6 +137,15 @@ class FailingFinalCompletedPipelineSession(RecordingPipelineSession):
         raise OSError("sidecar unavailable")
 
 
+class FailingCandidateFailedPipelineSession(RecordingPipelineSession):
+    async def save_running(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("running_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        if reason == "parallel candidate failed":
+            raise OSError("sidecar unavailable")
+
+
 class CapturingPipelineSession(RecordingPipelineSession):
     def __init__(self):
         super().__init__()
@@ -1306,6 +1315,42 @@ class TestParallelSubPipelineStep:
         assert record.error_type == "RuntimeError"
         assert record.error_summary == "lost worker token=[REDACTED] [PATH]"
         assert record.error_id == failed_event.data["error_details"]["error_id"]
+
+    @pytest.mark.asyncio
+    async def test_parallel_candidate_failure_save_failure_stops_before_failed_event(self, tmp_path):
+        runner = _build_parallel_runner(tmp_path)
+        runner.session = FailingCandidateFailedPipelineSession()
+        step = runner.state_machine.current_step
+
+        async def failing_execute_streaming(*args, **kwargs):
+            raise RuntimeError("candidate worker failed")
+            if False:
+                yield
+
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_sub_exec:
+            instance = MagicMock()
+            instance.execute_streaming = failing_execute_streaming
+            instance.current_step_executor_agent_loop = None
+            mock_sub_exec.return_value = instance
+
+            events = [event async for event in runner._execute_parallel_sub_pipeline(step)]
+
+        assert any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.STEP_FAILED
+            and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+            and event.data.get("failed") is True
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED for event in events
+        )
+        assert ("running_attempted", "eval", 1, "parallel candidate failed") in runner.session.calls
 
     @pytest.mark.asyncio
     async def test_resolve_iterate_field_raises_for_missing_and_returns_for_present(self, tmp_path):

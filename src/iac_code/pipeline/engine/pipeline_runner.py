@@ -3710,6 +3710,11 @@ class PipelineRunner:
                 )
                 state["error"] = error_summary
                 state["error_details"] = failure.details
+                try:
+                    await save_candidate_failed(i, state)
+                except PipelineStatePersistenceError as persistence_exc:
+                    await event_queue.put(persistence_exc)
+                    return
                 await event_queue.put(
                     PipelineEvent(
                         type=PipelineEventType.SUB_PIPELINE_COMPLETED,
@@ -3727,7 +3732,6 @@ class PipelineRunner:
                         },
                     )
                 )
-                await save_candidate_failed(i, state)
             finally:
                 self._active_candidates.pop(i, None)
                 await event_queue.put(CandidateSentinel(candidate_index=i))
