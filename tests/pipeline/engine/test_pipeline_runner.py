@@ -146,6 +146,15 @@ class FailingCandidateFailedPipelineSession(RecordingPipelineSession):
             raise OSError("sidecar unavailable")
 
 
+class FailingUserInputCheckpointPipelineSession(RecordingPipelineSession):
+    async def save_running(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("running_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        if reason in {"user input received", "pipeline pause confirmation received"}:
+            raise OSError("sidecar unavailable")
+
+
 class CapturingPipelineSession(RecordingPipelineSession):
     def __init__(self):
         super().__init__()
@@ -397,6 +406,7 @@ async def test_sidecar_save_failure_stops_before_next_step(tmp_path):
     assert any(
         isinstance(event, PipelineEvent)
         and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "a"
         and "pipeline state persistence failed" in str(event.data).lower()
         for event in events
     )
@@ -444,6 +454,54 @@ async def test_final_completed_save_failure_yields_persistence_failure_event(tmp
     )
     assert ("completed_attempted", "b", 2, "pipeline completed") in runner.session.calls
     assert runner.sidecar_status is None
+
+
+@pytest.mark.asyncio
+async def test_resume_input_save_failure_stops_before_input_received_event(tmp_path):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+    runner.session = FailingUserInputCheckpointPipelineSession()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={})
+
+    runner._step_executor.execute = fake_execute
+
+    events = []
+    async for event in runner.resume("continue"):
+        events.append(event)
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_RECEIVED for event in events
+    )
+    assert ("running_attempted", "a", 0, "user input received") in runner.session.calls
+
+
+@pytest.mark.asyncio
+async def test_pause_confirmation_save_failure_stops_before_input_received_event(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingUserInputCheckpointPipelineSession()
+    runner._set_pending_input_kind("pipeline_pause_confirmation")
+
+    events = []
+    async for event in runner.continue_from_sidecar("continue"):
+        events.append(event)
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_RECEIVED for event in events
+    )
+    assert ("running_attempted", "a", 0, "pipeline pause confirmation received") in runner.session.calls
 
 
 @pytest.mark.asyncio

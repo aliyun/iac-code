@@ -271,6 +271,7 @@ class InlineREPL:
         self._pipeline_restored_status: str | None = None
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id: str | None = None
+        self._pipeline_state_persistence_failed: bool = False
 
         # Keybinding manager
         self._keybinding_manager = KeybindingManager()
@@ -2196,6 +2197,8 @@ class InlineREPL:
             self._pipeline_display_recorder = None
 
     def _record_pipeline_display_event(self, event) -> None:
+        if self._is_pipeline_state_persistence_failure_event(event):
+            self._pipeline_state_persistence_failed = True
         recorder = getattr(self, "_pipeline_display_recorder", None)
         if recorder is None:
             return
@@ -2358,6 +2361,12 @@ class InlineREPL:
 
         pipeline_input = normalize_pipeline_user_input(user_input)
         self.renderer.record_user_turn(pipeline_input.display_text)
+        if self._pipeline is not None and getattr(self, "_pipeline_state_persistence_failed", False):
+            self.renderer.print_system_message(
+                _("Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable."),
+                style="yellow",
+            )
+            return
 
         if self._pipeline is None:
             pipeline_cwd = get_working_directory() or self._original_cwd
@@ -2625,10 +2634,18 @@ class InlineREPL:
         self._pipeline_restored_status = None
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id = None
+        self._pipeline_state_persistence_failed = False
 
     def _finalize_pipeline_after_render(self, terminal_event: PipelineEvent | None) -> None:
         # Keep terminal sidecars on disk for debugging. Terminal metadata
         # controls whether they are resumable.
+        if getattr(self, "_pipeline_state_persistence_failed", False):
+            if self._pipeline is not None:
+                pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
+                if callable(pause_agent_loops):
+                    pause_agent_loops()
+            self._pipeline_waiting_input = False
+            return
         handoff_result = self._handoff_pipeline_to_normal(terminal_event)
         if handoff_result in {"succeeded", "failed"}:
             self._clear_pipeline_runtime_state()
@@ -2637,7 +2654,13 @@ class InlineREPL:
         elif self._pipeline is not None and self._pipeline.state_machine.is_complete:
             self._clear_pipeline_runtime_state()
         elif self._pipeline is not None and not self._pipeline_waiting_input:
-            self._pipeline.mark_user_aborted("pipeline interrupted by user or renderer cancellation")
+            from iac_code.pipeline.engine.pipeline_runner import PipelineStatePersistenceError
+
+            try:
+                self._pipeline.mark_user_aborted("pipeline interrupted by user or renderer cancellation")
+            except PipelineStatePersistenceError as exc:
+                self._handle_pipeline_state_persistence_failure(exc)
+                return
             self._switch_user_aborted_pipeline_to_normal()
             self._clear_pipeline_runtime_state()
 
@@ -2693,6 +2716,7 @@ class InlineREPL:
                 _("Pipeline completed, but the handoff context could not be injected or saved."),
                 style="yellow",
             )
+            self._set_runtime_mode(RunMode.NORMAL)
             return "failed"
         self._set_runtime_mode(RunMode.NORMAL)
         self.renderer.print_system_message(
@@ -2703,6 +2727,7 @@ class InlineREPL:
 
     def _handle_pipeline_state_persistence_failure(self, exc: Exception) -> None:
         logger.opt(exception=True).warning("Pipeline state persistence failed during interrupt handling: {}", exc)
+        self._pipeline_state_persistence_failed = True
         self._last_interrupt_paused = True
         self._pipeline_waiting_input = False
         pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
@@ -3888,10 +3913,24 @@ class InlineREPL:
         """
         from iac_code.pipeline.engine.events import PipelineEventType
 
+        if self._is_pipeline_state_persistence_failure_event(event):
+            self._pipeline_state_persistence_failed = True
         if event.type == PipelineEventType.PIPELINE_STARTED:
             self._pipeline_step_names = event.data.get("step_names", [])
             self._pipeline_start_time = time.time()
             self._pipeline_completed_indices = set()
+
+    @staticmethod
+    def _is_pipeline_state_persistence_failure_event(event) -> bool:
+        from iac_code.pipeline.engine.events import PipelineEventType
+
+        if getattr(event, "type", None) != PipelineEventType.STEP_FAILED:
+            return False
+        data = getattr(event, "data", {})
+        if not isinstance(data, dict):
+            return False
+        error_details = data.get("error_details", {})
+        return isinstance(error_details, dict) and error_details.get("type") == "PipelineStatePersistenceError"
 
     def _render_pipeline_event(self, event):
         from rich.panel import Panel

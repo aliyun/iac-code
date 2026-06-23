@@ -40,6 +40,25 @@ class RecordingPipelineSession:
     def __init__(self):
         self.calls = []
 
+    async def save_running(
+        self,
+        current_step,
+        state_machine_snapshot,
+        context_snapshot,
+        pipeline_identity,
+        reason=None,
+        **kwargs,
+    ):
+        self.calls.append(
+            (
+                "running",
+                current_step,
+                state_machine_snapshot["current_index"],
+                reason,
+                pipeline_identity.pipeline_name,
+            )
+        )
+
     def save_rollback_sync(
         self,
         from_step,

@@ -6,7 +6,7 @@ import asyncio
 import time
 from io import StringIO
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 import yaml
@@ -1637,9 +1637,11 @@ async def test_handoff_injection_failure_still_switches_to_normal_and_preserves_
     assert repl._runtime_mode == RunMode.NORMAL
     repl._session_storage.append.assert_not_called()
     repl.renderer.print_system_message.assert_called()
-    pipeline.mark_normal_handoff.assert_called_once_with(
-        status="failed",
-        failed_reason="context unavailable",
+    pipeline.mark_normal_handoff.assert_has_calls(
+        [
+            call(status="succeeded", failed_reason=None),
+            call(status="failed", failed_reason="context unavailable"),
+        ]
     )
     pipeline.clear_sidecar.assert_not_called()
     pipeline.mark_user_aborted.assert_not_called()
@@ -1660,9 +1662,11 @@ async def test_handoff_persistence_failure_still_switches_to_normal_and_preserve
     assert repl._runtime_mode == RunMode.NORMAL
     repl._agent_loop.context_manager.add_raw_message.assert_called_once()
     repl.renderer.print_system_message.assert_called()
-    pipeline.mark_normal_handoff.assert_called_once_with(
-        status="failed",
-        failed_reason="disk unavailable",
+    pipeline.mark_normal_handoff.assert_has_calls(
+        [
+            call(status="succeeded", failed_reason=None),
+            call(status="failed", failed_reason="disk unavailable"),
+        ]
     )
     pipeline.clear_sidecar.assert_not_called()
     pipeline.mark_user_aborted.assert_not_called()

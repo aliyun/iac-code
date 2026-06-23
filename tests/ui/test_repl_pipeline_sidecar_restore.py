@@ -15,6 +15,7 @@ def repl_for_sidecar_restore(tmp_path):
     repl = InlineREPL.__new__(InlineREPL)
     repl._pipeline = None
     repl._pipeline_waiting_input = False
+    repl._pipeline_state_persistence_failed = False
     repl._session_id = "sid"
     repl._original_cwd = str(tmp_path)
     repl._provider_manager = MagicMock()
@@ -69,6 +70,57 @@ def test_normal_handoff_save_failure_does_not_switch_or_append(repl_for_sidecar_
     repl_for_sidecar_restore._session_storage.append.assert_not_called()
     repl_for_sidecar_restore.renderer.print_system_message.assert_called_once_with(
         "Pipeline state persistence failed. Normal chat handoff was not marked durable.",
+        style="yellow",
+    )
+
+
+def test_finalize_persistence_failure_event_does_not_mark_user_aborted(repl_for_sidecar_restore):
+    event = PipelineEvent(
+        type=PipelineEventType.STEP_FAILED,
+        step_id="collect",
+        timestamp=1.0,
+        data={
+            "error": "Pipeline state persistence failed.",
+            "error_details": {"type": "PipelineStatePersistenceError"},
+        },
+    )
+    pipeline = MagicMock()
+    pipeline.sidecar_status = None
+    pipeline.state_machine.is_complete = False
+    pipeline.pause_agent_loops = MagicMock()
+    pipeline.mark_user_aborted = MagicMock()
+    repl_for_sidecar_restore._pipeline = pipeline
+    repl_for_sidecar_restore._pipeline_waiting_input = False
+
+    repl_for_sidecar_restore._record_pipeline_display_event(event)
+    repl_for_sidecar_restore._finalize_pipeline_after_render(None)
+
+    assert repl_for_sidecar_restore._pipeline_state_persistence_failed is True
+    assert repl_for_sidecar_restore._pipeline is pipeline
+    pipeline.pause_agent_loops.assert_called_once_with()
+    pipeline.mark_user_aborted.assert_not_called()
+
+
+def test_finalize_user_abort_persistence_failure_keeps_pipeline_paused(repl_for_sidecar_restore):
+    pipeline = MagicMock()
+    pipeline.sidecar_status = None
+    pipeline.state_machine.is_complete = False
+    pipeline.pause_agent_loops = MagicMock()
+    pipeline.mark_user_aborted.side_effect = PipelineStatePersistenceError(
+        "pipeline state persistence failed during save_user_aborted_sync"
+    )
+    repl_for_sidecar_restore._pipeline = pipeline
+    repl_for_sidecar_restore._pipeline_waiting_input = False
+    repl_for_sidecar_restore._last_interrupt_paused = False
+
+    repl_for_sidecar_restore._finalize_pipeline_after_render(None)
+
+    assert repl_for_sidecar_restore._pipeline_state_persistence_failed is True
+    assert repl_for_sidecar_restore._pipeline is pipeline
+    pipeline.mark_user_aborted.assert_called_once_with("pipeline interrupted by user or renderer cancellation")
+    pipeline.pause_agent_loops.assert_called_once_with()
+    repl_for_sidecar_restore.renderer.print_system_message.assert_called_once_with(
+        "Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable.",
         style="yellow",
     )
 

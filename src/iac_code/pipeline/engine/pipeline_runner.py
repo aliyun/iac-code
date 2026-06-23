@@ -64,6 +64,10 @@ _REAL_RESTORE_FAILURE_REASONS = {
 class PipelineStatePersistenceError(RuntimeError):
     """Raised when recovery-critical pipeline state cannot be persisted."""
 
+    def __init__(self, message: str, *, step_id: str | None = None) -> None:
+        super().__init__(message)
+        self.step_id = step_id
+
 
 def _string_answer_value(value: Any) -> str:
     return value if isinstance(value, str) else ""
@@ -724,6 +728,12 @@ class PipelineRunner:
             self._set_pending_input_kind(None)
             current_step = getattr(self.state_machine, "current_step", None)
             step_id = getattr(current_step, "step_id", None)
+            self._set_current_step_user_input(pipeline_input)
+            try:
+                await self._save_running(str(step_id or ""), reason="pipeline pause confirmation received")
+            except PipelineStatePersistenceError as exc:
+                yield self._persistence_failure_event(exc)
+                return
             yield PipelineEvent(
                 type=PipelineEventType.USER_INPUT_RECEIVED,
                 step_id=step_id,
@@ -1273,18 +1283,19 @@ class PipelineRunner:
         )
 
     def _persistence_failure_event(self, exc: PipelineStatePersistenceError) -> PipelineEvent:
+        step_id = exc.step_id
         try:
             current_step = getattr(self.state_machine, "current_step", None)
-            step_id = getattr(current_step, "step_id", None)
+            step_id = step_id or getattr(current_step, "step_id", None)
         except (AttributeError, IndexError):
-            step_id = self._terminal_current_step_id() or None
+            step_id = step_id or self._terminal_current_step_id() or None
         return PipelineEvent(
             type=PipelineEventType.STEP_FAILED,
             step_id=step_id,
             timestamp=time.time(),
             data={
-                "error": "Pipeline state persistence failed.",
-                "error_summary": "Pipeline state persistence failed.",
+                "error": _("Pipeline state persistence failed."),
+                "error_summary": _("Pipeline state persistence failed."),
                 "error_details": {"type": "PipelineStatePersistenceError"},
             },
         )
@@ -1294,20 +1305,35 @@ class PipelineRunner:
         status: str,
         operation: str,
         save: Callable[[], Awaitable[None]],
+        *,
+        step_id: str | None = None,
     ) -> None:
         try:
             await save()
         except Exception as exc:
             self._record_sidecar_save_failure(status, operation, exc)
-            raise PipelineStatePersistenceError(f"pipeline state persistence failed during {operation}") from exc
+            raise PipelineStatePersistenceError(
+                f"pipeline state persistence failed during {operation}",
+                step_id=step_id,
+            ) from exc
         self._sidecar_status = status
 
-    def _try_save_sidecar_sync(self, status: str, operation: str, save: Callable[[], None]) -> None:
+    def _try_save_sidecar_sync(
+        self,
+        status: str,
+        operation: str,
+        save: Callable[[], None],
+        *,
+        step_id: str | None = None,
+    ) -> None:
         try:
             save()
         except Exception as exc:
             self._record_sidecar_save_failure(status, operation, exc)
-            raise PipelineStatePersistenceError(f"pipeline state persistence failed during {operation}") from exc
+            raise PipelineStatePersistenceError(
+                f"pipeline state persistence failed during {operation}",
+                step_id=step_id,
+            ) from exc
         self._sidecar_status = status
 
     async def _save_running(self, current_step: str, reason: str | None = None) -> None:
@@ -1330,7 +1356,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        await self._try_save_sidecar("running", "save_running", save)
+        await self._try_save_sidecar("running", "save_running", save, step_id=current_step)
 
     def _save_running_sync(self, current_step: str, reason: str | None = None) -> None:
         if not self.session:
@@ -1352,7 +1378,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        self._try_save_sidecar_sync("running", "save_running_sync", save)
+        self._try_save_sidecar_sync("running", "save_running_sync", save, step_id=current_step)
 
     async def _save_waiting_input(self, current_step: str) -> None:
         if not self.session:
@@ -1374,7 +1400,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        await self._try_save_sidecar("waiting_input", "save_waiting_input", save)
+        await self._try_save_sidecar("waiting_input", "save_waiting_input", save, step_id=current_step)
 
     async def _save_completed(self, current_step: str, reason: str | None = None) -> None:
         if not self.session:
@@ -1396,7 +1422,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        await self._try_save_sidecar("completed", "save_completed", save)
+        await self._try_save_sidecar("completed", "save_completed", save, step_id=current_step)
 
     async def _save_failed(self, current_step: str, reason: str) -> None:
         self._mark_active_attempt_failed()
@@ -1419,7 +1445,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        await self._try_save_sidecar("failed", "save_failed", save)
+        await self._try_save_sidecar("failed", "save_failed", save, step_id=current_step)
 
     def _save_failed_sync(self, current_step: str, reason: str) -> None:
         self._mark_active_attempt_failed()
@@ -1442,7 +1468,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        self._try_save_sidecar_sync("failed", "save_failed_sync", save)
+        self._try_save_sidecar_sync("failed", "save_failed_sync", save, step_id=current_step)
 
     def mark_user_aborted(self, reason: str) -> None:
         self._mark_active_attempt_failed_preserve_execution()
@@ -1478,7 +1504,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        self._try_save_sidecar_sync("user_aborted", "save_user_aborted_sync", save)
+        self._try_save_sidecar_sync("user_aborted", "save_user_aborted_sync", save, step_id=current_step or None)
 
     async def _save_rollback(self, from_step: str, to_step: str, reason: str) -> None:
         if not self.session:
@@ -1501,7 +1527,7 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        await self._try_save_sidecar("running", "save_rollback", save)
+        await self._try_save_sidecar("running", "save_rollback", save, step_id=from_step)
 
     def _save_rollback_sync(self, from_step: str, to_step: str, reason: str) -> None:
         session = getattr(self, "session", None)
@@ -1524,17 +1550,21 @@ class PipelineRunner:
                 attempts=dict(self._attempts),
             )
 
-        self._try_save_sidecar_sync("running", "save_rollback_sync", save)
+        self._try_save_sidecar_sync("running", "save_rollback_sync", save, step_id=from_step)
 
     async def _save_after_advance(self, completed_step_id: str) -> None:
         self._set_current_step_user_input(None)
-        if self.state_machine.is_complete:
-            await self._save_completed(completed_step_id, reason="pipeline completed")
-            return
-        await self._save_running(
-            self.state_machine.current_step.step_id,
-            reason=f"advanced from {completed_step_id}",
-        )
+        try:
+            if self.state_machine.is_complete:
+                await self._save_completed(completed_step_id, reason="pipeline completed")
+                return
+            await self._save_running(
+                self.state_machine.current_step.step_id,
+                reason=f"advanced from {completed_step_id}",
+            )
+        except PipelineStatePersistenceError as exc:
+            exc.step_id = completed_step_id
+            raise
 
     def iter_active_agent_loops(self):
         """Yield all currently-active AgentLoops (problem 6 — /status aggregation).
@@ -1855,6 +1885,22 @@ class PipelineRunner:
             if isinstance(restored_options, list):
                 waiting_options = restored_options
         selected_index: int | None = None
+        if step.ui_mode == "candidate_selection":
+            selected_index = self._infer_selected_index(user_text, waiting_options)
+            if selected_index is None:
+                logger.debug(
+                    "Pipeline candidate selection did not match a unique option: step_id=%s option_count=%d",
+                    step.step_id,
+                    len(waiting_options),
+                )
+        current_conclusion["user_input"] = user_text
+        self.context.set_conclusion(step.conclusion_field, current_conclusion)
+        self._set_current_step_user_input(pipeline_input)
+        try:
+            await self._save_running(step.step_id, reason="user input received")
+        except PipelineStatePersistenceError as exc:
+            yield self._persistence_failure_event(exc)
+            return
         self._observability.user_input_received(
             step_id=step.step_id,
             step_index=step_index,
@@ -1864,25 +1910,15 @@ class PipelineRunner:
             user_input=user_text,
             wait_duration_ms=wait_duration_ms,
         )
-        if step.ui_mode == "candidate_selection":
-            selected_index = self._infer_selected_index(user_text, waiting_options)
-            if selected_index is None:
-                logger.debug(
-                    "Pipeline candidate selection did not match a unique option: step_id=%s option_count=%d",
-                    step.step_id,
-                    len(waiting_options),
-                )
-            else:
-                self._observability.selection_made(
-                    step_id=step.step_id,
-                    step_attempt=step_attempt,
-                    ui_mode=step.ui_mode,
-                    option_count=len(waiting_options),
-                    selected_index=selected_index,
-                    selected_value=user_text,
-                )
-        current_conclusion["user_input"] = user_text
-        self.context.set_conclusion(step.conclusion_field, current_conclusion)
+        if step.ui_mode == "candidate_selection" and selected_index is not None:
+            self._observability.selection_made(
+                step_id=step.step_id,
+                step_attempt=step_attempt,
+                ui_mode=step.ui_mode,
+                option_count=len(waiting_options),
+                selected_index=selected_index,
+                selected_value=user_text,
+            )
 
         yield PipelineEvent(
             type=PipelineEventType.USER_INPUT_RECEIVED,
