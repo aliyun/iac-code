@@ -80,6 +80,10 @@ Durable appends must write, flush, and fsync. Best-effort appends can flush with
 
 For single durable A2A events, publishing succeeds only after at least one durable metadata sink succeeds for that event. The journal append is the preferred durable sink; a snapshot save can be a fallback only if it includes the event's recovery-relevant state. If neither durable journal append nor recovery-relevant snapshot save succeeds, the event must not be delivered as successful state.
 
+Add a centralized durable-event classifier in the A2A publisher or an adjacent low-dependency module. The effective durable flag should be `caller_requested_durable or is_recovery_semantic_event(envelope)`. Do not rely on scattered call sites remembering to pass `require_durable_metadata=True` for every recovery-relevant event. Tests should cover representative translated events and manual events so `pipeline_started`, step state, candidate state, input, terminal, handoff, cleanup, and artifact metadata events all route through durable persistence even when the caller does not pass an explicit flag.
+
+If `append_many()` uses one JSONL group record, `read_all()` and `read_all_repairing_tail()` must expand committed group records into normal events before sorting/reducing, and the high-water sequence logic must see the expanded events. If it uses group metadata plus a commit marker, replay must ignore uncommitted groups completely. Either form must preserve the in-group event order for events with adjacent sequences.
+
 ### Session Storage Save
 
 Keep `SessionStorage.save()` as a full-file save API. It still receives the complete message list and writes the complete JSONL session file.
@@ -89,6 +93,8 @@ Change the write path from truncate-and-rewrite to atomic replace. Cleanup promp
 Add a focused append helper for SessionStorage JSONL appends. It should serialize appends inside the current process and use the best available platform mechanism to avoid interleaving when another process also appends to the same file. On POSIX this can use an advisory lock around the append section; on Windows it should use the corresponding standard-library file locking primitive where feasible. The append operation should write each JSONL record as one encoded line while holding the lock. If a platform lock cannot be acquired, append should fail loudly rather than silently risk interleaving.
 
 This append helper is scoped to SessionStorage JSONL files. It does not introduce cross-process locking for `cleanup.yaml`.
+
+The legacy-to-directory session migration path must also stop relying on raw `shutil.move()` for the review-scoped Windows target-exists case. If the directory-format `session.jsonl` already exists, migration should leave it authoritative. If the legacy file is the source of truth, move or replace it through the shared retry helper or an equivalent explicit Windows-safe path, with clear failure rather than silent partial migration.
 
 ### ToolContext Compatibility
 
@@ -208,13 +214,20 @@ No additional recovery subsystem will be added for the small window between succ
 
 Pipeline runner checkpoints that affect recovery semantics must not fail silently.
 
-Use the shared retry helper for critical sidecar saves. If retries fail, pipeline execution stops before advancing to later steps or issuing further cloud operations. The user-facing error should clearly state that pipeline state persistence failed.
+Use the shared retry helper for critical sidecar saves. The runner sidecar save helpers should return success/failure or raise a dedicated persistence error; they must not swallow persistence failures and let callers continue as if the checkpoint succeeded. If retries fail, pipeline execution stops before advancing to later steps or issuing further cloud operations. The user-facing error should clearly state that pipeline state persistence failed.
+
+For checkpoints that currently happen after an in-memory transition, such as `state_machine.advance()`, rollback, interrupt rollback, or terminal handoff metadata, the implementation must establish an explicit persistence boundary. Prefer persisting the state that will be resumed before emitting success/terminal events or starting downstream work. If the in-memory transition must happen first because the resumable snapshot is derived from mutated state, then a persistence failure must immediately stop the pipeline, surface the persistence error, and avoid yielding success, handoff, or downstream execution events that imply the transition is durable.
+
+### REPL Resume Damaged Sidecar Fallback
+
+The `/resume` flow must handle damaged or racing pipeline sidecar metadata gracefully. After `has_resumable_status()` detects a candidate sidecar, `_confirm_pipeline_resume()` should catch `FileNotFoundError`, `OSError`, `UnicodeDecodeError`, and `yaml.YAMLError`, and should validate that parsed metadata is a mapping before reading fields. On failure, the REPL should show a clear warning and continue in normal chat mode or offer the existing discard path; it must not crash during session swap.
 
 Tests should inject sidecar save failures and assert:
 
 - downstream steps or cloud tools are not executed after persistent failure
 - REPL/A2A surfaces receive a clear error
 - retry success allows normal continuation
+- damaged `/resume` sidecar metadata does not crash the REPL and leaves the user in a coherent normal/discard fallback
 
 The sidecar two-file consistency residual risk remains accepted and documented.
 
@@ -315,6 +328,7 @@ The sidecar two-file consistency issue must be recorded as an accepted residual 
 Add focused pytest coverage for each high-risk fix:
 
 - durable A2A event failure behavior
+- durable A2A event classification for translated and manual recovery events
 - `append_many()` cancel handoff atomicity
 - active sidecar mismatch error data
 - cleanup ledger state merge
@@ -322,10 +336,12 @@ Add focused pytest coverage for each high-risk fix:
 - corrupt cleanup ledger fail-closed behavior
 - session atomic save and preservation on/off
 - session JSONL append locking/serialization
+- legacy session migration Windows-safe replace/move behavior
 - `ToolContext` positional compatibility
 - Windows path normalization
 - Windows signal fallback and script guard behavior where feasible
 - pipeline persistence retry/failure stop
+- `/resume` damaged sidecar metadata fallback
 - i18n string extraction patterns where feasible
 
 Final verification should include:
