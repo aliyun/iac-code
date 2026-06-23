@@ -97,6 +97,8 @@ aliyun_api(
 
 缺少 Default 或上下文值时，按 [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) 的参数推荐规则求解，并优先通过 `aliyun_api(product="ros", action="PreviewStack")` 形成 **Preview-Validated Pricing Parameter Set**。不要使用 `ros_stack` 执行 `PreviewStack`；本步骤只验证参数与模板可预览，不执行部署确认或 `CreateStack`。
 
+PreviewStack 必须传 StackName；调用 PreviewStack 前，必须先确定唯一 `StackName` 并传入 `PreviewStack` 参数。`StackName` 使用候选方案或服务简名作为前缀，并追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。该 `StackName` 是 ROS API 参数，不写入模板 `Parameters`，不放入 `deployment_parameters`。
+
 PreviewStack 不是硬门禁。它要求完整部署参数，常比 `GetTemplateEstimateCost` 需要更多外部输入；如果完整部署参数无法自动补齐、或 PreviewStack 因外部参数缺口失败，但已有参数足以询价，则可以调用 `GetTemplateEstimateCost` 估算费用。此时必须在 `parameter_set_summary` 说明 PreviewStack 状态，在 `missing_deployment_parameters` 列出缺口，后续选择阶段可通过 `parameter_overrides` 补齐，deploying 再做最终部署校验。
 
 本步骤的裁剪规则：

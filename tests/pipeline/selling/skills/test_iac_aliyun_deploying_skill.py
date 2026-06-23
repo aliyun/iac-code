@@ -97,6 +97,11 @@ class TestSkillContentRosOnly:
         assert "Preview-Validated Parameter Set" not in body
         assert "参数推荐" not in body
 
+    def test_create_stack_name_has_random_suffix(self, body):
+        assert "StackName" in body
+        assert "随机串后缀" in body
+        assert "避免重名" in body
+
     def test_prefers_cost_deployment_parameters(self, body):
         assert "selected_plan.selected_candidate_result.cost.deployment_parameters" in body
         assert "按以下优先级" in body

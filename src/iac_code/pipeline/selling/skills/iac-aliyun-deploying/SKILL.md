@@ -95,6 +95,13 @@ CreateStack 前按以下优先级确定 `Parameters`：
 
 装配参数时不得改写模板 `Default`，不得编造缺失的外部输入（LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等）。参数不可用或 CreateStack 无法成功时，优先调整非用户指定参数；仍无法成功创建资源栈时，才可调整用户指定参数。部署步骤不计算费用。
 
+## StackName
+
+新建 Stack 时，一开始就确定唯一 `StackName`，并传给 `CreateStack`。`StackName` 使用方案或服务简名作为前缀，并追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。
+
+- CreateStack 必须传 StackName，不要省略，不要使用容易重复的固定名称。
+- `UpdateStack`、`ContinueCreateStack`、`DeleteStack` 面向已有 Stack 时，使用上下文中的现有 Stack 标识，不要生成新的 StackName。
+
 ## 执行部署
 
 - 使用 ros_stack 工具执行 CreateStack/UpdateStack/ContinueCreateStack/DeleteStack，禁止用 Bash

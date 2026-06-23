@@ -140,6 +140,11 @@ class TestSkillContentRosOnly:
         assert 'aliyun_api(product="ros", action="PreviewStack")' in body
         assert "不要使用 `ros_stack` 执行 `PreviewStack`" in body
 
+    def test_preview_stack_must_pass_stack_name_with_random_suffix(self, body):
+        assert "PreviewStack 必须传 StackName" in body
+        assert "随机串后缀" in body
+        assert "避免重名" in body
+
     def test_parameter_recommendation_precedes_initial_pricing(self, body):
         assert "先直接询价" not in body
         assert "首次询价前" in body
