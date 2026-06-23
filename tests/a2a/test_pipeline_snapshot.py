@@ -50,10 +50,10 @@ def test_snapshot_load_logs_parse_failures(tmp_path, caplog) -> None:
 def test_snapshot_save_cleans_temp_file_when_replace_fails(monkeypatch, tmp_path, caplog) -> None:
     store = A2APipelineSnapshotStore(tmp_path)
 
-    def fail_replace(self: Path, target: Path) -> Path:
-        raise PermissionError(f"locked: {target}")
+    def fail_write(path: Path, value: dict, *, durable: bool = True) -> None:
+        raise PermissionError(f"locked: {path}")
 
-    monkeypatch.setattr(Path, "replace", fail_replace)
+    monkeypatch.setattr(pipeline_snapshot, "atomic_write_json", fail_write)
     caplog.set_level(logging.WARNING, logger="iac_code.a2a.pipeline_snapshot")
 
     assert store.save({"status": "working"}) is False

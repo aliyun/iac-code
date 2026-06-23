@@ -9,7 +9,7 @@ repository root with `uv run python ...` unless a script-specific README says ot
 | --- | --- |
 | `a2a/debugger.py` | Web debugger/client for A2A pipeline streams. |
 | `a2a/debugger.md` | Manual usage notes for the A2A debugger. |
-| `a2a/selling_console.py` | Local HTTP server for the Selling Pipeline Console; proxies text-only UI requests to an A2A server. |
+| `a2a/selling_console.py` | Selling pipeline console local HTTP server; proxies text-only UI requests to an A2A server. |
 | `a2a/selling_console_web/` | Static Selling Console frontend. It renders pipeline progress, candidate cards, chat, and debug panels; image input coverage belongs to `a2a/debugger.py`. |
 | `a2a/e2e/` | A2A session recovery end-to-end scenario runner, shared helpers, and result notes. |
 | `a2a/smoke/test_a2a_vpc.py` | Small manual smoke script for A2A VPC/pipeline behavior. |
