@@ -550,6 +550,87 @@ def test_observer_uses_persisted_tool_mapping_after_restart(tmp_path) -> None:
     assert updated.cleanup_status == "completed"
 
 
+def test_observer_rejects_persisted_mapping_result_stack_id_mismatch(tmp_path, caplog) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(provider="ros", resource_type="stack", resource_id="stack-a", region_id="cn-hangzhou"),
+            CleanupResource(provider="ros", resource_type="stack", resource_id="stack-b", region_id="cn-hangzhou"),
+        ],
+        source_step_id="deploying",
+        reason="rollback requested",
+    )
+    ledger.record_tool_use_mapping(
+        tool_use_id="toolu-delete-a",
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-a",
+        region_id="cn-hangzhou",
+        action="DeleteStack",
+        tool_name="ros_stack",
+        tool_input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-a"}},
+    )
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.cleanup")
+
+    CleanupObserver(CleanupLedger(tmp_path / "cleanup.yaml")).observe(
+        ToolResultEvent(
+            tool_use_id="toolu-delete-a",
+            tool_name="ros_stack",
+            result=json.dumps({"StackId": "stack-b", "Status": "DELETE_COMPLETE"}),
+            is_error=False,
+        )
+    )
+
+    resources = {
+        resource.resource_id: resource for resource in CleanupLedger(tmp_path / "cleanup.yaml").cleanup_resources()
+    }
+    assert resources["stack-a"].cleanup_status == "pending"
+    assert resources["stack-b"].cleanup_status == "pending"
+    history = CleanupLedger(tmp_path / "cleanup.yaml").history_entries()
+    assert history[-1]["type"] == "cleanup_tool_result_mismatch"
+    assert history[-1]["tool_use_id"] == "toolu-delete-a"
+    assert history[-1]["mapped_resource_id"] == "stack-a"
+    assert history[-1]["result_resource_id"] == "stack-b"
+    assert history[-1]["tool_name"] == "ros_stack"
+    assert "Mismatched cleanup tool result" in caplog.text
+
+
+def test_observer_rejects_in_memory_tool_result_stack_id_mismatch(tmp_path, caplog) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(provider="ros", resource_type="stack", resource_id="stack-a", region_id="cn-hangzhou"),
+            CleanupResource(provider="ros", resource_type="stack", resource_id="stack-b", region_id="cn-hangzhou"),
+        ],
+        source_step_id="deploying",
+        reason="rollback requested",
+    )
+    observer = CleanupObserver(ledger)
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-delete-a",
+            name="ros_stack",
+            input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-a"}},
+        )
+    )
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.cleanup")
+
+    observer.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-delete-a",
+            tool_name="ros_stack",
+            result=json.dumps({"StackId": "stack-b", "Status": "DELETE_COMPLETE"}),
+            is_error=False,
+        )
+    )
+
+    resources = {resource.resource_id: resource for resource in ledger.cleanup_resources()}
+    assert resources["stack-a"].cleanup_status == "started"
+    assert resources["stack-b"].cleanup_status == "pending"
+    assert ledger.history_entries()[-1]["type"] == "cleanup_tool_result_mismatch"
+    assert "Mismatched cleanup tool result" in caplog.text
+
+
 def test_observer_records_history_warning_for_unmatched_cleanup_tool_result(tmp_path, caplog) -> None:
     ledger = CleanupLedger(tmp_path / "cleanup.yaml")
     resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")

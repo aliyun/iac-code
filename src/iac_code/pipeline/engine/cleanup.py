@@ -392,6 +392,31 @@ class CleanupLedger:
             )
             self._save(data)
 
+    def record_tool_result_mismatch(
+        self,
+        *,
+        tool_use_id: str,
+        tool_name: str,
+        mapped_resource_id: str,
+        result_resource_id: str,
+    ) -> None:
+        with self._write_lock():
+            data = self._load_for_write()
+            if data is None:
+                return
+            self._append_history(
+                data,
+                {
+                    "type": "cleanup_tool_result_mismatch",
+                    "tool_use_id": _safe_history_error(tool_use_id),
+                    "tool_name": _safe_history_error(tool_name),
+                    "mapped_resource_id": _safe_history_error(mapped_resource_id),
+                    "result_resource_id": _safe_history_error(result_resource_id),
+                    "timestamp": time.time(),
+                },
+            )
+            self._save(data)
+
     def build_pending_prompt(self) -> CleanupPrompt | None:
         resources = self.pending_resources()
         if not resources:
@@ -532,6 +557,7 @@ class CleanupObserver:
         result = _json_object(event.result) or {}
         operation: dict[str, Any] | None = None
         stack_id: str | None = None
+        result_stack_id = _stack_id_from_sources(result)
         if isinstance(record, dict):
             tool_name = str(record.get("tool_name") or event.tool_name)
             tool_input = record.get("input")
@@ -540,7 +566,17 @@ class CleanupObserver:
             operation = _stack_operation_from_tool_input(tool_name, tool_input)
             if operation is None or operation["action"] not in {"DeleteStack", "GetStack"}:
                 return
-            stack_id = _stack_id_from_sources(result, operation["params"])
+            stack_id = _stack_id_from_sources(operation["params"])
+            if stack_id is None:
+                return
+            if result_stack_id is not None and result_stack_id != stack_id:
+                self._record_tool_result_mismatch(
+                    tool_use_id=event.tool_use_id,
+                    tool_name=tool_name,
+                    mapped_resource_id=stack_id,
+                    result_resource_id=result_stack_id,
+                )
+                return
         else:
             mapping = self._ledger.tool_use_mapping(event.tool_use_id)
             if mapping is None:
@@ -558,7 +594,15 @@ class CleanupObserver:
             operation = _stack_operation_from_tool_mapping(mapping)
             if operation is None:
                 return
-            stack_id = _stack_id_from_sources(result) or operation["resource_id"]
+            stack_id = operation["resource_id"]
+            if result_stack_id is not None and result_stack_id != stack_id:
+                self._record_tool_result_mismatch(
+                    tool_use_id=event.tool_use_id,
+                    tool_name=event.tool_name,
+                    mapped_resource_id=stack_id,
+                    result_resource_id=result_stack_id,
+                )
+                return
         if stack_id is None:
             return
         status = _status_from_result(result)
@@ -600,6 +644,28 @@ class CleanupObserver:
             progress_percentage=event.progress_percentage,
             last_error=status if status in _DELETE_FAILED_STATUSES else None,
             clear_last_error=status not in _DELETE_FAILED_STATUSES,
+        )
+
+    def _record_tool_result_mismatch(
+        self,
+        *,
+        tool_use_id: str,
+        tool_name: str,
+        mapped_resource_id: str,
+        result_resource_id: str,
+    ) -> None:
+        logger.warning(
+            "Mismatched cleanup tool result: tool_use_id=%s tool_name=%s mapped_resource_id=%s result_resource_id=%s",
+            tool_use_id,
+            tool_name,
+            mapped_resource_id,
+            result_resource_id,
+        )
+        self._ledger.record_tool_result_mismatch(
+            tool_use_id=tool_use_id,
+            tool_name=tool_name,
+            mapped_resource_id=mapped_resource_id,
+            result_resource_id=result_resource_id,
         )
 
 
