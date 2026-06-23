@@ -2653,7 +2653,16 @@ class InlineREPL:
         if not pipeline.should_switch_to_normal(terminal_event.data):
             return "not_applicable"
 
-        self._set_runtime_mode(RunMode.NORMAL)
+        try:
+            pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
+        except Exception as exc:
+            logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
+            self.renderer.print_system_message(
+                _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
+                style="yellow",
+            )
+            return "failed"
+
         try:
             summary = pipeline.build_normal_handoff_summary(terminal_event.data)
             injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": summary})
@@ -2681,25 +2690,28 @@ class InlineREPL:
                 return "failed"
             logger.opt(exception=True).warning("Pipeline-to-normal handoff injection failed: {}", exc)
             self.renderer.print_system_message(
-                _("Pipeline completed. Normal chat is active, but the handoff context could not be injected or saved."),
+                _("Pipeline completed, but the handoff context could not be injected or saved."),
                 style="yellow",
             )
             return "failed"
-        else:
-            try:
-                pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
-            except Exception as exc:
-                logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
-                self.renderer.print_system_message(
-                    _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
-                    style="yellow",
-                )
-                return "failed"
-            self.renderer.print_system_message(
-                _("Pipeline completed. Normal chat is now active."),
-                style="green",
-            )
+        self._set_runtime_mode(RunMode.NORMAL)
+        self.renderer.print_system_message(
+            _("Pipeline completed. Normal chat is now active."),
+            style="green",
+        )
         return "succeeded"
+
+    def _handle_pipeline_state_persistence_failure(self, exc: Exception) -> None:
+        logger.opt(exception=True).warning("Pipeline state persistence failed during interrupt handling: {}", exc)
+        self._last_interrupt_paused = True
+        self._pipeline_waiting_input = False
+        pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
+        if callable(pause_agent_loops):
+            pause_agent_loops()
+        self.renderer.print_system_message(
+            _("Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable."),
+            style="yellow",
+        )
 
     async def _handle_mid_pipeline_message(
         self, msg: PromptInputResult | str | "PipelineUserInput", suppress_render: bool = False
@@ -2712,6 +2724,8 @@ class InlineREPL:
         """
         if self._pipeline is None:
             return False, ""
+        from iac_code.pipeline.engine.pipeline_runner import PipelineStatePersistenceError
+
         pipeline_input = self._pipeline_user_input_from_repl_input(msg)
         if pipeline_input.is_empty:
             return False, ""
@@ -2733,7 +2747,11 @@ class InlineREPL:
             if getattr(verdict, "paused", False):
                 save_interrupt_pause = getattr(self._pipeline, "save_interrupt_pause", None)
                 if callable(save_interrupt_pause):
-                    await save_interrupt_pause(verdict)
+                    try:
+                        await save_interrupt_pause(verdict)
+                    except PipelineStatePersistenceError as exc:
+                        self._handle_pipeline_state_persistence_failure(exc)
+                        return False, ""
                 self._pipeline_waiting_input = True
             # P-I18: surface ambiguous continue verdicts so users see their input wasn't understood
             if verdict.reason and verdict.reason.startswith("[ambiguous]"):
@@ -2753,10 +2771,14 @@ class InlineREPL:
                 self._render_interrupt_feedback("supplement", display_text, verdict)
             return False, feedback
         if verdict.action == "hard_interrupt":
-            if pipeline_input.has_images:
-                is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict, source_input=pipeline_input)
-            else:
-                is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict)
+            try:
+                if pipeline_input.has_images:
+                    is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict, source_input=pipeline_input)
+                else:
+                    is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict)
+            except PipelineStatePersistenceError as exc:
+                self._handle_pipeline_state_persistence_failure(exc)
+                return False, ""
             applied_verdict = getattr(self._pipeline, "last_applied_interrupt_verdict", None)
             feedback_verdict = (
                 applied_verdict if getattr(applied_verdict, "action", None) == "hard_interrupt" else verdict

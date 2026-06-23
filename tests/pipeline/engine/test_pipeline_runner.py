@@ -129,6 +129,14 @@ class FailingAfterAdvancePipelineSession(RecordingPipelineSession):
             raise OSError("sidecar unavailable")
 
 
+class FailingFinalCompletedPipelineSession(RecordingPipelineSession):
+    async def save_completed(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("completed_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        raise OSError("sidecar unavailable")
+
+
 class CapturingPipelineSession(RecordingPipelineSession):
     def __init__(self):
         super().__init__()
@@ -393,6 +401,39 @@ async def test_sidecar_save_failure_stops_before_next_step(tmp_path):
     )
     assert runner.state_machine.current_step.step_id == "b"
     assert ("running_attempted", "b", 1, "advanced from a") in runner.session.calls
+    assert runner.sidecar_status is None
+
+
+@pytest.mark.asyncio
+async def test_final_completed_save_failure_yields_persistence_failure_event(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingFinalCompletedPipelineSession()
+    executed_steps = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        executed_steps.append(step.step_id)
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = []
+    async for event in runner._continue_from_current():
+        events.append(event)
+
+    assert executed_steps == ["a", "b"]
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "b"
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    assert ("completed_attempted", "b", 2, "pipeline completed") in runner.session.calls
     assert runner.sidecar_status is None
 
 

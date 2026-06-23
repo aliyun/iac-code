@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from iac_code.agent.message import Message
+from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.pipeline_runner import PipelineStatePersistenceError
 from iac_code.pipeline.engine.user_input import PipelineUserInput
 
 
@@ -25,6 +27,7 @@ def repl_for_sidecar_restore(tmp_path):
     repl.renderer = MagicMock()
     repl.renderer.record_user_turn = MagicMock()
     repl.renderer.print_system_message = MagicMock()
+    repl.console = MagicMock()
     repl.store = MagicMock()
     repl.store.get_state.return_value.permission_context = None
     repl.store.set_state = MagicMock()
@@ -32,6 +35,106 @@ def repl_for_sidecar_restore(tmp_path):
     repl._detect_pipeline_session = InlineREPL._detect_pipeline_session.__get__(repl)
     repl._handle_pipeline_chat = InlineREPL._handle_pipeline_chat.__get__(repl)
     return repl
+
+
+def test_normal_handoff_save_failure_does_not_switch_or_append(repl_for_sidecar_restore):
+    from iac_code.pipeline.config import RunMode
+
+    repl_for_sidecar_restore._runtime_mode = RunMode.PIPELINE
+    repl_for_sidecar_restore._agent_loop = MagicMock()
+    repl_for_sidecar_restore._agent_loop.context_manager = MagicMock()
+    repl_for_sidecar_restore._agent_loop.context_manager.add_raw_message = MagicMock()
+    repl_for_sidecar_restore.current_git_branch = MagicMock(return_value="main")
+    terminal_event = PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=1.0,
+        data={"total_steps": 1},
+    )
+    pipeline = MagicMock()
+    pipeline.should_switch_to_normal.return_value = True
+    pipeline.build_normal_handoff_summary.return_value = "handoff summary"
+    pipeline.mark_normal_handoff.side_effect = PipelineStatePersistenceError(
+        "pipeline state persistence failed during save_normal_handoff"
+    )
+    repl_for_sidecar_restore._pipeline = pipeline
+
+    result = repl_for_sidecar_restore._handoff_pipeline_to_normal(terminal_event)
+
+    assert result == "failed"
+    assert repl_for_sidecar_restore._runtime_mode == RunMode.PIPELINE
+    pipeline.mark_normal_handoff.assert_called_once_with(status="succeeded", failed_reason=None)
+    pipeline.build_normal_handoff_summary.assert_not_called()
+    repl_for_sidecar_restore._agent_loop.context_manager.add_raw_message.assert_not_called()
+    repl_for_sidecar_restore._session_storage.append.assert_not_called()
+    repl_for_sidecar_restore.renderer.print_system_message.assert_called_once_with(
+        "Pipeline state persistence failed. Normal chat handoff was not marked durable.",
+        style="yellow",
+    )
+
+
+@pytest.mark.asyncio
+async def test_mid_pipeline_pause_save_failure_warns_and_stays_paused(repl_for_sidecar_restore):
+    from iac_code.pipeline.engine.interrupt import InterruptVerdict
+
+    verdict = InterruptVerdict(action="continue", reason="judge failed", paused=True)
+    pipeline = MagicMock()
+    pipeline.handle_user_interrupt = AsyncMock(return_value=verdict)
+    pipeline.save_interrupt_pause = AsyncMock(
+        side_effect=PipelineStatePersistenceError("pipeline state persistence failed during save_waiting_input")
+    )
+    pipeline.pause_agent_loops = MagicMock()
+    pipeline.resume_agent_loops = MagicMock()
+    repl_for_sidecar_restore._pipeline = pipeline
+    repl_for_sidecar_restore._last_interrupt_paused = False
+    repl_for_sidecar_restore._pipeline_waiting_input = False
+
+    needs_restart, feedback = await repl_for_sidecar_restore._handle_mid_pipeline_message(
+        "等等",
+        suppress_render=True,
+    )
+
+    assert needs_restart is False
+    assert feedback == ""
+    assert repl_for_sidecar_restore._pipeline_waiting_input is False
+    assert repl_for_sidecar_restore._last_interrupt_paused is True
+    pipeline.save_interrupt_pause.assert_awaited_once_with(verdict)
+    pipeline.resume_agent_loops.assert_not_called()
+    repl_for_sidecar_restore.renderer.print_system_message.assert_called_once_with(
+        "Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable.",
+        style="yellow",
+    )
+
+
+@pytest.mark.asyncio
+async def test_mid_pipeline_hard_interrupt_save_failure_warns_and_stays_paused(repl_for_sidecar_restore):
+    from iac_code.pipeline.engine.interrupt import InterruptVerdict
+
+    verdict = InterruptVerdict(action="hard_interrupt", reason="changed mind", rollback_target="intent")
+    pipeline = MagicMock()
+    pipeline.handle_user_interrupt = AsyncMock(return_value=verdict)
+    pipeline.apply_hard_interrupt = MagicMock(
+        side_effect=PipelineStatePersistenceError("pipeline state persistence failed during save_rollback_sync")
+    )
+    pipeline.pause_agent_loops = MagicMock()
+    pipeline.resume_agent_loops = MagicMock()
+    repl_for_sidecar_restore._pipeline = pipeline
+    repl_for_sidecar_restore._last_interrupt_paused = False
+
+    needs_restart, feedback = await repl_for_sidecar_restore._handle_mid_pipeline_message(
+        "换方案",
+        suppress_render=True,
+    )
+
+    assert needs_restart is False
+    assert feedback == ""
+    assert repl_for_sidecar_restore._last_interrupt_paused is True
+    pipeline.apply_hard_interrupt.assert_called_once_with(verdict)
+    pipeline.resume_agent_loops.assert_not_called()
+    repl_for_sidecar_restore.renderer.print_system_message.assert_called_once_with(
+        "Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable.",
+        style="yellow",
+    )
 
 
 @pytest.mark.asyncio

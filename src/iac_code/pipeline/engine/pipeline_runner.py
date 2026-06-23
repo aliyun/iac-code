@@ -1273,10 +1273,14 @@ class PipelineRunner:
         )
 
     def _persistence_failure_event(self, exc: PipelineStatePersistenceError) -> PipelineEvent:
-        current_step = getattr(self.state_machine, "current_step", None)
+        try:
+            current_step = getattr(self.state_machine, "current_step", None)
+            step_id = getattr(current_step, "step_id", None)
+        except (AttributeError, IndexError):
+            step_id = self._terminal_current_step_id() or None
         return PipelineEvent(
             type=PipelineEventType.STEP_FAILED,
-            step_id=getattr(current_step, "step_id", None),
+            step_id=step_id,
             timestamp=time.time(),
             data={
                 "error": "Pipeline state persistence failed.",
