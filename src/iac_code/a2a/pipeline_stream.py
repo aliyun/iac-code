@@ -19,6 +19,41 @@ from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStre
 
 PipelinePermissionResolver = Callable[[PermissionRequestEvent], bool | Awaitable[bool]]
 logger = logging.getLogger(__name__)
+_RECOVERY_SEMANTIC_EVENT_TYPES = {
+    "pipeline_started",
+    "pipeline_resumed",
+    "step_started",
+    "step_completed",
+    "step_failed",
+    "candidate_started",
+    "candidate_selected",
+    "candidate_completed",
+    "candidate_failed",
+    "candidate_step_started",
+    "candidate_step_completed",
+    "candidate_step_failed",
+    "input_required",
+    "pipeline_completed",
+    "pipeline_failed",
+    "pipeline_canceled",
+    "pipeline_handoff_ready",
+    "cleanup_started",
+    "cleanup_progress",
+    "cleanup_completed",
+    "cleanup_failed",
+    "artifact_created",
+    "rollback_completed",
+    "candidate_restart_requested",
+}
+_DISPLAY_ONLY_EVENT_TYPES = {
+    "candidate_detail_shown",
+    "diagram_shown",
+    "permission_requested",
+    "text_delta",
+    "tool_result",
+}
+_RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"}
+_RECOVERY_STATE_STATUSES = {"working", "waiting_input", "input_required", "completed", "failed", "canceled"}
 
 
 class _SnapshotCatchUpUnavailableError(Exception):
@@ -263,10 +298,11 @@ class PipelineA2AEventPublisher:
             if not isinstance(safe_envelope, dict):
                 logger.warning("Skipping invalid A2A pipeline envelope: %r", envelope)
                 return False
+            durable_required = require_durable_metadata or is_recovery_semantic_event(safe_envelope)
             journal_persisted = False
             snapshot_persisted = False
             try:
-                self.journal.append(safe_envelope)
+                self.journal.append(safe_envelope, durable=durable_required)
                 journal_persisted = True
             except Exception:
                 logger.warning("Failed to append A2A pipeline journal event", exc_info=True)
@@ -279,7 +315,7 @@ class PipelineA2AEventPublisher:
                 logger.warning("Failed to persist A2A pipeline snapshot", exc_info=True)
             if snapshot_persisted:
                 _maybe_inject_test_fault("after_a2a_pipeline_snapshot_saved")
-            if require_durable_metadata and not (journal_persisted or snapshot_persisted):
+            if durable_required and not (journal_persisted or snapshot_persisted):
                 logger.warning("Skipping A2A pipeline status update because durable metadata was not persisted")
                 return False
             if artifact_metadata is not None and not (journal_persisted or snapshot_persisted):
@@ -444,6 +480,22 @@ def _resolve_permission_future(request: PermissionRequestEvent, approved: bool) 
         request.response_future.set_result(approved)
 
 
+def is_recovery_semantic_event(envelope: dict[str, Any]) -> bool:
+    event_type = envelope.get("eventType")
+    event_type = event_type if isinstance(event_type, str) else None
+    if event_type in _DISPLAY_ONLY_EVENT_TYPES:
+        return False
+    if event_type in _RECOVERY_SEMANTIC_EVENT_TYPES:
+        return True
+    status = envelope.get("status")
+    status = status if isinstance(status, str) else None
+    if status in {"waiting_input", "input_required", "completed", "failed", "canceled"}:
+        return True
+    scope = envelope.get("scope")
+    scope = scope if isinstance(scope, str) else None
+    return scope in _RECOVERY_STATE_SCOPES and status in _RECOVERY_STATE_STATUSES
+
+
 def _should_skip_envelope(envelope: dict[str, Any]) -> bool:
     return envelope.get("eventType") == "text_delta" and _text_from_envelope(envelope) == ""
 
@@ -520,4 +572,4 @@ def _int_value(value: Any, default: int) -> int:
         return default
 
 
-__all__ = ["PipelineA2AEventPublisher", "PipelinePermissionResolver"]
+__all__ = ["PipelineA2AEventPublisher", "PipelinePermissionResolver", "is_recovery_semantic_event"]

@@ -37,6 +37,23 @@ def test_read_after_filters_by_sequence(tmp_path) -> None:
     assert [event["eventId"] for event in journal.read_after(1)] == ["evt-2", "evt-3"]
 
 
+def test_append_many_replays_group_as_events(tmp_path) -> None:
+    journal = A2APipelineJournal(tmp_path / "pipeline")
+
+    journal.append_many([_event(1, "evt-cancel"), _event(2, "evt-handoff")], durable=True)
+
+    assert [event["eventId"] for event in journal.read_all_strict()] == ["evt-cancel", "evt-handoff"]
+
+
+def test_append_many_sorts_group_events_with_regular_events(tmp_path) -> None:
+    journal = A2APipelineJournal(tmp_path / "pipeline")
+
+    journal.append(_event(3, "evt-after"))
+    journal.append_many([_event(1, "evt-cancel"), _event(2, "evt-handoff")], durable=True)
+
+    assert [event["eventId"] for event in journal.read_all()] == ["evt-cancel", "evt-handoff", "evt-after"]
+
+
 def test_invalid_json_lines_are_skipped(tmp_path) -> None:
     journal = A2APipelineJournal(tmp_path / "pipeline")
     journal.append(_event(1, "evt-1"))

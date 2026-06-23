@@ -3,8 +3,6 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import os
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +13,7 @@ from iac_code.a2a.artifacts import (
 )
 from iac_code.a2a.pipeline_journal import to_json_safe
 from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.state_io import atomic_write_json
 
 SNAPSHOT_SCHEMA_VERSION = "1.1"
 logger = logging.getLogger(__name__)
@@ -57,22 +56,12 @@ class A2APipelineSnapshotStore:
             logger.warning("Skipping invalid A2A pipeline snapshot for %s", self.path)
             return False
 
-        self.pipeline_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.path.with_name(f"{self.path.name}.{uuid.uuid4().hex}.tmp")
         try:
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                json.dump(next_snapshot, handle, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            tmp_path.replace(self.path)
+            atomic_write_json(self.path, next_snapshot, durable=True)
             return True
         except (OSError, TypeError, ValueError):
             logger.warning("Failed to persist A2A pipeline snapshot to %s", self.path, exc_info=True)
             return False
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
 
     def load(self) -> dict[str, Any] | None:
         try:
