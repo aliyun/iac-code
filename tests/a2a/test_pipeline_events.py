@@ -798,6 +798,48 @@ def test_show_candidate_detail_tool_result_recovers_detail_from_tool_input() -> 
     assert detail_event["data"]["detail"]["costItems"] == [{"name": "ecs", "monthly_cost": "CNY 60"}]
 
 
+@pytest.mark.parametrize(
+    ("stream_event", "event_type"),
+    [
+        (TextDeltaEvent(text="开始部署资源"), "text_delta"),
+        (
+            ToolResultEvent(
+                tool_use_id="toolu-read",
+                tool_name="read_file",
+                result="template content",
+                is_error=False,
+            ),
+            "tool_result",
+        ),
+        (
+            PermissionRequestEvent(
+                tool_name="ros_stack",
+                tool_input={"action": "CreateStack"},
+                tool_use_id="toolu-stack",
+            ),
+            "permission_requested",
+        ),
+    ],
+)
+def test_parent_stream_events_include_current_step_coordinate(stream_event: object, event_type: str) -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="deploying",
+            timestamp=time.time(),
+            data={"index": 5, "total": 5},
+        )
+    )
+
+    [envelope] = translator.translate(stream_event)
+
+    assert envelope["eventType"] == event_type
+    assert envelope["scope"] == "step"
+    assert envelope["step"]["id"] == "deploying"
+    assert envelope["step"]["runId"] == "step-deploying-1"
+
+
 def test_stack_current_changed_is_disabled_by_default() -> None:
     translator = PipelineEventTranslator(_ctx())
     translator.translate(

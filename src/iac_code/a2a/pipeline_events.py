@@ -554,7 +554,7 @@ class PipelineEventTranslator:
         return envelopes
 
     def _translate_text_delta_event(self, event: TextDeltaEvent) -> dict[str, Any]:
-        return self._envelope("text_delta", "pipeline", "working", {"text": event.text})
+        return self._translate_parent_scoped_display_event("text_delta", {"text": event.text})
 
     def _translate_ask_user_question_event(self, event: AskUserQuestionEvent) -> dict[str, Any]:
         envelope = self._translate_parent_scoped_display_event("input_required", _ask_user_question_data(event))
@@ -563,7 +563,7 @@ class PipelineEventTranslator:
         return envelope
 
     def _translate_permission_request_event(self, event: PermissionRequestEvent) -> dict[str, Any]:
-        envelope = self._envelope("permission_requested", "pipeline", "working", _permission_request_data(event))
+        envelope = self._translate_parent_scoped_display_event("permission_requested", _permission_request_data(event))
         envelope["permission"] = _permission_request_metadata(event)
         return envelope
 
@@ -599,7 +599,7 @@ class PipelineEventTranslator:
         stack_envelope = self._translate_stack_current_changed_event(event)
         if stack_envelope is not None:
             envelopes.append(stack_envelope)
-        envelopes.append(self._envelope("tool_result", "pipeline", "working", _tool_result_data(event)))
+        envelopes.append(self._translate_parent_scoped_display_event("tool_result", _tool_result_data(event)))
         return envelopes
 
     def _remember_tool_input(self, event: ToolUseEndEvent) -> None:

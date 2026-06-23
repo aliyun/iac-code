@@ -9,6 +9,7 @@ repository root with `uv run python ...` unless a script-specific README says ot
 | --- | --- |
 | `a2a/debugger.py` | Web debugger/client for A2A pipeline streams. |
 | `a2a/debugger.md` | Manual usage notes for the A2A debugger. |
+| `a2a/selling_console.py` | Selling pipeline console for local A2A interactions. |
 | `a2a/e2e/` | A2A session recovery end-to-end scenario runner, shared helpers, and result notes. |
 | `a2a/smoke/test_a2a_vpc.py` | Small manual smoke script for A2A VPC/pipeline behavior. |
 | `acp/smoke/test_acp_vpc.py` | Small manual smoke script for ACP VPC behavior. |
@@ -23,6 +24,10 @@ repository root with `uv run python ...` unless a script-specific README says ot
 
 ```bash
 uv run python scripts/a2a/debugger.py --help
+PATH="$HOME/.local/bin:$PATH" \
+uv run python scripts/a2a/selling_console.py --port 41980 \
+  --default-server-url http://127.0.0.1:41299 \
+  --default-cwd "$PWD"
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py --help
 uv run python scripts/observability/local_observe.py --help
 uv run python scripts/repl/e2e/run_pipeline_scenarios.py --help

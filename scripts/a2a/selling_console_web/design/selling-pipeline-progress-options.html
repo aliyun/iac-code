@@ -1,0 +1,1655 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>进度控件方案 v61 B 标签对齐</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --ink: #1f2937;
+      --muted: #667085;
+      --line: #d9e2ef;
+      --blue: #1677ff;
+      --cyan: #40d9ff;
+      --green: #13a36f;
+      --orange: #ff6a00;
+    }
+    body {
+      margin: 0;
+      background: #f5f7fb;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    }
+    .page {
+      max-width: 888px;
+      margin: 0 auto;
+      padding: 20px 18px 36px;
+    }
+    .intro {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 14px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    .hint {
+      color: #667085;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .option {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid #cfd9e8;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, .045);
+      cursor: pointer;
+    }
+    .option:hover {
+      border-color: #9fc7ff;
+      box-shadow: 0 2px 6px rgba(22, 119, 255, .08);
+    }
+    .option[data-choice="b2"] {
+      display: none;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .title {
+      font-size: 11px;
+      font-weight: 720;
+    }
+    .meta {
+      color: #667085;
+      font-size: 9px;
+      white-space: nowrap;
+    }
+    .composer {
+      width: min(100%, 360px);
+      margin: 0 auto;
+      padding: 9px;
+      border: 1px solid #cbd8e8;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .input {
+      height: 82px;
+      margin-top: 8px;
+      padding: 11px;
+      border: 1px solid #bfccdc;
+      border-radius: 8px;
+      color: #687386;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .ghosts { display: flex; gap: 6px; }
+    .ghost,
+    .send {
+      height: 28px;
+      border-radius: 7px;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    .ghost {
+      min-width: 56px;
+      border: 1px solid #c4d0df;
+      background: #fff;
+      color: #344054;
+    }
+    .send {
+      width: 54px;
+      border: 0;
+      background: var(--orange);
+      color: #fff;
+    }
+    .tip {
+      position: absolute;
+      z-index: 50;
+      left: 50%;
+      top: calc(100% + 8px);
+      width: max-content;
+      max-width: 196px;
+      transform: translateX(-50%) translateY(-3px);
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #111827;
+      color: #f8fafc;
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1.45;
+      white-space: normal;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .15s ease, transform .15s ease;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, .22);
+    }
+    .step:hover .tip,
+    .node:hover .tip,
+    .fusion-step:hover .tip {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .chevrons {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      height: 26px;
+      isolation: isolate;
+    }
+    .chevrons .step {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      margin-left: -6px;
+      padding: 0 8px 0 12px;
+      clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%, 8px 50%);
+      background: #edf2f7;
+      color: #405066;
+      font-size: 9px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .chevrons .step:first-child {
+      margin-left: 0;
+      border-radius: 7px 0 0 7px;
+      clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%);
+    }
+    .chevrons .step:last-child { border-radius: 0 7px 7px 0; }
+    .chevrons .done { background: #e9f7f1; color: #14704d; }
+    .chevrons .active {
+      z-index: 2;
+      background: linear-gradient(90deg, #1677ff, #28a4ff);
+      color: #fff;
+      box-shadow: 0 4px 11px rgba(22, 119, 255, .2);
+    }
+    .chevrons .active::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(110deg, transparent 0%, transparent 38%, rgba(255,255,255,.5) 50%, transparent 62%, transparent 100%);
+      animation: sweep 1.8s linear infinite;
+    }
+    .circuit {
+      position: relative;
+      height: 42px;
+      padding: 0 7px;
+      border: 1px solid #cfd9e8;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fbfdff, #f7faff);
+      overflow: hidden;
+    }
+    .track {
+      position: absolute;
+      left: 31px;
+      right: 31px;
+      top: 19px;
+      height: 2px;
+      border-radius: 999px;
+      background:
+        linear-gradient(90deg,
+          var(--green) 0%,
+          var(--green) 49%,
+          transparent 49%,
+          transparent 89%,
+          #d7e1ee 89%,
+          #d7e1ee 100%);
+    }
+    .quiet-segment {
+      position: absolute;
+      left: 49%;
+      right: 11%;
+      top: 18px;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(22,119,255,.2), rgba(22,119,255,.1), rgba(22,119,255,0));
+    }
+    .pulse-soft .quiet-segment,
+    .pulse-dense .quiet-segment {
+      display: none;
+    }
+    .pulse-soft .quiet-segment {
+      background: linear-gradient(90deg, rgba(22,119,255,.22), rgba(64,217,255,.16), rgba(22,119,255,0));
+      animation: pulseBaseSoft 2.6s ease-in-out infinite;
+    }
+    .pulse-dense .quiet-segment {
+      background:
+        repeating-linear-gradient(90deg, rgba(22,119,255,.05) 0 5px, rgba(64,217,255,.18) 5px 7px, rgba(22,119,255,.05) 7px 13px),
+        linear-gradient(90deg, rgba(22,119,255,.14), rgba(22,119,255,0));
+      animation: pulseBaseDense 1.45s linear infinite;
+    }
+    .electric {
+      position: absolute;
+      left: 49%;
+      right: 10%;
+      top: 0;
+      height: 20px;
+      pointer-events: none;
+      overflow: visible;
+    }
+    .pulse-soft .electric::before,
+    .pulse-soft .electric::after,
+    .pulse-dense .electric::before,
+    .pulse-dense .electric::after {
+      content: none;
+      position: absolute;
+      pointer-events: none;
+      border-radius: 999px;
+    }
+    .pulse-soft .electric::before {
+      left: 4%;
+      top: 11px;
+      width: 34%;
+      height: 7px;
+      z-index: 1;
+      background: linear-gradient(90deg, transparent, rgba(64,217,255,.62), rgba(255,255,255,.78), rgba(22,119,255,.34), transparent);
+      filter: none;
+      animation: pulsePacketSoft 2.6s cubic-bezier(.37, 0, .18, 1) infinite;
+    }
+    .pulse-soft .electric::after {
+      display: none;
+      left: 38%;
+      top: 5px;
+      width: 25px;
+      height: 16px;
+      z-index: 0;
+      background: radial-gradient(ellipse at center, rgba(64,217,255,.18), rgba(64,217,255,0) 70%);
+      animation: pulseHaloSoft 2.6s cubic-bezier(.37, 0, .18, 1) infinite;
+    }
+    .pulse-dense .electric::before {
+      left: 0;
+      top: 10px;
+      width: 72%;
+      height: 8px;
+      z-index: 1;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 4px, rgba(244,253,255,.96) 4px 6px, rgba(64,217,255,.72) 6px 8px, transparent 8px 11px);
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 76%, transparent);
+      mask-image: linear-gradient(90deg, transparent, #000 12%, #000 76%, transparent);
+      filter: none;
+      animation: pulsePacketDense 1.55s cubic-bezier(.35, 0, .14, 1) infinite;
+    }
+    .pulse-dense .electric::after {
+      display: none;
+      left: 28%;
+      top: 4px;
+      width: 48%;
+      height: 16px;
+      z-index: 0;
+      background:
+        radial-gradient(ellipse at 32% 72%, rgba(64,217,255,.4), rgba(64,217,255,0) 38%),
+        radial-gradient(ellipse at 58% 66%, rgba(22,119,255,.34), rgba(22,119,255,0) 42%),
+        radial-gradient(ellipse at 78% 70%, rgba(244,253,255,.28), rgba(244,253,255,0) 34%);
+      animation: pulseHaloDense 1.55s steps(3, end) infinite;
+    }
+    .electric svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      position: relative;
+      z-index: 2;
+    }
+    .electric .glow {
+      display: none;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: .18;
+      filter: none;
+    }
+    .electric .bolt,
+    .electric .spark {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+      shape-rendering: geometricPrecision;
+      animation: boltGlide 2.35s cubic-bezier(.42, 0, .18, 1) infinite;
+    }
+    .electric .bolt {
+      stroke-dasharray: 28 132;
+      stroke-width: 2.2px;
+    }
+    .electric .spark {
+      stroke-dasharray: 9 122;
+      stroke-width: 1.1px;
+      animation-duration: 2.05s;
+      opacity: 1;
+    }
+    .electric .peak {
+      opacity: 0;
+      transform-origin: 68% 100%;
+      animation: peakFlash 2.35s cubic-bezier(.42, 0, .18, 1) infinite;
+    }
+    .dense .bolt {
+      stroke-dasharray: 9 42;
+      stroke-width: 2.25px;
+    }
+    .dense .spark {
+      stroke-dasharray: 5 30;
+      stroke-width: 1px;
+      opacity: .96;
+    }
+    .dense .peak {
+      animation-name: densePeakFlash;
+    }
+    .dense .dense-extra {
+      display: none;
+      stroke-dasharray: 6 28;
+      opacity: .9;
+      animation-duration: 1.55s;
+    }
+    .blue-pulse .track {
+      top: 17px;
+      height: 6px;
+      background:
+        linear-gradient(90deg,
+          var(--green) 0%,
+          var(--green) 49%,
+          var(--blue) 49%,
+          #2aa3ff 88%,
+          #d7e1ee 88%,
+          #d7e1ee 100%);
+    }
+    .blue-pulse .electric {
+      left: 49%;
+      right: 11%;
+      top: 6px;
+      height: 26px;
+      overflow: hidden;
+    }
+    .blue-pulse .electric svg {
+      display: none;
+    }
+    .blue-pulse .electric::before,
+    .blue-pulse .electric::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      height: auto;
+      width: 58px;
+      z-index: 3;
+      pointer-events: none;
+      border-radius: 0;
+      background: linear-gradient(105deg,
+        transparent 0%,
+        transparent 20%,
+        rgba(255,255,255,.22) 30%,
+        rgba(255,255,255,.98) 48%,
+        rgba(255,255,255,.44) 64%,
+        transparent 78%,
+        transparent 100%);
+      animation: blueLineSweep 2.25s cubic-bezier(.42, 0, .2, 1) infinite;
+    }
+    .blue-pulse .electric::after {
+      display: none;
+    }
+    .blue-pulse-dense .electric::before {
+      width: 40px;
+      animation-duration: 1.55s;
+    }
+    .blue-pulse-dense .electric::after {
+      display: block;
+      width: 32px;
+      opacity: .72;
+      animation: blueLineSweep 1.55s cubic-bezier(.42, 0, .2, 1) infinite;
+      animation-delay: .38s;
+    }
+    .pulse-wave .track {
+      top: 18px;
+      height: 3px;
+      background:
+        linear-gradient(90deg,
+          var(--green) 0%,
+          var(--green) 49%,
+          transparent 49%,
+          transparent 88%,
+          #d7e1ee 88%,
+          #d7e1ee 100%);
+    }
+    .pulse-wave .electric {
+      left: 54%;
+      right: 18%;
+      top: 0;
+      height: 17px;
+      overflow: visible;
+    }
+    .pulse-wave .electric::before,
+    .pulse-wave .electric::after {
+      content: none;
+    }
+    .pulse-wave .electric svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+    .pulse-wave .wave-base,
+    .pulse-wave .wave-sweep,
+    .pulse-wave .wave-sweep-2 {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+      shape-rendering: geometricPrecision;
+    }
+    .pulse-wave .wave-base {
+      stroke: #1677ff;
+      stroke-width: 1.65px;
+    }
+    .pulse-wave .wave-sweep,
+    .pulse-wave .wave-sweep-2 {
+      stroke-width: 3.4px;
+      stroke-dasharray: 30 210;
+      stroke-dashoffset: 170;
+      opacity: .94;
+      animation: waveSheen 2.15s cubic-bezier(.42, 0, .2, 1) infinite;
+    }
+    .pulse-wave-dense .wave-base {
+      stroke-width: 1.55px;
+    }
+    .pulse-wave-dense .wave-sweep,
+    .pulse-wave-dense .wave-sweep-2 {
+      stroke-width: 3.2px;
+      stroke-dasharray: 24 190;
+      animation-duration: 1.6s;
+    }
+    .pulse-wave .wave-sweep-2 {
+      display: none;
+    }
+    .pulse-wave-dense .wave-sweep-2 {
+      display: block;
+      opacity: .62;
+      animation-delay: .38s;
+    }
+    .nodes {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      height: 100%;
+      align-items: start;
+    }
+    .node {
+      position: relative;
+      min-width: 0;
+      padding-top: 25px;
+      color: #42526a;
+      font-size: 9px;
+      font-weight: 650;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .node::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 19px;
+      width: 7px;
+      height: 7px;
+      transform: translate(-50%, -50%);
+      border: 2px solid #7cc8a6;
+      border-radius: 999px;
+      background: #fff;
+      box-shadow: 0 0 0 3px #fff;
+    }
+    .node.active {
+      color: #0b62cf;
+      font-weight: 760;
+    }
+    .node.next::before { border-color: #b9c5d4; }
+    .node.active::before {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px #fff, 0 0 0 6px rgba(22,119,255,.12), 0 0 11px rgba(22,119,255,.5);
+      animation: nodePulse 2.35s ease-out infinite;
+    }
+    .signal-circuit {
+      position: relative;
+      height: 62px;
+      padding: 4px 8px 0;
+      border: 1px solid #cfd9e8;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fbfdff, #f8fbff);
+      overflow: hidden;
+      --absorb-duration: 510ms;
+    }
+    .signal-svg {
+      position: absolute;
+      inset: 0 8px auto 8px;
+      width: calc(100% - 16px);
+      height: 44px;
+      overflow: visible;
+    }
+    .signal-active-base,
+    .signal-moving-wave,
+    .signal-rail,
+    .signal-done {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+    .signal-rail {
+      stroke: #d5dfec;
+      stroke-width: 2px;
+    }
+    .signal-done {
+      stroke: var(--green);
+      stroke-width: 2px;
+    }
+    .signal-active-base {
+      stroke-width: 1.35px;
+    }
+    .signal-active-in {
+      stroke: rgba(22, 119, 255, .46);
+    }
+    .signal-active-out {
+      stroke: rgba(143, 155, 174, .6);
+    }
+    .signal-moving-wave {
+      stroke: var(--blue);
+      stroke-width: 1.2px;
+      opacity: .98;
+    }
+    .signal-node {
+      position: absolute;
+      top: 22px;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #7cc8a6;
+      border-radius: 50%;
+      background: #fff;
+      transform: translate(-50%, -50%);
+      z-index: 2;
+    }
+    .signal-node.active {
+      width: 15px;
+      height: 15px;
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px #fff;
+      overflow: hidden;
+    }
+    .signal-absorb-halo {
+      position: absolute;
+      left: 72%;
+      top: 22px;
+      width: 20px;
+      height: 20px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 1;
+    }
+    .signal-absorb-halo::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      opacity: 0;
+      transform: scale(.78);
+      transform-origin: center;
+      background: radial-gradient(circle, rgba(64, 217, 255, .34) 0 34%, rgba(22, 119, 255, .16) 52%, rgba(22, 119, 255, 0) 76%);
+      filter: blur(.3px);
+    }
+    .signal-node-core {
+      position: absolute;
+      inset: 1.5px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 1) 0 12%, rgba(110, 230, 255, .98) 30%, rgba(22, 119, 255, .92) 68%, rgba(22, 119, 255, .16) 100%);
+      opacity: 0;
+      transform: scale(.08);
+      transform-origin: center;
+      box-shadow: inset 0 0 3px rgba(255, 255, 255, .7), 0 0 10px rgba(22, 119, 255, .56);
+    }
+    .signal-node-charge {
+      position: absolute;
+      inset: 1.5px;
+      border-radius: 999px;
+      opacity: 0;
+      transform: scale(.76) rotate(-90deg);
+      transform-origin: center;
+      background:
+        conic-gradient(from 210deg,
+          rgba(22, 119, 255, 0) 0deg,
+          rgba(22, 119, 255, .22) 42deg,
+          rgba(64, 217, 255, .95) 86deg,
+          rgba(255, 255, 255, .98) 126deg,
+          rgba(22, 119, 255, .92) 178deg,
+          rgba(22, 119, 255, .16) 232deg,
+          rgba(22, 119, 255, 0) 300deg,
+          rgba(22, 119, 255, 0) 360deg);
+      box-shadow: inset 0 0 5px rgba(255, 255, 255, .45), 0 0 7px rgba(22, 119, 255, .44);
+      filter: saturate(1.08);
+    }
+    .signal-circuit.absorbing .signal-absorb-halo::before {
+      animation: signalAbsorbGlow var(--absorb-duration) ease-out both;
+    }
+    .signal-circuit.absorbing .signal-node.active .signal-node-charge {
+      animation: signalNodeChargeRing var(--absorb-duration) cubic-bezier(.18, .78, .24, 1) both;
+    }
+    .signal-circuit.absorbing .signal-node.active .signal-node-core {
+      animation: signalNodeInnerAbsorb var(--absorb-duration) ease-out both;
+    }
+    .signal-circuit.absorbing .signal-node.active {
+      animation: signalAbsorbCore var(--absorb-duration) ease-out both;
+    }
+    .signal-node.next {
+      border-color: #b9c5d4;
+    }
+    .signal-node.pending {
+      border-color: #b9c5d4;
+    }
+    .signal-labels {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 38px;
+      color: #42526a;
+      font-size: 9px;
+      font-weight: 650;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .signal-labels span {
+      position: absolute;
+      top: 0;
+      transform: translateX(-50%);
+    }
+    .signal-labels .active {
+      color: var(--blue);
+      font-weight: 760;
+    }
+    .param-panel {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px 10px;
+      margin-top: 12px;
+      padding: 8px;
+      padding-top: 10px;
+      border-top: 2px solid rgba(22, 119, 255, .78);
+      border-right: 1px solid #e0e7f2;
+      border-bottom: 1px solid #e0e7f2;
+      border-left: 1px solid #e0e7f2;
+      border-radius: 8px;
+      background: #fbfdff;
+    }
+    .param {
+      min-width: 0;
+    }
+    .param-wide {
+      grid-column: 1 / -1;
+    }
+    .step-switch {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 5px;
+      margin-top: 6px;
+    }
+    .step-switch button {
+      height: 22px;
+      border: 1px solid #cbd8e8;
+      border-radius: 6px;
+      background: #fff;
+      color: #475569;
+      font-size: 9px;
+      font-weight: 720;
+      cursor: pointer;
+    }
+    .step-switch button.active {
+      border-color: rgba(22, 119, 255, .72);
+      background: rgba(22, 119, 255, .1);
+      color: var(--blue);
+    }
+    .demo-step-control {
+      margin-top: 12px;
+      padding: 7px 8px;
+      padding-top: 10px;
+      border-top: 2px solid rgba(22, 119, 255, .78);
+      border-right: 1px solid #e0e7f2;
+      border-bottom: 1px solid #e0e7f2;
+      border-left: 1px solid #e0e7f2;
+      border-radius: 8px;
+      background: #fbfdff;
+    }
+    .demo-step-control label {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      color: #475569;
+      font-size: 9px;
+      font-weight: 650;
+      line-height: 1.2;
+    }
+    .demo-step-control output {
+      color: var(--blue);
+      font-weight: 760;
+    }
+    .timing-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 10px;
+      margin-top: 9px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(203,216,232,.82);
+    }
+    .param label {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      color: #475569;
+      font-size: 9px;
+      font-weight: 650;
+      line-height: 1.2;
+    }
+    .param output {
+      color: var(--blue);
+      font-variant-numeric: tabular-nums;
+    }
+    .param input {
+      width: 100%;
+      margin: 5px 0 0;
+      accent-color: var(--blue);
+    }
+    .fusion-label {
+      --fusion-green-end: 69.6%;
+      --fusion-blue-start: 69.6%;
+      --fusion-blue-end: 83.2%;
+      --fusion-sweep-duration: 1800ms;
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr;
+      align-items: center;
+      min-height: 36px;
+      padding: 5px 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background:
+        linear-gradient(#fff, #fff) padding-box,
+        linear-gradient(
+          90deg,
+          #13a36f 0 var(--fusion-green-end),
+          #1677ff var(--fusion-blue-start) var(--fusion-blue-end),
+          #dce5f2 var(--fusion-blue-end) 100%
+        ) border-box;
+      box-shadow: inset 0 1px 0 rgba(22,119,255,.06);
+    }
+    .fusion-label::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -1px;
+      height: 2px;
+      border-radius: 999px;
+      background:
+        linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(255,255,255,0) 30%,
+          rgba(125,185,255,.34) 42%,
+          rgba(255,255,255,.96) 50%,
+          rgba(125,185,255,.32) 58%,
+          rgba(255,255,255,0) 70%,
+          transparent 100%
+        );
+      background-position: -39.29% 0;
+      background-repeat: no-repeat;
+      background-size: 44% 100%;
+      filter: drop-shadow(0 0 2px rgba(22,119,255,.3));
+      pointer-events: none;
+      animation: fusionBorderSweepSync var(--fusion-sweep-duration) linear infinite;
+      animation-iteration-count: 1;
+      animation-fill-mode: both;
+    }
+    .fusion-label.sweep-reset::before,
+    .fusion-label.sweep-reset .fusion-step.active::after {
+      animation: none !important;
+    }
+    .fusion-label.sweep-reset::before {
+      background-position: -39.29% 0;
+      opacity: .96;
+    }
+    .fusion-label.sweep-reset .fusion-step.active::after {
+      background-position: 95.45% 0, 0 0;
+    }
+    .fusion-label.sweep-wait::before {
+      animation: none !important;
+      opacity: 0;
+    }
+    .fusion-label.sweep-wait .fusion-step.active::after {
+      animation: none !important;
+      background: var(--blue);
+    }
+    .fusion-steps {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 4px;
+      min-width: 0;
+    }
+    .fusion-step {
+      position: relative;
+      min-width: 0;
+      padding-top: 1px;
+      color: #536175;
+      font-size: 9px;
+      font-weight: 650;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .fusion-step .label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .fusion-step::after {
+      content: "";
+      display: block;
+      height: 5px;
+      margin-top: 4px;
+      border-radius: 999px;
+      background: #e8edf5;
+    }
+    .fusion-step.done { color: #14704d; }
+    .fusion-step.done::after { background: #97d8ba; }
+    .fusion-step.active {
+      color: #0b62cf;
+      font-weight: 760;
+    }
+    .fusion-step.active::after {
+      background:
+        linear-gradient(100deg, transparent 0 32%, rgba(255,255,255,.7) 44%, rgba(255,255,255,.9) 50%, rgba(255,255,255,.4) 57%, transparent 68%),
+        var(--blue);
+      background-size: 210% 100%, 100% 100%;
+      background-position: 95.45% 0, 0 0;
+      background-repeat: no-repeat, no-repeat;
+      box-shadow: 0 0 0 2px rgba(22,119,255,.1);
+      animation: fusionBarSweepSync var(--fusion-sweep-duration) linear infinite;
+      animation-iteration-count: 1;
+      animation-fill-mode: both;
+    }
+    @keyframes sweep {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(100%); }
+    }
+    @keyframes fusionBarSweepSync {
+      from { background-position: 95.45% 0, 0 0; }
+      to { background-position: 4.55% 0, 0 0; }
+    }
+    @keyframes boltGlide {
+      from { stroke-dashoffset: 132; opacity: .38; }
+      50% { opacity: 1; }
+      to { stroke-dashoffset: -132; opacity: .38; }
+    }
+    @keyframes peakFlash {
+      0%, 34%, 100% { opacity: 0; transform: scaleY(.35); }
+      49% { opacity: .95; transform: scaleY(1.16); }
+      58% { opacity: .45; transform: scaleY(.8); }
+    }
+    @keyframes densePeakFlash {
+      0%, 32%, 100% { opacity: 0; transform: scaleY(.35); }
+      46% { opacity: 1; transform: scaleY(1.28); }
+      52% { opacity: .55; transform: scaleY(.9); }
+      60% { opacity: .35; transform: scaleY(.72); }
+    }
+    @keyframes nodePulse {
+      0%, 34% { box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(22,119,255,.16), 0 0 8px rgba(22,119,255,.22); }
+      50% { box-shadow: 0 0 0 3px #fff, 0 0 0 8px rgba(22,119,255,.24), 0 0 14px rgba(22,119,255,.56); }
+      100% { box-shadow: 0 0 0 3px #fff, 0 0 0 10px rgba(22,119,255,0), 0 0 9px rgba(22,119,255,.1); }
+    }
+    @keyframes signalAbsorbGlow {
+      0% { opacity: 0; transform: scale(.72); }
+      22% { opacity: .42; transform: scale(1); }
+      100% { opacity: 0; transform: scale(1.9); }
+    }
+    @keyframes signalNodeInnerAbsorb {
+      0% { opacity: 0; transform: scale(.06); }
+      22% { opacity: .98; transform: scale(1.02); }
+      58% { opacity: .86; transform: scale(.9); }
+      100% { opacity: 0; transform: scale(.28); }
+    }
+    @keyframes signalNodeChargeRing {
+      0% { opacity: 0; transform: scale(.72) rotate(-120deg); }
+      18% { opacity: .96; transform: scale(1) rotate(-20deg); }
+      58% { opacity: .82; transform: scale(1.02) rotate(140deg); }
+      100% { opacity: 0; transform: scale(.74) rotate(255deg); }
+    }
+    @keyframes signalAbsorbCore {
+      0% { box-shadow: 0 0 0 3px #fff; }
+      30% { box-shadow: 0 0 0 3px #fff, 0 0 0 5px rgba(22,119,255,.2), 0 0 14px rgba(22,119,255,.56); }
+      100% { box-shadow: 0 0 0 3px #fff; }
+    }
+    @keyframes pulseBaseSoft {
+      0%, 100% { opacity: .45; transform: scaleX(.92); }
+      48% { opacity: .95; transform: scaleX(1); }
+    }
+    @keyframes pulseBaseDense {
+      from { background-position: 0 0, 0 0; opacity: .55; }
+      50% { opacity: .95; }
+      to { background-position: 26px 0, 0 0; opacity: .55; }
+    }
+    @keyframes pulsePacketSoft {
+      0% { opacity: 0; transform: translateX(-14%) scaleX(.72); }
+      20% { opacity: .86; transform: translateX(6%) scaleX(.94); }
+      56% { opacity: 1; transform: translateX(44%) scaleX(1.24); }
+      82% { opacity: .72; transform: translateX(76%) scaleX(.88); }
+      100% { opacity: 0; transform: translateX(96%) scaleX(.58); }
+    }
+    @keyframes pulseHaloSoft {
+      0%, 18%, 100% { opacity: 0; transform: translateX(-12%) scale(.72); }
+      48% { opacity: .82; transform: translateX(18%) scale(1.16); }
+      72% { opacity: .36; transform: translateX(44%) scale(.92); }
+    }
+    @keyframes pulsePacketDense {
+      0% { opacity: 0; transform: translateX(-12%) scaleX(.8); }
+      16% { opacity: .9; transform: translateX(4%) scaleX(1); }
+      48% { opacity: 1; transform: translateX(28%) scaleX(1.18); }
+      76% { opacity: .92; transform: translateX(54%) scaleX(.96); }
+      100% { opacity: 0; transform: translateX(74%) scaleX(.72); }
+    }
+    @keyframes pulseHaloDense {
+      0%, 100% { opacity: .16; transform: translateX(-4%) scale(.92); }
+      34% { opacity: .72; transform: translateX(10%) scale(1.1); }
+      66% { opacity: .38; transform: translateX(24%) scale(.98); }
+    }
+    @keyframes blueLineSweep {
+      0% { opacity: 0; transform: translateX(-48px); }
+      14% { opacity: .95; }
+      68% { opacity: 1; }
+      100% { opacity: 0; transform: translateX(128px); }
+    }
+    @keyframes waveSheen {
+      0% { opacity: 0; stroke-dashoffset: 178; }
+      16% { opacity: .92; }
+      72% { opacity: .98; }
+      100% { opacity: 0; stroke-dashoffset: -70; }
+    }
+    @keyframes fusionBorderSweepSync {
+      0% { background-position: -39.29% 0; opacity: .96; }
+      100% { background-position: 139.29% 0; opacity: .96; }
+    }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .hint { display: none; }
+    }
+    @media (max-width: 760px) {
+      .grid { grid-template-columns: 1fr; }
+      .page { max-width: 460px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="intro">
+      <div>
+        <h1>v61：B 标签对齐版</h1>
+        <p class="subtitle">B1 下方 Step 标题改为跟随节点同一组位置对齐，并移除无信息价值的底部说明文字；D 保持 v60。</p>
+      </div>
+      <div class="hint">B2 已移除</div>
+    </div>
+
+    <section class="grid">
+      <article class="option" data-choice="a" onclick="toggleSelect(this)">
+        <div class="head">
+          <div class="title">A. 箭头轨道 基准版</div>
+          <div class="meta">保留对照</div>
+        </div>
+        <div class="composer">
+          <div class="chevrons" data-demo-steps="a">
+            <div class="step done" data-step-index="0">需求理解<span class="tip">已完成：识别业务场景、规模和预算。</span></div>
+            <div class="step done" data-step-index="1">架构规划<span class="tip">已完成：拆分网络、计算、访问入口。</span></div>
+            <div class="step done" data-step-index="2">方案评估<span class="tip">已完成：比较成本、复杂度和扩展性。</span></div>
+            <div class="step active" data-step-index="3">方案选择<span class="tip">进行中：正在生成方案卡片并等待确认。</span></div>
+            <div class="step" data-step-index="4">确认部署<span class="tip">未开始：选定方案后进入部署确认。</span></div>
+          </div>
+          <div class="input">请描述业务场景、访问规模、预算范围或已有资源约束</div>
+          <div class="actions">
+            <div class="ghosts"><button class="ghost">附件</button><button class="ghost">深度思考</button></div>
+            <button class="send">发送</button>
+          </div>
+          <div class="demo-step-control">
+            <label>演示 Step <output data-output="aActiveStep">方案选择</output></label>
+            <div class="step-switch" data-demo-target="a" aria-label="A 方案演示当前步骤">
+              <button type="button" data-step-index="0">1</button>
+              <button type="button" data-step-index="1">2</button>
+              <button type="button" data-step-index="2">3</button>
+              <button class="active" type="button" data-step-index="3">4</button>
+              <button type="button" data-step-index="4">5</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option" data-choice="b1" onclick="toggleSelect(this)">
+        <div class="head">
+          <div class="title">B1. 虚拟端点补齐</div>
+          <div class="meta">可调参数</div>
+        </div>
+        <div class="composer">
+          <div class="signal-circuit" id="signal-demo">
+            <svg class="signal-svg" viewBox="0 0 344 44" preserveAspectRatio="none" aria-hidden="true">
+              <path class="signal-rail" d="M 20 22 L 324 22"/>
+              <path id="signal-done" class="signal-done" d="M 20 22 L 172 22"/>
+              <path id="signal-active-in" class="signal-active-base signal-active-in" d="M 172 22 L 248 22"/>
+              <path id="signal-active-out" class="signal-active-base signal-active-out" d="M 248 22 L 324 22"/>
+              <path id="signal-wave" class="signal-moving-wave" d=""/>
+            </svg>
+            <span class="signal-absorb-halo" aria-hidden="true"></span>
+            <span class="signal-node" data-step-index="0" style="left:6%"><span class="signal-node-charge"></span><span class="signal-node-core"></span></span>
+            <span class="signal-node" data-step-index="1" style="left:28%"><span class="signal-node-charge"></span><span class="signal-node-core"></span></span>
+            <span class="signal-node" data-step-index="2" style="left:50%"><span class="signal-node-charge"></span><span class="signal-node-core"></span></span>
+            <span class="signal-node active" data-step-index="3" style="left:72%"><span class="signal-node-charge"></span><span class="signal-node-core"></span></span>
+            <span class="signal-node pending next" data-step-index="4" style="left:94%"><span class="signal-node-charge"></span><span class="signal-node-core"></span></span>
+            <div class="signal-labels">
+              <span data-step-index="0" style="left:6%">需求理解</span>
+              <span data-step-index="1" style="left:28%">架构规划</span>
+              <span data-step-index="2" style="left:50%">方案评估</span>
+              <span class="active" data-step-index="3" style="left:72%">方案选择</span>
+              <span data-step-index="4" style="left:94%">确认部署</span>
+            </div>
+          </div>
+          <div class="input">请描述业务场景、访问规模、预算范围或已有资源约束</div>
+          <div class="actions">
+            <div class="ghosts"><button class="ghost">附件</button><button class="ghost">深度思考</button></div>
+            <button class="send">发送</button>
+          </div>
+          <div class="param-panel" id="signal-controls">
+            <div class="param param-wide">
+              <label>演示 Step <output data-output="activeStep">方案选择</output></label>
+              <div class="step-switch" id="signal-step-switch" data-demo-target="b" aria-label="B 方案演示当前步骤">
+                <button type="button" data-step-index="0">1</button>
+                <button type="button" data-step-index="1">2</button>
+                <button type="button" data-step-index="2">3</button>
+                <button class="active" type="button" data-step-index="3">4</button>
+                <button type="button" data-step-index="4">5</button>
+              </div>
+            </div>
+            <div class="param">
+              <label>X <output data-output="xPercent">28%</output></label>
+              <input data-param="xPercent" type="range" min="6" max="38" value="28" step="1">
+            </div>
+            <div class="param">
+              <label>Y <output data-output="yPercent">49%</output></label>
+              <input data-param="yPercent" type="range" min="20" max="90" value="49" step="1">
+            </div>
+            <div class="param">
+              <label>T1 <output data-output="t1">140ms</output></label>
+              <input data-param="t1" type="range" min="80" max="700" value="140" step="20">
+            </div>
+            <div class="param">
+              <label>T2 <output data-output="t2">540ms</output></label>
+              <input data-param="t2" type="range" min="160" max="1400" value="540" step="20">
+            </div>
+            <div class="param">
+              <label>最大振幅 <output data-output="maxAmplitude">9</output></label>
+              <input data-param="maxAmplitude" type="range" min="8" max="22" value="9" step="1">
+            </div>
+            <div class="param">
+              <label>停顿时间 <output data-output="pauseTime">510ms</output></label>
+              <input data-param="pauseTime" type="range" min="120" max="1200" value="510" step="30">
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="option" data-choice="b2" onclick="toggleSelect(this)">
+        <div class="head">
+          <div class="title">B2. 蓝色脉冲波形 双扫光</div>
+          <div class="meta">紧凑双峰</div>
+        </div>
+        <div class="composer">
+          <div class="circuit dense pulse-dense blue-pulse blue-pulse-dense pulse-wave pulse-wave-dense">
+            <div class="track"></div>
+            <div class="quiet-segment"></div>
+            <div class="electric">
+              <svg viewBox="0 0 220 18" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="wave-sheen-dense" x1="0%" x2="100%" y1="0%" y2="0%">
+                    <stop offset="0%" stop-color="#1677ff" stop-opacity="0"/>
+                    <stop offset="30%" stop-color="#ffffff" stop-opacity=".1"/>
+                    <stop offset="48%" stop-color="#ffffff" stop-opacity="1"/>
+                    <stop offset="66%" stop-color="#ffffff" stop-opacity=".24"/>
+                    <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <polyline class="wave-base" points="0,11 22,11 32,9 42,11 60,11 70,8 80,11 99,11 108,3 118,11 136,11 145,6.5 155,11 174,11 184,8.8 194,11 220,11"/>
+                <polyline class="wave-sweep" points="0,11 22,11 32,9 42,11 60,11 70,8 80,11 99,11 108,3 118,11 136,11 145,6.5 155,11 174,11 184,8.8 194,11 220,11" stroke="url(#wave-sheen-dense)"/>
+                <polyline class="wave-sweep-2" points="0,11 22,11 32,9 42,11 60,11 70,8 80,11 99,11 108,3 118,11 136,11 145,6.5 155,11 174,11 184,8.8 194,11 220,11" stroke="url(#wave-sheen-dense)"/>
+              </svg>
+            </div>
+            <div class="nodes">
+              <div class="node">需求理解<span class="tip">已完成：需求已归纳。</span></div>
+              <div class="node">架构规划<span class="tip">已完成：资源关系已确定。</span></div>
+              <div class="node">方案评估<span class="tip">蓝色线路从上一步进入当前步骤。</span></div>
+              <div class="node active">方案选择<span class="tip">两道白色扫光形成更强脉冲感。</span></div>
+              <div class="node next">确认部署<span class="tip">进入下一步前逐步收束。</span></div>
+            </div>
+          </div>
+          <div class="input">请描述业务场景、访问规模、预算范围或已有资源约束</div>
+          <div class="actions">
+            <div class="ghosts"><button class="ghost">附件</button><button class="ghost">深度思考</button></div>
+            <button class="send">发送</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="option" data-choice="d1" onclick="toggleSelect(this)">
+        <div class="head">
+          <div class="title">D1. 输入框融合 带标签</div>
+          <div class="meta">保留</div>
+        </div>
+        <div class="composer">
+          <div class="fusion-label">
+            <div class="fusion-steps">
+              <div class="fusion-step done" data-step-index="0"><span class="label">需求理解</span><span class="tip">已完成：需求已归纳。</span></div>
+              <div class="fusion-step done" data-step-index="1"><span class="label">架构规划</span><span class="tip">已完成：资源关系已确定。</span></div>
+              <div class="fusion-step done" data-step-index="2"><span class="label">方案评估</span><span class="tip">已完成：已比较候选方案。</span></div>
+              <div class="fusion-step active" data-step-index="3"><span class="label">方案选择</span><span class="tip">进行中：正在生成方案。</span></div>
+              <div class="fusion-step" data-step-index="4"><span class="label">确认部署</span><span class="tip">未开始：等待方案选择。</span></div>
+            </div>
+          </div>
+          <div class="input">请描述业务场景、访问规模、预算范围或已有资源约束</div>
+          <div class="actions">
+            <div class="ghosts"><button class="ghost">附件</button><button class="ghost">深度思考</button></div>
+            <button class="send">发送</button>
+          </div>
+          <div class="demo-step-control">
+            <label>演示 Step <output data-output="dActiveStep">方案选择</output></label>
+            <div class="step-switch" data-demo-target="d" aria-label="D 方案演示当前步骤">
+              <button type="button" data-step-index="0">1</button>
+              <button type="button" data-step-index="1">2</button>
+              <button type="button" data-step-index="2">3</button>
+              <button class="active" type="button" data-step-index="3">4</button>
+              <button type="button" data-step-index="4">5</button>
+            </div>
+            <div class="timing-grid" id="fusion-controls">
+              <div class="param">
+                <label>T1 <output data-fusion-output="t1">1800ms</output></label>
+                <input data-fusion-param="t1" type="range" min="800" max="3200" value="1800" step="100">
+              </div>
+              <div class="param">
+                <label>T2 <output data-fusion-output="t2">300ms</output></label>
+                <input data-fusion-param="t2" type="range" min="0" max="1200" value="300" step="50">
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const stepNames = ["需求理解", "架构规划", "方案评估", "方案选择", "确认部署"];
+      const stepStatus = ["理解需求中", "规划架构中", "评估方案中", "生成方案中", "确认部署中"];
+      const completedTips = [
+        "已完成：识别业务场景、规模和预算。",
+        "已完成：拆分网络、计算、访问入口。",
+        "已完成：比较成本、复杂度和扩展性。",
+        "已完成：方案卡片已生成并确认。",
+        "已完成：部署确认已完成。",
+      ];
+      const pendingTips = [
+        "未开始：等待需求输入。",
+        "未开始：等待需求理解。",
+        "未开始：等待架构规划。",
+        "未开始：等待方案评估。",
+        "未开始：等待方案选择。",
+      ];
+
+      function setSwitchState(target, activeIndex) {
+        document.querySelectorAll(`.step-switch[data-demo-target="${target}"] [data-step-index]`).forEach((button) => {
+          button.classList.toggle("active", Number(button.dataset.stepIndex) === activeIndex);
+        });
+      }
+
+      function updateTips(step, index, activeIndex) {
+        const tip = step.querySelector(".tip");
+        if (!tip) return;
+        if (index < activeIndex) {
+          tip.textContent = completedTips[index];
+        } else if (index === activeIndex) {
+          tip.textContent = `进行中：${stepStatus[index]}。`;
+        } else {
+          tip.textContent = pendingTips[index];
+        }
+      }
+
+      function setArrowStep(activeIndex) {
+        document.querySelectorAll('[data-demo-steps="a"] .step[data-step-index]').forEach((step) => {
+          const index = Number(step.dataset.stepIndex);
+          step.classList.toggle("done", index < activeIndex);
+          step.classList.toggle("active", index === activeIndex);
+          updateTips(step, index, activeIndex);
+        });
+        document.querySelector('[data-output="aActiveStep"]').textContent = stepNames[activeIndex];
+        setSwitchState("a", activeIndex);
+      }
+
+      let fusionActiveIndex = 3;
+      const fusionTiming = { t1: 1800, t2: 300 };
+      let fusionRunTimer = 0;
+      let fusionWaitTimer = 0;
+
+      function percent(value) {
+        return `${Math.max(0, Math.min(100, value)).toFixed(2)}%`;
+      }
+
+      function syncFusionBorder(activeIndex) {
+        const label = document.querySelector('[data-choice="d1"] .fusion-label');
+        const activeStep = label?.querySelector(`.fusion-step[data-step-index="${activeIndex}"]`);
+        if (!label || !activeStep) return;
+
+        const labelRect = label.getBoundingClientRect();
+        const activeRect = activeStep.getBoundingClientRect();
+        if (!labelRect.width) return;
+
+        const activeStart = ((activeRect.left - labelRect.left) / labelRect.width) * 100;
+        const activeEnd = ((activeRect.right - labelRect.left) / labelRect.width) * 100;
+        const blueStart = activeIndex === 0 ? 0 : activeStart;
+        const greenEnd = activeIndex === 0 ? 0 : activeStart;
+        const blueEnd = activeIndex === stepNames.length - 1 ? 100 : activeEnd;
+
+        label.style.setProperty("--fusion-green-end", percent(greenEnd));
+        label.style.setProperty("--fusion-blue-start", percent(blueStart));
+        label.style.setProperty("--fusion-blue-end", percent(blueEnd));
+      }
+
+      function syncFusionTiming() {
+        const controls = document.getElementById("fusion-controls");
+        const label = document.querySelector('[data-choice="d1"] .fusion-label');
+        if (!controls || !label) return;
+        controls.querySelectorAll("input[data-fusion-param]").forEach((input) => {
+          fusionTiming[input.dataset.fusionParam] = Number(input.value);
+          const output = controls.querySelector(`[data-fusion-output="${input.dataset.fusionParam}"]`);
+          if (output) output.textContent = `${input.value}ms`;
+        });
+        label.style.setProperty("--fusion-sweep-duration", `${fusionTiming.t1}ms`);
+      }
+
+      function restartFusionSweeps() {
+        const label = document.querySelector('[data-choice="d1"] .fusion-label');
+        if (!label) return;
+        window.clearTimeout(fusionRunTimer);
+        window.clearTimeout(fusionWaitTimer);
+        syncFusionTiming();
+        label.classList.remove("sweep-wait");
+        label.classList.add("sweep-reset");
+        void label.offsetWidth;
+        label.classList.remove("sweep-reset");
+        fusionRunTimer = window.setTimeout(() => {
+          label.classList.add("sweep-wait");
+          fusionWaitTimer = window.setTimeout(() => restartFusionSweeps(), fusionTiming.t2);
+        }, fusionTiming.t1);
+      }
+
+      function setFusionStep(activeIndex) {
+        fusionActiveIndex = activeIndex;
+        document.querySelectorAll(".fusion-step[data-step-index]").forEach((step) => {
+          const index = Number(step.dataset.stepIndex);
+          step.classList.toggle("done", index < activeIndex);
+          step.classList.toggle("active", index === activeIndex);
+          updateTips(step, index, activeIndex);
+        });
+        document.querySelector('[data-output="dActiveStep"]').textContent = stepNames[activeIndex];
+        setSwitchState("d", activeIndex);
+        requestAnimationFrame(() => {
+          syncFusionBorder(activeIndex);
+          restartFusionSweeps();
+        });
+      }
+
+      function setOptionStep(target, index) {
+        const activeIndex = Math.max(0, Math.min(stepNames.length - 1, Number(index)));
+        if (Number.isNaN(activeIndex)) return;
+        if (target === "a") setArrowStep(activeIndex);
+        if (target === "d") setFusionStep(activeIndex);
+      }
+
+      document.querySelectorAll('.step-switch[data-demo-target="a"], .step-switch[data-demo-target="d"]').forEach((switcher) => {
+        switcher.addEventListener("click", (event) => {
+          const button = event.target.closest("[data-step-index]");
+          if (!button) return;
+          setOptionStep(switcher.dataset.demoTarget, button.dataset.stepIndex);
+        });
+      });
+
+      window.setOptionStep = setOptionStep;
+      window.addEventListener("resize", () => syncFusionBorder(fusionActiveIndex));
+      document.getElementById("fusion-controls")?.addEventListener("input", () => restartFusionSweeps());
+      setArrowStep(3);
+      setFusionStep(3);
+    })();
+
+    (() => {
+      const wave = document.getElementById("signal-wave");
+      const demo = document.getElementById("signal-demo");
+      const controls = document.getElementById("signal-controls");
+      const donePath = document.getElementById("signal-done");
+      const activeInPath = document.getElementById("signal-active-in");
+      const activeOutPath = document.getElementById("signal-active-out");
+      const absorbHalo = document.querySelector(".signal-absorb-halo");
+      const signalNodes = [...document.querySelectorAll(".signal-node[data-step-index]")];
+      const signalLabels = [...document.querySelectorAll(".signal-labels [data-step-index]")];
+      const stepButtons = [...document.querySelectorAll("#signal-step-switch [data-step-index]")];
+      const activeStepOutput = controls?.querySelector('[data-output="activeStep"]');
+      if (!wave || !demo || !controls || !donePath || !activeInPath || !activeOutPath) return;
+
+      const params = {
+        xPercent: 28,
+        yPercent: 49,
+        t1: 140,
+        t2: 540,
+        maxAmplitude: 9,
+        pauseTime: 510,
+      };
+      const stepNames = ["需求理解", "架构规划", "方案评估", "方案选择", "确认部署"];
+      const stepPercents = [6, 28, 50, 72, 94];
+      const stepXs = [20, 96, 172, 248, 324];
+      const baseY = 22;
+      const viewMinX = 0;
+      const viewMaxX = 344;
+      const railStartX = stepXs[0];
+      const railEndX = stepXs[stepXs.length - 1];
+      const virtualPadding = 66;
+      const virtualLeftX = railStartX - virtualPadding;
+      const virtualRightX = railEndX + virtualPadding;
+      const nodeClearance = 10;
+      const outboundTailClearance = 6;
+      let activeIndex = 3;
+      let phase = "inbound";
+      let elapsed = 0;
+      let pauseLeft = 0;
+      let last = performance.now();
+      let cycleSalt = 0;
+      let absorbTimer = 0;
+
+      function readParams() {
+        controls.querySelectorAll("input[data-param]").forEach((input) => {
+          params[input.dataset.param] = Number(input.value);
+          const output = controls.querySelector(`[data-output="${input.dataset.param}"]`);
+          if (output) {
+            if (input.dataset.param === "xPercent" || input.dataset.param === "yPercent") {
+              output.textContent = `${input.value}%`;
+            } else if (input.dataset.param === "t1" || input.dataset.param === "t2" || input.dataset.param === "pauseTime") {
+              output.textContent = `${input.value}ms`;
+            } else {
+              output.textContent = input.value;
+            }
+          }
+        });
+        if (params.xPercent >= 48) params.xPercent = 48;
+        if (params.yPercent > 100) params.yPercent = 100;
+        if (demo) demo.style.setProperty("--absorb-duration", `${params.pauseTime}ms`);
+      }
+
+      function smoothstep(edge0, edge1, value) {
+        const x = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+        return x * x * (3 - 2 * x);
+      }
+
+      function lerp(start, end, progress) {
+        return start + (end - start) * progress;
+      }
+
+      function clampToView(x) {
+        return Math.max(viewMinX, Math.min(viewMaxX, x));
+      }
+
+      function linePath(from, to) {
+        const start = clampToView(from);
+        const end = clampToView(to);
+        if (end - start < 1) return "";
+        return `M ${start} ${baseY} L ${end} ${baseY}`;
+      }
+
+      function inboundSegment() {
+        const currentX = stepXs[activeIndex];
+        return {
+          from: activeIndex === 0 ? virtualLeftX : stepXs[activeIndex - 1] + nodeClearance,
+          to: currentX - nodeClearance,
+          color: "#1677ff",
+          nextPhase: "pause-current",
+        };
+      }
+
+      function outboundSegment() {
+        const currentX = stepXs[activeIndex];
+        return {
+          from: currentX + nodeClearance,
+          to: activeIndex === stepXs.length - 1 ? virtualRightX : stepXs[activeIndex + 1] - outboundTailClearance,
+          color: "#8f9bae",
+          nextPhase: "pause-next",
+        };
+      }
+
+      function currentSegment() {
+        return (phase === "outbound" || phase === "pause-next") ? outboundSegment() : inboundSegment();
+      }
+
+      function renderStaticState() {
+        const currentX = stepXs[activeIndex];
+        const previousBaseX = activeIndex === 0 ? viewMinX : stepXs[activeIndex - 1];
+        const nextBaseX = activeIndex === stepXs.length - 1 ? viewMaxX : stepXs[activeIndex + 1];
+
+        donePath.setAttribute("d", activeIndex > 0 ? `M ${railStartX} ${baseY} L ${stepXs[activeIndex - 1]} ${baseY}` : "");
+        activeInPath.setAttribute("d", linePath(previousBaseX, currentX));
+        activeOutPath.setAttribute("d", linePath(currentX, nextBaseX));
+
+        if (absorbHalo) absorbHalo.style.left = `${stepPercents[activeIndex]}%`;
+        signalNodes.forEach((node) => {
+          const index = Number(node.dataset.stepIndex);
+          node.classList.toggle("active", index === activeIndex);
+          node.classList.toggle("pending", index > activeIndex);
+          node.classList.toggle("next", index === activeIndex + 1);
+        });
+        signalLabels.forEach((label) => {
+          label.classList.toggle("active", Number(label.dataset.stepIndex) === activeIndex);
+        });
+        stepButtons.forEach((button) => {
+          button.classList.toggle("active", Number(button.dataset.stepIndex) === activeIndex);
+        });
+        if (activeStepOutput) activeStepOutput.textContent = stepNames[activeIndex];
+      }
+
+      function progressEase(value) {
+        return smoothstep(0, 1, value);
+      }
+
+      function segmentMotion(timeMs) {
+        const x = Math.max(0.04, Math.min(0.48, params.xPercent / 100));
+        const y = Math.max(0, Math.min(1, params.yPercent / 100));
+        const t1 = Math.max(40, params.t1);
+        const t2 = Math.max(80, params.t2);
+        const middleLength = Math.max(0.04, 1 - 2 * x);
+
+        if (timeMs < t1) {
+          const u = Math.max(0, Math.min(1, timeMs / t1));
+          return {
+            anchor: "right",
+            progress: x * u,
+            amplitudeScale: y * progressEase(u),
+            done: false,
+          };
+        }
+
+        if (timeMs < t1 + t2) {
+          const u = Math.max(0, Math.min(1, (timeMs - t1) / t2));
+          return {
+            anchor: "right",
+            progress: x + (1 - x) * u,
+            amplitudeScale: y + (1 - y) * Math.sin(Math.PI * u),
+            done: false,
+          };
+        }
+
+        if (timeMs < t1 * 2 + t2) {
+          const u = Math.max(0, Math.min(1, (timeMs - t1 - t2) / t1));
+          return {
+            anchor: "left",
+            progress: 1 - x + x * u,
+            amplitudeScale: y * (1 - progressEase(u)),
+            done: false,
+          };
+        }
+
+        return {
+          anchor: "left",
+          progress: 1,
+          amplitudeScale: 0,
+          done: true,
+        };
+      }
+
+      function pulseShape(t) {
+        const micro = 0.1 * Math.sin((t * 2.6 + cycleSalt) * Math.PI);
+        const lift = Math.sin(Math.PI * smoothstep(0.16, 0.38, t));
+        const drop = Math.sin(Math.PI * smoothstep(0.37, 0.62, t));
+        const settle = 0.2 * Math.sin((t - 0.62) * Math.PI * 4.5 + cycleSalt * 0.4);
+        return micro + lift - drop * 0.86 + settle * smoothstep(0.58, 0.96, t);
+      }
+
+      function makeMovingWavePath() {
+        if (phase === "pause-current" || phase === "pause-next") return "";
+
+        const segment = currentSegment();
+        const segmentLength = segment.to - segment.from;
+        const xRatio = Math.max(0.04, Math.min(0.48, params.xPercent / 100));
+        const waveLength = segmentLength * xRatio;
+        const motion = segmentMotion(elapsed);
+        const amplitude = params.maxAmplitude * motion.amplitudeScale;
+        if (amplitude < 0.2) return "";
+        const right = motion.anchor === "left"
+          ? segment.from + motion.progress * segmentLength + waveLength
+          : segment.from + motion.progress * segmentLength;
+        const left = motion.anchor === "left"
+          ? segment.from + motion.progress * segmentLength
+          : right - waveLength;
+        const start = Math.max(segment.from, left);
+        const end = Math.min(segment.to, right);
+        if (end <= segment.from || start >= segment.to || end - start < 1) return "";
+
+        const points = [];
+        const samples = 54;
+        for (let i = 0; i <= samples; i += 1) {
+          const t = i / samples;
+          const x = start + t * (end - start);
+          const packetT = left < segment.from ? t : (x - left) / waveLength;
+          const envelope = smoothstep(0, 0.16, packetT) * (1 - smoothstep(0.84, 1, packetT));
+          const y = baseY - pulseShape(packetT) * amplitude * envelope;
+          points.push(`${i === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`);
+        }
+        return points.join(" ");
+      }
+
+      function render() {
+        wave.style.stroke = currentSegment().color;
+        wave.setAttribute("d", makeMovingWavePath());
+      }
+
+      function triggerAbsorbHalo() {
+        if (!demo) return;
+        demo.classList.remove("absorbing");
+        window.clearTimeout(absorbTimer);
+        void demo.offsetWidth;
+        demo.classList.add("absorbing");
+        absorbTimer = window.setTimeout(() => {
+          demo.classList.remove("absorbing");
+        }, params.pauseTime);
+      }
+
+      function setActiveIndex(index) {
+        const nextIndex = Math.max(0, Math.min(stepXs.length - 1, Number(index)));
+        if (Number.isNaN(nextIndex)) return;
+        activeIndex = nextIndex;
+        phase = "inbound";
+        elapsed = 0;
+        pauseLeft = 0;
+        cycleSalt = (cycleSalt + 0.37) % (Math.PI * 2);
+        demo.classList.remove("absorbing");
+        window.clearTimeout(absorbTimer);
+        renderStaticState();
+        render();
+      }
+
+      function tick(now) {
+        const dt = Math.min(48, now - last) / 1000;
+        last = now;
+
+        if (phase === "pause-current" || phase === "pause-next") {
+          pauseLeft -= dt * 1000;
+          if (pauseLeft <= 0) {
+            if (phase === "pause-current" && demo) {
+              demo.classList.remove("absorbing");
+              window.clearTimeout(absorbTimer);
+            }
+            phase = phase === "pause-current" ? "outbound" : "inbound";
+            elapsed = 0;
+            cycleSalt = (cycleSalt + 0.73) % (Math.PI * 2);
+          }
+          render();
+          requestAnimationFrame(tick);
+          return;
+        }
+
+        const segment = currentSegment();
+        elapsed += dt * 1000;
+        if (segmentMotion(elapsed).done) {
+          pauseLeft = params.pauseTime;
+          phase = segment.nextPhase;
+          if (phase === "pause-current") triggerAbsorbHalo();
+          elapsed = params.t1 * 2 + params.t2;
+        }
+        render();
+        requestAnimationFrame(tick);
+      }
+
+      controls.addEventListener("input", () => {
+        readParams();
+        render();
+      });
+      controls.addEventListener("click", (event) => {
+        const button = event.target.closest("#signal-step-switch [data-step-index]");
+        if (button) setActiveIndex(button.dataset.stepIndex);
+      });
+      window.setSignalActiveIndex = setActiveIndex;
+      readParams();
+      renderStaticState();
+      requestAnimationFrame((now) => {
+        last = now;
+        render();
+        tick(now);
+      });
+    })();
+  </script>
+</body>
+</html>
