@@ -1811,6 +1811,7 @@ msgid "Input schema"
 msgstr "Esquema de entrada"
 
 #: src/iac_code/commands/prompt.py
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "tool"
 msgstr "ferramenta"
 
@@ -2439,6 +2440,62 @@ msgstr ""
 "{fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A successful tool result is required before completing the current step."
+msgstr ""
+"É necessário um resultado de ferramenta bem-sucedido antes de concluir a "
+"etapa atual."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{field} must match the {tool} result "
+"value {value}."
+msgstr ""
+"{message} complete_step.conclusion.{field} deve corresponder ao valor de "
+"resultado {value} de {tool}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "<missing>"
+msgstr "<missing>"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " with status {statuses}"
+msgstr " com status {statuses}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " and is_success={expected}"
+msgstr " e is_success={expected}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " one of {actions}"
+msgstr " com uma das ações {actions}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Call {tool}{action} first and wait for a successful "
+"result{status_hint}{success_hint}."
+msgstr ""
+"{message} Chame {tool}{action} primeiro e aguarde um resultado bem-"
+"sucedido{status_hint}{success_hint}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "the required tool"
+msgstr "a ferramenta obrigatória"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
+"or ask the user for help."
+msgstr ""
+"A quantidade de reversões não pode exceder {max_rollbacks}. Conclua a "
+"etapa atual ou peça ajuda ao usuário."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr ""
@@ -2455,15 +2512,6 @@ msgstr ""
 "A quantidade de destinos de reversão não pode exceder {limit}; há "
 "{count}. Peça ajuda ao usuário ou reduza os destinos antes de chamar "
 "complete_step."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr ""
-"A quantidade de reversões não pode exceder {max_rollbacks}. Conclua a "
-"etapa atual ou peça ajuda ao usuário."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -3470,6 +3518,16 @@ msgstr "ROS Stack"
 #: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+msgid ""
+"ROS template calls must use TemplateURL instead of TemplateBody. Save the"
+" template to a file and pass params.TemplateURL, for example a local file"
+" path or OSS/HTTP URL."
+msgstr ""
+"As chamadas de modelo ROS devem usar TemplateURL em vez de TemplateBody. "
+"Salve o modelo em um arquivo e passe params.TemplateURL, por exemplo um "
+"caminho de arquivo local ou uma URL OSS/HTTP."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format

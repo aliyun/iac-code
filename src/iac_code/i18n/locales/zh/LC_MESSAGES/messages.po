@@ -1751,6 +1751,7 @@ msgid "Input schema"
 msgstr "输入 schema"
 
 #: src/iac_code/commands/prompt.py
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "tool"
 msgstr "工具"
 
@@ -2316,6 +2317,54 @@ msgid ""
 msgstr "{message} complete_step.conclusion 必须包含以下字段之一: {fields}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A successful tool result is required before completing the current step."
+msgstr "完成当前步骤前需要成功的工具结果。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{field} must match the {tool} result "
+"value {value}."
+msgstr "{message} complete_step.conclusion.{field} 必须与 {tool} 结果值 {value} 匹配。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "<missing>"
+msgstr "<missing>"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " with status {statuses}"
+msgstr "，状态为 {statuses}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " and is_success={expected}"
+msgstr "，且 is_success={expected}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " one of {actions}"
+msgstr "，动作为 {actions} 之一"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Call {tool}{action} first and wait for a successful "
+"result{status_hint}{success_hint}."
+msgstr "{message} 请先调用 {tool}{action}，并等待成功结果{status_hint}{success_hint}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "the required tool"
+msgstr "必需工具"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
+"or ask the user for help."
+msgstr "回滚次数不能超过 {max_rollbacks} 次。请完成当前步骤或请求用户介入。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr "候选方案数量不能超过 {limit} 个，当前提交了 {count} 个。"
@@ -2327,13 +2376,6 @@ msgid ""
 "user for help or narrow the rollback targets before calling "
 "complete_step."
 msgstr "可回滚目标数量不能超过 {limit} 个，当前有 {count} 个。请请求用户介入或收窄回滚目标后再调用 complete_step。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr "回滚次数不能超过 {max_rollbacks} 次。请完成当前步骤或请求用户介入。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -3296,6 +3338,15 @@ msgstr "ROS 资源栈"
 #: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py
 msgid "CloudStackInstances"
 msgstr "云资源栈实例"
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+msgid ""
+"ROS template calls must use TemplateURL instead of TemplateBody. Save the"
+" template to a file and pass params.TemplateURL, for example a local file"
+" path or OSS/HTTP URL."
+msgstr ""
+"ROS 模板调用必须使用 TemplateURL，而不能使用 TemplateBody。请将模板保存到文件，并传入 "
+"params.TemplateURL，例如本地文件路径或 OSS/HTTP URL。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format

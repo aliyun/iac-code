@@ -1765,6 +1765,7 @@ msgid "Input schema"
 msgstr "入力スキーマ"
 
 #: src/iac_code/commands/prompt.py
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "tool"
 msgstr "ツール"
 
@@ -2350,6 +2351,58 @@ msgid ""
 msgstr "{message} complete_step.conclusion には次のいずれかのフィールドが必要です: {fields}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A successful tool result is required before completing the current step."
+msgstr "現在のステップを完了する前に、成功したツール結果が必要です。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{field} must match the {tool} result "
+"value {value}."
+msgstr ""
+"{message} complete_step.conclusion.{field} は {tool} の結果値 {value} "
+"と一致する必要があります。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "<missing>"
+msgstr "<missing>"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " with status {statuses}"
+msgstr "（ステータス: {statuses}）"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " and is_success={expected}"
+msgstr "、かつ is_success={expected}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " one of {actions}"
+msgstr "（アクションは {actions} のいずれか）"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Call {tool}{action} first and wait for a successful "
+"result{status_hint}{success_hint}."
+msgstr ""
+"{message} まず {tool}{action} "
+"を呼び出し、成功した結果{status_hint}{success_hint}を待ってください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "the required tool"
+msgstr "必須ツール"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
+"or ask the user for help."
+msgstr "ロールバック回数は {max_rollbacks} を超えられません。現在のステップを完了するか、ユーザーに支援を求めてください。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr "候補数は {limit} を超えられません。{count} 件が送信されました。"
@@ -2363,13 +2416,6 @@ msgid ""
 msgstr ""
 "ロールバック対象数は {limit} を超えられません。現在 {count} 件あります。complete_step "
 "を呼ぶ前にユーザーに支援を求めるか、対象を絞ってください。"
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr "ロールバック回数は {max_rollbacks} を超えられません。現在のステップを完了するか、ユーザーに支援を求めてください。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -3346,6 +3392,16 @@ msgstr "ROS スタック"
 #: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+msgid ""
+"ROS template calls must use TemplateURL instead of TemplateBody. Save the"
+" template to a file and pass params.TemplateURL, for example a local file"
+" path or OSS/HTTP URL."
+msgstr ""
+"ROS テンプレート呼び出しでは TemplateBody ではなく TemplateURL "
+"を使用する必要があります。テンプレートをファイルに保存し、ローカルファイルパスまたは OSS/HTTP URL などを "
+"params.TemplateURL として渡してください。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
