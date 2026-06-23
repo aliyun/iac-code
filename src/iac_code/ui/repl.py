@@ -106,7 +106,7 @@ else:
 # pipeline's allow_user_escapes.command setting (problem 5). Permanent whitelist
 # so users are never locked out of the basics while a pipeline is running.
 _PIPELINE_SAFE_COMMANDS: frozenset[str] = frozenset({"/exit", "/help", "/status", "/prompt", "/resume"})
-PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed"]
+PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed", "persistence_failed"]
 
 
 class ExitREPLError(Exception):
@@ -2647,6 +2647,13 @@ class InlineREPL:
             self._pipeline_waiting_input = False
             return
         handoff_result = self._handoff_pipeline_to_normal(terminal_event)
+        if handoff_result == "persistence_failed":
+            if self._pipeline is not None:
+                pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
+                if callable(pause_agent_loops):
+                    pause_agent_loops()
+            self._pipeline_waiting_input = False
+            return
         if handoff_result in {"succeeded", "failed"}:
             self._clear_pipeline_runtime_state()
         elif self._pipeline is not None and self._pipeline.sidecar_status == "failed":
@@ -2679,12 +2686,13 @@ class InlineREPL:
         try:
             pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
         except Exception as exc:
+            self._pipeline_state_persistence_failed = True
             logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
             self.renderer.print_system_message(
                 _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
                 style="yellow",
             )
-            return "failed"
+            return "persistence_failed"
 
         try:
             summary = pipeline.build_normal_handoff_summary(terminal_event.data)
@@ -2702,6 +2710,7 @@ class InlineREPL:
             try:
                 pipeline.mark_normal_handoff(status="failed", failed_reason=str(exc))
             except Exception as persistence_exc:
+                self._pipeline_state_persistence_failed = True
                 logger.opt(exception=True).warning(
                     "Pipeline handoff failure metadata persistence failed: {}",
                     persistence_exc,
@@ -2710,7 +2719,7 @@ class InlineREPL:
                     _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
                     style="yellow",
                 )
-                return "failed"
+                return "persistence_failed"
             logger.opt(exception=True).warning("Pipeline-to-normal handoff injection failed: {}", exc)
             self.renderer.print_system_message(
                 _("Pipeline completed, but the handoff context could not be injected or saved."),

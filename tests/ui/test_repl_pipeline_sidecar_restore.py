@@ -62,7 +62,8 @@ def test_normal_handoff_save_failure_does_not_switch_or_append(repl_for_sidecar_
 
     result = repl_for_sidecar_restore._handoff_pipeline_to_normal(terminal_event)
 
-    assert result == "failed"
+    assert result == "persistence_failed"
+    assert repl_for_sidecar_restore._pipeline_state_persistence_failed is True
     assert repl_for_sidecar_restore._runtime_mode == RunMode.PIPELINE
     pipeline.mark_normal_handoff.assert_called_once_with(status="succeeded", failed_reason=None)
     pipeline.build_normal_handoff_summary.assert_not_called()
@@ -72,6 +73,34 @@ def test_normal_handoff_save_failure_does_not_switch_or_append(repl_for_sidecar_
         "Pipeline state persistence failed. Normal chat handoff was not marked durable.",
         style="yellow",
     )
+
+
+def test_finalize_handoff_persistence_failure_keeps_pipeline_paused(repl_for_sidecar_restore):
+    from iac_code.pipeline.config import RunMode
+
+    terminal_event = PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=1.0,
+        data={"total_steps": 1},
+    )
+    pipeline = MagicMock()
+    pipeline.should_switch_to_normal.return_value = True
+    pipeline.mark_normal_handoff.side_effect = PipelineStatePersistenceError(
+        "pipeline state persistence failed during save_normal_handoff"
+    )
+    pipeline.pause_agent_loops = MagicMock()
+    pipeline.mark_user_aborted = MagicMock()
+    repl_for_sidecar_restore._runtime_mode = RunMode.PIPELINE
+    repl_for_sidecar_restore._pipeline = pipeline
+
+    repl_for_sidecar_restore._finalize_pipeline_after_render(terminal_event)
+
+    assert repl_for_sidecar_restore._runtime_mode == RunMode.PIPELINE
+    assert repl_for_sidecar_restore._pipeline is pipeline
+    assert repl_for_sidecar_restore._pipeline_state_persistence_failed is True
+    pipeline.pause_agent_loops.assert_called_once_with()
+    pipeline.mark_user_aborted.assert_not_called()
 
 
 def test_finalize_persistence_failure_event_does_not_mark_user_aborted(repl_for_sidecar_restore):
