@@ -1201,6 +1201,25 @@ async def test_publish_ask_user_question_maps_to_input_required_snapshot(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_pipeline_input_received_is_not_enqueued_when_metadata_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
+        raise OSError("journal locked")
+
+    monkeypatch.setattr(publisher.journal, "append", fail_append)
+    monkeypatch.setattr(publisher.snapshot_store, "save", lambda _snapshot: False)
+
+    result = await publisher.publish_manual("input_received", "pipeline")
+
+    assert result is None
+    assert queue.events == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("failed", "expected_state"),
     [

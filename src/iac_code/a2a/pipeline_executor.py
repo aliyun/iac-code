@@ -1519,9 +1519,10 @@ def cancel_waiting_input_task_from_sidecar(
     ):
         handoff_envelope["sequence"] = int(envelope.get("sequence") or 0) + 1
     try:
-        journal.append(envelope)
+        events_to_append = [envelope]
         if handoff_envelope is not None:
-            journal.append(handoff_envelope)
+            events_to_append.append(handoff_envelope)
+        journal.append_many(events_to_append, durable=True)
         snapshot_store.save(reduce_pipeline_events(journal.read_all_repairing_tail()))
     except Exception:
         logger.warning("Failed to persist waiting A2A pipeline cancellation", exc_info=True)

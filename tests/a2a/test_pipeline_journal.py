@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 
 
@@ -52,6 +54,25 @@ def test_append_many_sorts_group_events_with_regular_events(tmp_path) -> None:
     journal.append_many([_event(1, "evt-cancel"), _event(2, "evt-handoff")], durable=True)
 
     assert [event["eventId"] for event in journal.read_all()] == ["evt-cancel", "evt-handoff", "evt-after"]
+
+
+@pytest.mark.parametrize("write_method", ["append", "append_many"])
+def test_durable_append_fsyncs_parent_directory_when_journal_is_created(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    write_method: str,
+) -> None:
+    journal = A2APipelineJournal(tmp_path / "pipeline")
+    calls = []
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_journal.fsync_parent_dir", calls.append, raising=False)
+
+    if write_method == "append":
+        journal.append(_event(1, "evt-1"), durable=True)
+    else:
+        journal.append_many([_event(1, "evt-1"), _event(2, "evt-2")], durable=True)
+
+    assert calls == [journal.path]
 
 
 def test_invalid_json_lines_are_skipped(tmp_path) -> None:

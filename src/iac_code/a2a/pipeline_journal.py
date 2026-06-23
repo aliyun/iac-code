@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from iac_code.utils.state_io import fsync_parent_dir
+
 logger = logging.getLogger(__name__)
 _EVENT_GROUP_RECORD_TYPE = "event_group"
 _EVENT_GROUP_RECORD_KEY = "__iac_code_record_type"
@@ -24,6 +26,7 @@ class A2APipelineJournal:
 
     def append(self, event: dict[str, Any], durable: bool = False) -> None:
         self.pipeline_dir.mkdir(parents=True, exist_ok=True)
+        created = not self.path.exists()
         safe_event = to_json_safe(event)
         try:
             line = json.dumps(safe_event, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
@@ -35,12 +38,15 @@ class A2APipelineJournal:
             handle.flush()
             if durable:
                 os.fsync(handle.fileno())
+        if durable and created:
+            fsync_parent_dir(self.path)
 
     def append_many(self, events: list[dict[str, Any]], durable: bool = False) -> None:
         if not events:
             return
 
         self.pipeline_dir.mkdir(parents=True, exist_ok=True)
+        created = not self.path.exists()
         safe_events = []
         for event in events:
             safe_event = to_json_safe(event)
@@ -59,6 +65,8 @@ class A2APipelineJournal:
             handle.flush()
             if durable:
                 os.fsync(handle.fileno())
+        if durable and created:
+            fsync_parent_dir(self.path)
 
     def read_all(self) -> list[dict[str, Any]]:
         return self._read_all(strict=False)

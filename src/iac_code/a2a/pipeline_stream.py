@@ -33,6 +33,7 @@ _RECOVERY_SEMANTIC_EVENT_TYPES = {
     "candidate_step_completed",
     "candidate_step_failed",
     "input_required",
+    "input_received",
     "pipeline_completed",
     "pipeline_failed",
     "pipeline_canceled",

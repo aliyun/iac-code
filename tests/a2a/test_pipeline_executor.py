@@ -3460,6 +3460,63 @@ def test_waiting_input_task_id_from_sidecar_accepts_candidate_selection(tmp_path
     assert waiting_input_task_id_from_sidecar(cwd=str(cwd), session_id=session_id, context_id=context_id) == "task-1"
 
 
+def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a.pipeline_executor import cancel_waiting_input_task_from_sidecar
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    session_id = "session-ctx-1"
+    context_id = "ctx-1"
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": "task-1",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "input-confirm_and_select-1",
+            "kind": "candidate_selection",
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+        },
+    }
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    append_many_calls = []
+    original_append_many = A2APipelineJournal.append_many
+
+    def recording_append_many(self, events, durable: bool = False):
+        append_many_calls.append(([event["eventType"] for event in events], durable))
+        return original_append_many(self, events, durable=durable)
+
+    monkeypatch.setattr(A2APipelineJournal, "append_many", recording_append_many)
+
+    canceled = cancel_waiting_input_task_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+        task_id="task-1",
+        reason="user canceled",
+    )
+
+    assert canceled is True
+    assert append_many_calls[-1] == (["pipeline_canceled", "pipeline_handoff_ready"], True)
+    events = A2APipelineJournal(pipeline_dir).read_all()
+    assert [event["eventType"] for event in events[-2:]] == ["pipeline_canceled", "pipeline_handoff_ready"]
+
+
 @pytest.mark.asyncio
 async def test_executor_recovers_pending_ask_from_journal_when_snapshot_is_missing(
     monkeypatch: pytest.MonkeyPatch,
