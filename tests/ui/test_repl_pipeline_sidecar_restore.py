@@ -406,6 +406,28 @@ async def test_corrupt_sidecar_starts_fresh(monkeypatch, repl_for_sidecar_restor
 
 
 @pytest.mark.asyncio
+async def test_confirm_pipeline_resume_handles_corrupt_meta(tmp_path, repl_for_sidecar_restore):
+    meta_path = tmp_path / "meta.yaml"
+    meta_path.write_text("[broken", encoding="utf-8")
+
+    choice = await repl_for_sidecar_restore._confirm_pipeline_resume(meta_path)
+
+    assert choice == "discard"
+    repl_for_sidecar_restore.renderer.print_system_message.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_confirm_pipeline_resume_discards_non_mapping_meta(tmp_path, repl_for_sidecar_restore):
+    meta_path = tmp_path / "meta.yaml"
+    meta_path.write_text("- not\n- metadata\n", encoding="utf-8")
+
+    choice = await repl_for_sidecar_restore._confirm_pipeline_resume(meta_path)
+
+    assert choice == "discard"
+    repl_for_sidecar_restore.renderer.print_system_message.assert_called()
+
+
+@pytest.mark.asyncio
 async def test_discarded_sidecar_starts_fresh_without_restore(monkeypatch, repl_for_sidecar_restore):
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     pipeline = MagicMock()

@@ -2667,7 +2667,18 @@ class InlineREPL:
                 git_branch=self.current_git_branch(),
             )
         except Exception as exc:
-            pipeline.mark_normal_handoff(status="failed", failed_reason=str(exc))
+            try:
+                pipeline.mark_normal_handoff(status="failed", failed_reason=str(exc))
+            except Exception as persistence_exc:
+                logger.opt(exception=True).warning(
+                    "Pipeline handoff failure metadata persistence failed: {}",
+                    persistence_exc,
+                )
+                self.renderer.print_system_message(
+                    _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
+                    style="yellow",
+                )
+                return "failed"
             logger.opt(exception=True).warning("Pipeline-to-normal handoff injection failed: {}", exc)
             self.renderer.print_system_message(
                 _("Pipeline completed. Normal chat is active, but the handoff context could not be injected or saved."),
@@ -2675,7 +2686,15 @@ class InlineREPL:
             )
             return "failed"
         else:
-            pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
+            try:
+                pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
+            except Exception as exc:
+                logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
+                self.renderer.print_system_message(
+                    _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
+                    style="yellow",
+                )
+                return "failed"
             self.renderer.print_system_message(
                 _("Pipeline completed. Normal chat is now active."),
                 style="green",
@@ -4631,7 +4650,23 @@ class InlineREPL:
         from iac_code.pipeline.display_names import display_step_name
         from iac_code.ui.components.select import InputOption, Select, SelectLayout, TextOption
 
-        meta = _yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+        try:
+            loaded = _yaml.safe_load(meta_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, UnicodeDecodeError, _yaml.YAMLError) as exc:
+            self.renderer.print_system_message(
+                _("Could not read pipeline state metadata: {reason}").format(reason=str(exc) or type(exc).__name__),
+                style="yellow",
+            )
+            return "discard"
+        if loaded is None:
+            loaded = {}
+        if not isinstance(loaded, dict):
+            self.renderer.print_system_message(
+                _("Pipeline state metadata is invalid; continuing as normal chat."),
+                style="yellow",
+            )
+            return "discard"
+        meta = loaded
         current_step = display_step_name(str(meta.get("current_step", "?")))
 
         title = _("Found pipeline state in this session (paused at: {step}).").format(step=current_step)

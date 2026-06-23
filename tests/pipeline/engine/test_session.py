@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 
 import pytest
 import yaml
@@ -107,6 +108,27 @@ def test_session_save_failure_reraises_without_lower_layer_warning(session, capl
         for record in caplog.records
         if record.name == "iac_code.pipeline.engine.session" and record.levelno >= logging.WARNING
     ]
+
+
+def test_sidecar_yaml_uses_atomic_state_write(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_atomic_write_text(path, content, *, durable=True, replace_attempts=3, encoding="utf-8"):
+        calls.append((Path(path).name, durable))
+        Path(path).write_text(content, encoding=encoding)
+
+    monkeypatch.setattr("iac_code.pipeline.engine.session.atomic_write_text", fake_atomic_write_text)
+
+    session = PipelineSession(tmp_path / "pipeline")
+    session.save_running_sync(
+        "step",
+        {"current_index": 0, "rollback_count": 0, "step_statuses": {"step": "running"}},
+        {},
+        {"pipeline_name": "test", "step_ids": ["step"], "sub_pipeline_step_ids": {}, "pipeline_fingerprint": "fp"},
+    )
+
+    assert ("context.yaml", True) in calls
+    assert ("meta.yaml", True) in calls
 
 
 class TestSaveRollback:

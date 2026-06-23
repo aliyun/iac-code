@@ -120,6 +120,15 @@ class FailingSavePipelineSession(RecordingPipelineSession):
         raise OSError("sidecar unavailable")
 
 
+class FailingAfterAdvancePipelineSession(RecordingPipelineSession):
+    async def save_running(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("running_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        if current_step == "b" and reason == "advanced from a":
+            raise OSError("sidecar unavailable")
+
+
 class CapturingPipelineSession(RecordingPipelineSession):
     def __init__(self):
         super().__init__()
@@ -350,14 +359,14 @@ async def test_user_input_required_saves_waiting_input(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sidecar_save_failure_does_not_abort_pipeline(tmp_path):
-    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
-    runner.session = FailingSavePipelineSession()
+async def test_sidecar_save_failure_stops_before_next_step(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingAfterAdvancePipelineSession()
     executed_steps = []
 
     async def fake_execute(step, context, session_id, user_message=None, **kwargs):
         executed_steps.append(step.step_id)
-        conclusion = {"user_prompt": "choose", "options": ["one"]}
+        conclusion = {"value": step.step_id}
         context.set_conclusion(step.conclusion_field, conclusion)
         yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
 
@@ -369,8 +378,21 @@ async def test_sidecar_save_failure_does_not_abort_pipeline(tmp_path):
 
     assert executed_steps == ["a"]
     assert any(
-        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and "pipeline state persistence failed" in str(event.data).lower()
+        for event in events
     )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED and event.step_id == "a"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_STARTED and event.step_id == "b"
+        for event in events
+    )
+    assert runner.state_machine.current_step.step_id == "b"
+    assert ("running_attempted", "b", 1, "advanced from a") in runner.session.calls
     assert runner.sidecar_status is None
 
 
@@ -380,7 +402,8 @@ async def test_sidecar_save_failure_emits_sidecar_failed_telemetry(tmp_path):
     runner.session = FailingSavePipelineSession()
     runner._observability.sidecar_failed = MagicMock()
 
-    await runner._save_running("a", reason="step started")
+    with pytest.raises(RuntimeError, match="pipeline state persistence failed during save_running"):
+        await runner._save_running("a", reason="step started")
 
     runner._observability.sidecar_failed.assert_called_once_with(
         operation="save_running",
@@ -404,7 +427,8 @@ async def test_real_sidecar_save_failure_logs_once_at_runner_boundary(tmp_path, 
     monkeypatch.setattr(runner.session, "_atomic_write_yaml", fail_write)
     caplog.set_level(logging.WARNING)
 
-    await runner._save_running("a", reason="step started")
+    with pytest.raises(RuntimeError, match="pipeline state persistence failed during save_running"):
+        await runner._save_running("a", reason="step started")
 
     sidecar_records = [record for record in caplog.records if "pipeline sidecar" in record.getMessage()]
     assert len(sidecar_records) == 1
@@ -465,7 +489,7 @@ async def test_continue_from_sidecar_continues_without_user_prompt(tmp_path):
     assert seen_user_messages == [None]
 
 
-def test_sync_sidecar_save_failure_does_not_abort_hard_interrupt(tmp_path):
+def test_sync_sidecar_save_failure_raises_after_hard_interrupt_boundary(tmp_path):
     from iac_code.pipeline.engine.interrupt import InterruptVerdict
 
     runner = _build_two_step_runner(tmp_path)
@@ -473,11 +497,11 @@ def test_sync_sidecar_save_failure_does_not_abort_hard_interrupt(tmp_path):
     runner._observability.sidecar_failed = MagicMock()
     runner.state_machine.advance()
 
-    result = runner.apply_hard_interrupt(
-        InterruptVerdict(action="hard_interrupt", reason="changed mind", rollback_target="a")
-    )
+    with pytest.raises(RuntimeError, match="pipeline state persistence failed during save_rollback_sync"):
+        runner.apply_hard_interrupt(
+            InterruptVerdict(action="hard_interrupt", reason="changed mind", rollback_target="a")
+        )
 
-    assert result is True
     assert runner.state_machine.current_step.step_id == "a"
     assert any(call[0] == "rollback_sync_attempted" for call in runner.session.calls)
     assert runner.sidecar_status is None

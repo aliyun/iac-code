@@ -61,6 +61,10 @@ _REAL_RESTORE_FAILURE_REASONS = {
 }
 
 
+class PipelineStatePersistenceError(RuntimeError):
+    """Raised when recovery-critical pipeline state cannot be persisted."""
+
+
 def _string_answer_value(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
@@ -780,7 +784,10 @@ class PipelineRunner:
         self, verdict: InterruptVerdict, *, user_input: PipelineUserInput
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         if verdict.paused:
-            yield await self._save_and_emit_interrupt_pause(verdict)
+            try:
+                yield await self._save_and_emit_interrupt_pause(verdict)
+            except PipelineStatePersistenceError as exc:
+                yield self._persistence_failure_event(exc)
             return
         if verdict.action == "hard_interrupt":
             async for event in self._continue_after_sidecar_hard_interrupt(verdict, source_input=user_input):
@@ -796,10 +803,14 @@ class PipelineRunner:
     async def _continue_after_sidecar_hard_interrupt(
         self, verdict: InterruptVerdict, *, source_input: PipelineUserInput | None = None
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
-        if source_input is not None and source_input.has_images:
-            parent_rollback = self.apply_hard_interrupt(verdict, source_input=source_input)
-        else:
-            parent_rollback = self.apply_hard_interrupt(verdict)
+        try:
+            if source_input is not None and source_input.has_images:
+                parent_rollback = self.apply_hard_interrupt(verdict, source_input=source_input)
+            else:
+                parent_rollback = self.apply_hard_interrupt(verdict)
+        except PipelineStatePersistenceError as exc:
+            yield self._persistence_failure_event(exc)
+            return
         if self.sidecar_status == "failed":
             current_step = getattr(self.state_machine, "current_step", None)
             yield PipelineEvent(
@@ -1240,6 +1251,40 @@ class PipelineRunner:
             return False
         return bool(self._transcript_storage.load(self._cwd, transcript_id))
 
+    def _record_sidecar_save_failure(self, status: str, operation: str, exc: Exception) -> None:
+        self._sidecar_status = None
+        observability = getattr(self, "_observability", None)
+        if observability is not None:
+            failure = public_error_from_exception(exc)
+            observability.sidecar_failed(
+                operation=operation,
+                status=status,
+                error_type=failure.details["type"],
+                error_summary=failure.summary,
+                error_id=failure.error_id,
+            )
+        logger.warning(
+            "Failed to persist pipeline sidecar during %s (pipeline=%s, session_id=%s, status=%s)",
+            operation,
+            getattr(getattr(self, "_loaded", None), "name", ""),
+            getattr(self, "_session_id", ""),
+            status,
+            exc_info=True,
+        )
+
+    def _persistence_failure_event(self, exc: PipelineStatePersistenceError) -> PipelineEvent:
+        current_step = getattr(self.state_machine, "current_step", None)
+        return PipelineEvent(
+            type=PipelineEventType.STEP_FAILED,
+            step_id=getattr(current_step, "step_id", None),
+            timestamp=time.time(),
+            data={
+                "error": "Pipeline state persistence failed.",
+                "error_summary": "Pipeline state persistence failed.",
+                "error_details": {"type": "PipelineStatePersistenceError"},
+            },
+        )
+
     async def _try_save_sidecar(
         self,
         status: str,
@@ -1249,52 +1294,16 @@ class PipelineRunner:
         try:
             await save()
         except Exception as exc:
-            self._sidecar_status = None
-            observability = getattr(self, "_observability", None)
-            if observability is not None:
-                failure = public_error_from_exception(exc)
-                observability.sidecar_failed(
-                    operation=operation,
-                    status=status,
-                    error_type=failure.details["type"],
-                    error_summary=failure.summary,
-                    error_id=failure.error_id,
-                )
-            logger.warning(
-                "Failed to persist pipeline sidecar during %s (pipeline=%s, session_id=%s, status=%s)",
-                operation,
-                getattr(getattr(self, "_loaded", None), "name", ""),
-                getattr(self, "_session_id", ""),
-                status,
-                exc_info=True,
-            )
-            return
+            self._record_sidecar_save_failure(status, operation, exc)
+            raise PipelineStatePersistenceError(f"pipeline state persistence failed during {operation}") from exc
         self._sidecar_status = status
 
     def _try_save_sidecar_sync(self, status: str, operation: str, save: Callable[[], None]) -> None:
         try:
             save()
         except Exception as exc:
-            self._sidecar_status = None
-            observability = getattr(self, "_observability", None)
-            if observability is not None:
-                failure = public_error_from_exception(exc)
-                observability.sidecar_failed(
-                    operation=operation,
-                    status=status,
-                    error_type=failure.details["type"],
-                    error_summary=failure.summary,
-                    error_id=failure.error_id,
-                )
-            logger.warning(
-                "Failed to persist pipeline sidecar during %s (pipeline=%s, session_id=%s, status=%s)",
-                operation,
-                getattr(getattr(self, "_loaded", None), "name", ""),
-                getattr(self, "_session_id", ""),
-                status,
-                exc_info=True,
-            )
-            return
+            self._record_sidecar_save_failure(status, operation, exc)
+            raise PipelineStatePersistenceError(f"pipeline state persistence failed during {operation}") from exc
         self._sidecar_status = status
 
     async def _save_running(self, current_step: str, reason: str | None = None) -> None:
@@ -1794,7 +1803,11 @@ class PipelineRunner:
             {"type": "pipeline_init", "pipeline_type": self._loaded.name},
         )
         self._set_current_step_user_input(pipeline_input)
-        await self._save_running(self.state_machine.current_step.step_id, reason="pipeline started")
+        try:
+            await self._save_running(self.state_machine.current_step.step_id, reason="pipeline started")
+        except PipelineStatePersistenceError as exc:
+            yield self._persistence_failure_event(exc)
+            return
         self._observability.pipeline_started(
             total_steps=self.state_machine.total_steps,
             step_names=list(self.state_machine._order),
@@ -2828,10 +2841,18 @@ class PipelineRunner:
 
             if resume_current_step:
                 step_attempt = self._current_step_attempt(step.step_id)
-                await self._save_running(step.step_id, reason="resumed from user input")
+                try:
+                    await self._save_running(step.step_id, reason="resumed from user input")
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
             else:
                 step_attempt = self._next_step_attempt(step.step_id)
-                await self._save_running(step.step_id, reason="step started")
+                try:
+                    await self._save_running(step.step_id, reason="step started")
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
                 self._observability.step_started(
                     step_id=step.step_id,
                     step_index=step_index,
@@ -2883,7 +2904,11 @@ class PipelineRunner:
                         error_type="StepFailed",
                         extra_details={"step_id": step.step_id},
                     )
-                    await self._save_failed(step.step_id, str(exc) or type(exc).__name__)
+                    try:
+                        await self._save_failed(step.step_id, str(exc) or type(exc).__name__)
+                    except PipelineStatePersistenceError as persistence_exc:
+                        yield self._persistence_failure_event(persistence_exc)
+                        return
                     self._observability.step_failed(
                         step_id=step.step_id,
                         duration_ms=self._observability.duration_ms(step_started_at),
@@ -2918,6 +2943,14 @@ class PipelineRunner:
                     break
 
                 duration_ms = self._observability.duration_ms(step_started_at)
+                self._mark_attempt_status(attempt.get("attempt_id"), "completed")
+                completed_step_id = step.step_id
+                self.state_machine.advance()
+                try:
+                    await self._save_after_advance(completed_step_id)
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
                 self._observability.step_completed(
                     step_id=step.step_id,
                     duration_ms=duration_ms,
@@ -2937,7 +2970,6 @@ class PipelineRunner:
                     ui_mode=step.ui_mode,
                     duration_ms=duration_ms,
                 )
-                self._mark_attempt_status(attempt.get("attempt_id"), "completed")
                 if step.forward is None:
                     emit_pipeline_completed(failed=False, early_exit=False)
                 parallel_result = self.context.get_conclusion(step.conclusion_field)
@@ -2953,9 +2985,6 @@ class PipelineRunner:
                         "conclusion": parallel_result,
                     },
                 )
-                completed_step_id = step.step_id
-                self.state_machine.advance()
-                await self._save_after_advance(completed_step_id)
                 continue
 
             with self._observability.step_span(
@@ -3037,7 +3066,11 @@ class PipelineRunner:
                     extra_details={"step_id": step.step_id},
                 )
                 error_summary = failure.summary
-                await self._save_failed(step.step_id, reason)
+                try:
+                    await self._save_failed(step.step_id, reason)
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
                 self._observability.step_failed(
                     step_id=step.step_id,
                     duration_ms=self._observability.duration_ms(step_started_at),
@@ -3123,8 +3156,12 @@ class PipelineRunner:
                 matched = actual is ec_value if isinstance(ec_value, bool) else actual == ec_value
                 if matched:
                     logger.info("Exit condition met for step %s: %s=%r", step.step_id, ec_field, ec_value)
+                    try:
+                        await self._save_completed(step.step_id, reason="exit condition met")
+                    except PipelineStatePersistenceError as exc:
+                        yield self._persistence_failure_event(exc)
+                        return
                     emit_step_success_observability()
-                    await self._save_completed(step.step_id, reason="exit condition met")
                     emit_pipeline_completed(failed=False, early_exit=True)
                     yield step_completed_event
                     yield PipelineEvent(
@@ -3158,7 +3195,11 @@ class PipelineRunner:
                         step.step_id,
                         valid_targets,
                     )
-                    await self._save_failed(step.step_id, str(exc))
+                    try:
+                        await self._save_failed(step.step_id, str(exc))
+                    except PipelineStatePersistenceError as persistence_exc:
+                        yield self._persistence_failure_event(persistence_exc)
+                        return
                     self._observability.step_failed(
                         step_id=step.step_id,
                         duration_ms=self._observability.duration_ms(step_started_at),
@@ -3209,7 +3250,6 @@ class PipelineRunner:
                 self._create_parent_attempt(target)
                 target_field = next((s.conclusion_field for s in self._loaded.steps if s.step_id == target), None)
                 stale = self.context.mark_stale(target_field) if target_field else []
-                emit_step_success_observability()
                 self._set_current_step_user_input(None)
                 self._mark_rollback_cleanup_required(
                     step,
@@ -3217,7 +3257,12 @@ class PipelineRunner:
                     reason,
                     from_attempt_id=current_attempt_id if isinstance(current_attempt_id, str) else None,
                 )
-                await self._save_rollback(step.step_id, target, reason)
+                try:
+                    await self._save_rollback(step.step_id, target, reason)
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
+                emit_step_success_observability()
                 self._observability.rollback(
                     from_step=step.step_id,
                     to_step=target,
@@ -3245,18 +3290,26 @@ class PipelineRunner:
                 continue
 
             if step.auto_advance or resume_current_step:
+                completed_step_id = step.step_id
+                self.state_machine.advance()
+                try:
+                    await self._save_after_advance(completed_step_id)
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
                 emit_step_success_observability()
                 if step.forward is None:
                     emit_pipeline_completed(failed=False, early_exit=False)
                 yield step_completed_event
-                completed_step_id = step.step_id
-                self.state_machine.advance()
-                await self._save_after_advance(completed_step_id)
             else:
+                self._set_current_step_user_input(None)
+                try:
+                    await self._save_waiting_input(step.step_id)
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
                 emit_step_success_observability(funnel_status=None)
                 yield step_completed_event
-                self._set_current_step_user_input(None)
-                await self._save_waiting_input(step.step_id)
                 conclusion = step_result.conclusion or {}
                 prompt = conclusion.get("user_prompt", "")
                 options = conclusion.get("options", [])
@@ -3585,7 +3638,6 @@ class PipelineRunner:
                     state["agent_loop"] = sub_executors[i].current_step_executor_agent_loop
                     if isinstance(event, PipelineEvent):
                         _normalize_failed_sub_pipeline_completed_event(event)
-                    await event_queue.put(event)
                     if (
                         isinstance(event, PipelineEvent)
                         and event.type == PipelineEventType.SUB_PIPELINE_COMPLETED
@@ -3602,8 +3654,11 @@ class PipelineRunner:
                         state["error"] = event.data.get("error")
                         state["error_details"] = event.data.get("error_details")
                         await save_candidate_failed(i, state)
+                    await event_queue.put(event)
             except asyncio.CancelledError:
                 logger.debug("Candidate %d cancelled", i)
+            except PipelineStatePersistenceError as exc:
+                await event_queue.put(exc)
             except Exception as exc:
                 failure = public_error_from_exception(exc)
                 error_summary = failure.summary
@@ -3710,6 +3765,9 @@ class PipelineRunner:
             total = len(candidates)
             while done_count < total:
                 event = await event_queue.get()
+                if isinstance(event, PipelineStatePersistenceError):
+                    yield self._persistence_failure_event(event)
+                    return
                 if isinstance(event, CandidateSentinel):
                     idx = event.candidate_index
                     if idx in self._pending_candidate_restarts:
