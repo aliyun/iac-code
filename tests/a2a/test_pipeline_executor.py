@@ -30,6 +30,45 @@ RETRY_TEXT = "A temporary error occurred. Please retry."
 AUTH_TEXT = "Authentication required. Configure credentials and retry."
 
 
+def test_active_sidecar_mismatch_error_exposes_jsonrpc_data() -> None:
+    from iac_code.a2a.pipeline_executor import _active_sidecar_mismatch_error
+
+    error = _active_sidecar_mismatch_error(
+        recoverable_task_id="task-owner",
+        context_id="ctx-1",
+        sidecar_status="running",
+    )
+
+    assert error.code == -32602
+    assert error.data == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": "running",
+    }
+    assert "task-owner" in error.message
+
+
+def test_active_sidecar_mismatch_error_serializes_raw_jsonrpc_data() -> None:
+    from a2a.server.request_handlers.response_helpers import build_error_response
+
+    from iac_code.a2a.pipeline_executor import _active_sidecar_mismatch_error
+
+    error = _active_sidecar_mismatch_error(
+        recoverable_task_id="task-owner",
+        context_id="ctx-1",
+        sidecar_status="waiting_input",
+    )
+
+    response = build_error_response("req-1", error)
+
+    assert response["error"]["code"] == -32602
+    assert response["error"]["data"] == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": "waiting_input",
+    }
+
+
 def dump(event):
     return MessageToDict(event, preserving_proto_field_name=False)
 
@@ -884,12 +923,10 @@ async def test_executor_clears_previous_task_terminal_sidecar_and_runs_new_task(
 @pytest.mark.parametrize(
     ("sidecar_status", "event_type", "event_status"),
     [
-        ("waiting_input", "input_required", "waiting_input"),
-        ("running", "pipeline_started", "working"),
         ("completed", "pipeline_completed", "completed"),
     ],
 )
-async def test_executor_replaces_restored_pipeline_when_sidecar_owner_mismatches(
+async def test_executor_replaces_terminal_restored_pipeline_when_sidecar_owner_mismatches(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     sidecar_status: str,
@@ -964,6 +1001,102 @@ async def test_executor_replaces_restored_pipeline_when_sidecar_owner_mismatches
     assert fresh_pipeline.run_prompts == ["new request"]
     record = await store.get_task_record("task-new")
     assert "".join(record.output_text) == "fresh output"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sidecar_status", "event_type", "event_status"),
+    [
+        ("waiting_input", "input_required", "waiting_input"),
+        ("running", "pipeline_started", "working"),
+    ],
+)
+async def test_executor_rejects_active_restored_pipeline_owner_mismatch_without_clearing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    sidecar_status: str,
+    event_type: str,
+    event_status: str,
+) -> None:
+    from iac_code.a2a.pipeline_executor import (
+        IacCodeA2APipelineExecutor,
+        RecoverablePipelineInvalidParamsError,
+    )
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    session_dir = tmp_path / "sidecar"
+    owner_event = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-owner",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": event_type,
+        "scope": "pipeline",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-owner",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": event_status,
+        "data": {"prompt": "owner choice"} if event_type == "input_required" else {},
+    }
+    journal = A2APipelineJournal(session_dir)
+    journal.append(owner_event)
+    A2APipelineSnapshotStore(session_dir).save(reduce_pipeline_events([owner_event]))
+    restored_pipeline = FakePipeline(
+        [
+            TextDeltaEvent(text="stale restored output"),
+            PipelineEvent(type=PipelineEventType.PIPELINE_COMPLETED, step_id=None, timestamp=1717821601.0, data={}),
+        ],
+        session_dir=session_dir,
+    )
+    restored_pipeline.sidecar_status = sidecar_status
+    created_pipelines: list[FakePipeline] = []
+
+    def fake_create_pipeline(*args, **kwargs):
+        created_pipelines.append(restored_pipeline)
+        return restored_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            context=FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            event_queue=FakeEventQueue(),
+            task=await store.get_or_create_task(task_id="task-new", context_id="ctx-1"),
+            task_id="task-new",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            prompt="new request",
+        )
+
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": sidecar_status,
+    }
+    assert len(created_pipelines) == 1
+    assert restored_pipeline.clear_sidecar_calls == 0
+    assert restored_pipeline.run_prompts == []
+    assert journal.read_all() == [owner_event]
 
 
 @pytest.mark.asyncio
@@ -1711,10 +1844,12 @@ async def test_executor_does_not_resume_nonterminal_sidecar_when_a2a_state_is_te
 
 
 @pytest.mark.asyncio
-async def test_executor_clears_previous_task_waiting_sidecar_and_runs_new_task(
+async def test_executor_rejects_previous_task_waiting_sidecar_without_starting_new_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     session_dir = tmp_path / "sidecar"
     old_input = {
@@ -1747,19 +1882,25 @@ async def test_executor_clears_previous_task_waiting_sidecar_and_runs_new_task(
 
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
 
-    await executor.execute(
-        FakeRequestContext(
-            task_id="task-new",
-            context_id="ctx-1",
-            text="new request",
-            metadata={"iac_code": {"cwd": str(tmp_path)}},
-        ),
-        FakeEventQueue(),
-    )
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
 
-    assert fake_pipeline.clear_sidecar_calls == 1
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-old",
+        "contextId": "ctx-1",
+        "sidecarStatus": "waiting_input",
+    }
+    assert fake_pipeline.clear_sidecar_calls == 0
     assert fake_pipeline.resume_prompts == []
-    assert fake_pipeline.run_prompts == ["new request"]
+    assert fake_pipeline.run_prompts == []
 
 
 @pytest.mark.asyncio
@@ -1777,6 +1918,8 @@ async def test_executor_does_not_attach_current_sidecar_to_historical_task(
     event_type: str,
     event_status: str,
 ) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     session_dir = tmp_path / "sidecar"
     old_event = {
@@ -1821,21 +1964,27 @@ async def test_executor_does_not_attach_current_sidecar_to_historical_task(
 
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
 
-    await executor.execute(
-        FakeRequestContext(
-            task_id="task-old",
-            context_id="ctx-1",
-            text="old followup",
-            metadata={"iac_code": {"cwd": str(tmp_path)}},
-        ),
-        FakeEventQueue(),
-    )
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-old",
+                context_id="ctx-1",
+                text="old followup",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
 
-    assert fake_pipeline.clear_sidecar_calls == 1
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-current",
+        "contextId": "ctx-1",
+        "sidecarStatus": sidecar_status,
+    }
+    assert fake_pipeline.clear_sidecar_calls == 0
     assert fake_pipeline.resume_prompts == []
     assert fake_pipeline.continue_calls == 0
-    assert fake_pipeline.run_prompts == ["old followup"]
-    assert journal.read_all()[-1]["taskId"] == "task-old"
+    assert fake_pipeline.run_prompts == []
+    assert journal.read_all()[-1]["taskId"] == "task-current"
 
 
 @pytest.mark.asyncio
@@ -2000,10 +2149,12 @@ async def test_executor_routes_waiting_input_pause_confirmation_through_interrup
 
 
 @pytest.mark.asyncio
-async def test_executor_clears_previous_task_running_sidecar_and_runs_new_task(
+async def test_executor_rejects_previous_task_running_sidecar_without_starting_new_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     session_dir = tmp_path / "sidecar"
     old_running = {
@@ -2036,19 +2187,25 @@ async def test_executor_clears_previous_task_running_sidecar_and_runs_new_task(
 
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
 
-    await executor.execute(
-        FakeRequestContext(
-            task_id="task-new",
-            context_id="ctx-1",
-            text="new request",
-            metadata={"iac_code": {"cwd": str(tmp_path)}},
-        ),
-        FakeEventQueue(),
-    )
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
 
-    assert fake_pipeline.clear_sidecar_calls == 1
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-old",
+        "contextId": "ctx-1",
+        "sidecarStatus": "running",
+    }
+    assert fake_pipeline.clear_sidecar_calls == 0
     assert fake_pipeline.continue_calls == 0
-    assert fake_pipeline.run_prompts == ["new request"]
+    assert fake_pipeline.run_prompts == []
 
 
 @pytest.mark.asyncio
@@ -3515,6 +3672,63 @@ def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
     assert append_many_calls[-1] == (["pipeline_canceled", "pipeline_handoff_ready"], True)
     events = A2APipelineJournal(pipeline_dir).read_all()
     assert [event["eventType"] for event in events[-2:]] == ["pipeline_canceled", "pipeline_handoff_ready"]
+
+
+def test_cancel_waiting_input_sidecar_returns_false_when_durable_group_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a.pipeline_executor import cancel_waiting_input_task_from_sidecar
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    session_id = "session-ctx-1"
+    context_id = "ctx-1"
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": "task-1",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "input-confirm_and_select-1",
+            "kind": "candidate_selection",
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+        },
+    }
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    def fail_append_many(self, events, durable: bool = False):
+        assert durable is True
+        assert [event["eventType"] for event in events] == ["pipeline_canceled", "pipeline_handoff_ready"]
+        raise OSError("journal locked")
+
+    monkeypatch.setattr(A2APipelineJournal, "append_many", fail_append_many)
+
+    canceled = cancel_waiting_input_task_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+        task_id="task-1",
+        reason="user canceled",
+    )
+
+    assert canceled is False
+    assert [event["eventType"] for event in A2APipelineJournal(pipeline_dir).read_all()] == ["input_required"]
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None
+    assert snapshot["status"] == "waiting_input"
 
 
 @pytest.mark.asyncio

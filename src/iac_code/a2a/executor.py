@@ -106,6 +106,33 @@ def _cleanup_ledger_path_from_handoff(handoff: dict[str, Any]) -> str | None:
     return path if isinstance(path, str) and path else None
 
 
+def _cleanup_payload_from_private_ledger_or_unavailable(
+    *,
+    ledger_path: Path,
+    public_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    ledger = CleanupLedger(ledger_path)
+    try:
+        ledger_exists = ledger_path.exists()
+    except OSError:
+        ledger_exists = False
+    if not ledger_exists or ledger.load_failed():
+        return {
+            "status": "unavailable",
+            "statusMessage": _("Cleanup state unavailable. Inspect the session file and cloud resources manually."),
+        }
+    prompt = ledger.build_pending_prompt()
+    if prompt is None:
+        return {"status": "completed", "resourceCount": 0}
+    return {
+        "status": "pending",
+        "resourceCount": len(prompt.resources),
+        "statusMessage": prompt.status_message,
+        "prompt": prompt.prompt,
+        "ledgerPath": str(ledger_path),
+    }
+
+
 def _session_has_user_message(
     messages: list[AgentMessage],
     *,
@@ -172,6 +199,10 @@ def _cleanup_ledger_for_a2a_normal_chat(*, cwd: str, session_id: str) -> Cleanup
     if ledger.load_failed():
         return None
     return ledger if ledger.pending_resources() else None
+
+
+def _default_cleanup_ledger_path(*, cwd: str, session_id: str) -> Path:
+    return SessionStorage().session_dir(cwd, session_id) / "pipeline" / "cleanup.yaml"
 
 
 def _ensure_cleanup_prompt_in_session(*, cwd: str, session_id: str, ledger: CleanupLedger, runtime: Any) -> None:
@@ -1262,8 +1293,19 @@ class IacCodeA2AExecutor(AgentExecutor):
         if not isinstance(handoff, dict):
             return
         summary = handoff.get("summary")
-        cleanup_prompt = _cleanup_prompt_from_handoff(handoff)
-        cleanup_ledger_path = _cleanup_ledger_path_from_handoff(handoff)
+        cleanup_payload = None
+        data = handoff.get("data")
+        if isinstance(data, dict) and isinstance(data.get("cleanup"), dict):
+            cleanup_payload = _cleanup_payload_from_private_ledger_or_unavailable(
+                ledger_path=_default_cleanup_ledger_path(cwd=cwd, session_id=ctx.session_id),
+                public_snapshot=snapshot,
+            )
+        cleanup_prompt = cleanup_payload.get("prompt") if isinstance(cleanup_payload, dict) else None
+        cleanup_ledger_path = cleanup_payload.get("ledgerPath") if isinstance(cleanup_payload, dict) else None
+        if not isinstance(cleanup_prompt, str) or not cleanup_prompt:
+            cleanup_prompt = None
+        if not isinstance(cleanup_ledger_path, str) or not cleanup_ledger_path:
+            cleanup_ledger_path = None
         if (not isinstance(summary, str) or not summary) and cleanup_prompt is None:
             return
 

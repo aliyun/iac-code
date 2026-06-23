@@ -18,6 +18,19 @@ from urllib.request import Request, urlopen
 import pytest
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "a2a" / "debugger.py"
+RECOVERABLE_JSONRPC_ERROR = {
+    "jsonrpc": "2.0",
+    "id": "1",
+    "error": {
+        "code": -32602,
+        "message": "Pipeline already running.",
+        "data": {
+            "recoverableTaskId": "task-owner",
+            "contextId": "ctx-1",
+            "sidecarStatus": "running",
+        },
+    },
+}
 
 
 def load_debugger_module():
@@ -1986,6 +1999,11 @@ class JsonRpcErrorTargetHandler(BaseHTTPRequestHandler):
                 "error": {
                     "code": -32602,
                     "message": "Current model text-only-model does not support image input.",
+                    "data": {
+                        "recoverableTaskId": "task-owner",
+                        "contextId": "ctx-1",
+                        "sidecarStatus": "running",
+                    },
                 },
             }
         ).encode("utf-8")
@@ -1994,6 +2012,16 @@ class JsonRpcErrorTargetHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def test_jsonrpc_error_message_includes_recoverable_task_id() -> None:
+    debugger = load_debugger_module()
+
+    message = debugger._jsonrpc_error_message(RECOVERABLE_JSONRPC_ERROR)
+
+    assert message is not None
+    assert "Pipeline already running." in message
+    assert "task-owner" in message
 
 
 def test_message_stream_route_forwards_sse_and_uses_stream_payload() -> None:
@@ -2180,10 +2208,12 @@ def test_message_stream_route_converts_jsonrpc_error_to_sse_error(tmp_path: Path
     assert status == 200
     assert "data: " in body
     assert "Current model text-only-model does not support image input." in body
+    assert "task-owner" in body
     records = read_jsonl(tmp_path / "sse-events.jsonl")
     assert records[-1]["parsedEventType"] == "error"
     assert records[-1]["raw"]["type"] == "error"
     assert records[-1]["raw"]["body"]["error"]["code"] == -32602
+    assert records[-1]["raw"]["body"]["error"]["data"]["recoverableTaskId"] == "task-owner"
 
 
 def test_message_stream_route_ignores_client_disconnect_without_traceback(capsys: pytest.CaptureFixture[str]) -> None:

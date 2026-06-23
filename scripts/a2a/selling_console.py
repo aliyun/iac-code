@@ -177,6 +177,28 @@ def create_server(config: SellingConsoleConfig) -> ThreadingHTTPServer:
                     server_url, payload = a2a_debugger._message_stream_body(body)
                     try:
                         with a2a_debugger._open_sse_stream(server_url, payload) as response:
+                            headers = getattr(response, "headers", {})
+                            content_type = ""
+                            if hasattr(headers, "get"):
+                                content_type = str(headers.get("Content-Type", "")).lower()
+                            if content_type and "text/event-stream" not in content_type:
+                                raw = response.read()
+                                data, _text = a2a_debugger._decode_json_text(raw)
+                                message = a2a_debugger._jsonrpc_error_message(data)
+                                if message:
+                                    a2a_debugger._send_sse_event(
+                                        self,
+                                        200,
+                                        {
+                                            "type": "error",
+                                            "error": message,
+                                            "statusCode": response.status,
+                                            "body": data,
+                                        },
+                                    )
+                                    return
+                                a2a_debugger._send_sse_error(self, 502, "Target server returned a non-SSE response")
+                                return
                             self.send_response(response.status)
                             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                             self.end_headers()

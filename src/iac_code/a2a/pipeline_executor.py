@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
+from a2a.utils.errors import InvalidParamsError
+from jsonrpc.jsonrpc2 import JSONRPC20Response
 
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
@@ -32,6 +34,7 @@ from iac_code.agent.message import Message as AgentMessage
 from iac_code.i18n import _
 from iac_code.pipeline import create_pipeline, discover_pipelines
 from iac_code.pipeline.config import get_pipeline_name
+from iac_code.pipeline.engine.cleanup import CleanupLedger
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
 from iac_code.pipeline.engine.loader import load_pipeline_dir
@@ -71,6 +74,58 @@ def _retry_text() -> str:
 
 def _auth_error_text() -> str:
     return _("Authentication required. Configure credentials and retry.")
+
+
+def _install_jsonrpc_error_data_passthrough() -> None:
+    try:
+        from a2a.server.request_handlers import response_helpers
+        from a2a.server.routes import jsonrpc_dispatcher
+    except Exception:
+        return
+    current = response_helpers.build_error_response
+    if getattr(current, "_iac_code_recoverable_data_passthrough", False):
+        return
+    original = current
+
+    def build_error_response_with_passthrough(request_id: str | int | None, error: Any) -> dict[str, Any]:
+        if getattr(error, "jsonrpc_error_data_passthrough", False):
+            payload = {
+                "code": int(getattr(error, "code", -32603)),
+                "message": str(error),
+            }
+            data = getattr(error, "data", None)
+            if data is not None:
+                payload["data"] = data
+            return JSONRPC20Response(error=payload, _id=request_id).data
+        return original(request_id, error)
+
+    setattr(build_error_response_with_passthrough, "_iac_code_recoverable_data_passthrough", True)
+    setattr(response_helpers, "build_error_response", build_error_response_with_passthrough)
+    setattr(jsonrpc_dispatcher, "build_error_response", build_error_response_with_passthrough)
+
+
+_install_jsonrpc_error_data_passthrough()
+
+
+class RecoverablePipelineInvalidParamsError(InvalidParamsError):
+    code = -32602
+    jsonrpc_error_data_passthrough = True
+
+
+def _active_sidecar_mismatch_error(
+    *,
+    recoverable_task_id: str,
+    context_id: str,
+    sidecar_status: str,
+) -> RecoverablePipelineInvalidParamsError:
+    return RecoverablePipelineInvalidParamsError(
+        _("Pipeline already running. Resume task {task_id}.").format(task_id=recoverable_task_id),
+        data={
+            "recoverableTaskId": recoverable_task_id,
+            "contextId": context_id,
+            "sidecarStatus": sidecar_status,
+        },
+    )
 
 
 @dataclass
@@ -362,6 +417,8 @@ class IacCodeA2APipelineExecutor:
                 )
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
                 self._record_state(task.state)
+            except RecoverablePipelineInvalidParamsError:
+                raise
             except Exception as exc:
                 await self._publish_exception_status(
                     event_queue,
@@ -806,10 +863,10 @@ class IacCodeA2APipelineExecutor:
         if status == "waiting_input":
             _raise_if_sidecar_restore_failed(pipeline, status)
             if not _sidecar_matches_task(publisher, task_id=task_id, context_id=context_id, sidecar_status=status):
-                pipeline = self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
-                return _SelectedPipelineStream(
-                    pipeline=pipeline,
-                    stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+                raise _active_sidecar_mismatch_error_from_publisher(
+                    publisher,
+                    context_id=context_id,
+                    sidecar_status=status,
                 )
             pending_ask = _pending_ask_input_from_sidecar(
                 publisher,
@@ -846,10 +903,10 @@ class IacCodeA2APipelineExecutor:
         if status == "running":
             _raise_if_sidecar_restore_failed(pipeline, status)
             if not _sidecar_matches_task(publisher, task_id=task_id, context_id=context_id, sidecar_status=status):
-                pipeline = self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
-                return _SelectedPipelineStream(
-                    pipeline=pipeline,
-                    stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+                raise _active_sidecar_mismatch_error_from_publisher(
+                    publisher,
+                    context_id=context_id,
+                    sidecar_status=status,
                 )
             pending_ask = _pending_ask_input_from_sidecar(
                 publisher,
@@ -1556,17 +1613,21 @@ def _waiting_input_cancel_handoff_event(
         context_snapshot=context_snapshot,
         include_fields=include_fields,
     )
+    data: dict[str, Any] = {
+        "action": "switch_to_normal",
+        "targetMode": "normal",
+        "outcome": "canceled",
+        "summary": summary,
+        "reason": reason,
+    }
+    cleanup = _pipeline_cleanup_handoff_data_from_session(cwd=cwd, session_id=session_id, public_snapshot=snapshot)
+    if cleanup is not None:
+        data["cleanup"] = cleanup
     return translator.manual_event(
         "pipeline_handoff_ready",
         "pipeline",
         status="canceled",
-        data={
-            "action": "switch_to_normal",
-            "targetMode": "normal",
-            "outcome": "canceled",
-            "summary": summary,
-            "reason": reason,
-        },
+        data=data,
     )
 
 
@@ -1742,13 +1803,44 @@ def _pipeline_cleanup_handoff_data(pipeline: Any) -> dict[str, Any] | None:
         return None
     try:
         ledger = cleanup_ledger()
+    except Exception:
+        logger.warning("Failed to build A2A pipeline cleanup handoff data", exc_info=True)
+        return None
+    return _pipeline_cleanup_handoff_data_from_ledger(ledger)
+
+
+def _pipeline_cleanup_handoff_data_from_session(
+    *,
+    cwd: str,
+    session_id: str,
+    public_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    try:
+        ledger_path = SessionStorage().session_dir(cwd, session_id) / "pipeline" / "cleanup.yaml"
+    except Exception:
+        logger.warning("Failed to locate A2A pipeline cleanup ledger for handoff", exc_info=True)
+        return None
+    if not ledger_path.exists():
+        snapshot_cleanup = public_snapshot.get("cleanup") if isinstance(public_snapshot, dict) else None
+        return _cleanup_state_unavailable_payload() if isinstance(snapshot_cleanup, dict) else None
+    return _pipeline_cleanup_handoff_data_from_ledger(CleanupLedger(ledger_path))
+
+
+def _pipeline_cleanup_handoff_data_from_ledger(ledger: Any) -> dict[str, Any] | None:
+    try:
+        ledger_path = getattr(ledger, "path", None)
+        if ledger_path is not None and not Path(ledger_path).exists():
+            return _cleanup_state_unavailable_payload()
+        load_failed = getattr(ledger, "load_failed", None)
+        if callable(load_failed) and load_failed():
+            return _cleanup_state_unavailable_payload()
         build_pending_prompt = getattr(ledger, "build_pending_prompt", None)
         if not callable(build_pending_prompt):
             return None
         prompt = build_pending_prompt()
     except Exception:
         logger.warning("Failed to build A2A pipeline cleanup handoff data", exc_info=True)
-        return None
+        return _cleanup_state_unavailable_payload()
     if prompt is None:
         return None
 
@@ -1760,6 +1852,13 @@ def _pipeline_cleanup_handoff_data(pipeline: Any) -> dict[str, Any] | None:
         "resourceCount": len(resources),
         "statusMessage": str(getattr(prompt, "status_message", "") or ""),
         "resources": [_cleanup_resource_handoff_data(resource) for resource in resources],
+    }
+
+
+def _cleanup_state_unavailable_payload() -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "statusMessage": _("Cleanup state unavailable. Inspect the session file and cloud resources manually."),
     }
 
 
@@ -2008,6 +2107,22 @@ def _sidecar_matches_task(
                 return True
         return status in _RUNNING_A2A_STATUSES
     return False
+
+
+def _active_sidecar_mismatch_error_from_publisher(
+    publisher: PipelineA2AEventPublisher,
+    *,
+    context_id: str,
+    sidecar_status: str,
+) -> RecoverablePipelineInvalidParamsError:
+    owner = _current_sidecar_owner(publisher, context_id=context_id)
+    recoverable_task_id = owner.task_id if owner is not None and owner.task_id else "unknown"
+    recoverable_context_id = owner.context_id if owner is not None and owner.context_id else context_id
+    return _active_sidecar_mismatch_error(
+        recoverable_task_id=recoverable_task_id,
+        context_id=recoverable_context_id,
+        sidecar_status=sidecar_status,
+    )
 
 
 def _current_sidecar_owner(publisher: PipelineA2AEventPublisher, *, context_id: str) -> _TaskContextOwner | None:

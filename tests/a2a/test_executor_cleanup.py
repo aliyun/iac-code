@@ -13,6 +13,7 @@ from iac_code.a2a.executor import (
     _a2a_deferred_cleanup_prompts_path,
     _append_a2a_deferred_cleanup_prompt,
     _cleanup_ledger_for_a2a_normal_chat,
+    _cleanup_payload_from_private_ledger_or_unavailable,
     _cleanup_publisher_for_a2a_normal_chat,
     _cleanup_resource_states,
     _load_a2a_deferred_cleanup_prompts,
@@ -49,6 +50,25 @@ class _TaskStore:
 
     async def get_context_record(self, context_id: str) -> SimpleNamespace:
         return self._record
+
+
+def test_a2a_handoff_does_not_reconstruct_cleanup_prompt_from_public_snapshot(tmp_path: Path) -> None:
+    snapshot = {
+        "cleanup": {
+            "resources": [{"provider": "ros", "resourceId": "stack-123", "resourceType": "stack"}],
+            "status": "pending",
+        }
+    }
+
+    cleanup = _cleanup_payload_from_private_ledger_or_unavailable(
+        ledger_path=tmp_path / "missing-cleanup.yaml",
+        public_snapshot=snapshot,
+    )
+
+    assert cleanup["status"] == "unavailable"
+    assert "statusMessage" in cleanup
+    assert "prompt" not in cleanup
+    assert "resources" not in cleanup
 
 
 def test_normal_chat_cleanup_ledger_ignores_observed_only_ledger(

@@ -23,6 +23,19 @@ import pytest
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "a2a" / "selling_console.py"
 SCRIPTS_README_PATH = Path(__file__).resolve().parents[2] / "scripts" / "README.md"
 NODE_RELATIVE_PATH = Path(".cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+RECOVERABLE_JSONRPC_ERROR = {
+    "jsonrpc": "2.0",
+    "id": "1",
+    "error": {
+        "code": -32602,
+        "message": "Pipeline already running.",
+        "data": {
+            "recoverableTaskId": "task-owner",
+            "contextId": "ctx-1",
+            "sidecarStatus": "running",
+        },
+    },
+}
 
 
 def bundled_node_candidates() -> list[Path]:
@@ -368,6 +381,30 @@ def test_message_stream_route_forwards_sse_and_cwd_metadata() -> None:
     payload = json.loads(SseTargetHandler.requests[0]["body"])
     assert payload["method"] == "SendStreamingMessage"
     assert payload["params"]["message"]["metadata"] == {"iac_code": {"cwd": "/workspace/demo"}}
+
+
+def test_message_stream_route_surfaces_recoverable_task_id_from_jsonrpc_error() -> None:
+    console = load_module()
+    JsonTargetHandler.response_status = 200
+    JsonTargetHandler.response_body = RECOVERABLE_JSONRPC_ERROR
+    JsonTargetHandler.response_headers = {"Content-Type": "application/json"}
+    JsonTargetHandler.requests = []
+
+    with serve_handler(JsonTargetHandler) as target:
+        running = start_console(console)
+        try:
+            status, text, content_type = post_raw(
+                f"{running.url}/api/message/stream",
+                {"serverUrl": target, "cwd": "/workspace/demo", "prompt": "部署一个静态网站"},
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "event-stream" in content_type
+    assert "data: " in text
+    assert "Pipeline already running." in text
+    assert "task-owner" in text
 
 
 def test_message_stream_route_keeps_read_errors_in_sse_body(monkeypatch: pytest.MonkeyPatch) -> None:

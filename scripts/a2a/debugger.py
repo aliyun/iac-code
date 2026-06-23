@@ -4859,11 +4859,31 @@ def _jsonrpc_error_message(value: Any) -> str | None:
     error = value.get("error")
     if isinstance(error, dict):
         message = error.get("message")
+        recoverable_task_id = _recoverable_task_id_from_jsonrpc_error(error)
         if isinstance(message, str) and message:
+            if recoverable_task_id:
+                return f"{message} Resume task {recoverable_task_id}."
             return message
         return json.dumps(error, ensure_ascii=False)
     if isinstance(error, str) and error:
         return error
+    return None
+
+
+def _recoverable_task_id_from_jsonrpc_error(error: dict[str, Any]) -> str | None:
+    data = error.get("data")
+    if isinstance(data, dict):
+        task_id = data.get("recoverableTaskId")
+        return task_id if isinstance(task_id, str) and task_id else None
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            metadata = item.get("metadata")
+            if isinstance(metadata, dict):
+                task_id = metadata.get("recoverableTaskId")
+                if isinstance(task_id, str) and task_id:
+                    return task_id
     return None
 
 
