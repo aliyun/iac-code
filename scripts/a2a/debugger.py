@@ -4861,13 +4861,17 @@ def _jsonrpc_error_message(value: Any) -> str | None:
         message = error.get("message")
         recoverable_task_id = _recoverable_task_id_from_jsonrpc_error(error)
         if isinstance(message, str) and message:
-            if recoverable_task_id:
+            if recoverable_task_id and not _message_has_resume_guidance(message, recoverable_task_id):
                 return f"{message} Resume task {recoverable_task_id}."
             return message
         return json.dumps(error, ensure_ascii=False)
     if isinstance(error, str) and error:
         return error
     return None
+
+
+def _message_has_resume_guidance(message: str, task_id: str) -> bool:
+    return f"resume task {task_id}".casefold() in message.casefold()
 
 
 def _recoverable_task_id_from_jsonrpc_error(error: dict[str, Any]) -> str | None:

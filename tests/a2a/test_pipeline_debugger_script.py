@@ -2024,6 +2024,25 @@ def test_jsonrpc_error_message_includes_recoverable_task_id() -> None:
     assert "task-owner" in message
 
 
+def test_jsonrpc_error_message_does_not_duplicate_resume_guidance() -> None:
+    debugger = load_debugger_module()
+    value = {
+        "error": {
+            "code": -32602,
+            "message": "Pipeline already running. Resume task task-owner.",
+            "data": {
+                "recoverableTaskId": "task-owner",
+                "contextId": "ctx-1",
+                "sidecarStatus": "running",
+            },
+        }
+    }
+
+    message = debugger._jsonrpc_error_message(value)
+
+    assert message == "Pipeline already running. Resume task task-owner."
+
+
 def test_message_stream_route_forwards_sse_and_uses_stream_payload() -> None:
     debugger = load_debugger_module()
     SseTargetHandler.requests = []

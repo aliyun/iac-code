@@ -14,6 +14,7 @@ from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.metrics import NoOpA2AMetrics
+from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
@@ -2206,6 +2207,78 @@ async def test_executor_rejects_previous_task_running_sidecar_without_starting_n
     assert fake_pipeline.clear_sidecar_calls == 0
     assert fake_pipeline.continue_calls == 0
     assert fake_pipeline.run_prompts == []
+
+
+@pytest.mark.asyncio
+async def test_executor_rejected_active_sidecar_mismatch_does_not_persist_new_working_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    session_dir = tmp_path / "sidecar"
+    owner_event = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-owner-running",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "pipeline_started",
+        "scope": "pipeline",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-owner",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "working",
+        "data": {},
+    }
+    A2APipelineJournal(session_dir).append(owner_event)
+    A2APipelineSnapshotStore(session_dir).save(reduce_pipeline_events([owner_event]))
+    fake_pipeline = FakePipeline(
+        [
+            TextDeltaEvent(text="new output"),
+            PipelineEvent(type=PipelineEventType.PIPELINE_COMPLETED, step_id=None, timestamp=1717821601.0, data={}),
+        ],
+        session_dir=session_dir,
+    )
+    fake_pipeline.sidecar_status = "running"
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=task_store, model="qwen3.6-plus")
+
+    with pytest.raises(RecoverablePipelineInvalidParamsError):
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
+
+    assert fake_pipeline.clear_sidecar_calls == 0
+    assert fake_pipeline.run_prompts == []
+    rejected_task = persistence.load_task("task-new")
+    assert rejected_task is not None
+    assert rejected_task.state != "working"
+    assert [task.task_id for task in persistence.list_tasks() if task.state == "working"] == []
+
+
+def test_cleanup_handoff_missing_ledger_ignores_empty_public_cleanup_snapshot(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _pipeline_cleanup_handoff_data_from_session
+
+    cleanup = _pipeline_cleanup_handoff_data_from_session(
+        cwd=str(tmp_path),
+        session_id="session-empty-cleanup",
+        public_snapshot={"cleanup": {"resourceCount": 0, "resources": [], "status": ""}},
+    )
+
+    assert cleanup is None
 
 
 @pytest.mark.asyncio

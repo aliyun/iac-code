@@ -279,11 +279,7 @@ class IacCodeA2APipelineExecutor:
 
         try:
             owner_task = asyncio.current_task()
-            ctx.active_task_id = task.task_id
-            task.active_task = owner_task
-            task.state = TASK_STATE_WORKING
-            self._task_store.mirror_task(task)
-            self._task_store.mirror_context(ctx)
+            task_persistence_started = False
 
             pipeline = None
             publisher: PipelineA2AEventPublisher | None = None
@@ -342,6 +338,12 @@ class IacCodeA2APipelineExecutor:
                     pipeline_runtime.pipeline = pipeline
                     self._task_store.mirror_context(ctx)
                 stream = selected.stream
+                ctx.active_task_id = task.task_id
+                task.active_task = owner_task
+                task.state = TASK_STATE_WORKING
+                task_persistence_started = True
+                self._task_store.mirror_task(task)
+                self._task_store.mirror_context(ctx)
                 stream_had_events = False
                 with use_session_id(ctx.session_id):
                     while True:
@@ -420,6 +422,7 @@ class IacCodeA2APipelineExecutor:
             except RecoverablePipelineInvalidParamsError:
                 raise
             except Exception as exc:
+                task_persistence_started = True
                 await self._publish_exception_status(
                     event_queue,
                     task=task,
@@ -434,8 +437,9 @@ class IacCodeA2APipelineExecutor:
                     if ctx.active_task_id == task.task_id:
                         ctx.active_task_id = None
                 ctx.touch()
-                task.touch()
-                self._task_store.mirror_task(task)
+                if task_persistence_started:
+                    task.touch()
+                    self._task_store.mirror_task(task)
                 self._task_store.mirror_context(ctx)
                 await _flush_telemetry_safely()
         finally:
@@ -1822,7 +1826,9 @@ def _pipeline_cleanup_handoff_data_from_session(
         return None
     if not ledger_path.exists():
         snapshot_cleanup = public_snapshot.get("cleanup") if isinstance(public_snapshot, dict) else None
-        return _cleanup_state_unavailable_payload() if isinstance(snapshot_cleanup, dict) else None
+        if _public_cleanup_snapshot_has_pending_evidence(snapshot_cleanup):
+            return _cleanup_state_unavailable_payload()
+        return None
     return _pipeline_cleanup_handoff_data_from_ledger(CleanupLedger(ledger_path))
 
 
@@ -1860,6 +1866,21 @@ def _cleanup_state_unavailable_payload() -> dict[str, Any]:
         "status": "unavailable",
         "statusMessage": _("Cleanup state unavailable. Inspect the session file and cloud resources manually."),
     }
+
+
+def _public_cleanup_snapshot_has_pending_evidence(cleanup: Any) -> bool:
+    if not isinstance(cleanup, dict):
+        return False
+    resources = cleanup.get("resources")
+    if isinstance(resources, list) and len(resources) > 0:
+        return True
+    resource_count = cleanup.get("resourceCount")
+    if isinstance(resource_count, int) and resource_count > 0:
+        return True
+    status = cleanup.get("status")
+    if isinstance(status, str) and status in {"pending", "started", "in_progress", "failed", "unavailable"}:
+        return True
+    return False
 
 
 def _cleanup_resource_handoff_data(resource: Any) -> dict[str, Any]:

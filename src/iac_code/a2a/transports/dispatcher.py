@@ -44,7 +44,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 
 from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
-from iac_code.a2a.app import normalize_v03_jsonrpc_version
+from iac_code.a2a.app import install_v03_jsonrpc_error_data_passthrough, normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.executor import IacCodeA2AExecutor
@@ -521,6 +521,7 @@ def _task_is_input_required(task: Task) -> bool:
 
 def _create_dispatch_app(handler: DefaultRequestHandler) -> Starlette:
     jsonrpc_endpoint = create_jsonrpc_routes(handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
+    install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint)
 
     async def handle_jsonrpc(request):
         await normalize_v03_jsonrpc_version(request)

@@ -487,6 +487,14 @@ def _pipeline_event(sequence: int, event_id: str) -> dict:
     }
 
 
+def _sse_json_events(body: str) -> list[dict]:
+    events: list[dict] = []
+    for line in body.splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line.removeprefix("data: ")))
+    return events
+
+
 def _pipeline_pending_ask_event() -> dict:
     event = _pipeline_event(1, "evt-ask")
     event["eventType"] = "input_required"
@@ -788,6 +796,88 @@ def test_streaming_v03_method_with_v10_header_returns_sse(monkeypatch, tmp_path)
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "hello from mixed streaming route" in body
     assert loop.prompts == ["hello mixed"]
+
+
+def test_streaming_v03_active_sidecar_mismatch_preserves_recoverable_error_data(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-owner", context_id="ctx-1", state="working"))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-new", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    owner_event = _pipeline_event(1, "evt-owner")
+    owner_event["taskId"] = "task-owner"
+    A2APipelineJournal(pipeline_dir).append(owner_event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([owner_event]))
+
+    class RunningPipeline:
+        pipeline_name = "selling"
+        sidecar_status = "running"
+        handoff_enabled = False
+
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(
+                session_dir=SessionStorage().session_dir(str(tmp_path), session_id) / "pipeline"
+            )
+
+        async def run(self, prompt: str):  # pragma: no cover - regression asserts this is not reached
+            yield TextDeltaEvent(text=f"unexpected {prompt}")
+
+        def clear_sidecar(self) -> None:  # pragma: no cover - regression asserts this is not reached
+            raise AssertionError("active sidecar should not be cleared")
+
+    fake_runtime = SimpleNamespace(provider_manager=object(), tool_registry=object())
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: fake_runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: RunningPipeline())
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "message/stream",
+                "params": {
+                    "message": {
+                        "messageId": "msg-new",
+                        "taskId": "task-new",
+                        "contextId": "ctx-1",
+                        "role": "user",
+                        "parts": [{"kind": "text", "text": "new request"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ) as response:
+            body = response.read().decode()
+
+    events = _sse_json_events(body)
+    assert response.status_code == 200
+    assert events
+    error = events[-1]["error"]
+    assert error["code"] == -32602
+    assert error["data"] == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": "running",
+    }
 
 
 def test_pipeline_streaming_starts_with_task_before_status_update(monkeypatch, tmp_path: Path) -> None:
