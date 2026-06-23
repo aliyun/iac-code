@@ -531,6 +531,10 @@ class PipelineRunner:
                     exc,
                     exc_info=True,
                 )
+                raise PipelineStatePersistenceError(
+                    "pipeline state persistence failed during record_observed_cleanup_resource",
+                    step_id=step.step_id,
+                ) from exc
 
     def _mark_rollback_cleanup_required(
         self,
@@ -1299,6 +1303,13 @@ class PipelineRunner:
                 "error_details": {"type": "PipelineStatePersistenceError"},
             },
         )
+
+    @staticmethod
+    def _is_persistence_failure_event(event: object) -> bool:
+        if not isinstance(event, PipelineEvent) or event.type != PipelineEventType.STEP_FAILED:
+            return False
+        error_details = event.data.get("error_details", {})
+        return isinstance(error_details, dict) and error_details.get("type") == "PipelineStatePersistenceError"
 
     async def _try_save_sidecar(
         self,
@@ -2938,6 +2949,8 @@ class PipelineRunner:
                             emit_step_completed_event=False,
                         ):
                             yield event
+                            if self._is_persistence_failure_event(event):
+                                return
                 except Exception as exc:
                     failure = public_error(
                         message=str(exc) or type(exc).__name__,
@@ -3084,11 +3097,15 @@ class PipelineRunner:
                         step_result = event
                     else:
                         if isinstance(event, ResourceObservedEvent):
-                            self._handle_resource_observed(
-                                step,
-                                event,
-                                attempt_id=attempt.get("attempt_id"),
-                            )
+                            try:
+                                self._handle_resource_observed(
+                                    step,
+                                    event,
+                                    attempt_id=attempt.get("attempt_id"),
+                                )
+                            except PipelineStatePersistenceError as exc:
+                                yield self._persistence_failure_event(exc)
+                                return
                         yield event
 
             if (

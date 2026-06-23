@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from iac_code.agent.message import Message, ToolResultBlock
+from iac_code.pipeline.engine.cleanup import CleanupLedger, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
@@ -17,6 +18,7 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_storage import SessionStorage
+from iac_code.types.stream_events import ResourceObservedEvent
 
 
 def _selling_dir() -> Path:
@@ -519,6 +521,63 @@ async def test_sidecar_save_failure_emits_sidecar_failed_telemetry(tmp_path):
         error_type="OSError",
         error_summary="sidecar unavailable",
         error_id=ANY,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resource_observed_save_failure_stops_before_continuing(tmp_path, monkeypatch):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = PipelineSession(tmp_path / "session" / "pipeline")
+    step = runner.state_machine.current_step
+
+    def on_resource_observed(ctx, event, *, ledger, step_id, attempt_id):
+        return ObservedResource(
+            provider=event.provider,
+            resource_type=event.resource_type,
+            resource_id=event.resource_id,
+            resource_name=event.resource_name,
+            region_id=event.region_id,
+            source_step_id=step_id,
+            source_attempt_id=attempt_id,
+            observed_action=event.action,
+            observed_at=1.0,
+        )
+
+    def fail_record_observed(self, observed):
+        raise OSError("cleanup disk full")
+
+    step.on_resource_observed = on_resource_observed
+    monkeypatch.setattr(CleanupLedger, "record_observed", fail_record_observed)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield ResourceObservedEvent(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-123",
+            resource_name="demo",
+            region_id="cn-hangzhou",
+            action="CreateStack",
+        )
+        context.set_conclusion(step.conclusion_field, {"value": step.step_id})
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"value": step.step_id})
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "a"
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED and event.step_id == "a"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
     )
 
 
@@ -1408,6 +1467,42 @@ class TestParallelSubPipelineStep:
         assert not any(
             isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED for event in events
         )
+        assert ("running_attempted", "eval", 1, "parallel candidate failed") in runner.session.calls
+
+    @pytest.mark.asyncio
+    async def test_parallel_candidate_failure_save_failure_stops_outer_step(self, tmp_path):
+        runner = _build_parallel_runner(tmp_path)
+        runner.session = FailingCandidateFailedPipelineSession()
+
+        async def failing_execute_streaming(*args, **kwargs):
+            raise RuntimeError("candidate worker failed")
+            if False:
+                yield
+
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_sub_exec:
+            instance = MagicMock()
+            instance.execute_streaming = failing_execute_streaming
+            instance.current_step_executor_agent_loop = None
+            mock_sub_exec.return_value = instance
+
+            events = [event async for event in runner._continue_from_current()]
+
+        assert any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.STEP_FAILED
+            and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.STEP_COMPLETED
+            and event.step_id == "eval"
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+        )
+        assert not any(call[0] == "completed" for call in runner.session.calls)
         assert ("running_attempted", "eval", 1, "parallel candidate failed") in runner.session.calls
 
     @pytest.mark.asyncio

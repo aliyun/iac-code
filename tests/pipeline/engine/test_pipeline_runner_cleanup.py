@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 import yaml
 
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
-from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+from iac_code.pipeline.engine.pipeline_runner import PipelineRunner, PipelineStatePersistenceError
 from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec
 from iac_code.types.stream_events import ResourceObservedEvent
@@ -71,7 +72,7 @@ def test_runner_persists_resource_observed_returned_by_step_hook(tmp_path) -> No
     assert observed.source_attempt_id == "att_0001"
 
 
-def test_runner_logs_cleanup_observed_write_failure(tmp_path, monkeypatch, caplog) -> None:
+def test_runner_raises_cleanup_observed_write_failure(tmp_path, monkeypatch, caplog) -> None:
     runner = _runner(tmp_path)
 
     def on_resource_observed(ctx, event, *, ledger, step_id, attempt_id):
@@ -100,19 +101,21 @@ def test_runner_logs_cleanup_observed_write_failure(tmp_path, monkeypatch, caplo
     monkeypatch.setattr(CleanupLedger, "record_observed", fail_record_observed)
     caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
 
-    runner._handle_resource_observed(
-        step,
-        ResourceObservedEvent(
-            provider="ros",
-            resource_type="stack",
-            resource_id="stack-123",
-            resource_name="demo",
-            region_id="cn-hangzhou",
-            action="CreateStack",
-        ),
-        attempt_id="att_0001",
-    )
+    with pytest.raises(PipelineStatePersistenceError) as exc_info:
+        runner._handle_resource_observed(
+            step,
+            ResourceObservedEvent(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                resource_name="demo",
+                region_id="cn-hangzhou",
+                action="CreateStack",
+            ),
+            attempt_id="att_0001",
+        )
 
+    assert exc_info.value.step_id == "deploying"
     assert "Failed to persist observed cleanup resource" in caplog.text
     assert "step_id=deploying" in caplog.text
     assert "cleanup disk full" in caplog.text
