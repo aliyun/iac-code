@@ -37,6 +37,19 @@ class FakeSessionStorage:
         return self._path
 
 
+class FailingAppendMetaSessionStorage(FakeSessionStorage):
+    def __init__(self, fail_types: set[str] | None = None):
+        super().__init__()
+        self.fail_types = fail_types
+        self.append_attempts = []
+
+    def append_meta(self, cwd, session_id, meta):
+        self.append_attempts.append(meta)
+        if self.fail_types is None or meta.get("type") in self.fail_types:
+            raise OSError("session meta unavailable")
+        super().append_meta(cwd, session_id, meta)
+
+
 class DirectorySessionStorage(FakeSessionStorage):
     def __init__(self, root: Path):
         super().__init__()
@@ -179,7 +192,7 @@ class CapturingPipelineSession(RecordingPipelineSession):
         )
 
 
-def _build_two_step_runner(tmp_path, *, auto_advance_first=True):
+def _build_two_step_runner(tmp_path, *, auto_advance_first=True, storage=None):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "a.md").write_text("A", encoding="utf-8")
     (tmp_path / "prompts" / "b.md").write_text("B", encoding="utf-8")
@@ -210,7 +223,7 @@ def _build_two_step_runner(tmp_path, *, auto_advance_first=True):
         pipeline_dir=tmp_path,
         provider_manager=MagicMock(),
         base_tool_registry=MagicMock(),
-        session_storage=FakeSessionStorage(),
+        session_storage=storage or FakeSessionStorage(),
         session_id="test",
         cwd=str(tmp_path),
     )
@@ -656,6 +669,69 @@ async def test_initial_sidecar_save_failure_stops_before_pipeline_init_meta(tmp_
     assert not any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_STARTED for event in events
     )
+
+
+@pytest.mark.asyncio
+async def test_session_meta_append_failure_is_best_effort_for_completed_pipeline(tmp_path, caplog):
+    storage = FailingAppendMetaSessionStorage()
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner.run("start")]
+
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_STARTED for event in events
+    )
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert {meta["type"] for meta in storage.append_attempts} >= {"pipeline_init", "pipeline_step_complete"}
+    assert "Failed to append pipeline session metadata" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rollback_session_meta_append_failure_is_best_effort(tmp_path, caplog):
+    storage = FailingAppendMetaSessionStorage(fail_types={"pipeline_rollback"})
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    requested_rollback = False
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        nonlocal requested_rollback
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        rollback_request = None
+        if step.step_id == "b" and not requested_rollback:
+            requested_rollback = True
+            rollback_request = ("a", "retry")
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=rollback_request,
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.ROLLBACK_TRIGGERED for event in events
+    )
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert any(meta["type"] == "pipeline_rollback" for meta in storage.append_attempts)
+    assert "Failed to append pipeline session metadata during pipeline_rollback" in caplog.text
 
 
 @pytest.mark.asyncio

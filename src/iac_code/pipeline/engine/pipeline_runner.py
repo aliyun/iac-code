@@ -1299,6 +1299,19 @@ class PipelineRunner:
             exc_info=True,
         )
 
+    def _append_pipeline_session_meta_best_effort(self, meta: dict[str, Any], *, operation: str) -> None:
+        try:
+            self._session_storage.append_meta(self._cwd, self._session_id, meta)
+        except Exception:
+            logger.warning(
+                "Failed to append pipeline session metadata during %s (pipeline=%s, session_id=%s, meta_type=%s)",
+                operation,
+                getattr(getattr(self, "_loaded", None), "name", ""),
+                getattr(self, "_session_id", ""),
+                meta.get("type"),
+                exc_info=True,
+            )
+
     def _persistence_failure_event(self, exc: PipelineStatePersistenceError) -> PipelineEvent:
         step_id = exc.step_id
         try:
@@ -1861,10 +1874,9 @@ class PipelineRunner:
         except PipelineStatePersistenceError as exc:
             yield self._persistence_failure_event(exc)
             return
-        self._session_storage.append_meta(
-            self._cwd,
-            self._session_id,
+        self._append_pipeline_session_meta_best_effort(
             {"type": "pipeline_init", "pipeline_type": self._loaded.name},
+            operation="pipeline_init",
         )
         self._observability.pipeline_started(
             total_steps=self.state_machine.total_steps,
@@ -3203,8 +3215,9 @@ class PipelineRunner:
                         ui_mode=step.ui_mode,
                         duration_ms=duration_ms,
                     )
-                self._session_storage.append_meta(
-                    self._cwd, self._session_id, {"type": "pipeline_step_complete", "step_id": step.step_id}
+                self._append_pipeline_session_meta_best_effort(
+                    {"type": "pipeline_step_complete", "step_id": step.step_id},
+                    operation="pipeline_step_complete",
                 )
                 step_success_observed = True
 
@@ -3344,10 +3357,9 @@ class PipelineRunner:
                     rollback_scope="parent",
                     stale_fields=stale,
                 )
-                self._session_storage.append_meta(
-                    self._cwd,
-                    self._session_id,
+                self._append_pipeline_session_meta_best_effort(
                     {"type": "pipeline_rollback", "from": step.step_id, "to": target, "reason": reason},
+                    operation="pipeline_rollback",
                 )
                 yield step_completed_event
                 yield PipelineEvent(

@@ -3141,6 +3141,10 @@ class InlineREPL:
                                 and selection_result.type == PipelineEventType.PIPELINE_COMPLETED
                             ):
                                 return selection_result
+                            if isinstance(
+                                selection_result, PipelineEvent
+                            ) and self._is_pipeline_state_persistence_failure_event(selection_result):
+                                return selection_result
                             if self._pipeline_waiting_input:
                                 return None
                             if selection_result is True and self._pipeline:
@@ -3168,6 +3172,10 @@ class InlineREPL:
                                 isinstance(tabs_interrupted, PipelineEvent)
                                 and tabs_interrupted.type == PipelineEventType.PIPELINE_COMPLETED
                             ):
+                                return tabs_interrupted
+                            if isinstance(
+                                tabs_interrupted, PipelineEvent
+                            ) and self._is_pipeline_state_persistence_failure_event(tabs_interrupted):
                                 return tabs_interrupted
                             if self._pipeline_waiting_input:
                                 return None
@@ -3489,7 +3497,10 @@ class InlineREPL:
                         PipelineEventType.PIPELINE_COMPLETED,
                         PipelineEventType.ROLLBACK_TRIGGERED,
                     ):
-                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                        if (
+                            event.type == PipelineEventType.PIPELINE_COMPLETED
+                            or self._is_pipeline_state_persistence_failure_event(event)
+                        ):
                             terminal_event = event
                         break
 
@@ -3864,7 +3875,10 @@ class InlineREPL:
                         PipelineEventType.PIPELINE_COMPLETED,
                         PipelineEventType.STEP_FAILED,
                     ):
-                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                        if (
+                            event.type == PipelineEventType.PIPELINE_COMPLETED
+                            or self._is_pipeline_state_persistence_failure_event(event)
+                        ):
                             terminal_event = event
                         break
 

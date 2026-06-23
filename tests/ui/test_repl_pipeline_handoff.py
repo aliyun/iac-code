@@ -40,6 +40,18 @@ def _pipeline_completed_event(**data) -> PipelineEvent:
     )
 
 
+def _pipeline_persistence_failure_event(step_id: str) -> PipelineEvent:
+    return PipelineEvent(
+        type=PipelineEventType.STEP_FAILED,
+        step_id=step_id,
+        timestamp=time.time(),
+        data={
+            "error": "Pipeline state persistence failed.",
+            "error_details": {"type": "PipelineStatePersistenceError"},
+        },
+    )
+
+
 def _make_repl_for_handoff(
     terminal_event: PipelineEvent,
     *,
@@ -1746,6 +1758,79 @@ async def test_outer_stream_returns_parallel_tabs_terminal_event():
 
 
 @pytest.mark.asyncio
+async def test_outer_stream_returns_candidate_selection_persistence_failure_without_marking_completed():
+    from iac_code.ui.repl import InlineREPL
+
+    failure_event = _pipeline_persistence_failure_event("select")
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._pipeline = MagicMock()
+    repl._pipeline_step_names = []
+    repl._pipeline_completed_indices = set()
+    repl._update_pipeline_state_from_event = InlineREPL._update_pipeline_state_from_event.__get__(repl)
+    repl._render_pipeline_event = MagicMock()
+    repl._render_candidate_selection_tabs = AsyncMock(return_value=failure_event)
+    repl._restart_pipeline_stream_after_interrupt = AsyncMock(return_value=_empty_stream())
+
+    async def stream():
+        yield PipelineEvent(
+            type=PipelineEventType.PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={"step_names": ["select"]},
+        )
+        yield PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="select",
+            timestamp=time.time(),
+            data={"index": 1, "total": 1, "ui_mode": "candidate_selection"},
+        )
+
+    result = await repl._render_pipeline_stream(stream())
+
+    assert result is failure_event
+    assert repl._pipeline_completed_indices == set()
+
+
+@pytest.mark.asyncio
+async def test_outer_stream_returns_parallel_tabs_persistence_failure_without_marking_completed():
+    from iac_code.ui.repl import InlineREPL
+
+    failure_event = _pipeline_persistence_failure_event("parallel")
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._pipeline = MagicMock()
+    repl._pipeline_step_names = []
+    repl._pipeline_completed_indices = set()
+    repl._update_pipeline_state_from_event = InlineREPL._update_pipeline_state_from_event.__get__(repl)
+    repl._render_pipeline_event = MagicMock()
+    repl._render_parallel_tabs = AsyncMock(return_value=failure_event)
+    repl._restart_pipeline_stream_after_interrupt = AsyncMock(return_value=_empty_stream())
+
+    async def stream():
+        yield PipelineEvent(
+            type=PipelineEventType.PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={"step_names": ["parallel"]},
+        )
+        yield PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="parallel",
+            timestamp=time.time(),
+            data={
+                "index": 1,
+                "total": 1,
+                "ui_mode": "default",
+                "step_type": "parallel_sub_pipeline",
+            },
+        )
+
+    result = await repl._render_pipeline_stream(stream())
+
+    assert result is failure_event
+    assert repl._pipeline_completed_indices == set()
+
+
+@pytest.mark.asyncio
 async def test_render_parallel_tabs_returns_consumed_pipeline_completed_event(monkeypatch):
     from iac_code.ui.repl import InlineREPL
 
@@ -1773,3 +1858,87 @@ async def test_render_parallel_tabs_returns_consumed_pipeline_completed_event(mo
     result = await repl._render_parallel_tabs(stream())
 
     assert result is terminal_event
+
+
+@pytest.mark.asyncio
+async def test_render_candidate_selection_tabs_returns_consumed_persistence_failure_event(monkeypatch):
+    from iac_code.ui.repl import InlineREPL
+
+    failure_event = _pipeline_persistence_failure_event("select")
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.renderer = MagicMock()
+    repl.renderer.console = Console(file=StringIO(), width=120, force_terminal=True)
+    repl._pipeline = MagicMock()
+    repl._pipeline_waiting_input = False
+    repl._pipeline_display_recorder = None
+    repl._pipeline_state_persistence_failed = False
+
+    class FakeLive:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def update(self, *args, **kwargs):
+            pass
+
+    class FakeCapture:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read_key(self, timeout):
+            return None
+
+    monkeypatch.setattr("iac_code.ui.repl.Live", FakeLive)
+    monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", FakeCapture)
+
+    async def stream():
+        yield failure_event
+
+    result = await repl._render_candidate_selection_tabs(stream())
+
+    assert result is failure_event
+    assert repl._pipeline_state_persistence_failed is True
+
+
+@pytest.mark.asyncio
+async def test_render_parallel_tabs_returns_consumed_persistence_failure_event(monkeypatch):
+    from iac_code.ui.repl import InlineREPL
+
+    failure_event = _pipeline_persistence_failure_event("parallel")
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.renderer = MagicMock()
+    repl.renderer.console = Console(file=StringIO(), width=120, force_terminal=True)
+    repl._pipeline = MagicMock()
+    repl._pipeline_display_recorder = None
+    repl._pipeline_state_persistence_failed = False
+
+    class FakeLive:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def update(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(InlineREPL, "_create_parallel_live", lambda self: FakeLive(), raising=False)
+
+    async def stream():
+        yield failure_event
+
+    result = await repl._render_parallel_tabs(stream())
+
+    assert result is failure_event
+    assert repl._pipeline_state_persistence_failed is True
