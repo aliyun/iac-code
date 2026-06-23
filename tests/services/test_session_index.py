@@ -258,6 +258,16 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
         assert entry.title == prompt
         assert entry.auto_title == prompt
 
+    def test_user_prompt_mentioning_resources_to_clean_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "待清理资源怎么配置提醒？"
+        storage.append("/p", "resources-to-clean", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
+
     def test_legacy_cleanup_prompt_last_prompt_meta_is_ignored(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
         cwd = "/proj/cp-last-legacy"
