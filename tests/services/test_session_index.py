@@ -221,6 +221,16 @@ class TestSessionIndex:
         assert entry.title == prompt
         assert entry.auto_title == prompt
 
+    def test_user_prompt_mentioning_cleanup_required_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "What does cleanup required mean in Terraform?"
+        storage.append("/p", "cleanup-required", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
+
     def test_legacy_cleanup_prompt_last_prompt_meta_is_ignored(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
         cwd = "/proj/cp-last-legacy"

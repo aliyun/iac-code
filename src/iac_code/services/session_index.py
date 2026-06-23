@@ -26,9 +26,10 @@ from iac_code.utils.project_paths import (
 
 LITE_READ_BUF_SIZE = 64 * 1024
 _LEGACY_CLEANUP_PROMPT_MARKERS = (
-    "pipeline rollback",
-    "rollback cleanup",
-    "cleanup required",
+    "pipeline rollback cleanup required",
+    "rollback cleanup required",
+    "pipeline rollback 后仍需要清理",
+    "仍需要清理的云资源",
     "待清理资源",
     "回滚残留资源",
     "严格白名单",

@@ -2112,6 +2112,7 @@ class TestAgentLoopCompaction:
             "auto-compact-session",
             compacted_messages,
             git_branch="main",
+            preserve_cleanup_prompts=True,
         )
 
     async def test_auto_compact_records_response_usage(self, mock_provider, mock_registry, tmp_path):
@@ -2216,6 +2217,7 @@ class TestAgentLoopCompaction:
             "manual-compact-session",
             compacted_messages,
             git_branch="dev",
+            preserve_cleanup_prompts=True,
         )
 
     async def test_compact_records_response_usage(self, mock_provider, mock_registry, tmp_path):
