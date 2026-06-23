@@ -388,6 +388,7 @@ class AgentLoop:
             self._session_id,
             self.context_manager.get_messages(),
             git_branch=self._current_git_branch,
+            preserve_cleanup_prompts=True,
         )
 
     def _inject_recalled_memory_result(self, result: Any) -> bool:
@@ -1323,6 +1324,7 @@ class AgentLoop:
                         self._session_id,
                         msgs,
                         git_branch=self._current_git_branch,
+                        preserve_cleanup_prompts=True,
                     )
                 break
 

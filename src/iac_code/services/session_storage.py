@@ -25,12 +25,12 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from shutil import move
 from typing import Any
 
 from iac_code import __version__
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
+from iac_code.pipeline.engine.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.services.session_metadata import (
     SESSION_JSONL_FILENAME,
     SessionMetadata,
@@ -45,6 +45,7 @@ from iac_code.utils.project_paths import (
     get_session_path,
     is_conversation_session_file,
 )
+from iac_code.utils.state_io import append_jsonl_locked, atomic_write_text, safe_replace
 
 
 def _utc_now() -> str:
@@ -53,7 +54,7 @@ def _utc_now() -> str:
 
 def _cleanup_prompt_identity(message: Message) -> str:
     metadata = message.metadata
-    if metadata.get("type") == "pipeline_cleanup_prompt":
+    if metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE:
         metadata = {
             "type": metadata.get("type"),
             "source": metadata.get("source"),
@@ -151,8 +152,7 @@ class SessionStorage:
         path = self._session_path(cwd, session_id)
         ensure_private_dir(path.parent)
         data = self._stamp(message.to_dict(), cwd, session_id, git_branch)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        append_jsonl_locked(path, [data])
         ensure_private_file(path)
 
     def append_meta(self, cwd: str, session_id: str, meta_entry: dict[str, Any]) -> None:
@@ -163,8 +163,7 @@ class SessionStorage:
         ensure_private_dir(path.parent)
         entry = dict(meta_entry)
         entry["session_id"] = session_id
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        append_jsonl_locked(path, [entry])
         ensure_private_file(path)
 
     def save(
@@ -174,15 +173,18 @@ class SessionStorage:
         messages: list[Message],
         *,
         git_branch: str | None = None,
+        preserve_cleanup_prompts: bool = False,
     ) -> None:
         """Overwrite the session file with the given messages."""
-        messages = self._merge_preserved_cleanup_prompts(cwd, session_id, messages)
+        if preserve_cleanup_prompts:
+            messages = self._merge_preserved_cleanup_prompts(cwd, session_id, messages)
         path = self._session_path(cwd, session_id)
         ensure_private_dir(path.parent)
-        with open(path, "w", encoding="utf-8") as f:
-            for msg in messages:
-                data = self._stamp(msg.to_dict(), cwd, session_id, git_branch)
-                f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        lines = []
+        for msg in messages:
+            data = self._stamp(msg.to_dict(), cwd, session_id, git_branch)
+            lines.append(json.dumps(data, ensure_ascii=False) + "\n")
+        atomic_write_text(path, "".join(lines), durable=True)
         ensure_private_file(path)
 
     def _merge_preserved_cleanup_prompts(
@@ -271,7 +273,7 @@ class SessionStorage:
             ensure_private_file(directory_path)
             return session_dir
         ensure_private_dir(session_dir)
-        move(str(legacy_path), str(directory_path))
+        safe_replace(str(legacy_path), str(directory_path))
         ensure_private_file(directory_path)
         return session_dir
 

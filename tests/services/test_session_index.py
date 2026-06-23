@@ -213,13 +213,46 @@ class TestSessionIndex:
 
     def test_user_prompt_mentioning_cleanup_terms_is_not_hidden(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
-        prompt = "How does pipeline rollback verify DELETE_COMPLETE?"
+        prompt = "How do I verify DELETE_COMPLETE for deleted stacks?"
         storage.append("/p", "cleanup-terms", Message(role="user", content=prompt), git_branch=None)
 
         entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
 
         assert entry.title == prompt
         assert entry.auto_title == prompt
+
+    def test_legacy_cleanup_prompt_last_prompt_meta_is_ignored(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        cwd = "/proj/cp-last-legacy"
+        storage.append(cwd, "scp-last-legacy", Message(role="user", content="real prompt"), git_branch=None)
+        storage.append_meta(
+            cwd,
+            "scp-last-legacy",
+            {
+                "type": "last-prompt",
+                "last_prompt": "Pipeline rollback cleanup required for leftover resources.",
+            },
+        )
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-last-legacy"))
+
+        assert meta.last_prompt is None
+        assert meta.first_prompt == "real prompt"
+
+    def test_skips_legacy_cleanup_prompt_user_messages(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        cwd = "/proj/cp-first-legacy"
+        storage.append(
+            cwd,
+            "scp-first-legacy",
+            Message(role="user", content="Rollback cleanup required for stack-123."),
+            git_branch=None,
+        )
+        storage.append(cwd, "scp-first-legacy", Message(role="user", content="real prompt"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-first-legacy"))
+
+        assert meta.first_prompt == "real prompt"
 
     def test_legacy_session_still_indexed(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)

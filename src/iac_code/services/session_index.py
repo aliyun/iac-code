@@ -14,7 +14,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE
+from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE, Message
+from iac_code.pipeline.engine.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, read_session_metadata
 from iac_code.utils.project_paths import (
     get_project_dir,
@@ -24,8 +25,14 @@ from iac_code.utils.project_paths import (
 )
 
 LITE_READ_BUF_SIZE = 64 * 1024
-# Keep in sync with pipeline.engine.cleanup without importing pipeline.engine in normal mode.
-CLEANUP_PROMPT_METADATA_TYPE = "pipeline_cleanup_prompt"
+_LEGACY_CLEANUP_PROMPT_MARKERS = (
+    "pipeline rollback",
+    "rollback cleanup",
+    "cleanup required",
+    "待清理资源",
+    "回滚残留资源",
+    "严格白名单",
+)
 
 
 @dataclass
@@ -164,9 +171,21 @@ def _is_recalled_memory_text(text: str | None) -> bool:
 
 
 def _is_cleanup_prompt_text(text: str | None) -> bool:
-    return bool(
-        text and text.startswith("检测到 pipeline rollback 后仍需要清理的云资源。") and "DELETE_COMPLETE" in text
-    )
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker.lower() in lowered for marker in _LEGACY_CLEANUP_PROMPT_MARKERS)
+
+
+def _is_cleanup_prompt_message(message: Message) -> bool:
+    metadata = message.metadata
+    if isinstance(metadata, dict) and metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE:
+        return True
+    content = message.content
+    if not isinstance(content, str):
+        return False
+    lowered = content.lower()
+    return any(marker.lower() in lowered for marker in _LEGACY_CLEANUP_PROMPT_MARKERS)
 
 
 def _is_hidden_prompt_row(obj: dict) -> bool:
