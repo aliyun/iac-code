@@ -372,9 +372,6 @@ class PipelineSession:
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.session_dir.mkdir(parents=True, exist_ok=True)
-        self._append_event(
-            {"type": "rollback", "from": from_step, "to": to_step, "reason": reason, "timestamp": time.time()}
-        )
         self.save_running_sync(
             to_step,
             state_machine_snapshot,
@@ -384,6 +381,9 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+        )
+        self._append_event(
+            {"type": "rollback", "from": from_step, "to": to_step, "reason": reason, "timestamp": time.time()}
         )
 
     def mark_discarded(self, reason: str | None = None) -> None:

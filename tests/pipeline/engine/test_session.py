@@ -164,6 +164,29 @@ class TestSaveRollback:
         assert event["from"] == "c"
         assert event["to"] == "a"
 
+    def test_sync_does_not_append_rollback_event_when_state_save_fails(self, session, monkeypatch):
+        def fail_write(path, data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(session, "_atomic_write_yaml", fail_write)
+
+        with pytest.raises(OSError, match="disk full"):
+            session.save_rollback_sync(
+                from_step="confirm",
+                to_step="intent",
+                reason="retry intent",
+                state_machine_snapshot={
+                    "current_index": 0,
+                    "rollback_count": 1,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {"intent": "running", "confirm": "stale"},
+                },
+                context_snapshot={},
+                identity=_identity(),
+            )
+
+        assert not session.events_path.exists()
+
     def test_sync_preserves_attempt_metadata(self, session):
         identity = _identity()
         execution = {
