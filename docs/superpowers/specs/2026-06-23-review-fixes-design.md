@@ -28,8 +28,6 @@ The review spans A2A pipeline recovery, A2A event durability, cleanup ledger cor
 
 `PipelineSession` will continue to store sidecar state in two files: `context.yaml` and `meta.yaml`. This round will improve single-file atomicity through a shared state I/O helper, but it will not add a shared generation/checksum or merge the files. A crash between the two file writes can still leave the pair out of sync. This is accepted for this batch and must be recorded in `docs/review-fix-summary.md`.
 
-Session JSONL concurrent append atomicity on Windows is also an accepted residual risk for this batch. The project model does not support multiple processes appending to the same session file concurrently. The implementation should keep append safe for the single-process runtime and record the cross-process append limitation in the closure summary.
-
 ## Architecture
 
 The design uses a shared state I/O layer and then applies fixes in dependent batches:
@@ -52,11 +50,13 @@ The core reliability rule is:
 Add a low-dependency helper for state-file writes. It should support:
 
 - Write to a temporary file in the destination directory.
-- Flush and optionally fsync file contents.
+- Flush and fsync file contents for state files that affect recovery semantics.
 - Atomically replace the target.
 - Best-effort fsync of the parent directory.
 - Short retry around replace failures, especially for Windows file-lock behavior.
 - Clear exceptions when writes cannot be made durable.
+
+For the review-scoped state files in this design, file fsync is required by default. Optional/no-fsync behavior is allowed only for explicitly best-effort display data, not for `cleanup.yaml`, A2A snapshots, sidecar YAML, or session full-file saves.
 
 The helper will be used only for review-scoped paths:
 
@@ -76,7 +76,9 @@ Extend the A2A journal API with:
 
 Durable appends must write, flush, and fsync. Best-effort appends can flush without fsync.
 
-`append_many()` is required for event groups such as cancel plus handoff. The group should be written under one file open and fsync once when durable. If a durable group fails, callers must not treat any event in the group as successfully persisted or delivered.
+`append_many()` is required for event groups such as cancel plus handoff. The group must be atomic from the journal replay and snapshot-reducer perspective. Implement this either by writing one JSONL group record that expands to multiple events when read, or by using group metadata plus a commit marker and ignoring incomplete groups during replay. A plain loop that writes multiple independent JSONL event lines is not sufficient because a crash between lines can leave a half group. Durable groups should fsync once after the complete group representation is written. If a durable group fails, callers must not treat any event in the group as successfully persisted or delivered.
+
+For single durable A2A events, publishing succeeds only after at least one durable metadata sink succeeds for that event. The journal append is the preferred durable sink; a snapshot save can be a fallback only if it includes the event's recovery-relevant state. If neither durable journal append nor recovery-relevant snapshot save succeeds, the event must not be delivered as successful state.
 
 ### Session Storage Save
 
@@ -84,7 +86,9 @@ Keep `SessionStorage.save()` as a full-file save API. It still receives the comp
 
 Change the write path from truncate-and-rewrite to atomic replace. Cleanup prompt preservation becomes explicit and opt-in. Normal mode saves should not read the old session file just to scan for cleanup prompts. Preservation should be enabled only from flows that may rewrite or compact context while needing to retain hidden cleanup prompts.
 
-Keep session append as the single-process append path. It does not need a cross-process locking redesign in this round. If review closure mentions Windows `O_APPEND`, mark cross-process append as accepted residual risk and document that concurrent writers for the same session file are unsupported.
+Add a focused append helper for SessionStorage JSONL appends. It should serialize appends inside the current process and use the best available platform mechanism to avoid interleaving when another process also appends to the same file. On POSIX this can use an advisory lock around the append section; on Windows it should use the corresponding standard-library file locking primitive where feasible. The append operation should write each JSONL record as one encoded line while holding the lock. If a platform lock cannot be acquired, append should fail loudly rather than silently risk interleaving.
+
+This append helper is scoped to SessionStorage JSONL files. It does not introduce cross-process locking for `cleanup.yaml`.
 
 ### ToolContext Compatibility
 
@@ -225,8 +229,8 @@ Runtime fixes include:
 - path normalization for `read_file`
 - atomic replace retry and explicit failure surfacing
 - state-file write helper coverage for review-scoped files
-- explicit Windows handling for REPL signal registration: guard unsupported `loop.add_signal_handler` behavior, keep the fallback path intentional, and test or document it
-- image store privacy behavior: apply best-effort restrictive permissions where the platform supports them and document Windows limitations where POSIX `0600` semantics are unavailable
+- explicit Windows handling for REPL signal registration: guard unsupported `loop.add_signal_handler` behavior, keep the fallback path intentional, and add a focused test for the fallback when feasible; if the test cannot run on the current platform, document that verification limit in the closure summary
+- image store privacy behavior: apply restrictive permissions through the best available platform API; on Windows, use an equivalent ACL-based approach where practical, and only document a residual limitation if the standard library cannot enforce one
 - Selling Console socket reuse behavior: avoid unsafe Windows `SO_REUSEADDR` semantics by disabling address reuse on Windows or using the platform's exclusive-address option when available
 
 Script and documentation fixes include:
@@ -235,7 +239,9 @@ Script and documentation fixes include:
 - mark `pexpect` usage or runner docs as POSIX-only
 - replace hard-coded `/tmp` docs with system temporary directory wording
 - document Windows limitations for real PTY E2E
-- document the single-process assumption for session JSONL append
+- fix or guard REPL E2E `shlex.split()` usage so Windows paths are not parsed with POSIX-only assumptions
+- document that cleanup ledger temporary-file names using a dot prefix are cosmetic and not relied on for security or Windows hiding behavior
+- make Selling Console shutdown handle `KeyboardInterrupt` cleanly enough that worker threads do not keep the process alive unexpectedly
 
 ### I18n
 
@@ -302,7 +308,7 @@ Create `docs/review-fix-summary.md` after implementation. It should map each rev
 - test coverage
 - accepted residual risk
 
-The sidecar two-file consistency issue and the unsupported cross-process Session JSONL append case must be recorded as accepted residual risks.
+The sidecar two-file consistency issue must be recorded as an accepted residual risk. Any platform limitation discovered for image-store privacy enforcement must also be recorded if it cannot be fully fixed with the standard library.
 
 ## Testing Strategy
 
@@ -315,8 +321,10 @@ Add focused pytest coverage for each high-risk fix:
 - cleanup persisted tool-use mapping
 - corrupt cleanup ledger fail-closed behavior
 - session atomic save and preservation on/off
+- session JSONL append locking/serialization
 - `ToolContext` positional compatibility
 - Windows path normalization
+- Windows signal fallback and script guard behavior where feasible
 - pipeline persistence retry/failure stop
 - i18n string extraction patterns where feasible
 
