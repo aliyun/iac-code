@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -65,7 +65,7 @@ def test_normal_handoff_save_failure_does_not_switch_or_append(repl_for_sidecar_
     assert result == "persistence_failed"
     assert repl_for_sidecar_restore._pipeline_state_persistence_failed is True
     assert repl_for_sidecar_restore._runtime_mode == RunMode.PIPELINE
-    pipeline.mark_normal_handoff.assert_called_once_with(status="succeeded", failed_reason=None)
+    pipeline.mark_normal_handoff.assert_called_once_with(status="pending", failed_reason=None)
     pipeline.build_normal_handoff_summary.assert_not_called()
     repl_for_sidecar_restore._agent_loop.context_manager.add_raw_message.assert_not_called()
     repl_for_sidecar_restore._session_storage.append.assert_not_called()
@@ -101,6 +101,47 @@ def test_finalize_handoff_persistence_failure_keeps_pipeline_paused(repl_for_sid
     assert repl_for_sidecar_restore._pipeline_state_persistence_failed is True
     pipeline.pause_agent_loops.assert_called_once_with()
     pipeline.mark_user_aborted.assert_not_called()
+
+
+def test_handoff_append_failure_and_failed_metadata_failure_does_not_record_success(repl_for_sidecar_restore):
+    from iac_code.pipeline.config import RunMode
+
+    repl_for_sidecar_restore._runtime_mode = RunMode.PIPELINE
+    repl_for_sidecar_restore._agent_loop = MagicMock()
+    repl_for_sidecar_restore._agent_loop.context_manager = MagicMock()
+    repl_for_sidecar_restore._agent_loop.context_manager.add_raw_message.return_value = Message(
+        role="user",
+        content="handoff summary",
+    )
+    repl_for_sidecar_restore.current_git_branch = MagicMock(return_value="main")
+    repl_for_sidecar_restore._session_storage.append.side_effect = RuntimeError("disk unavailable")
+    terminal_event = PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=1.0,
+        data={"total_steps": 1},
+    )
+    pipeline = MagicMock()
+    pipeline.should_switch_to_normal.return_value = True
+    pipeline.build_normal_handoff_summary.return_value = "handoff summary"
+    pipeline.mark_normal_handoff.side_effect = [
+        None,
+        PipelineStatePersistenceError("pipeline state persistence failed during save_normal_handoff"),
+    ]
+    repl_for_sidecar_restore._pipeline = pipeline
+
+    result = repl_for_sidecar_restore._handoff_pipeline_to_normal(terminal_event)
+
+    assert result == "persistence_failed"
+    assert repl_for_sidecar_restore._pipeline_state_persistence_failed is True
+    assert repl_for_sidecar_restore._runtime_mode == RunMode.PIPELINE
+    pipeline.mark_normal_handoff.assert_has_calls(
+        [
+            call(status="pending", failed_reason=None),
+            call(status="failed", failed_reason="disk unavailable"),
+        ]
+    )
+    assert pipeline.mark_normal_handoff.call_count == 2
 
 
 def test_finalize_persistence_failure_event_does_not_mark_user_aborted(repl_for_sidecar_restore):

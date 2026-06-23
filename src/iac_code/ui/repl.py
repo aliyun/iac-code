@@ -2684,7 +2684,7 @@ class InlineREPL:
             return "not_applicable"
 
         try:
-            pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
+            pipeline.mark_normal_handoff(status="pending", failed_reason=None)
         except Exception as exc:
             self._pipeline_state_persistence_failed = True
             logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
@@ -2727,6 +2727,16 @@ class InlineREPL:
             )
             self._set_runtime_mode(RunMode.NORMAL)
             return "failed"
+        try:
+            pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
+        except Exception as exc:
+            self._pipeline_state_persistence_failed = True
+            logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
+            self.renderer.print_system_message(
+                _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
+                style="yellow",
+            )
+            return "persistence_failed"
         self._set_runtime_mode(RunMode.NORMAL)
         self.renderer.print_system_message(
             _("Pipeline completed. Normal chat is now active."),

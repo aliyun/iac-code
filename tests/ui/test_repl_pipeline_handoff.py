@@ -289,7 +289,12 @@ async def test_completed_pipeline_handoff_switches_to_normal_and_clears_state():
         injected,
         git_branch="main",
     )
-    pipeline.mark_normal_handoff.assert_called_once_with(status="succeeded", failed_reason=None)
+    pipeline.mark_normal_handoff.assert_has_calls(
+        [
+            call(status="pending", failed_reason=None),
+            call(status="succeeded", failed_reason=None),
+        ]
+    )
     pipeline.clear_sidecar.assert_not_called()
     pipeline.mark_user_aborted.assert_not_called()
     assert repl._pipeline is None
@@ -1597,7 +1602,12 @@ async def test_early_exit_handoff_clears_incomplete_state_without_user_abort():
     await repl._handle_pipeline_chat("start")
 
     assert repl._runtime_mode == RunMode.NORMAL
-    pipeline.mark_normal_handoff.assert_called_once_with(status="succeeded", failed_reason=None)
+    pipeline.mark_normal_handoff.assert_has_calls(
+        [
+            call(status="pending", failed_reason=None),
+            call(status="succeeded", failed_reason=None),
+        ]
+    )
     pipeline.clear_sidecar.assert_not_called()
     pipeline.mark_user_aborted.assert_not_called()
     assert repl._pipeline is None
@@ -1639,7 +1649,7 @@ async def test_handoff_injection_failure_still_switches_to_normal_and_preserves_
     repl.renderer.print_system_message.assert_called()
     pipeline.mark_normal_handoff.assert_has_calls(
         [
-            call(status="succeeded", failed_reason=None),
+            call(status="pending", failed_reason=None),
             call(status="failed", failed_reason="context unavailable"),
         ]
     )
@@ -1652,7 +1662,7 @@ async def test_handoff_injection_failure_still_switches_to_normal_and_preserves_
 
 
 @pytest.mark.asyncio
-async def test_handoff_persistence_failure_still_switches_to_normal_and_preserves_sidecar():
+async def test_handoff_summary_append_failure_still_switches_to_normal_and_preserves_sidecar():
     terminal_event = _pipeline_completed_event()
     repl, pipeline, _injected = _make_repl_for_handoff(terminal_event, should_switch_to_normal=True)
     repl._session_storage.append.side_effect = RuntimeError("disk unavailable")
@@ -1664,7 +1674,7 @@ async def test_handoff_persistence_failure_still_switches_to_normal_and_preserve
     repl.renderer.print_system_message.assert_called()
     pipeline.mark_normal_handoff.assert_has_calls(
         [
-            call(status="succeeded", failed_reason=None),
+            call(status="pending", failed_reason=None),
             call(status="failed", failed_reason="disk unavailable"),
         ]
     )

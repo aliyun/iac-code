@@ -619,7 +619,7 @@ class PipelineRunner:
         current_step = self._terminal_current_step_id()
         normal_handoff = {
             "status": status,
-            "switched_to_normal": True,
+            "switched_to_normal": status in {"succeeded", "failed"},
             "root_session_id": self._session_id,
             "summary_message_appended": status == "succeeded",
             "failed_reason": failed_reason,
