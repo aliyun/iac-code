@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 import time
 
 import pytest
@@ -170,6 +173,20 @@ class TestLiteMetadata:
 
 
 class TestSessionIndex:
+    def test_session_services_do_not_import_pipeline_engine_modules(self):
+        script = """
+import json
+import sys
+
+import iac_code.services.session_index
+import iac_code.services.session_storage
+
+print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_code.pipeline.engine"))))
+"""
+        result = subprocess.run([sys.executable, "-c", script], check=True, capture_output=True, text=True)
+
+        assert json.loads(result.stdout) == []
+
     def test_list_for_cwd_filters_by_project(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
         storage.append("/a", "id-a", Message(role="user", content="one"), git_branch=None)
@@ -225,6 +242,16 @@ class TestSessionIndex:
         storage = SessionStorage(projects_dir=tmp_path)
         prompt = "What does cleanup required mean in Terraform?"
         storage.append("/p", "cleanup-required", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
+
+    def test_user_prompt_mentioning_strict_whitelist_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "严格白名单策略怎么配置？"
+        storage.append("/p", "strict-whitelist", Message(role="user", content=prompt), git_branch=None)
 
         entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
 

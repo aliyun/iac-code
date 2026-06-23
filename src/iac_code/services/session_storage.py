@@ -30,7 +30,7 @@ from typing import Any
 from iac_code import __version__
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
-from iac_code.pipeline.engine.constants import CLEANUP_PROMPT_METADATA_TYPE
+from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.services.session_metadata import (
     SESSION_JSONL_FILENAME,
     SessionMetadata,

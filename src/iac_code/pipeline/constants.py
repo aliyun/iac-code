@@ -1,4 +1,4 @@
-"""Low-dependency pipeline engine constants."""
+"""Low-dependency pipeline constants."""
 
 CLEANUP_PROMPT_METADATA_TYPE = "pipeline_cleanup_prompt"
 

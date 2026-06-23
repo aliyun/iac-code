@@ -15,7 +15,7 @@ import yaml
 
 from iac_code.agent.message import Message
 from iac_code.i18n import _
-from iac_code.pipeline.engine.constants import CLEANUP_PROMPT_METADATA_TYPE
+from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
 from iac_code.utils.public_errors import sanitize_public_text
 

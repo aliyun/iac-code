@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE, Message
-from iac_code.pipeline.engine.constants import CLEANUP_PROMPT_METADATA_TYPE
+from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, read_session_metadata
 from iac_code.utils.project_paths import (
     get_project_dir,
@@ -32,7 +32,6 @@ _LEGACY_CLEANUP_PROMPT_MARKERS = (
     "仍需要清理的云资源",
     "待清理资源",
     "回滚残留资源",
-    "严格白名单",
 )
 
 
