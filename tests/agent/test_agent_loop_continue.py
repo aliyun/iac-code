@@ -4,8 +4,6 @@ import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.message import Message
-from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE, create_cleanup_prompt_message
-from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.stream_events import MessageEndEvent, TextDeltaEvent, Usage
 
@@ -31,8 +29,8 @@ class RecordingStorage:
     def append(self, cwd, session_id, message, *, git_branch=None):
         self.appended.append((cwd, session_id, message, git_branch))
 
-    def save(self, cwd, session_id, messages, *, git_branch=None):
-        self.saved.append((cwd, session_id, messages, git_branch))
+    def save(self, cwd, session_id, messages, *, git_branch=None, preserve_cleanup_prompts=False):
+        self.saved.append((cwd, session_id, messages, git_branch, preserve_cleanup_prompts))
 
 
 @pytest.mark.asyncio
@@ -58,23 +56,22 @@ async def test_continue_streaming_uses_existing_context_without_appending_user_m
     assert appended_roles == ["assistant"]
 
 
-def test_stamp_last_turn_elapsed_preserves_cleanup_prompt_in_session(tmp_path):
-    storage = SessionStorage(projects_dir=tmp_path)
-    cwd = "/repo"
-    session_id = "session-cleanup"
-    storage.append(cwd, session_id, create_cleanup_prompt_message("cleanup hidden prompt"))
+def test_stamp_last_turn_elapsed_does_not_request_cleanup_prompt_preservation():
+    storage = RecordingStorage()
     loop = AgentLoop(
         provider_manager=FakeProviderManager(),
         system_prompt="system",
         tool_registry=ToolRegistry(),
         session_storage=storage,
-        session_id=session_id,
+        session_id="session-cleanup",
         resume_messages=[Message(role="user", content="later"), Message(role="assistant", content="done")],
-        cwd=cwd,
+        cwd="/repo",
     )
 
     loop.stamp_last_turn_elapsed(1.5)
 
-    loaded = storage.load(cwd, session_id)
-    assert [message.content for message in loaded] == ["later", "done", "cleanup hidden prompt"]
-    assert loaded[-1].metadata["type"] == CLEANUP_PROMPT_METADATA_TYPE
+    assert len(storage.saved) == 1
+    _cwd, _session_id, messages, _branch, preserve_cleanup_prompts = storage.saved[0]
+    assert [message.content for message in messages] == ["later", "done"]
+    assert messages[-1].elapsed_seconds == 1.5
+    assert preserve_cleanup_prompts is False

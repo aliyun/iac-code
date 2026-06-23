@@ -231,7 +231,7 @@ uv run python scripts/a2a/debugger.py --port 41880 \
 http://127.0.0.1:41880
 ```
 
-debugger 支持上传 `image/png`、`image/jpeg`、`image/webp`、`image/gif`，单图最大 5 MiB。直接构造 A2A 请求时，inline payload 和本地文件 payload 同样受 A2A part parser 的大小限制；`file://` 必须解析到请求 cwd 或其它允许读取的 root 内，越权本地 URL 会被拒绝。Selling Console Web UI 当前只发送文本输入，图片手测请使用 debugger。
+debugger 支持上传 `image/png`、`image/jpeg`、`image/webp`、`image/gif`，单图最大 5 MiB。直接构造 A2A 请求时，A2A part parser 的大小限制为：文本 inline/raw 和文本 `file://` 最大 1 MiB；二进制 inline/raw/data 最大 5 MiB；二进制 `file://` 最大 25 MiB。`file://` 必须解析到本地已存在文件，且同时位于请求 cwd 内和已配置的 A2A allowed cwd root 内；越过任一边界的本地 URL 都会被拒绝。Selling Console Web UI 当前只发送文本输入，图片手测请使用 debugger。
 
 ### A2A-1：首轮图片启动 pipeline
 

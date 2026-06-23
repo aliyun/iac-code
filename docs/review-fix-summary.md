@@ -32,7 +32,7 @@ This document maps every current item in `docs/review.md` to its repair status, 
 | Review item | Resolution | Tests | Residual risk |
 | --- | --- | --- | --- |
 | Minor 1 `--default-cwd` docs mismatch | Fixed docs to describe allowed-root directory creation and rejection conditions. | Documentation review | None |
-| Minor 2 A2A image limits missing from docs | Fixed docs for MIME types, size limits, and `file://` allowed-root checks. | Documentation review | None |
+| Minor 2 A2A image limits missing from docs | Fixed docs for MIME types, exact parser size limits, and `file://` checks requiring both request-cwd and allowed-root containment. | Documentation review | None |
 | Minor 3 Selling Console and A2A image capability mismatch | Fixed docs and script docstring to state Selling Console is text-only and debugger covers image parts. | `tests/a2a/test_selling_console_script.py` | None |
 | Minor 4 stale pipeline-image worktree path | Fixed manual guide to use the current repository checkout/worktree root. | Documentation review | None |
 | Minor 5 REPL E2E English/POSIX/system-temp docs | Fixed by adding English README and updating Chinese README to say POSIX-only and system temporary directory. | Documentation review | None |

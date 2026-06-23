@@ -175,7 +175,7 @@ def test_prompt_snapshot_inserts_removed_cleanup_prompt_between_session_anchors(
         "检测到 pipeline rollback 后仍需要清理的云资源。\n待清理资源：stack-anchored",
         "after cleanup",
     ]
-    assert messages[1]["badge"] == "cleanup prompt · 已移除"
+    assert messages[1]["badge"] == "cleanup prompt · removed"
     assert snapshot["cleanup_prompts"][0]["content"].endswith("stack-anchored")
 
 

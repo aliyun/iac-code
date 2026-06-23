@@ -617,7 +617,7 @@ def _insert_or_mark_cleanup_prompt_message(
     if insert_at is None:
         return
     snapshot = _message_snapshot(cleanup_message)
-    snapshot["badge"] = _("cleanup prompt · 已移除")
+    snapshot["badge"] = _("cleanup prompt · removed")
     provider_messages.insert(insert_at, snapshot)
 
 

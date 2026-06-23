@@ -365,7 +365,10 @@ async def test_completed_pipeline_handoff_starts_hidden_cleanup_prompt(tmp_path:
 
     await repl._handle_pipeline_chat("start")
 
-    repl.renderer.print_system_message.assert_any_call("\n检测到 1 个回滚残留资源，开始清理流程。", style="yellow")
+    repl.renderer.print_system_message.assert_any_call(
+        "\nDetected 1 rollback cleanup resources; starting cleanup.",
+        style="yellow",
+    )
     raw_cleanup_call = repl._agent_loop.context_manager.add_raw_message.call_args_list[-1].args[0]
     assert raw_cleanup_call["role"] == "user"
     assert raw_cleanup_call["metadata"]["type"] == CLEANUP_PROMPT_METADATA_TYPE
@@ -473,7 +476,7 @@ async def test_normal_resume_continues_existing_cleanup_prompt_without_duplicate
     assert await repl._maybe_start_normal_chat_cleanup_on_startup() is True
 
     repl.renderer.print_system_message.assert_any_call(
-        "\n检测到 1 个回滚残留资源，开始清理流程。",
+        "\nDetected 1 rollback cleanup resources; starting cleanup.",
         style="yellow",
     )
     assert any(

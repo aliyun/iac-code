@@ -37,7 +37,7 @@ selling pipeline 的 step5 在部署阿里云 ROS 资源栈后，如果中途被
 
 - `/prompt` 在 normal chat 阶段不会误用已经结束的 pipeline prompt context。
 - cleanup prompt 会在 `Cleanup Prompts` tab 中单独展示，便于诊断。
-- 如果 cleanup prompt 已经从 provider messages 中被移除，只有在能基于 `session.jsonl` 找到前后稳定锚点时，才会插回 Provider Messages 并标记 `cleanup prompt · 已移除`。
+- 如果 cleanup prompt 已经从 provider messages 中被移除，只有在能基于 `session.jsonl` 找到前后稳定锚点时，才会插回 Provider Messages 并标记 `cleanup prompt · removed`（中文界面为 `cleanup prompt · 已移除`）。
 - 如果找不到稳定锚点，则不会在 Provider Messages 中展示，避免误导真实发送顺序。
 
 ## 测试覆盖

@@ -483,7 +483,7 @@ class CleanupLedger:
         return CleanupPrompt(
             resources=resources,
             prompt="\n".join(lines),
-            status_message=_("检测到 {count} 个回滚残留资源，开始清理流程。").format(count=count),
+            status_message=_("Detected {count} rollback cleanup resources; starting cleanup.").format(count=count),
         )
 
     def _load(self) -> dict[str, Any]:

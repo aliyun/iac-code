@@ -1323,7 +1323,6 @@ class AgentLoop:
                         self._session_id,
                         msgs,
                         git_branch=self._current_git_branch,
-                        preserve_cleanup_prompts=True,
                     )
                 break
 

@@ -95,6 +95,6 @@ uv run python scripts/a2a/debugger.py --port 41880 \
 - `contextId` identifies the conversation; `taskId` identifies one A2A task.
 - After `pipeline_handoff_ready`, follow-up messages normally start a new normal-chat task in the same context.
 - Image input accepts supported image MIME types only: `image/png`, `image/jpeg`, `image/webp`, and `image/gif`.
-- Inline or local image payloads are size-limited by the A2A part parser; debugger uploads are limited to 5 MiB per image.
-- `file://` image inputs must resolve under the request cwd or another allowed read root. Local URLs outside those roots are rejected.
+- A2A part parser limits: text inline/raw and text `file://` parts are limited to 1 MiB; binary inline/raw/data parts are limited to 5 MiB; binary `file://` parts are limited to 25 MiB. Debugger uploads are limited to 5 MiB per image.
+- `file://` image inputs must resolve to an existing local file that is both under the request cwd and under a configured A2A allowed cwd root. Local URLs outside either boundary are rejected.
 - The A2A debugger sends image parts. The Selling Console web UI currently sends text input only.

@@ -372,7 +372,7 @@ async def test_executor_publishes_normal_handoff_ready_with_cleanup_resources(
     cleanup = handoff["data"]["cleanup"]
     assert cleanup["status"] == "pending"
     assert cleanup["resourceCount"] == 1
-    assert cleanup["statusMessage"] == "检测到 1 个回滚残留资源，开始清理流程。"
+    assert cleanup["statusMessage"] == "Detected 1 rollback cleanup resources; starting cleanup."
     assert "prompt" not in cleanup
     assert "ledgerPath" not in cleanup
     assert cleanup["resources"] == [
