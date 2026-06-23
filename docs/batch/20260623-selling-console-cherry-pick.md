@@ -12,6 +12,7 @@
 
 - 新增 `scripts/a2a/selling_console.py`，提供本地 Selling Pipeline Console 的静态资源服务和 A2A 代理接口。
 - 新增 `scripts/a2a/selling_console_web/`，实现售卖页 Web 控制台，包括聊天区、方案卡片、流程进度条、调试面板和交互事件渲染。
+- Selling Console Web UI 当前只发送文本输入；A2A 图片输入覆盖应使用 `scripts/a2a/debugger.py` 或直接 A2A 请求。
 - 新增 `selling_console_web/README.md`，说明 A2A server 与 Web console 的启动方式。
 - 新增进度条视觉方案设计稿 `scripts/a2a/selling_console_web/design/selling-pipeline-progress-options.html`。
 - 更新 `scripts/README.md`，补充售卖控制台脚本入口说明。

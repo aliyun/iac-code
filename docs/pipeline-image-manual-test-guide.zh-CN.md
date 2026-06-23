@@ -17,10 +17,10 @@
 
 ## 前置条件
 
-从 pipeline-image worktree 运行：
+从当前仓库 checkout/worktree 的根目录运行即可：
 
 ```bash
-cd /Users/ehzyo/open_repo/iac-code3/.worktrees/pipeline-image
+cd /path/to/iac-code
 ```
 
 建议使用支持图片输入的模型：
@@ -231,7 +231,7 @@ uv run python scripts/a2a/debugger.py --port 41880 \
 http://127.0.0.1:41880
 ```
 
-debugger 支持上传 `image/png`、`image/jpeg`、`image/webp`、`image/gif`，单图最大 5 MiB。
+debugger 支持上传 `image/png`、`image/jpeg`、`image/webp`、`image/gif`，单图最大 5 MiB。直接构造 A2A 请求时，inline payload 和本地文件 payload 同样受 A2A part parser 的大小限制；`file://` 必须解析到请求 cwd 或其它允许读取的 root 内，越权本地 URL 会被拒绝。Selling Console Web UI 当前只发送文本输入，图片手测请使用 debugger。
 
 ### A2A-1：首轮图片启动 pipeline
 

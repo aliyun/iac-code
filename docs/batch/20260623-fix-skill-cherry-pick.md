@@ -24,7 +24,7 @@
 
 - `pipeline.yaml` 中保留 `parameter_overrides` 和 `completion_guards`，没有恢复已经移除的静态 rollback 规则。
 - `pipeline_runner.py`、`deploying.py`、`test_terminal_ui_contract.py`、`test_step_executor.py` 合并了目标分支已有的 cleanup、用户输入、skill root 读权限等逻辑。
-- `session_index.py` 保留本地 `CLEANUP_PROMPT_METADATA_TYPE` 常量，避免 normal mode 导入 pipeline engine。
+- 当时为避免 normal mode 导入 pipeline engine，cleanup prompt metadata 常量暂未集中；后续 review 修复已将该常量集中到低依赖的 `iac_code.pipeline.constants`，normal mode 不再导入 pipeline engine。
 - 本次 cherry-pick 没有遇到国际化文件冲突；后续按验证结果执行 `make translate`，将新增 msgid 同步到各语言 `messages.po`，没有手工删除既有词条。
 
 ## 验证

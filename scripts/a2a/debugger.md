@@ -35,10 +35,11 @@ message. It is the server-side workspace for the task, not merely the debugger's
 own working directory.
 
 The A2A server validates this path before running the agent. By default, the
-server accepts its own startup directory and Python's temp directory. If the
-server starts in directory `a` but the debugger starts in directory `b`,
-`--default-cwd "$PWD"` expands to `b`; the request is rejected with
-`Invalid A2A workspace metadata.` unless `b` is under an allowed root.
+server accepts its own startup directory and Python's temp directory. If
+`--default-cwd` points inside an allowed root and the directory does not exist
+yet, the server may create it. The request is rejected with
+`Invalid A2A workspace metadata.` when the resolved path escapes the allowed
+root, cannot be created, or cannot be used as a directory.
 
 Use one of these patterns:
 
@@ -93,3 +94,7 @@ uv run python scripts/a2a/debugger.py --port 41880 \
 - The debugger is a local development tool and does not provide authentication.
 - `contextId` identifies the conversation; `taskId` identifies one A2A task.
 - After `pipeline_handoff_ready`, follow-up messages normally start a new normal-chat task in the same context.
+- Image input accepts supported image MIME types only: `image/png`, `image/jpeg`, `image/webp`, and `image/gif`.
+- Inline or local image payloads are size-limited by the A2A part parser; debugger uploads are limited to 5 MiB per image.
+- `file://` image inputs must resolve under the request cwd or another allowed read root. Local URLs outside those roots are rejected.
+- The A2A debugger sends image parts. The Selling Console web UI currently sends text input only.

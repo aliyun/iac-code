@@ -37,7 +37,7 @@
 
 - 在 `scripts/a2a/debugger.md` 中补充 `--default-cwd` 的含义。
 - `--default-cwd` 会作为 A2A workspace metadata 传给 server，表示 agent 执行任务时使用的 workspace，不是 debugger 自身的启动目录。
-- 如果该目录不存在、不是目录，或者服务端策略不允许，会返回 `Invalid A2A workspace metadata.`。
+- 如果 `--default-cwd` 指向已配置 workspace root 内部且目录尚不存在，A2A executor 可能会创建该目录。只有当解析后的路径逃逸允许的 root、目录无法创建，或路径无法作为目录使用时，才会返回 `Invalid A2A workspace metadata.`。
 
 ## 测试覆盖
 

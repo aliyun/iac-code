@@ -2,6 +2,8 @@
 
 Standalone static frontend for `scripts/a2a/selling_console.py`. It is used to drive the selling pipeline, inspect step progress, select candidate plans, and continue into normal chat after deployment.
 
+The web console currently sends text input only. Use `scripts/a2a/debugger.py` for A2A image-part coverage.
+
 ## Run
 
 From the repository root, start the A2A server first:
