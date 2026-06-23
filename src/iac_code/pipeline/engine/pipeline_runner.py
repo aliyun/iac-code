@@ -513,7 +513,16 @@ class PipelineRunner:
             logger.warning("Pipeline resource-observed hook failed: step_id=%s", step.step_id, exc_info=True)
             return
         for observed in self._observed_resources_from_hook_result(result):
-            ledger.record_observed(observed)
+            try:
+                ledger.record_observed(observed)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to persist observed cleanup resource: step_id=%s resource_id=%s error=%s",
+                    step.step_id,
+                    observed.resource_id,
+                    exc,
+                    exc_info=True,
+                )
 
     def _mark_rollback_cleanup_required(
         self,

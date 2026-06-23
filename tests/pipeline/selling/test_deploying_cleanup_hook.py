@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from iac_code.pipeline.engine.cleanup import CleanupLedger
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.selling.hooks import deploying
@@ -118,6 +120,24 @@ def test_deploying_hook_ignores_other_step_rollbacks(tmp_path) -> None:
 
     assert cleanup == []
     assert ledger.pending_resources() == []
+
+
+def test_deploying_hook_warns_when_attempt_id_missing(tmp_path, caplog) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    ctx = PipelineContext({})
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.selling.hooks.deploying")
+
+    cleanup = deploying.on_rollback_cleanup_required(
+        ctx,
+        ledger=ledger,
+        from_step="deploying",
+        from_attempt_id=None,
+        to_step="confirm_and_select",
+        reason="retry",
+    )
+
+    assert cleanup == []
+    assert "Skipping deploying cleanup hook because from_attempt_id is missing" in caplog.text
 
 
 def test_deploying_hook_marks_only_current_attempt_resources(tmp_path) -> None:

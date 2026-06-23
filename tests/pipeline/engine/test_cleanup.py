@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
+import time
 
+import yaml
+
+import iac_code.pipeline.engine.cleanup as cleanup_module
 from iac_code.pipeline.engine.cleanup import (
     CleanupLedger,
     CleanupObserver,
@@ -488,6 +494,181 @@ def test_mark_cleanup_required_skips_terminal_resources_without_history(tmp_path
 
     assert ledger._load()["history"] == history_before
     assert [resource.cleanup_status for resource in ledger.cleanup_resources()] == ["completed", "skipped"]
+
+
+def test_mark_cleanup_required_preserves_active_execution_fields(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    ledger.update_resource(
+        provider="ros",
+        resource_type="stack",
+        resource_id="stack-123",
+        region_id="cn-hangzhou",
+        cleanup_status="in_progress",
+        cleanup_tool_use_id="toolu-delete",
+        cleanup_action="DeleteStack",
+        progress_status="DELETE_IN_PROGRESS",
+        progress_percentage=30,
+        last_error="slow",
+    )
+
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested again")
+
+    [updated] = ledger.cleanup_resources()
+    assert updated.cleanup_status == "in_progress"
+    assert updated.cleanup_tool_use_id == "toolu-delete"
+    assert updated.cleanup_action == "DeleteStack"
+    assert updated.progress_status == "DELETE_IN_PROGRESS"
+    assert updated.progress_percentage == 30
+    assert updated.last_error == "slow"
+
+
+def test_observer_uses_persisted_tool_mapping_after_restart(tmp_path) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    CleanupObserver(ledger).observe(
+        ToolUseEndEvent(
+            tool_use_id="toolu-delete",
+            name="ros_stack",
+            input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-123"}},
+        )
+    )
+
+    restarted = CleanupObserver(CleanupLedger(tmp_path / "cleanup.yaml"))
+    restarted.observe(
+        ToolResultEvent(
+            tool_use_id="toolu-delete",
+            tool_name="ros_stack",
+            result=json.dumps({"stack_id": "stack-123", "status": "DELETE_COMPLETE"}),
+            is_error=False,
+        )
+    )
+
+    [updated] = CleanupLedger(tmp_path / "cleanup.yaml").cleanup_resources()
+    assert updated.cleanup_status == "completed"
+
+
+def test_observer_records_history_warning_for_unmatched_cleanup_tool_result(tmp_path, caplog) -> None:
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    resource = CleanupResource.from_observed(_observed_stack(), reason="rollback requested")
+    ledger.mark_cleanup_required([resource], source_step_id="deploying", reason="rollback requested")
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.cleanup")
+
+    CleanupObserver(ledger).observe(
+        ToolResultEvent(
+            tool_use_id="toolu-missing",
+            tool_name="ros_stack",
+            result=json.dumps({"stack_id": "stack-123", "status": "DELETE_COMPLETE"}),
+            is_error=False,
+        )
+    )
+
+    [pending] = ledger.cleanup_resources()
+    assert pending.cleanup_status == "pending"
+    history = ledger.history_entries()
+    assert history[-1]["type"] == "cleanup_tool_result_unmatched"
+    assert history[-1]["tool_use_id"] == "toolu-missing"
+    assert history[-1]["tool_name"] == "ros_stack"
+    assert "Unmatched cleanup tool result" in caplog.text
+
+
+def test_corrupt_ledger_records_unavailable_without_overwrite(tmp_path) -> None:
+    path = tmp_path / "cleanup.yaml"
+    path.write_text("[broken", encoding="utf-8")
+    ledger = CleanupLedger(path)
+
+    ledger.mark_cleanup_required(
+        [CleanupResource.from_observed(_observed_stack(), reason="rollback")],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+
+    assert path.read_text(encoding="utf-8") == "[broken"
+    assert ledger.load_failed()
+    assert ledger.load_error()
+
+
+def test_cleanup_ledger_save_uses_state_io_atomic_durable_write(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    def fake_atomic_write_text(path, content, *, durable=True, **_kwargs):
+        calls.append((path, content, durable))
+        path.write_text(content, encoding="utf-8")
+
+    monkeypatch.setattr(cleanup_module, "atomic_write_text", fake_atomic_write_text, raising=False)
+    path = tmp_path / "cleanup.yaml"
+    ledger = CleanupLedger(path)
+
+    ledger.mark_cleanup_required(
+        [CleanupResource.from_observed(_observed_stack(), reason="rollback requested")],
+        source_step_id="deploying",
+        reason="rollback requested",
+    )
+
+    assert len(calls) == 1
+    saved_path, content, durable = calls[0]
+    assert saved_path == path
+    assert durable is True
+    saved = yaml.safe_load(content)
+    assert saved["cleanup_resources"][0]["resource_id"] == "stack-123"
+
+
+def test_mark_cleanup_required_serializes_read_modify_write_for_same_path(tmp_path) -> None:
+    first_save_entered = threading.Event()
+    save_lock = threading.Lock()
+    save_count = 0
+
+    class SlowFirstSaveLedger(CleanupLedger):
+        def _save(self, data):
+            nonlocal save_count
+            with save_lock:
+                save_count += 1
+                current_save = save_count
+            if current_save == 1:
+                first_save_entered.set()
+                time.sleep(0.25)
+            super()._save(data)
+
+    path = tmp_path / "cleanup.yaml"
+    errors = []
+
+    def mark_required(resource_id: str) -> None:
+        try:
+            resource = CleanupResource.from_observed(
+                ObservedResource(
+                    provider="ros",
+                    resource_type="stack",
+                    resource_id=resource_id,
+                    region_id="cn-hangzhou",
+                    source_step_id="deploying",
+                    observed_action="CreateStack",
+                ),
+                reason="rollback requested",
+            )
+            SlowFirstSaveLedger(path).mark_cleanup_required(
+                [resource],
+                source_step_id="deploying",
+                reason="rollback requested",
+            )
+        except Exception as exc:  # pragma: no cover - surfaced by assertion below
+            errors.append(exc)
+
+    first = threading.Thread(target=mark_required, args=("stack-one",))
+    second = threading.Thread(target=mark_required, args=("stack-two",))
+
+    first.start()
+    assert first_save_entered.wait(timeout=1)
+    second.start()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    resources = CleanupLedger(path).cleanup_resources()
+    assert sorted(resource.resource_id for resource in resources) == ["stack-one", "stack-two"]
 
 
 def test_corrupt_ledger_non_empty_writes_do_not_mutate_or_replace_file(tmp_path) -> None:

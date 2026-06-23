@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import yaml
 
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
@@ -67,6 +69,53 @@ def test_runner_persists_resource_observed_returned_by_step_hook(tmp_path) -> No
     assert observed.resource_id == "stack-123"
     assert observed.source_step_id == "deploying"
     assert observed.source_attempt_id == "att_0001"
+
+
+def test_runner_logs_cleanup_observed_write_failure(tmp_path, monkeypatch, caplog) -> None:
+    runner = _runner(tmp_path)
+
+    def on_resource_observed(ctx, event, *, ledger, step_id, attempt_id):
+        return ObservedResource(
+            provider=event.provider,
+            resource_type=event.resource_type,
+            resource_id=event.resource_id,
+            resource_name=event.resource_name,
+            region_id=event.region_id,
+            source_step_id=step_id,
+            source_attempt_id=attempt_id,
+            observed_action=event.action,
+            observed_at=1.0,
+        )
+
+    def fail_record_observed(self, observed):
+        raise OSError("cleanup disk full")
+
+    step = StepSpec(
+        step_id="deploying",
+        conclusion_field="deployment",
+        forward=None,
+        prompt_file="deploying.md",
+    )
+    step.on_resource_observed = on_resource_observed
+    monkeypatch.setattr(CleanupLedger, "record_observed", fail_record_observed)
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    runner._handle_resource_observed(
+        step,
+        ResourceObservedEvent(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-123",
+            resource_name="demo",
+            region_id="cn-hangzhou",
+            action="CreateStack",
+        ),
+        attempt_id="att_0001",
+    )
+
+    assert "Failed to persist observed cleanup resource" in caplog.text
+    assert "step_id=deploying" in caplog.text
+    assert "cleanup disk full" in caplog.text
 
 
 def test_runner_marks_cleanup_required_from_rollback_hook(tmp_path) -> None:

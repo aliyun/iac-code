@@ -1,5 +1,6 @@
 """Hook for the deploying step."""
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +11,7 @@ from iac_code.pipeline.engine.ui_contract import SelectedCandidate, parse_select
 from iac_code.types.stream_events import ResourceObservedEvent
 
 _DEPLOYING_STEP_ID = "deploying"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -192,7 +194,10 @@ def on_rollback_cleanup_required(
 ) -> list[CleanupResource]:
     """Mark deploying-created ROS stacks for cleanup when deploying rolls back."""
     _ = (ctx, to_step)
-    if from_step != _DEPLOYING_STEP_ID or not from_attempt_id:
+    if from_step != _DEPLOYING_STEP_ID:
+        return []
+    if not from_attempt_id:
+        logger.warning("Skipping deploying cleanup hook because from_attempt_id is missing")
         return []
     resources = [
         CleanupResource.from_observed(resource, reason=reason)
