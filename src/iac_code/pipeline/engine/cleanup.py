@@ -654,12 +654,16 @@ class CleanupObserver:
         mapped_resource_id: str,
         result_resource_id: str,
     ) -> None:
+        safe_tool_use_id = _safe_history_error(tool_use_id) or ""
+        safe_tool_name = _safe_history_error(tool_name) or ""
+        safe_mapped_resource_id = _safe_history_error(mapped_resource_id) or ""
+        safe_result_resource_id = _safe_history_error(result_resource_id) or ""
         logger.warning(
             "Mismatched cleanup tool result: tool_use_id=%s tool_name=%s mapped_resource_id=%s result_resource_id=%s",
-            tool_use_id,
-            tool_name,
-            mapped_resource_id,
-            result_resource_id,
+            safe_tool_use_id,
+            safe_tool_name,
+            safe_mapped_resource_id,
+            safe_result_resource_id,
         )
         self._ledger.record_tool_result_mismatch(
             tool_use_id=tool_use_id,

@@ -571,12 +571,13 @@ def test_observer_rejects_persisted_mapping_result_stack_id_mismatch(tmp_path, c
         tool_input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-a"}},
     )
     caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.cleanup")
+    unsafe_stack_id = "stack-b AccessKeySecret=super-secret /Users/alice/.iac-code/settings.yml"
 
     CleanupObserver(CleanupLedger(tmp_path / "cleanup.yaml")).observe(
         ToolResultEvent(
             tool_use_id="toolu-delete-a",
             tool_name="ros_stack",
-            result=json.dumps({"StackId": "stack-b", "Status": "DELETE_COMPLETE"}),
+            result=json.dumps({"StackId": unsafe_stack_id, "Status": "DELETE_COMPLETE"}),
             is_error=False,
         )
     )
@@ -590,9 +591,18 @@ def test_observer_rejects_persisted_mapping_result_stack_id_mismatch(tmp_path, c
     assert history[-1]["type"] == "cleanup_tool_result_mismatch"
     assert history[-1]["tool_use_id"] == "toolu-delete-a"
     assert history[-1]["mapped_resource_id"] == "stack-a"
-    assert history[-1]["result_resource_id"] == "stack-b"
+    assert history[-1]["result_resource_id"] != unsafe_stack_id
+    assert "super-secret" not in history[-1]["result_resource_id"]
+    assert "/Users/alice" not in history[-1]["result_resource_id"]
+    assert "[REDACTED]" in history[-1]["result_resource_id"]
+    assert "[PATH]" in history[-1]["result_resource_id"]
     assert history[-1]["tool_name"] == "ros_stack"
     assert "Mismatched cleanup tool result" in caplog.text
+    assert "super-secret" not in caplog.text
+    assert "/Users/alice" not in caplog.text
+    assert "settings.yml" not in caplog.text
+    assert "[REDACTED]" in caplog.text
+    assert "[PATH]" in caplog.text
 
 
 def test_observer_rejects_in_memory_tool_result_stack_id_mismatch(tmp_path, caplog) -> None:
