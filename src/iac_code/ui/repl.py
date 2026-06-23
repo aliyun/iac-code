@@ -272,6 +272,7 @@ class InlineREPL:
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id: str | None = None
         self._pipeline_state_persistence_failed: bool = False
+        self._pipeline_state_persistence_warning_rendered: bool = False
 
         # Keybinding manager
         self._keybinding_manager = KeybindingManager()
@@ -2635,6 +2636,7 @@ class InlineREPL:
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id = None
         self._pipeline_state_persistence_failed = False
+        self._pipeline_state_persistence_warning_rendered = False
 
     def _finalize_pipeline_after_render(self, terminal_event: PipelineEvent | None) -> None:
         # Keep terminal sidecars on disk for debugging. Terminal metadata
@@ -2645,6 +2647,7 @@ class InlineREPL:
                 if callable(pause_agent_loops):
                     pause_agent_loops()
             self._pipeline_waiting_input = False
+            self._warn_pipeline_state_persistence_failed_once()
             return
         handoff_result = self._handoff_pipeline_to_normal(terminal_event)
         if handoff_result == "persistence_failed":
@@ -2752,6 +2755,12 @@ class InlineREPL:
         pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
         if callable(pause_agent_loops):
             pause_agent_loops()
+        self._warn_pipeline_state_persistence_failed_once()
+
+    def _warn_pipeline_state_persistence_failed_once(self) -> None:
+        if getattr(self, "_pipeline_state_persistence_warning_rendered", False):
+            return
+        self._pipeline_state_persistence_warning_rendered = True
         self.renderer.print_system_message(
             _("Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable."),
             style="yellow",

@@ -562,7 +562,20 @@ class PipelineRunner:
             return
         resources = self._cleanup_resources_from_hook_result(result)
         if resources:
-            ledger.mark_cleanup_required(resources, source_step_id=step.step_id, reason=reason)
+            try:
+                ledger.mark_cleanup_required(resources, source_step_id=step.step_id, reason=reason)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to persist rollback cleanup resources: step_id=%s target_step_id=%s error=%s",
+                    step.step_id,
+                    to_step,
+                    exc,
+                    exc_info=True,
+                )
+                raise PipelineStatePersistenceError(
+                    "pipeline state persistence failed during mark_rollback_cleanup_required",
+                    step_id=step.step_id,
+                ) from exc
 
     @staticmethod
     def _observed_resources_from_hook_result(result: object) -> list[ObservedResource]:
@@ -1842,17 +1855,17 @@ class PipelineRunner:
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Start the pipeline from the first step."""
         pipeline_input = normalize_pipeline_user_input(user_input)
-        self._session_storage.append_meta(
-            self._cwd,
-            self._session_id,
-            {"type": "pipeline_init", "pipeline_type": self._loaded.name},
-        )
         self._set_current_step_user_input(pipeline_input)
         try:
             await self._save_running(self.state_machine.current_step.step_id, reason="pipeline started")
         except PipelineStatePersistenceError as exc:
             yield self._persistence_failure_event(exc)
             return
+        self._session_storage.append_meta(
+            self._cwd,
+            self._session_id,
+            {"type": "pipeline_init", "pipeline_type": self._loaded.name},
+        )
         self._observability.pipeline_started(
             total_steps=self.state_machine.total_steps,
             step_names=list(self.state_machine._order),
@@ -3308,12 +3321,16 @@ class PipelineRunner:
                 target_field = next((s.conclusion_field for s in self._loaded.steps if s.step_id == target), None)
                 stale = self.context.mark_stale(target_field) if target_field else []
                 self._set_current_step_user_input(None)
-                self._mark_rollback_cleanup_required(
-                    step,
-                    target,
-                    reason,
-                    from_attempt_id=current_attempt_id if isinstance(current_attempt_id, str) else None,
-                )
+                try:
+                    self._mark_rollback_cleanup_required(
+                        step,
+                        target,
+                        reason,
+                        from_attempt_id=current_attempt_id if isinstance(current_attempt_id, str) else None,
+                    )
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
                 try:
                     await self._save_rollback(step.step_id, target, reason)
                 except PipelineStatePersistenceError as exc:

@@ -16,6 +16,7 @@ def repl_for_sidecar_restore(tmp_path):
     repl._pipeline = None
     repl._pipeline_waiting_input = False
     repl._pipeline_state_persistence_failed = False
+    repl._pipeline_state_persistence_warning_rendered = False
     repl._session_id = "sid"
     repl._original_cwd = str(tmp_path)
     repl._provider_manager = MagicMock()
@@ -169,6 +170,10 @@ def test_finalize_persistence_failure_event_does_not_mark_user_aborted(repl_for_
     assert repl_for_sidecar_restore._pipeline is pipeline
     pipeline.pause_agent_loops.assert_called_once_with()
     pipeline.mark_user_aborted.assert_not_called()
+    repl_for_sidecar_restore.renderer.print_system_message.assert_called_once_with(
+        "Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable.",
+        style="yellow",
+    )
 
 
 def test_finalize_user_abort_persistence_failure_keeps_pipeline_paused(repl_for_sidecar_restore):

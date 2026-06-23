@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from iac_code.agent.message import Message, ToolResultBlock
-from iac_code.pipeline.engine.cleanup import CleanupLedger, ObservedResource
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
@@ -578,6 +578,83 @@ async def test_resource_observed_save_failure_stops_before_continuing(tmp_path, 
     )
     assert not any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_rollback_cleanup_required_save_failure_stops_before_rollback_event(tmp_path, monkeypatch):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = PipelineSession(tmp_path / "session" / "pipeline")
+
+    def on_rollback_cleanup_required(ctx, *, ledger, from_step, from_attempt_id, to_step, reason):
+        return [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                source_step_id=from_step,
+                source_attempt_id=from_attempt_id,
+                cleanup_reason=reason,
+            )
+        ]
+
+    def fail_mark_cleanup_required(self, resources, *, source_step_id, reason):
+        raise OSError("cleanup disk full")
+
+    runner._loaded.steps[1].on_rollback_cleanup_required = on_rollback_cleanup_required
+    monkeypatch.setattr(CleanupLedger, "mark_cleanup_required", fail_mark_cleanup_required)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        if step.step_id == "a":
+            conclusion = {"value": "a"}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+            return
+        conclusion = {"value": "b"}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=("a", "retry"),
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "b"
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED and event.step_id == "b"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.ROLLBACK_TRIGGERED for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_initial_sidecar_save_failure_stops_before_pipeline_init_meta(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingSavePipelineSession()
+
+    events = [event async for event in runner.run("start")]
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert runner._session_storage.meta_entries == []
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_STARTED for event in events
     )
 
 

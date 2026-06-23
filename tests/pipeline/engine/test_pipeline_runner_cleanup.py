@@ -163,3 +163,45 @@ def test_runner_marks_cleanup_required_from_rollback_hook(tmp_path) -> None:
     assert pending.cleanup_reason == "invalid selection"
     data = yaml.safe_load((runner.session.session_dir / "cleanup.yaml").read_text(encoding="utf-8"))
     assert [entry["type"] for entry in data["history"]] == ["cleanup_required"]
+
+
+def test_runner_raises_cleanup_required_write_failure(tmp_path, monkeypatch, caplog) -> None:
+    runner = _runner(tmp_path)
+
+    def on_rollback_cleanup_required(ctx, *, ledger, from_step, from_attempt_id, to_step, reason):
+        return [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                source_step_id=from_step,
+                source_attempt_id=from_attempt_id,
+                cleanup_reason=reason,
+            )
+        ]
+
+    def fail_mark_cleanup_required(self, resources, *, source_step_id, reason):
+        raise OSError("cleanup disk full")
+
+    step = StepSpec(
+        step_id="deploying",
+        conclusion_field="deployment",
+        forward=None,
+        prompt_file="deploying.md",
+    )
+    step.on_rollback_cleanup_required = on_rollback_cleanup_required
+    monkeypatch.setattr(CleanupLedger, "mark_cleanup_required", fail_mark_cleanup_required)
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    with pytest.raises(PipelineStatePersistenceError) as exc_info:
+        runner._mark_rollback_cleanup_required(
+            step,
+            "confirm_and_select",
+            "invalid selection",
+            from_attempt_id="att_0001",
+        )
+
+    assert exc_info.value.step_id == "deploying"
+    assert "Failed to persist rollback cleanup resources" in caplog.text
+    assert "step_id=deploying" in caplog.text
+    assert "cleanup disk full" in caplog.text
