@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 import time
 
 import pytest
 
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, create_recalled_memory_message
+from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
 from iac_code.services.session_index import (
     SessionIndex,
     extract_first_json_string_field,
@@ -131,6 +135,37 @@ class TestLiteMetadata:
 
         assert meta.first_prompt == "real prompt"
 
+    def test_cleanup_prompt_last_prompt_meta_is_ignored(self, storage):
+        cwd = "/proj/cp-last"
+        storage.append(cwd, "scp-last", Message(role="user", content="real prompt"), git_branch=None)
+        storage.append_meta(
+            cwd,
+            "scp-last",
+            {
+                "type": "last-prompt",
+                "last_prompt": "检测到 pipeline rollback 后仍需要清理的云资源。只有确认 DELETE_COMPLETE 才算完成。",
+            },
+        )
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-last"))
+
+        assert meta.last_prompt is None
+        assert meta.first_prompt == "real prompt"
+
+    def test_skips_cleanup_prompt_user_messages(self, storage):
+        cwd = "/proj/cp-first"
+        storage.append(
+            cwd,
+            "scp-first",
+            create_cleanup_prompt_message("cleanup hidden prompt"),
+            git_branch=None,
+        )
+        storage.append(cwd, "scp-first", Message(role="user", content="real prompt"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-first"))
+
+        assert meta.first_prompt == "real prompt"
+
 
 # ---------------------------------------------------------------------------
 # SessionIndex
@@ -138,6 +173,20 @@ class TestLiteMetadata:
 
 
 class TestSessionIndex:
+    def test_session_services_do_not_import_pipeline_engine_modules(self):
+        script = """
+import json
+import sys
+
+import iac_code.services.session_index
+import iac_code.services.session_storage
+
+print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_code.pipeline.engine"))))
+"""
+        result = subprocess.run([sys.executable, "-c", script], check=True, capture_output=True, text=True)
+
+        assert json.loads(result.stdout) == []
+
     def test_list_for_cwd_filters_by_project(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
         storage.append("/a", "id-a", Message(role="user", content="one"), git_branch=None)
@@ -178,6 +227,79 @@ class TestSessionIndex:
         assert entry.title == "deploy-prod"
         assert entry.auto_title == "first prompt"
         assert entry.is_legacy is False
+
+    def test_user_prompt_mentioning_cleanup_terms_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "How do I verify DELETE_COMPLETE for deleted stacks?"
+        storage.append("/p", "cleanup-terms", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
+
+    def test_user_prompt_mentioning_cleanup_required_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "What does cleanup required mean in Terraform?"
+        storage.append("/p", "cleanup-required", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
+
+    def test_user_prompt_mentioning_strict_whitelist_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "严格白名单策略怎么配置？"
+        storage.append("/p", "strict-whitelist", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
+
+    def test_user_prompt_mentioning_resources_to_clean_is_not_hidden(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        prompt = "待清理资源怎么配置提醒？"
+        storage.append("/p", "resources-to-clean", Message(role="user", content=prompt), git_branch=None)
+
+        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
+
+        assert entry.title == prompt
+        assert entry.auto_title == prompt
+
+    def test_legacy_cleanup_prompt_last_prompt_meta_is_ignored(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        cwd = "/proj/cp-last-legacy"
+        storage.append(cwd, "scp-last-legacy", Message(role="user", content="real prompt"), git_branch=None)
+        storage.append_meta(
+            cwd,
+            "scp-last-legacy",
+            {
+                "type": "last-prompt",
+                "last_prompt": "Pipeline rollback cleanup required for leftover resources.",
+            },
+        )
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-last-legacy"))
+
+        assert meta.last_prompt is None
+        assert meta.first_prompt == "real prompt"
+
+    def test_skips_legacy_cleanup_prompt_user_messages(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        cwd = "/proj/cp-first-legacy"
+        storage.append(
+            cwd,
+            "scp-first-legacy",
+            Message(role="user", content="Rollback cleanup required for stack-123."),
+            git_branch=None,
+        )
+        storage.append(cwd, "scp-first-legacy", Message(role="user", content="real prompt"), git_branch=None)
+
+        meta = read_lite_metadata(storage.session_path(cwd, "scp-first-legacy"))
+
+        assert meta.first_prompt == "real prompt"
 
     def test_legacy_session_still_indexed(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)

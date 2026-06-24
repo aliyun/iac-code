@@ -6,6 +6,8 @@ import pytest
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.commands import create_default_registry
 from iac_code.commands import prompt as prompt_module
+from iac_code.pipeline.config import RunMode
+from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
 from iac_code.providers.base import ContentBlock, Message, ToolDefinition
 
 
@@ -112,6 +114,121 @@ def test_prompt_snapshot_prefers_last_provider_request_with_recalled_memory():
     assert "hidden conversation" in html
 
 
+def test_prompt_snapshot_includes_hidden_cleanup_prompt_from_session():
+    cleanup = create_cleanup_prompt_message(
+        "检测到 pipeline rollback 后仍需要清理的云资源。\n待清理资源：stack-123",
+        cleanup_status="pending",
+    )
+    repl = SimpleNamespace(
+        _agent_loop=_FakeAgentLoopWithLastRequest(),
+        _session_storage=SimpleNamespace(load=lambda cwd, session_id: [cleanup]),
+        _original_cwd="/repo",
+        _session_id="session-123",
+        get_status_snapshot=lambda: {"session_id": "session-123", "cwd": "/repo"},
+    )
+
+    snapshot = prompt_module.build_prompt_snapshot(repl)
+    html = prompt_module.render_prompt_html(snapshot)
+
+    assert "待清理资源：stack-123" in html
+    assert "cleanup prompt" in html
+    assert 'data-tab-target="cleanup"' in html
+    assert 'data-tab-panel="cleanup"' in html
+    assert "Cleanup Prompts" in html
+
+
+def test_prompt_snapshot_inserts_removed_cleanup_prompt_between_session_anchors():
+    class _AnchoredLastRequestLoop(_FakeAgentLoop):
+        def get_last_provider_request_snapshot(self):
+            return {
+                "system_prompt": "# Sent System\nactual sent system",
+                "provider_messages": [
+                    Message.user("before cleanup"),
+                    Message(role="assistant", content="after cleanup"),
+                ],
+                "tools": [],
+            }
+
+    cleanup = create_cleanup_prompt_message(
+        "检测到 pipeline rollback 后仍需要清理的云资源。\n待清理资源：stack-anchored",
+        cleanup_status="completed",
+    )
+    repl = SimpleNamespace(
+        _agent_loop=_AnchoredLastRequestLoop(),
+        _session_storage=SimpleNamespace(
+            load=lambda cwd, session_id: [
+                AgentMessage(role="user", content="before cleanup"),
+                cleanup,
+                AgentMessage(role="assistant", content="after cleanup"),
+            ]
+        ),
+        _original_cwd="/repo",
+        _session_id="session-123",
+        get_status_snapshot=lambda: {"session_id": "session-123", "cwd": "/repo"},
+    )
+
+    snapshot = prompt_module.build_prompt_snapshot(repl)
+    messages = snapshot["provider_messages"]
+
+    assert [message["content"] for message in messages] == [
+        "before cleanup",
+        "检测到 pipeline rollback 后仍需要清理的云资源。\n待清理资源：stack-anchored",
+        "after cleanup",
+    ]
+    assert messages[1]["badge"] == "cleanup prompt · removed"
+    assert snapshot["cleanup_prompts"][0]["content"].endswith("stack-anchored")
+
+
+def test_prompt_snapshot_keeps_unanchored_removed_cleanup_prompt_out_of_provider_messages():
+    class _UnanchoredLastRequestLoop(_FakeAgentLoop):
+        def get_last_provider_request_snapshot(self):
+            return {
+                "system_prompt": "# Sent System\nactual sent system",
+                "provider_messages": [Message(role="assistant", content="after cleanup")],
+                "tools": [],
+            }
+
+    cleanup = create_cleanup_prompt_message(
+        "检测到 pipeline rollback 后仍需要清理的云资源。\n待清理资源：stack-unanchored",
+        cleanup_status="completed",
+    )
+    repl = SimpleNamespace(
+        _agent_loop=_UnanchoredLastRequestLoop(),
+        _session_storage=SimpleNamespace(
+            load=lambda cwd, session_id: [
+                cleanup,
+                AgentMessage(role="assistant", content="after cleanup"),
+            ]
+        ),
+        _original_cwd="/repo",
+        _session_id="session-123",
+        get_status_snapshot=lambda: {"session_id": "session-123", "cwd": "/repo"},
+    )
+
+    snapshot = prompt_module.build_prompt_snapshot(repl)
+    html = prompt_module.render_prompt_html(snapshot)
+
+    assert [message["content"] for message in snapshot["provider_messages"]] == ["after cleanup"]
+    assert snapshot["cleanup_prompts"][0]["content"].endswith("stack-unanchored")
+    assert "待清理资源：stack-unanchored" in html
+    assert 'data-tab-target="cleanup"' in html
+
+
+def test_prompt_html_hides_cleanup_tab_when_no_cleanup_prompt():
+    html = prompt_module.render_prompt_html(
+        {
+            "metadata": {"session_id": "abc"},
+            "system_prompt": "# System\nPrompt",
+            "system_sections": [{"title": "System", "content": "# System\nPrompt", "zone": "static"}],
+            "provider_messages": [{"role": "user", "content": "hello"}],
+            "tools": [],
+        }
+    )
+
+    assert 'data-tab-target="cleanup"' not in html
+    assert 'data-tab-panel="cleanup"' not in html
+
+
 @pytest.mark.asyncio
 async def test_prompt_command_exports_html_and_opens(tmp_path, monkeypatch):
     opened: list[object] = []
@@ -212,6 +329,52 @@ async def test_prompt_command_exports_pipeline_prompt_context(tmp_path):
     assert "real system prompt" in html
     assert "[user]" in html
     assert "original prompt" in html
+
+
+@pytest.mark.asyncio
+async def test_prompt_command_uses_normal_snapshot_with_cleanup_prompt_after_pipeline_handoff(tmp_path):
+    ensure = AsyncMock(return_value=False)
+    cleanup = create_cleanup_prompt_message(
+        "检测到 pipeline rollback 后仍需要清理的云资源。\n待清理资源：stack-cleanup",
+        cleanup_status="completed",
+    )
+    prompt_context = SimpleNamespace(
+        scope="parent",
+        step_id="deploying",
+        system_prompt="stale pipeline prompt",
+        messages=[AgentMessage(role="user", content="stale pipeline message")],
+        agent_loop_session_id="transcript_deploying",
+        initial_prompt="",
+        candidate_index=None,
+        candidate_name="",
+        sub_pipeline_id="",
+    )
+    session_dir = tmp_path / "root-session"
+    repl = SimpleNamespace(
+        ensure_pipeline_restored_for_prompt=ensure,
+        _get_runtime_mode=lambda: RunMode.NORMAL,
+        _pipeline=SimpleNamespace(get_prompt_contexts=lambda: [prompt_context]),
+        _agent_loop=_FakeAgentLoopWithLastRequest(),
+        _session_storage=SimpleNamespace(
+            load=lambda cwd, session_id: [cleanup],
+            session_dir=lambda cwd, session_id: session_dir,
+        ),
+        _original_cwd="/repo",
+        _session_id="root-session",
+        get_status_snapshot=lambda: {"session_id": "root-session", "cwd": "/repo"},
+    )
+    opened_urls: list[str] = []
+
+    await prompt_module.prompt_command(
+        context=SimpleNamespace(repl=repl),
+        browser_opener=lambda url: opened_urls.append(url) or True,
+    )
+
+    html = (session_dir / "prompt.html").read_text(encoding="utf-8")
+    assert "待清理资源：stack-cleanup" in html
+    assert "cleanup prompt" in html
+    assert "stale pipeline prompt" not in html
+    assert "stale pipeline message" not in html
 
 
 @pytest.mark.asyncio

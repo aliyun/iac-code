@@ -67,15 +67,29 @@ class TestSkillContentRosOnly:
     def test_contains_ros_template_format(self, body):
         assert "ROSTemplateFormatVersion" in body or "ROS" in body
 
-    def test_contains_parameterization_rules(self, body):
-        assert "参数化规则" in body
+    def test_parameterization_guidance_points_to_references_without_inline_table(self, body):
+        assert "库存相关属性" in body
+        assert "references/cloud-products/" in body
+        assert "| ECS | ZoneId, InstanceType" not in body
 
     def test_contains_validation_step(self, body):
         assert "ValidateTemplate" in body
 
-    def test_contains_resource_types(self, body):
-        assert "ALIYUN::ECS::VPC" in body
-        assert "ALIYUN::ECS::InstanceGroup" in body
+    def test_must_read_ros_template_reference_before_generation(self, body):
+        assert "必须" in body
+        assert "references/ros-template.md" in body
+        assert "未阅读不得生成模板" in body
+
+    def test_does_not_inline_common_resource_catalog(self, body):
+        assert "## 常用资源类型" not in body
+        assert "ALIYUN::ECS::VPC: 创建专有网络" not in body
+        assert "ALIYUN::ECS::InstanceGroup: 创建 N 个 ECS 实例" not in body
+        assert "references/ros-template.md" in body
+
+    def test_run_command_details_stay_in_reference(self, body):
+        assert "## 在实例中执行命令" not in body
+        assert "ALIYUN::ECS::RunCommand + `CommandContent`" not in body
+        assert "references/ros-template.md" in body
 
     def test_no_deploy_flow(self, body):
         assert "CreateStack" not in body
@@ -138,6 +152,30 @@ class TestSkillPromptRendering:
         )._build_full_system_prompt(step, context)
 
         assert f"Base directory for this skill: {SKILL_DIR}" in prompt
+
+    def test_agent_loop_trusts_skill_base_directory_for_tools(self, tmp_path):
+        from iac_code.pipeline.engine.context import PipelineContext
+        from iac_code.pipeline.engine.loader import load_pipeline_dir
+        from iac_code.pipeline.engine.step_executor import StepExecutor
+        from iac_code.tools.base import ToolRegistry
+
+        pipeline_dir = SKILL_DIR.parents[1]
+        loaded = load_pipeline_dir(pipeline_dir)
+        step = next(s for s in loaded.sub_pipelines["evaluate_candidate"].steps if s.step_id == "template_generating")
+        context = PipelineContext({"candidate": []})
+        context.set_conclusion("candidate", {"output_path": "templates/example.yml"})
+
+        agent_context = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=loaded,
+            pipeline_dir=pipeline_dir,
+            cwd=str(tmp_path),
+        ).build_agent_loop_context(step, context, "session-1")
+
+        assert agent_context.agent_loop is not None
+        assert str(SKILL_DIR) in agent_context.agent_loop._tool_context_trusted_read_directories
+        assert str(SKILL_DIR) in agent_context.agent_loop._tool_context_relative_read_directories
 
 
 class TestEvalsJson:

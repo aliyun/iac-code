@@ -9,6 +9,7 @@ SKILL_DIR = (
 )
 SKILL_MD = SKILL_DIR / "SKILL.md"
 EVALS_JSON = SKILL_DIR / "evals.json"
+COST_PROMPT_MD = SKILL_DIR.parents[1] / "prompts" / "cost_estimating.md"
 
 
 def _direct_references_dir_or_skip() -> Path:
@@ -55,6 +56,20 @@ class TestSkillFrontmatter:
         fm = _parse_frontmatter(content)
         assert "GetTemplateEstimateCost" in fm["description"] or "费用" in fm["description"]
 
+    def test_conclusion_schema_carries_deployment_parameters(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        assert "deployment_parameters" in schema["required"]
+        assert schema["properties"]["deployment_parameters"]["type"] == "object"
+
+    def test_conclusion_schema_can_report_missing_deployment_parameters(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        assert "missing_deployment_parameters" in schema["properties"]
+        assert schema["properties"]["missing_deployment_parameters"]["type"] == "array"
+
 
 class TestSkillContentRosOnly:
     @pytest.fixture()
@@ -91,8 +106,61 @@ class TestSkillContentRosOnly:
     def test_validate_template_policy_is_not_repeated(self, body):
         assert body.count("只有在修复或改写模板后") == 1
 
-    def test_contains_parameter_flattening(self, body):
-        assert "Parameters.1.ParameterKey" in body or "ParameterKey" in body
+    def test_uses_parameters_dictionary_auto_expansion(self, body):
+        assert '"Parameters": {' in body
+        assert "直接传字典格式" in body
+        assert "工具会自动展开" in body
+        assert "Parameters.1.ParameterKey" not in body
+
+    def test_outputs_pricing_parameters_for_deployment(self, body):
+        assert "deployment_parameters" in body
+        assert "传递给 deploying" in body
+        assert "写入模板 Parameters 的 `Default`" not in body
+        assert "沉淀参数默认值" not in body
+
+    def test_contains_parameter_recommendation_flow(self, body):
+        assert "Pricing Parameter Set" in body
+        assert "Preview-Validated Pricing Parameter Set" in body
+        assert "references/template-parameter-recommendation.md" in body
+        assert "GetTemplateParameterConstraints" in body
+        assert "PreviewStack" in body
+        assert "AllowedValues" in body
+        assert "不得编造" in body
+        assert "外部输入" in body
+        assert "不执行 `PreviewStack`" not in body
+        assert "写回模板的 Default 保持一致" not in body
+
+    def test_existing_resource_parameters_can_use_api_candidates(self, body):
+        assert "VpcId、VSwitchId、SecurityGroupId、KeyPairName" in body
+        assert "API 返回候选不是编造" in body
+        assert "先查询约束或只读资源候选" in body
+        assert "不要仅因参数名是 VpcId" in body
+
+    def test_preview_stack_uses_aliyun_api_not_ros_stack(self, body):
+        assert 'aliyun_api(product="ros", action="PreviewStack")' in body
+        assert "不要使用 `ros_stack` 执行 `PreviewStack`" in body
+
+    def test_preview_stack_must_pass_stack_name_with_random_suffix(self, body):
+        assert "PreviewStack 必须传 StackName" in body
+        assert "随机串后缀" in body
+        assert "避免重名" in body
+
+    def test_parameter_recommendation_precedes_initial_pricing(self, body):
+        assert "先直接询价" not in body
+        assert "首次询价前" in body
+        assert "形成 Preview-Validated Pricing Parameter Set" in body
+
+    def test_preserves_preview_parameters_when_pricing_fails(self, body):
+        assert "PreviewStack 成功但询价失败" in body
+        assert "不要丢弃 Preview-Validated Pricing Parameter Set" in body
+        assert "询价失败或外部输入缺失时填 `{}`" not in body
+
+    def test_preview_stack_is_not_hard_gate_for_pricing(self, body):
+        assert "PreviewStack 不是硬门禁" in body
+        assert "完整部署参数" in body
+        assert "GetTemplateEstimateCost" in body
+        assert "missing_deployment_parameters" in body
+        assert "选择阶段" in body and "parameter_overrides" in body
 
     def test_contains_template_url(self, body):
         assert "TemplateURL" in body
@@ -111,12 +179,15 @@ class TestSkillContentRosOnly:
             if "aliyun_doc_search" in line:
                 assert "不要" in line or "不" in line or "禁" in line
 
-    def test_contains_resource_types(self, body):
-        assert "ALIYUN::ECS::VPC" in body
-        assert "ALIYUN::ECS::InstanceGroup" in body
+    def test_does_not_inline_common_resource_catalog(self, body):
+        assert "### 常用资源类型" not in body
+        assert "ALIYUN::ECS::VPC — 专有网络" not in body
+        assert "ALIYUN::ECS::InstanceGroup — ECS 实例" not in body
 
-    def test_contains_parameterization_rules(self, body):
-        assert "参数化" in body
+    def test_parameterization_details_stay_in_references(self, body):
+        assert "### 参数化规则" not in body
+        assert "| ECS | ZoneId, InstanceType" not in body
+        assert "references/template-parameters.md" in body
 
     def test_contains_error_handling(self, body):
         assert "失败" in body
@@ -193,6 +264,26 @@ class TestSkillDiscovery:
         assert loaded.skills["iac-aliyun-cost"] == expected
 
 
+class TestCostPrompt:
+    def test_prompt_is_not_duplicate_output_reference(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert "Preview-Validated Pricing Parameter Set" in body
+        assert "deployment_parameters" not in body
+        assert "询价失败但 PreviewStack 已成功" not in body
+        assert "字段为字符串" not in body
+
+    def test_prompt_names_preview_stack_tool_contract(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert 'aliyun_api(product="ros", action="PreviewStack")' in body
+        assert "不要使用 `ros_stack` 执行 `PreviewStack`" in body
+
+    def test_prompt_treats_preview_stack_as_soft_gate(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert "优先通过" in body
+        assert "不是硬门禁" in body
+        assert "参数缺口" in body
+
+
 class TestEvalsJson:
     def test_evals_file_exists(self):
         assert EVALS_JSON.exists()
@@ -200,6 +291,42 @@ class TestEvalsJson:
     def test_valid_json(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
         assert isinstance(data, dict)
+
+    def test_evals_follow_parameter_dictionary_contract(self):
+        text = EVALS_JSON.read_text(encoding="utf-8")
+        assert "Parameters.<N>.ParameterKey" not in text
+        assert "Parameters.1.ParameterKey" not in text
+        assert "deployment_parameters" in text
+
+    def test_evals_do_not_require_validation_before_initial_pricing(self):
+        text = EVALS_JSON.read_text(encoding="utf-8")
+        assert "先校验" not in text
+
+    def test_evals_keep_preview_parameters_on_pricing_failure(self):
+        text = EVALS_JSON.read_text(encoding="utf-8")
+        assert "PreviewStack 成功但询价失败" in text
+        assert "不丢弃" in text
+
+    def test_evals_assert_preview_stack_api_tool_contract(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        checks = "\n".join(assertion["check"] for ev in data["evals"] for assertion in ev["assertions"])
+        assert 'aliyun_api(product="ros", action="PreviewStack")' in checks
+        assert "不使用 ros_stack" in checks
+
+    def test_evals_cover_existing_vpc_parameter_recommendation(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        eval_text = json.dumps(data, ensure_ascii=False)
+        assert "existing-vpc-vswitch-cost" in eval_text
+        assert "ALIYUN::ECS::VPC::VPCId" in eval_text
+        assert "VpcId" in eval_text
+        assert "API 返回候选不是编造" in eval_text
+
+    def test_evals_cover_preview_stack_soft_gate(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        eval_text = json.dumps(data, ensure_ascii=False)
+        assert "preview-soft-gate-partial-pricing" in eval_text
+        assert "PreviewStack 不是硬门禁" in eval_text
+        assert "missing_deployment_parameters" in eval_text
 
     def test_has_required_fields(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))

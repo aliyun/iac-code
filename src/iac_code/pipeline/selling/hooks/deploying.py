@@ -1,10 +1,17 @@
 """Hook for the deploying step."""
 
-from dataclasses import asdict, dataclass
+import logging
+import time
+from dataclasses import dataclass
 from typing import Any
 
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.ui_contract import SelectedCandidate, parse_selected_candidate
+from iac_code.types.stream_events import ResourceObservedEvent
+
+_DEPLOYING_STEP_ID = "deploying"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -74,7 +81,7 @@ def normalize_selected_plan(
 
     candidates = evaluated_candidates or []
     resolution = resolve_selected_candidate(selected, candidates)
-    plan["selection"] = asdict(selected)
+    plan["selection"] = _selection_dict(selected)
     if resolution.error:
         plan["selection_valid"] = False
         plan["selection_error"] = resolution.error
@@ -83,16 +90,51 @@ def normalize_selected_plan(
     plan["selection_valid"] = True
     plan["selected_candidate"] = resolution.candidate
     plan["selected_candidate_result"] = resolution.result
+    plan["parameter_overrides"] = dict(selected.parameter_overrides)
+    effective_parameters = _effective_deployment_parameters(resolution.result, selected.parameter_overrides)
+    if effective_parameters:
+        plan["effective_deployment_parameters"] = effective_parameters
+    plan["cost_estimate_parameter_overridden"] = bool(selected.parameter_overrides)
     return plan
 
 
 def _selection_payload(plan: dict[str, Any]) -> Any:
     if "selected_candidate_index" in plan or "selected_candidate_name" in plan:
-        return {
+        payload = {
             "selected_candidate_name": plan.get("selected_candidate_name", ""),
             "selected_candidate_index": plan.get("selected_candidate_index"),
         }
+        if "parameter_overrides" in plan:
+            payload["parameter_overrides"] = plan.get("parameter_overrides")
+        elif "parameters" in plan:
+            payload["parameters"] = plan.get("parameters")
+        return payload
     return plan.get("user_input")
+
+
+def _selection_dict(selected: SelectedCandidate) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "selected_candidate_name": selected.selected_candidate_name,
+        "selected_candidate_index": selected.selected_candidate_index,
+    }
+    if selected.parameter_overrides:
+        data["parameter_overrides"] = dict(selected.parameter_overrides)
+    return data
+
+
+def _effective_deployment_parameters(
+    selected_candidate_result: dict[str, Any] | None,
+    parameter_overrides: dict[str, Any],
+) -> dict[str, Any]:
+    parameters: dict[str, Any] = {}
+    if isinstance(selected_candidate_result, dict):
+        cost = selected_candidate_result.get("cost")
+        if isinstance(cost, dict):
+            deployment_parameters = cost.get("deployment_parameters")
+            if isinstance(deployment_parameters, dict):
+                parameters.update(deployment_parameters)
+    parameters.update(parameter_overrides)
+    return parameters
 
 
 def on_enter(ctx: PipelineContext) -> None:
@@ -104,3 +146,66 @@ def on_enter(ctx: PipelineContext) -> None:
         evaluated_candidates if isinstance(evaluated_candidates, list) else [],
     )
     ctx.set_conclusion("selected_plan", normalized)
+
+
+def on_resource_observed(
+    ctx: PipelineContext,
+    event: ResourceObservedEvent,
+    *,
+    ledger: CleanupLedger,
+    step_id: str,
+    attempt_id: str | None,
+) -> ObservedResource | None:
+    """Persist only ROS stacks created by the deploying step."""
+    _ = ctx
+    if step_id != _DEPLOYING_STEP_ID:
+        return None
+    if event.provider.lower() != "ros" or event.resource_type.lower() != "stack":
+        return None
+    if event.action != "CreateStack" or not event.resource_id:
+        return None
+
+    observed = ObservedResource(
+        provider="ros",
+        resource_type="stack",
+        resource_id=event.resource_id,
+        resource_name=event.resource_name,
+        region_id=event.region_id,
+        source_step_id=step_id,
+        source_attempt_id=attempt_id,
+        observed_action=event.action,
+        observed_at=time.time(),
+        metadata={
+            "tool_name": event.tool_name,
+            "tool_use_id": event.tool_use_id,
+        },
+    )
+    return observed
+
+
+def on_rollback_cleanup_required(
+    ctx: PipelineContext,
+    *,
+    ledger: CleanupLedger,
+    from_step: str,
+    from_attempt_id: str | None,
+    to_step: str,
+    reason: str,
+) -> list[CleanupResource]:
+    """Mark deploying-created ROS stacks for cleanup when deploying rolls back."""
+    _ = (ctx, to_step)
+    if from_step != _DEPLOYING_STEP_ID:
+        return []
+    if not from_attempt_id:
+        logger.warning("Skipping deploying cleanup hook because from_attempt_id is missing")
+        return []
+    resources = [
+        CleanupResource.from_observed(resource, reason=reason)
+        for resource in ledger.observed_resources()
+        if resource.source_step_id == _DEPLOYING_STEP_ID
+        and resource.source_attempt_id == from_attempt_id
+        and resource.provider.lower() == "ros"
+        and resource.resource_type.lower() == "stack"
+        and resource.observed_action == "CreateStack"
+    ]
+    return resources

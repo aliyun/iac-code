@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from iac_code.agent.message import ImageBlock, Message, TextBlock, ToolResultBlock
 from iac_code.pipeline.engine.events import PipelineEventType
 from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner, RestartInfo
@@ -23,9 +24,40 @@ class FakeSessionStorage:
         return self._path
 
 
+class FakeTranscriptStorage:
+    def __init__(self, messages_by_id=None):
+        self.messages_by_id = messages_by_id or {}
+
+    def load(self, cwd, session_id):
+        return list(self.messages_by_id.get(session_id, []))
+
+    @staticmethod
+    def repair_interrupted(messages):
+        return list(messages)
+
+
 class RecordingPipelineSession:
     def __init__(self):
         self.calls = []
+
+    async def save_running(
+        self,
+        current_step,
+        state_machine_snapshot,
+        context_snapshot,
+        pipeline_identity,
+        reason=None,
+        **kwargs,
+    ):
+        self.calls.append(
+            (
+                "running",
+                current_step,
+                state_machine_snapshot["current_index"],
+                reason,
+                pipeline_identity.pipeline_name,
+            )
+        )
 
     def save_rollback_sync(
         self,
@@ -431,6 +463,32 @@ class TestContinueFromSidecarInterruptRouting:
 
         judge.assert_awaited_once_with("use a smaller instance")
         cont.assert_called_once_with(user_input="use a smaller instance", resume_running_step=True)
+
+    @pytest.mark.asyncio
+    async def test_supplement_verdict_preserves_image_blocks_for_current_step(self, pipeline_runner):
+        verdict = InterruptVerdict(action="supplement", reason="extra context")
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+
+        with (
+            patch.object(pipeline_runner._interrupt_controller, "judge", AsyncMock(return_value=verdict)) as judge,
+            patch.object(pipeline_runner, "_continue_from_current", MagicMock(return_value=_empty_stream())) as cont,
+        ):
+            async for _event in pipeline_runner.continue_from_sidecar(user_input=image_input):
+                pass
+
+        judge.assert_awaited_once()
+        judged_input = judge.await_args.args[0]
+        assert judged_input.content == image_input
+        assert judged_input.display_text == "参考这张图"
+        assert judged_input.has_images is True
+        cont.assert_called_once_with(
+            user_input=image_input,
+            user_input_display_text="参考这张图",
+            resume_running_step=True,
+        )
 
     @pytest.mark.asyncio
     async def test_restored_parallel_continuation_judges_with_persisted_candidate_state(self, pipeline_runner):
@@ -1403,6 +1461,29 @@ class TestRollbackContextPropagation:
         assert pipeline_runner._rollback_context is None
         await gen.aclose()
 
+    @pytest.mark.asyncio
+    async def test_continue_after_interrupt_preserves_image_source_input(self, pipeline_runner):
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        verdict = InterruptVerdict(
+            action="hard_interrupt",
+            reason="changed mind",
+            rollback_target="a",
+            rollback_context="用户要求改为WordPress网站",
+        )
+        pipeline_runner.apply_hard_interrupt(verdict, source_input=image_input)
+
+        expected_display = "用户要求改为WordPress网站\n\n参考这张图"
+        expected_content = [TextBlock(text="用户要求改为WordPress网站"), *image_input]
+        with patch.object(pipeline_runner, "_continue_from_current", MagicMock(return_value=_empty_stream())) as cont:
+            gen = pipeline_runner.continue_after_interrupt()
+            await gen.aclose()
+
+        assert pipeline_runner._rollback_context is None
+        cont.assert_called_once_with(user_input=expected_content, user_input_display_text=expected_display)
+
     def test_schedule_candidate_restart_stores_rollback_context(self, pipeline_runner):
         mock_task = MagicMock()
         mock_task.done.return_value = False
@@ -1425,6 +1506,643 @@ class TestRollbackContextPropagation:
         pipeline_runner._schedule_candidate_restart(verdict)
 
         assert pipeline_runner._pending_candidate_restarts[0].rollback_context == "用户要求模板使用WordPress"
+
+    def test_schedule_candidate_restart_preserves_image_source_input(self, pipeline_runner):
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        mock_task.cancel = MagicMock()
+        pipeline_runner._active_candidates[0] = {
+            "task": mock_task,
+            "current_sub_step": "template_generating",
+            "conclusions": {},
+            "name": "基础方案",
+            "agent_loop": None,
+        }
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+
+        verdict = InterruptVerdict(
+            action="hard_interrupt",
+            reason="fix template",
+            rollback_target="template_generating",
+            candidate_scope="candidate:0",
+            rollback_context="用户要求模板使用WordPress",
+        )
+        pipeline_runner._schedule_candidate_restart(verdict, source_input=image_input)
+
+        info = pipeline_runner._pending_candidate_restarts[0]
+        assert info.rollback_context == "用户要求模板使用WordPress\n\n参考这张图"
+        assert info.rollback_input == [TextBlock(text="用户要求模板使用WordPress"), *image_input]
+
+    def test_candidate_ask_user_question_keeps_tool_result_before_image_message(self, pipeline_runner):
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        tool_result_message = Message(role="user", content=[tool_result])
+        pipeline_runner._restored_ask_user_question = {
+            "candidate_index": 0,
+            "resume_messages": [tool_result_message],
+            "user_message": image_input,
+            "precompleted_tools": {"ask_user_question": {"free_text": "see image"}},
+        }
+
+        assert pipeline_runner._candidate_resume_messages_for_restored_ask_user_question(0) == [tool_result_message]
+        assert pipeline_runner._candidate_user_message_for_restored_ask_user_question(0) == image_input
+
+    def test_candidate_ask_user_question_resume_state_survives_execution_snapshot(self, pipeline_runner):
+        _seed_restored_parallel_judge_state(pipeline_runner)
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        tool_result_message = Message(role="user", content=[tool_result])
+        precompleted_tools = {"ask_user_question": {"free_text": "see image"}}
+
+        pipeline_runner._set_candidate_ask_user_question_resume_state(
+            0,
+            user_message=image_input,
+            resume_messages=[tool_result_message],
+            precompleted_tools=precompleted_tools,
+        )
+
+        restored = PipelineRunner(
+            pipeline_dir=pipeline_runner._pipeline_dir,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="restored",
+            cwd=pipeline_runner._cwd,
+        )
+        restored._execution = dict(pipeline_runner._execution)
+
+        assert restored._candidate_user_message_for_restored_ask_user_question(0) == image_input
+        assert restored._candidate_resume_messages_for_restored_ask_user_question(0) == [tool_result_message]
+        assert restored._candidate_precompleted_tools_for_restored_ask_user_question(0) == precompleted_tools
+
+    @pytest.mark.asyncio
+    async def test_restored_candidate_ask_user_question_image_resume_reaches_sub_pipeline(self, tmp_path):
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "sub_a.md").write_text("sub A", encoding="utf-8")
+        (tmp_path / "pipeline.yaml").write_text(
+            dedent("""\
+            name: test
+            context_dependencies:
+              architecture: []
+              candidates_done: [architecture]
+            max_rollbacks: 3
+            sub_pipelines:
+              per_candidate:
+                iterate_over: architecture.candidates
+                context_fields_from_parent: []
+                max_rollbacks: 3
+                steps:
+                  - id: sub_a
+                    conclusion_field: sub_a_out
+                    forward: null
+                    prompt: prompts/sub_a.md
+                    description: Sub A
+            steps:
+              - id: parallel
+                conclusion_field: candidates_done
+                type: parallel_sub_pipeline
+                sub_pipeline: per_candidate
+                forward: null
+                description: Parallel
+        """),
+            encoding="utf-8",
+        )
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="test",
+            cwd=str(tmp_path),
+        )
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        tool_result_message = Message(role="user", content=[tool_result])
+        precompleted_tools = {"ask_user_question": {"free_text": "see image"}}
+        candidates = [{"name": "方案1"}]
+        runner.context.set_conclusion("architecture", {"candidates": candidates})
+        runner._execution = {
+            "kind": "parallel_sub_pipeline",
+            "step_id": "parallel",
+            "sub_pipeline_name": "per_candidate",
+            "active_attempt_id": "attempt_parent",
+            "transcript_id": "transcript_parent",
+            "candidates": {
+                "0": {
+                    "status": "running",
+                    "candidate": candidates[0],
+                    "current_sub_step": "sub_a",
+                    "state_machine": {"current_index": 0, "completed": [], "rollback_count": 0},
+                    "context": {"fields": {}},
+                    "pending_ask_user_question_resume": {
+                        "user_message": [
+                            {"type": "text", "text": "参考这张图"},
+                            {"type": "image", "media_type": "image/png", "data": "aW1hZ2U="},
+                        ],
+                        "resume_messages": [tool_result_message.to_dict()],
+                        "precompleted_tools": precompleted_tools,
+                    },
+                },
+            },
+        }
+        runner._attempts["items"]["attempt_parent"] = {
+            "attempt_id": "attempt_parent",
+            "scope": "parent",
+            "step_id": "parallel",
+            "status": "running",
+            "transcript_id": "transcript_parent",
+        }
+        captured: dict[str, object] = {}
+
+        from iac_code.pipeline.engine import sub_pipeline_executor as spe_module
+
+        original_execute_streaming = spe_module.SubPipelineExecutor.execute_streaming
+
+        async def spy_execute_streaming(self, *args, **kwargs):
+            captured.update(kwargs)
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_STARTED,
+                step_id=None,
+                timestamp=0.0,
+                data={
+                    "sub_pipeline_id": "x",
+                    "candidate_index": kwargs.get("candidate_index", 0),
+                    "candidate_name": "方案",
+                    "total_steps": 1,
+                    "sub_pipeline_name": "per_candidate",
+                },
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=0.0,
+                data={
+                    "sub_pipeline_id": "x",
+                    "candidate_index": kwargs.get("candidate_index", 0),
+                    "failed": False,
+                    "conclusions": {},
+                },
+            )
+
+        spe_module.SubPipelineExecutor.execute_streaming = spy_execute_streaming
+        try:
+            async for _event in runner._continue_from_current(user_input=None):
+                pass
+        finally:
+            spe_module.SubPipelineExecutor.execute_streaming = original_execute_streaming
+
+        assert captured["user_message"] == image_input
+        assert captured["resume_messages"] == [tool_result_message]
+        assert captured["precompleted_tools"] == precompleted_tools
+
+    @pytest.mark.asyncio
+    async def test_parent_ask_user_question_image_resume_state_survives_sidecar_restore(self, pipeline_runner):
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        tool_result_message = Message(role="user", content=[tool_result])
+        precompleted_tools = {"ask_user_question": {"free_text": "see image"}}
+
+        pipeline_runner._set_current_step_user_input(image_input, display_text="参考这张图")
+        pipeline_runner._set_current_step_resume_state(
+            resume_messages=[tool_result_message],
+            precompleted_tools=precompleted_tools,
+        )
+        snapshot = pipeline_runner._state_machine_snapshot_for_sidecar()
+
+        restored = PipelineRunner(
+            pipeline_dir=pipeline_runner._pipeline_dir,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="restored",
+            cwd=pipeline_runner._cwd,
+        )
+        restored.state_machine = type(pipeline_runner.state_machine).from_snapshot(
+            snapshot,
+            restored._loaded.steps,
+            max_rollbacks=restored._loaded.max_rollbacks,
+        )
+        restored._restore_current_step_user_input_from_snapshot(snapshot)
+
+        captured: dict[str, object] = {}
+
+        async def capture_execute(*args, **kwargs):
+            captured.update(kwargs)
+            if False:
+                yield None
+
+        restored._step_executor.execute = capture_execute
+
+        async for _event in restored._continue_from_current(user_input=None):
+            pass
+
+        assert captured["user_message"] == image_input
+        assert captured["resume_messages"] == [tool_result_message]
+        assert captured["precompleted_tools"] == precompleted_tools
+
+    @pytest.mark.asyncio
+    async def test_parent_ask_user_question_restore_prefers_transcript_with_answer(self, pipeline_runner):
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        tool_result_message = Message(role="user", content=[tool_result])
+        post_answer_message = Message(role="assistant", content=[TextBlock(text="我已经读取图片")])
+        precompleted_tools = {"ask_user_question": {"free_text": "see image"}}
+
+        pipeline_runner._set_current_step_user_input(image_input, display_text="参考这张图")
+        pipeline_runner._set_current_step_resume_state(
+            resume_messages=[tool_result_message],
+            precompleted_tools=precompleted_tools,
+        )
+        snapshot = pipeline_runner._state_machine_snapshot_for_sidecar()
+
+        restored = PipelineRunner(
+            pipeline_dir=pipeline_runner._pipeline_dir,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="restored",
+            cwd=pipeline_runner._cwd,
+        )
+        restored.state_machine = type(pipeline_runner.state_machine).from_snapshot(
+            snapshot,
+            restored._loaded.steps,
+            max_rollbacks=restored._loaded.max_rollbacks,
+        )
+        restored._restore_current_step_user_input_from_snapshot(snapshot)
+        restored._attempts["items"]["attempt_parent"] = {
+            "attempt_id": "attempt_parent",
+            "scope": "parent",
+            "step_id": "a",
+            "status": "running",
+            "transcript_id": "transcript_parent",
+        }
+        restored._execution = {
+            "kind": "step",
+            "step_id": "a",
+            "active_attempt_id": "attempt_parent",
+            "transcript_id": "transcript_parent",
+        }
+        restored._transcript_storage = FakeTranscriptStorage(
+            {"transcript_parent": [tool_result_message, post_answer_message]}
+        )
+        captured: dict[str, object] = {}
+
+        async def capture_execute(*args, **kwargs):
+            captured.update(kwargs)
+            if False:
+                yield None
+
+        restored._step_executor.execute = capture_execute
+
+        async for _event in restored._continue_from_current(user_input=None):
+            pass
+
+        assert captured["resume_messages"] == [tool_result_message, post_answer_message]
+        assert captured["precompleted_tools"] == precompleted_tools
+
+    @pytest.mark.asyncio
+    async def test_parent_ask_user_question_restore_does_not_replay_transcript_image_user_message(
+        self,
+        pipeline_runner,
+    ):
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        tool_result_message = Message(role="user", content=[tool_result])
+        image_message = Message(role="user", content=image_input)
+        precompleted_tools = {"ask_user_question": {"free_text": "see image"}}
+
+        pipeline_runner._set_current_step_user_input(image_input, display_text="参考这张图")
+        pipeline_runner._set_current_step_resume_state(
+            resume_messages=[tool_result_message],
+            precompleted_tools=precompleted_tools,
+        )
+        snapshot = pipeline_runner._state_machine_snapshot_for_sidecar()
+
+        restored = PipelineRunner(
+            pipeline_dir=pipeline_runner._pipeline_dir,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="restored",
+            cwd=pipeline_runner._cwd,
+        )
+        restored.state_machine = type(pipeline_runner.state_machine).from_snapshot(
+            snapshot,
+            restored._loaded.steps,
+            max_rollbacks=restored._loaded.max_rollbacks,
+        )
+        restored._restore_current_step_user_input_from_snapshot(snapshot)
+        restored._attempts["items"]["attempt_parent"] = {
+            "attempt_id": "attempt_parent",
+            "scope": "parent",
+            "step_id": "a",
+            "status": "running",
+            "transcript_id": "transcript_parent",
+        }
+        restored._execution = {
+            "kind": "step",
+            "step_id": "a",
+            "active_attempt_id": "attempt_parent",
+            "transcript_id": "transcript_parent",
+        }
+        restored._transcript_storage = FakeTranscriptStorage(
+            {"transcript_parent": [tool_result_message, image_message]}
+        )
+        captured: dict[str, object] = {}
+
+        async def capture_execute(*args, **kwargs):
+            captured.update(kwargs)
+            if False:
+                yield None
+
+        restored._step_executor.execute = capture_execute
+
+        async for _event in restored._continue_from_current(user_input=None):
+            pass
+
+        assert captured["user_message"] is None
+        assert captured["resume_messages"] == [tool_result_message, image_message]
+        assert captured["precompleted_tools"] == precompleted_tools
+
+    @pytest.mark.asyncio
+    async def test_sub_pipeline_ask_user_question_restore_does_not_duplicate_transcript_answer(self, tmp_path):
+        from iac_code.pipeline.engine.context import PipelineContext
+        from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec, SubPipelineSpec
+        from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
+        from iac_code.pipeline.engine.types import StepResult, StepStatus
+
+        step = StepSpec(
+            step_id="sub_a",
+            conclusion_field="sub_a_out",
+            forward=None,
+            prompt_file="prompts/sub_a.md",
+            description="Sub A",
+        )
+        sub_spec = SubPipelineSpec(
+            name="per_candidate",
+            steps=[step],
+            max_rollbacks=3,
+            iterate_over="architecture.candidates",
+        )
+        loaded = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={},
+            max_rollbacks=3,
+            skills={},
+            sub_pipelines={"per_candidate": sub_spec},
+        )
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            pipeline=loaded,
+            pipeline_dir=tmp_path,
+            session_storage=FakeSessionStorage(),
+            cwd=str(tmp_path),
+        )
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result_message = Message(role="user", content=[tool_result])
+        post_answer_message = Message(role="assistant", content=[TextBlock(text="我已经读取图片")])
+        captured: dict[str, object] = {}
+
+        class CapturingStepExecutor:
+            async def execute(self, step, context, session_id, **kwargs):
+                captured.update(kwargs)
+                yield StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.COMPLETED,
+                    conclusion={"ok": True},
+                )
+
+        executor._make_step_executor = lambda: CapturingStepExecutor()
+
+        def allocate_sub_step_attempt(request):
+            return {
+                "attempt_id": "attempt_sub",
+                "transcript_id": "transcript_sub",
+                "resume_messages": [tool_result_message, post_answer_message],
+            }
+
+        async for _event in executor.execute_streaming(
+            sub_spec=sub_spec,
+            candidate={"name": "方案1"},
+            candidate_index=0,
+            parent_context=PipelineContext({}),
+            session_id="session",
+            user_message=image_input,
+            resume_messages=[tool_result_message],
+            parent_step_id="parallel",
+            resume_state={
+                "sub_pipeline_id": "sub",
+                "state_machine": {
+                    "current_index": 0,
+                    "rollback_count": 0,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {},
+                },
+                "context": {"fields": {}},
+                "active_attempt_id": "attempt_sub",
+                "transcript_id": "transcript_sub",
+                "current_sub_step": "sub_a",
+            },
+            sub_step_attempt_allocator=allocate_sub_step_attempt,
+            precompleted_tools={"ask_user_question": {"free_text": "see image"}},
+        ):
+            pass
+
+        assert captured["resume_messages"] == [tool_result_message, post_answer_message]
+
+    @pytest.mark.asyncio
+    async def test_sub_pipeline_ask_user_question_restore_does_not_replay_transcript_image_user_message(
+        self,
+        tmp_path,
+    ):
+        from iac_code.pipeline.engine.context import PipelineContext
+        from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec, SubPipelineSpec
+        from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
+        from iac_code.pipeline.engine.types import StepResult, StepStatus
+
+        step = StepSpec(
+            step_id="sub_a",
+            conclusion_field="sub_a_out",
+            forward=None,
+            prompt_file="prompts/sub_a.md",
+            description="Sub A",
+        )
+        sub_spec = SubPipelineSpec(
+            name="per_candidate",
+            steps=[step],
+            max_rollbacks=3,
+            iterate_over="architecture.candidates",
+        )
+        loaded = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={},
+            max_rollbacks=3,
+            skills={},
+            sub_pipelines={"per_candidate": sub_spec},
+        )
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            pipeline=loaded,
+            pipeline_dir=tmp_path,
+            session_storage=FakeSessionStorage(),
+            cwd=str(tmp_path),
+        )
+        tool_result = ToolResultBlock(
+            tool_use_id="toolu_1",
+            content='{"selected_id":"","selected_label":"","free_text":"see image"}',
+        )
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        tool_result_message = Message(role="user", content=[tool_result])
+        image_message = Message(role="user", content=image_input)
+        captured: dict[str, object] = {}
+
+        class CapturingStepExecutor:
+            async def execute(self, step, context, session_id, **kwargs):
+                captured.update(kwargs)
+                yield StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.COMPLETED,
+                    conclusion={"ok": True},
+                )
+
+        executor._make_step_executor = lambda: CapturingStepExecutor()
+
+        def allocate_sub_step_attempt(request):
+            return {
+                "attempt_id": "attempt_sub",
+                "transcript_id": "transcript_sub",
+                "resume_messages": [tool_result_message, image_message],
+            }
+
+        async for _event in executor.execute_streaming(
+            sub_spec=sub_spec,
+            candidate={"name": "方案1"},
+            candidate_index=0,
+            parent_context=PipelineContext({}),
+            session_id="session",
+            user_message=image_input,
+            resume_messages=[tool_result_message],
+            parent_step_id="parallel",
+            resume_state={
+                "sub_pipeline_id": "sub",
+                "state_machine": {
+                    "current_index": 0,
+                    "rollback_count": 0,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {},
+                },
+                "context": {"fields": {}},
+                "active_attempt_id": "attempt_sub",
+                "transcript_id": "transcript_sub",
+                "current_sub_step": "sub_a",
+            },
+            sub_step_attempt_allocator=allocate_sub_step_attempt,
+            precompleted_tools={"ask_user_question": {"free_text": "see image"}},
+        ):
+            pass
+
+        assert captured["user_message"] is None
+        assert captured["resume_messages"] == [tool_result_message, image_message]
+
+    def test_inject_pending_question_supplement_preserves_image_blocks(self, pipeline_runner):
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        injected_messages = []
+
+        class AgentLoop:
+            def try_inject_user_message(self, message):
+                injected_messages.append(message)
+                return True
+
+        agent_loop = AgentLoop()
+        pipeline_runner._step_executor._current_agent_loop = agent_loop
+
+        injected = pipeline_runner.inject_pending_question_supplement(
+            image_input,
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        )
+
+        assert injected is True
+        assert injected_messages == [image_input]
+
+    def test_inject_pending_question_supplement_treats_none_return_as_success(self, pipeline_runner):
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        injected_messages = []
+
+        class AgentLoop:
+            def try_inject_user_message(self, message):
+                injected_messages.append(message)
+
+        agent_loop = AgentLoop()
+        pipeline_runner._step_executor._current_agent_loop = agent_loop
+
+        injected = pipeline_runner.inject_pending_question_supplement(
+            image_input,
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        )
+
+        assert injected is True
+        assert injected_messages == [image_input]
 
 
 class TestParallelSubPipelineUserMessagePropagation:
@@ -1889,6 +2607,128 @@ class TestParallelSubPipelineUserMessagePropagation:
         assert captured[1]["start_from_step"] == "sub_a"
         assert captured[1]["user_message"] == "restored restart feedback"
         assert isinstance(captured[1]["resume_state"], dict)
+
+    @pytest.mark.asyncio
+    async def test_restored_candidate_restart_preserves_image_rollback_input(self, tmp_path):
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+        from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "sub_a.md").write_text("sub A", encoding="utf-8")
+        (tmp_path / "pipeline.yaml").write_text(
+            dedent("""\
+            name: test
+            context_dependencies:
+              architecture: []
+              candidates_done: [architecture]
+            max_rollbacks: 3
+            sub_pipelines:
+              per_candidate:
+                iterate_over: architecture.candidates
+                context_fields_from_parent: []
+                max_rollbacks: 3
+                steps:
+                  - id: sub_a
+                    conclusion_field: sub_a_out
+                    forward: null
+                    prompt: prompts/sub_a.md
+                    description: Sub A
+            steps:
+              - id: parallel
+                conclusion_field: candidates_done
+                type: parallel_sub_pipeline
+                sub_pipeline: per_candidate
+                forward: null
+                description: Parallel
+        """),
+            encoding="utf-8",
+        )
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="test",
+            cwd=str(tmp_path),
+        )
+        image_input = [
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ]
+        candidates = [{"name": "方案1"}]
+        runner.context.set_conclusion("architecture", {"candidates": candidates})
+        runner._execution = {
+            "kind": "parallel_sub_pipeline",
+            "step_id": "parallel",
+            "sub_pipeline_name": "per_candidate",
+            "active_attempt_id": "attempt_parent",
+            "transcript_id": "transcript_parent",
+            "candidates": {
+                "0": {
+                    "status": "running",
+                    "candidate": candidates[0],
+                    "current_sub_step": "sub_a",
+                    "pending_restart": {
+                        "start_from_step": "sub_a",
+                        "preserved_conclusions": {},
+                        "rollback_context": "用户要求改架构\n\n参考这张图",
+                        "rollback_input": [
+                            {"type": "text", "text": "用户要求改架构"},
+                            {"type": "text", "text": "参考这张图"},
+                            {"type": "image", "media_type": "image/png", "data": "aW1hZ2U="},
+                        ],
+                    },
+                },
+            },
+        }
+        runner._attempts["items"]["attempt_parent"] = {
+            "attempt_id": "attempt_parent",
+            "scope": "parent",
+            "step_id": "parallel",
+            "status": "running",
+            "transcript_id": "transcript_parent",
+        }
+        captured: dict[int, dict[str, object]] = {}
+
+        from iac_code.pipeline.engine import sub_pipeline_executor as spe_module
+
+        original_execute_streaming = spe_module.SubPipelineExecutor.execute_streaming
+
+        async def spy_execute_streaming(self, *args, **kwargs):
+            captured[kwargs["candidate_index"]] = {"user_message": kwargs.get("user_message")}
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_STARTED,
+                step_id=None,
+                timestamp=0.0,
+                data={
+                    "sub_pipeline_id": "x",
+                    "candidate_index": kwargs.get("candidate_index", 0),
+                    "candidate_name": "方案",
+                    "total_steps": 1,
+                    "sub_pipeline_name": "per_candidate",
+                },
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=0.0,
+                data={
+                    "sub_pipeline_id": "x",
+                    "candidate_index": kwargs.get("candidate_index", 0),
+                    "failed": False,
+                    "conclusions": {},
+                },
+            )
+
+        spe_module.SubPipelineExecutor.execute_streaming = spy_execute_streaming
+        try:
+            async for _ev in runner._continue_from_current(user_input=None):
+                if captured:
+                    break
+        finally:
+            spe_module.SubPipelineExecutor.execute_streaming = original_execute_streaming
+
+        assert captured[0]["user_message"] == [TextBlock(text="用户要求改架构"), *image_input]
 
 
 class TestSupplementTargetUnifiedFormat:

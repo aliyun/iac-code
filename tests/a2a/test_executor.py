@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from a2a.types import TaskStatusUpdateEvent
+from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.executor import IacCodeA2AExecutor
@@ -13,6 +14,8 @@ from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.agent.message import ImageBlock
+from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent, ToolResultEvent
 
 from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntime, pending_future
@@ -20,6 +23,14 @@ from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntim
 
 def dump(event):
     return MessageToDict(event, preserving_proto_field_name=False)
+
+
+def _image_only_pipeline_input() -> PipelineUserInput:
+    return PipelineUserInput(
+        content=[ImageBlock(media_type="image/png", data="aGVsbG8=")],
+        display_text="[Image input]",
+        has_images=True,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -388,8 +399,18 @@ async def test_executor_delegates_pipeline_mode_after_validation(
         def __init__(self, **kwargs):
             calls.append(("init", kwargs))
 
-        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, prompt):
-            calls.append(("execute", {"task_id": task_id, "context_id": context_id, "cwd": cwd, "prompt": prompt}))
+        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, pipeline_input):
+            calls.append(
+                (
+                    "execute",
+                    {
+                        "task_id": task_id,
+                        "context_id": context_id,
+                        "cwd": cwd,
+                        "pipeline_input": pipeline_input,
+                    },
+                )
+            )
 
     monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", SpyPipelineExecutor)
 
@@ -400,7 +421,12 @@ async def test_executor_delegates_pipeline_mode_after_validation(
 
     assert calls[-1] == (
         "execute",
-        {"task_id": "task-1", "context_id": "ctx-1", "cwd": str(tmp_path), "prompt": "hello"},
+        {
+            "task_id": "task-1",
+            "context_id": "ctx-1",
+            "cwd": str(tmp_path),
+            "pipeline_input": PipelineUserInput(content="hello", display_text="hello", has_images=False),
+        },
     )
 
 
@@ -435,8 +461,18 @@ async def test_executor_hydrates_running_pipeline_task_id_from_sidecar(
         def __init__(self, **kwargs):
             calls.append(("init", kwargs))
 
-        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, prompt):
-            calls.append(("execute", {"task_id": task_id, "context_id": context_id, "cwd": cwd, "prompt": prompt}))
+        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, pipeline_input):
+            calls.append(
+                (
+                    "execute",
+                    {
+                        "task_id": task_id,
+                        "context_id": context_id,
+                        "cwd": cwd,
+                        "pipeline_input": pipeline_input,
+                    },
+                )
+            )
 
     monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", SpyPipelineExecutor)
 
@@ -455,8 +491,101 @@ async def test_executor_hydrates_running_pipeline_task_id_from_sidecar(
 
     assert calls[-1] == (
         "execute",
-        {"task_id": "task-1", "context_id": "ctx-1", "cwd": str(tmp_path), "prompt": "继续"},
+        {
+            "task_id": "task-1",
+            "context_id": "ctx-1",
+            "cwd": str(tmp_path),
+            "pipeline_input": PipelineUserInput(content="继续", display_text="继续", has_images=False),
+        },
     )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_mode_accepts_image_only_input(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    pipeline_input = _image_only_pipeline_input()
+    calls = []
+
+    class CapturingPipelineExecutor:
+        def __init__(self, **kwargs):
+            pass
+
+        async def execute(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", CapturingPipelineExecutor)
+    monkeypatch.setattr(
+        IacCodeA2AExecutor,
+        "_pipeline_input_from_context",
+        lambda self, context, *, cwd: pipeline_input,
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.is_model_multimodal", lambda *args, **kwargs: True)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    assert calls
+    assert calls[0]["pipeline_input"] == pipeline_input
+    states = [dump(event)["status"]["state"] for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert "TASK_STATE_FAILED" not in states
+
+
+@pytest.mark.asyncio
+async def test_pipeline_mode_image_input_checks_provider_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setattr(
+        IacCodeA2AExecutor,
+        "_pipeline_input_from_context",
+        lambda self, context, *, cwd: _image_only_pipeline_input(),
+    )
+    seen = {}
+
+    def fake_is_model_multimodal(model, *, provider_key=None, base_url=None, api_key=None):
+        seen.update(
+            {
+                "model": model,
+                "provider_key": provider_key,
+                "base_url": base_url,
+                "api_key": api_key,
+            }
+        )
+        return False
+
+    monkeypatch.setattr("iac_code.a2a.executor.get_active_provider_key", lambda: "openai_compatible")
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.get_provider_config",
+        lambda provider_key: {"keyName": provider_key, "apiBase": "https://example.test/v1"},
+    )
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.load_credentials",
+        lambda model=None: {"openai_compatible": "test-key"},
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.is_model_multimodal", fake_is_model_multimodal)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="custom-vl")
+
+    queue = FakeEventQueue()
+    with pytest.raises(InvalidParamsError, match="Current model custom-vl does not support image input"):
+        await executor.execute(
+            FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+            queue,
+        )
+
+    assert seen == {
+        "model": "custom-vl",
+        "provider_key": "openai_compatible",
+        "base_url": "https://example.test/v1",
+        "api_key": "test-key",
+    }
+    assert not [event for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    with pytest.raises(ValueError, match="A2A task not found"):
+        await store.get_task_record("task-1")
 
 
 @pytest.mark.asyncio
@@ -475,11 +604,11 @@ async def test_executor_empty_prompt_takes_precedence_over_pipeline_mode(
     queue = FakeEventQueue()
     context = FakeRequestContext(text="   ", metadata={"iac_code": {"cwd": str(tmp_path)}})
 
-    await executor.execute(context, queue)
-
-    dumped = dump(queue.events[-1])
-    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
-    assert dumped["status"]["message"]["parts"][0]["text"] == "A2A server currently accepts text input only."
+    with pytest.raises(InvalidParamsError, match="A2A server received empty input"):
+        await executor.execute(context, queue)
+    assert not [event for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    with pytest.raises(ValueError, match="A2A task not found"):
+        await store.get_task_record("task-1")
 
 
 @pytest.mark.asyncio
@@ -847,6 +976,80 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_handoff_image_request_uses_normal_manifest_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from a2a.types import Message, Part, Role
+
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.agent.message import Message as AgentMessage
+    from iac_code.services.session_storage import SessionStorage
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    session_id = "session-handoff"
+    context_id = "ctx-handoff"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
+        {"normalHandoff": {"action": "switch_to_normal", "targetMode": "normal", "summary": "handoff"}}
+    )
+    SessionStorage().append(str(cwd), session_id, AgentMessage(role="user", content="handoff"))
+
+    def fail_pipeline_input(*args, **kwargs):
+        raise AssertionError("normal handoff must not build PipelineUserInput")
+
+    monkeypatch.setattr(IacCodeA2AExecutor, "_pipeline_input_from_context", fail_pipeline_input)
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.create_agent_runtime",
+        lambda options: FakeRuntime(agent_loop=loop, session_id=options.session_id),
+    )
+
+    class FailingPipelineExecutor:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def execute(self, **kwargs) -> None:
+            raise AssertionError("pipeline executor should not be used after normal handoff")
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", FailingPipelineExecutor)
+
+    context = FakeRequestContext(
+        task_id="task-followup",
+        context_id=context_id,
+        text="",
+        metadata={"iac_code": {"cwd": str(cwd)}},
+    )
+    context.message = Message(
+        role=Role.ROLE_USER,
+        parts=[Part(raw=b"\x89PNG\r\n\x1a\nimage", media_type="image/png", filename="diagram.png")],
+        message_id="msg-1",
+    )
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence),
+        model="qwen3.6-plus",
+    )
+    await executor.execute(
+        context,
+        FakeEventQueue(),
+    )
+
+    assert loop.prompts
+    assert "A2A multimodal attachment:" in loop.prompts[0]
+    assert "mediaType=image/png" in loop.prompts[0]
+    assert "[Image input]" not in loop.prompts[0]
+
+
+@pytest.mark.asyncio
 async def test_pipeline_handoff_context_is_backfilled_from_snapshot_when_session_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -912,6 +1115,112 @@ async def test_pipeline_handoff_context_is_backfilled_from_snapshot_when_session
     loaded = SessionStorage().load(str(cwd), session_id)
     assert loaded is not None
     assert any(getattr(message, "content", "") == summary for message in loaded)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_handoff_context_routes_and_backfills_public_summary_from_journal_when_snapshot_corrupt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
+    from iac_code.services.session_storage import SessionStorage
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    session_id = "session-handoff"
+    context_id = "ctx-handoff"
+    summary = "[Pipeline Handoff Context]\nPipeline: selling"
+    cleanup_prompt = "cleanup prompt for stack-123"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+    (pipeline_dir / "a2a-snapshot.json").write_text("{broken", encoding="utf-8")
+    A2APipelineJournal(pipeline_dir).append(
+        {
+            "schemaVersion": "1.0",
+            "eventId": "evt-handoff",
+            "sequence": 1,
+            "createdAt": "2026-01-01T00:00:00Z",
+            "eventType": "pipeline_handoff_ready",
+            "scope": "pipeline",
+            "pipelineRunId": context_id,
+            "taskId": "task-pipeline",
+            "contextId": context_id,
+            "pipelineName": "selling",
+            "status": "completed",
+            "data": {
+                "action": "switch_to_normal",
+                "targetMode": "normal",
+                "summary": summary,
+                "cleanup": {
+                    "status": "pending",
+                    "resourceCount": 1,
+                    "prompt": cleanup_prompt,
+                    "resources": [{"resourceId": "stack-123", "regionId": "cn-hangzhou"}],
+                },
+            },
+        }
+    )
+    ledger = CleanupLedger(SessionStorage().session_dir(str(cwd), session_id) / "pipeline" / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                region_id="cn-hangzhou",
+                cleanup_status="completed",
+                progress_status="DELETE_COMPLETE",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
+    seen_resume: list[object | None] = []
+
+    def fake_factory(options):
+        seen_resume.append(options.resume_messages)
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    class FailingPipelineExecutor:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def execute(self, **kwargs) -> None:
+            raise AssertionError("pipeline executor should not be used after normal handoff")
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_factory)
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", FailingPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-followup",
+            context_id=context_id,
+            text="继续解释一下",
+            metadata={"iac_code": {"cwd": str(cwd)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert loop.prompts == ["继续解释一下"]
+    assert seen_resume and seen_resume[0] is not None
+    assert any(getattr(message, "content", "") == summary for message in seen_resume[0])
+    assert not any(getattr(message, "content", "") == cleanup_prompt for message in seen_resume[0])
+    loaded = SessionStorage().load(str(cwd), session_id)
+    assert loaded is not None
+    assert any(getattr(message, "content", "") == summary for message in loaded)
+    assert not any(getattr(message, "content", "") == cleanup_prompt for message in loaded)
 
 
 @pytest.mark.asyncio

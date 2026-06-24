@@ -61,6 +61,49 @@ async def test_recovery_returns_snapshot_and_replay_events(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_recovery_keeps_pipeline_warning_visible_after_snapshot_sequence(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: object(),
+    )
+    context = await store.get_context_record("ctx-1")
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), context.session_id) / "pipeline"
+    started = _event(1, "evt-1")
+    warning = _event(2, "evt-warning")
+    warning["eventType"] = "pipeline_warning"
+    warning["data"] = {
+        "reason": "cleanup_tracking_unavailable",
+        "operation": "record_observed",
+        "ledger_path": "/Users/alice/.iac-code/projects/demo/cleanup.yaml",
+        "load_error": "while parsing /Users/alice/.iac-code/projects/demo/cleanup.yaml",
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(started)
+    journal.append(warning)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([started, warning]))
+
+    service = A2APipelineRecoveryService(task_store=store)
+    state = await service.get_state(context_id="ctx-1")
+
+    assert state["events"] == []
+    assert state["snapshot"]["lastSequence"] == 2
+    assert state["snapshot"]["control"]["warningHistory"][0]["eventId"] == "evt-warning"
+    assert state["snapshot"]["control"]["warningHistory"][0]["data"]["reason"] == "cleanup_tracking_unavailable"
+    assert "ledger_path" not in state["snapshot"]["control"]["warningHistory"][0]["data"]
+    assert "load_error" not in state["snapshot"]["control"]["warningHistory"][0]["data"]
+
+    replay_state = await service.get_state(context_id="ctx-1", after_sequence=1)
+
+    assert replay_state["events"][0]["eventType"] == "pipeline_warning"
+    assert replay_state["events"][0]["data"]["reason"] == "cleanup_tracking_unavailable"
+    assert "ledger_path" not in replay_state["events"][0]["data"]
+    assert "load_error" not in replay_state["events"][0]["data"]
+
+
+@pytest.mark.asyncio
 async def test_recovery_sanitizes_legacy_artifact_file_uris_from_snapshot_and_replay(tmp_path) -> None:
     persistence = A2APersistenceStore(tmp_path / "a2a")
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
@@ -243,6 +286,108 @@ async def test_recovery_rejects_task_id_when_pipeline_state_belongs_to_different
 
     with pytest.raises(ValueError, match="A2A pipeline state not found"):
         await service.get_state(task_id="task-2")
+
+
+@pytest.mark.asyncio
+async def test_recovery_resolves_cleanup_snapshot_from_normal_delivery_task_id(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_task(A2ATaskSnapshot(task_id="task-pipeline", context_id="ctx-1", state="completed"))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-normal", context_id="ctx-1", state="input-required"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    raw_error = (
+        "DeleteStack failed AccessKeySecret=super-secret token=sk-live-1234567890 "
+        "at /Users/alice/.iac-code/projects/session/pipeline/cleanup.yaml"
+    )
+    pipeline_started = _event_for_task(1, "evt-pipeline-started", task_id="task-pipeline")
+    cleanup_started = _event_for_task(2, "evt-cleanup-started", task_id="task-pipeline")
+    cleanup_started.update(
+        {
+            "eventType": "cleanup_started",
+            "scope": "cleanup",
+            "deliveryTaskId": "task-normal",
+            "data": {
+                "status": "started",
+                "resourceCount": 1,
+                "prompt": "hidden cleanup prompt for stack-123",
+                "ledgerPath": "/Users/alice/.iac-code/projects/session/pipeline/cleanup.yaml",
+                "provider": "ros",
+                "resourceType": "stack",
+                "resourceId": "stack-123",
+                "regionId": "cn-hangzhou",
+                "cleanupStatus": "started",
+                "progressStatus": "DELETE_STARTED",
+                "lastError": raw_error,
+            },
+        }
+    )
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pipeline_started)
+    journal.append(cleanup_started)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pipeline_started, cleanup_started]))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    service = A2APipelineRecoveryService(task_store=store)
+
+    state = await service.get_state(task_id="task-normal", after_sequence=0)
+
+    assert state["snapshot"]["taskId"] == "task-pipeline"
+    assert state["snapshot"]["cleanup"]["status"] == "started"
+    assert state["snapshot"]["cleanup"]["resources"][0]["resourceId"] == "stack-123"
+    assert "prompt" not in state["snapshot"]["cleanup"]
+    assert "ledgerPath" not in state["snapshot"]["cleanup"]
+    assert "prompt" not in state["snapshot"]["cleanup"]["history"][0]["data"]
+    assert "ledgerPath" not in state["snapshot"]["cleanup"]["history"][0]["data"]
+    assert raw_error not in state["snapshot"]["cleanup"]["history"][0]["data"]["lastError"]
+    assert [event["eventId"] for event in state["events"]] == ["evt-cleanup-started"]
+    assert "prompt" not in state["events"][0]["data"]
+    assert "ledgerPath" not in state["events"][0]["data"]
+    assert raw_error not in state["events"][0]["data"]["lastError"]
+    rendered = json.dumps(state, ensure_ascii=False)
+    assert "super-secret" not in rendered
+    assert "sk-live-1234567890" not in rendered
+    assert "/Users/alice" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_recovery_by_delivery_task_catches_up_stale_pipeline_snapshot(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_task(A2ATaskSnapshot(task_id="task-pipeline", context_id="ctx-1", state="completed"))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-normal", context_id="ctx-1", state="input-required"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    pipeline_started = _event_for_task(1, "evt-pipeline-started", task_id="task-pipeline")
+    cleanup_started = _event_for_task(2, "evt-cleanup-started", task_id="task-pipeline")
+    cleanup_started.update(
+        {
+            "eventType": "cleanup_started",
+            "scope": "cleanup",
+            "deliveryTaskId": "task-normal",
+            "data": {
+                "status": "started",
+                "resourceCount": 1,
+                "provider": "ros",
+                "resourceType": "stack",
+                "resourceId": "stack-123",
+                "regionId": "cn-hangzhou",
+                "cleanupStatus": "started",
+                "progressStatus": "DELETE_STARTED",
+            },
+        }
+    )
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pipeline_started)
+    journal.append(cleanup_started)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pipeline_started]))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    service = A2APipelineRecoveryService(task_store=store)
+
+    state = await service.get_state(task_id="task-normal")
+
+    assert state["snapshot"]["lastSequence"] == 2
+    assert state["snapshot"]["cleanup"]["status"] == "started"
+    assert state["snapshot"]["cleanup"]["resources"][0]["resourceId"] == "stack-123"
+    assert "prompt" not in state["snapshot"]["cleanup"]
+    assert "ledgerPath" not in state["snapshot"]["cleanup"]
 
 
 @pytest.mark.asyncio

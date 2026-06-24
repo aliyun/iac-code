@@ -1,4 +1,4 @@
-from iac_code.pipeline.engine.types import RollbackRule, StepConfig, StepResult, StepStatus
+from iac_code.pipeline.engine.types import StepConfig, StepResult, StepStatus
 
 
 class TestStepStatus:
@@ -13,22 +13,6 @@ class TestStepStatus:
         assert isinstance(StepStatus.PENDING, str)
 
 
-class TestRollbackRule:
-    def test_basic_construction(self):
-        rule = RollbackRule(target_step="intent_parsing", condition="user_request")
-        assert rule.target_step == "intent_parsing"
-        assert rule.condition == "user_request"
-        assert rule.invalidates == []
-
-    def test_with_invalidates(self):
-        rule = RollbackRule(
-            target_step="architecture_planning",
-            condition="cost_too_high",
-            invalidates=["specs", "template"],
-        )
-        assert rule.invalidates == ["specs", "template"]
-
-
 class TestStepConfig:
     def test_defaults(self):
         config = StepConfig(
@@ -38,22 +22,21 @@ class TestStepConfig:
         )
         assert config.auto_advance is True
         assert config.max_agent_turns == 50
-        assert config.rollback_rules == []
+        assert config.rollback_targets == []
 
     def test_custom_values(self):
-        rules = [RollbackRule(target_step="prev", condition="wrong")]
         config = StepConfig(
             step_id="my_step",
             conclusion_field="my_field",
             forward=None,
-            rollback_rules=rules,
+            rollback_targets=["prev"],
             auto_advance=False,
             max_agent_turns=20,
         )
         assert config.forward is None
         assert config.auto_advance is False
         assert config.max_agent_turns == 20
-        assert len(config.rollback_rules) == 1
+        assert config.rollback_targets == ["prev"]
 
 
 class TestStepResult:

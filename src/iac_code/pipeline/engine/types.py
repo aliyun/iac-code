@@ -15,22 +15,12 @@ class StepStatus(str, Enum):
 
 
 @dataclass
-class RollbackRule:
-    """Configurable rollback rule for a step."""
-
-    target_step: str
-    condition: str
-    invalidates: list[str] = field(default_factory=list)
-
-
-@dataclass
 class StepConfig:
     """Static configuration for a pipeline step."""
 
     step_id: str
     conclusion_field: str
     forward: str | None
-    rollback_rules: list[RollbackRule] = field(default_factory=list)
     auto_advance: bool = True
     max_agent_turns: int = 50
     conclusion_schema: dict | None = None

@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
-from iac_code.agent.message import Message, create_recalled_memory_message
+from iac_code.agent.message import ImageBlock, Message, TextBlock, create_recalled_memory_message
+from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.stream_events import StackInstancesProgressEvent, StackProgressEvent
@@ -30,6 +31,18 @@ def make_console(width: int = 80, height: int = 12) -> Console:
         height=height,
         force_terminal=True,
         color_system=None,
+        legacy_windows=False,
+        _environ={},
+    )
+
+
+def make_link_console(width: int = 80, height: int = 12) -> Console:
+    return Console(
+        file=StringIO(),
+        width=width,
+        height=height,
+        force_terminal=True,
+        color_system="standard",
         legacy_windows=False,
         _environ={},
     )
@@ -180,6 +193,70 @@ class TestRendererHelpers:
         assert "visible answer" in output
         assert "Prefer ROS YAML" not in output
         assert "Relevant persistent memories" not in output
+
+    def test_replay_history_hides_pipeline_cleanup_prompt(self):
+        renderer = make_renderer()
+
+        renderer.replay_history(
+            [
+                Message(role="user", content="visible question"),
+                Message(
+                    role="user",
+                    content="hidden cleanup prompt",
+                    metadata={"type": CLEANUP_PROMPT_METADATA_TYPE},
+                ),
+                Message(role="assistant", content="visible answer"),
+            ]
+        )
+
+        output = renderer.console.file.getvalue()
+        assert "visible question" in output
+        assert "visible answer" in output
+        assert "hidden cleanup prompt" not in output
+
+    def test_replay_history_does_not_link_plain_image_refs_without_image_blocks(self):
+        console = make_link_console()
+        registry = ToolRegistry()
+        renderer = Renderer(
+            console,
+            registry,
+            status_callback=lambda: "ready",
+            image_path_resolver=lambda image_id: f"/tmp/session-image-{image_id}.png",
+        )
+
+        renderer.replay_history([Message(role="user", content="see [Image #1]")])
+
+        output = console.file.getvalue()
+        assert "[Image #1]" in output
+        assert "\x1b]8;" not in output
+        assert "file:///tmp/session-image-1.png" not in output
+
+    def test_replay_history_renders_structured_image_blocks_as_image_refs(self):
+        console = make_link_console()
+        registry = ToolRegistry()
+        renderer = Renderer(
+            console,
+            registry,
+            status_callback=lambda: "ready",
+            image_block_path_resolver=lambda block: f"/tmp/session-image-{block.ref_id}.png",
+        )
+
+        renderer.replay_history(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        TextBlock(text="see "),
+                        ImageBlock(media_type="image/png", data="aGVsbG8=", ref_id=8),
+                    ],
+                )
+            ]
+        )
+
+        output = console.file.getvalue()
+        assert "see " in output
+        assert "[Image #8]" in output
+        assert renderer._file_url("/tmp/session-image-8.png") in output
 
     def test_any_segment_has_verbose_content(self):
         renderer = make_renderer()

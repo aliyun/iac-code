@@ -20,9 +20,9 @@ from iac_code.pipeline.engine.step_spec import (
     LoadedPipeline,
     OnCompletePolicy,
     StepSpec,
+    StepSurfaceOverride,
     SubPipelineSpec,
 )
-from iac_code.pipeline.engine.types import RollbackRule
 
 logger = logging.getLogger(__name__)
 
@@ -195,10 +195,6 @@ def _parse_sub_pipelines(
 def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
     steps: list[StepSpec] = []
     for raw in raw_steps:
-        rollback_rules = [
-            RollbackRule(target_step=r["target"], condition=r["condition"]) for r in raw.get("rollback", [])
-        ]
-
         raw_tools = raw.get("tools")
         if raw_tools is not None:
             tools = IncludeExcludeConfig(
@@ -217,6 +213,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
         else:
             step_sections = None
 
+        step_id = raw.get("id", "?")
         steps.append(
             StepSpec(
                 step_id=raw["id"],
@@ -227,7 +224,6 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 step_type=raw.get("type", "normal"),
                 sub_pipeline_name=raw.get("sub_pipeline"),
                 tools=tools,
-                rollback_rules=rollback_rules,
                 auto_advance=raw.get("auto_advance", True),
                 max_agent_turns=raw.get("max_agent_turns", 50),
                 context_fields=raw.get("context_fields", []),
@@ -244,11 +240,53 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 ),
                 completion_guards=raw.get("completion_guards", []),
                 description=raw.get("description", ""),
-                exit_condition=_parse_exit_condition(raw.get("exit_condition"), raw.get("id", "?")),
-                a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), raw.get("id", "?")),
+                exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
+                a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),
+                surface_overrides=_parse_surface_overrides(raw.get("surface_overrides"), step_id),
             )
         )
     return steps
+
+
+def _parse_surface_overrides(raw: object, step_id: str) -> dict[str, StepSurfaceOverride]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Step '{step_id}': surface_overrides must be a mapping, got {raw!r}")
+
+    overrides: dict[str, StepSurfaceOverride] = {}
+    for surface, raw_override in raw.items():
+        if not isinstance(surface, str) or not surface:
+            raise ValueError(f"Step '{step_id}': surface_overrides keys must be non-empty strings, got {surface!r}")
+        if not isinstance(raw_override, dict):
+            raise ValueError(f"Step '{step_id}': surface_overrides.{surface} must be a mapping, got {raw_override!r}")
+        override = cast(dict[str, Any], raw_override)
+        unsupported = set(override) - {"prompt", "inject_tools"}
+        if unsupported:
+            supported = "inject_tools, prompt"
+            unknown = ", ".join(sorted(unsupported))
+            raise ValueError(
+                f"Step '{step_id}': surface_overrides.{surface} contains unsupported key(s): "
+                f"{unknown}; supported: {supported}"
+            )
+
+        prompt = override.get("prompt")
+        if prompt is not None and not isinstance(prompt, str):
+            raise ValueError(f"Step '{step_id}': surface_overrides.{surface}.prompt must be a string")
+
+        inject_tools = override.get("inject_tools")
+        if inject_tools is not None:
+            if not isinstance(inject_tools, list) or not all(isinstance(name, str) for name in inject_tools):
+                raise ValueError(
+                    f"Step '{step_id}': surface_overrides.{surface}.inject_tools must be a list of strings"
+                )
+            inject_tools = cast(list[str], inject_tools)
+
+        overrides[surface] = StepSurfaceOverride(
+            prompt_file=prompt,
+            inject_tools=list(inject_tools) if inject_tools is not None else None,
+        )
+    return overrides
 
 
 def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
@@ -321,7 +359,7 @@ def _find_next_enabled(all_steps: list[StepSpec], start_id: str, enabled_ids: se
 
 
 def _bind_hooks(steps: list[StepSpec], pipeline_dir: Path) -> None:
-    """Load hook files and bind on_enter/on_exit callables."""
+    """Load hook files and bind optional step hook callables."""
     for step in steps:
         if not step.hooks_file:
             continue
@@ -333,6 +371,10 @@ def _bind_hooks(steps: list[StepSpec], pipeline_dir: Path) -> None:
             step.on_enter = module.on_enter
         if hasattr(module, "on_exit"):
             step.on_exit = module.on_exit
+        if hasattr(module, "on_resource_observed"):
+            step.on_resource_observed = module.on_resource_observed
+        if hasattr(module, "on_rollback_cleanup_required"):
+            step.on_rollback_cleanup_required = module.on_rollback_cleanup_required
 
 
 def _load_module_from_file(path: Path, module_name: str) -> ModuleType:
@@ -346,11 +388,16 @@ def _load_module_from_file(path: Path, module_name: str) -> ModuleType:
 
 def _validate_prompts_exist(steps: list[StepSpec], pipeline_dir: Path) -> None:
     for step in steps:
-        if not step.prompt_file:
-            continue
-        prompt_path = pipeline_dir / step.prompt_file
-        if not prompt_path.exists():
-            raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+        prompt_files = [step.prompt_file]
+        prompt_files.extend(
+            override.prompt_file for override in step.surface_overrides.values() if override.prompt_file is not None
+        )
+        for prompt_file in prompt_files:
+            if not prompt_file:
+                continue
+            prompt_path = pipeline_dir / prompt_file
+            if not prompt_path.exists():
+                raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
 
 
 def _discover_pipeline_tools(pipeline_dir: Path) -> dict[str, type]:

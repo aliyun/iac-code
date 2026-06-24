@@ -7,7 +7,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from iac_code.pipeline.engine.context import PipelineContext
-from iac_code.pipeline.engine.types import RollbackRule
 
 
 @dataclass
@@ -25,6 +24,14 @@ class A2AArtifactSpec:
     path: str
     content: str
     media_type: str = "auto"
+
+
+@dataclass(frozen=True)
+class StepSurfaceOverride:
+    """Per-surface overrides for selected step fields."""
+
+    prompt_file: str | None = None
+    inject_tools: list[str] | None = None
 
 
 @dataclass
@@ -55,7 +62,6 @@ class StepSpec:
     step_type: str = "normal"
     sub_pipeline_name: str | None = None
     tools: IncludeExcludeConfig | None = None
-    rollback_rules: list[RollbackRule] = field(default_factory=list)
     auto_advance: bool = True
     max_agent_turns: int = 50
     context_fields: list[str] = field(default_factory=list)
@@ -63,6 +69,8 @@ class StepSpec:
     hooks_file: str | None = None
     on_enter: Callable[[PipelineContext], None] | None = None
     on_exit: Callable[[PipelineContext, dict], None] | None = None
+    on_resource_observed: Callable[..., object] | None = None
+    on_rollback_cleanup_required: Callable[..., object] | None = None
     base_prompt_sections: IncludeExcludeConfig | None = None
     inject_tools: list[str] = field(default_factory=list)
     ui_mode: str | None = None
@@ -73,6 +81,19 @@ class StepSpec:
     description: str = ""
     exit_condition: dict | None = None
     a2a_artifacts: list[A2AArtifactSpec] = field(default_factory=list)
+    surface_overrides: dict[str, StepSurfaceOverride] = field(default_factory=dict)
+
+    def prompt_file_for_surface(self, surface: str | None) -> str:
+        override = self.surface_overrides.get(surface or "")
+        if override is not None and override.prompt_file is not None:
+            return override.prompt_file
+        return self.prompt_file
+
+    def inject_tools_for_surface(self, surface: str | None) -> list[str]:
+        override = self.surface_overrides.get(surface or "")
+        if override is not None and override.inject_tools is not None:
+            return list(override.inject_tools)
+        return list(self.inject_tools)
 
 
 @dataclass

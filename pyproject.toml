@@ -74,6 +74,7 @@ dev = [
     "setuptools>=68.0",
     "wheel",
     "tomli>=2.0; python_version<\"3.11\"",
+    "pexpect>=4.9.0",
 ]
 
 [build-system]

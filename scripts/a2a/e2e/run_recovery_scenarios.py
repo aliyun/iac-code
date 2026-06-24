@@ -11,6 +11,9 @@ directory, then validates recovery behavior.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import io
 import json
 import os
 import signal
@@ -25,6 +28,9 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+import yaml
+from PIL import Image, ImageDraw, ImageFont
 
 E2E_SCRIPTS_DIR = Path(__file__).resolve().parent
 A2A_SCRIPTS_DIR = E2E_SCRIPTS_DIR.parent
@@ -76,10 +82,35 @@ ASK_SECOND_ANSWER = "选择一个已有 VPC，创建一个 VSwitch；地域、�
 INTERVENING_ASK_ANSWER = "使用默认配置（可用区和网段自动规划），继续。"
 ROLLBACK_PROMPT = "回退到 intent_parsing，选择一个已有vpc，创建一个安全组"
 CONTINUE_PROMPT = "继续"
+CLEANUP_RECOVERY_PROMPT = (
+    "请只回复“OK，继续”。不要调用任何工具，不要查询任何云资源，不要删除任何资源。"
+    "如果系统有后台 cleanup 恢复流程，请让它自行完成。"
+)
+CLEANUP_PROMPT_METADATA_TYPE = "pipeline_cleanup_prompt"
+CLEANUP_EVENT_TYPES = frozenset(
+    {
+        "cleanup_started",
+        "cleanup_progress",
+        "cleanup_completed",
+        "cleanup_failed",
+    }
+)
+CLEANUP_ACTIVE_STATUSES = frozenset({"pending", "started", "in_progress", "failed"})
+IMAGE_TEXT_PROMPT = "请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"
+STATIC_TEXT_IMAGE_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "text-images"
+STATIC_TEXT_IMAGE_FIXTURES = {
+    "initial": DEFAULT_INITIAL_PROMPT,
+    "selection": DEFAULT_SELECTION_PROMPT,
+    "normal-followup": DEFAULT_NORMAL_FOLLOWUP_PROMPT,
+    "ask-first-answer": ASK_FIRST_ANSWER,
+    "ask-second-answer": ASK_SECOND_ANSWER,
+    "rollback-interrupt": ROLLBACK_PROMPT,
+}
 
 VSWITCH_MARKERS = ("ALIYUN::ECS::VSwitch", "VSwitchId", "vsw-", "VSwitch", "交换机")
 SECURITY_GROUP_MARKERS = ("ALIYUN::ECS::SecurityGroup", "SecurityGroupId", "sg-", "安全组")
 TERMINAL_STATES = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_INPUT_REQUIRED"}
+ROS_STACK_DELETED_STATUSES = {"DELETE_COMPLETE"}
 
 
 @dataclass
@@ -102,6 +133,127 @@ class EventMatch:
     summary: StreamSummary
 
 
+class TextImageFixtureStore:
+    def __init__(self, root: Path, static_root: Path = STATIC_TEXT_IMAGE_FIXTURE_ROOT) -> None:
+        self.root = root
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.manifest_path = self.root / "manifest.json"
+        self.static_root = static_root
+
+    def part(self, key: str, text: str) -> dict[str, Any]:
+        safe_key = _safe_fixture_key(key)
+        path = self._static_fixture_path(safe_key, text)
+        source = "static"
+        if path is None:
+            path = self.root / f"{safe_key}.png"
+            source = "generated"
+            if not path.exists():
+                path.write_bytes(_render_text_png(text))
+        raw = path.read_bytes()
+        self._record_manifest(safe_key, text=text, path=path, byte_size=len(raw), source=source)
+        return {
+            "filename": path.name,
+            "mediaType": "image/png",
+            "bytes": base64.b64encode(raw).decode("ascii"),
+        }
+
+    def _static_fixture_path(self, key: str, text: str) -> Path | None:
+        try:
+            manifest = json.loads((self.static_root / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(manifest, dict):
+            return None
+        entry = manifest.get(key)
+        if not isinstance(entry, dict) or entry.get("text") != text or entry.get("mediaType") != "image/png":
+            return None
+        filename = entry.get("filename")
+        if not isinstance(filename, str) or not filename:
+            return None
+        path = self.static_root / filename
+        return path if path.is_file() else None
+
+    def _record_manifest(self, key: str, *, text: str, path: Path, byte_size: int, source: str) -> None:
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        if not isinstance(manifest, dict):
+            manifest = {}
+        manifest[key] = {
+            "text": text,
+            "path": str(path),
+            "mediaType": "image/png",
+            "byteSize": byte_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "source": source,
+        }
+        _write_json(self.manifest_path, manifest)
+
+
+def _safe_fixture_key(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value.strip().lower())
+    return safe.strip("-") or "input"
+
+
+def _render_text_png(text: str) -> bytes:
+    font = _load_text_image_font(size=34)
+    lines = _wrap_text_for_image(text)
+    padding = 40
+    line_spacing = 12
+    probe = Image.new("RGB", (1, 1), "white")
+    draw = ImageDraw.Draw(probe)
+    boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    text_width = int(max((right - left for left, _top, right, _bottom in boxes), default=360))
+    line_heights = [int(bottom - top) for _left, top, _right, bottom in boxes] or [40]
+    width = int(max(760, min(1600, text_width + padding * 2)))
+    height = int(max(220, sum(line_heights) + line_spacing * max(0, len(lines) - 1) + padding * 2))
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    y = padding
+    for line, line_height in zip(lines, line_heights, strict=False):
+        draw.text((padding, y), line, fill=(16, 24, 39), font=font)
+        y += line_height + line_spacing
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _wrap_text_for_image(text: str, *, max_chars: int = 26) -> list[str]:
+    lines: list[str] = []
+    for raw_line in text.splitlines() or [text]:
+        line = raw_line.strip()
+        if not line:
+            lines.append("")
+            continue
+        while len(line) > max_chars:
+            lines.append(line[:max_chars])
+            line = line[max_chars:]
+        if line:
+            lines.append(line)
+    return lines or [""]
+
+
+def _load_text_image_font(*, size: int) -> Any:
+    candidates = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            try:
+                return ImageFont.truetype(candidate, size=size)
+            except OSError:
+                continue
+    return ImageFont.load_default()
+
+
 class BackgroundStream:
     def __init__(
         self,
@@ -114,6 +266,7 @@ class BackgroundStream:
         timeout: float,
         context_id: str = "",
         task_id: str = "",
+        images: list[dict[str, Any]] | None = None,
         redaction_env: dict[str, str] | None = None,
     ) -> None:
         self.server_url = server_url
@@ -124,6 +277,7 @@ class BackgroundStream:
         self.timeout = timeout
         self.context_id = context_id
         self.task_id = task_id
+        self.images = images
         self.redaction_env = redaction_env
         self.summary = StreamSummary(name=name, prompt=prompt, request_task_id=task_id)
         self.events: list[Any] = []
@@ -182,6 +336,7 @@ class BackgroundStream:
             task_id=self.task_id,
             request_id=str(uuid.uuid4()),
             message_id=str(uuid.uuid4()),
+            images=self.images,
         )
         _append_jsonl(
             self.run_dir / "requests.jsonl",
@@ -230,6 +385,7 @@ class ScenarioHarness:
         self.server_cwd = str(Path(args.server_cwd).expanduser().resolve())
         self.run_dir = _scenario_run_dir(args, scenario)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.image_fixtures = TextImageFixtureStore(self.run_dir / "image-fixtures")
         self.workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else self.run_dir / "workspace"
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.cwd = str(self.workspace_dir)
@@ -314,6 +470,7 @@ class ScenarioHarness:
         name: str,
         context_id: str | None = None,
         task_id: str | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> StreamSummary:
         summary = stream_message(
             server_url=self.server_url,
@@ -324,11 +481,30 @@ class ScenarioHarness:
             name=name,
             run_dir=self.run_dir,
             timeout=self.args.stream_timeout,
+            images=images,
             redaction_env=self.server_env,
         )
         self._remember_identity(summary)
         self.summaries[name] = summary
         return summary
+
+    def stream_image_text(
+        self,
+        *,
+        text: str,
+        image_key: str,
+        name: str,
+        context_id: str | None = None,
+        task_id: str | None = None,
+        prompt: str = IMAGE_TEXT_PROMPT,
+    ) -> StreamSummary:
+        return self.stream(
+            prompt=prompt,
+            name=name,
+            context_id=context_id,
+            task_id=task_id,
+            images=[self.image_fixtures.part(image_key, text)],
+        )
 
     def start_stream(
         self,
@@ -337,6 +513,7 @@ class ScenarioHarness:
         name: str,
         context_id: str | None = None,
         task_id: str | None = None,
+        images: list[dict[str, Any]] | None = None,
     ) -> BackgroundStream:
         stream = BackgroundStream(
             server_url=self.server_url,
@@ -347,6 +524,7 @@ class ScenarioHarness:
             name=name,
             run_dir=self.run_dir,
             timeout=self.args.stream_timeout,
+            images=images,
             redaction_env=self.server_env,
         )
         stream.start()
@@ -358,6 +536,24 @@ class ScenarioHarness:
         self._remember_identity(stream.summary)
         self.summaries[name] = stream.summary
         return stream
+
+    def start_stream_image_text(
+        self,
+        *,
+        text: str,
+        image_key: str,
+        name: str,
+        context_id: str | None = None,
+        task_id: str | None = None,
+        prompt: str = IMAGE_TEXT_PROMPT,
+    ) -> BackgroundStream:
+        return self.start_stream(
+            prompt=prompt,
+            name=name,
+            context_id=context_id,
+            task_id=task_id,
+            images=[self.image_fixtures.part(image_key, text)],
+        )
 
     def fetch_state(self, name: str) -> Any:
         snapshot = fetch_pipeline_state(
@@ -573,6 +769,9 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
             context_id=h.context_id,
             task_id=h.pipeline_task_id,
         )
+        h.checks["after-pipeline state has no cleanup activity"] = not _snapshot_has_cleanup_activity(
+            h.snapshots["after_pipeline"]
+        )
         normal = h.stream(prompt=args.normal_followup_prompt, name="03-normal-followup", task_id="")
         h.checks["normal follow-up stayed in same context"] = normal.context_id == h.context_id
         h.checks["normal follow-up used a new task"] = bool(normal.task_id) and normal.task_id != h.pipeline_task_id
@@ -587,6 +786,9 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
             context_id=h.context_id,
             task_id=h.pipeline_task_id,
         )
+        h.checks["after-restart state has no cleanup activity"] = not _snapshot_has_cleanup_activity(
+            h.snapshots["after_restart"]
+        )
         recovery = h.stream(prompt=args.recovery_prompt, name="04-recovery-question", task_id="")
         h.checks["recovery stayed in same context"] = recovery.context_id == h.context_id
         h.checks["recovery used a new task"] = bool(recovery.task_id) and recovery.task_id not in {
@@ -596,6 +798,9 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
         h.checks["recovery finished turn"] = _normal_turn_finished(recovery)
         h.checks["recovery answer mentions previous question"] = args.expected_text in recovery.text
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+        h.checks["scenario1 emitted no cleanup events"] = not _run_dir_has_cleanup_events(h.run_dir)
+        h.checks["scenario1 persisted no cleanup prompt"] = not _session_has_cleanup_prompt(h)
+        h.checks["scenario1 ledger has no cleanup-required resources"] = not _cleanup_ledger_has_required_resources(h)
 
     return _run_with_harness(args, scenario, callback)
 
@@ -700,6 +905,164 @@ def run_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
         _add_hydrated_task_checks(h, selection, "selection answer")
         h.checks["selection completed pipeline"] = _pipeline_completed(selection)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream_image_text(
+            text=args.initial_prompt,
+            image_key="initial",
+            name="01-initial-image",
+            context_id="",
+            task_id="",
+        )
+        initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial-image")
+        h.checks["image initial reached step4 input_required"] = (
+            initial.last_input_required_step_id == "confirm_and_select"
+        )
+        selection = h.stream(prompt=args.selection_prompt, name="02-select-candidate")
+        h.checks["image initial selection completed pipeline"] = _pipeline_completed(selection)
+        h.checks["image initial VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream(prompt=ASK_TRIGGER_PROMPT, name="01-ask-trigger", context_id="", task_id="")
+        h.checks["initial reached input_required"] = _reached_input_required(initial)
+        h.checks["input_required is ask_user_question"] = (
+            _latest_pending_kind(h.run_dir / "01-ask-trigger.events.jsonl") == "ask_user_question"
+        )
+        h.kill9_and_restart()
+        snapshot = h.fetch_state("after-restart")
+        h.checks["snapshot still waiting input"] = _snapshot_value(snapshot, "status") == "waiting_input"
+        h.checks["pending input is ask_user_question"] = _pending_kind(snapshot) == "ask_user_question"
+        answer = h.stream_image_text(
+            text=ASK_FIRST_ANSWER,
+            image_key="ask-first-answer",
+            name="02-answer-first-ask-image",
+            task_id="",
+        )
+        _add_hydrated_task_checks(h, answer, "first ask image answer")
+        final_summary = answer
+        if answer.last_input_required_step_id:
+            second = h.stream_image_text(
+                text=ASK_SECOND_ANSWER,
+                image_key="ask-second-answer",
+                name="03-answer-second-ask-image",
+            )
+            _add_same_task_checks(h, second, "second ask image answer")
+            _finish_pipeline_after_possible_input(h, second, args)
+            final_summary = second
+        else:
+            _finish_pipeline_after_possible_input(h, answer, args)
+        h.checks["pipeline completed after ask image recovery"] = _completed_snapshot_or_stream(h, final_summary)
+        h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
+        initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
+        h.checks["initial reached step4 input_required"] = initial.last_input_required_step_id == "confirm_and_select"
+        h.kill9_and_restart()
+        snapshot = h.fetch_state("after-restart")
+        h.checks["snapshot still waiting input"] = _snapshot_value(snapshot, "status") == "waiting_input"
+        h.checks["pending input is confirm_and_select"] = _pending_step_id(snapshot) == "confirm_and_select"
+        selection = h.stream_image_text(
+            text=args.selection_prompt,
+            image_key="selection",
+            name="02-select-after-restart-image",
+            task_id="",
+        )
+        _add_hydrated_task_checks(h, selection, "selection image answer")
+        h.checks["selection image completed pipeline"] = _pipeline_completed(selection)
+        h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        _complete_pipeline(h, args)
+        normal = h.stream_image_text(
+            text=args.normal_followup_prompt,
+            image_key="normal-followup",
+            name="03-normal-followup-image",
+            task_id="",
+        )
+        h.checks["normal image follow-up stayed in same context"] = normal.context_id == h.context_id
+        h.checks["normal image follow-up used a new task"] = (
+            bool(normal.task_id) and normal.task_id != h.pipeline_task_id
+        )
+        h.checks["normal image follow-up finished turn"] = _normal_turn_finished(normal)
+        h.checks["normal image follow-up produced text"] = bool(normal.text.strip())
+        h.kill9_and_restart()
+        h.snapshots["after_restart"] = h.fetch_state("after-restart")
+        _add_completed_snapshot_checks(
+            h.checks,
+            "after-restart state",
+            h.snapshots["after_restart"],
+            context_id=h.context_id,
+            task_id=h.pipeline_task_id,
+        )
+        recovery = h.stream(prompt=args.recovery_prompt, name="04-recovery-question", task_id="")
+        h.checks["normal image recovery stayed in same context"] = recovery.context_id == h.context_id
+        h.checks["normal image recovery finished turn"] = _normal_turn_finished(recovery)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.start_stream(prompt=args.initial_prompt, name="01-initial-running", context_id="", task_id="")
+        observed_streams = _wait_for_with_intervening_ask_inputs(
+            h,
+            [initial],
+            _candidate_started,
+            description="candidate started before image interrupt",
+            timeout=args.event_timeout,
+            name_prefix="initial-running",
+        )
+        rollback = h.start_stream_image_text(
+            text=ROLLBACK_PROMPT,
+            image_key="rollback-interrupt",
+            name="02-rollback-image-interrupt",
+        )
+        _wait_any(
+            [*observed_streams, rollback],
+            _event_type("rollback_completed"),
+            description="image rollback_completed",
+            timeout=args.event_timeout,
+        )
+        streams_to_join = [*observed_streams, rollback]
+        _wait_any(
+            [*observed_streams, rollback],
+            _step_started("intent_parsing"),
+            description="post-image-rollback step_started(intent_parsing)",
+            timeout=args.event_timeout,
+        )
+        h.fetch_state("before-kill")
+        h.kill9_and_restart()
+        for stream in streams_to_join:
+            _join_after_kill(stream, h)
+        snapshot = h.fetch_state("after-restart")
+        h.checks["state endpoint returned snapshot after image interrupt restart"] = _snapshot(snapshot) is not None
+        resumed = h.stream(prompt=CONTINUE_PROMPT, name="03-continue-after-restart")
+        _finish_pipeline_after_possible_input(h, resumed, args)
+        h.checks["pipeline completed after image interrupt recovery"] = _completed_snapshot_or_stream(h, resumed)
+        final_state = h.fetch_state("after-image-interrupt-completion")
+        final_deploying = _final_deployment_evidence(final_state)
+        h.checks["final deploying target is security group"] = _has_any_marker(
+            final_deploying,
+            SECURITY_GROUP_MARKERS,
+        )
+        h.checks["final deploying target is not VSwitch"] = not _has_any_marker(final_deploying, VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)
 
@@ -868,11 +1231,14 @@ def run_fault_after_snapshot(args: argparse.Namespace, scenario: str) -> int:
         _add_hydrated_task_checks(h, resumed, "continue")
         _finish_pipeline_after_possible_input(h, resumed, args)
         after_continue = h.capture_task_snapshots("after-continue")
-        h.checks["task_get_after_continue_completed"] = _task_response_matches(
-            after_continue["task_get"],
-            task_id=h.pipeline_task_id,
-            context_id=h.context_id,
-        ) and _task_status_state(after_continue["task_get"]) == "TASK_STATE_COMPLETED"
+        h.checks["task_get_after_continue_completed"] = (
+            _task_response_matches(
+                after_continue["task_get"],
+                task_id=h.pipeline_task_id,
+                context_id=h.context_id,
+            )
+            and _task_status_state(after_continue["task_get"]) == "TASK_STATE_COMPLETED"
+        )
         h.checks["task_list_after_continue_kept_recovered_task"] = _task_list_contains(
             after_continue["task_list"],
             task_id=h.pipeline_task_id,
@@ -880,6 +1246,138 @@ def run_fault_after_snapshot(args: argparse.Namespace, scenario: str) -> int:
         )
         h.checks["pipeline_completed"] = _completed_snapshot_or_stream(h, resumed)
         h.checks["created_vswitch"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
+
+    return _run_with_harness(args, scenario, callback)
+
+
+def run_rollback_step5_cleanup(args: argparse.Namespace, scenario: str) -> int:
+    return _run_rollback_step5_cleanup(args, scenario, kill_during_cleanup=False)
+
+
+def run_rollback_step5_cleanup_recovery(args: argparse.Namespace, scenario: str) -> int:
+    return _run_rollback_step5_cleanup(args, scenario, kill_during_cleanup=True)
+
+
+def _run_rollback_step5_cleanup(
+    args: argparse.Namespace,
+    scenario: str,
+    *,
+    kill_during_cleanup: bool,
+) -> int:
+    def callback(h: ScenarioHarness) -> None:
+        initial = h.stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
+        initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
+        h.checks["initial reached step4 selection"] = initial.last_input_required_step_id == "confirm_and_select"
+
+        first_deploy = h.start_stream(
+            prompt=_cleanup_deployment_prompt(args.selection_prompt, h, "first"),
+            name="02-create-first-stack",
+        )
+        first_stack_id = _wait_for_created_stack(
+            first_deploy,
+            exclude=set(),
+            timeout=args.event_timeout,
+        )
+        h.checks["first rollback stack observed before rollback"] = bool(first_stack_id)
+
+        rollback = h.start_stream(prompt=ROLLBACK_PROMPT, name="03-rollback-after-first-stack")
+        _wait_any(
+            [first_deploy, rollback],
+            _event_type("rollback_completed"),
+            description="rollback_completed after first stack",
+            timeout=args.event_timeout,
+        )
+        _wait_any(
+            [first_deploy, rollback],
+            _input_required_step("confirm_and_select"),
+            description="post-rollback input_required(confirm_and_select)",
+            timeout=_post_rollback_timeout(args),
+        )
+        cleanup_stack_ids = _cleanup_target_stack_ids(h, exclude=set())
+        h.checks["rollback cleanup ledger includes first stack"] = bool(first_stack_id) and (
+            first_stack_id in cleanup_stack_ids
+        )
+        h.checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
+
+        second_deploy = h.start_stream(
+            prompt=_cleanup_deployment_prompt(args.selection_prompt, h, "second"),
+            name="04-select-second-stack",
+        )
+        _wait_any(
+            [second_deploy],
+            _step_started("deploying"),
+            description="second deployment step_started(deploying)",
+            timeout=args.event_timeout,
+        )
+        for stream in (first_deploy, rollback, second_deploy):
+            _join_stream_or_note(stream, h)
+
+        _finish_pipeline_after_possible_input(h, second_deploy.summary, args)
+        h.checks["pipeline completed after second deployment"] = _completed_snapshot_or_stream(h, second_deploy.summary)
+        h.fetch_state("after-second-stack")
+        second_stack_id = _created_stack_id_from_stream(second_deploy, exclude=set(cleanup_stack_ids))
+        h.checks["second stack created after rollback"] = bool(second_stack_id)
+        h.checks["second stack differs from first rollback stack"] = bool(second_stack_id) and (
+            second_stack_id != first_stack_id
+        )
+        cleanup_stack_ids = _cleanup_target_stack_ids(
+            h,
+            exclude={stack_id for stack_id in [second_stack_id] if stack_id},
+        )
+        h.checks["rollback cleanup ledger includes first stack"] = bool(first_stack_id) and (
+            first_stack_id in cleanup_stack_ids
+        )
+        h.checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
+
+        if kill_during_cleanup:
+            cleanup_stream = h.start_stream(
+                prompt=args.normal_followup_prompt,
+                name="05-cleanup-running",
+                task_id="",
+            )
+            _wait_for_cleanup_started(h, cleanup_stream, first_stack_id, timeout=args.event_timeout)
+            h.kill9_and_restart()
+            _join_after_kill(cleanup_stream, h)
+            h.snapshots["after_cleanup_restart"] = h.fetch_state("after-cleanup-restart")
+            cleanup_summary = h.stream(prompt=CLEANUP_RECOVERY_PROMPT, name="06-cleanup-after-restart", task_id="")
+            h.checks["cleanup retriggered after restart"] = _events_file_has_cleanup_event(
+                h.run_dir / "06-cleanup-after-restart.events.jsonl",
+                stack_id=first_stack_id,
+                event_types={"cleanup_started", "cleanup_progress", "cleanup_completed"},
+            )
+        else:
+            cleanup_summary = h.stream(
+                prompt=args.normal_followup_prompt,
+                name="05-cleanup-normal-turn",
+                task_id="",
+            )
+        h.checks["cleanup normal turn stayed in same context"] = cleanup_summary.context_id == h.context_id
+        h.checks["cleanup normal turn used normal task"] = cleanup_summary.task_id != h.pipeline_task_id
+
+        after_cleanup = h.fetch_state("after-cleanup")
+        cleanup_resource = _cleanup_resource_for_stack(after_cleanup, first_stack_id)
+        h.checks["first rollback stack cleanup completed in snapshot"] = _cleanup_resource_completed(cleanup_resource)
+        h.checks["rollback cleanup stacks completed in snapshot"] = bool(cleanup_stack_ids) and all(
+            _cleanup_resource_completed(_cleanup_resource_for_stack(after_cleanup, stack_id))
+            for stack_id in cleanup_stack_ids
+        )
+        h.checks["cleanup snapshot does not target second stack"] = (
+            bool(second_stack_id) and _cleanup_resource_for_stack(after_cleanup, second_stack_id) is None
+        )
+
+        ros_stack_ids = _unique_strings([*cleanup_stack_ids, second_stack_id])
+        ros_states = _capture_ros_stack_states(
+            h,
+            ros_stack_ids,
+            "after-cleanup",
+        )
+        h.checks["ROS first rollback stack deleted"] = _ros_stack_deleted(ros_states.get(first_stack_id, {}))
+        h.checks["ROS rollback cleanup stacks deleted"] = bool(cleanup_stack_ids) and all(
+            _ros_stack_deleted(ros_states.get(stack_id, {})) for stack_id in cleanup_stack_ids
+        )
+        h.checks["ROS second stack retained"] = bool(second_stack_id) and _ros_stack_retained(
+            ros_states.get(second_stack_id, {})
+        )
 
     return _run_with_harness(args, scenario, callback)
 
@@ -985,10 +1483,7 @@ def _input_required_step(step_id: str) -> Callable[[Any, StreamSummary], bool]:
         return (
             isinstance(envelope, dict)
             and envelope.get("eventType") == "input_required"
-            and (
-                (isinstance(step, dict) and step.get("id") == step_id)
-                or data_step_id == step_id
-            )
+            and ((isinstance(step, dict) and step.get("id") == step_id) or data_step_id == step_id)
         )
 
     return predicate
@@ -1023,14 +1518,18 @@ def _wait_any(
 ) -> EventMatch:
     deadline = time.monotonic() + timeout
     last_error = ""
+    active_streams = list(streams)
     while time.monotonic() < deadline:
-        for stream in streams:
+        for stream in list(active_streams):
             try:
                 return stream.wait_for(predicate, description=description, timeout=0.25)
             except TimeoutError:
                 continue
             except RuntimeError as exc:
                 last_error = str(exc)
+                active_streams.remove(stream)
+        if not active_streams:
+            break
         time.sleep(0.05)
     raise TimeoutError(f"Timed out waiting for {description}; last_error={last_error}")
 
@@ -1067,9 +1566,7 @@ def _wait_for_with_intervening_ask_inputs(
                 answered_count += 1
                 if answered_count > 4:
                     raise RuntimeError(f"too many intervening ask_user_question inputs before {description}") from exc
-                h.notes.append(
-                    f"answered intervening ask_user_question while waiting for {description}: {stream.name}"
-                )
+                h.notes.append(f"answered intervening ask_user_question while waiting for {description}: {stream.name}")
                 answer = h.start_stream(
                     prompt=INTERVENING_ASK_ANSWER,
                     name=f"{name_prefix}-answer-ask-{answered_count}",
@@ -1265,11 +1762,7 @@ def _jsonrpc_result(response: Any) -> Any:
 def _task_response_matches(response: Any, *, task_id: str, context_id: str) -> bool:
     result = _jsonrpc_result(response)
     identity = _a2a_task_identity(result)
-    return (
-        isinstance(identity, dict)
-        and identity.get("taskId") == task_id
-        and identity.get("contextId") == context_id
-    )
+    return isinstance(identity, dict) and identity.get("taskId") == task_id and identity.get("contextId") == context_id
 
 
 def _task_status_state(response: Any) -> str:
@@ -1286,11 +1779,7 @@ def _task_list_contains(response: Any, *, task_id: str, context_id: str) -> bool
         return False
     for task in tasks:
         identity = _a2a_task_identity(task)
-        if (
-            isinstance(identity, dict)
-            and identity.get("taskId") == task_id
-            and identity.get("contextId") == context_id
-        ):
+        if isinstance(identity, dict) and identity.get("taskId") == task_id and identity.get("contextId") == context_id:
             return True
     return False
 
@@ -1420,6 +1909,560 @@ def _has_any_marker(text: str, markers: Iterable[str]) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _join_stream_or_note(stream: BackgroundStream, h: ScenarioHarness) -> None:
+    try:
+        stream.join(timeout=h.args.stream_timeout)
+    except Exception as exc:
+        h.notes.append(f"{stream.name} ended while joining: {type(exc).__name__}: {exc}")
+
+
+def _post_rollback_timeout(args: argparse.Namespace) -> float:
+    event_timeout = float(getattr(args, "event_timeout", 0) or 0)
+    stream_timeout = float(getattr(args, "stream_timeout", 0) or 0)
+    return max(event_timeout, min(stream_timeout, 900.0))
+
+
+def _cleanup_deployment_prompt(base_prompt: str, h: ScenarioHarness, label: str) -> str:
+    stack_name = _cleanup_stack_name(h, label)
+    completion_instruction = (
+        "本轮是回滚窗口验证：CreateStack 成功后不要调用 complete_step，不要结束 deploying step；"
+        "只简短说明新建的 stack_id，并等待用户下一条指令。"
+        if label == "first"
+        else "complete_step 前必须在本轮对话中看到一次新的 CreateStack 成功，部署总结的 stack_id 必须来自这次新建。"
+    )
+    return (
+        f"{base_prompt}\n\n"
+        "E2E 强制部署约束：\n"
+        f"- 本轮唯一成功条件是新建一个 ROS stack，StackName 必须精确等于 `{stack_name}`。\n"
+        "- 任何已有 stack（即使是 CREATE_COMPLETE）都必须视为失败结果，不能作为部署成功依据。\n"
+        f"- 调用 ros_stack 或 aliyun_api CreateStack 前，必须复核工具参数里的 StackName 精确等于 `{stack_name}`。\n"
+        f"- 如果模板、文件名、候选方案或默认值给出了其他 StackName，必须覆盖为 `{stack_name}` 后再调用 CreateStack。\n"
+        f"- 如果已经用其他 StackName 调用失败，不能 GetStack 或复用那个 stack，必须改用 `{stack_name}` "
+        "重新 CreateStack。\n"
+        "- 如果无法使用上述 StackName 新建 stack，就停下来说明失败，不要调用 complete_step。\n"
+        f"{completion_instruction}"
+        "创建 VSwitch 时请先检查目标 VPC 已有 VSwitch CIDR，选择未占用且属于 VPC CIDR 的网段；"
+        "如果 CIDR 冲突，请选择另一个未占用网段并继续使用上述指定 StackName。"
+    )
+
+
+def _cleanup_stack_name(h: ScenarioHarness, label: str) -> str:
+    suffix = Path(getattr(h, "run_dir", "")).name.rsplit("-", maxsplit=1)[-1] or "stack"
+    safe_label = "".join(ch if ch.isalnum() else "-" for ch in label.lower()).strip("-") or "stack"
+    return f"iac-e2e-{suffix[:12]}-{safe_label}"[:128]
+
+
+def _wait_for_observed_cleanup_stack(
+    h: ScenarioHarness,
+    *,
+    exclude: set[str],
+    timeout: float,
+) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        stack_id = _latest_observed_stack_id(h, exclude=exclude)
+        if stack_id:
+            return stack_id
+        time.sleep(1.0)
+    raise TimeoutError("Timed out waiting for rollback cleanup ledger to observe a ROS stack")
+
+
+def _wait_for_created_stack(
+    stream: BackgroundStream,
+    *,
+    exclude: set[str],
+    timeout: float,
+) -> str:
+    match = _wait_any(
+        [stream],
+        _created_stack_event(exclude),
+        description="successful CreateStack stack_current_changed",
+        timeout=timeout,
+    )
+    envelope = _extract_pipeline_envelope(match.event)
+    data = envelope.get("data") if isinstance(envelope, dict) else None
+    stack_id = _string_from_mapping(data, "stackId", "stack_id", "StackId")
+    if not stack_id:
+        raise RuntimeError("successful CreateStack event did not include a stack id")
+    return stack_id
+
+
+def _created_stack_id_from_stream(stream: Any, *, exclude: set[str]) -> str | None:
+    for event in getattr(stream, "events", []) or []:
+        envelope = _extract_pipeline_envelope(event)
+        if not isinstance(envelope, dict) or envelope.get("eventType") != "stack_current_changed":
+            continue
+        data = envelope.get("data")
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("provider") or "").lower() != "ros":
+            continue
+        if data.get("action") != "CreateStack" or data.get("isSuccess") is not True:
+            continue
+        stack_id = _string_from_mapping(data, "stackId", "stack_id", "StackId")
+        if stack_id and stack_id not in exclude:
+            return stack_id
+    return None
+
+
+def _created_stack_event(exclude: set[str]) -> Callable[[Any, StreamSummary], bool]:
+    def predicate(event: Any, _summary: StreamSummary) -> bool:
+        envelope = _extract_pipeline_envelope(event)
+        if not isinstance(envelope, dict) or envelope.get("eventType") != "stack_current_changed":
+            return False
+        data = envelope.get("data")
+        if not isinstance(data, dict):
+            return False
+        if str(data.get("provider") or "").lower() != "ros":
+            return False
+        if data.get("action") != "CreateStack" or data.get("isSuccess") is not True:
+            return False
+        stack_id = _string_from_mapping(data, "stackId", "stack_id", "StackId")
+        return bool(stack_id and stack_id not in exclude)
+
+    return predicate
+
+
+def _latest_observed_stack_id(h: ScenarioHarness, *, exclude: set[str]) -> str | None:
+    resources = _cleanup_ledger_items(h, "observed_resources")
+    for resource in reversed(resources):
+        if not _is_ros_stack_resource(resource):
+            continue
+        if str(resource.get("observed_action") or resource.get("action") or "") != "CreateStack":
+            continue
+        stack_id = _string_from_mapping(resource, "resource_id", "resourceId", "stack_id", "stackId")
+        if stack_id and stack_id not in exclude:
+            return stack_id
+    return None
+
+
+def _cleanup_ledger_items(h: ScenarioHarness, key: str) -> list[dict[str, Any]]:
+    if not getattr(h, "context_id", ""):
+        return []
+    try:
+        from iac_code.services.session_storage import SessionStorage
+
+        cwd, session_id = _pipeline_session_identity(h)
+        session_dir = SessionStorage().session_dir(cwd, session_id)
+        paths = [session_dir / "pipeline" / "cleanup.yaml", session_dir / "a2a" / "pipeline" / "cleanup.yaml"]
+        data = None
+        for path in paths:
+            if path.exists():
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                break
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    values = data.get(key)
+    return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
+
+
+def _pipeline_session_identity(h: ScenarioHarness) -> tuple[str, str]:
+    context_id = str(getattr(h, "context_id", "") or "")
+    cwd = str(getattr(h, "cwd", "") or "")
+    run_dir_value = getattr(h, "run_dir", None)
+    if context_id and run_dir_value is not None:
+        path = Path(run_dir_value) / "a2a-persistence" / "contexts" / f"{context_id}.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            data = None
+        if isinstance(data, dict):
+            session_id = data.get("session_id")
+            persisted_cwd = data.get("cwd")
+            if isinstance(session_id, str) and session_id:
+                return (persisted_cwd if isinstance(persisted_cwd, str) and persisted_cwd else cwd, session_id)
+    return cwd, context_id
+
+
+def _wait_for_cleanup_started(
+    h: ScenarioHarness,
+    stream: BackgroundStream,
+    stack_id: str,
+    *,
+    timeout: float,
+) -> None:
+    try:
+        _wait_any(
+            [stream],
+            _cleanup_event_for_stack(stack_id, {"cleanup_started", "cleanup_progress"}),
+            description=f"cleanup_started({stack_id})",
+            timeout=timeout,
+        )
+        return
+    except Exception as exc:
+        h.notes.append(f"did not observe cleanup_started event before fallback: {exc}")
+    _wait_for_cleanup_ledger_status(h, stack_id, {"started", "in_progress"}, timeout=timeout)
+
+
+def _wait_for_cleanup_ledger_status(
+    h: ScenarioHarness,
+    stack_id: str,
+    statuses: set[str],
+    *,
+    timeout: float,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for resource in _cleanup_ledger_items(h, "cleanup_resources"):
+            if _string_from_mapping(resource, "resource_id", "resourceId") != stack_id:
+                continue
+            if str(resource.get("cleanup_status") or resource.get("cleanupStatus") or "") in statuses:
+                return
+        time.sleep(0.5)
+    raise TimeoutError(f"Timed out waiting for cleanup ledger status {sorted(statuses)} on {stack_id}")
+
+
+def _cleanup_event_for_stack(
+    stack_id: str,
+    event_types: set[str],
+) -> Callable[[Any, StreamSummary], bool]:
+    def predicate(event: Any, _summary: StreamSummary) -> bool:
+        envelope = _extract_pipeline_envelope(event)
+        if not isinstance(envelope, dict) or envelope.get("eventType") not in event_types:
+            return False
+        data = envelope.get("data")
+        return isinstance(data, dict) and data.get("resourceId") == stack_id
+
+    return predicate
+
+
+def _events_file_has_cleanup_event(path: Path, *, stack_id: str, event_types: set[str]) -> bool:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        envelope = _extract_pipeline_envelope(value)
+        if not isinstance(envelope, dict) or envelope.get("eventType") not in event_types:
+            continue
+        data = envelope.get("data")
+        if isinstance(data, dict) and data.get("resourceId") == stack_id:
+            return True
+    return False
+
+
+def _run_dir_has_cleanup_events(run_dir: Path) -> bool:
+    return any(_events_file_has_cleanup_activity(path) for path in sorted(run_dir.glob("*.events.jsonl")))
+
+
+def _events_file_has_cleanup_activity(path: Path) -> bool:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        envelope = _extract_pipeline_envelope(value)
+        if isinstance(envelope, dict) and _pipeline_envelope_has_cleanup_activity(envelope):
+            return True
+    return False
+
+
+def _pipeline_envelope_has_cleanup_activity(envelope: dict[str, Any]) -> bool:
+    if envelope.get("eventType") in CLEANUP_EVENT_TYPES or envelope.get("scope") == "cleanup":
+        return True
+    data = envelope.get("data")
+    cleanup = data.get("cleanup") if isinstance(data, dict) else None
+    return isinstance(cleanup, dict) and _cleanup_payload_has_targets(cleanup)
+
+
+def _cleanup_resource_for_stack(response: Any, stack_id: str | None) -> dict[str, Any] | None:
+    if not stack_id:
+        return None
+    cleanup = _snapshot_cleanup(response)
+    resources = cleanup.get("resources") if isinstance(cleanup, dict) else None
+    if not isinstance(resources, list):
+        return None
+    for resource in resources:
+        if isinstance(resource, dict) and resource.get("resourceId") == stack_id:
+            return resource
+    return None
+
+
+def _cleanup_target_stack_ids(h: ScenarioHarness, *, exclude: set[str]) -> list[str]:
+    stack_ids: list[str] = []
+    for resource in _cleanup_ledger_items(h, "cleanup_resources"):
+        if not _is_ros_stack_resource(resource):
+            continue
+        if resource.get("cleanup_required") is False or resource.get("cleanupRequired") is False:
+            continue
+        stack_id = _string_from_mapping(resource, "resource_id", "resourceId", "stack_id", "stackId")
+        if stack_id and stack_id not in exclude:
+            stack_ids.append(stack_id)
+    return _unique_strings(stack_ids)
+
+
+def _cleanup_resource_completed(resource: dict[str, Any] | None) -> bool:
+    if not isinstance(resource, dict):
+        return False
+    cleanup_status = resource.get("cleanupStatus") or resource.get("cleanup_status") or resource.get("status")
+    stack_status = resource.get("stackStatus") or resource.get("progressStatus") or resource.get("progress_status")
+    return cleanup_status == "completed" and stack_status == "DELETE_COMPLETE"
+
+
+def _snapshot_cleanup(response: Any) -> dict[str, Any]:
+    snapshot = _snapshot(response)
+    cleanup = snapshot.get("cleanup") if isinstance(snapshot, dict) else None
+    return cleanup if isinstance(cleanup, dict) else {}
+
+
+def _snapshot_has_cleanup_activity(response: Any) -> bool:
+    return _cleanup_payload_has_targets(_snapshot_cleanup(response))
+
+
+def _cleanup_payload_has_targets(cleanup: dict[str, Any]) -> bool:
+    resources = cleanup.get("resources")
+    if isinstance(resources, list) and any(isinstance(item, dict) for item in resources):
+        return True
+    history = cleanup.get("history")
+    if isinstance(history, list) and history:
+        return True
+    resource_count = cleanup.get("resourceCount", cleanup.get("resource_count"))
+    if _positive_int(resource_count):
+        return True
+    status = str(cleanup.get("status") or "")
+    return status in CLEANUP_ACTIVE_STATUSES
+
+
+def _positive_int(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    if isinstance(value, str):
+        try:
+            return int(value) > 0
+        except ValueError:
+            return False
+    return False
+
+
+def _cleanup_ledger_has_required_resources(h: ScenarioHarness) -> bool:
+    for resource in _cleanup_ledger_items(h, "cleanup_resources"):
+        if resource.get("cleanup_required") is False or resource.get("cleanupRequired") is False:
+            continue
+        return True
+    return False
+
+
+def _session_has_cleanup_prompt(h: ScenarioHarness) -> bool:
+    if not getattr(h, "context_id", ""):
+        return False
+    try:
+        from iac_code.services.session_storage import SessionStorage
+
+        cwd, session_id = _pipeline_session_identity(h)
+        return _session_file_has_cleanup_prompt(SessionStorage().session_path(cwd, session_id))
+    except OSError:
+        return False
+
+
+def _session_file_has_cleanup_prompt(path: Path) -> bool:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return False
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        metadata = value.get("metadata") if isinstance(value, dict) else None
+        if isinstance(metadata, dict) and metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE:
+            return True
+    return False
+
+
+def _snapshot_current_stack_id(response: Any, *, exclude: set[str]) -> str | None:
+    snapshot = _snapshot(response)
+    stacks = snapshot.get("stacks") if isinstance(snapshot, dict) else None
+    if not isinstance(stacks, dict):
+        return None
+    current = stacks.get("current")
+    current_id = _active_stack_id_from_record(current)
+    if current_id and current_id not in exclude:
+        return current_id
+    by_id = stacks.get("byId")
+    if isinstance(by_id, dict):
+        for record in reversed(list(by_id.values())):
+            stack_id = _active_stack_id_from_record(record)
+            if stack_id and stack_id not in exclude:
+                return stack_id
+    history = stacks.get("history")
+    if isinstance(history, list):
+        for record in reversed(history):
+            stack_id = _active_stack_id_from_record(record)
+            if stack_id and stack_id not in exclude:
+                return stack_id
+    return None
+
+
+def _active_stack_id_from_record(record: Any) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    if record.get("current") is False or record.get("cleared") is True:
+        return None
+    if record.get("isSuccess") is False:
+        return None
+    status = str(record.get("stackStatus") or record.get("status") or "")
+    if status.endswith("_FAILED"):
+        return None
+    action = record.get("action")
+    if action == "DeleteStack":
+        return None
+    return _string_from_mapping(record, "stackId", "stack_id", "StackId", "id")
+
+
+def _capture_ros_stack_states(h: ScenarioHarness, stack_ids: Iterable[str], name: str) -> dict[str, dict[str, Any]]:
+    states: dict[str, dict[str, Any]] = {}
+    for stack_id in stack_ids:
+        region_id = _region_for_stack(h, stack_id)
+        states[stack_id] = _get_ros_stack_state(stack_id=stack_id, region_id=region_id, redaction_env=h.server_env)
+    redacted = _redact_json_value(states, h.server_env)
+    _write_json(h.run_dir / f"{name}.ros-stack-states.json", redacted)
+    h.snapshots[f"{name}.ros-stack-states"] = redacted
+    return states
+
+
+def _get_ros_stack_state(
+    *,
+    stack_id: str,
+    region_id: str,
+    redaction_env: dict[str, str] | None,
+) -> dict[str, Any]:
+    try:
+        from alibabacloud_ros20190910 import models as ros_models
+
+        from iac_code.services.cloud_credentials import CloudCredentials
+        from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+
+        credential = CloudCredentials().get_provider("aliyun")
+        effective_region = region_id or (credential.region_id if credential is not None else "")
+        client = RosClientFactory.create(credential, effective_region)
+        request = ros_models.GetStackRequest(stack_id=stack_id, region_id=effective_region)
+        response = client.get_stack(request)
+        body = response.body.to_map()
+        return {
+            "stack_id": str(body.get("StackId") or stack_id),
+            "stack_name": str(body.get("StackName") or ""),
+            "region_id": effective_region,
+            "status": str(body.get("Status") or ""),
+            "status_reason": str(body.get("StatusReason") or ""),
+            "not_found": False,
+        }
+    except Exception as exc:
+        message = _redact_sensitive_text(str(exc), redaction_env)
+        return {
+            "stack_id": stack_id,
+            "region_id": region_id,
+            "status": "",
+            "not_found": _is_ros_stack_not_found(exc),
+            "error": _compact_text(message, max_chars=1000),
+        }
+
+
+def _is_ros_stack_not_found(exc: BaseException) -> bool:
+    code = str(getattr(exc, "code", "") or "")
+    message = str(exc)
+    combined = f"{code} {message}".lower()
+    not_found_tokens = (
+        "stacknotfound",
+        "notfound.stack",
+        "entitynotexist.stack",
+        "specified stack does not exist",
+        "stack could not be found",
+        "stack not found",
+    )
+    return any(token in combined for token in not_found_tokens)
+
+
+def _region_for_stack(h: ScenarioHarness, stack_id: str) -> str:
+    for snapshot in reversed(list(h.snapshots.values())):
+        region = _region_for_stack_in_snapshot(snapshot, stack_id)
+        if region:
+            return region
+    for key in ("cleanup_resources", "observed_resources"):
+        for resource in reversed(_cleanup_ledger_items(h, key)):
+            if _string_from_mapping(resource, "resource_id", "resourceId", "stack_id", "stackId") == stack_id:
+                region = _string_from_mapping(resource, "region_id", "regionId", "RegionId")
+                if region:
+                    return region
+    return h.server_env.get("ALIBABA_CLOUD_REGION_ID", "")
+
+
+def _region_for_stack_in_snapshot(response: Any, stack_id: str) -> str:
+    cleanup_resource = _cleanup_resource_for_stack(response, stack_id)
+    if cleanup_resource is not None:
+        region = _string_from_mapping(cleanup_resource, "regionId", "region_id", "RegionId")
+        if region:
+            return region
+    snapshot = _snapshot(response)
+    stacks = snapshot.get("stacks") if isinstance(snapshot, dict) else None
+    if not isinstance(stacks, dict):
+        return ""
+    by_id = stacks.get("byId")
+    if isinstance(by_id, dict):
+        record = by_id.get(stack_id)
+        region = _string_from_mapping(record, "regionId", "region_id", "RegionId") if isinstance(record, dict) else None
+        if region:
+            return region
+    current = stacks.get("current")
+    if isinstance(current, dict) and _string_from_mapping(current, "stackId", "stack_id", "StackId") == stack_id:
+        return _string_from_mapping(current, "regionId", "region_id", "RegionId") or ""
+    return ""
+
+
+def _ros_stack_deleted(state: dict[str, Any]) -> bool:
+    if not isinstance(state, dict):
+        return False
+    if state.get("not_found") is True:
+        return True
+    return state.get("status") in ROS_STACK_DELETED_STATUSES
+
+
+def _ros_stack_retained(state: dict[str, Any]) -> bool:
+    if not isinstance(state, dict) or state.get("not_found") is True:
+        return False
+    status = state.get("status")
+    return isinstance(status, str) and bool(status) and not status.startswith("DELETE_")
+
+
+def _is_ros_stack_resource(resource: dict[str, Any]) -> bool:
+    provider = str(resource.get("provider") or "").lower()
+    resource_type = str(resource.get("resource_type") or resource.get("resourceType") or "").lower()
+    return provider == "ros" and resource_type == "stack"
+
+
+def _unique_strings(values: Iterable[str | None]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _string_from_mapping(mapping: Any, *keys: str) -> str | None:
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def _scenario_run_dir(args: argparse.Namespace, scenario: str) -> Path:
     if args.run_dir:
         return Path(args.run_dir).expanduser()
@@ -1477,20 +2520,34 @@ _CANCEL_SCENARIOS = {
 }
 _REAL_CLOUD_SCENARIOS = {
     "fault-after-snapshot",
+    "image-ask-waiting",
+    "image-initial",
+    "image-interrupt",
+    "image-normal-handoff",
+    "image-selection-waiting",
     "scenario1",
     "normal-running",
     "ask-waiting",
     "selection-waiting",
+    "rollback-step5-cleanup",
+    "rollback-step5-cleanup-recovery",
     *_RUNNING_STEP_SCENARIOS,
     *_ROLLBACK_SCENARIOS,
     *_CANCEL_SCENARIOS,
 }
 _SCENARIOS: dict[str, Callable[[argparse.Namespace, str], int]] = {
+    "image-ask-waiting": run_image_ask_waiting,
+    "image-initial": run_image_initial,
+    "image-interrupt": run_image_interrupt,
+    "image-normal-handoff": run_image_normal_handoff,
+    "image-selection-waiting": run_image_selection_waiting,
     "scenario1": run_scenario1,
     "normal-running": run_normal_running,
     "ask-waiting": run_ask_waiting,
     "selection-waiting": run_selection_waiting,
     "fault-after-snapshot": run_fault_after_snapshot,
+    "rollback-step5-cleanup": run_rollback_step5_cleanup,
+    "rollback-step5-cleanup-recovery": run_rollback_step5_cleanup_recovery,
     **{name: run_running_step for name in _RUNNING_STEP_SCENARIOS},
     **{name: run_rollback for name in _ROLLBACK_SCENARIOS},
     **{name: run_cancel for name in _CANCEL_SCENARIOS},

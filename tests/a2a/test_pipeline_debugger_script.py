@@ -18,6 +18,19 @@ from urllib.request import Request, urlopen
 import pytest
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "a2a" / "debugger.py"
+RECOVERABLE_JSONRPC_ERROR = {
+    "jsonrpc": "2.0",
+    "id": "1",
+    "error": {
+        "code": -32602,
+        "message": "Pipeline already running.",
+        "data": {
+            "recoverableTaskId": "task-owner",
+            "contextId": "ctx-1",
+            "sidecarStatus": "running",
+        },
+    },
+}
 
 
 def load_debugger_module():
@@ -75,7 +88,7 @@ def serve_handler(handler_cls: type[BaseHTTPRequestHandler]) -> Iterator[str]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        host, port = server.server_address
+        host, port = server.server_address[:2]
         yield f"http://{host}:{port}"
     finally:
         server.shutdown()
@@ -100,7 +113,7 @@ def start_debugger_server(debugger, *, default_cwd: str = "/workspace/demo"):
     server = debugger.create_server(config)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    host, port = server.server_address
+    host, port = server.server_address[:2]
 
     class RunningServer:
         url = f"http://{host}:{port}"
@@ -124,7 +137,7 @@ def start_logged_debugger_server(debugger, *, log_dir: Path, default_cwd: str = 
     server = debugger.create_server(config)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    host, port = server.server_address
+    host, port = server.server_address[:2]
 
     class RunningServer:
         url = f"http://{host}:{port}"
@@ -222,6 +235,61 @@ def test_build_message_stream_payload_uses_a2a_v1_method_and_cwd_metadata() -> N
     assert message["contextId"] == "ctx-demo"
     assert message["taskId"] == "task-demo"
     assert payload["params"]["configuration"] == {"acceptedOutputModes": ["text/plain"]}
+
+
+def test_build_message_stream_payload_adds_image_data_parts() -> None:
+    debugger = load_debugger_module()
+
+    payload = debugger.build_message_stream_payload(
+        cwd="/workspace/demo",
+        prompt="inspect this topology",
+        context_id="ctx-demo",
+        task_id="task-demo",
+        request_id="req-1",
+        message_id="msg-1",
+        images=[
+            {
+                "filename": "topology.png",
+                "mediaType": "image/png",
+                "bytes": "iVBORw0KGgo=",
+            }
+        ],
+    )
+
+    assert payload["params"]["message"]["parts"] == [
+        {"text": "inspect this topology"},
+        {
+            "data": {"filename": "topology.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
+
+
+def test_build_message_stream_payload_allows_image_only_parts() -> None:
+    debugger = load_debugger_module()
+
+    payload = debugger.build_message_stream_payload(
+        cwd="/workspace/demo",
+        prompt="",
+        context_id="ctx-demo",
+        task_id="task-demo",
+        request_id="req-1",
+        message_id="msg-1",
+        images=[
+            {
+                "filename": "topology.png",
+                "mediaType": "image/png",
+                "bytes": "iVBORw0KGgo=",
+            }
+        ],
+    )
+
+    assert payload["params"]["message"]["parts"] == [
+        {
+            "data": {"filename": "topology.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
 
 
 def test_build_message_stream_payload_omits_blank_context_id() -> None:
@@ -357,6 +425,8 @@ def test_index_html_contains_debugger_controls_and_raw_panels(tmp_path: Path) ->
         'id="context-id"',
         'id="task-id"',
         'id="prompt"',
+        'id="image-input"',
+        'id="image-summary"',
         'id="stream-button"',
         'id="fetch-state-button"',
         'id="cancel-button"',
@@ -1038,6 +1108,23 @@ def test_index_html_cancel_uses_active_task_id() -> None:
         assert expected in html
 
 
+def test_index_html_fetches_pipeline_state_after_cancel() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+    cancel_body = html.split("async function cancelTask()", 1)[1].split("async function streamMessage()", 1)[0]
+
+    assert 'appendRawEvent("sse", {type: "cancel", body});' in cancel_body
+    assert "await fetchStateIfAvailable();" in cancel_body
+
+
 def test_index_html_yields_between_batched_sse_events() -> None:
     debugger = load_debugger_module()
 
@@ -1076,12 +1163,77 @@ def test_index_html_omits_completed_pipeline_task_id_after_normal_handoff() -> N
     for expected in [
         "normalHandoffReady",
         "function streamTaskIdForControls",
-        "state.normalHandoffReady && !controls.activeTaskId",
+        "state.normalHandoffReady || isTerminalPipelineTaskState(state.status)",
         'state.activeTaskId = "";',
         'return "";',
         "updateNormalHandoffState(envelope);",
     ]:
         assert expected in html
+
+
+def test_index_html_omits_terminal_pipeline_task_id_when_streaming_followup(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+    script = html[html.index("<script>") + len("<script>") : html.rindex("</script>")]
+
+    assert "function isTerminalPipelineTaskState" in script
+    assert "isTerminalPipelineTaskState(state.status)" in script
+
+    def extract_function(name: str) -> str:
+        start = script.index(f"function {name}")
+        brace = script.index("{", start)
+        depth = 0
+        for index in range(brace, len(script)):
+            char = script[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return script[start : index + 1]
+        raise AssertionError(f"Could not extract {name}")
+
+    functions = [extract_function("streamTaskIdForControls")]
+    if "function isTerminalPipelineTaskState" in script:
+        functions.insert(0, extract_function("isTerminalPipelineTaskState"))
+
+    js_path = tmp_path / "stream-task-routing.js"
+    js_path.write_text(
+        "\n".join(
+            [
+                'const state = {normalHandoffReady: false, activeTaskId: "", taskId: "task-1", status: ""};',
+                *functions,
+                'state.status = "TASK_STATE_CANCELED";',
+                'if (streamTaskIdForControls({activeTaskId: "", taskId: "task-1"}) !== "") {',
+                '  throw new Error("canceled pipeline taskId should not be reused");',
+                "}",
+                'state.status = "canceled";',
+                'if (streamTaskIdForControls({activeTaskId: "", taskId: "task-1"}) !== "") {',
+                '  throw new Error("snapshot canceled pipeline taskId should not be reused");',
+                "}",
+                'state.status = "waiting_input";',
+                'if (streamTaskIdForControls({activeTaskId: "", taskId: "task-1"}) !== "task-1") {',
+                '  throw new Error("waiting input pipeline taskId should be reused");',
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        result = subprocess.run(["node", str(js_path)], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        pytest.skip("node is not installed")
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_index_html_clears_finished_active_task_after_normal_chat_turn() -> None:
@@ -1190,6 +1342,112 @@ def test_index_html_can_restore_debugger_log_replay_payload(tmp_path: Path) -> N
     ]
 
 
+def test_load_log_dir_replays_state_fetch_cancel_handoff_events(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "sse-events.jsonl").write_text(
+        json.dumps(
+            {
+                "raw": {
+                    "statusUpdate": {
+                        "taskId": "task-pipeline",
+                        "contextId": "ctx-1",
+                        "status": {"state": "TASK_STATE_INPUT_REQUIRED"},
+                        "metadata": {
+                            "iac_code": {
+                                "pipeline": {
+                                    "eventType": "input_required",
+                                    "sequence": 72.0,
+                                    "taskId": "task-pipeline",
+                                    "contextId": "ctx-1",
+                                    "status": "input_required",
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (log_dir / "snapshots.jsonl").write_text(
+        json.dumps(
+            {
+                "raw": {
+                    "snapshot": {
+                        "status": "canceled",
+                        "taskId": "task-pipeline",
+                        "contextId": "ctx-1",
+                        "lastSequence": 74,
+                        "normalHandoff": {
+                            "action": "switch_to_normal",
+                            "targetMode": "normal",
+                            "outcome": "canceled",
+                        },
+                    },
+                    "events": [
+                        {
+                            "eventType": "pipeline_canceled",
+                            "sequence": 73,
+                            "taskId": "task-pipeline",
+                            "contextId": "ctx-1",
+                            "status": "canceled",
+                        },
+                        {
+                            "eventType": "pipeline_handoff_ready",
+                            "sequence": 74,
+                            "taskId": "task-pipeline",
+                            "contextId": "ctx-1",
+                            "status": "canceled",
+                            "data": {
+                                "action": "switch_to_normal",
+                                "targetMode": "normal",
+                                "outcome": "canceled",
+                            },
+                        },
+                    ],
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    replay = debugger.load_debug_log_export(log_dir)
+
+    assert replay["task"]["taskId"] == "task-pipeline"
+    assert replay["task"]["activeTaskId"] == ""
+    assert replay["task"]["contextId"] == "ctx-1"
+    assert replay["task"]["status"] == "canceled"
+    assert replay["task"]["lastSequence"] == 74
+    assert [event["eventType"] for event in replay["sseEvents"][-2:]] == [
+        "pipeline_canceled",
+        "pipeline_handoff_ready",
+    ]
+
+
+def test_index_html_normal_handoff_summary_reads_snapshot_response_wrapper() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+    normal_handoff_body = html.split("function snapshotNormalHandoff(snapshot)", 1)[1].split(
+        "function normalHandoffSummary(snapshot)",
+        1,
+    )[0]
+
+    assert "snapshotEnvelope(snapshot)" in normal_handoff_body
+    assert "snapshotObject(envelope &&" in normal_handoff_body
+
+
 def test_index_html_fills_context_and_task_id_controls_after_capture() -> None:
     debugger = load_debugger_module()
 
@@ -1250,6 +1508,26 @@ def test_index_html_reads_input_required_data_and_clears_stale_permissions() -> 
         "envelope.data",
         "state.latestPermission = null",
         "fetchStateIfAvailable",
+    ]:
+        assert expected in html
+
+
+def test_index_html_highlights_pipeline_canceled_events() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+
+    for expected in [
+        'type === "pipeline_canceled"',
+        'label: "pipeline canceled"',
+        "timeline-canceled",
     ]:
         assert expected in html
 
@@ -1707,6 +1985,73 @@ class EmptySseTargetHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+class JsonRpcErrorTargetHandler(BaseHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        return None
+
+    def do_POST(self) -> None:
+        raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0") or "0"))
+        assert raw_body
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": "1",
+                "error": {
+                    "code": -32602,
+                    "message": "Current model text-only-model does not support image input.",
+                    "data": {
+                        "recoverableTaskId": "task-owner",
+                        "contextId": "ctx-1",
+                        "sidecarStatus": "running",
+                    },
+                },
+            }
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def test_jsonrpc_error_message_includes_recoverable_task_id() -> None:
+    debugger = load_debugger_module()
+
+    message = debugger._jsonrpc_error_message(RECOVERABLE_JSONRPC_ERROR)
+
+    assert message is not None
+    assert "Pipeline already running." in message
+    assert "task-owner" in message
+
+
+def test_index_html_extracts_delivery_task_aliases() -> None:
+    script = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "statusUpdate.deliveryTaskId" in script
+    assert "statusUpdate.deliveryContextId" in script
+    assert "task.deliveryTaskId" in script
+    assert "envelope.deliveryTaskId" in script
+
+
+def test_jsonrpc_error_message_does_not_duplicate_resume_guidance() -> None:
+    debugger = load_debugger_module()
+    value = {
+        "error": {
+            "code": -32602,
+            "message": "Pipeline already running. Resume task task-owner.",
+            "data": {
+                "recoverableTaskId": "task-owner",
+                "contextId": "ctx-1",
+                "sidecarStatus": "running",
+            },
+        }
+    }
+
+    message = debugger._jsonrpc_error_message(value)
+
+    assert message == "Pipeline already running. Resume task task-owner."
+
+
 def test_message_stream_route_forwards_sse_and_uses_stream_payload() -> None:
     debugger = load_debugger_module()
     SseTargetHandler.requests = []
@@ -1736,6 +2081,81 @@ def test_message_stream_route_forwards_sse_and_uses_stream_payload() -> None:
     assert sent["params"]["message"]["contextId"] == "ctx-1"
     assert sent["params"]["message"]["taskId"] == "task-1"
     assert sent["params"]["message"]["metadata"] == {"iac_code": {"cwd": "/workspace/demo"}}
+
+
+def test_message_stream_route_forwards_image_parts() -> None:
+    debugger = load_debugger_module()
+    SseTargetHandler.requests = []
+
+    with serve_handler(SseTargetHandler) as target_url:
+        running = start_debugger_server(debugger)
+        try:
+            status, body = post_raw(
+                f"{running.url}/api/message/stream",
+                {
+                    "serverUrl": target_url,
+                    "cwd": "/workspace/demo",
+                    "contextId": "ctx-1",
+                    "prompt": "inspect this diagram",
+                    "images": [
+                        {
+                            "filename": "diagram.png",
+                            "mediaType": "image/png",
+                            "bytes": "iVBORw0KGgo=",
+                        }
+                    ],
+                },
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "data: " in body
+    sent = json.loads(SseTargetHandler.requests[0]["body"])
+    assert sent["params"]["message"]["parts"] == [
+        {"text": "inspect this diagram"},
+        {
+            "data": {"filename": "diagram.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
+
+
+def test_message_stream_route_allows_image_only_prompt() -> None:
+    debugger = load_debugger_module()
+    SseTargetHandler.requests = []
+
+    with serve_handler(SseTargetHandler) as target_url:
+        running = start_debugger_server(debugger)
+        try:
+            status, body = post_raw(
+                f"{running.url}/api/message/stream",
+                {
+                    "serverUrl": target_url,
+                    "cwd": "/workspace/demo",
+                    "contextId": "ctx-1",
+                    "prompt": "",
+                    "images": [
+                        {
+                            "filename": "diagram.png",
+                            "mediaType": "image/png",
+                            "bytes": "iVBORw0KGgo=",
+                        }
+                    ],
+                },
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "data: " in body
+    sent = json.loads(SseTargetHandler.requests[0]["body"])
+    assert sent["params"]["message"]["parts"] == [
+        {
+            "data": {"filename": "diagram.png", "bytes": "iVBORw0KGgo="},
+            "mediaType": "image/png",
+        },
+    ]
 
 
 def test_message_stream_route_writes_sse_debugger_log(tmp_path: Path) -> None:
@@ -1793,6 +2213,35 @@ def test_message_stream_route_logs_empty_upstream_stream(tmp_path: Path) -> None
     records = read_jsonl(tmp_path / "sse-events.jsonl")
     assert records[-1]["parsedEventType"] == "stream_empty"
     assert records[-1]["raw"] == {"type": "stream_empty", "statusCode": 200}
+
+
+def test_message_stream_route_converts_jsonrpc_error_to_sse_error(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+
+    with serve_handler(JsonRpcErrorTargetHandler) as target_url:
+        running = start_logged_debugger_server(debugger, log_dir=tmp_path)
+        try:
+            status, body = post_raw(
+                f"{running.url}/api/message/stream",
+                {
+                    "serverUrl": target_url,
+                    "cwd": "/workspace/demo",
+                    "contextId": "ctx-1",
+                    "prompt": "inspect image",
+                },
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "data: " in body
+    assert "Current model text-only-model does not support image input." in body
+    assert "task-owner" in body
+    records = read_jsonl(tmp_path / "sse-events.jsonl")
+    assert records[-1]["parsedEventType"] == "error"
+    assert records[-1]["raw"]["type"] == "error"
+    assert records[-1]["raw"]["body"]["error"]["code"] == -32602
+    assert records[-1]["raw"]["body"]["error"]["data"]["recoverableTaskId"] == "task-owner"
 
 
 def test_message_stream_route_ignores_client_disconnect_without_traceback(capsys: pytest.CaptureFixture[str]) -> None:

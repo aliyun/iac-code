@@ -172,6 +172,7 @@ def stream_message(
     timeout: float,
     context_id: str = "",
     task_id: str = "",
+    images: list[dict[str, Any]] | None = None,
     redaction_env: dict[str, str] | None = None,
 ) -> StreamSummary:
     payload = build_message_stream_payload(
@@ -181,6 +182,7 @@ def stream_message(
         task_id=task_id,
         request_id=str(uuid.uuid4()),
         message_id=str(uuid.uuid4()),
+        images=images,
     )
     _append_jsonl(run_dir / "requests.jsonl", {"name": name, "payload": payload, "at": _utc_now()}, redaction_env)
     request = Request(
@@ -253,14 +255,16 @@ def run_llm_preflight(
         }
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started
-        output = _redact_sensitive_text("\n".join(part for part in [exc.stdout, exc.stderr] if part), preflight_env)
+        stdout = _subprocess_output_text(exc.stdout)
+        stderr = _subprocess_output_text(exc.stderr)
+        output = _redact_sensitive_text("\n".join(part for part in [stdout, stderr] if part), preflight_env)
         payload = {
             "ok": False,
             "returnCode": None,
             "elapsedSeconds": round(elapsed, 3),
             "summary": f"timed out after {timeout:.0f}s" + (f": {_compact_text(output)}" if output else ""),
-            "stdout": _redact_sensitive_text(exc.stdout or "", preflight_env),
-            "stderr": _redact_sensitive_text(exc.stderr or "", preflight_env),
+            "stdout": _redact_sensitive_text(stdout, preflight_env),
+            "stderr": _redact_sensitive_text(stderr, preflight_env),
         }
     _write_json(run_dir / "preflight.json", payload)
     return payload
@@ -450,6 +454,14 @@ def _split_python_command(value: str) -> list[str]:
     if not parts:
         raise ValueError("--python must not be empty")
     return parts
+
+
+def _subprocess_output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 def _redact_sensitive_text(text: str, env: dict[str, str] | None) -> str:

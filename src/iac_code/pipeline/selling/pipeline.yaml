@@ -44,7 +44,7 @@ context_dependencies:
   architecture: [intent]
   evaluated_candidates: [architecture]
   selected_plan: [evaluated_candidates]
-  deployment: [selected_plan]
+  deployment: [intent, selected_plan]
 
 max_rollbacks: 3
 
@@ -71,6 +71,9 @@ sub_pipelines:
         skill: iac-aliyun-template-generating
         prompt: prompts/template_generating.md
         context_fields: [candidate]
+        tools:
+          include: []
+          exclude: [write_memory]
 
       - id: reviewing
         description: "审查模板的安全性和最佳实践"
@@ -83,9 +86,6 @@ sub_pipelines:
         tools:
           include: [-]
           exclude: []
-        rollback:
-          - target: template_generating
-            condition: template_issue
 
       - id: cost_estimating
         description: "评估模板的资源成本"
@@ -100,7 +100,7 @@ sub_pipelines:
         context_fields: [template]
         tools:
           include: []
-          exclude: [bash]
+          exclude: [bash, write_memory]
 
 steps:
   - id: intent_parsing
@@ -113,7 +113,7 @@ steps:
       field: is_infra_intent
       value: false
     tools:
-      include: [-]
+      include: [read_memory]
       exclude: []
     inject_tools: [ask_user_question]
     completion_guards:
@@ -181,11 +181,8 @@ steps:
     prompt: prompts/architecture_planning.md
     context_fields: [intent]
     tools:
-      include: [read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
+      include: [read_memory, read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
       exclude: []
-    rollback:
-      - target: intent_parsing
-        condition: intent_unclear
 
   - id: evaluate_candidates
     description: "并行生成各候选方案的 IaC 模板并评估成本"
@@ -204,6 +201,10 @@ steps:
     auto_advance: false
     ui_mode: candidate_selection
     inject_tools: [show_architecture_diagram, show_candidate_detail]
+    surface_overrides:
+      a2a:
+        prompt: prompts/confirm_and_select.a2a.md
+        inject_tools: []
     tools:
       include: [read_file]
       exclude: []
@@ -238,9 +239,9 @@ steps:
         selected_candidate_index:
           type: integer
           description: 用户最终选择的候选方案在 evaluated_candidates 中的 0 基下标；首次展示方案时可省略
-    rollback:
-      - target: architecture_planning
-        condition: want_different_plans
+        parameter_overrides:
+          type: object
+          description: 用户选择方案时传入的部署参数覆盖字典；键为 ROS Parameters 名称，值为用户指定的部署参数值；首次展示方案时可省略
 
   - id: deploying
     description: "执行用户选定方案的部署"
@@ -249,10 +250,19 @@ steps:
     skill: iac-aliyun-deploying
     prompt: prompts/deploying.md
     interrupt_judge_failure: pause
-    context_fields: [selected_plan, evaluated_candidates]
+    context_fields: [intent, selected_plan, evaluated_candidates]
     hooks_file: hooks/deploying.py
-    rollback:
-      - target: confirm_and_select
-        condition: invalid_selection
-      - target: architecture_planning
-        condition: need_different_architecture
+    completion_guards:
+      - when_conclusion_field_equals:
+          status: success
+        required_conclusion_field: stack_id
+        require_tool_result:
+          tool: ros_stack
+          action_in: [CreateStack, ContinueCreateStack]
+          is_success: true
+          status_in: [CREATE_COMPLETE]
+          match_conclusion_field: stack_id
+        message: "部署成功必须等待 ros_stack CreateStack 返回 CREATE_COMPLETE。"
+    tools:
+      include: []
+      exclude: [write_memory]

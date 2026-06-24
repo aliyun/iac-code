@@ -9,7 +9,7 @@ import uuid
 from collections import deque
 from collections.abc import AsyncGenerator, Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from loguru import logger
@@ -73,6 +73,26 @@ def _normalize_memory_filename(filename: Any) -> str:
     return name
 
 
+def _extend_unique(target: list[str], values: list[str]) -> None:
+    seen = set(target)
+    for value in values:
+        if value not in seen:
+            target.append(value)
+            seen.add(value)
+
+
+def _with_trusted_read_directories(permission_context: Any, directories: list[str]) -> Any:
+    if not directories:
+        return permission_context
+
+    trusted_read_directories = list(getattr(permission_context, "trusted_read_directories", []))
+    original_count = len(trusted_read_directories)
+    _extend_unique(trusted_read_directories, directories)
+    if len(trusted_read_directories) == original_count:
+        return permission_context
+    return replace(permission_context, trusted_read_directories=trusted_read_directories)
+
+
 def _filter_recalled_memory_content(content: str, selected_files: list[str]) -> str:
     keep = [_normalize_memory_filename(filename) for filename in selected_files]
     keep = [filename for filename in keep if filename]
@@ -129,6 +149,9 @@ class AgentLoop:
         memory_recall_service: Any = None,
         system_prompt_refresher: Callable[[], str] | None = None,
         pause_event: asyncio.Event | None = None,
+        tool_context_trusted_read_directories: list[str] | None = None,
+        tool_context_relative_read_directories: list[str] | None = None,
+        pipeline_mode: bool = False,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -141,6 +164,9 @@ class AgentLoop:
         self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
         self._permission_context = permission_context
         self._permission_context_getter = permission_context_getter
+        self._tool_context_trusted_read_directories = list(tool_context_trusted_read_directories or [])
+        self._tool_context_relative_read_directories = list(tool_context_relative_read_directories or [])
+        self._pipeline_mode = pipeline_mode
         self._auto_trigger_skills = auto_trigger_skills or []
         self._auto_loaded_skills: set[str] = set()
         self._current_git_branch: str | None = None
@@ -167,7 +193,7 @@ class AgentLoop:
         self._result_storage = ResultStorage(
             storage_dir=os.path.join(str(get_config_dir()), "tool-results", self._session_id),
         )
-        self._pending_injections: deque[str] = deque()
+        self._pending_injections: deque[str | list[ContentBlock]] = deque()
         self._current_turn_text: str = ""
         self._accepting_injected_user_messages = False
         self._pause_event = pause_event
@@ -176,7 +202,7 @@ class AgentLoop:
     def current_turn_text(self) -> str:
         return self._current_turn_text
 
-    def inject_user_message(self, msg: str) -> None:
+    def inject_user_message(self, msg: str | list[ContentBlock]) -> None:
         """Schedule a user message to be injected before the next LLM turn."""
         self._pending_injections.append(msg)
 
@@ -185,12 +211,26 @@ class AgentLoop:
         """Whether a queued supplement can still be consumed by this run."""
         return self._accepting_injected_user_messages
 
-    def try_inject_user_message(self, msg: str) -> bool:
+    def try_inject_user_message(self, msg: str | list[ContentBlock]) -> bool:
         """Queue a supplement only when this loop still has a consumable turn."""
         if not self.can_accept_injected_user_message:
             return False
         self.inject_user_message(msg)
         return True
+
+    def _drain_pending_injections(self) -> None:
+        while self._pending_injections:
+            injected = self._pending_injections.popleft()
+            self.context_manager.add_user_message(injected)
+            if self._session_storage:
+                from iac_code.agent.message import Message
+
+                self._session_storage.append(
+                    self._cwd,
+                    self._session_id,
+                    Message(role="user", content=injected),
+                    git_branch=self._current_git_branch,
+                )
 
     def set_provider(self, provider_manager: Any, system_prompt: str | None = None) -> None:
         """Swap the provider manager in place, preserving conversation history.
@@ -347,6 +387,7 @@ class AgentLoop:
             self._session_id,
             self.context_manager.get_messages(),
             git_branch=self._current_git_branch,
+            preserve_cleanup_prompts=True,
         )
 
     def _inject_recalled_memory_result(self, result: Any) -> bool:
@@ -765,8 +806,7 @@ class AgentLoop:
             # inject supplemental user text before the next provider call.
             if self._pause_event is not None:
                 await self._pause_event.wait()
-            while self._pending_injections:
-                self.context_manager.add_user_message(self._pending_injections.popleft())
+            self._drain_pending_injections()
             self._accepting_injected_user_messages = False
             self._current_turn_text = ""
 
@@ -900,7 +940,12 @@ class AgentLoop:
                             event_queue=queue,
                         )
                     )
-                context = ToolContext(cwd=self._cwd)
+                context = ToolContext(
+                    cwd=self._cwd,
+                    trusted_read_directories=list(self._tool_context_trusted_read_directories),
+                    relative_read_directories=list(self._tool_context_relative_read_directories),
+                    pipeline_mode=self._pipeline_mode,
+                )
 
                 allowed_requests: list[ToolCallRequest] = []
                 denied_results: list[tuple[ToolCallRequest, ToolResult]] = []
@@ -919,7 +964,14 @@ class AgentLoop:
                     if perm_ctx is not None:
                         from iac_code.services.permissions.pipeline import check_tool_permission
 
-                        permission = await check_tool_permission(tool, request.input, perm_ctx)
+                        effective_perm_ctx = _with_trusted_read_directories(
+                            perm_ctx, self._tool_context_trusted_read_directories
+                        )
+                        _extend_unique(context.additional_directories, list(effective_perm_ctx.additional_directories))
+                        _extend_unique(
+                            context.trusted_read_directories, list(effective_perm_ctx.trusted_read_directories)
+                        )
+                        permission = await check_tool_permission(tool, request.input, effective_perm_ctx)
                     else:
                         permission = await tool.check_permissions(request.input, {"cwd": context.cwd})
 
@@ -1271,6 +1323,7 @@ class AgentLoop:
                         self._session_id,
                         msgs,
                         git_branch=self._current_git_branch,
+                        preserve_cleanup_prompts=True,
                     )
                 break
 

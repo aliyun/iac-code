@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
 from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock
+from iac_code.pipeline.engine.cleanup import (
+    CLEANUP_PROMPT_METADATA_TYPE,
+    create_cleanup_prompt_message,
+    is_cleanup_prompt_message,
+)
 from iac_code.services.context_manager import ContextManager, get_context_window_config
 
 
@@ -132,6 +137,50 @@ class TestSegmentedCompaction:
         assert "User message 0" in prompt
         assert "hidden memory body" not in prompt
         assert "hidden-topic.md" not in prompt
+
+    def test_build_compaction_prompt_excludes_cleanup_prompt_messages(self):
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cm.add_raw_message(
+            {
+                "role": "user",
+                "content": "cleanup hidden prompt",
+                "metadata": {"type": CLEANUP_PROMPT_METADATA_TYPE, "source": "pipeline_cleanup"},
+            }
+        )
+        for i in range(6):
+            cm.add_user_message(f"User message {i}")
+            cm.add_assistant_message([TextBlock(text=f"Assistant response {i}")])
+
+        prompt = cm.build_compaction_prompt()
+
+        assert "User message 0" in prompt
+        assert "cleanup hidden prompt" not in prompt
+
+    def test_apply_compaction_preserves_cleanup_prompt_messages(self):
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cleanup_message = create_cleanup_prompt_message("cleanup hidden prompt")
+        cm.add_raw_message(cleanup_message.to_dict())
+        for i in range(6):
+            cm.add_user_message(f"User message {i}")
+            cm.add_assistant_message([TextBlock(text=f"Assistant response {i}")])
+
+        cm.apply_compaction("summary")
+
+        messages = cm.get_messages()
+        assert any(
+            is_cleanup_prompt_message(message) and message.content == "cleanup hidden prompt" for message in messages
+        )
+        assert messages[0].content == "[Conversation Summary]\nsummary"
+
+    def test_remove_cleanup_prompt_messages_removes_hidden_prompts(self):
+        cm = ContextManager(system_prompt="sys", model="qwen")
+        cm.add_user_message("real prompt")
+        cm.add_raw_message(create_cleanup_prompt_message("cleanup hidden prompt").to_dict())
+
+        removed = cm.remove_cleanup_prompt_messages()
+
+        assert removed == 1
+        assert [message.content for message in cm.get_messages()] == ["real prompt"]
 
     def test_apply_compaction_preserves_recent(self):
         cm = ContextManager(system_prompt="sys", model="qwen")
@@ -298,3 +347,18 @@ def test_compaction_surfaced_files_come_from_retained_metadata_only():
     cm.apply_compaction("Summary mentions old.md and recent.md")
 
     assert cm.get_surfaced_memory_files() == {"recent.md"}
+
+
+def test_add_raw_message_preserves_metadata():
+    cm = ContextManager(system_prompt="sys", model="qwen")
+
+    msg = cm.add_raw_message(
+        {
+            "role": "user",
+            "content": "hidden cleanup prompt",
+            "metadata": {"type": CLEANUP_PROMPT_METADATA_TYPE, "source": "pipeline_cleanup"},
+        }
+    )
+
+    assert msg.metadata == {"type": CLEANUP_PROMPT_METADATA_TYPE, "source": "pipeline_cleanup"}
+    assert cm.get_messages()[0].metadata["type"] == CLEANUP_PROMPT_METADATA_TYPE

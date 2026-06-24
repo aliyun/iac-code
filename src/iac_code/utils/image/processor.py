@@ -31,6 +31,7 @@ def process_user_input(
             ImageBlock(
                 media_type=pc.media_type or "image/png",
                 data=pc.content,
+                ref_id=pc.id,
             )
         )
         cursor = ref.end

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,7 +80,7 @@ def _normalize_for_platform(path: str, *, case_insensitive: bool | None = None) 
     if case_insensitive is None:
         case_insensitive = sys.platform == "win32"
     if case_insensitive:
-        return normalized.lower()
+        return normalized.casefold()
     return normalized
 
 
@@ -158,11 +159,50 @@ def get_iac_code_application_root() -> Path:
 
 
 def _path_is_under(path: str, root: str) -> bool:
-    path_r = _normalize_for_platform(os.path.realpath(path))
-    root_r = _normalize_for_platform(os.path.realpath(root))
+    root_real_raw = os.path.realpath(root)
+    case_insensitive = _should_casefold_for_under_check(root_real_raw)
+    path_r = _normalize_for_platform(os.path.realpath(path), case_insensitive=case_insensitive)
+    root_r = _normalize_for_platform(root_real_raw, case_insensitive=case_insensitive)
     if path_r == root_r:
         return True
     return path_r.startswith(root_r.rstrip("/") + "/")
+
+
+def _should_casefold_for_under_check(root: str) -> bool:
+    if sys.platform == "win32":
+        return True
+    if sys.platform == "darwin":
+        return not _path_case_sensitive(root)
+    return False
+
+
+def _path_case_sensitive(root: str) -> bool:
+    probe_dir = _existing_probe_dir(root)
+    if probe_dir is None:
+        return True
+    try:
+        fd, probe_path = tempfile.mkstemp(prefix=".iac-code-case-", dir=probe_dir)
+    except OSError:
+        return True
+    os.close(fd)
+    alternate = os.path.join(probe_dir, os.path.basename(probe_path).swapcase())
+    try:
+        return not os.path.exists(alternate)
+    finally:
+        try:
+            os.unlink(probe_path)
+        except OSError:
+            pass
+
+
+def _existing_probe_dir(path: str) -> str | None:
+    candidate = path if os.path.isdir(path) else os.path.dirname(path)
+    while candidate and not os.path.isdir(candidate):
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            return None
+        candidate = parent
+    return candidate or None
 
 
 def _is_in_allowed_roots(path: str, roots: list[str]) -> bool:

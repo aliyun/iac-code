@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
+
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from iac_code.pipeline.engine import completion_guard_state
+from iac_code.pipeline.engine.completion_guard_state import record_completion_guard_tool_result
 from iac_code.pipeline.engine.recovery import (
     last_successful_tool_input,
     reconstruct_completion_guard_state,
@@ -164,3 +169,87 @@ def test_reconstruct_completion_guard_state_ignores_successful_non_guard_tools()
 
     assert state["successful_tools"] == set()
     assert state["tool_results"] == {}
+
+
+def test_reconstruct_completion_guard_state_records_ros_stack_results_for_completion_guards():
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_stack",
+                    name="ros_stack",
+                    input={"action": "CreateStack", "params": {"StackName": "demo"}},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_stack",
+                    content=json.dumps(
+                        {
+                            "stack_id": "stack-123",
+                            "stack_name": "demo",
+                            "status": "CREATE_COMPLETE",
+                            "is_success": True,
+                        }
+                    ),
+                    is_error=False,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["successful_tools"] == {"ros_stack"}
+    assert state["tool_results"]["ros_stack"]["stack_id"] == "stack-123"
+    assert state["tool_result_records"] == [
+        {
+            "tool_name": "ros_stack",
+            "input": {"action": "CreateStack", "params": {"StackName": "demo"}},
+            "result": {
+                "stack_id": "stack-123",
+                "stack_name": "demo",
+                "status": "CREATE_COMPLETE",
+                "is_success": True,
+            },
+            "is_error": False,
+        }
+    ]
+
+
+def test_completion_guard_state_logs_json_parse_failures(caplog):
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+    state = {}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="ros_stack",
+        tool_input={"action": "CreateStack"},
+        content="{not-json",
+        is_error=False,
+    )
+
+    assert "Failed to parse completion guard state" in caplog.text
+
+
+def test_completion_guard_state_logs_rebuild_failures(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+
+    def fail_record(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(completion_guard_state, "_record_ask_user_question", fail_record)
+
+    record_completion_guard_tool_result(
+        {},
+        tool_name="ask_user_question",
+        tool_input={},
+        content='{"free_text": "ok"}',
+        is_error=False,
+    )
+
+    assert "Failed to rebuild completion guard state" in caplog.text

@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from iac_code.agent.message import ImageBlock, TextBlock
+from iac_code.pipeline.engine.user_input import PipelineUserInput
+
 
 class TestInterruptVerdict:
     def test_verdict_creation(self):
@@ -100,6 +103,49 @@ class TestInterruptController:
         verdict = await controller.judge("我不要nginx了，换成redis")
         assert verdict.action == "hard_interrupt"
         assert verdict.rollback_target == "intent_parsing"
+
+    @pytest.mark.asyncio
+    async def test_judge_sends_image_blocks_to_provider(self):
+        from iac_code.pipeline.engine.interrupt import InterruptController
+
+        captured = {}
+
+        class ProviderManager:
+            async def complete(self, *, messages, system, tools=None, max_tokens=8192, cache_policy="default"):
+                captured["messages"] = messages
+                return type(
+                    "Response",
+                    (),
+                    {
+                        "text": (
+                            '{"action":"supplement","reason":"image updates current step",'
+                            '"rollback_target":null,"candidate_scope":null,'
+                            '"supplement_target":null,"rollback_context":null}'
+                        )
+                    },
+                )()
+
+        controller = InterruptController(
+            ProviderManager(),
+            lambda: {"pipeline_name": "selling", "steps": []},
+        )
+        image = ImageBlock(media_type="image/png", data="aGVsbG8=")
+        verdict = await controller.judge(
+            PipelineUserInput(
+                content=[TextBlock(text="see diagram"), image],
+                display_text="see diagram",
+                has_images=True,
+            )
+        )
+
+        assert verdict.action == "supplement"
+        message = captured["messages"][0]
+        assert isinstance(message.content, list)
+        assert message.content[0].type == "text"
+        assert "用户同时提供了图片输入" in (message.content[0].text or "")
+        assert message.content[1].type == "image"
+        assert message.content[1].media_type == "image/png"
+        assert message.content[1].data == "aGVsbG8="
 
     @pytest.mark.asyncio
     async def test_judge_invalid_json_returns_continue(self):

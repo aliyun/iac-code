@@ -40,7 +40,17 @@ class ReadMemoryTool(Tool):
         if name:
             mem = self._manager.load(name)
             if mem is None:
-                return ToolResult.error(_("Memory '{name}' not found.").format(name=name))
+                base = _("Memory '{name}' not found.").format(name=name)
+                index = self._manager.get_index_content()
+                if index:
+                    return ToolResult.error(
+                        _(
+                            "{base}\n\n"
+                            "Available memories:\n{index}\n\n"
+                            "Call read_memory again with one of these names, or omit name to list all memories."
+                        ).format(base=base, index=index.rstrip())
+                    )
+                return ToolResult.error("{base}\n\n{empty}".format(base=base, empty=_("No memories saved yet.")))
             return ToolResult.success(f"[{mem.get('type', '')}] {mem.get('description', '')}\n\n{mem['content']}")
         else:
             index = self._manager.get_index_content()

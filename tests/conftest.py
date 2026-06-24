@@ -48,6 +48,20 @@ def _isolate_iac_home(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _disable_tiktoken_encoding_downloads(monkeypatch):
+    """Keep tests from downloading tokenizer assets through tiktoken."""
+    try:
+        import tiktoken
+    except Exception:
+        return
+
+    def unavailable_encoding(_name):
+        raise RuntimeError("tiktoken encoding downloads are disabled in tests")
+
+    monkeypatch.setattr(tiktoken, "get_encoding", unavailable_encoding)
+
+
+@pytest.fixture(autouse=True)
 def _stamp_release_date(monkeypatch):
     """Simulate a packaged release build so the telemetry local-build gate
     (empty ``__release_date__`` disables telemetry) doesn't auto-disable

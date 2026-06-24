@@ -63,6 +63,28 @@ class TestReadMemoryTool:
         assert result.is_error is True
         assert "not found" in result.content
 
+    async def test_read_missing_memory_returns_error_with_index_content(self):
+        manager = FakeMemoryManager()
+        manager.index_content = "- [role](role.md) — Role\n- [prefs](prefs.md) — Preferences\n"
+        tool = ReadMemoryTool(manager)
+
+        result = await tool.execute(tool_input={"name": "missing"}, context=ToolContext())
+
+        assert result.is_error is True
+        assert "Memory 'missing' not found." in result.content
+        assert "Available memories:" in result.content
+        assert "- [role](role.md) — Role" in result.content
+        assert "- [prefs](prefs.md) — Preferences" in result.content
+        assert "Call read_memory again with one of these names" in result.content
+
+    async def test_read_missing_memory_returns_error_with_empty_index_message(self):
+        tool = ReadMemoryTool(FakeMemoryManager())
+
+        result = await tool.execute(tool_input={"name": "missing"}, context=ToolContext())
+
+        assert result.is_error is True
+        assert result.content == "Memory 'missing' not found.\n\nNo memories saved yet."
+
     async def test_read_without_name_returns_index_content(self):
         manager = FakeMemoryManager()
         manager.index_content = "memory index"

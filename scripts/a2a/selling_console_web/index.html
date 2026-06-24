@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>阿里云售卖 Pipeline Console</title>
+  <link rel="stylesheet" href="/styles.css?v=__STATIC_ASSET_VERSION__">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-button" type="button" aria-label="打开菜单">☰</button>
+    <div class="brand">
+      <strong>阿里云</strong>
+      <span>售卖 Pipeline Console</span>
+    </div>
+    <nav class="topbar-nav" aria-label="主导航">
+      <a href="#">工作台</a>
+      <a href="#">资源</a>
+      <button class="nav-pill" type="button">华东 1（杭州）</button>
+    </nav>
+    <label class="topbar-search">
+      <span>搜索</span>
+      <input type="search" placeholder="搜索产品、资源、文档">
+    </label>
+    <div class="topbar-links">
+      <a href="#">文档</a>
+      <a href="#">费用</a>
+      <a href="#">备案</a>
+      <a href="#">工单</a>
+    </div>
+    <div class="user-summary">
+      <span>企业账号</span>
+      <span class="avatar" aria-hidden="true">U</span>
+    </div>
+  </header>
+
+  <main class="console-shell">
+    <section id="workflow-panel" class="workflow-panel" aria-labelledby="workflow-title">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">AI 购买助手</p>
+          <h1 id="workflow-title">售卖 Pipeline</h1>
+        </div>
+        <span id="status-pill" class="status-pill">等待输入</span>
+      </div>
+      <div id="status-alert" class="status-alert" role="status" hidden></div>
+
+      <div id="step-list" class="step-list" aria-label="Pipeline 实时步骤"></div>
+
+      <div class="composer" aria-label="售卖需求输入">
+        <div id="composer-progress" class="composer-progress" aria-label="Pipeline 总进度"></div>
+        <div class="composer-box">
+          <textarea
+            id="composer-input"
+            rows="2"
+            placeholder="继续补充您的需求，比如降低成本、提升可用性或约束地域"
+          ></textarea>
+          <div class="composer-toolbar">
+            <div class="composer-tools">
+              <button id="deep-think-button" class="secondary-button compact-button" type="button">深度思考</button>
+            </div>
+            <div class="composer-actions">
+              <button class="secondary-button icon-only-button" type="button" aria-label="附件" title="附件">
+                <span class="attachment-icon" aria-hidden="true"></span>
+              </button>
+              <span class="composer-divider" aria-hidden="true"></span>
+              <button id="send-button" class="primary-button send-icon-button" type="button" aria-label="发送" title="发送">
+                <span class="send-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <p class="ai-disclaimer">内容由 AI 生成，方案与价格仅供参考</p>
+      </div>
+    </section>
+
+    <section class="plan-area" aria-labelledby="plans-title">
+      <div class="plan-header">
+        <div class="plan-title-block">
+          <p class="eyebrow">方案预览</p>
+          <h1 id="plans-title">您的购买方案</h1>
+        </div>
+      </div>
+
+      <div id="plans-grid" class="plans-grid" aria-live="polite">
+        <article class="plan-card recommended">
+          <div class="plan-card-header">
+            <span class="tag">推荐</span>
+            <span class="score">匹配度 92%</span>
+          </div>
+          <h2>轻量 Web 应用方案</h2>
+          <p>适合中小规模业务上线，包含 VPC、ECS、SLB 与基础监控。</p>
+          <div class="price">¥ 238.00 / 月</div>
+          <dl class="plan-meta">
+            <div>
+              <dt>地域</dt>
+              <dd>华东 1（杭州）</dd>
+            </div>
+            <div>
+              <dt>弹性</dt>
+              <dd>支持后续扩容</dd>
+            </div>
+          </dl>
+        </article>
+        <article class="plan-card">
+          <div class="plan-card-header">
+            <span class="tag muted">备选</span>
+            <span class="score">匹配度 86%</span>
+          </div>
+          <h2>高可用标准方案</h2>
+          <p>面向生产流量，加入多可用区部署、日志服务与云安全中心。</p>
+          <div class="price">¥ 486.00 / 月</div>
+          <dl class="plan-meta">
+            <div>
+              <dt>地域</dt>
+              <dd>华东 1（杭州）</dd>
+            </div>
+            <div>
+              <dt>容灾</dt>
+              <dd>跨可用区</dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+
+      <details id="debug-drawer" class="debug-drawer">
+        <summary>调试面板</summary>
+        <div class="debug-panel">
+          <div class="connection-controls" aria-label="连接控制">
+            <label>
+              <span>Server URL</span>
+              <input id="server-url" type="url" value="__DEFAULT_SERVER_URL_ATTR__">
+            </label>
+            <label>
+              <span>CWD</span>
+              <input id="cwd" type="text" value="__DEFAULT_CWD_ATTR__">
+            </label>
+            <div class="connection-actions">
+              <button id="health-button" class="secondary-button" type="button">连接检查</button>
+              <button id="fetch-state-button" class="secondary-button" type="button">同步状态</button>
+              <button id="cancel-button" class="secondary-button danger-button" type="button">取消任务</button>
+            </div>
+          </div>
+          <div id="debug-session-info" class="debug-session-info" aria-label="调试上下文"></div>
+          <div id="progress-debug-panel" class="progress-debug-panel" aria-label="进度条视觉调试"></div>
+          <details class="debug-output-block">
+            <summary>Pipeline Diagnostics</summary>
+            <pre id="debug-output">等待 pipeline 事件...</pre>
+          </details>
+        </div>
+      </details>
+    </section>
+
+    <aside class="utility-rail" aria-label="快捷工具">
+      <button type="button" title="帮助" aria-label="帮助">?</button>
+      <button type="button" title="刷新" aria-label="刷新">↻</button>
+      <button type="button" title="反馈" aria-label="反馈">!</button>
+      <button type="button" title="设置" aria-label="设置">⚙</button>
+    </aside>
+  </main>
+
+  <script>
+    window.SELLING_CONSOLE_DEFAULTS = __DEFAULTS_JSON__;
+  </script>
+  <script src="/app.js?v=__STATIC_ASSET_VERSION__"></script>
+</body>
+</html>

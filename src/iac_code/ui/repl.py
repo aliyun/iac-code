@@ -91,6 +91,7 @@ if TYPE_CHECKING:
     from iac_code.pipeline import PipelineRunner
     from iac_code.pipeline.config import RunMode
     from iac_code.pipeline.engine.events import PipelineEvent
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
 
 termios: ModuleType | None
 try:
@@ -105,7 +106,7 @@ else:
 # pipeline's allow_user_escapes.command setting (problem 5). Permanent whitelist
 # so users are never locked out of the basics while a pipeline is running.
 _PIPELINE_SAFE_COMMANDS: frozenset[str] = frozenset({"/exit", "/help", "/status", "/prompt", "/resume"})
-PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed"]
+PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed", "persistence_failed"]
 
 
 class ExitREPLError(Exception):
@@ -261,6 +262,8 @@ class InlineREPL:
             self.tool_registry,
             status_callback=self._status_text,
             app_state_store=self.store,
+            image_path_resolver=self._image_store.get_path,
+            image_block_path_resolver=self._image_store.store_block,
         )
 
         self._pipeline: PipelineRunner | None = None
@@ -268,6 +271,8 @@ class InlineREPL:
         self._pipeline_restored_status: str | None = None
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id: str | None = None
+        self._pipeline_state_persistence_failed: bool = False
+        self._pipeline_state_persistence_warning_rendered: bool = False
 
         # Keybinding manager
         self._keybinding_manager = KeybindingManager()
@@ -455,11 +460,13 @@ class InlineREPL:
         try:
             loop.add_signal_handler(signal.SIGINT, _on_sigint)
             _has_sigint_handler = True
-        except (NotImplementedError, OSError):
+        except (NotImplementedError, OSError, RuntimeError):
             pass  # Windows or restricted environment
 
         if initial_prompt is None:
-            await self._resume_pipeline_sidecar_on_startup()
+            resumed_pipeline = await self._resume_pipeline_sidecar_on_startup()
+            if not resumed_pipeline:
+                await self._maybe_start_normal_chat_cleanup_on_startup()
 
         first_turn = True
         last_ctrl_c_time: float = 0.0
@@ -774,6 +781,7 @@ class InlineREPL:
     def _history_search_messages(self) -> list[dict[str, str]]:
         """Build searchable user-history rows from prompt history and conversation context."""
         from iac_code.agent.message import RECALLED_MEMORY_MARKER, is_recalled_memory_message
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         entries: list[str] = []
         seen: set[str] = set()
@@ -802,7 +810,11 @@ class InlineREPL:
         for msg in context_messages:
             if getattr(msg, "role", None) != "user":
                 continue
-            if is_recalled_memory_message(msg) or Renderer.is_internal_skill_context_message(msg):
+            if (
+                is_recalled_memory_message(msg)
+                or is_cleanup_prompt_message(msg)
+                or Renderer.is_internal_skill_context_message(msg)
+            ):
                 continue
             get_text = getattr(msg, "get_text", None)
             if callable(get_text):
@@ -926,6 +938,16 @@ class InlineREPL:
         """Commands always allowed mid-pipeline regardless of allow_user_escapes.command."""
         first = user_input.split(None, 1)[0] if user_input else ""
         return first in _PIPELINE_SAFE_COMMANDS
+
+    def _pipeline_memory_content_getter(self) -> None:
+        """Return pipeline prompt memory provider.
+
+        Pipeline steps should not receive all auto-memory topic bodies in the
+        system prompt. They also intentionally do not receive MemoryRecallService,
+        so no side recall is triggered. Relevant topic memories are available
+        through the explicit read_memory tool when a step's tool policy allows it.
+        """
+        return None
 
     def _maybe_block_user_escape(self, user_input: str) -> bool:
         """Return True if the input is a gated escape and we should NOT process it.
@@ -1188,7 +1210,13 @@ class InlineREPL:
 
     @classmethod
     def _pipeline_visible_resume_messages(cls, messages: list[Message]) -> list[Message]:
-        return [message for message in messages if not cls._is_pipeline_handoff_context_message(message)]
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
+
+        return [
+            message
+            for message in messages
+            if not cls._is_pipeline_handoff_context_message(message) and not is_cleanup_prompt_message(message)
+        ]
 
     @staticmethod
     def _is_pipeline_handoff_context_message(message: Message) -> bool:
@@ -1263,6 +1291,8 @@ class InlineREPL:
             self.tool_registry,
             status_callback=self._status_text,
             app_state_store=self.store,
+            image_path_resolver=self._image_store.get_path,
+            image_block_path_resolver=self._image_store.store_block,
         )
         temp_renderer.replay_history(messages)
         rendered = stream.getvalue().rstrip()
@@ -1305,12 +1335,17 @@ class InlineREPL:
             logger.error("_handle_chat_continue called in pipeline mode; this is a bug")
             return []
 
+        if self._block_if_cleanup_ledger_unreadable():
+            return []
+
         self.store.set_state(is_busy=True)
         try:
             streaming_input = StreamingInputBuffer()
-            events = self._agent_loop.run_streaming(
-                "",
-                queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+            events = self._wrap_cleanup_observer(
+                self._agent_loop.run_streaming(
+                    "",
+                    queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+                )
             )
             result = await self.renderer.run_streaming_output(
                 events,
@@ -1327,24 +1362,784 @@ class InlineREPL:
                     self._streaming_error_log.append((err, msg_count))
             return queued_inputs
         finally:
+            self._prune_cleanup_prompts_if_no_pending_cleanup()
             self.store.set_state(is_busy=False)
+
+    def _cleanup_ledger_for_pipeline(self, pipeline: object | None):
+        if pipeline is None:
+            return None
+        from iac_code.pipeline.engine.cleanup import CleanupLedger
+
+        getter = getattr(pipeline, "cleanup_ledger", None)
+        if not callable(getter):
+            return None
+        try:
+            ledger = getter()
+        except Exception:
+            logger.warning("Failed to load pipeline cleanup ledger", exc_info=True)
+            return None
+        return ledger if isinstance(ledger, CleanupLedger) else None
+
+    def _cleanup_ledger_for_normal_chat(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import CleanupLedger
+
+        prompt_path = self._cleanup_ledger_path_from_active_prompt()
+        if prompt_path is not None:
+            return CleanupLedger(prompt_path)
+
+        explicit_path = getattr(self, "_pipeline_cleanup_ledger_path", None)
+        if explicit_path:
+            ledger = CleanupLedger(Path(explicit_path))
+            has_active_prompt = self._cleanup_prompt_exists_anywhere()
+            if has_active_prompt:
+                return ledger
+            if not ledger.path.exists():
+                self._clear_pipeline_cleanup_ledger_path(ledger.path)
+                return None
+            if ledger.load_failed():
+                return ledger
+            if ledger.pending_resources():
+                return ledger
+            self._clear_pipeline_cleanup_ledger_path(ledger.path)
+            return None
+
+        has_active_prompt = self._cleanup_prompt_exists_anywhere()
+
+        candidate_cwds: list[str] = []
+        try:
+            from iac_code.pipeline.config import get_working_directory
+
+            pipeline_cwd = get_working_directory()
+            if pipeline_cwd:
+                candidate_cwds.append(pipeline_cwd)
+        except Exception:
+            pass
+        original_cwd = getattr(self, "_original_cwd", None)
+        if original_cwd:
+            candidate_cwds.append(original_cwd)
+
+        session_storage = getattr(self, "_session_storage", None)
+        session_id = getattr(self, "_session_id", None)
+        if session_storage is None or not isinstance(session_id, str) or not session_id:
+            return None
+
+        seen: set[str] = set()
+        completed_prompt_ledger = None
+        for cwd in candidate_cwds:
+            if cwd in seen:
+                continue
+            seen.add(cwd)
+            try:
+                path = Path(session_storage.session_dir(cwd, session_id)) / "pipeline" / "cleanup.yaml"
+            except Exception:
+                continue
+            if path.exists():
+                ledger = CleanupLedger(path)
+                if ledger.load_failed():
+                    continue
+                if ledger.pending_resources():
+                    return ledger
+                if has_active_prompt and completed_prompt_ledger is None:
+                    completed_prompt_ledger = ledger
+        return completed_prompt_ledger
+
+    def _cleanup_ledger_for_resume_summary(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import CleanupLedger
+
+        prompt_path = self._cleanup_ledger_path_from_any_cleanup_prompt()
+        if prompt_path is not None:
+            return CleanupLedger(prompt_path)
+
+        explicit_path = getattr(self, "_pipeline_cleanup_ledger_path", None)
+        if explicit_path:
+            return CleanupLedger(Path(explicit_path))
+
+        return None
+
+    def _clear_pipeline_cleanup_ledger_path(self, path=None) -> None:
+        from pathlib import Path
+
+        explicit_path = getattr(self, "_pipeline_cleanup_ledger_path", None)
+        if explicit_path is None:
+            return
+        if path is not None:
+            try:
+                if Path(explicit_path) != Path(path):
+                    return
+            except TypeError:
+                return
+        try:
+            delattr(self, "_pipeline_cleanup_ledger_path")
+        except AttributeError:
+            pass
+
+    def _cleanup_ledger_path_from_active_prompt(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import cleanup_prompt_ledger_path, is_active_cleanup_prompt_message
+
+        for message in [*self._cleanup_prompt_messages_from_context(), *self._cleanup_prompt_messages_from_session()]:
+            if not is_active_cleanup_prompt_message(message):
+                continue
+            ledger_path = cleanup_prompt_ledger_path(message)
+            if ledger_path:
+                return Path(ledger_path)
+        return None
+
+    def _cleanup_ledger_path_from_any_cleanup_prompt(self):
+        from pathlib import Path
+
+        from iac_code.pipeline.engine.cleanup import cleanup_prompt_ledger_path, is_cleanup_prompt_message
+
+        for message in [*self._cleanup_prompt_messages_from_context(), *self._cleanup_prompt_messages_from_session()]:
+            if not is_cleanup_prompt_message(message):
+                continue
+            ledger_path = cleanup_prompt_ledger_path(message)
+            if ledger_path:
+                return Path(ledger_path)
+        return None
+
+    def _wrap_cleanup_observer(self, events, *, ledger=None):
+        from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupObserver
+
+        cleanup_ledger = ledger or self._cleanup_ledger_for_normal_chat()
+        if not isinstance(cleanup_ledger, CleanupLedger):
+            return events
+        if cleanup_ledger.load_failed():
+            return events
+
+        async def observed_stream():
+            observer = CleanupObserver(cleanup_ledger)
+            previous = self._cleanup_resource_state_map(cleanup_ledger)
+            async for event in events:
+                observer.observe(event)
+                previous = self._print_cleanup_status_changes(cleanup_ledger, previous)
+                yield event
+
+        return observed_stream()
+
+    @staticmethod
+    def _cleanup_resource_state(resource) -> tuple[object, ...]:
+        return (
+            getattr(resource, "cleanup_status", None),
+            getattr(resource, "progress_status", None),
+            getattr(resource, "progress_percentage", None),
+            getattr(resource, "cleanup_tool_use_id", None),
+            getattr(resource, "last_error", None),
+        )
+
+    def _cleanup_resource_state_map(self, ledger) -> dict[str, tuple[object, ...]]:
+        try:
+            resources = ledger.cleanup_resources()
+        except Exception:
+            return {}
+        return {resource.key: self._cleanup_resource_state(resource) for resource in resources}
+
+    def _print_cleanup_status_changes(
+        self,
+        ledger,
+        previous: dict[str, tuple[object, ...]],
+    ) -> dict[str, tuple[object, ...]]:
+        try:
+            resources = ledger.cleanup_resources()
+        except Exception:
+            return previous
+        current = {resource.key: self._cleanup_resource_state(resource) for resource in resources}
+        printer = getattr(getattr(self, "renderer", None), "print_system_message", None)
+        if not callable(printer):
+            return current
+        for resource in resources:
+            state = current.get(resource.key)
+            if state is None or previous.get(resource.key) == state:
+                continue
+            message = self._cleanup_resource_status_message(resource)
+            if not message:
+                continue
+            printer(message, style=self._cleanup_status_style(getattr(resource, "cleanup_status", "")))
+        return current
+
+    @staticmethod
+    def _cleanup_status_style(status: str) -> str:
+        if status == "failed":
+            return "red"
+        if status in {"completed", "skipped"}:
+            return "green"
+        return "yellow"
+
+    @staticmethod
+    def _cleanup_resource_status_message(resource) -> str:
+        status = str(getattr(resource, "cleanup_status", "") or "pending")
+        resource_id = str(getattr(resource, "resource_id", "") or "")
+        label = str(getattr(resource, "resource_name", "") or resource_id)
+        region = str(getattr(resource, "region_id", "") or "unknown")
+        progress = str(getattr(resource, "progress_status", "") or status)
+        last_error = str(getattr(resource, "last_error", "") or "")
+        badge = InlineREPL._cleanup_status_badge(status, progress)
+        detail = InlineREPL._cleanup_status_detail(status, progress)
+        parts = [
+            _("↺ Rollback cleanup [{badge}] {label}").format(badge=badge, label=label),
+            _("{kind} {resource_id}").format(
+                kind=InlineREPL._cleanup_resource_kind_label(resource),
+                resource_id=InlineREPL._short_cleanup_resource_id(resource_id),
+            ),
+            region,
+            detail,
+        ]
+        if last_error:
+            parts.append(_("Error: {error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
+        return " · ".join(part for part in parts if part)
+
+    @staticmethod
+    def _cleanup_status_badge(status: str, progress: str) -> str:
+        if status == "started":
+            return _("Deleting")
+        if status == "completed":
+            return _("Completed")
+        if status == "failed":
+            return _("Failed")
+        if status == "skipped":
+            return _("Skipped")
+        if status == "pending":
+            return _("Pending")
+        if progress and not progress.startswith("DELETE"):
+            return _("Checking")
+        if progress in {"DELETE_REQUESTED", "DELETE_STARTED", "DELETE_IN_PROGRESS"}:
+            return _("Deleting")
+        return _("Progress")
+
+    @staticmethod
+    def _cleanup_status_detail(status: str, progress: str) -> str:
+        if status == "started":
+            if progress:
+                return _("DeleteStack submitted; waiting for deletion to complete ({progress})").format(
+                    progress=progress
+                )
+            return _("DeleteStack submitted; waiting for deletion to complete")
+        if status == "completed":
+            return progress or "completed"
+        if status == "failed":
+            return progress or "failed"
+        if status == "skipped":
+            return _("Skipped")
+        if progress == "DELETE_IN_PROGRESS":
+            return _("Deleting ({progress})").format(progress=progress)
+        if progress in {"DELETE_REQUESTED", "DELETE_STARTED"}:
+            return _("DeleteStack submitted; waiting for deletion to complete ({progress})").format(progress=progress)
+        if progress and not progress.startswith("DELETE"):
+            return _("{progress}; deletion required").format(progress=progress)
+        return progress or status
+
+    @staticmethod
+    def _cleanup_resource_kind_label(resource) -> str:
+        provider = str(getattr(resource, "provider", "") or "").lower()
+        resource_type = str(getattr(resource, "resource_type", "") or "").lower()
+        if provider == "ros" and resource_type == "stack":
+            return _("stack")
+        return _("resource")
+
+    @staticmethod
+    def _short_cleanup_resource_id(resource_id: str) -> str:
+        if len(resource_id) <= 18:
+            return resource_id
+        return "{}…{}".format(resource_id[:8], resource_id[-4:])
+
+    @staticmethod
+    def _safe_cleanup_error(error: str) -> str:
+        from iac_code.utils.public_errors import sanitize_public_text
+
+        sanitized = sanitize_public_text(error)
+        return sanitized[:1000] + "..." if len(sanitized) > 1000 else sanitized
+
+    def _remove_cleanup_prompts_from_context(self) -> int:
+        context_manager = getattr(getattr(self, "_agent_loop", None), "context_manager", None)
+        remover = getattr(context_manager, "remove_cleanup_prompt_messages", None)
+        if not callable(remover):
+            return 0
+        try:
+            removed = remover()
+        except Exception:
+            logger.warning("Failed to remove pipeline cleanup prompt from context", exc_info=True)
+            return 0
+        return removed if isinstance(removed, int) else 0
+
+    def _warn_cleanup_ledger_load_failed(self, ledger) -> None:
+        if getattr(self, "_cleanup_ledger_load_failed_warning_printed", False):
+            return
+        self._cleanup_ledger_load_failed_warning_printed = True
+        load_error = ""
+        get_load_error = getattr(ledger, "load_error", None)
+        if callable(get_load_error):
+            try:
+                load_error = get_load_error() or ""
+            except Exception:
+                load_error = ""
+        if load_error:
+            logger.warning("Pipeline cleanup ledger is unreadable: %s", load_error)
+        else:
+            ledger_path = getattr(ledger, "path", None)
+            if ledger_path:
+                logger.warning("Pipeline cleanup ledger is unavailable: %s", ledger_path)
+        self.renderer.print_system_message(
+            _("Could not read rollback cleanup records. The cleanup prompt was kept; retry later or inspect manually."),
+            style="yellow",
+        )
+
+    def _prune_cleanup_prompts_if_no_pending_cleanup(self, ledger=None) -> None:
+        cleanup_ledger = ledger or self._cleanup_ledger_for_normal_chat()
+        if self._cleanup_ledger_unavailable_with_prompt(cleanup_ledger):
+            self._warn_cleanup_ledger_load_failed(cleanup_ledger)
+            return
+        if cleanup_ledger is not None:
+            load_failed = getattr(cleanup_ledger, "load_failed", None)
+            if callable(load_failed) and load_failed():
+                self._warn_cleanup_ledger_load_failed(cleanup_ledger)
+                return
+        if cleanup_ledger is None or not cleanup_ledger.pending_resources():
+            if cleanup_ledger is not None:
+                self._mark_cleanup_prompts_completed(cleanup_ledger)
+                self._clear_pipeline_cleanup_ledger_path(getattr(cleanup_ledger, "path", None))
+            self._remove_cleanup_prompts_from_context()
+
+    def _print_cleanup_resume_summary(self) -> None:
+        ledger = self._cleanup_ledger_for_resume_summary()
+        if ledger is None:
+            return
+        load_failed = getattr(ledger, "load_failed", None)
+        if callable(load_failed) and load_failed():
+            return
+        ledger_path = str(getattr(ledger, "path", "") or "")
+        printed_paths = getattr(self, "_cleanup_resume_summary_printed_paths", set())
+        if ledger_path and ledger_path in printed_paths:
+            return
+        try:
+            resume_resources = self._cleanup_resume_resources(ledger)
+        except Exception:
+            return
+        if not resume_resources:
+            return
+        printer = getattr(getattr(self, "renderer", None), "print_system_message", None)
+        if not callable(printer):
+            return
+        printer(
+            self._cleanup_resume_summary_message(resume_resources),
+            style=self._cleanup_resume_summary_style(resume_resources),
+        )
+        detail_resources = [
+            resource for resource in resume_resources if self._cleanup_resume_should_show_detail(resource)
+        ]
+        visible_resources = detail_resources[-5:]
+        for resource in visible_resources:
+            printer(
+                self._cleanup_resume_resource_line(resource),
+                style=self._cleanup_status_style(str(getattr(resource, "cleanup_status", "") or "")),
+            )
+        if len(detail_resources) > 5:
+            printer(
+                _("{count} additional resources needing attention were not shown.").format(
+                    count=len(detail_resources) - 5
+                ),
+                style="yellow",
+            )
+        if ledger_path:
+            printed_paths = set(printed_paths)
+            printed_paths.add(ledger_path)
+            self._cleanup_resume_summary_printed_paths = printed_paths
+
+    @staticmethod
+    def _cleanup_resume_resources(ledger) -> list[Any]:
+        resources = ledger.cleanup_resources()
+        history_resources = InlineREPL._cleanup_resume_history_resources(ledger)
+        if not history_resources:
+            return resources
+
+        history_by_key = {resource.key: resource for resource in history_resources}
+        merged: list[Any] = []
+        seen: set[str] = set()
+        for resource in resources:
+            key = resource.key
+            merged.append(history_by_key.get(key, resource))
+            seen.add(key)
+        for resource in history_resources:
+            if resource.key not in seen:
+                merged.append(resource)
+        return merged
+
+    @staticmethod
+    def _cleanup_resume_summary_message(resources: list[Any]) -> str:
+        total = len(resources)
+        counts = InlineREPL._cleanup_resume_status_counts(resources)
+        if total > 0 and counts["completed"] == total:
+            return _("↺ Rollback cleanup resume: all {count} records are completed.").format(count=total)
+
+        parts: list[str] = []
+        for key, label in (
+            ("failed", _("failed")),
+            ("pending", _("pending")),
+            ("active", _("in progress")),
+            ("completed", _("completed")),
+            ("skipped", _("skipped")),
+        ):
+            count = counts[key]
+            if count:
+                parts.append(_("{count} {label}").format(count=count, label=label))
+        if parts:
+            return _("↺ Rollback cleanup resume: {count} records, {summary}.").format(
+                count=total,
+                summary=", ".join(parts),
+            )
+        return _("↺ Rollback cleanup resume: {count} records.").format(count=total)
+
+    @staticmethod
+    def _cleanup_resume_status_counts(resources: list[Any]) -> dict[str, int]:
+        counts = {
+            "pending": 0,
+            "active": 0,
+            "completed": 0,
+            "failed": 0,
+            "skipped": 0,
+        }
+        for resource in resources:
+            status = str(getattr(resource, "cleanup_status", "") or "pending")
+            if status in {"started", "in_progress"}:
+                counts["active"] += 1
+            elif status in counts:
+                counts[status] += 1
+            else:
+                counts["pending"] += 1
+        return counts
+
+    @staticmethod
+    def _cleanup_resume_summary_style(resources: list[Any]) -> str:
+        if resources and all(
+            str(getattr(resource, "cleanup_status", "") or "pending") in {"completed", "skipped"}
+            for resource in resources
+        ):
+            return "green"
+        return "yellow"
+
+    @staticmethod
+    def _cleanup_resume_should_show_detail(resource) -> bool:
+        status = str(getattr(resource, "cleanup_status", "") or "pending")
+        return status not in {"completed", "skipped"}
+
+    @staticmethod
+    def _cleanup_resume_history_resources(ledger) -> list[Any]:
+        from iac_code.pipeline.constants import (
+            PIPELINE_EVENT_CLEANUP_COMPLETED,
+            PIPELINE_EVENT_CLEANUP_FAILED,
+            PIPELINE_EVENT_CLEANUP_PROGRESS,
+            PIPELINE_EVENT_CLEANUP_STARTED,
+        )
+        from iac_code.pipeline.engine.cleanup import CleanupResource
+
+        get_history = getattr(ledger, "history_entries", None)
+        if not callable(get_history):
+            return []
+        resources_by_key = {}
+        for entry in get_history():
+            event_type = str(entry.get("type") or "")
+            if event_type not in {
+                PIPELINE_EVENT_CLEANUP_STARTED,
+                PIPELINE_EVENT_CLEANUP_PROGRESS,
+                PIPELINE_EVENT_CLEANUP_COMPLETED,
+                PIPELINE_EVENT_CLEANUP_FAILED,
+                "cleanup_skipped",
+                "cleanup_pending",
+            }:
+                continue
+            resource_data = dict(entry.get("resource") or {})
+            if not resource_data:
+                continue
+            for key in (
+                "cleanup_status",
+                "cleanup_tool_use_id",
+                "cleanup_action",
+                "progress_status",
+                "progress_percentage",
+                "last_error",
+            ):
+                if entry.get(key) is not None:
+                    resource_data[key] = entry[key]
+            if entry.get("timestamp") is not None:
+                resource_data["updated_at"] = entry["timestamp"]
+            resource = CleanupResource.from_dict(resource_data)
+            if resource.resource_id:
+                resources_by_key.pop(resource.key, None)
+                resources_by_key[resource.key] = resource
+        return list(resources_by_key.values())
+
+    @staticmethod
+    def _cleanup_resume_resource_line(resource) -> str:
+        status = str(getattr(resource, "cleanup_status", "") or "pending")
+        resource_id = str(getattr(resource, "resource_id", "") or "")
+        label = str(getattr(resource, "resource_name", "") or resource_id)
+        region = str(getattr(resource, "region_id", "") or "unknown")
+        progress = str(getattr(resource, "progress_status", "") or status)
+        last_error = str(getattr(resource, "last_error", "") or "")
+        badge = InlineREPL._cleanup_status_badge(status, progress)
+        detail = InlineREPL._cleanup_status_detail(status, progress)
+        parts = [
+            _("  [{badge}] {label}").format(badge=badge, label=label),
+            _("{kind} {resource_id}").format(
+                kind=InlineREPL._cleanup_resource_kind_label(resource),
+                resource_id=InlineREPL._short_cleanup_resource_id(resource_id),
+            ),
+            region,
+            detail,
+        ]
+        if last_error:
+            parts.append(_("Error: {error}").format(error=InlineREPL._safe_cleanup_error(last_error)))
+        return " · ".join(part for part in parts if part)
+
+    async def _maybe_start_normal_chat_cleanup_on_startup(self) -> bool:
+        from iac_code.pipeline.config import RunMode
+
+        if self._get_runtime_mode() != RunMode.NORMAL:
+            return False
+        self._print_cleanup_resume_summary()
+        ledger = self._cleanup_ledger_for_normal_chat()
+        if self._cleanup_ledger_unavailable_with_prompt(ledger):
+            self._warn_cleanup_ledger_load_failed(ledger)
+            return False
+        if ledger is None:
+            self._remove_cleanup_prompts_from_context()
+            return False
+        if ledger.load_failed():
+            self._warn_cleanup_ledger_load_failed(ledger)
+            return False
+        if not ledger.pending_resources():
+            self._prune_cleanup_prompts_if_no_pending_cleanup(ledger)
+            return False
+        return await self._start_pipeline_cleanup_from_ledger(ledger)
+
+    async def _maybe_start_pipeline_cleanup(self, pipeline: object | None) -> bool:
+        from iac_code.pipeline.config import RunMode
+
+        if pipeline is None or self._get_runtime_mode() != RunMode.NORMAL:
+            return False
+        ledger = self._cleanup_ledger_for_pipeline(pipeline)
+        if ledger is None:
+            return False
+        return await self._start_pipeline_cleanup_from_ledger(ledger)
+
+    async def _start_pipeline_cleanup_from_ledger(self, ledger) -> bool:
+        from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
+
+        load_failed = getattr(ledger, "load_failed", None)
+        if callable(load_failed) and load_failed():
+            self._warn_cleanup_ledger_load_failed(ledger)
+            return False
+        cleanup_prompt = ledger.build_pending_prompt()
+        if cleanup_prompt is None:
+            return False
+
+        self._pipeline_cleanup_ledger_path = ledger.path
+        ledger.record_prompt_queued(cleanup_prompt, ui_surface="repl")
+        self.renderer.print_system_message("\n" + cleanup_prompt.status_message, style="yellow")
+        session_prompt_exists = self._cleanup_prompt_exists_in_session(cleanup_prompt.prompt)
+        self._remove_cleanup_prompts_from_context()
+        message = create_cleanup_prompt_message(
+            cleanup_prompt.prompt,
+            cleanup_ledger_path=ledger.path,
+            cleanup_status="pending",
+        )
+        try:
+            injected = self._agent_loop.context_manager.add_raw_message(message.to_dict())
+            if not session_prompt_exists:
+                self._session_storage.append(
+                    self._original_cwd,
+                    self._session_id,
+                    injected,
+                    git_branch=self.current_git_branch(),
+                )
+        except Exception as exc:
+            logger.warning("Failed to inject pipeline cleanup prompt: %s", exc)
+            self.renderer.print_system_message(
+                _("Detected rollback cleanup resources, but cleanup prompt injection failed."),
+                style="yellow",
+            )
+            return False
+
+        self.store.set_state(is_busy=True)
+        try:
+            streaming_input = StreamingInputBuffer()
+            events = self._wrap_cleanup_observer(self._agent_loop.continue_streaming(), ledger=ledger)
+            result = await self.renderer.run_streaming_output(
+                events,
+                permission_handler=self.renderer.prompt_permission,
+                streaming_input=streaming_input,
+            )
+            elapsed, queued_inputs, draft_input = self._normalize_streaming_output_result(result)
+            self._streaming_draft_input = draft_input
+            if elapsed >= 1.0:
+                self._agent_loop.stamp_last_turn_elapsed(elapsed)
+            if queued_inputs:
+                self._streaming_draft_input = "\n".join([*queued_inputs, draft_input]).strip()
+            if self.renderer._last_streaming_errors:
+                msg_count = len(self._agent_loop.context_manager.get_messages())
+                for err in self.renderer._last_streaming_errors:
+                    self._streaming_error_log.append((err, msg_count))
+        finally:
+            self._prune_cleanup_prompts_if_no_pending_cleanup(ledger)
+            self.store.set_state(is_busy=False)
+        return True
+
+    def _cleanup_prompt_messages_from_context(self):
+        context_manager = getattr(getattr(self, "_agent_loop", None), "context_manager", None)
+        get_messages = getattr(context_manager, "get_messages", None)
+        if not callable(get_messages):
+            return []
+        try:
+            messages = get_messages()
+        except Exception:
+            return []
+        return messages if isinstance(messages, list) else []
+
+    def _cleanup_prompt_messages_from_session(self):
+        session_storage = getattr(self, "_session_storage", None)
+        load = getattr(session_storage, "load", None)
+        if not callable(load):
+            return []
+        original_cwd = getattr(self, "_original_cwd", None)
+        session_id = getattr(self, "_session_id", None)
+        if not isinstance(original_cwd, str) or not isinstance(session_id, str):
+            return []
+        try:
+            messages = load(original_cwd, session_id)
+        except Exception:
+            return []
+        return messages if isinstance(messages, list) else []
+
+    def _mark_cleanup_prompts_completed(self, ledger) -> None:
+        from iac_code.pipeline.engine.cleanup import mark_cleanup_prompt_message_completed
+
+        ledger_path = getattr(ledger, "path", None)
+        for message in self._cleanup_prompt_messages_from_context():
+            mark_cleanup_prompt_message_completed(message, cleanup_ledger_path=ledger_path)
+
+        session_storage = getattr(self, "_session_storage", None)
+        save = getattr(session_storage, "save", None)
+        if not callable(save):
+            return
+        messages = self._cleanup_prompt_messages_from_session()
+        changed = False
+        for message in messages:
+            changed = mark_cleanup_prompt_message_completed(message, cleanup_ledger_path=ledger_path) or changed
+        if not changed:
+            return
+        original_cwd = getattr(self, "_original_cwd", None)
+        session_id = getattr(self, "_session_id", None)
+        if not isinstance(original_cwd, str) or not isinstance(session_id, str):
+            return
+        try:
+            save(
+                original_cwd,
+                session_id,
+                messages,
+                git_branch=self.current_git_branch(),
+            )
+        except Exception:
+            logger.warning("Failed to mark pipeline cleanup prompt completed in session", exc_info=True)
+
+    def _cleanup_prompt_exists_in_context(self, prompt: str) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) and message.content == prompt
+            for message in self._cleanup_prompt_messages_from_context()
+        )
+
+    def _cleanup_prompt_exists_in_session(self, prompt: str) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) and message.content == prompt
+            for message in self._cleanup_prompt_messages_from_session()
+        )
+
+    def _context_has_cleanup_prompt(self) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) for message in self._cleanup_prompt_messages_from_context()
+        )
+
+    def _session_has_cleanup_prompt(self) -> bool:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        return any(
+            is_active_cleanup_prompt_message(message) for message in self._cleanup_prompt_messages_from_session()
+        )
+
+    def _cleanup_prompt_exists_anywhere(self) -> bool:
+        return self._context_has_cleanup_prompt() or self._session_has_cleanup_prompt()
+
+    def _cleanup_ledger_unavailable_with_prompt(self, ledger) -> bool:
+        if not self._cleanup_prompt_exists_anywhere():
+            return False
+        if ledger is None:
+            return True
+        path = getattr(ledger, "path", None)
+        try:
+            if path is not None and not path.exists():
+                return True
+        except Exception:
+            return True
+        load_failed = getattr(ledger, "load_failed", None)
+        return bool(callable(load_failed) and load_failed())
+
+    def _block_if_cleanup_ledger_unreadable(self) -> bool:
+        ledger = self._cleanup_ledger_for_normal_chat()
+        if not self._cleanup_ledger_unavailable_with_prompt(ledger):
+            return False
+        self._warn_cleanup_ledger_load_failed(ledger)
+        return True
+
+    async def _run_pending_cleanup_before_normal_turn(self, *, draft_text: str) -> bool:
+        ledger = self._cleanup_ledger_for_normal_chat()
+        if self._cleanup_ledger_unavailable_with_prompt(ledger):
+            self._warn_cleanup_ledger_load_failed(ledger)
+            self._streaming_draft_input = draft_text
+            return False
+        if ledger is None:
+            return True
+        if ledger.load_failed():
+            if self._context_has_cleanup_prompt():
+                self._warn_cleanup_ledger_load_failed(ledger)
+                self._streaming_draft_input = draft_text
+                return False
+            return True
+        if not ledger.pending_resources():
+            self._mark_cleanup_prompts_completed(ledger)
+            self._remove_cleanup_prompts_from_context()
+            return True
+
+        if not await self._start_pipeline_cleanup_from_ledger(ledger):
+            self._streaming_draft_input = draft_text
+            return False
+        if ledger.load_failed() or ledger.pending_resources():
+            self._streaming_draft_input = draft_text
+            self.renderer.print_system_message(
+                _("Rollback cleanup is still in progress. Please continue after cleanup completes."),
+                style="yellow",
+            )
+            return False
+        return True
 
     async def _handle_chat(self, user_input: PromptInputResult | str) -> list[str]:
         """Send the user message to the agent loop and stream output."""
         from iac_code.pipeline.config import RunMode
 
         if self._get_runtime_mode() == RunMode.PIPELINE:
-            # Pipeline mode doesn't accept multimodal input — flatten to text.
-            text = user_input.text if isinstance(user_input, PromptInputResult) else user_input
-            # U-I4: warn user if we're about to drop pasted image content.
-            if isinstance(user_input, PromptInputResult) and user_input.pasted_contents:
-                has_image = any(pc.type == "image" for pc in user_input.pasted_contents.values())
-                if has_image:
-                    self.renderer.print_system_message(
-                        _("Note: images are not supported in pipeline mode and will be ignored."),
-                        style="yellow",
-                    )
-            await self._handle_pipeline_chat(text)
+            await self._handle_pipeline_chat(self._pipeline_user_input_from_repl_input(user_input))
+            return []
+
+        draft_text = user_input.text if isinstance(user_input, PromptInputResult) else user_input
+        if not await self._run_pending_cleanup_before_normal_turn(draft_text=draft_text):
             return []
 
         from iac_code.utils.image.processor import process_user_input
@@ -1367,9 +2162,11 @@ class InlineREPL:
         self.renderer.record_user_turn(record_text)
         try:
             streaming_input = StreamingInputBuffer()
-            events = self._agent_loop.run_streaming(
-                payload,
-                queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+            events = self._wrap_cleanup_observer(
+                self._agent_loop.run_streaming(
+                    payload,
+                    queued_input_provider=lambda: streaming_input.drain_queued_inputs(self._should_submit_mid_turn),
+                )
             )
             result = await self.renderer.run_streaming_output(
                 events,
@@ -1386,6 +2183,7 @@ class InlineREPL:
                     self._streaming_error_log.append((err, msg_count))
             return queued_inputs
         finally:
+            self._prune_cleanup_prompts_if_no_pending_cleanup()
             self.store.set_state(is_busy=False)
 
     async def _flush_pipeline_telemetry(self) -> None:
@@ -1413,6 +2211,8 @@ class InlineREPL:
             self._pipeline_display_recorder = None
 
     def _record_pipeline_display_event(self, event) -> None:
+        if self._is_pipeline_state_persistence_failure_event(event):
+            self._pipeline_state_persistence_failed = True
         recorder = getattr(self, "_pipeline_display_recorder", None)
         if recorder is None:
             return
@@ -1516,7 +2316,7 @@ class InlineREPL:
             session_id=self._session_id,
             cwd=pipeline_cwd,
             permission_context_getter=lambda: self.store.get_state().permission_context,
-            memory_content_getter=(lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""),
+            memory_content_getter=self._pipeline_memory_content_getter(),
             auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
             resume_from_sidecar=True,
         )
@@ -1540,12 +2340,47 @@ class InlineREPL:
         self._pipeline_waiting_input = restored.status == "waiting_input"
         return True
 
-    async def _handle_pipeline_chat(self, user_input: str) -> None:
+    def _pipeline_user_input_from_repl_input(
+        self, user_input: PromptInputResult | str | "PipelineUserInput" | None
+    ) -> "PipelineUserInput":
+        """Convert REPL input to the pipeline wrapper used by model-facing entry points."""
+        from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
+        from iac_code.utils.image.processor import process_user_input
+
+        if isinstance(user_input, PromptInputResult):
+            blocks = process_user_input(user_input.text, pasted_contents=user_input.pasted_contents)
+            content: str | list[ContentBlock]
+            if any(isinstance(block, ImageBlock) for block in blocks):
+                content = blocks
+            else:
+                content = user_input.text
+            return normalize_pipeline_user_input(content, display_text=user_input.text)
+        return normalize_pipeline_user_input(user_input)
+
+    async def _read_pipeline_interrupt_input(self) -> "PipelineUserInput":
+        user_input = await self._prompt_input.get_input(prompt="✎ ", transient=True)
+        if user_input is not None:
+            make_result = getattr(self._prompt_input, "make_result", None)
+            if callable(make_result):
+                result = make_result()
+                if isinstance(result, PromptInputResult):
+                    return self._pipeline_user_input_from_repl_input(result)
+        return self._pipeline_user_input_from_repl_input(user_input)
+
+    async def _handle_pipeline_chat(self, user_input: str | "PipelineUserInput") -> None:
         """Drive the pipeline and render output."""
         from iac_code.pipeline import create_pipeline
         from iac_code.pipeline.config import get_pipeline_name, get_working_directory
+        from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
 
-        self.renderer.record_user_turn(user_input)
+        pipeline_input = normalize_pipeline_user_input(user_input)
+        self.renderer.record_user_turn(pipeline_input.display_text)
+        if self._pipeline is not None and getattr(self, "_pipeline_state_persistence_failed", False):
+            self.renderer.print_system_message(
+                _("Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable."),
+                style="yellow",
+            )
+            return
 
         if self._pipeline is None:
             pipeline_cwd = get_working_directory() or self._original_cwd
@@ -1557,9 +2392,7 @@ class InlineREPL:
                 session_id=self._session_id,
                 cwd=pipeline_cwd,
                 permission_context_getter=lambda: self.store.get_state().permission_context,
-                memory_content_getter=(
-                    lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""
-                ),
+                memory_content_getter=self._pipeline_memory_content_getter(),
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
             )
             self._refresh_pipeline_display_recorder()
@@ -1580,13 +2413,13 @@ class InlineREPL:
                 if self._pipeline_current_step_is_candidate_selection() is True:
                     resume_waiting_candidate_selection = True
                 else:
-                    event_stream = self._pipeline.resume(user_input)
+                    event_stream = cast(Any, self._pipeline).resume(pipeline_input)
             elif restored and restored.ok and restored.status == "running":
                 self._pipeline_waiting_input = False
-                event_stream = self._pipeline.continue_from_sidecar(user_input=user_input)
+                event_stream = cast(Any, self._pipeline).continue_from_sidecar(user_input=pipeline_input)
             else:
-                self._persist_pipeline_visible_user_turn(user_input)
-                event_stream = self._pipeline.run(user_input)
+                self._persist_pipeline_visible_user_turn(pipeline_input)
+                event_stream = cast(Any, self._pipeline).run(pipeline_input)
         else:
             self._refresh_pipeline_display_recorder()
             self._pipeline_waiting_input = False
@@ -1595,14 +2428,14 @@ class InlineREPL:
             resume_waiting_candidate_selection = False
             event_stream = None
             if restored_status == "running":
-                event_stream = self._pipeline.continue_from_sidecar(user_input=user_input)
+                event_stream = cast(Any, self._pipeline).continue_from_sidecar(user_input=pipeline_input)
             elif restored_status == "waiting_input":
                 if self._pipeline_current_step_is_candidate_selection() is True:
                     resume_waiting_candidate_selection = True
                 else:
-                    event_stream = self._pipeline.resume(user_input)
+                    event_stream = cast(Any, self._pipeline).resume(pipeline_input)
             else:
-                event_stream = self._pipeline.resume(user_input)
+                event_stream = cast(Any, self._pipeline).resume(pipeline_input)
 
         # No except for CancelledError/KeyboardInterrupt here: Ctrl+C must
         # propagate to the run() loop's single handler (which keeps the REPL
@@ -1625,6 +2458,7 @@ class InlineREPL:
             self._finalize_pipeline_after_render(terminal_event)
             if pipeline_for_flush is not None:
                 await self._flush_pipeline_telemetry()
+                await self._maybe_start_pipeline_cleanup(pipeline_for_flush)
 
     def _pipeline_current_step_is_candidate_selection(self) -> bool:
         pipeline = getattr(self, "_pipeline", None)
@@ -1658,7 +2492,11 @@ class InlineREPL:
                 self._pipeline_waiting_input = True
         finally:
             self.store.set_state(is_busy=False)
+            pipeline_for_flush = self._pipeline
             self._finalize_pipeline_after_render(terminal_event)
+            if pipeline_for_flush is not None:
+                await self._flush_pipeline_telemetry()
+                await self._maybe_start_pipeline_cleanup(pipeline_for_flush)
         return True
 
     def _render_pipeline_display_replay_on_startup(self) -> None:
@@ -1810,11 +2648,28 @@ class InlineREPL:
         self._pipeline_restored_status = None
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id = None
+        self._pipeline_state_persistence_failed = False
+        self._pipeline_state_persistence_warning_rendered = False
 
     def _finalize_pipeline_after_render(self, terminal_event: PipelineEvent | None) -> None:
         # Keep terminal sidecars on disk for debugging. Terminal metadata
         # controls whether they are resumable.
+        if getattr(self, "_pipeline_state_persistence_failed", False):
+            if self._pipeline is not None:
+                pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
+                if callable(pause_agent_loops):
+                    pause_agent_loops()
+            self._pipeline_waiting_input = False
+            self._warn_pipeline_state_persistence_failed_once()
+            return
         handoff_result = self._handoff_pipeline_to_normal(terminal_event)
+        if handoff_result == "persistence_failed":
+            if self._pipeline is not None:
+                pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
+                if callable(pause_agent_loops):
+                    pause_agent_loops()
+            self._pipeline_waiting_input = False
+            return
         if handoff_result in {"succeeded", "failed"}:
             self._clear_pipeline_runtime_state()
         elif self._pipeline is not None and self._pipeline.sidecar_status == "failed":
@@ -1822,7 +2677,13 @@ class InlineREPL:
         elif self._pipeline is not None and self._pipeline.state_machine.is_complete:
             self._clear_pipeline_runtime_state()
         elif self._pipeline is not None and not self._pipeline_waiting_input:
-            self._pipeline.mark_user_aborted("pipeline interrupted by user or renderer cancellation")
+            from iac_code.pipeline.engine.pipeline_runner import PipelineStatePersistenceError
+
+            try:
+                self._pipeline.mark_user_aborted("pipeline interrupted by user or renderer cancellation")
+            except PipelineStatePersistenceError as exc:
+                self._handle_pipeline_state_persistence_failure(exc)
+                return
             self._switch_user_aborted_pipeline_to_normal()
             self._clear_pipeline_runtime_state()
 
@@ -1838,7 +2699,17 @@ class InlineREPL:
         if not pipeline.should_switch_to_normal(terminal_event.data):
             return "not_applicable"
 
-        self._set_runtime_mode(RunMode.NORMAL)
+        try:
+            pipeline.mark_normal_handoff(status="pending", failed_reason=None)
+        except Exception as exc:
+            self._pipeline_state_persistence_failed = True
+            logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
+            self.renderer.print_system_message(
+                _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
+                style="yellow",
+            )
+            return "persistence_failed"
+
         try:
             summary = pipeline.build_normal_handoff_summary(terminal_event.data)
             injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": summary})
@@ -1852,22 +2723,65 @@ class InlineREPL:
                 git_branch=self.current_git_branch(),
             )
         except Exception as exc:
-            pipeline.mark_normal_handoff(status="failed", failed_reason=str(exc))
+            try:
+                pipeline.mark_normal_handoff(status="failed", failed_reason=str(exc))
+            except Exception as persistence_exc:
+                self._pipeline_state_persistence_failed = True
+                logger.opt(exception=True).warning(
+                    "Pipeline handoff failure metadata persistence failed: {}",
+                    persistence_exc,
+                )
+                self.renderer.print_system_message(
+                    _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
+                    style="yellow",
+                )
+                return "persistence_failed"
             logger.opt(exception=True).warning("Pipeline-to-normal handoff injection failed: {}", exc)
             self.renderer.print_system_message(
-                _("Pipeline completed. Normal chat is active, but the handoff context could not be injected or saved."),
+                _("Pipeline completed, but the handoff context could not be injected or saved."),
                 style="yellow",
             )
+            self._set_runtime_mode(RunMode.NORMAL)
             return "failed"
-        else:
+        try:
             pipeline.mark_normal_handoff(status="succeeded", failed_reason=None)
+        except Exception as exc:
+            self._pipeline_state_persistence_failed = True
+            logger.opt(exception=True).warning("Pipeline handoff metadata persistence failed: {}", exc)
             self.renderer.print_system_message(
-                _("Pipeline completed. Normal chat is now active."),
-                style="green",
+                _("Pipeline state persistence failed. Normal chat handoff was not marked durable."),
+                style="yellow",
             )
+            return "persistence_failed"
+        self._set_runtime_mode(RunMode.NORMAL)
+        self.renderer.print_system_message(
+            _("Pipeline completed. Normal chat is now active."),
+            style="green",
+        )
         return "succeeded"
 
-    async def _handle_mid_pipeline_message(self, msg: str, suppress_render: bool = False) -> tuple[bool, str]:
+    def _handle_pipeline_state_persistence_failure(self, exc: Exception) -> None:
+        logger.opt(exception=True).warning("Pipeline state persistence failed during interrupt handling: {}", exc)
+        self._pipeline_state_persistence_failed = True
+        self._last_interrupt_paused = True
+        self._pipeline_waiting_input = False
+        pause_agent_loops = getattr(self._pipeline, "pause_agent_loops", None)
+        if callable(pause_agent_loops):
+            pause_agent_loops()
+        self._warn_pipeline_state_persistence_failed_once()
+
+    def _warn_pipeline_state_persistence_failed_once(self) -> None:
+        if getattr(self, "_pipeline_state_persistence_warning_rendered", False):
+            return
+        self._pipeline_state_persistence_warning_rendered = True
+        self.renderer.print_system_message(
+            _("Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable."),
+            style="yellow",
+        )
+
+    async def _handle_mid_pipeline_message(
+        self, msg: PromptInputResult | str | "PipelineUserInput", suppress_render: bool = False
+    ) -> tuple[bool, str]:
         """Process a user message received during pipeline execution via judge.
 
         Returns (needs_restart, feedback_text). When suppress_render is True,
@@ -1876,6 +2790,12 @@ class InlineREPL:
         """
         if self._pipeline is None:
             return False, ""
+        from iac_code.pipeline.engine.pipeline_runner import PipelineStatePersistenceError
+
+        pipeline_input = self._pipeline_user_input_from_repl_input(msg)
+        if pipeline_input.is_empty:
+            return False, ""
+        display_text = pipeline_input.display_text
 
         from rich.spinner import Spinner
 
@@ -1885,15 +2805,19 @@ class InlineREPL:
             refresh_per_second=10,
             transient=True,
         ):
-            verdict = await self._pipeline.handle_user_interrupt(msg)
+            verdict = await cast(Any, self._pipeline).handle_user_interrupt(pipeline_input)
 
         self._last_interrupt_paused = bool(getattr(verdict, "paused", False))
         if verdict.action == "continue":
-            feedback = self._format_interrupt_feedback("continue", msg, verdict)
+            feedback = self._format_interrupt_feedback("continue", display_text, verdict)
             if getattr(verdict, "paused", False):
                 save_interrupt_pause = getattr(self._pipeline, "save_interrupt_pause", None)
                 if callable(save_interrupt_pause):
-                    await save_interrupt_pause(verdict)
+                    try:
+                        await save_interrupt_pause(verdict)
+                    except PipelineStatePersistenceError as exc:
+                        self._handle_pipeline_state_persistence_failure(exc)
+                        return False, ""
                 self._pipeline_waiting_input = True
             # P-I18: surface ambiguous continue verdicts so users see their input wasn't understood
             if verdict.reason and verdict.reason.startswith("[ambiguous]"):
@@ -1905,27 +2829,34 @@ class InlineREPL:
                     style="yellow",
                 )
             if not suppress_render:
-                self._render_interrupt_feedback("continue", msg, verdict)
+                self._render_interrupt_feedback("continue", display_text, verdict)
             return False, feedback
         if verdict.action == "supplement":
-            feedback = self._format_interrupt_feedback("supplement", msg, verdict)
+            feedback = self._format_interrupt_feedback("supplement", display_text, verdict)
             if not suppress_render:
-                self._render_interrupt_feedback("supplement", msg, verdict)
+                self._render_interrupt_feedback("supplement", display_text, verdict)
             return False, feedback
         if verdict.action == "hard_interrupt":
-            is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict)
+            try:
+                if pipeline_input.has_images:
+                    is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict, source_input=pipeline_input)
+                else:
+                    is_parent_rollback = self._pipeline.apply_hard_interrupt(verdict)
+            except PipelineStatePersistenceError as exc:
+                self._handle_pipeline_state_persistence_failure(exc)
+                return False, ""
             applied_verdict = getattr(self._pipeline, "last_applied_interrupt_verdict", None)
             feedback_verdict = (
                 applied_verdict if getattr(applied_verdict, "action", None) == "hard_interrupt" else verdict
             )
             if not is_parent_rollback:
-                feedback = self._format_interrupt_feedback("hard_interrupt_candidate", msg, feedback_verdict)
+                feedback = self._format_interrupt_feedback("hard_interrupt_candidate", display_text, feedback_verdict)
                 if not suppress_render:
-                    self._render_interrupt_feedback("hard_interrupt_candidate", msg, feedback_verdict)
+                    self._render_interrupt_feedback("hard_interrupt_candidate", display_text, feedback_verdict)
                 return False, feedback
-            feedback = self._format_interrupt_feedback("hard_interrupt_parent", msg, feedback_verdict)
+            feedback = self._format_interrupt_feedback("hard_interrupt_parent", display_text, feedback_verdict)
             if not suppress_render:
-                self._render_interrupt_feedback("hard_interrupt_parent", msg, feedback_verdict)
+                self._render_interrupt_feedback("hard_interrupt_parent", display_text, feedback_verdict)
             return True, feedback
         return False, ""
 
@@ -2146,10 +3077,10 @@ class InlineREPL:
                             self._pipeline.pause_agent_loops()
                         try:
                             had_renderer = await _stop_renderer()
-                            user_input = await self._prompt_input.get_input(prompt="✎ ", transient=True)
-                            if user_input and user_input.strip():
+                            user_input = await self._read_pipeline_interrupt_input()
+                            if not user_input.is_empty:
                                 needs_restart, feedback = await self._handle_mid_pipeline_message(
-                                    user_input.strip(), suppress_render=True
+                                    user_input, suppress_render=True
                                 )
                                 if needs_restart and self._pipeline:
                                     event_stream = await self._restart_pipeline_stream_after_interrupt(
@@ -2223,6 +3154,10 @@ class InlineREPL:
                                 and selection_result.type == PipelineEventType.PIPELINE_COMPLETED
                             ):
                                 return selection_result
+                            if isinstance(
+                                selection_result, PipelineEvent
+                            ) and self._is_pipeline_state_persistence_failure_event(selection_result):
+                                return selection_result
                             if self._pipeline_waiting_input:
                                 return None
                             if selection_result is True and self._pipeline:
@@ -2250,6 +3185,10 @@ class InlineREPL:
                                 isinstance(tabs_interrupted, PipelineEvent)
                                 and tabs_interrupted.type == PipelineEventType.PIPELINE_COMPLETED
                             ):
+                                return tabs_interrupted
+                            if isinstance(
+                                tabs_interrupted, PipelineEvent
+                            ) and self._is_pipeline_state_persistence_failure_event(tabs_interrupted):
                                 return tabs_interrupted
                             if self._pipeline_waiting_input:
                                 return None
@@ -2408,9 +3347,6 @@ class InlineREPL:
 
         stop_keys = asyncio.Event()
         interrupt_requested = asyncio.Event()
-        input_mode = False
-        input_chars: list[str] = []
-        input_done = asyncio.Event()
         parent_task = asyncio.current_task()
 
         def _request_pipeline_cancel() -> None:
@@ -2420,7 +3356,6 @@ class InlineREPL:
                 parent_task.cancel()
 
         async def key_reader():
-            nonlocal input_mode
             loop = asyncio.get_running_loop()
             try:
                 with RawInputCapture(use_cbreak=True) as cap:
@@ -2432,26 +3367,6 @@ class InlineREPL:
                         if key_event.ctrl and key_event.key == "c":
                             _request_pipeline_cancel()
                             return
-
-                        if input_mode:
-                            if key_event.key == "enter":
-                                input_done.set()
-                                return
-                            if key_event.key == "escape":
-                                input_chars.clear()
-                                input_done.set()
-                                return
-                            if key_event.key == "backspace":
-                                if input_chars:
-                                    input_chars.pop()
-                            elif key_event.key == "paste":
-                                if key_event.char:
-                                    input_chars.extend(key_event.char)
-                            elif key_event.char and key_event.char.isprintable():
-                                input_chars.append(key_event.char)
-                            tabs.set_status_message(f"✎ {''.join(input_chars)}█")
-                            _live_update(tabs.render())
-                            continue
 
                         if key_event.key == "escape":
                             interrupt_requested.set()
@@ -2471,26 +3386,24 @@ class InlineREPL:
                 pass
 
         async def _handle_esc_interrupt() -> bool:
-            """Handle ESC interrupt inline (no live.stop). Returns True if pipeline restarted."""
-            nonlocal input_mode, interrupt_feedback
+            """Handle ESC interrupt prompt. Returns True if pipeline restarted."""
+            nonlocal interrupt_feedback
             if self._pipeline:
                 self._last_interrupt_paused = False
                 self._pipeline.pause_agent_loops()
+            live_stopped = False
             try:
-                input_mode = True
-                input_chars.clear()
-                input_done.clear()
-                tabs.set_status_message("✎ █")
+                await _cancel_key_task()
+                tabs.set_status_message("✎")
                 _live_update(tabs.render())
 
-                nonlocal key_task
-                key_task = asyncio.create_task(key_reader())
-                await input_done.wait()
+                live.stop()
+                live_stopped = True
+                user_input = await self._read_pipeline_interrupt_input()
+                live.start()
+                live_stopped = False
 
-                user_input = "".join(input_chars).strip()
-                input_mode = False
-
-                if user_input:
+                if not user_input.is_empty:
                     tabs.set_status_message(_("Judging your input..."))
                     _live_update(tabs.render())
                     needs_restart, feedback = await self._handle_mid_pipeline_message(user_input, suppress_render=True)
@@ -2504,6 +3417,8 @@ class InlineREPL:
                 else:
                     tabs.set_status_message("")
             finally:
+                if live_stopped:
+                    live.start()
                 if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
                     self._pipeline.resume_agent_loops()
             interrupt_requested.clear()
@@ -2595,7 +3510,10 @@ class InlineREPL:
                         PipelineEventType.PIPELINE_COMPLETED,
                         PipelineEventType.ROLLBACK_TRIGGERED,
                     ):
-                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                        if (
+                            event.type == PipelineEventType.PIPELINE_COMPLETED
+                            or self._is_pipeline_state_persistence_failure_event(event)
+                        ):
                             terminal_event = event
                         break
 
@@ -2675,6 +3593,7 @@ class InlineREPL:
             return terminal_event
 
         if selected and self._pipeline is not None:
+            self._pipeline_waiting_input = False
             selected_name = selected.selected_candidate_name
             selected_label = selected.display_label or selected_name
             self._record_pipeline_display_candidate_selected(
@@ -2745,9 +3664,6 @@ class InlineREPL:
 
         stop_keys = asyncio.Event()
         interrupt_requested = asyncio.Event()
-        input_mode = False
-        input_chars: list[str] = []
-        input_done = asyncio.Event()
         parent_task = asyncio.current_task()
 
         def _request_pipeline_cancel() -> None:
@@ -2757,7 +3673,6 @@ class InlineREPL:
                 parent_task.cancel()
 
         async def key_reader():
-            nonlocal input_mode
             loop = asyncio.get_running_loop()
             try:
                 with RawInputCapture(use_cbreak=True) as cap:
@@ -2769,27 +3684,6 @@ class InlineREPL:
                         if key_event.ctrl and key_event.key == "c":
                             _request_pipeline_cancel()
                             return
-
-                        if input_mode:
-                            if key_event.key == "enter":
-                                input_done.set()
-                                return
-                            if key_event.key == "escape":
-                                input_chars.clear()
-                                input_done.set()
-                                return
-                            if key_event.key == "backspace":
-                                if input_chars:
-                                    input_chars.pop()
-                            elif key_event.key == "paste":
-                                if key_event.char:
-                                    input_chars.extend(key_event.char)
-                            elif key_event.char and key_event.char.isprintable():
-                                input_chars.append(key_event.char)
-                            if tabs_renderer:
-                                tabs_renderer.set_input_line("".join(input_chars))
-                            _update_live()
-                            continue
 
                         if key_event.key == "escape":
                             interrupt_requested.set()
@@ -2847,7 +3741,7 @@ class InlineREPL:
         key_task: asyncio.Task | None = None
 
         async def _prompt_child_permission(sub_id: str, inner: PermissionRequestEvent) -> None:
-            nonlocal input_mode, key_task, live
+            nonlocal key_task, live
             response_future = inner.response_future
             if response_future is None or response_future.done():
                 return
@@ -2855,9 +3749,6 @@ class InlineREPL:
             allowed = False
             try:
                 await _stop_key_reader()
-                input_mode = False
-                input_chars.clear()
-                input_done.clear()
                 if tabs_renderer:
                     tabs_renderer.set_input_line(None)
                 live.stop()
@@ -2887,22 +3778,22 @@ class InlineREPL:
                     if self._pipeline:
                         self._last_interrupt_paused = False
                         self._pipeline.pause_agent_loops()
+                    live_stopped = False
                     try:
-                        input_mode = True
-                        input_chars.clear()
-                        input_done.clear()
+                        await _cancel_key_task()
                         if tabs_renderer:
-                            tabs_renderer.set_input_line("")
+                            tabs_renderer.set_input_line("✎")
                         _update_live()
-                        key_task = asyncio.create_task(key_reader())
-                        await input_done.wait()
 
-                        user_input = "".join(input_chars).strip()
-                        input_mode = False
+                        live.stop()
+                        live_stopped = True
+                        user_input = await self._read_pipeline_interrupt_input()
+                        live.start()
+                        live_stopped = False
                         if tabs_renderer:
                             tabs_renderer.set_input_line(None)
 
-                        if user_input:
+                        if not user_input.is_empty:
                             if tabs_renderer:
                                 tabs_renderer.set_input_line(_("Judging your input..."))
                             _update_live()
@@ -2929,6 +3820,8 @@ class InlineREPL:
                                 for acc in accumulators.values():
                                     acc.text_buffer += "\n" + feedback + "\n"
                     finally:
+                        if live_stopped:
+                            live.start()
                         if self._pipeline and not getattr(self, "_last_interrupt_paused", False):
                             self._pipeline.resume_agent_loops()
                     interrupt_requested.clear()
@@ -2995,7 +3888,10 @@ class InlineREPL:
                         PipelineEventType.PIPELINE_COMPLETED,
                         PipelineEventType.STEP_FAILED,
                     ):
-                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                        if (
+                            event.type == PipelineEventType.PIPELINE_COMPLETED
+                            or self._is_pipeline_state_persistence_failure_event(event)
+                        ):
                             terminal_event = event
                         break
 
@@ -3072,10 +3968,24 @@ class InlineREPL:
         """
         from iac_code.pipeline.engine.events import PipelineEventType
 
+        if self._is_pipeline_state_persistence_failure_event(event):
+            self._pipeline_state_persistence_failed = True
         if event.type == PipelineEventType.PIPELINE_STARTED:
             self._pipeline_step_names = event.data.get("step_names", [])
             self._pipeline_start_time = time.time()
             self._pipeline_completed_indices = set()
+
+    @staticmethod
+    def _is_pipeline_state_persistence_failure_event(event) -> bool:
+        from iac_code.pipeline.engine.events import PipelineEventType
+
+        if getattr(event, "type", None) != PipelineEventType.STEP_FAILED:
+            return False
+        data = getattr(event, "data", {})
+        if not isinstance(data, dict):
+            return False
+        error_details = data.get("error_details", {})
+        return isinstance(error_details, dict) and error_details.get("type") == "PipelineStatePersistenceError"
 
     def _render_pipeline_event(self, event):
         from rich.panel import Panel
@@ -3105,6 +4015,10 @@ class InlineREPL:
                 err = event.data.get("error", "")
                 step_id = event.step_id or ""
                 con.print(f"  [red]✗ {display_step_name(step_id)}[/] [dim]── {err}[/]")
+            case PipelineEventType.PIPELINE_WARNING:
+                reason = str(event.data.get("reason") or "warning")
+                message = str(event.data.get("message") or _("Pipeline warning: {reason}").format(reason=reason))
+                con.print(f"  [yellow]⚠[/] [yellow]{message}[/]")
             case PipelineEventType.USER_INPUT_REQUIRED:
                 options = event.data.get("options", [])
                 prompt_text = event.data.get("prompt", "")
@@ -3454,12 +4368,16 @@ class InlineREPL:
             logger.warning("Failed to inspect terminal pipeline sidecar: {}", exc)
             return None
 
-    def _persist_pipeline_visible_user_turn(self, user_input: str) -> None:
+    def _persist_pipeline_visible_user_turn(self, user_input: str | "PipelineUserInput") -> None:
         """Persist the user-visible pipeline prompt into the root session."""
-        if not isinstance(user_input, str) or not user_input.strip():
+        from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
+
+        pipeline_input = normalize_pipeline_user_input(user_input)
+        if pipeline_input.is_empty:
             return
+        visible_input = pipeline_input.content if pipeline_input.has_images else pipeline_input.display_text
         try:
-            injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": user_input})
+            injected = self._agent_loop.context_manager.add_raw_message({"role": "user", "content": visible_input})
             self._session_storage.append(
                 self._original_cwd,
                 self._session_id,
@@ -3698,12 +4616,13 @@ class InlineREPL:
     @staticmethod
     def _count_user_turns(messages: list) -> int:
         from iac_code.agent.message import ToolResultBlock, is_recalled_memory_message
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         turns = 0
         for message in messages:
             if getattr(message, "role", None) != "user":
                 continue
-            if is_recalled_memory_message(message):
+            if is_recalled_memory_message(message) or is_cleanup_prompt_message(message):
                 continue
             content = getattr(message, "content", "")
             if isinstance(content, list) and any(isinstance(block, ToolResultBlock) for block in content):
@@ -3729,6 +4648,7 @@ class InlineREPL:
         new_messages = self._with_terminal_pipeline_abort_notice(new_messages, pipeline_cwd, new_session_id)
         self._agent_loop.replace_session(new_session_id, new_messages or None)
         self._session_id = new_session_id
+        self._clear_pipeline_cleanup_ledger_path()
         self._was_resumed = True
         self._session_name = self._load_current_session_name()
 
@@ -3752,6 +4672,8 @@ class InlineREPL:
                 session_name=self._session_name,
             )
         )
+        self._print_cleanup_resume_summary()
+        self._prune_cleanup_prompts_if_no_pending_cleanup()
         if new_messages:
             self._replay_resume_messages(new_messages)
             self.console.print()
@@ -3812,9 +4734,7 @@ class InlineREPL:
                 session_id=new_session_id,
                 cwd=pipeline_cwd,
                 permission_context_getter=lambda: self.store.get_state().permission_context,
-                memory_content_getter=(
-                    lambda: self._memory_manager.get_prompt_content() if self._memory_manager else ""
-                ),
+                memory_content_getter=self._pipeline_memory_content_getter(),
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
                 resume_from_sidecar=True,
             )
@@ -3850,7 +4770,23 @@ class InlineREPL:
         from iac_code.pipeline.display_names import display_step_name
         from iac_code.ui.components.select import InputOption, Select, SelectLayout, TextOption
 
-        meta = _yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+        try:
+            loaded = _yaml.safe_load(meta_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, UnicodeDecodeError, _yaml.YAMLError) as exc:
+            self.renderer.print_system_message(
+                _("Could not read pipeline state metadata: {reason}").format(reason=str(exc) or type(exc).__name__),
+                style="yellow",
+            )
+            return "discard"
+        if loaded is None:
+            loaded = {}
+        if not isinstance(loaded, dict):
+            self.renderer.print_system_message(
+                _("Pipeline state metadata is invalid; continuing as normal chat."),
+                style="yellow",
+            )
+            return "discard"
+        meta = loaded
         current_step = display_step_name(str(meta.get("current_step", "?")))
 
         title = _("Found pipeline state in this session (paused at: {step}).").format(step=current_step)
@@ -3945,11 +4881,12 @@ class InlineREPL:
     def _extract_last_user_text(messages: list) -> str:
         """Walk messages from newest to oldest, return first plain user text."""
         from iac_code.agent.message import RECALLED_MEMORY_MARKER, TextBlock, is_recalled_memory_message
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         for msg in reversed(messages):
             if msg.role != "user":
                 continue
-            if is_recalled_memory_message(msg):
+            if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             content = msg.content
             if isinstance(content, str):

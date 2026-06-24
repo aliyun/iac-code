@@ -21,8 +21,10 @@ from iac_code.services.telemetry import add_metric, log_event
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.services.telemetry.sanitize import sanitize_error_message
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.cloud.aliyun.template_source import reject_template_body_param
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
+from iac_code.types.stream_events import ResourceObservedEvent
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +144,10 @@ def _emit_validate_template_event(response_body: dict | Any, duration_ms: int) -
         1,
         {"outcome": outcome},
     )
+
+
+def _string_value(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 class AliyunApi(BaseCloudApi):
@@ -408,6 +414,8 @@ class AliyunApi(BaseCloudApi):
 
         # ROS: TemplateURL as local file path → read into TemplateBody
         if product == "ros":
+            if error := reject_template_body_param(params, pipeline_mode=context.pipeline_mode):
+                return ToolResult.error(error)
             template_url = params.get("TemplateURL", "")
             if template_url and not template_url.startswith(("http://", "https://", "oss://")):
                 params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
@@ -517,6 +525,22 @@ class AliyunApi(BaseCloudApi):
             # Special case: ROS ValidateTemplate
             if api_service == "ROS" and action == "ValidateTemplate":
                 _emit_validate_template_event(body, duration_ms)
+
+            if context.event_queue is not None and product == "ros" and action == "CreateStack":
+                stack_id = _string_value(body.get("StackId")) if isinstance(body, dict) else None
+                if stack_id:
+                    await context.event_queue.put(
+                        ResourceObservedEvent(
+                            provider="ros",
+                            resource_type="stack",
+                            resource_id=stack_id,
+                            resource_name=str(params.get("StackName") or params.get("stack_name") or ""),
+                            region_id=region,
+                            action=action,
+                            tool_name=self.name,
+                            tool_use_id=context.tool_use_id,
+                        )
+                    )
 
             return ToolResult.success(json.dumps(body, ensure_ascii=False, indent=2))
         except Exception as e:

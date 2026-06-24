@@ -12,6 +12,7 @@ from iac_code.a2a.pipeline_snapshot import (
     A2APipelineSnapshotStore,
     reduce_pipeline_events,
     sanitize_pipeline_artifact_uris,
+    sanitize_pipeline_cleanup_private_fields,
 )
 from iac_code.i18n import _
 
@@ -44,9 +45,9 @@ class A2APipelineRecoveryService:
         snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
         snapshot = snapshot_store.load()
         events = journal.read_all_repairing_tail()
+        context_events = _events_for_task(events, task_id=None, context_id=context_id)
         recovery_task_id = task_id
         if recovery_task_id is None:
-            context_events = _events_for_task(events, task_id=None, context_id=context_id)
             snapshot_task_id = None
             if isinstance(snapshot, dict) and _snapshot_matches_context(snapshot, context_id=context_id):
                 snapshot_task_id = snapshot.get("taskId")
@@ -88,21 +89,45 @@ class A2APipelineRecoveryService:
                 snapshot_store.save(snapshot)
                 snapshot = snapshot_store.load() or snapshot
         elif recovery_task_id is not None and (
-            not _snapshot_matches(
+            not _snapshot_matches_or_delivery_alias(
                 snapshot,
                 task_id=recovery_task_id,
                 context_id=context_id,
+                context_events=context_events,
             )
-            or not _snapshot_seen_events_are_within_context_task(
-                snapshot,
-                _events_for_task(events, task_id=None, context_id=context_id),
-                task_id=recovery_task_id,
+            or (
+                _snapshot_matches(snapshot, task_id=recovery_task_id, context_id=context_id)
+                and not _snapshot_seen_events_are_within_context_task(
+                    snapshot,
+                    context_events,
+                    task_id=recovery_task_id,
+                )
+            )
+            or (
+                not _snapshot_matches(snapshot, task_id=recovery_task_id, context_id=context_id)
+                and _snapshot_is_missing_delivery_alias_events(
+                    snapshot,
+                    task_id=recovery_task_id,
+                    context_events=context_events,
+                )
             )
         ):
-            if not replay_events:
+            rebuild_events = _rebuild_events_for_recovery_task(
+                events,
+                snapshot=snapshot,
+                task_id=recovery_task_id,
+                context_id=context_id,
+                fallback_events=replay_events,
+            )
+            if not rebuild_events:
                 raise ValueError(_("A2A pipeline state not found"))
-            snapshot = reduce_pipeline_events(replay_events)
-            if not _snapshot_matches(snapshot, task_id=recovery_task_id, context_id=context_id):
+            snapshot = reduce_pipeline_events(rebuild_events)
+            if not _snapshot_matches_or_delivery_alias(
+                snapshot,
+                task_id=recovery_task_id,
+                context_id=context_id,
+                context_events=context_events,
+            ):
                 raise ValueError(_("A2A pipeline state not found"))
             if task_id is None:
                 snapshot_store.save(snapshot)
@@ -132,7 +157,13 @@ class A2APipelineRecoveryService:
             snapshot = snapshot_store.load() or snapshot
 
         if task_id is not None and not _snapshot_matches(snapshot, task_id=task_id, context_id=context_id):
-            raise ValueError(_("A2A pipeline state not found"))
+            if not _snapshot_matches_or_delivery_alias(
+                snapshot,
+                task_id=task_id,
+                context_id=context_id,
+                context_events=context_events,
+            ):
+                raise ValueError(_("A2A pipeline state not found"))
         if (
             task_id is None
             and recovery_task_id is not None
@@ -149,8 +180,8 @@ class A2APipelineRecoveryService:
         replay_after = after_sequence if after_sequence is not None else _int_value(snapshot.get("lastSequence"), 0)
         events_after_replay = [event for event in replay_events if _int_value(event.get("sequence"), 0) > replay_after]
         return {
-            "snapshot": _json_compatible(sanitize_pipeline_artifact_uris(snapshot)),
-            "events": _json_compatible(sanitize_pipeline_artifact_uris(events_after_replay)),
+            "snapshot": _json_compatible(_sanitize_public_recovery_payload(snapshot)),
+            "events": _json_compatible(_sanitize_public_recovery_payload(events_after_replay)),
         }
 
     async def _verify_task_owner(
@@ -182,6 +213,10 @@ def _json_compatible(value: Any) -> Any:
     return value
 
 
+def _sanitize_public_recovery_payload(value: Any) -> Any:
+    return sanitize_pipeline_cleanup_private_fields(sanitize_pipeline_artifact_uris(value))
+
+
 def _events_for_task(
     events: list[dict[str, Any]],
     *,
@@ -191,11 +226,75 @@ def _events_for_task(
     context_events = [event for event in events if event.get("contextId") == context_id]
     if task_id is None:
         return context_events
-    return [event for event in context_events if event.get("taskId") == task_id]
+    return [
+        event for event in context_events if event.get("taskId") == task_id or event.get("deliveryTaskId") == task_id
+    ]
 
 
 def _snapshot_matches(snapshot: dict[str, Any], *, task_id: str, context_id: str) -> bool:
     return snapshot.get("taskId") == task_id and snapshot.get("contextId") == context_id
+
+
+def _snapshot_matches_or_delivery_alias(
+    snapshot: dict[str, Any],
+    *,
+    task_id: str,
+    context_id: str,
+    context_events: list[dict[str, Any]],
+) -> bool:
+    if _snapshot_matches(snapshot, task_id=task_id, context_id=context_id):
+        return True
+    if not _snapshot_matches_context(snapshot, context_id=context_id):
+        return False
+    snapshot_task_id = snapshot.get("taskId")
+    if not isinstance(snapshot_task_id, str):
+        return False
+    return any(
+        event.get("taskId") == snapshot_task_id and event.get("deliveryTaskId") == task_id for event in context_events
+    )
+
+
+def _snapshot_is_missing_delivery_alias_events(
+    snapshot: dict[str, Any],
+    *,
+    task_id: str,
+    context_events: list[dict[str, Any]],
+) -> bool:
+    snapshot_task_id = snapshot.get("taskId")
+    if not isinstance(snapshot_task_id, str):
+        return False
+    alias_events = [
+        event
+        for event in context_events
+        if event.get("taskId") == snapshot_task_id and event.get("deliveryTaskId") == task_id
+    ]
+    if not alias_events:
+        return False
+    seen_event_ids = snapshot.get("seenEventIds")
+    if isinstance(seen_event_ids, list):
+        seen = {event_id for event_id in seen_event_ids if isinstance(event_id, str)}
+        return any(isinstance(event.get("eventId"), str) and event["eventId"] not in seen for event in alias_events)
+    snapshot_sequence = _int_value(snapshot.get("lastSequence"), 0)
+    return any(_int_value(event.get("sequence"), 0) > snapshot_sequence for event in alias_events)
+
+
+def _rebuild_events_for_recovery_task(
+    events: list[dict[str, Any]],
+    *,
+    snapshot: dict[str, Any],
+    task_id: str,
+    context_id: str,
+    fallback_events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if _snapshot_matches(snapshot, task_id=task_id, context_id=context_id):
+        return fallback_events
+    snapshot_task_id = snapshot.get("taskId")
+    if not isinstance(snapshot_task_id, str):
+        return fallback_events
+    source_events = _events_for_task(events, task_id=snapshot_task_id, context_id=context_id)
+    if any(event.get("deliveryTaskId") == task_id for event in source_events):
+        return source_events
+    return fallback_events
 
 
 def _snapshot_matches_context(snapshot: dict[str, Any], *, context_id: str) -> bool:
@@ -270,7 +369,15 @@ def _snapshot_seen_events_are_within_context_task(
     event_task_ids = {
         event.get("eventId"): event.get("taskId") for event in context_events if isinstance(event.get("eventId"), str)
     }
+    event_delivery_task_ids = {
+        event.get("eventId"): event.get("deliveryTaskId")
+        for event in context_events
+        if isinstance(event.get("eventId"), str)
+    }
     return all(
-        not isinstance(event_id, str) or event_id not in event_task_ids or event_task_ids[event_id] == task_id
+        not isinstance(event_id, str)
+        or event_id not in event_task_ids
+        or event_task_ids[event_id] == task_id
+        or event_delivery_task_ids.get(event_id) == task_id
         for event_id in seen_event_ids
     )

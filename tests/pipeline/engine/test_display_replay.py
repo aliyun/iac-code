@@ -32,6 +32,26 @@ def test_recorder_and_reducer_preserve_repeated_attempts_after_rollback(tmp_path
     assert model.interrupted is True
 
 
+def test_display_replay_ignores_pipeline_warning_without_terminal_change(tmp_path) -> None:
+    path = tmp_path / "display.jsonl"
+    recorder = PipelineDisplayRecorder(path)
+
+    recorder.record("pipeline_started", pipeline_name="selling", timestamp=1.0)
+    recorder.record("step_started", step_id="deploying", payload={"index": 1, "total": 1}, timestamp=1.5)
+    recorder.record(
+        "pipeline_warning",
+        step_id="deploying",
+        payload={"reason": "cleanup_tracking_unavailable"},
+        timestamp=2.0,
+    )
+
+    model = PipelineDisplayReducer().reduce(load_display_events(path))
+
+    assert model.interrupted is False
+    assert model.failed is False
+    assert model.attempts[-1].status == "running"
+
+
 def test_reducer_attaches_transcript_ids_from_event_payload_and_attempt_metadata(tmp_path):
     path = tmp_path / "display.jsonl"
     recorder = PipelineDisplayRecorder(path)

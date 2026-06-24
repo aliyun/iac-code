@@ -54,6 +54,21 @@ conclusion_schema:
       description: 逐资源生命周期意图；后续步骤必须优先使用此字段判断新建、复用、引用或禁止
     non_functional:
       type: object
+      properties:
+        region_preference:
+          type: string
+          description: 用户指定或默认的阿里云地域，如 cn-hangzhou
+        stack_name:
+          type: string
+          description: 用户明确指定的 ROS 资源栈名称或 StackName，必须原样保留
+        naming_constraints:
+          type: array
+          items:
+            type: string
+          description: 其它资源命名或禁止使用默认名称的约束
+        network_constraints:
+          type: object
+          description: 用户指定的 VPC、可用区、CIDR 等网络参数约束
     scale_hint:
       type: string
     budget_constraint:
@@ -165,6 +180,8 @@ conclusion_schema:
 - `scale_hint`：根据上下文推断的业务规模，影响后续规格选择
 - `budget_constraint`：如用户提到预算则填写（如 "月预算500以内"），否则为 null
 - `region_preference`（在 `non_functional` 中）：如用户有地域偏好则填写，否则默认 "cn-hangzhou"
+- `stack_name`（在 `non_functional` 中）：如用户指定“资源栈名称”“StackName”或 ROS 资源栈名称，必须把精确名称写入该字段；不得把模板名、候选方案名或默认名称替代为 stack_name
+- `network_constraints`（在 `non_functional` 中）：如用户指定 VPC ID、ZoneId、CidrBlock、已有网络资源或多个网段关系，必须原样保留
 
 ### 资源生命周期提取规则
 

@@ -190,6 +190,22 @@ class ToolEmittedEvent:
 
 
 @dataclass
+class ResourceObservedEvent(ToolEmittedEvent):
+    """A cloud resource id became known before the lifecycle tool completed."""
+
+    provider: str
+    resource_type: str
+    resource_id: str
+    resource_name: str = ""
+    region_id: str = ""
+    action: str = ""
+    tool_name: str = ""
+    tool_use_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    type: Literal["resource_observed"] = "resource_observed"
+
+
+@dataclass
 class StackProgressEvent(ToolEmittedEvent):
     """Real-time progress from a stack lifecycle operation."""
 
@@ -295,6 +311,7 @@ StreamEvent = Union[
     TaskNotificationEvent,
     QueuedInputSubmittedEvent,
     SubAgentToolEvent,
+    ResourceObservedEvent,
     StackProgressEvent,
     StackInstancesProgressEvent,
     PlanEvent,

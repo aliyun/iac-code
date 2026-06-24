@@ -24,6 +24,21 @@ conclusion_schema:
     error:
       type: string
       description: 失败原因（status 为 failed 时必填）
+  allOf:
+    - if:
+        properties:
+          status:
+            const: success
+        required: [status]
+      then:
+        required: [stack_id]
+    - if:
+        properties:
+          status:
+            const: failed
+        required: [status]
+      then:
+        required: [error]
 ---
 
 # 阿里云 ROS 部署技能
@@ -45,6 +60,7 @@ conclusion_schema:
 - 当 pipeline prompt 明确说明用户已确认选择/部署时，表示 pipeline 已完成部署确认，不要再次请求用户确认。
 - 在已确认的 pipeline 部署步骤中，可展示将使用的 VPC、可用区、网段、Stack 名等参数摘要，但展示后必须继续执行部署，不要询问“是否确认部署”或“是否确认部署参数”。
 - 仅当本技能被用户直接触发，或删除/更新等高风险操作没有上层确认时，才需要先询问用户确认；删除/更新操作使用 ⚠️ 警告措辞。
+- 删除请求本身不等于删除确认。只有用户明确回复“确认删除”“我确认删除”等删除确认语句，或上下文显式提供 `delete_confirmed: true` 时，才可执行删除；未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`。
 - `status: cancelled` 只表示用户明确取消部署，不得用 status: cancelled 表示等待用户确认。
 
 ## 模板校验
@@ -64,16 +80,33 @@ conclusion_schema:
 查询步骤：
 1. 解析模板 Parameters，识别库存相关参数及对应产品
 2. 调用各产品可用性 API（具体 API 见 [references/cloud-products/](references/cloud-products/) 各产品文件的「可用性查询」节）
-3. 找出公共可用区（所有资源都有库存的可用区）
-4. 按 cloud-products 中的推荐规格优先匹配，不可用时选最接近的替代
-5. 得到选定参数；若上层 pipeline 已确认部署，展示选定结果后继续执行，不要再次请求用户确认。
+3. 核对最终部署参数中的可用区和规格是否可用
+4. 参数不可用时先报告冲突详情并尝试调整非用户指定参数；仍无法成功创建资源栈时，才可调整用户指定参数
 
 无法找到公共可用区时，告知用户冲突详情，建议换规格系列或换地域。
+
+## 部署参数装配
+
+CreateStack 前按以下优先级确定 `Parameters`：
+
+1. `selected_plan.effective_deployment_parameters` 非空时，直接作为最终部署参数集。
+2. 否则使用 `selected_plan.selected_candidate_result.cost.deployment_parameters`。
+3. 仍缺少模板必填参数时，使用模板 Default 或上下文已有值补足；无法补足时返回 `status: failed` 或通过 rollback_request 回到 `confirm_and_select`。
+
+装配参数时不得改写模板 `Default`，不得编造缺失的外部输入（LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等）。参数不可用或 CreateStack 无法成功时，优先调整非用户指定参数；仍无法成功创建资源栈时，才可调整用户指定参数。部署步骤不计算费用。
+
+## StackName
+
+新建 Stack 时，一开始就确定唯一 `StackName`，并传给 `CreateStack`。`StackName` 使用方案或服务简名作为前缀，并追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。
+
+- CreateStack 必须传 StackName，不要省略，不要使用容易重复的固定名称。
+- `UpdateStack`、`ContinueCreateStack`、`DeleteStack` 面向已有 Stack 时，使用上下文中的现有 Stack 标识，不要生成新的 StackName。
 
 ## 执行部署
 
 - 使用 ros_stack 工具执行 CreateStack/UpdateStack/ContinueCreateStack/DeleteStack，禁止用 Bash
 - CreateStack 必须传 `DisableRollback: true`
+- CreateStack 使用装配后的 `Parameters` 字典；不要手动展开为 `Parameters.N.ParameterKey`
 
 > **TemplateURL 支持本地文件路径**：ros_stack 中 TemplateURL 可传本地文件路径（如 `/tmp/template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
 

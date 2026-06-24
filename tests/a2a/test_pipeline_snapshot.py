@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -49,10 +50,10 @@ def test_snapshot_load_logs_parse_failures(tmp_path, caplog) -> None:
 def test_snapshot_save_cleans_temp_file_when_replace_fails(monkeypatch, tmp_path, caplog) -> None:
     store = A2APipelineSnapshotStore(tmp_path)
 
-    def fail_replace(self: Path, target: Path) -> Path:
-        raise PermissionError(f"locked: {target}")
+    def fail_write(path: Path, value: dict, *, durable: bool = True) -> None:
+        raise PermissionError(f"locked: {path}")
 
-    monkeypatch.setattr(Path, "replace", fail_replace)
+    monkeypatch.setattr(pipeline_snapshot, "atomic_write_json", fail_write)
     caplog.set_level(logging.WARNING, logger="iac_code.a2a.pipeline_snapshot")
 
     assert store.save({"status": "working"}) is False
@@ -90,6 +91,26 @@ def test_reduce_steps_and_pending_input() -> None:
     assert snapshot["pendingInput"]["inputId"] == "input-confirm_and_select-1"
 
 
+def test_pipeline_warning_does_not_change_terminal_snapshot_status() -> None:
+    started = _base("evt-start", 1, "pipeline_started")
+    warning = _base("evt-warning", 2, "pipeline_warning", status="working")
+    warning["data"] = {"reason": "cleanup_tracking_unavailable"}
+
+    snapshot = reduce_pipeline_events([started, warning])
+
+    assert snapshot["status"] == "working"
+    assert snapshot["lastSequence"] == 2
+    assert snapshot.get("completedAt") is None
+    assert snapshot["control"]["warningHistory"] == [
+        {
+            "eventId": "evt-warning",
+            "sequence": 2,
+            "createdAt": "2026-06-08T10:00:00Z",
+            "data": {"reason": "cleanup_tracking_unavailable"},
+        }
+    ]
+
+
 def test_reduce_input_received_completes_waiting_step() -> None:
     step = _base("evt-1", 1, "step_started", scope="step")
     step["step"] = {
@@ -112,6 +133,173 @@ def test_reduce_input_received_completes_waiting_step() -> None:
     assert snapshot["pendingInput"] is None
     assert snapshot["steps"][0]["status"] == "completed"
     assert snapshot["steps"][0]["completedAt"] == "2026-06-08T10:00:00Z"
+
+
+def test_reduce_cleanup_handoff_updates_snapshot_cleanup() -> None:
+    handoff = _base("evt-cleanup-handoff", 1, "pipeline_handoff_ready", status="completed")
+    handoff["data"] = {
+        "action": "switch_to_normal",
+        "targetMode": "normal",
+        "outcome": "completed",
+        "summary": "[Pipeline Handoff Context]",
+        "cleanup": {
+            "status": "pending",
+            "resourceCount": 1,
+            "statusMessage": "检测到 1 个回滚残留资源，开始清理流程。",
+            "resources": [{"resourceId": "stack-123", "regionId": "cn-hangzhou"}],
+        },
+    }
+
+    snapshot = reduce_pipeline_events([handoff])
+
+    assert snapshot["cleanup"]["status"] == "pending"
+    assert snapshot["cleanup"]["resourceCount"] == 1
+    assert snapshot["cleanup"]["resources"] == [{"resourceId": "stack-123", "regionId": "cn-hangzhou"}]
+    assert snapshot["cleanup"]["history"][-1]["eventType"] == "pipeline_handoff_ready"
+    assert snapshot["normalHandoff"]["data"]["cleanup"]["resourceCount"] == 1
+
+
+def test_reduce_cleanup_progress_events_update_snapshot_cleanup() -> None:
+    started = _base("evt-cleanup-started", 1, "cleanup_started", scope="cleanup")
+    started["data"] = {
+        "status": "started",
+        "resourceCount": 1,
+        "resources": [{"resourceId": "stack-123", "regionId": "cn-hangzhou"}],
+    }
+    progress = _base("evt-cleanup-progress", 2, "cleanup_progress", scope="cleanup")
+    progress["data"] = {
+        "status": "in_progress",
+        "resourceId": "stack-123",
+        "regionId": "cn-hangzhou",
+        "stackStatus": "DELETE_IN_PROGRESS",
+    }
+    completed = _base("evt-cleanup-completed", 3, "cleanup_completed", scope="cleanup", status="completed")
+    completed["data"] = {
+        "status": "completed",
+        "resourceId": "stack-123",
+        "regionId": "cn-hangzhou",
+        "stackStatus": "DELETE_COMPLETE",
+    }
+
+    snapshot = reduce_pipeline_events([started, progress, completed])
+
+    assert snapshot["cleanup"]["status"] == "completed"
+    assert snapshot["cleanup"]["resourceCount"] == 1
+    assert snapshot["cleanup"]["resources"][0]["resourceId"] == "stack-123"
+    assert snapshot["cleanup"]["resources"][0]["stackStatus"] == "DELETE_COMPLETE"
+    assert [item["eventType"] for item in snapshot["cleanup"]["history"]] == [
+        "cleanup_started",
+        "cleanup_progress",
+        "cleanup_completed",
+    ]
+
+
+def test_reduce_cleanup_status_aggregates_multiple_resources() -> None:
+    started = _base("evt-cleanup-started", 1, "cleanup_started", scope="cleanup")
+    started["data"] = {
+        "status": "pending",
+        "resourceCount": 2,
+        "resources": [
+            {
+                "provider": "ros",
+                "resourceType": "stack",
+                "resourceId": "stack-a",
+                "regionId": "cn-hangzhou",
+                "cleanupStatus": "pending",
+            },
+            {
+                "provider": "ros",
+                "resourceType": "stack",
+                "resourceId": "stack-b",
+                "regionId": "cn-hangzhou",
+                "cleanupStatus": "pending",
+            },
+        ],
+    }
+    completed_one = _base("evt-cleanup-one-complete", 2, "cleanup_completed", scope="cleanup")
+    completed_one["data"] = {
+        "status": "completed",
+        "provider": "ros",
+        "resourceType": "stack",
+        "resourceId": "stack-a",
+        "regionId": "cn-hangzhou",
+        "cleanupStatus": "completed",
+        "stackStatus": "DELETE_COMPLETE",
+    }
+    failed_one = _base("evt-cleanup-one-failed", 3, "cleanup_failed", scope="cleanup")
+    failed_one["data"] = {
+        "status": "failed",
+        "provider": "ros",
+        "resourceType": "stack",
+        "resourceId": "stack-b",
+        "regionId": "cn-hangzhou",
+        "cleanupStatus": "failed",
+        "stackStatus": "DELETE_FAILED",
+    }
+
+    partial = reduce_pipeline_events([started, completed_one])
+    failed = reduce_pipeline_events([started, completed_one, failed_one])
+
+    assert partial["cleanup"]["status"] == "pending"
+    assert failed["cleanup"]["status"] == "failed"
+
+
+def test_reduce_cleanup_progress_distinguishes_provider_and_resource_type() -> None:
+    started = _base("evt-cleanup-started", 1, "cleanup_started", scope="cleanup")
+    started["data"] = {
+        "status": "started",
+        "resourceCount": 3,
+        "resources": [
+            {
+                "provider": "ros",
+                "resourceType": "stack",
+                "resourceId": "shared-id",
+                "regionId": "cn-hangzhou",
+                "stackStatus": "DELETE_IN_PROGRESS",
+            },
+            {
+                "provider": "ros",
+                "resourceType": "stack_set",
+                "resourceId": "shared-id",
+                "regionId": "cn-hangzhou",
+                "stackStatus": "DELETE_IN_PROGRESS",
+            },
+            {
+                "provider": "terraform",
+                "resourceType": "stack",
+                "resourceId": "shared-id",
+                "regionId": "cn-hangzhou",
+                "stackStatus": "DELETE_IN_PROGRESS",
+            },
+        ],
+    }
+    type_progress = _base("evt-cleanup-type-progress", 2, "cleanup_progress", scope="cleanup")
+    type_progress["data"] = {
+        "status": "in_progress",
+        "provider": "ros",
+        "resourceType": "stack_set",
+        "resourceId": "shared-id",
+        "regionId": "cn-hangzhou",
+        "stackStatus": "DELETE_COMPLETE",
+    }
+    provider_progress = _base("evt-cleanup-provider-progress", 3, "cleanup_progress", scope="cleanup")
+    provider_progress["data"] = {
+        "status": "in_progress",
+        "provider": "terraform",
+        "resourceType": "stack",
+        "resourceId": "shared-id",
+        "regionId": "cn-hangzhou",
+        "stackStatus": "DELETE_FAILED",
+    }
+
+    snapshot = reduce_pipeline_events([started, type_progress, provider_progress])
+
+    resources = {
+        (resource["provider"], resource["resourceType"]): resource for resource in snapshot["cleanup"]["resources"]
+    }
+    assert resources[("ros", "stack")]["stackStatus"] == "DELETE_IN_PROGRESS"
+    assert resources[("ros", "stack_set")]["stackStatus"] == "DELETE_COMPLETE"
+    assert resources[("terraform", "stack")]["stackStatus"] == "DELETE_FAILED"
 
 
 def test_reduce_input_received_records_candidate_selection_details_on_step() -> None:
@@ -729,6 +917,7 @@ def test_reduce_stack_current_changed_updates_snapshot_stack_state() -> None:
         "regionId": "cn-hangzhou",
         "stackId": "stack-123",
         "stackName": "demo",
+        "stackStatus": "DELETE_COMPLETE",
         "isSuccess": True,
         "current": False,
         "cleared": True,
@@ -742,6 +931,40 @@ def test_reduce_stack_current_changed_updates_snapshot_stack_state() -> None:
     assert deleted_snapshot["stacks"]["current"] is None
     assert deleted_snapshot["stacks"]["byId"]["stack-123"]["current"] is False
     assert [item["eventId"] for item in deleted_snapshot["stacks"]["history"]] == ["evt-create", "evt-delete"]
+
+
+def test_reduce_stack_current_changed_keeps_current_for_delete_requested() -> None:
+    created = _base("evt-create", 1, "stack_current_changed", scope="stack")
+    created["data"] = {
+        "toolName": "aliyun_api",
+        "toolUseId": "toolu-create",
+        "provider": "ros",
+        "action": "CreateStack",
+        "regionId": "cn-hangzhou",
+        "stackId": "stack-123",
+        "stackName": "demo",
+        "isSuccess": True,
+        "current": True,
+    }
+    delete_requested = _base("evt-delete-requested", 2, "stack_current_changed", scope="stack")
+    delete_requested["data"] = {
+        "toolName": "ros_stack",
+        "toolUseId": "toolu-delete",
+        "provider": "ros",
+        "action": "DeleteStack",
+        "regionId": "cn-hangzhou",
+        "stackId": "stack-123",
+        "stackName": "demo",
+        "stackStatus": "DELETE_REQUESTED",
+        "isSuccess": True,
+        "current": True,
+    }
+
+    snapshot = reduce_pipeline_events([created, delete_requested])
+
+    assert snapshot["stacks"]["current"]["stackId"] == "stack-123"
+    assert snapshot["stacks"]["byId"]["stack-123"]["current"] is True
+    assert snapshot["stacks"]["byId"]["stack-123"]["stackStatus"] == "DELETE_REQUESTED"
 
 
 def test_reduce_artifact_created_prefers_top_level_artifact_metadata() -> None:
@@ -938,6 +1161,81 @@ def test_store_sanitizes_non_finite_and_non_json_values(tmp_path) -> None:
     assert loaded is not None
     assert loaded["display"]["candidateDetails"][0]["totalMonthlyCost"] is None
     assert loaded["display"]["candidateDetails"][0]["raw"].startswith("<object object at ")
+
+
+def test_store_sanitizes_cleanup_private_fields_without_dropping_input_prompt(tmp_path) -> None:
+    store = A2APipelineSnapshotStore(tmp_path / "pipeline")
+    raw_error = (
+        "DeleteStack failed AccessKeySecret=super-secret token=sk-live-1234567890 "
+        "at /Users/alice/.iac-code/projects/session/pipeline/cleanup.yaml"
+    )
+    snapshot = reduce_pipeline_events([_base("evt-1", 1, "pipeline_started")])
+    snapshot["pendingInput"] = {"prompt": "choose deployment target"}
+    snapshot["control"]["inputHistory"] = [{"prompt": "choose deployment target"}]
+    snapshot["control"]["handoffHistory"] = [
+        {
+            "data": {
+                "cleanup": {
+                    "prompt": "hidden cleanup prompt",
+                    "ledgerPath": "/tmp/cleanup.yaml",
+                    "lastError": raw_error,
+                }
+            }
+        }
+    ]
+    snapshot["normalHandoff"] = {
+        "data": {
+            "cleanup": {
+                "prompt": "hidden cleanup prompt",
+                "ledgerPath": "/tmp/cleanup.yaml",
+                "lastError": raw_error,
+            }
+        }
+    }
+    snapshot["cleanup"] = {
+        "status": "pending",
+        "resourceCount": 1,
+        "resources": [{"resourceId": "stack-123", "lastError": raw_error}],
+        "history": [
+            {"data": {"prompt": "hidden cleanup prompt", "ledgerPath": "/tmp/cleanup.yaml", "lastError": raw_error}}
+        ],
+        "prompt": "hidden cleanup prompt",
+        "ledgerPath": "/tmp/cleanup.yaml",
+        "last_error": raw_error,
+    }
+
+    store.save(snapshot)
+
+    loaded = store.load()
+    assert loaded is not None
+    assert loaded["pendingInput"]["prompt"] == "choose deployment target"
+    assert loaded["control"]["inputHistory"][0]["prompt"] == "choose deployment target"
+    assert "prompt" not in loaded["control"]["handoffHistory"][0]["data"]["cleanup"]
+    assert raw_error not in loaded["control"]["handoffHistory"][0]["data"]["cleanup"]["lastError"]
+    assert "ledgerPath" not in loaded["normalHandoff"]["data"]["cleanup"]
+    assert raw_error not in loaded["normalHandoff"]["data"]["cleanup"]["lastError"]
+    assert "prompt" not in loaded["cleanup"]
+    assert raw_error not in loaded["cleanup"]["last_error"]
+    assert raw_error not in loaded["cleanup"]["resources"][0]["lastError"]
+    assert "ledgerPath" not in loaded["cleanup"]["history"][0]["data"]
+    assert raw_error not in loaded["cleanup"]["history"][0]["data"]["lastError"]
+    rendered = json.dumps(loaded, ensure_ascii=False)
+    assert "super-secret" not in rendered
+    assert "sk-live-1234567890" not in rendered
+    assert "/Users/alice" not in rendered
+    assert "[REDACTED]" in rendered
+    assert "[PATH]" in rendered
+
+    store.path.write_text(json.dumps(snapshot), encoding="utf-8")
+    loaded = store.load()
+    assert loaded is not None
+    assert loaded["pendingInput"]["prompt"] == "choose deployment target"
+    assert "prompt" not in loaded["normalHandoff"]["data"]["cleanup"]
+    assert "ledgerPath" not in loaded["cleanup"]
+    rendered = json.dumps(loaded, ensure_ascii=False)
+    assert "super-secret" not in rendered
+    assert "sk-live-1234567890" not in rendered
+    assert "/Users/alice" not in rendered
 
 
 def test_store_returns_none_for_invalid_utf8_snapshot(tmp_path) -> None:

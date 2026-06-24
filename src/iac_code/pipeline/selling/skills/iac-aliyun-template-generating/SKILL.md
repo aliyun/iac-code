@@ -39,10 +39,11 @@ conclusion_schema:
 
 1. 分析架构方案，确定资源列表
 2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
-3. 生成 ROS YAML 模板（库存相关属性按「参数化规则」定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
-4. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
-5. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
-6. 校验通过 → 完成
+3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板
+4. 生成 ROS YAML 模板（库存相关属性按 [references/cloud-products/](references/cloud-products/) 与 [references/template-parameters.md](references/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
+5. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
+6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
+7. 校验通过 → 完成
 
 > **TemplateURL 支持本地文件路径**：aliyun_api（product=ros）中，TemplateURL 可传本地文件路径（如 `/tmp/template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
 
@@ -59,14 +60,7 @@ conclusion_schema:
 
 ## 参数化规则
 
-生成模板时，以下属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）：
-
-| 产品 | 须参数化的属性 |
-|------|---------------|
-| ECS | ZoneId, InstanceType, ImageId, SystemDiskCategory, DataDiskCategory |
-| RDS | ZoneId, DBInstanceClass, DBInstanceStorageType |
-| Redis | ZoneId, InstanceClass |
-| SLB/ALB | ZoneId |
+生成模板时，库存相关属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）。具体字段按 [references/cloud-products/](references/cloud-products/) 的产品文件和 [references/template-parameters.md](references/template-parameters.md) 执行，不在本技能重复维护产品字段清单。
 
 以下属性**不需要**参数化，直接使用合理默认值：
 - 网络：VPC CIDR、VSwitch CIDR
@@ -87,22 +81,6 @@ conclusion_schema:
 - 模板格式为 YAML
 - 使用 `!Ref`、`!GetAtt` 等内置函数引用参数和资源属性，避免硬编码
 - Outputs 中所有输出变量必须定义 Label
-
-## 常用资源类型
-
-- ALIYUN::ECS::VPC: 创建专有网络
-- ALIYUN::ECS::VSwitch: 创建交换机
-- ALIYUN::ECS::SecurityGroup: 创建安全组
-- ALIYUN::ECS::InstanceGroup: 创建 N 个 ECS 实例（通过 `MaxAmount` 指定数量）
-- ALIYUN::ECS::RunCommand: 在实例中执行自定义命令
-- ALIYUN::ECS::Invocation: 执行公共命令
-
-## 在实例中执行命令
-
-**不要使用 UserData + WaitCondition**。根据场景选择：
-
-- **自定义命令** → `ALIYUN::ECS::RunCommand` + `CommandContent`
-- **公共命令** → `ALIYUN::ECS::Invocation` + `CommandName`
 
 ## 资源和文档搜索
 

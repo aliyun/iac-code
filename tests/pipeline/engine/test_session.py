@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 
 import pytest
 import yaml
@@ -109,6 +110,27 @@ def test_session_save_failure_reraises_without_lower_layer_warning(session, capl
     ]
 
 
+def test_sidecar_yaml_uses_atomic_state_write(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_atomic_write_text(path, content, *, durable=True, replace_attempts=3, encoding="utf-8"):
+        calls.append((Path(path).name, durable))
+        Path(path).write_text(content, encoding=encoding)
+
+    monkeypatch.setattr("iac_code.pipeline.engine.session.atomic_write_text", fake_atomic_write_text)
+
+    session = PipelineSession(tmp_path / "pipeline")
+    session.save_running_sync(
+        "step",
+        {"current_index": 0, "rollback_count": 0, "step_statuses": {"step": "running"}},
+        {},
+        {"pipeline_name": "test", "step_ids": ["step"], "sub_pipeline_step_ids": {}, "pipeline_fingerprint": "fp"},
+    )
+
+    assert ("context.yaml", True) in calls
+    assert ("meta.yaml", True) in calls
+
+
 class TestSaveRollback:
     @pytest.mark.asyncio
     async def test_updates_meta_with_target_step(self, session, session_dir):
@@ -141,6 +163,29 @@ class TestSaveRollback:
         assert event["type"] == "rollback"
         assert event["from"] == "c"
         assert event["to"] == "a"
+
+    def test_sync_does_not_append_rollback_event_when_state_save_fails(self, session, monkeypatch):
+        def fail_write(path, data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(session, "_atomic_write_yaml", fail_write)
+
+        with pytest.raises(OSError, match="disk full"):
+            session.save_rollback_sync(
+                from_step="confirm",
+                to_step="intent",
+                reason="retry intent",
+                state_machine_snapshot={
+                    "current_index": 0,
+                    "rollback_count": 1,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {"intent": "running", "confirm": "stale"},
+                },
+                context_snapshot={},
+                identity=_identity(),
+            )
+
+        assert not session.events_path.exists()
 
     def test_sync_preserves_attempt_metadata(self, session):
         identity = _identity()

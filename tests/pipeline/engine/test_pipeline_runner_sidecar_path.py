@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from iac_code.agent.message import Message, ToolResultBlock
+from iac_code.agent.message import ImageBlock, Message, TextBlock, ToolResultBlock
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 
@@ -470,6 +470,40 @@ async def test_continue_from_sidecar_reuses_persisted_current_step_user_input(tm
 
 
 @pytest.mark.asyncio
+async def test_continue_from_sidecar_reuses_persisted_current_step_image_input(tmp_path):
+    from iac_code.pipeline.engine.user_input import PipelineUserInput
+
+    image_input = PipelineUserInput(
+        content=[
+            TextBlock(text="参考这张图"),
+            ImageBlock(media_type="image/png", data="aW1hZ2U="),
+        ],
+        display_text="参考这张图",
+        has_images=True,
+    )
+    runner = _build_two_step_runner(tmp_path)
+    runner._set_current_step_user_input(image_input)
+    await runner._save_running("s1", reason="step started")
+
+    runner2 = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
+    seen_user_messages = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **_kwargs):
+        seen_user_messages.append(user_message)
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner2._step_executor.execute = fake_execute
+
+    async for _event in runner2.continue_from_sidecar():
+        if seen_user_messages:
+            break
+
+    assert seen_user_messages == [image_input.content]
+
+
+@pytest.mark.asyncio
 async def test_hard_interrupt_rollback_context_survives_sidecar_restore(tmp_path):
     from iac_code.pipeline.engine.interrupt import InterruptVerdict
 
@@ -564,6 +598,37 @@ async def test_resume_candidate_selection_emits_selected_option_details(tmp_path
         "selected_value": "方案B",
         "selected_option": {"name": "方案B", "candidate_index": 1},
     }
+
+
+@pytest.mark.asyncio
+async def test_resume_candidate_selection_extracts_index_from_structured_json(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner.state_machine.current_step.ui_mode = "candidate_selection"
+    runner._waiting_input_options_by_step["s1"] = [
+        {"name": "方案A", "candidate_index": 0},
+        {"name": "方案B", "candidate_index": 1},
+    ]
+
+    async def fake_continue(user_input=None, **kwargs):
+        assert kwargs == {"resume_waiting_step": True}
+        if False:
+            yield
+
+    runner._continue_from_current = fake_continue
+    user_input = json.dumps(
+        {
+            "selected_candidate_index": 1,
+            "parameter_overrides": {"InstanceType": "ecs.g7.large"},
+        },
+        ensure_ascii=False,
+    )
+
+    events = [event async for event in runner.resume(user_input)]
+
+    received = next(event for event in events if isinstance(event, PipelineEvent))
+    assert received.type == PipelineEventType.USER_INPUT_RECEIVED
+    assert received.data["selected_index"] == 1
+    assert received.data["selected_option"] == {"name": "方案B", "candidate_index": 1}
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,10 @@ from typing import Any
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
 from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
+from iac_code.pipeline.engine.completion_guard_state import (
+    ensure_completion_guard_state,
+    record_completion_guard_tool_result,
+)
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent
 from iac_code.pipeline.engine.observability import PipelineObservability
@@ -49,6 +53,7 @@ class StepAgentLoopContext:
     agent_loop: Any | None
     initial_prompt: str | list[ContentBlock]
     resume_messages: list[Message]
+    completion_guard_state: dict[str, Any]
     restored_step_result: StepResult | None = None
 
 
@@ -67,6 +72,7 @@ class StepExecutor:
         permission_context_getter: Callable[[], Any] | None = None,
         memory_content_getter: Callable[[], str] | None = None,
         auto_trigger_skills: list[Any] | None = None,
+        surface: str = "repl",
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -78,6 +84,7 @@ class StepExecutor:
         self._permission_context_getter = permission_context_getter
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
+        self._surface = surface
         self._current_agent_loop = None
         pipeline_name = getattr(pipeline, "name", "")
         if not isinstance(pipeline_name, str):
@@ -152,8 +159,10 @@ class StepExecutor:
         agent_loop = agent_context.agent_loop
         assert agent_loop is not None
         self._current_agent_loop = agent_loop
+        completion_guard_state = agent_context.completion_guard_state
 
         complete_step_ids: set[str] = set()
+        pending_tool_inputs: dict[str, dict[str, Any]] = {}
         pending_complete_input: dict[str, dict] = {}
         complete_step_input: dict | None = None
         terminal_failed_step_result: StepResult | None = None
@@ -171,17 +180,31 @@ class StepExecutor:
             async for event in stream:
                 if isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
                     complete_step_ids.add(event.tool_use_id)
-                elif isinstance(event, ToolUseEndEvent) and event.tool_use_id in complete_step_ids:
-                    pending_complete_input[event.tool_use_id] = event.input
-                elif isinstance(event, ToolResultEvent) and event.tool_use_id in complete_step_ids:
-                    step_result = (event.metadata or {}).get("step_result")
-                    if isinstance(step_result, StepResult) and step_result.status == StepStatus.FAILED:
-                        terminal_failed_step_result = step_result
-                    if not event.is_error:
-                        complete_step_input = pending_complete_input.get(event.tool_use_id)
-                    else:
-                        last_complete_step_error = event.result
-                        last_complete_step_input = pending_complete_input.get(event.tool_use_id)
+                elif isinstance(event, ToolUseEndEvent):
+                    pending_tool_inputs[event.tool_use_id] = {"tool_name": event.name, "input": dict(event.input)}
+                    if event.tool_use_id in complete_step_ids:
+                        pending_complete_input[event.tool_use_id] = event.input
+                elif isinstance(event, ToolResultEvent):
+                    tool_record = pending_tool_inputs.get(event.tool_use_id)
+                    if isinstance(tool_record, dict):
+                        tool_input_raw = tool_record.get("input")
+                        tool_input: dict[str, Any] = tool_input_raw if isinstance(tool_input_raw, dict) else {}
+                        record_completion_guard_tool_result(
+                            completion_guard_state,
+                            tool_name=str(tool_record.get("tool_name") or event.tool_name),
+                            tool_input=tool_input,
+                            content=event.result,
+                            is_error=event.is_error,
+                        )
+                    if event.tool_use_id in complete_step_ids:
+                        step_result = (event.metadata or {}).get("step_result")
+                        if isinstance(step_result, StepResult) and step_result.status == StepStatus.FAILED:
+                            terminal_failed_step_result = step_result
+                        if not event.is_error:
+                            complete_step_input = pending_complete_input.get(event.tool_use_id)
+                        else:
+                            last_complete_step_error = event.result
+                            last_complete_step_input = pending_complete_input.get(event.tool_use_id)
                 yield event
 
         try:
@@ -247,6 +270,7 @@ class StepExecutor:
                     transcript_id=transcript_id,
                     resume_messages=None,
                     precompleted_tools=None,
+                    completion_guard_state_seed=completion_guard_state,
                     rollback_targets=rollback_targets,
                     rollback_count=rollback_count,
                     max_rollbacks=max_rollbacks,
@@ -299,6 +323,7 @@ class StepExecutor:
         transcript_id: str | None = None,
         resume_messages: list | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
+        completion_guard_state_seed: dict[str, Any] | None = None,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
         max_rollbacks: int = 5,
@@ -307,12 +332,17 @@ class StepExecutor:
         initial_prompt = user_message or f"请完成当前步骤：{step.step_id}。"
 
         repaired_messages = list(resume_messages or [])
-        completion_guard_state: dict[str, Any] = reconstruct_completion_guard_state(repaired_messages)
-        completion_guard_state.setdefault("successful_tools", set())
-        completion_guard_state.setdefault("tool_results", {})
+        completion_guard_state: dict[str, Any] = ensure_completion_guard_state(
+            reconstruct_completion_guard_state(repaired_messages)
+        )
         if precompleted_tools:
-            completion_guard_state["successful_tools"].update(precompleted_tools)
+            completion_guard_state["successful_tools"].update(precompleted_tools.keys())
             completion_guard_state["tool_results"].update(precompleted_tools)
+        if completion_guard_state_seed:
+            seed = ensure_completion_guard_state(completion_guard_state_seed)
+            completion_guard_state["successful_tools"].update(seed.get("successful_tools", set()))
+            completion_guard_state["tool_results"].update(seed.get("tool_results", {}))
+            completion_guard_state["tool_result_records"].extend(seed.get("tool_result_records", []))
 
         build_tool_kwargs: dict[str, Any] = {
             "rollback_targets": rollback_targets,
@@ -338,6 +368,7 @@ class StepExecutor:
                 agent_loop=None,
                 initial_prompt=initial_prompt,
                 resume_messages=repaired_messages,
+                completion_guard_state=completion_guard_state,
                 restored_step_result=restored_step_result,
             )
 
@@ -346,6 +377,7 @@ class StepExecutor:
         from iac_code.agent.agent_loop import AgentLoop
 
         agent_session_id = transcript_id or session_id
+        step_skill_roots = self._resolve_step_skill_roots(step)
         agent_loop = AgentLoop(
             provider_manager=self._provider_manager,
             system_prompt=system_prompt,
@@ -358,11 +390,15 @@ class StepExecutor:
             pause_event=self._pause_event,
             permission_context_getter=self._permission_context_getter,
             auto_trigger_skills=self._resolve_auto_trigger_skills(step),
+            tool_context_trusted_read_directories=step_skill_roots,
+            tool_context_relative_read_directories=step_skill_roots,
+            pipeline_mode=True,
         )
         return StepAgentLoopContext(
             agent_loop=agent_loop,
             initial_prompt=initial_prompt,
             resume_messages=repaired_messages,
+            completion_guard_state=completion_guard_state,
         )
 
     @staticmethod
@@ -377,7 +413,10 @@ class StepExecutor:
 
         normalized_input = copy.deepcopy(complete_step_input)
         complete_step_tool = tool_registry.get("complete_step")
-        if complete_step_tool is not None:
+        if isinstance(complete_step_tool, CompleteStepTool):
+            if complete_step_tool.validate_completion_input(normalized_input) is not None:
+                return None
+        elif complete_step_tool is not None:
             complete_step_tool.normalize_input(normalized_input)
 
         conclusion = normalized_input.get("conclusion", {})
@@ -403,8 +442,9 @@ class StepExecutor:
             memory_content=memory_content,
         )
 
-        prompt_path = self._pipeline_dir / step.prompt_file
-        step_prompt = prompt_path.read_text(encoding="utf-8") if step.prompt_file else ""
+        prompt_file = step.prompt_file_for_surface(self._surface)
+        prompt_path = self._pipeline_dir / prompt_file
+        step_prompt = prompt_path.read_text(encoding="utf-8") if prompt_file else ""
         rendered_step_prompt = render_prompt(step_prompt, context, step.context_fields)
 
         skill_content = ""
@@ -586,6 +626,28 @@ class StepExecutor:
 
         return None
 
+    def _resolve_step_skill_roots(self, step: StepSpec) -> list[str]:
+        if not step.skill:
+            return []
+        root = self._resolve_skill_root(step.skill)
+        return [root] if root else []
+
+    def _resolve_skill_root(self, skill_name: str) -> str:
+        root = self._pipeline.skill_roots.get(skill_name, "")
+        if root:
+            return root
+
+        try:
+            from iac_code.skills.bundled import get_bundled_skills
+
+            for skill_def in get_bundled_skills():
+                if skill_def.name == skill_name:
+                    return skill_def.skill_root
+        except ImportError:
+            pass
+
+        return ""
+
     @staticmethod
     def _with_skill_base_directory(content: str, skill_root: str) -> str:
         if not skill_root:
@@ -621,18 +683,17 @@ class StepExecutor:
             step_id=step.step_id,
             conclusion_field=step.conclusion_field,
             forward=step.forward,
-            rollback_rules=step.rollback_rules,
             auto_advance=step.auto_advance,
             max_agent_turns=step.max_agent_turns,
             conclusion_schema=step.conclusion_schema,
-            rollback_targets=rollback_targets
-            if rollback_targets is not None
-            else [r.target_step for r in step.rollback_rules],
+            rollback_targets=rollback_targets if rollback_targets is not None else [],
             max_conclusion_retries=step.max_conclusion_retries,
             rollback_count=rollback_count,
             max_rollbacks=max_rollbacks,
         )
-        guard_state = completion_guard_state if completion_guard_state is not None else {"successful_tools": set()}
+        guard_state = ensure_completion_guard_state(
+            completion_guard_state if completion_guard_state is not None else {}
+        )
         registry.register(
             CompleteStepTool(
                 step_config,
@@ -642,8 +703,9 @@ class StepExecutor:
             )
         )
 
-        if step.inject_tools:
-            self._register_injectable_tools(registry, step.inject_tools, guard_state)
+        inject_tools = step.inject_tools_for_surface(self._surface)
+        if inject_tools:
+            self._register_injectable_tools(registry, inject_tools, guard_state)
 
         return registry
 

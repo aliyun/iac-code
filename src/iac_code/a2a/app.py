@@ -6,6 +6,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import os
 from contextlib import asynccontextmanager, suppress
 from email.utils import formatdate
@@ -25,8 +26,13 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
 from iac_code.a2a.agent_card import agent_card_to_client_dict
+from iac_code.a2a.jsonrpc_passthrough import (
+    install_jsonrpc_error_data_passthrough,
+    install_v03_jsonrpc_error_data_passthrough,
+)
 from iac_code.i18n import _
 
+logger = logging.getLogger(__name__)
 _V03_JSONRPC_METHODS = frozenset(
     {
         "message/send",
@@ -273,7 +279,9 @@ def create_app(
         Route(AGENT_CARD_WELL_KNOWN_PATH, get_agent_card, methods=["GET"]),
         Route("/iac-code/pipeline/state", get_pipeline_state, methods=["GET"]),
     ]
+    install_jsonrpc_error_data_passthrough()
     jsonrpc_endpoint = create_jsonrpc_routes(components.handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
+    install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint)
 
     async def handle_jsonrpc(request: Request) -> Response:
         await normalize_v03_jsonrpc_version(request)

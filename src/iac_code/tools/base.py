@@ -7,7 +7,7 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from iac_code.i18n import _
 
@@ -15,7 +15,10 @@ if TYPE_CHECKING:
     from iac_code.types.permissions import PermissionResult
 
 
-@dataclass
+_DEFAULT_CWD = object()
+
+
+@dataclass(init=False)
 class ToolContext:
     """Execution context passed to tools."""
 
@@ -26,6 +29,40 @@ class ToolContext:
     # downstream (e.g. in the renderer's per-tab accumulator). Populated by the
     # ToolExecutor on each call.
     tool_use_id: str | None = None
+    additional_directories: list[str] = field(default_factory=list)
+    trusted_read_directories: list[str] = field(default_factory=list)
+    relative_read_directories: list[str] = field(default_factory=list)
+    # True when this tool call is being executed as part of a pipeline step.
+    pipeline_mode: bool = False
+
+    def __init__(
+        self,
+        cwd: str | object = _DEFAULT_CWD,
+        event_queue: asyncio.Queue | None = None,
+        tool_use_id: str | list[str] | None = None,
+        additional_directories: list[str] | None = None,
+        trusted_read_directories: list[str] | str | None = None,
+        relative_read_directories: list[str] | None = None,
+        pipeline_mode: bool = False,
+    ) -> None:
+        if isinstance(tool_use_id, list) and isinstance(additional_directories, list):
+            old_additional_directories = tool_use_id
+            old_trusted_read_directories = additional_directories
+            old_tool_use_id = trusted_read_directories
+
+            tool_use_id = old_tool_use_id if isinstance(old_tool_use_id, str) else None
+            additional_directories = old_additional_directories
+            trusted_read_directories = old_trusted_read_directories
+
+        self.cwd = os.getcwd() if cwd is _DEFAULT_CWD else cast(str, cwd)
+        self.event_queue = event_queue
+        self.tool_use_id = tool_use_id if isinstance(tool_use_id, str) else None
+        self.additional_directories = list(additional_directories or [])
+        self.trusted_read_directories = (
+            list(trusted_read_directories or []) if isinstance(trusted_read_directories, list) else []
+        )
+        self.relative_read_directories = list(relative_read_directories or [])
+        self.pipeline_mode = pipeline_mode
 
 
 @dataclass

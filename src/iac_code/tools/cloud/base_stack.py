@@ -11,7 +11,7 @@ from typing import Any
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus, translate_status
-from iac_code.types.stream_events import StackProgressEvent
+from iac_code.types.stream_events import ResourceObservedEvent, StackProgressEvent
 
 POLL_INTERVAL = 5
 
@@ -138,6 +138,9 @@ class BaseCloudStack(Tool):
     def _resolve_region(self, input: dict) -> str:
         return input.get("region_id") or self._get_default_region()
 
+    def _call_action_kwargs(self, context: ToolContext) -> dict[str, Any]:
+        return {}
+
     def render_tool_use_message(self, input: dict, *, verbose: bool = False) -> str | None:
         action = input.get("action", "")
         region = self._resolve_region(input)
@@ -223,9 +226,23 @@ class BaseCloudStack(Tool):
         region = self._resolve_region(tool_input)
 
         try:
-            stack_id = await self.call_action(action, params, region)
+            stack_id = await self.call_action(action, params, region, **self._call_action_kwargs(context))
         except Exception as e:
             return ToolResult.error(f"[{action}] {e}")
+
+        if context.event_queue is not None and action == "CreateStack" and stack_id:
+            await context.event_queue.put(
+                ResourceObservedEvent(
+                    provider=self.provider_name,
+                    resource_type="stack",
+                    resource_id=stack_id,
+                    resource_name=str(params.get("StackName") or params.get("stack_name") or ""),
+                    region_id=region,
+                    action=action,
+                    tool_name=self.name,
+                    tool_use_id=context.tool_use_id,
+                )
+            )
 
         start_time = time.monotonic()
 

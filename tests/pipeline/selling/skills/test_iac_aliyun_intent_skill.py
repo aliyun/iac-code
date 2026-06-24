@@ -49,6 +49,16 @@ def test_intent_prompt_requires_question_before_completion_for_ambiguous_guidabl
     assert "不要把 `is_infra_intent`" in body
 
 
+def test_intent_prompt_guides_optional_memory_lookup_without_overriding_current_input():
+    body = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert "不要读取项目文件或记忆" not in body
+    assert "read_memory({})" in body
+    assert "已有资源" in body
+    assert "当前用户输入为准" in body
+    assert "不要因为没有相关记忆而阻塞" in body
+
+
 def test_intent_prompt_pins_extremely_vague_launch_to_detail_request():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 
@@ -116,6 +126,25 @@ def test_intent_schema_captures_resource_lifecycle_fields():
     assert item_properties["role"]["type"] == "string"
     assert item_properties["source"]["type"] == "string"
     assert "forbidden_resources" not in properties
+
+
+def test_intent_schema_captures_stack_name_and_network_constraints_without_e2e_controls():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    prompt = PROMPT_FILE.read_text(encoding="utf-8")
+    schema = _parse_frontmatter(body)["conclusion_schema"]
+    non_functional = schema["properties"]["non_functional"]["properties"]
+
+    assert non_functional["stack_name"]["type"] == "string"
+    assert "资源栈名称" in non_functional["stack_name"]["description"]
+    assert non_functional["network_constraints"]["type"] == "object"
+    assert "deployment_hold" not in non_functional
+    assert "non_functional.stack_name" in prompt
+    assert "non_functional.network_constraints" in prompt
+    assert "deployment_hold" not in body
+    assert "部署后等待用户继续" not in body
+    assert "CreateStack 的 params.StackName" not in prompt
+    assert "first/second" not in body
+    assert "first/second" not in prompt
 
 
 def test_intent_guidance_preserves_existing_resource_lifecycle():

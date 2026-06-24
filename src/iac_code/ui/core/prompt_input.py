@@ -643,7 +643,7 @@ class PromptInput:
         self._buffer = list(initial_text)
         self._cursor = len(self._buffer)
         self._pasted_contents = {}
-        self._next_paste_id = 1
+        self._next_paste_id = self._initial_paste_id()
         self._submitted = False
         self._cancelled = False
         self._esc_pressed = False
@@ -742,3 +742,13 @@ class PromptInput:
         if self._cancelled:
             return None
         return self._get_text()
+
+    def _initial_paste_id(self) -> int:
+        next_image_id = getattr(self._image_store, "next_image_id", None)
+        if not callable(next_image_id):
+            return 1
+        try:
+            value = int(next_image_id())
+        except Exception:
+            return 1
+        return value if value > 0 else 1

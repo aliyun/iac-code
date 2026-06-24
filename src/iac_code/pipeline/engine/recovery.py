@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
+from iac_code.pipeline.engine.completion_guard_state import (
+    ensure_completion_guard_state,
+    record_completion_guard_tool_result,
+)
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 
 
@@ -59,26 +62,21 @@ def reconstruct_step_result(messages: list[Message], step_id: str) -> StepResult
 
 def reconstruct_completion_guard_state(messages: list[Message]) -> dict[str, Any]:
     tool_uses = _tool_uses_by_id(messages)
-    successful_tools: set[str] = set()
-    tool_results: dict[str, Any] = {}
+    state = ensure_completion_guard_state({})
     for message in messages:
         if message.role != "user" or isinstance(message.content, str):
             continue
         for block in message.content:
-            if not isinstance(block, ToolResultBlock) or block.is_error:
+            if not isinstance(block, ToolResultBlock):
                 continue
             tool_use = tool_uses.get(block.tool_use_id)
             if tool_use is None:
                 continue
-            if tool_use.name != "ask_user_question":
-                continue
-            successful_tools.add("ask_user_question")
-            try:
-                tool_results["ask_user_question"] = json.loads(block.content)
-            except json.JSONDecodeError:
-                tool_results["ask_user_question"] = {
-                    "selected_id": "",
-                    "selected_label": "",
-                    "free_text": block.content,
-                }
-    return {"successful_tools": successful_tools, "tool_results": tool_results}
+            record_completion_guard_tool_result(
+                state,
+                tool_name=tool_use.name,
+                tool_input=tool_use.input,
+                content=block.content,
+                is_error=block.is_error,
+            )
+    return state

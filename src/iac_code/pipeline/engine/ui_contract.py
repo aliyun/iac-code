@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -33,22 +33,28 @@ class SelectedCandidate:
 
     selected_candidate_name: str
     selected_candidate_index: int | None = None
+    parameter_overrides: dict[str, Any] = field(default_factory=dict)
 
 
-def encode_selected_candidate(candidate_name: str, candidate_index: int | None) -> str:
-    return json.dumps(
-        {
-            "selected_candidate_name": candidate_name,
-            "selected_candidate_index": candidate_index,
-        },
-        ensure_ascii=False,
-    )
+def encode_selected_candidate(
+    candidate_name: str,
+    candidate_index: int | None,
+    parameter_overrides: dict[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "selected_candidate_name": candidate_name,
+        "selected_candidate_index": candidate_index,
+    }
+    if parameter_overrides:
+        payload["parameter_overrides"] = parameter_overrides
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def parse_selected_candidate(value: Any) -> SelectedCandidate | None:
     if isinstance(value, dict):
         name = value.get("selected_candidate_name")
         index = value.get("selected_candidate_index")
+        parameter_overrides = _parse_parameter_overrides(value)
     elif isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -64,9 +70,12 @@ def parse_selected_candidate(value: Any) -> SelectedCandidate | None:
             return None
         name = decoded.get("selected_candidate_name")
         index = decoded.get("selected_candidate_index")
+        parameter_overrides = _parse_parameter_overrides(decoded)
     else:
         return None
 
+    if parameter_overrides is None:
+        return None
     if index is not None and not isinstance(index, int):
         return None
     if isinstance(name, str) and name.strip():
@@ -75,7 +84,11 @@ def parse_selected_candidate(value: Any) -> SelectedCandidate | None:
         candidate_name = ""
     else:
         return None
-    return SelectedCandidate(selected_candidate_name=candidate_name, selected_candidate_index=index)
+    return SelectedCandidate(
+        selected_candidate_name=candidate_name,
+        selected_candidate_index=index,
+        parameter_overrides=parameter_overrides,
+    )
 
 
 def _parse_candidate_index_hint(value: str) -> int | None:
@@ -88,3 +101,27 @@ def _parse_candidate_index_hint(value: str) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _parse_parameter_overrides(payload: dict[str, Any]) -> dict[str, Any] | None:
+    raw: Any = None
+    found = False
+    for key in ("parameter_overrides", "deployment_parameters", "parameters"):
+        if key in payload:
+            raw = payload.get(key)
+            found = True
+            break
+
+    if not found or raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        return None
+
+    overrides: dict[str, Any] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            return None
+        if value is None:
+            continue
+        overrides[key.strip()] = value
+    return overrides

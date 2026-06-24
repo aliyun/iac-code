@@ -12,7 +12,7 @@ from iac_code.pipeline.engine.observability import PipelineObservability
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
 from iac_code.pipeline.engine.session import RestoreResult
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec, SubPipelineSpec
-from iac_code.pipeline.engine.types import RollbackRule, StepResult, StepStatus
+from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.telemetry.config import ContentCaptureMode
 from iac_code.services.telemetry.names import Events, GenAiAttr, GenAiOperationName, GenAiSpanKind, Metrics, Spans
 
@@ -1491,7 +1491,6 @@ def test_restore_from_sidecar_emits_sidecar_failed_for_real_restore_failure(runn
 async def test_runner_emits_parent_rollback_telemetry(runner):
     runner._observability.rollback = MagicMock()
     runner.state_machine.advance()
-    runner.state_machine.current_step.rollback_rules.append(RollbackRule(target_step="a", condition="revise"))
 
     async def fake_execute(step, context, session_id, user_message=None, **kwargs):
         conclusion = {"value": step.step_id}
@@ -1529,7 +1528,6 @@ async def test_runner_distinguishes_step_attempts_after_parent_rollback(runner):
     runner._observability.step_completed = MagicMock()
     runner._observability.funnel_step = MagicMock()
     runner._observability.rollback = MagicMock()
-    runner.state_machine._steps["b"].rollback_rules.append(RollbackRule(target_step="a", condition="revise"))
     seen: dict[str, int] = {"a": 0, "b": 0}
 
     async def fake_execute(step, context, session_id, user_message=None, **kwargs):

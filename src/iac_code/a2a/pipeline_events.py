@@ -40,11 +40,24 @@ _TOP_LEVEL_DATA_KEY_ALIASES = {
     "from_step": "fromStep",
     "parent_step_id": "parentStepId",
     "pipeline_type": "pipelineType",
+    "progress_status": "progressStatus",
     "rollback_target": "rollbackTarget",
+    "cleanup_status": "cleanupStatus",
+    "cleanup_tool_use_id": "cleanupToolUseId",
+    "last_error": "lastError",
+    "progress_percentage": "progressPercentage",
+    "resource_count": "resourceCount",
+    "resource_id": "resourceId",
+    "resource_name": "resourceName",
+    "resource_type": "resourceType",
+    "region_id": "regionId",
     "selected_index": "selectedIndex",
     "selected_option": "selectedOption",
     "selected_value": "selectedValue",
+    "source_step_id": "sourceStepId",
     "stale_fields": "staleFields",
+    "stack_status": "stackStatus",
+    "status_message": "statusMessage",
     "step_id": "stepId",
     "step_index": "stepIndex",
     "step_names": "stepNames",
@@ -325,6 +338,16 @@ class PipelineEventTranslator:
             return [self._envelope("pipeline_started", "pipeline", "working", _event_data(data), created_at=created_at)]
         if event.type == PipelineEventType.PIPELINE_RESUMED:
             return [self._envelope("pipeline_resumed", "pipeline", "working", _event_data(data), created_at=created_at)]
+        if event.type == PipelineEventType.PIPELINE_WARNING:
+            return [
+                self._envelope(
+                    "pipeline_warning",
+                    "pipeline",
+                    "working",
+                    _warning_event_data(data),
+                    created_at=created_at,
+                )
+            ]
         if event.type == PipelineEventType.PIPELINE_COMPLETED:
             event_type = "pipeline_failed" if data.get("failed") is True else "pipeline_completed"
             status = "failed" if event_type == "pipeline_failed" else "completed"
@@ -541,7 +564,7 @@ class PipelineEventTranslator:
         return envelopes
 
     def _translate_text_delta_event(self, event: TextDeltaEvent) -> dict[str, Any]:
-        return self._envelope("text_delta", "pipeline", "working", {"text": event.text})
+        return self._translate_parent_scoped_display_event("text_delta", {"text": event.text})
 
     def _translate_ask_user_question_event(self, event: AskUserQuestionEvent) -> dict[str, Any]:
         envelope = self._translate_parent_scoped_display_event("input_required", _ask_user_question_data(event))
@@ -550,7 +573,7 @@ class PipelineEventTranslator:
         return envelope
 
     def _translate_permission_request_event(self, event: PermissionRequestEvent) -> dict[str, Any]:
-        envelope = self._envelope("permission_requested", "pipeline", "working", _permission_request_data(event))
+        envelope = self._translate_parent_scoped_display_event("permission_requested", _permission_request_data(event))
         envelope["permission"] = _permission_request_metadata(event)
         return envelope
 
@@ -586,7 +609,7 @@ class PipelineEventTranslator:
         stack_envelope = self._translate_stack_current_changed_event(event)
         if stack_envelope is not None:
             envelopes.append(stack_envelope)
-        envelopes.append(self._envelope("tool_result", "pipeline", "working", _tool_result_data(event)))
+        envelopes.append(self._translate_parent_scoped_display_event("tool_result", _tool_result_data(event)))
         return envelopes
 
     def _remember_tool_input(self, event: ToolUseEndEvent) -> None:
@@ -662,6 +685,11 @@ class PipelineEventTranslator:
         if stack_id is None:
             return None
 
+        stack_status = _first_string_from_sources((result,), ("StackStatus", "stackStatus", "status"))
+        is_delete_complete = action in _STACK_CLEAR_ACTIONS and is_success and stack_status == "DELETE_COMPLETE"
+        if action in _STACK_CLEAR_ACTIONS and is_success and stack_status is None:
+            stack_status = "DELETE_REQUESTED"
+
         data: dict[str, Any] = {
             "toolName": event.tool_name,
             "toolUseId": event.tool_use_id,
@@ -670,11 +698,11 @@ class PipelineEventTranslator:
             "regionId": operation["regionId"],
             "stackId": stack_id,
             "stackName": _first_string_from_sources((result, params), ("StackName", "stackName", "stack_name", "name")),
-            "stackStatus": _first_string_from_sources((result,), ("StackStatus", "stackStatus", "status")),
+            "stackStatus": stack_status,
             "isSuccess": is_success,
-            "current": False if action in _STACK_CLEAR_ACTIONS and is_success else True,
+            "current": False if is_delete_complete else True,
         }
-        if action in _STACK_CLEAR_ACTIONS and is_success:
+        if is_delete_complete:
             data["cleared"] = True
         return {key: value for key, value in data.items() if value is not None}
 
@@ -942,6 +970,11 @@ def _event_data(data: dict[str, Any]) -> dict[str, Any]:
         _TOP_LEVEL_DATA_KEY_ALIASES.get(str(key), str(key)): _sanitize_event_value(str(key), value)
         for key, value in data.items()
     }
+
+
+def _warning_event_data(data: dict[str, Any]) -> dict[str, Any]:
+    private_keys = {"ledger_path", "ledgerPath", "load_error", "loadError"}
+    return _event_data({key: value for key, value in data.items() if str(key) not in private_keys})
 
 
 def _sanitize_event_value(key: str, value: Any) -> Any:

@@ -15,7 +15,7 @@ from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
-from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, is_recovery_semantic_event
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
@@ -79,6 +79,17 @@ def _envelope(event_type: str, status: str = "working") -> dict[str, Any]:
         "status": status,
         "data": {},
     }
+
+
+def test_pipeline_warning_is_recovery_semantic() -> None:
+    assert is_recovery_semantic_event(_envelope("pipeline_warning")) is True
+
+
+def test_unknown_working_step_event_is_recovery_semantic() -> None:
+    envelope = _envelope("custom_step_progress")
+    envelope["scope"] = "step"
+
+    assert is_recovery_semantic_event(envelope) is True
 
 
 @pytest.mark.asyncio
@@ -300,7 +311,7 @@ async def test_publish_permission_denies_future_when_permission_metadata_is_not_
     publisher, queue = _publisher(tmp_path)
     future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
 
-    def fail_append(_event: dict[str, Any]) -> None:
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
         raise OSError("append failed")
 
     def fail_save(_snapshot: dict[str, Any]) -> bool:
@@ -322,6 +333,91 @@ async def test_publish_permission_denies_future_when_permission_metadata_is_not_
     assert returned is None
     assert future.result() is False
     assert queue.events == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_semantic_event_is_not_enqueued_when_metadata_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
+        raise OSError("journal locked")
+
+    monkeypatch.setattr(publisher.journal, "append", fail_append)
+    monkeypatch.setattr(publisher.snapshot_store, "save", lambda _snapshot: False)
+
+    result = await publisher.publish_manual("pipeline_started", "pipeline")
+
+    assert result is None
+    assert queue.events == []
+
+
+@pytest.mark.asyncio
+async def test_text_delta_can_be_enqueued_when_only_durable_metadata_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    def fail_append(event: dict[str, Any], durable: bool = False) -> None:
+        if durable:
+            raise OSError("journal locked")
+        A2APipelineJournal.append(publisher.journal, event)
+
+    monkeypatch.setattr(publisher.journal, "append", fail_append)
+    monkeypatch.setattr(publisher.snapshot_store, "save", lambda _snapshot: False)
+
+    returned = await publisher.publish(TextDeltaEvent(text="hello"))
+
+    assert returned == "hello"
+    assert len(queue.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_recovery_event_routes_durable_metadata_without_explicit_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, _queue = _publisher(tmp_path)
+    durable_flags: list[bool] = []
+
+    def record_append(event: dict[str, Any], durable: bool = False) -> None:
+        durable_flags.append(durable)
+        A2APipelineJournal.append(publisher.journal, event)
+
+    monkeypatch.setattr(publisher.journal, "append", record_append)
+
+    await publisher.publish_manual("pipeline_started", "pipeline")
+
+    assert durable_flags == [True]
+
+
+@pytest.mark.asyncio
+async def test_translated_recovery_event_routes_durable_metadata_without_explicit_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, _queue = _publisher(tmp_path)
+    durable_flags: list[bool] = []
+
+    def record_append(event: dict[str, Any], durable: bool = False) -> None:
+        durable_flags.append(durable)
+        A2APipelineJournal.append(publisher.journal, event)
+
+    monkeypatch.setattr(publisher.journal, "append", record_append)
+
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="confirm_and_select",
+            timestamp=1717821600.0,
+            data={"index": 1, "total": 2},
+        )
+    )
+
+    assert durable_flags == [True]
 
 
 @pytest.mark.asyncio
@@ -702,7 +798,7 @@ async def test_publish_does_not_emit_artifact_update_when_artifact_metadata_is_n
     store = A2AArtifactStore(tmp_path / "artifacts")
     publisher, queue = _publisher(tmp_path, artifact_store=store, exposure_types=[A2AExposureType.TOOL_TRACE])
 
-    def fail_append(_event: dict[str, Any]) -> None:
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
         raise OSError("append failed")
 
     def fail_save(_snapshot: dict[str, Any]) -> None:
@@ -896,7 +992,7 @@ async def test_publish_candidate_failure_keeps_a2a_task_working(tmp_path: Path) 
 async def test_publish_continues_when_pipeline_persistence_fails(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path)
 
-    def fail_append(_event: dict[str, Any]) -> None:
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
         raise OSError("disk full")
 
     publisher.journal.append = fail_append  # type: ignore[method-assign]
@@ -984,7 +1080,7 @@ async def test_publish_rebuilds_missing_snapshot_with_current_event_when_journal
     await publisher.publish(TextDeltaEvent(text="old"))
     publisher.snapshot_store.path.unlink()
 
-    def fail_append(_event: dict[str, Any]) -> None:
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
         raise OSError("disk full")
 
     publisher.journal.append = fail_append  # type: ignore[method-assign]
@@ -1113,6 +1209,25 @@ async def test_publish_ask_user_question_maps_to_input_required_snapshot(tmp_pat
     assert snapshot["pendingInput"]["kind"] == "ask_user_question"
     assert snapshot["pendingInput"]["toolUseId"] == "ask-1"
     assert snapshot["pendingInput"]["question"] == "请选择部署目标"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_input_received_is_not_enqueued_when_metadata_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
+        raise OSError("journal locked")
+
+    monkeypatch.setattr(publisher.journal, "append", fail_append)
+    monkeypatch.setattr(publisher.snapshot_store, "save", lambda _snapshot: False)
+
+    result = await publisher.publish_manual("input_received", "pipeline")
+
+    assert result is None
+    assert queue.events == []
 
 
 @pytest.mark.asyncio

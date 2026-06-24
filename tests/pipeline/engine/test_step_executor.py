@@ -1,5 +1,7 @@
+import json
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -7,9 +9,9 @@ import pytest
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.step_executor import StepExecutor
-from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec
-from iac_code.pipeline.engine.types import RollbackRule, StepResult, StepStatus
-from iac_code.tools.base import ToolContext, ToolRegistry
+from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, StepSurfaceOverride
+from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     MessageEndEvent,
@@ -99,6 +101,16 @@ class TestStepExecutorToolSetup:
         ctx = PipelineContext(SIMPLE_DEPS)
         tool_reg = executor._build_step_tools(step, ctx)
         assert tool_reg.get("complete_step") is not None
+
+    def test_agent_loop_context_marks_pipeline_mode(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        agent_context = executor.build_agent_loop_context(step, ctx, "test_session")
+
+        assert agent_context.agent_loop is not None
+        assert agent_context.agent_loop._pipeline_mode is True
 
     def test_full_tools_when_step_returns_none(self, tmp_path):
         registry = ToolRegistry()
@@ -716,6 +728,38 @@ class TestStepExecutorSkillResolution:
         assert "# Step Prompt Only" in prompt
         assert prompt.endswith("# Step Prompt Only")
 
+    def test_surface_override_uses_surface_prompt_file(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "confirm.md").write_text("# REPL Prompt", encoding="utf-8")
+        (tmp_path / "prompts" / "confirm.a2a.md").write_text("# A2A Prompt", encoding="utf-8")
+
+        step = StepSpec(
+            step_id="confirm_and_select",
+            conclusion_field="selected_plan",
+            forward=None,
+            prompt_file="prompts/confirm.md",
+            surface_overrides={"a2a": StepSurfaceOverride(prompt_file="prompts/confirm.a2a.md")},
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"selected_plan": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a",
+        )
+
+        prompt = executor._build_full_system_prompt(step, PipelineContext({"selected_plan": []}))
+
+        assert "# A2A Prompt" in prompt
+        assert "# REPL Prompt" not in prompt
+
     def test_empty_prompt_file_with_skill(self, tmp_path):
         """When prompt_file is empty string but skill exists, just use skill content."""
         step = StepSpec(
@@ -1014,6 +1058,39 @@ class TestInjectTools:
 
         assert registry.get("show_architecture_diagram") is None
         assert registry.get("ask_user_question") is None
+        assert registry.get("complete_step") is not None
+
+    def test_surface_override_can_disable_injected_tools(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "confirm.md").write_text("Confirm.", encoding="utf-8")
+
+        step = StepSpec(
+            step_id="confirm_and_select",
+            conclusion_field="selected_plan",
+            forward=None,
+            prompt_file="prompts/confirm.md",
+            inject_tools=["show_architecture_diagram"],
+            surface_overrides={"a2a": StepSurfaceOverride(inject_tools=[])},
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"selected_plan": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            surface="a2a",
+        )
+
+        context = PipelineContext({"selected_plan": []})
+        registry = executor._build_step_tools(step, context)
+
+        assert registry.get("show_architecture_diagram") is None
         assert registry.get("complete_step") is not None
 
     @pytest.mark.asyncio
@@ -1350,6 +1427,417 @@ class TestInjectTools:
         assert step_results[-1].conclusion["clarification_choice"] == "deploy_to_aliyun"
         assert "selected_id" not in step_results[-1].conclusion
 
+    @pytest.mark.asyncio
+    async def test_completion_guard_rejects_deploying_success_until_create_stack_completes(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "deploying.md").write_text("Deploy.", encoding="utf-8")
+
+        class DummyRosStack(Tool):
+            @property
+            def name(self) -> str:
+                return "ros_stack"
+
+            @property
+            def description(self) -> str:
+                return "ROS stack"
+
+            @property
+            def input_schema(self) -> dict:
+                return {
+                    "type": "object",
+                    "required": ["action"],
+                    "properties": {"action": {"type": "string"}, "params": {"type": "object"}},
+                }
+
+            def is_read_only(self, input: dict | None = None) -> bool:
+                return True
+
+            async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
+                assert tool_input["action"] == "CreateStack"
+                return ToolResult.success(
+                    json.dumps(
+                        {
+                            "stack_id": "stack-123",
+                            "stack_name": "demo",
+                            "status": "CREATE_COMPLETE",
+                            "is_success": True,
+                        }
+                    )
+                )
+
+        step = StepSpec(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            prompt_file="prompts/deploying.md",
+            conclusion_schema={
+                "type": "object",
+                "required": ["status"],
+                "additionalProperties": False,
+                "properties": {
+                    "stack_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["success", "failed", "cancelled"]},
+                    "error": {"type": "string"},
+                },
+            },
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "success"},
+                    "required_conclusion_field": "stack_id",
+                    "require_tool_result": {
+                        "tool": "ros_stack",
+                        "action_in": ["CreateStack", "ContinueCreateStack"],
+                        "is_success": True,
+                        "status_in": ["CREATE_COMPLETE"],
+                        "match_conclusion_field": "stack_id",
+                    },
+                    "message": "部署成功必须等待 ros_stack CreateStack 返回 CREATE_COMPLETE。",
+                }
+            ],
+            max_agent_turns=8,
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"deployment": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        registry = ToolRegistry()
+        registry.register(DummyRosStack())
+
+        class Provider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_model_name(self) -> str:
+                return "test-model"
+
+            async def stream(self, messages, system, tools=None):
+                self.calls += 1
+                if self.calls == 1:
+                    yield MessageStartEvent(message_id="m1")
+                    yield ToolUseStartEvent(tool_use_id="done_bad", name="complete_step")
+                    yield ToolUseEndEvent(
+                        tool_use_id="done_bad",
+                        name="complete_step",
+                        input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+                    )
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+
+                if self.calls == 2:
+                    assert any(
+                        getattr(block, "type", None) == "tool_result"
+                        and getattr(block, "tool_use_id", None) == "done_bad"
+                        and getattr(block, "is_error", False)
+                        and "CreateStack" in getattr(block, "content", "")
+                        for message in messages
+                        for block in (message.content if isinstance(message.content, list) else [])
+                    )
+                    yield MessageStartEvent(message_id="m2")
+                    yield ToolUseStartEvent(tool_use_id="stack_1", name="ros_stack")
+                    yield ToolUseEndEvent(
+                        tool_use_id="stack_1",
+                        name="ros_stack",
+                        input={"action": "CreateStack", "params": {"StackName": "demo"}},
+                    )
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+
+                if self.calls == 3:
+                    yield MessageStartEvent(message_id="m3")
+                    yield ToolUseStartEvent(tool_use_id="done_good", name="complete_step")
+                    yield ToolUseEndEvent(
+                        tool_use_id="done_good",
+                        name="complete_step",
+                        input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+                    )
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+
+                yield MessageStartEvent(message_id="m4")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        provider = Provider()
+        executor = StepExecutor(
+            provider_manager=provider,
+            base_tool_registry=registry,
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+
+        collected = []
+        async for event in executor.execute(step, PipelineContext({"deployment": []}), "test"):
+            collected.append(event)
+
+        complete_results = [
+            event for event in collected if isinstance(event, ToolResultEvent) and event.tool_name == "complete_step"
+        ]
+        assert provider.calls == 3
+        assert complete_results[0].is_error
+        assert "CreateStack" in complete_results[0].result
+        assert complete_results[-1].is_error is False
+        step_results = [event for event in collected if isinstance(event, StepResult)]
+        assert step_results[-1].status == StepStatus.COMPLETED
+        assert step_results[-1].conclusion == {"status": "success", "stack_id": "stack-123"}
+
+    @pytest.mark.asyncio
+    async def test_fresh_complete_step_recovery_preserves_create_stack_guard_state(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "deploying.md").write_text("Deploy.", encoding="utf-8")
+
+        class DummyRosStack(Tool):
+            @property
+            def name(self) -> str:
+                return "ros_stack"
+
+            @property
+            def description(self) -> str:
+                return "ROS stack"
+
+            @property
+            def input_schema(self) -> dict:
+                return {
+                    "type": "object",
+                    "required": ["action"],
+                    "properties": {"action": {"type": "string"}, "params": {"type": "object"}},
+                }
+
+            def is_read_only(self, input: dict | None = None) -> bool:
+                return True
+
+            async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
+                return ToolResult.success(
+                    json.dumps(
+                        {
+                            "stack_id": "stack-123",
+                            "stack_name": "demo",
+                            "status": "CREATE_COMPLETE",
+                            "is_success": True,
+                        }
+                    )
+                )
+
+        step = StepSpec(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            prompt_file="prompts/deploying.md",
+            conclusion_schema={
+                "type": "object",
+                "required": ["status"],
+                "additionalProperties": False,
+                "properties": {
+                    "stack_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["success", "failed", "cancelled"]},
+                    "error": {"type": "string"},
+                },
+            },
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "success"},
+                    "required_conclusion_field": "stack_id",
+                    "require_tool_result": {
+                        "tool": "ros_stack",
+                        "action_in": ["CreateStack", "ContinueCreateStack"],
+                        "is_success": True,
+                        "status_in": ["CREATE_COMPLETE"],
+                        "match_conclusion_field": "stack_id",
+                    },
+                }
+            ],
+            max_agent_turns=8,
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"deployment": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        registry = ToolRegistry()
+        registry.register(DummyRosStack())
+
+        class Provider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_model_name(self) -> str:
+                return "test-model"
+
+            async def stream(self, messages, system, tools=None):
+                self.calls += 1
+                if self.calls == 1:
+                    yield MessageStartEvent(message_id="m1")
+                    yield ToolUseStartEvent(tool_use_id="stack_1", name="ros_stack")
+                    yield ToolUseEndEvent(
+                        tool_use_id="stack_1",
+                        name="ros_stack",
+                        input={"action": "CreateStack", "params": {"StackName": "demo"}},
+                    )
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+
+                if self.calls in {2, 3}:
+                    yield MessageStartEvent(message_id=f"m{self.calls}")
+                    yield ToolUseStartEvent(tool_use_id=f"done_bad_{self.calls}", name="complete_step")
+                    yield ToolUseEndEvent(
+                        tool_use_id=f"done_bad_{self.calls}",
+                        name="complete_step",
+                        input={},
+                    )
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+
+                if self.calls == 4:
+                    yield MessageStartEvent(message_id="m4")
+                    yield ToolUseStartEvent(tool_use_id="done_good", name="complete_step")
+                    yield ToolUseEndEvent(
+                        tool_use_id="done_good",
+                        name="complete_step",
+                        input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+                    )
+                    yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                    return
+
+                yield MessageStartEvent(message_id="m5")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        provider = Provider()
+        executor = StepExecutor(
+            provider_manager=provider,
+            base_tool_registry=registry,
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+
+        collected = []
+        async for event in executor.execute(step, PipelineContext({"deployment": []}), "test"):
+            collected.append(event)
+
+        assert provider.calls == 4
+        complete_results = [
+            event for event in collected if isinstance(event, ToolResultEvent) and event.tool_name == "complete_step"
+        ]
+        assert complete_results[-1].is_error is False
+        step_results = [event for event in collected if isinstance(event, StepResult)]
+        assert step_results[-1].status == StepStatus.COMPLETED
+        assert step_results[-1].conclusion == {"status": "success", "stack_id": "stack-123"}
+
+    @pytest.mark.asyncio
+    async def test_resumed_completed_step_revalidates_completion_guards(self, monkeypatch, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "deploying.md").write_text("Deploy.", encoding="utf-8")
+        calls: list[str] = []
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.resume_messages = kwargs.get("resume_messages")
+
+            async def continue_streaming(self):
+                calls.append("continue")
+                yield ToolUseStartEvent(tool_use_id="stack_1", name="ros_stack")
+                yield ToolUseEndEvent(
+                    tool_use_id="stack_1",
+                    name="ros_stack",
+                    input={"action": "CreateStack", "params": {"StackName": "demo"}},
+                )
+                yield ToolResultEvent(
+                    tool_use_id="stack_1",
+                    tool_name="ros_stack",
+                    result=json.dumps(
+                        {
+                            "stack_id": "stack-123",
+                            "stack_name": "demo",
+                            "status": "CREATE_COMPLETE",
+                            "is_success": True,
+                        }
+                    ),
+                )
+                yield ToolUseStartEvent(tool_use_id="done_good", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="done_good",
+                    name="complete_step",
+                    input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+                )
+                yield ToolResultEvent(tool_use_id="done_good", tool_name="complete_step", result="ok")
+
+            async def run_streaming(self, user_input):
+                raise AssertionError("resumed step should continue, not start a fresh prompt")
+
+        monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop)
+
+        step = StepSpec(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            prompt_file="prompts/deploying.md",
+            conclusion_schema={
+                "type": "object",
+                "required": ["status"],
+                "additionalProperties": False,
+                "properties": {
+                    "stack_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["success", "failed", "cancelled"]},
+                    "error": {"type": "string"},
+                },
+            },
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "success"},
+                    "required_conclusion_field": "stack_id",
+                    "require_tool_result": {
+                        "tool": "ros_stack",
+                        "action_in": ["CreateStack", "ContinueCreateStack"],
+                        "is_success": True,
+                        "status_in": ["CREATE_COMPLETE"],
+                        "match_conclusion_field": "stack_id",
+                    },
+                }
+            ],
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"deployment": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        resume_messages = [
+            Message(
+                role="assistant",
+                content=[
+                    ToolUseBlock(
+                        id="done_old",
+                        name="complete_step",
+                        input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+                    )
+                ],
+            ),
+            Message(role="user", content=[ToolResultBlock(tool_use_id="done_old", content="ok", is_error=False)]),
+        ]
+
+        collected = []
+        async for event in executor.execute(
+            step,
+            PipelineContext({"deployment": []}),
+            "test",
+            resume_messages=resume_messages,
+        ):
+            collected.append(event)
+
+        assert calls == ["continue"]
+        step_results = [event for event in collected if isinstance(event, StepResult)]
+        assert step_results[-1].status == StepStatus.COMPLETED
+        assert step_results[-1].conclusion == {"status": "success", "stack_id": "stack-123"}
+
 
 class TestPipelineToolsDiscovery:
     def test_inject_tool_from_pipeline_tools_dir(self, tmp_path):
@@ -1575,8 +2063,29 @@ class TestStepExecutorSchemaWiring:
             conclusion_field="intent",
             forward="arch",
             prompt_file="prompts/intent_parsing.md",
-            rollback_rules=[RollbackRule(target_step="prev_step", condition="bad")],
         )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=_make_pipeline(),
+            pipeline_dir=tmp_path,
+        )
+        ctx = PipelineContext(SIMPLE_DEPS)
+        tool_reg = executor._build_step_tools(step, ctx, rollback_targets=["prev_step"])
+        complete_tool = tool_reg.get("complete_step")
+        schema = complete_tool.input_schema
+        assert schema["properties"]["rollback_request"]["properties"]["target_step"]["enum"] == ["prev_step"]
+
+    def test_does_not_fallback_to_static_rollback_rules(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "intent_parsing.md").write_text("Parse.", encoding="utf-8")
+        step = StepSpec(
+            step_id="intent_parsing",
+            conclusion_field="intent",
+            forward="arch",
+            prompt_file="prompts/intent_parsing.md",
+        )
+        setattr(step, "rollback_rules", [SimpleNamespace(target_step="legacy_prev", condition="bad")])
         executor = StepExecutor(
             provider_manager=MagicMock(),
             base_tool_registry=ToolRegistry(),
@@ -1586,8 +2095,8 @@ class TestStepExecutorSchemaWiring:
         ctx = PipelineContext(SIMPLE_DEPS)
         tool_reg = executor._build_step_tools(step, ctx)
         complete_tool = tool_reg.get("complete_step")
-        schema = complete_tool.input_schema
-        assert schema["properties"]["rollback_request"]["properties"]["target_step"]["enum"] == ["prev_step"]
+
+        assert "rollback_request" not in complete_tool.input_schema["properties"]
 
 
 class TestSchemaIntegration:
@@ -1595,7 +2104,7 @@ class TestSchemaIntegration:
 
     def test_conclusion_schema_and_rollback_targets_propagate(self, tmp_path):
         """Verify that conclusion_schema from StepSpec reaches the tool's input_schema,
-        and rollback_rules produce correct enum constraint on rollback_request.target_step."""
+        and explicit rollback targets produce correct enum constraint on rollback_request.target_step."""
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "intent_parsing.md").write_text("Do it.", encoding="utf-8")
         step = StepSpec(
@@ -1611,10 +2120,6 @@ class TestSchemaIntegration:
                     "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
                 },
             },
-            rollback_rules=[
-                RollbackRule(target_step="prev_step", condition="bad_input"),
-                RollbackRule(target_step="other_step", condition="other_issue"),
-            ],
             max_conclusion_retries=3,
         )
         executor = StepExecutor(
@@ -1624,7 +2129,7 @@ class TestSchemaIntegration:
             pipeline_dir=tmp_path,
         )
         ctx = PipelineContext(SIMPLE_DEPS)
-        tool_reg = executor._build_step_tools(step, ctx)
+        tool_reg = executor._build_step_tools(step, ctx, rollback_targets=["prev_step", "other_step"])
         tool = tool_reg.get("complete_step")
         schema = tool.input_schema
 
@@ -1665,7 +2170,7 @@ class TestSchemaIntegration:
         assert conclusion["type"] == "object"
         assert "description" in conclusion
         assert "properties" not in conclusion
-        # No rollback when no rollback_rules
+        # No rollback unless the runner passes dynamic rollback targets.
         assert "rollback_request" not in schema["properties"]
 
 

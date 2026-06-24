@@ -113,6 +113,42 @@ class TestToolExecutor:
         assert len(results) == 5
         assert all(r.content == "read result" for r in results)
 
+    async def test_preserves_tool_context_read_roots(self):
+        class CapturingReadTool(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                roots = ",".join(context.trusted_read_directories)
+                return ToolResult.success(roots)
+
+        read_tool = CapturingReadTool()
+        registry = MagicMock()
+        registry.get = lambda name: read_tool
+        executor = ToolExecutor(registry=registry)
+
+        results = await executor.execute_batch(
+            [ToolCallRequest(id="read-1", name="read", input={})],
+            ToolContext(trusted_read_directories=["/tmp/skill-root"]),
+        )
+
+        assert results[0].content == "/tmp/skill-root"
+
+    async def test_preserves_tool_context_relative_read_roots(self):
+        class CapturingReadTool(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                roots = ",".join(context.relative_read_directories)
+                return ToolResult.success(roots)
+
+        read_tool = CapturingReadTool()
+        registry = MagicMock()
+        registry.get = lambda name: read_tool
+        executor = ToolExecutor(registry=registry)
+
+        results = await executor.execute_batch(
+            [ToolCallRequest(id="read-1", name="read", input={})],
+            ToolContext(relative_read_directories=["/tmp/skill-root"]),
+        )
+
+        assert results[0].content == "/tmp/skill-root"
+
     async def test_serial_order(self):
         order = []
 
@@ -189,6 +225,21 @@ class TestToolExecutor:
         assert [result.content for result in results] == ["first", "second"]
         assert tool.seen_context_queues == {"first": first_queue, "second": second_queue}
         assert tool._event_queue is None
+
+    async def test_pipeline_mode_is_preserved_in_derived_tool_context(self):
+        class ContextAwareTool(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                return ToolResult.success(str(context.pipeline_mode))
+
+        tool = ContextAwareTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        calls = [ToolCallRequest(id="a", name="read", input={})]
+
+        results = await executor.execute_batch(calls, ToolContext(pipeline_mode=True))
+
+        assert results[0].content == "True"
 
 
 class FakeStrictTool(Tool):

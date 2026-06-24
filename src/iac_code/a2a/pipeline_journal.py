@@ -8,7 +8,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from iac_code.utils.state_io import fsync_parent_dir
+
 logger = logging.getLogger(__name__)
+_EVENT_GROUP_RECORD_TYPE = "event_group"
+_EVENT_GROUP_RECORD_KEY = "__iac_code_record_type"
 
 
 class A2APipelineJournalReadError(ValueError):
@@ -20,8 +24,9 @@ class A2APipelineJournal:
         self.pipeline_dir = Path(pipeline_dir)
         self.path = self.pipeline_dir / "a2a-events.jsonl"
 
-    def append(self, event: dict[str, Any]) -> None:
+    def append(self, event: dict[str, Any], durable: bool = False) -> None:
         self.pipeline_dir.mkdir(parents=True, exist_ok=True)
+        created = not self.path.exists()
         safe_event = to_json_safe(event)
         try:
             line = json.dumps(safe_event, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
@@ -31,6 +36,37 @@ class A2APipelineJournal:
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
             handle.flush()
+            if durable:
+                os.fsync(handle.fileno())
+        if durable and created:
+            fsync_parent_dir(self.path)
+
+    def append_many(self, events: list[dict[str, Any]], durable: bool = False) -> None:
+        if not events:
+            return
+
+        self.pipeline_dir.mkdir(parents=True, exist_ok=True)
+        created = not self.path.exists()
+        safe_events = []
+        for event in events:
+            safe_event = to_json_safe(event)
+            if not isinstance(safe_event, dict):
+                raise TypeError("A2A journal group events must be JSON objects")
+            safe_events.append(safe_event)
+        record = {
+            _EVENT_GROUP_RECORD_KEY: _EVENT_GROUP_RECORD_TYPE,
+            "schemaVersion": "1.0",
+            "groupId": uuid.uuid4().hex,
+            "events": safe_events,
+        }
+        line = json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+            handle.flush()
+            if durable:
+                os.fsync(handle.fileno())
+        if durable and created:
+            fsync_parent_dir(self.path)
 
     def read_all(self) -> list[dict[str, Any]]:
         return self._read_all(strict=False)
@@ -116,7 +152,7 @@ class A2APipelineJournal:
                         f"Non-object A2A pipeline journal line {line_number} in {self.path}"
                     )
                 continue
-            events.append(value)
+            events.extend(_events_from_journal_record(value, strict=strict, line_number=line_number, path=self.path))
 
         events.sort(key=_sequence_value)
         return events
@@ -131,6 +167,25 @@ def _sequence_value(event: dict[str, Any]) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _events_from_journal_record(
+    value: dict[str, Any],
+    *,
+    strict: bool,
+    line_number: int,
+    path: Path,
+) -> list[dict[str, Any]]:
+    if value.get(_EVENT_GROUP_RECORD_KEY) != _EVENT_GROUP_RECORD_TYPE:
+        return [value]
+
+    group_events = value.get("events")
+    if not isinstance(group_events, list) or not all(isinstance(event, dict) for event in group_events):
+        if strict:
+            raise A2APipelineJournalReadError(f"Invalid A2A pipeline journal event group line {line_number} in {path}")
+        logger.warning("Skipping invalid A2A pipeline journal event group in %s", path)
+        return []
+    return group_events
 
 
 def _repairable_tail_bytes(content: bytes) -> tuple[bytes, bytes] | None:

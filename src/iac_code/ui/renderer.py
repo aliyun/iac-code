@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable
 
 if sys.platform != "win32":
@@ -32,6 +33,7 @@ from rich.live import Live
 from rich.markdown import ListItem, Markdown
 from rich.rule import Rule
 from rich.segment import Segment
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
@@ -270,10 +272,15 @@ class Renderer:
         tool_registry: "ToolRegistry",
         status_callback: Callable[[], str] | None = None,
         app_state_store: "AppStateStore | None" = None,
+        *,
+        image_path_resolver: Callable[[int], str | None] | None = None,
+        image_block_path_resolver: Callable[[Any], str | None] | None = None,
     ) -> None:
         self.console = console
         self._tool_registry = tool_registry
         self._status_callback = status_callback
+        self._image_path_resolver = image_path_resolver
+        self._image_block_path_resolver = image_block_path_resolver
         self._verbose = False
         self._text_flushed = False  # tracks whether current text block was partially flushed
         self._message_history: list[RenderedTurn] = []
@@ -330,6 +337,37 @@ class Renderer:
         t.append("❯ ", style="bold cyan")
         t.append(text)
         self.console.print(t)
+
+    def _image_ref_style(self, image_id: int) -> Style | None:
+        if self._image_path_resolver is None:
+            return None
+        try:
+            image_path = self._image_path_resolver(image_id)
+            if not image_path:
+                return None
+            return Style(color="cyan", link=self._file_url(image_path))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _file_url(path: str) -> str:
+        resolved = Path(path).expanduser()
+        if not resolved.is_absolute():
+            resolved = resolved.resolve(strict=False)
+        return resolved.as_uri()
+
+    def _image_block_style(self, block: Any) -> Style | None:
+        if self._image_block_path_resolver is not None:
+            try:
+                image_path = self._image_block_path_resolver(block)
+                if image_path:
+                    return Style(color="cyan", link=self._file_url(image_path))
+            except Exception:
+                pass
+        ref_id = getattr(block, "ref_id", None)
+        if isinstance(ref_id, int):
+            return self._image_ref_style(ref_id)
+        return None
 
     def print_command_result(self, command: str, result: str) -> None:
         t = Text()
@@ -1795,12 +1833,19 @@ class Renderer:
 
     def replay_history(self, messages: list) -> None:
         """Replay saved Message objects to scrollback with 1:1 visual fidelity."""
-        from iac_code.agent.message import TextBlock, ToolResultBlock, ToolUseBlock, is_recalled_memory_message
+        from iac_code.agent.message import (
+            ImageBlock,
+            TextBlock,
+            ToolResultBlock,
+            ToolUseBlock,
+            is_recalled_memory_message,
+        )
+        from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         # Build a lookup of tool_use_id → ToolResultBlock from all user messages
         tool_results: dict[str, ToolResultBlock] = {}
         for msg in messages:
-            if is_recalled_memory_message(msg):
+            if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             if msg.role == "user" and isinstance(msg.content, list):
                 for block in msg.content:
@@ -1809,7 +1854,7 @@ class Renderer:
 
         first_turn = True
         for msg in messages:
-            if is_recalled_memory_message(msg):
+            if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             if msg.role == "user":
                 if self.is_internal_skill_context_message(msg):
@@ -1822,12 +1867,13 @@ class Renderer:
                 if not first_turn:
                     self.console.print()
                 first_turn = False
-                if isinstance(msg.content, str):
-                    self.print_user_message(msg.content)
-                else:
-                    text = msg.get_text()
-                    if text:
-                        self.print_user_message(text)
+                rendered = self._render_user_content(
+                    msg.content,
+                    text_block_type=TextBlock,
+                    image_block_type=ImageBlock,
+                )
+                if rendered.plain.strip():
+                    self.console.print(rendered)
                 self.console.print()  # blank line between user input and agent response
             elif msg.role == "assistant":
                 segments: list[_Segment] = []
@@ -1857,6 +1903,25 @@ class Renderer:
                     self.console.print(
                         Text(f"✻ {random_completion_verb()} {_format_elapsed(msg.elapsed_seconds)}", style="dim italic")
                     )
+
+    def _render_user_content(self, content: Any, *, text_block_type: type, image_block_type: type) -> Text:
+        text = Text()
+        text.append("❯ ", style="bold cyan")
+        if isinstance(content, str):
+            text.append(content)
+            return text
+        if not isinstance(content, list):
+            return text
+        image_count = 0
+        for block in content:
+            if isinstance(block, text_block_type):
+                text.append(block.text)
+            elif isinstance(block, image_block_type):
+                image_count += 1
+                image_id = getattr(block, "ref_id", None)
+                label_id = image_id if isinstance(image_id, int) else image_count
+                text.append(f"[Image #{label_id}]", style=self._image_block_style(block))
+        return text
 
     @staticmethod
     def is_internal_skill_context_message(message: Any) -> bool:

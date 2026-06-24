@@ -14,10 +14,15 @@ from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.metrics import NoOpA2AMetrics
+from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.agent.message import ImageBlock
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.interrupt import InterruptVerdict
+from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.types.stream_events import AskUserQuestionEvent, TextDeltaEvent
 
 from .fakes import FakeEventQueue, FakeRequestContext
@@ -26,8 +31,61 @@ RETRY_TEXT = "A temporary error occurred. Please retry."
 AUTH_TEXT = "Authentication required. Configure credentials and retry."
 
 
+def test_active_sidecar_mismatch_error_exposes_jsonrpc_data() -> None:
+    from iac_code.a2a.pipeline_executor import _active_sidecar_mismatch_error
+
+    error = _active_sidecar_mismatch_error(
+        recoverable_task_id="task-owner",
+        context_id="ctx-1",
+        sidecar_status="running",
+    )
+
+    assert error.code == -32602
+    assert error.data == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": "running",
+    }
+    assert "task-owner" in error.message
+
+
+def test_active_sidecar_mismatch_error_serializes_raw_jsonrpc_data() -> None:
+    from iac_code.a2a.jsonrpc_passthrough import install_jsonrpc_error_data_passthrough
+    from iac_code.a2a.pipeline_executor import _active_sidecar_mismatch_error
+
+    install_jsonrpc_error_data_passthrough()
+    from a2a.server.request_handlers.response_helpers import build_error_response
+
+    error = _active_sidecar_mismatch_error(
+        recoverable_task_id="task-owner",
+        context_id="ctx-1",
+        sidecar_status="waiting_input",
+    )
+
+    response = build_error_response("req-1", error)
+
+    assert response["error"]["code"] == -32602
+    assert response["error"]["data"] == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": "waiting_input",
+    }
+
+
 def dump(event):
     return MessageToDict(event, preserving_proto_field_name=False)
+
+
+def image_interrupt_input() -> PipelineUserInput:
+    return PipelineUserInput(
+        content=[ImageBlock(media_type="image/png", data="aGVsbG8=")],
+        display_text="[Image input]",
+        has_images=True,
+    )
+
+
+def _display_text(value):
+    return value.display_text if isinstance(value, PipelineUserInput) else value
 
 
 class FakePipeline:
@@ -46,14 +104,14 @@ class FakePipeline:
         self.handoff_summary = "handoff summary"
 
     async def run(self, prompt: str):
-        self.run_prompts.append(prompt)
+        self.run_prompts.append(_display_text(prompt))
         for event in self.events:
             if isinstance(event, BaseException):
                 raise event
             yield event
 
     async def resume(self, prompt: str):
-        self.resume_prompts.append(prompt)
+        self.resume_prompts.append(_display_text(prompt))
         for event in self.events:
             if isinstance(event, BaseException):
                 raise event
@@ -61,7 +119,7 @@ class FakePipeline:
 
     def continue_from_sidecar(self, user_input: str | None = None):
         self.continue_calls += 1
-        self.continue_inputs.append(user_input)
+        self.continue_inputs.append(_display_text(user_input))
         return self.run(user_input or "continued")
 
     def clear_sidecar(self) -> None:
@@ -255,6 +313,96 @@ async def test_executor_publishes_normal_handoff_ready_after_completed_pipeline(
 
 
 @pytest.mark.asyncio
+async def test_executor_publishes_normal_handoff_ready_with_cleanup_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    session_dir = tmp_path / "sidecar"
+    ledger = CleanupLedger(session_dir / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                resource_name="selling-stack",
+                region_id="cn-hangzhou",
+                source_step_id="deploying",
+            )
+        ],
+        source_step_id="deploying",
+        reason="rollback from deploying",
+    )
+    fake_pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=session_dir,
+    )
+    fake_pipeline.handoff_enabled = True
+    fake_pipeline.handoff_summary = "[Pipeline Handoff Context]\nPipeline: selling"
+    fake_pipeline.cleanup_ledger = lambda: ledger
+
+    def fake_create_pipeline(*args, **kwargs):
+        fake_pipeline._session_storage = kwargs["session_storage"]
+        fake_pipeline._session_id = kwargs["session_id"]
+        fake_pipeline._cwd = kwargs["cwd"]
+        return fake_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    pipeline_events = [
+        dump(event)["metadata"]["iac_code"]["pipeline"]
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and "pipeline" in dump(event).get("metadata", {}).get("iac_code", {})
+    ]
+    handoff = pipeline_events[-1]
+    cleanup = handoff["data"]["cleanup"]
+    assert cleanup["status"] == "pending"
+    assert cleanup["resourceCount"] == 1
+    assert cleanup["statusMessage"] == "Detected 1 rollback cleanup resources; starting cleanup."
+    assert "prompt" not in cleanup
+    assert "ledgerPath" not in cleanup
+    assert cleanup["resources"] == [
+        {
+            "provider": "ros",
+            "resourceType": "stack",
+            "resourceId": "stack-123",
+            "resourceName": "selling-stack",
+            "regionId": "cn-hangzhou",
+            "sourceStepId": "deploying",
+            "cleanupStatus": "pending",
+            "progressStatus": None,
+            "lastError": None,
+        }
+    ]
+
+    snapshot = A2APipelineSnapshotStore(session_dir).load()
+    assert snapshot is not None
+    assert snapshot["cleanup"]["status"] == "pending"
+    assert snapshot["cleanup"]["resourceCount"] == 1
+    assert snapshot["normalHandoff"]["data"]["cleanup"]["resourceCount"] == 1
+    assert "prompt" not in snapshot["cleanup"]
+    assert "ledgerPath" not in snapshot["cleanup"]
+    assert "prompt" not in snapshot["normalHandoff"]["data"]["cleanup"]
+    assert "ledgerPath" not in snapshot["normalHandoff"]["data"]["cleanup"]
+
+
+@pytest.mark.asyncio
 async def test_executor_sets_pipeline_telemetry_correlation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -272,8 +420,10 @@ async def test_executor_sets_pipeline_telemetry_correlation(
         session_dir=tmp_path / "sidecar",
     )
     fake_pipeline.set_telemetry_correlation = MagicMock()
+    create_pipeline_kwargs = {}
 
     def fake_create_pipeline(*args, **kwargs):
+        create_pipeline_kwargs.update(kwargs)
         fake_pipeline._session_storage = kwargs["session_storage"]
         fake_pipeline._session_id = kwargs["session_id"]
         fake_pipeline._cwd = kwargs["cwd"]
@@ -295,6 +445,7 @@ async def test_executor_sets_pipeline_telemetry_correlation(
         context_id="ctx-1",
         pipeline_run_id="ctx-1",
     )
+    assert create_pipeline_kwargs["surface"] == "a2a"
 
 
 @pytest.mark.asyncio
@@ -775,12 +926,10 @@ async def test_executor_clears_previous_task_terminal_sidecar_and_runs_new_task(
 @pytest.mark.parametrize(
     ("sidecar_status", "event_type", "event_status"),
     [
-        ("waiting_input", "input_required", "waiting_input"),
-        ("running", "pipeline_started", "working"),
         ("completed", "pipeline_completed", "completed"),
     ],
 )
-async def test_executor_replaces_restored_pipeline_when_sidecar_owner_mismatches(
+async def test_executor_replaces_terminal_restored_pipeline_when_sidecar_owner_mismatches(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     sidecar_status: str,
@@ -855,6 +1004,102 @@ async def test_executor_replaces_restored_pipeline_when_sidecar_owner_mismatches
     assert fresh_pipeline.run_prompts == ["new request"]
     record = await store.get_task_record("task-new")
     assert "".join(record.output_text) == "fresh output"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sidecar_status", "event_type", "event_status"),
+    [
+        ("waiting_input", "input_required", "waiting_input"),
+        ("running", "pipeline_started", "working"),
+    ],
+)
+async def test_executor_rejects_active_restored_pipeline_owner_mismatch_without_clearing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    sidecar_status: str,
+    event_type: str,
+    event_status: str,
+) -> None:
+    from iac_code.a2a.pipeline_executor import (
+        IacCodeA2APipelineExecutor,
+        RecoverablePipelineInvalidParamsError,
+    )
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    session_dir = tmp_path / "sidecar"
+    owner_event = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-owner",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": event_type,
+        "scope": "pipeline",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-owner",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": event_status,
+        "data": {"prompt": "owner choice"} if event_type == "input_required" else {},
+    }
+    journal = A2APipelineJournal(session_dir)
+    journal.append(owner_event)
+    A2APipelineSnapshotStore(session_dir).save(reduce_pipeline_events([owner_event]))
+    restored_pipeline = FakePipeline(
+        [
+            TextDeltaEvent(text="stale restored output"),
+            PipelineEvent(type=PipelineEventType.PIPELINE_COMPLETED, step_id=None, timestamp=1717821601.0, data={}),
+        ],
+        session_dir=session_dir,
+    )
+    restored_pipeline.sidecar_status = sidecar_status
+    created_pipelines: list[FakePipeline] = []
+
+    def fake_create_pipeline(*args, **kwargs):
+        created_pipelines.append(restored_pipeline)
+        return restored_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            context=FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            event_queue=FakeEventQueue(),
+            task=await store.get_or_create_task(task_id="task-new", context_id="ctx-1"),
+            task_id="task-new",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            prompt="new request",
+        )
+
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": sidecar_status,
+    }
+    assert len(created_pipelines) == 1
+    assert restored_pipeline.clear_sidecar_calls == 0
+    assert restored_pipeline.run_prompts == []
+    assert journal.read_all() == [owner_event]
 
 
 @pytest.mark.asyncio
@@ -1602,10 +1847,12 @@ async def test_executor_does_not_resume_nonterminal_sidecar_when_a2a_state_is_te
 
 
 @pytest.mark.asyncio
-async def test_executor_clears_previous_task_waiting_sidecar_and_runs_new_task(
+async def test_executor_rejects_previous_task_waiting_sidecar_without_starting_new_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     session_dir = tmp_path / "sidecar"
     old_input = {
@@ -1638,19 +1885,25 @@ async def test_executor_clears_previous_task_waiting_sidecar_and_runs_new_task(
 
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
 
-    await executor.execute(
-        FakeRequestContext(
-            task_id="task-new",
-            context_id="ctx-1",
-            text="new request",
-            metadata={"iac_code": {"cwd": str(tmp_path)}},
-        ),
-        FakeEventQueue(),
-    )
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
 
-    assert fake_pipeline.clear_sidecar_calls == 1
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-old",
+        "contextId": "ctx-1",
+        "sidecarStatus": "waiting_input",
+    }
+    assert fake_pipeline.clear_sidecar_calls == 0
     assert fake_pipeline.resume_prompts == []
-    assert fake_pipeline.run_prompts == ["new request"]
+    assert fake_pipeline.run_prompts == []
 
 
 @pytest.mark.asyncio
@@ -1668,6 +1921,8 @@ async def test_executor_does_not_attach_current_sidecar_to_historical_task(
     event_type: str,
     event_status: str,
 ) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     session_dir = tmp_path / "sidecar"
     old_event = {
@@ -1712,21 +1967,27 @@ async def test_executor_does_not_attach_current_sidecar_to_historical_task(
 
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
 
-    await executor.execute(
-        FakeRequestContext(
-            task_id="task-old",
-            context_id="ctx-1",
-            text="old followup",
-            metadata={"iac_code": {"cwd": str(tmp_path)}},
-        ),
-        FakeEventQueue(),
-    )
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-old",
+                context_id="ctx-1",
+                text="old followup",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
 
-    assert fake_pipeline.clear_sidecar_calls == 1
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-current",
+        "contextId": "ctx-1",
+        "sidecarStatus": sidecar_status,
+    }
+    assert fake_pipeline.clear_sidecar_calls == 0
     assert fake_pipeline.resume_prompts == []
     assert fake_pipeline.continue_calls == 0
-    assert fake_pipeline.run_prompts == ["old followup"]
-    assert journal.read_all()[-1]["taskId"] == "task-old"
+    assert fake_pipeline.run_prompts == []
+    assert journal.read_all()[-1]["taskId"] == "task-current"
 
 
 @pytest.mark.asyncio
@@ -1891,10 +2152,12 @@ async def test_executor_routes_waiting_input_pause_confirmation_through_interrup
 
 
 @pytest.mark.asyncio
-async def test_executor_clears_previous_task_running_sidecar_and_runs_new_task(
+async def test_executor_rejects_previous_task_running_sidecar_without_starting_new_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     session_dir = tmp_path / "sidecar"
     old_running = {
@@ -1927,19 +2190,126 @@ async def test_executor_clears_previous_task_running_sidecar_and_runs_new_task(
 
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
 
-    await executor.execute(
-        FakeRequestContext(
-            task_id="task-new",
-            context_id="ctx-1",
-            text="new request",
-            metadata={"iac_code": {"cwd": str(tmp_path)}},
-        ),
-        FakeEventQueue(),
+    with pytest.raises(RecoverablePipelineInvalidParamsError) as exc_info:
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
+
+    assert exc_info.value.data == {
+        "recoverableTaskId": "task-old",
+        "contextId": "ctx-1",
+        "sidecarStatus": "running",
+    }
+    assert fake_pipeline.clear_sidecar_calls == 0
+    assert fake_pipeline.continue_calls == 0
+    assert fake_pipeline.run_prompts == []
+
+
+@pytest.mark.asyncio
+async def test_executor_rejected_active_sidecar_mismatch_does_not_persist_new_working_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import RecoverablePipelineInvalidParamsError
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    session_dir = tmp_path / "sidecar"
+    owner_event = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-owner-running",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "pipeline_started",
+        "scope": "pipeline",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-owner",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "working",
+        "data": {},
+    }
+    A2APipelineJournal(session_dir).append(owner_event)
+    A2APipelineSnapshotStore(session_dir).save(reduce_pipeline_events([owner_event]))
+    fake_pipeline = FakePipeline(
+        [
+            TextDeltaEvent(text="new output"),
+            PipelineEvent(type=PipelineEventType.PIPELINE_COMPLETED, step_id=None, timestamp=1717821601.0, data={}),
+        ],
+        session_dir=session_dir,
+    )
+    fake_pipeline.sidecar_status = "running"
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=task_store, model="qwen3.6-plus")
+
+    with pytest.raises(RecoverablePipelineInvalidParamsError):
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-new",
+                context_id="ctx-1",
+                text="new request",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            FakeEventQueue(),
+        )
+
+    assert fake_pipeline.clear_sidecar_calls == 0
+    assert fake_pipeline.run_prompts == []
+    rejected_task = persistence.load_task("task-new")
+    assert rejected_task is not None
+    assert rejected_task.state != "working"
+    assert [task.task_id for task in persistence.list_tasks() if task.state == "working"] == []
+
+
+def test_cleanup_handoff_missing_ledger_ignores_empty_public_cleanup_snapshot(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _pipeline_cleanup_handoff_data_from_session
+
+    cleanup = _pipeline_cleanup_handoff_data_from_session(
+        cwd=str(tmp_path),
+        session_id="session-empty-cleanup",
+        public_snapshot={"cleanup": {"resourceCount": 0, "resources": [], "status": ""}},
     )
 
-    assert fake_pipeline.clear_sidecar_calls == 1
-    assert fake_pipeline.continue_calls == 0
-    assert fake_pipeline.run_prompts == ["new request"]
+    assert cleanup is None
+
+
+def test_cleanup_handoff_missing_ledger_does_not_reconstruct_prompt_from_public_snapshot(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _pipeline_cleanup_handoff_data_from_session
+
+    cleanup = _pipeline_cleanup_handoff_data_from_session(
+        cwd=str(tmp_path),
+        session_id="session-public-cleanup-only",
+        public_snapshot={
+            "cleanup": {
+                "resourceCount": 1,
+                "resources": [
+                    {
+                        "provider": "ros",
+                        "resourceType": "stack",
+                        "resourceId": "stack-public-only",
+                        "cleanupStatus": "pending",
+                    }
+                ],
+                "status": "pending",
+            }
+        },
+    )
+
+    assert cleanup is not None
+    assert cleanup["status"] == "unavailable"
+    assert "prompt" not in cleanup
+    assert "resources" not in cleanup
+    assert "stack-public-only" not in repr(cleanup)
 
 
 @pytest.mark.asyncio
@@ -2942,7 +3312,7 @@ async def test_active_task_route_does_not_treat_finished_pending_question_as_int
         task_id="task-1",
         context_id="ctx-1",
         cwd=str(tmp_path),
-        prompt="Nginx 网站",
+        pipeline_input="Nginx 网站",
         preserve_task_record=True,
     )
 
@@ -3035,7 +3405,7 @@ async def test_active_task_route_answers_pending_question_without_marking_input_
         task_id="task-1",
         context_id="ctx-1",
         cwd=str(tmp_path),
-        prompt="Nginx 网站",
+        pipeline_input="Nginx 网站",
         preserve_task_record=True,
     )
 
@@ -3349,6 +3719,120 @@ def test_waiting_input_task_id_from_sidecar_accepts_candidate_selection(tmp_path
     A2APipelineSnapshotStore(session_dir).save(reduce_pipeline_events([pending]))
 
     assert waiting_input_task_id_from_sidecar(cwd=str(cwd), session_id=session_id, context_id=context_id) == "task-1"
+
+
+def test_cancel_waiting_input_sidecar_appends_cancel_handoff_as_durable_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a.pipeline_executor import cancel_waiting_input_task_from_sidecar
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    session_id = "session-ctx-1"
+    context_id = "ctx-1"
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": "task-1",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "input-confirm_and_select-1",
+            "kind": "candidate_selection",
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+        },
+    }
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+    append_many_calls = []
+    original_append_many = A2APipelineJournal.append_many
+
+    def recording_append_many(self, events, durable: bool = False):
+        append_many_calls.append(([event["eventType"] for event in events], durable))
+        return original_append_many(self, events, durable=durable)
+
+    monkeypatch.setattr(A2APipelineJournal, "append_many", recording_append_many)
+
+    canceled = cancel_waiting_input_task_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+        task_id="task-1",
+        reason="user canceled",
+    )
+
+    assert canceled is True
+    assert append_many_calls[-1] == (["pipeline_canceled", "pipeline_handoff_ready"], True)
+    events = A2APipelineJournal(pipeline_dir).read_all()
+    assert [event["eventType"] for event in events[-2:]] == ["pipeline_canceled", "pipeline_handoff_ready"]
+
+
+def test_cancel_waiting_input_sidecar_returns_false_when_durable_group_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.a2a.pipeline_executor import cancel_waiting_input_task_from_sidecar
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    cwd = tmp_path / "workspace"
+    session_id = "session-ctx-1"
+    context_id = "ctx-1"
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": "task-1",
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "input-confirm_and_select-1",
+            "kind": "candidate_selection",
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+        },
+    }
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    def fail_append_many(self, events, durable: bool = False):
+        assert durable is True
+        assert [event["eventType"] for event in events] == ["pipeline_canceled", "pipeline_handoff_ready"]
+        raise OSError("journal locked")
+
+    monkeypatch.setattr(A2APipelineJournal, "append_many", fail_append_many)
+
+    canceled = cancel_waiting_input_task_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+        task_id="task-1",
+        reason="user canceled",
+    )
+
+    assert canceled is False
+    assert [event["eventType"] for event in A2APipelineJournal(pipeline_dir).read_all()] == ["input_required"]
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None
+    assert snapshot["status"] == "waiting_input"
 
 
 @pytest.mark.asyncio
@@ -4283,3 +4767,363 @@ async def test_same_task_non_interruptible_active_context_preserves_active_recor
     final_status = _status_events(queue)[-1]["status"]
     assert final_status["state"] == "TASK_STATE_FAILED"
     assert final_status["message"]["parts"][0]["text"] == "Task is already working."
+
+
+@pytest.mark.asyncio
+async def test_active_pipeline_interrupt_receives_structured_image_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.active_task = asyncio.current_task()
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: _fake_runtime(),
+    )
+    ctx.active_task_id = "task-1"
+    received = []
+
+    class InterruptPipeline(FakePipeline):
+        async def handle_user_interrupt(self, message):
+            received.append(message)
+            return InterruptVerdict(action="continue", reason="keep going")
+
+        def pause_agent_loops(self) -> None:
+            pass
+
+        def resume_agent_loops(self) -> None:
+            pass
+
+    pipeline = InterruptPipeline([], session_dir=tmp_path / "pipeline")
+    publisher = SimpleNamespace(
+        publish_interrupt_received=AsyncMock(),
+        publish_interrupt=AsyncMock(),
+        journal=A2APipelineJournal(tmp_path / "pipeline"),
+        snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline"),
+    )
+    ctx.runtime = SimpleNamespace(
+        agent_runtime=_fake_runtime(),
+        pipeline=pipeline,
+        publisher=publisher,
+        current_stream=None,
+        restart_after_interrupt=False,
+        pause_after_interrupt=False,
+        restart_requested=asyncio.Event(),
+    )
+    store.mirror_context(ctx)
+    pipeline_input = image_interrupt_input()
+
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    await executor.execute(
+        context=FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=FakeEventQueue(),
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input=pipeline_input,
+    )
+
+    assert received == [pipeline_input]
+    publisher.publish_interrupt_received.assert_awaited_once_with(prompt="[Image input]")
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_answer_preserves_image_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+
+    future = asyncio.get_running_loop().create_future()
+    injected = []
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            injected.append((message, envelope))
+
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="Upload diagram",
+                options=[],
+                response_future=future,
+            ),
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        ),
+        pipeline=Pipeline(),
+        publisher=SimpleNamespace(
+            publish_manual=AsyncMock(return_value=object()),
+        ),
+    )
+    pipeline_input = image_interrupt_input()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    result = await executor._route_pending_question_answer(runtime, pipeline_input)
+
+    assert result == "answered"
+    answer = future.result()
+    assert answer == {"selected_id": "", "selected_label": "", "free_text": "[Image input]"}
+    assert injected == [(pipeline_input.content, {"scope": "pipeline", "inputId": "ask-toolu_1"})]
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_image_injection_failure_is_not_marked_answered(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+
+    future = asyncio.get_running_loop().create_future()
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            return False
+
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="Upload diagram",
+                options=[],
+                response_future=future,
+            ),
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        ),
+        pipeline=Pipeline(),
+        publisher=SimpleNamespace(
+            publish_manual=AsyncMock(return_value=object()),
+        ),
+    )
+    pipeline_input = image_interrupt_input()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    with pytest.raises(RuntimeError, match="image supplement could not be delivered"):
+        await executor._route_pending_question_answer(runtime, pipeline_input)
+
+    assert future.done() is False
+    assert runtime.pending_question is not None
+
+
+@pytest.mark.asyncio
+async def test_active_pending_question_image_injection_failure_restores_snapshot_pending_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, _PendingAskUserQuestion
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    future = asyncio.get_running_loop().create_future()
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            return False
+
+    publisher = PipelineA2AEventPublisher(
+        event_queue=FakeEventQueue(),
+        translator=PipelineEventTranslator(
+            PipelineA2AContext(
+                pipeline_run_id="ctx-1",
+                task_id="task-1",
+                context_id="ctx-1",
+                pipeline_name="selling",
+            )
+        ),
+        journal=A2APipelineJournal(tmp_path / "pipeline"),
+        snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline"),
+    )
+    await publisher.publish_manual(
+        "input_required",
+        "pipeline",
+        status="input_required",
+        data={
+            "kind": "ask_user_question",
+            "inputId": "ask-toolu_1",
+            "toolUseId": "toolu_1",
+            "question": "Upload diagram",
+            "prompt": "Upload diagram",
+            "options": [],
+            "required": True,
+        },
+    )
+    assert publisher.snapshot_store.load()["pendingInput"]["inputId"] == "ask-toolu_1"
+
+    runtime = SimpleNamespace(
+        pending_question=_PendingAskUserQuestion(
+            event=AskUserQuestionEvent(
+                tool_use_id="toolu_1",
+                question="Upload diagram",
+                options=[],
+                response_future=future,
+            ),
+            envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+        ),
+        pipeline=Pipeline(),
+        publisher=publisher,
+    )
+    executor = IacCodeA2APipelineExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    with pytest.raises(RuntimeError, match="image supplement could not be delivered"):
+        await executor._route_pending_question_answer(runtime, image_interrupt_input())
+
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot["status"] == "waiting_input"
+    assert snapshot["pendingInput"]["inputId"] == "ask-toolu_1"
+    assert future.done() is False
+    assert runtime.pending_question is not None
+
+
+@pytest.mark.asyncio
+async def test_execute_reports_active_pending_question_image_injection_failure(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import (
+        A2APipelineRuntime,
+        IacCodeA2APipelineExecutor,
+        _PendingAskUserQuestion,
+    )
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+
+    future = asyncio.get_running_loop().create_future()
+
+    class Pipeline:
+        def inject_pending_question_supplement(self, message, *, envelope):
+            return False
+
+    queue = FakeEventQueue()
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(
+            PipelineA2AContext(
+                pipeline_run_id="ctx-1",
+                task_id="task-1",
+                context_id="ctx-1",
+                pipeline_name="selling",
+            )
+        ),
+        journal=A2APipelineJournal(tmp_path / "pipeline"),
+        snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline"),
+    )
+    publisher.publish_manual = AsyncMock(return_value=object())  # type: ignore[method-assign]
+    runtime = A2APipelineRuntime(agent_runtime=_fake_runtime(), pipeline=Pipeline(), publisher=publisher)
+    runtime.pending_question = _PendingAskUserQuestion(
+        event=AskUserQuestionEvent(
+            tool_use_id="toolu_1",
+            question="Upload diagram",
+            options=[],
+            response_future=future,
+        ),
+        envelope={"scope": "pipeline", "inputId": "ask-toolu_1"},
+    )
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: _fake_runtime(),
+    )
+    ctx.runtime = runtime
+    ctx.active_task_id = "task-1"
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    await executor.execute(
+        context=FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        event_queue=queue,
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input=image_interrupt_input(),
+    )
+
+    states = [dump(event)["status"]["state"] for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert "TASK_STATE_FAILED" in states
+    assert future.done() is False
+    assert runtime.pending_question is not None
+
+
+@pytest.mark.asyncio
+async def test_pending_ask_user_question_resume_preserves_image_input(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _resume_pending_ask_user_question_stream
+
+    pipeline_input = image_interrupt_input()
+    received = {}
+
+    class AskPipeline(FakePipeline):
+        sidecar_status = "waiting_input"
+
+        async def resume_ask_user_question(self, answer, **kwargs):
+            received["answer"] = answer
+            received["supplemental_input"] = kwargs.get("supplemental_input")
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id="ask",
+                timestamp=0.0,
+                data={"total_steps": 1},
+            )
+
+    pending_input = {
+        "kind": "ask_user_question",
+        "toolUseId": "toolu_1",
+        "inputId": "ask-toolu_1",
+    }
+    pipeline = AskPipeline([], session_dir=tmp_path / "pipeline")
+    publisher = SimpleNamespace(
+        snapshot_store=SimpleNamespace(load=lambda: {"status": "waiting_input"}),
+        publish_manual=AsyncMock(return_value=object()),
+    )
+
+    stream = _resume_pending_ask_user_question_stream(
+        pipeline=pipeline,
+        publisher=publisher,
+        pending_input=pending_input,
+        prompt="[Image input]",
+        pipeline_input=pipeline_input,
+    )
+    events = [event async for event in stream]
+
+    assert events
+    assert received["supplemental_input"] == pipeline_input

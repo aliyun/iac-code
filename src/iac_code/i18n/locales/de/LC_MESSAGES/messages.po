@@ -49,6 +49,38 @@ msgid "Unknown error"
 msgstr "Unbekannter Fehler"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid ""
+"Cleanup state unavailable. Inspect the session file and cloud resources "
+"manually."
+msgstr ""
+"Bereinigungsstatus nicht verfügbar. Prüfen Sie die Sitzungsdatei und "
+"Cloud-Ressourcen manuell."
+
+#: src/iac_code/a2a/executor.py
+msgid ""
+"Rollback cleanup deferred prompt state is unavailable. Please repair it "
+"before continuing."
+msgstr ""
+"Der verzögerte Prompt-Status der Rollback-Bereinigung ist nicht "
+"verfügbar. Bitte reparieren Sie ihn, bevor Sie fortfahren."
+
+#: src/iac_code/a2a/executor.py
+msgid ""
+"Rollback cleanup state is unavailable. Please repair the cleanup ledger "
+"before continuing."
+msgstr ""
+"Der Status der Rollback-Bereinigung ist nicht verfügbar. Bitte reparieren"
+" Sie das Bereinigungs-Ledger, bevor Sie fortfahren."
+
+#: src/iac_code/a2a/executor.py src/iac_code/ui/repl.py
+msgid ""
+"Rollback cleanup is still in progress. Please continue after cleanup "
+"completes."
+msgstr ""
+"Die Rollback-Bereinigung läuft noch. Bitte fahren Sie fort, nachdem die "
+"Bereinigung abgeschlossen ist."
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 msgid "Task is already working."
 msgstr "Die Aufgabe läuft bereits."
 
@@ -56,6 +88,11 @@ msgstr "Die Aufgabe läuft bereits."
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "Aufgabe abgebrochen."
+
+#: src/iac_code/a2a/executor.py
+#, python-brace-format
+msgid "Current model {model} does not support image input."
+msgstr "Aktuelles Modell {model} unterstützt keine Bildeingabe."
 
 #: src/iac_code/a2a/pipeline_executor.py
 msgid "A temporary error occurred. Please retry."
@@ -66,6 +103,11 @@ msgid "Authentication required. Configure credentials and retry."
 msgstr ""
 "Authentifizierung erforderlich. Anmeldedaten konfigurieren und erneut "
 "versuchen."
+
+#: src/iac_code/a2a/pipeline_executor.py
+#, python-brace-format
+msgid "Pipeline already running. Resume task {task_id}."
+msgstr "Pipeline läuft bereits. Setzen Sie Aufgabe {task_id} fort."
 
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A pipeline state not found"
@@ -501,6 +543,22 @@ msgid "Use iac-code as an A2A client."
 msgstr "iac-code als A2A-Client verwenden."
 
 #: src/iac_code/cli/main.py
+msgid ""
+"A2A client dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
+msgstr ""
+"A2A-Client-Abhängigkeiten fehlen. Installieren mit: pip install 'iac-"
+"code[a2a]'"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"A2A server dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
+msgstr ""
+"A2A-Server-Abhängigkeiten fehlen. Installieren mit: pip install 'iac-"
+"code[a2a]'"
+
+#: src/iac_code/cli/main.py
 msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
 msgstr "Git for Windows über den npmmirror-Spiegel installieren (nur Windows)."
 
@@ -511,14 +569,6 @@ msgstr "iac-code auf die neueste Version aktualisieren."
 #: src/iac_code/cli/main.py
 msgid "YAML config file containing A2A client options"
 msgstr "YAML-Konfigurationsdatei mit A2A-Client-Optionen"
-
-#: src/iac_code/cli/main.py
-msgid ""
-"A2A client dependencies are missing. Install with: pip install 'iac-"
-"code[a2a]'"
-msgstr ""
-"A2A-Client-Abhängigkeiten fehlen. Installieren mit: pip install 'iac-"
-"code[a2a]'"
 
 #: src/iac_code/cli/main.py
 msgid "LLM model to use"
@@ -657,14 +707,6 @@ msgid ""
 msgstr ""
 "Legt A2A-Thinking-Signaltypen offen; fuer mehrere Werte wiederholen. "
 "Werte: raw-thinking, tool-trace."
-
-#: src/iac_code/cli/main.py
-msgid ""
-"A2A server dependencies are missing. Install with: pip install 'iac-"
-"code[a2a]'"
-msgstr ""
-"A2A-Server-Abhängigkeiten fehlen. Installieren mit: pip install 'iac-"
-"code[a2a]'"
 
 #: src/iac_code/cli/main.py
 msgid "Send a prompt to an A2A JSON-RPC endpoint."
@@ -1563,8 +1605,16 @@ msgid "No provider messages yet."
 msgstr "Noch keine Anbieternachrichten."
 
 #: src/iac_code/commands/prompt.py
+msgid "No cleanup prompts in this snapshot."
+msgstr "In diesem Snapshot gibt es keine Bereinigungs-Prompts."
+
+#: src/iac_code/commands/prompt.py
 msgid "No tools are currently registered."
 msgstr "Derzeit sind keine Tools registriert."
+
+#: src/iac_code/commands/prompt.py
+msgid "Cleanup Prompts"
+msgstr "Bereinigungs-Prompts"
 
 #: src/iac_code/commands/prompt.py
 msgid "IAC-CODE Prompt Snapshot"
@@ -1601,6 +1651,14 @@ msgstr "Anbieternachrichten"
 #: src/iac_code/commands/prompt.py
 msgid "Tools"
 msgstr "Tools"
+
+#: src/iac_code/commands/prompt.py
+msgid "cleanup prompt"
+msgstr "Bereinigungs-Prompt"
+
+#: src/iac_code/commands/prompt.py
+msgid "cleanup prompt · removed"
+msgstr "Bereinigungs-Prompt · entfernt"
 
 #: src/iac_code/commands/prompt.py
 msgid "Instruction Memory"
@@ -1682,6 +1740,11 @@ msgid "   Recalled memory: {status}"
 msgstr "   Abgerufener Speicher: {status}"
 
 #: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "   Cleanup prompts: {count}"
+msgstr "   Bereinigungs-Prompts: {count}"
+
+#: src/iac_code/commands/prompt.py
 msgid "3. Tools"
 msgstr "3. Tools"
 
@@ -1731,6 +1794,17 @@ msgid "not present"
 msgstr "nicht vorhanden"
 
 #: src/iac_code/commands/prompt.py
+msgid "Rollback cleanup prompts are also shown separately for quick inspection."
+msgstr ""
+"Rollback-Bereinigungs-Prompts werden zur schnellen Prüfung auch separat "
+"angezeigt."
+
+#: src/iac_code/commands/prompt.py
+#, python-brace-format
+msgid "{count} cleanup prompts"
+msgstr "{count} Bereinigungs-Prompts"
+
+#: src/iac_code/commands/prompt.py
 msgid "Tool definitions available to the main model for this request."
 msgstr "Für diese Anfrage verfügbare Tooldefinitionen für das Hauptmodell."
 
@@ -1761,6 +1835,7 @@ msgid "Input schema"
 msgstr "Eingabeschema"
 
 #: src/iac_code/commands/prompt.py
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "tool"
 msgstr "Tool"
 
@@ -2058,6 +2133,25 @@ msgstr "Name des zu lesenden Speichers. Weglassen, um alle aufzulisten."
 #: src/iac_code/memory/memory_tools.py
 #, python-brace-format
 msgid ""
+"{base}\n"
+"\n"
+"Available memories:\n"
+"{index}\n"
+"\n"
+"Call read_memory again with one of these names, or omit name to list all "
+"memories."
+msgstr ""
+"{base}\n"
+"\n"
+"Verfügbare Speicher:\n"
+"{index}\n"
+"\n"
+"Rufen Sie read_memory erneut mit einem dieser Namen auf, oder lassen Sie "
+"name weg, um alle Speicher aufzulisten."
+
+#: src/iac_code/memory/memory_tools.py
+#, python-brace-format
+msgid ""
 "Save a persistent memory. Use when the user explicitly asks you to "
 "remember or preserve information. Choose a concise, stable name, an "
 "appropriate type, a short description, and the useful content to keep. "
@@ -2156,6 +2250,148 @@ msgstr "ask_user_question erfordert eine Pipeline-Ereigniswarteschlange."
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid "User cancelled ask_user_question."
 msgstr "Der Benutzer hat ask_user_question abgebrochen."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"Cloud resources still need cleanup after pipeline rollback. Clean them up"
+" now and keep checking until deletion completes."
+msgstr ""
+"Cloud-Ressourcen müssen nach dem Pipeline-Rollback noch bereinigt werden."
+" Bereinigen Sie sie jetzt und prüfen Sie weiter, bis die Löschung "
+"abgeschlossen ist."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "Requirements:"
+msgstr "Anforderungen:"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Cleanup scope is a strict allowlist: delete only ids in the cleanup "
+"resources list below."
+msgstr ""
+"- Der Bereinigungsumfang ist eine strikte Allowlist: Löschen Sie nur die "
+"IDs in der unten stehenden Bereinigungsressourcenliste."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Do not delete, modify, or roll back any stack or cloud resource outside"
+" the cleanup resources list."
+msgstr ""
+"- Löschen, ändern oder rollen Sie keine Stacks oder Cloud-Ressourcen "
+"außerhalb der Bereinigungsressourcenliste zurück."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Do not call ListStacks or search for other stacks by name; cleanup "
+"resource ids are fully listed."
+msgstr ""
+"- Rufen Sie ListStacks nicht auf und suchen Sie nicht nach anderen Stacks"
+" anhand des Namens; die Bereinigungsressourcen-IDs sind vollständig "
+"aufgeführt."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Before every GetStack/DeleteStack call, verify that StackId exactly "
+"matches an id in the cleanup resources list."
+msgstr ""
+"- Prüfen Sie vor jedem GetStack/DeleteStack-Aufruf, dass die StackId "
+"genau mit einer ID in der Bereinigungsressourcenliste übereinstimmt."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- If StackId is not in the cleanup resources list, do not call "
+"DeleteStack, even if it is the current handoff or newly created stack."
+msgstr ""
+"- Wenn die StackId nicht in der Bereinigungsressourcenliste steht, rufen "
+"Sie DeleteStack nicht auf, selbst wenn es der aktuelle Handoff- oder neu "
+"erstellte Stack ist."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Do not infer extra cleanup targets from pipeline handoff, "
+"deployment.stack_id, current stack, or resources_created; those may be "
+"final delivered resources."
+msgstr ""
+"- Leiten Sie keine zusätzlichen Bereinigungsziele aus Pipeline-Handoff, "
+"deployment.stack_id, aktuellem Stack oder resources_created ab; das "
+"können finale Auslieferungsressourcen sein."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Do not expand cleanup scope for user follow-ups, continue instructions,"
+" or pipeline handoff context."
+msgstr ""
+"- Erweitern Sie den Bereinigungsumfang nicht aufgrund von Benutzer-"
+"Rückfragen, Continue-Anweisungen oder Pipeline-Handoff-Kontext."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- When resuming cleanup, still process only resources listed in this "
+"prompt; do not inspect or delete others."
+msgstr ""
+"- Verarbeiten Sie beim Fortsetzen der Bereinigung weiterhin nur die in "
+"diesem Prompt aufgeführten Ressourcen; prüfen oder löschen Sie keine "
+"anderen."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
+"call DeleteStack first, then repeatedly call GetStack to check status."
+msgstr ""
+"- Verwenden Sie für die Löschung bevorzugt verfügbare ROS-Stack-Tools; "
+"wenn Sie aliyun_api verwenden, rufen Sie zuerst DeleteStack auf und "
+"anschließend wiederholt GetStack, um den Status zu prüfen."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- If a resource is already deleting, call GetStack first, then decide "
+"whether DeleteStack is needed again."
+msgstr ""
+"- Wenn eine Ressource bereits gelöscht wird, rufen Sie zuerst GetStack "
+"auf und entscheiden Sie dann, ob DeleteStack erneut nötig ist."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- Cleanup is complete only after DELETE_COMPLETE; for DELETE_FAILED or "
+"unknown status, tell the user the failure reason and next step."
+msgstr ""
+"- Die Bereinigung ist erst nach DELETE_COMPLETE abgeschlossen; bei "
+"DELETE_FAILED oder unbekanntem Status nennen Sie dem Benutzer den "
+"Fehlergrund und den nächsten Schritt."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid ""
+"- After all listed resources are DELETE_COMPLETE, stop this cleanup turn "
+"immediately."
+msgstr ""
+"- Nachdem alle aufgeführten Ressourcen DELETE_COMPLETE erreicht haben, "
+"beenden Sie diesen Bereinigungsschritt sofort."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "- Briefly update the user during cleanup."
+msgstr ""
+"- Informieren Sie den Benutzer während der Bereinigung kurz über den "
+"Fortschritt."
+
+#: src/iac_code/pipeline/engine/cleanup.py
+msgid "Cleanup resources:"
+msgstr "Bereinigungsressourcen:"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid ""
+"{index}. provider={provider}, type={resource_type}, id={resource_id}, "
+"name={name}, region={region}"
+msgstr ""
+"{index}. Anbieter={provider}, Typ={resource_type}, ID={resource_id}, "
+"Name={name}, Region={region}"
+
+#: src/iac_code/pipeline/engine/cleanup.py
+#, python-brace-format
+msgid "Detected {count} rollback cleanup resources; starting cleanup."
+msgstr ""
+"{count} Rollback-Bereinigungsressourcen erkannt; Bereinigung wird "
+"gestartet."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
@@ -2261,6 +2497,63 @@ msgstr ""
 "{fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A successful tool result is required before completing the current step."
+msgstr ""
+"Vor dem Abschluss des aktuellen Schritts ist ein erfolgreiches Tool-"
+"Ergebnis erforderlich."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{field} must match the {tool} result "
+"value {value}."
+msgstr ""
+"{message} complete_step.conclusion.{field} muss dem Ergebniswert {value} "
+"von {tool} entsprechen."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "<missing>"
+msgstr "<fehlt>"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " with status {statuses}"
+msgstr " mit Status {statuses}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " and is_success={expected}"
+msgstr " und is_success={expected}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid " one of {actions}"
+msgstr " mit einer der Aktionen {actions}"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} Call {tool}{action} first and wait for a successful "
+"result{status_hint}{success_hint}."
+msgstr ""
+"{message} Rufen Sie zuerst {tool}{action} auf und warten Sie auf ein "
+"erfolgreiches Ergebnis{status_hint}{success_hint}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "the required tool"
+msgstr "das erforderliche Tool"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
+"or ask the user for help."
+msgstr ""
+"Die Anzahl der Zurücksetzungen darf {max_rollbacks} nicht überschreiten. "
+"Schließen Sie den aktuellen Schritt ab oder bitten Sie den Benutzer um "
+"Hilfe."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
 msgid "Candidate count cannot exceed {limit}; {count} were submitted."
 msgstr ""
@@ -2277,16 +2570,6 @@ msgstr ""
 "Die Anzahl der Rücksetzungsziele darf {limit} nicht überschreiten; es "
 "gibt {count}. Bitten Sie den Benutzer um Hilfe oder grenzen Sie die Ziele"
 " ein, bevor Sie complete_step aufrufen."
-
-#: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"Rollback count cannot exceed {max_rollbacks}. Complete the current step "
-"or ask the user for help."
-msgstr ""
-"Die Anzahl der Zurücksetzungen darf {max_rollbacks} nicht überschreiten. "
-"Schließen Sie den aktuellen Schritt ab oder bitten Sie den Benutzer um "
-"Hilfe."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -2313,6 +2596,10 @@ msgstr ""
 #, python-brace-format
 msgid "Step {step_id} completed. Conclusion submitted."
 msgstr "Schritt {step_id} abgeschlossen. Schlussfolgerung übermittelt."
+
+#: src/iac_code/pipeline/engine/pipeline_runner.py
+msgid "Pipeline state persistence failed."
+msgstr "Persistenz des Pipeline-Zustands fehlgeschlagen."
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 #: src/iac_code/pipeline/engine/sub_pipeline_executor.py
@@ -2413,6 +2700,10 @@ msgstr "Der Template-Dateipfad muss relativ zum Arbeitsverzeichnis sein"
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "Template file path cannot escape the working directory"
 msgstr "Der Template-Dateipfad darf das Arbeitsverzeichnis nicht verlassen"
+
+#: src/iac_code/pipeline/engine/user_input.py
+msgid "[Image input]"
+msgstr "[Bildeingabe]"
 
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 msgid ""
@@ -3302,6 +3593,17 @@ msgstr "ROS Stack"
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
 
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+msgid ""
+"ROS template calls must use TemplateURL instead of TemplateBody. Save the"
+" template to a file and pass params.TemplateURL, for example a local file"
+" path or OSS/HTTP URL."
+msgstr ""
+"ROS-Vorlagenaufrufe müssen TemplateURL statt TemplateBody verwenden. "
+"Speichern Sie die Vorlage in einer Datei und übergeben Sie "
+"params.TemplateURL, zum Beispiel einen lokalen Dateipfad oder eine OSS"
+"/HTTP-URL."
+
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 #, python-brace-format
 msgid "Template YAML syntax error: {}"
@@ -3418,11 +3720,11 @@ msgstr "Unterbrochen"
 msgid "Running"
 msgstr "Läuft"
 
-#: src/iac_code/ui/pipeline_display_replay.py
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
 msgid "Completed"
 msgstr "Abgeschlossen"
 
-#: src/iac_code/ui/pipeline_display_replay.py
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/repl.py
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
@@ -3699,8 +4001,130 @@ msgid "Command has no handler: {name}"
 msgstr "Kein Handler für Befehl: {name}"
 
 #: src/iac_code/ui/repl.py
-msgid "Note: images are not supported in pipeline mode and will be ignored."
-msgstr "Hinweis: Bilder werden im Pipeline-Modus nicht unterstützt und ignoriert."
+#, python-brace-format
+msgid "↺ Rollback cleanup [{badge}] {label}"
+msgstr "↺ Rollback-Bereinigung [{badge}] {label}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{kind} {resource_id}"
+msgstr "{kind} {resource_id}"
+
+#: src/iac_code/ui/repl.py
+msgid "Deleting"
+msgstr "Löschen"
+
+#: src/iac_code/ui/repl.py
+msgid "Skipped"
+msgstr "Übersprungen"
+
+#: src/iac_code/ui/repl.py
+msgid "Pending"
+msgstr "Ausstehend"
+
+#: src/iac_code/ui/repl.py
+msgid "Checking"
+msgstr "Prüfen"
+
+#: src/iac_code/ui/repl.py
+msgid "Progress"
+msgstr "Fortschritt"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "DeleteStack submitted; waiting for deletion to complete ({progress})"
+msgstr "DeleteStack übermittelt; warte auf Abschluss der Löschung ({progress})"
+
+#: src/iac_code/ui/repl.py
+msgid "DeleteStack submitted; waiting for deletion to complete"
+msgstr "DeleteStack übermittelt; warte auf Abschluss der Löschung"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Deleting ({progress})"
+msgstr "Wird gelöscht ({progress})"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{progress}; deletion required"
+msgstr "{progress}; Löschung erforderlich"
+
+#: src/iac_code/ui/repl.py
+msgid "stack"
+msgstr "Stack"
+
+#: src/iac_code/ui/repl.py
+msgid "resource"
+msgstr "Ressource"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Could not read rollback cleanup records. The cleanup prompt was kept; "
+"retry later or inspect manually."
+msgstr ""
+"Rollback-Bereinigungsdatensätze konnten nicht gelesen werden. Der "
+"Bereinigungs-Prompt wurde beibehalten; versuchen Sie es später erneut "
+"oder prüfen Sie manuell."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{count} additional resources needing attention were not shown."
+msgstr ""
+"{count} weitere Ressourcen, die Aufmerksamkeit erfordern, wurden nicht "
+"angezeigt."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "↺ Rollback cleanup resume: all {count} records are completed."
+msgstr ""
+"↺ Rollback-Bereinigung fortsetzen: Alle {count} Datensätze sind "
+"abgeschlossen."
+
+#: src/iac_code/ui/repl.py
+msgid "failed"
+msgstr "fehlgeschlagen"
+
+#: src/iac_code/ui/repl.py
+msgid "pending"
+msgstr "ausstehend"
+
+#: src/iac_code/ui/repl.py
+msgid "in progress"
+msgstr "in Bearbeitung"
+
+#: src/iac_code/ui/repl.py
+msgid "completed"
+msgstr "abgeschlossen"
+
+#: src/iac_code/ui/repl.py
+msgid "skipped"
+msgstr "übersprungen"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{count} {label}"
+msgstr "{count} {label}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "↺ Rollback cleanup resume: {count} records, {summary}."
+msgstr "↺ Rollback-Bereinigung fortsetzen: {count} Datensätze, {summary}."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "↺ Rollback cleanup resume: {count} records."
+msgstr "↺ Rollback-Bereinigung fortsetzen: {count} Datensätze."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "  [{badge}] {label}"
+msgstr "  [{badge}] {label}"
+
+#: src/iac_code/ui/repl.py
+msgid "Detected rollback cleanup resources, but cleanup prompt injection failed."
+msgstr ""
+"Rollback-Bereinigungsressourcen wurden erkannt, aber das Einfügen des "
+"Bereinigungs-Prompts ist fehlgeschlagen."
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -3709,11 +4133,28 @@ msgstr "Gespeicherter Pipeline-Zustand wird ignoriert: {reason}"
 
 #: src/iac_code/ui/repl.py
 msgid ""
-"Pipeline completed. Normal chat is active, but the handoff context could "
-"not be injected or saved."
+"Pipeline state persistence failed. The pipeline is paused; do not "
+"continue until state is durable."
 msgstr ""
-"Die Pipeline wurde abgeschlossen. Der normale Chat ist aktiv, aber der "
-"Übergabekontext konnte nicht eingefügt oder gespeichert werden."
+"Persistenz des Pipeline-Zustands fehlgeschlagen. Die Pipeline ist "
+"pausiert; fahren Sie nicht fort, bis der Zustand dauerhaft gespeichert "
+"ist."
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Pipeline state persistence failed. Normal chat handoff was not marked "
+"durable."
+msgstr ""
+"Persistenz des Pipeline-Zustands fehlgeschlagen. Der Handoff zum normalen"
+" Chat wurde nicht dauerhaft markiert."
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Pipeline completed, but the handoff context could not be injected or "
+"saved."
+msgstr ""
+"Pipeline abgeschlossen, aber der Handoff-Kontext konnte nicht eingefügt "
+"oder gespeichert werden."
 
 #: src/iac_code/ui/repl.py
 msgid "Judging your input..."
@@ -3895,6 +4336,11 @@ msgstr "  ✘ {name}: fehlgeschlagen"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
+msgid "Pipeline warning: {reason}"
+msgstr "Pipeline-Warnung: {reason}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
 msgid "Option {index}"
 msgstr "Option {index}"
 
@@ -3973,6 +4419,15 @@ msgstr "unbekannter Fehler"
 #, python-brace-format
 msgid "Resumed pipeline at step: {step}"
 msgstr "Pipeline bei Schritt fortgesetzt: {step}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Could not read pipeline state metadata: {reason}"
+msgstr "Pipeline-Zustandsmetadaten konnten nicht gelesen werden: {reason}"
+
+#: src/iac_code/ui/repl.py
+msgid "Pipeline state metadata is invalid; continuing as normal chat."
+msgstr "Pipeline-Zustandsmetadaten sind ungültig; fahre als normaler Chat fort."
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -4536,3 +4991,207 @@ msgstr "Stacktrace im öffentlichen Ereignis ausgelassen; siehe error_id."
 
 #~ msgid "Project Memory Index"
 #~ msgstr "Projektspeicherindex"
+
+#~ msgid "检测到 pipeline rollback 后仍需要清理的云资源。请立即清理这些资源，并持续检查直到删除完成。"
+#~ msgstr ""
+#~ "Es wurden Cloud-Ressourcen erkannt, die"
+#~ " nach dem Pipeline-Rollback noch "
+#~ "bereinigt werden müssen. Bereinigen Sie "
+#~ "sie sofort und prüfen Sie weiter, "
+#~ "bis das Löschen abgeschlossen ist."
+
+#~ msgid "要求："
+#~ msgstr "Anforderungen:"
+
+#~ msgid "- 清理范围是严格白名单：只能删除下面“待清理资源”列表中的 id。"
+#~ msgstr ""
+#~ "- Der Bereinigungsumfang ist eine "
+#~ "strikte Positivliste: Es dürfen nur die"
+#~ " IDs in der folgenden Liste „Zu "
+#~ "bereinigende Ressourcen“ gelöscht werden."
+
+#~ msgid "- 不要删除、修改或回滚任何未列入“待清理资源”的 stack 或云资源。"
+#~ msgstr ""
+#~ "- Löschen, ändern oder rollen Sie "
+#~ "keine Stacks oder Cloud-Ressourcen "
+#~ "zurück, die nicht unter „Zu bereinigende"
+#~ " Ressourcen“ aufgeführt sind."
+
+#~ msgid "- 不要调用 ListStacks 或按名称搜索其它 stack；待清理资源 id 已完整列出。"
+#~ msgstr ""
+#~ "- ListStacks nicht aufrufen und nicht"
+#~ " nach anderen Stacks per Name suchen;"
+#~ " die IDs der zu bereinigenden "
+#~ "Ressourcen sind vollstaendig aufgelistet."
+
+#~ msgid "- 每次调用 GetStack/DeleteStack 前，必须核对 StackId 精确等于“待清理资源”列表中的某个 id。"
+#~ msgstr ""
+#~ "- Vor jedem Aufruf von "
+#~ "GetStack/DeleteStack muss geprueft werden, "
+#~ "dass StackId exakt einer ID in der"
+#~ " Liste der zu bereinigenden Ressourcen "
+#~ "entspricht."
+
+#~ msgid "- 如果 StackId 不在“待清理资源”列表中，禁止调用 DeleteStack，即使它是当前 handoff 或刚创建的 stack。"
+#~ msgstr ""
+#~ "- Wenn StackId nicht in der Liste"
+#~ " der zu bereinigenden Ressourcen steht, "
+#~ "darf DeleteStack nicht aufgerufen werden, "
+#~ "selbst wenn es der aktuelle Handoff-"
+#~ "Stack oder ein gerade erstellter Stack"
+#~ " ist."
+
+#~ msgid ""
+#~ "- 不要根据 pipeline handoff、deployment.stack_id、current"
+#~ " stack 或 resources_created "
+#~ "额外推断清理对象；这些可能是最终成功交付的资源。"
+#~ msgstr ""
+#~ "- Leiten Sie keine zusätzlichen "
+#~ "Bereinigungsobjekte aus pipeline handoff, "
+#~ "deployment.stack_id, current stack oder "
+#~ "resources_created ab; sie können erfolgreich"
+#~ " bereitgestellte Endressourcen sein."
+
+#~ msgid "- 即使本轮还有用户追问、继续指令或 pipeline handoff 上下文，也不能扩大清理范围。"
+#~ msgstr ""
+#~ "- Auch bei weiteren Nutzerfragen, "
+#~ "Fortsetzungsanweisungen oder Pipeline-Handoff-"
+#~ "Kontext in dieser Runde darf der "
+#~ "Bereinigungsumfang nicht erweitert werden."
+
+#~ msgid "- 恢复或继续清理时仍只处理当前提示列出的资源；不要检查或删除其它资源。"
+#~ msgstr ""
+#~ "- Beim Wiederaufnehmen oder Fortsetzen "
+#~ "der Bereinigung nur die in diesem "
+#~ "Hinweis aufgelisteten Ressourcen verarbeiten; "
+#~ "keine anderen Ressourcen pruefen oder "
+#~ "loeschen."
+
+#~ msgid ""
+#~ "- 优先使用可用的 ROS stack 工具删除；如果改用 "
+#~ "aliyun_api，请先 DeleteStack，再反复 GetStack 检查状态。"
+#~ msgstr ""
+#~ "- Verwenden Sie bevorzugt das verfügbare"
+#~ " ROS-stack-Tool zum Löschen; wenn "
+#~ "Sie aliyun_api nutzen, führen Sie zuerst"
+#~ " DeleteStack aus und prüfen Sie den"
+#~ " Status wiederholt mit GetStack."
+
+#~ msgid "- 如果资源已经处于删除中，请先 GetStack 检查当前状态，再决定是否需要重新 DeleteStack。"
+#~ msgstr ""
+#~ "- Wenn die Ressource bereits gelöscht"
+#~ " wird, prüfen Sie zuerst den "
+#~ "aktuellen Status mit GetStack, bevor Sie"
+#~ " entscheiden, ob DeleteStack erneut nötig"
+#~ " ist."
+
+#~ msgid "- 只有确认 DELETE_COMPLETE 才算清理完成；DELETE_FAILED 或无法确认时要向用户说明失败原因和下一步。"
+#~ msgstr ""
+#~ "- Die Bereinigung gilt erst nach "
+#~ "Bestätigung von DELETE_COMPLETE als "
+#~ "abgeschlossen; bei DELETE_FAILED oder "
+#~ "fehlender Bestätigung erklären Sie dem "
+#~ "Nutzer die Fehlerursache und den "
+#~ "nächsten Schritt."
+
+#~ msgid "- 列表内资源全部 DELETE_COMPLETE 后，立刻停止本轮清理；不要继续删除或检查任何其他 stack。"
+#~ msgstr ""
+#~ "- Sobald alle Ressourcen in der "
+#~ "Liste DELETE_COMPLETE erreicht haben, stoppen"
+#~ " Sie diese Bereinigung sofort; löschen "
+#~ "oder prüfen Sie keine anderen Stacks."
+
+#~ msgid "- 清理过程中向用户简短同步进度。"
+#~ msgstr ""
+#~ "- Informieren Sie den Nutzer während "
+#~ "der Bereinigung kurz über den "
+#~ "Fortschritt."
+
+#~ msgid "待清理资源："
+#~ msgstr "Zu bereinigende Ressourcen:"
+
+#~ msgid "检测到 {count} 个回滚残留资源，开始清理流程。"
+#~ msgstr ""
+#~ "{count} verbleibende Rollback-Ressourcen "
+#~ "erkannt; Bereinigungsablauf wird gestartet."
+
+#~ msgid "错误：{error}"
+#~ msgstr "Fehler: {error}"
+
+#~ msgid "删除中"
+#~ msgstr "Wird gelöscht"
+
+#~ msgid "完成"
+#~ msgstr "Abgeschlossen"
+
+#~ msgid "失败"
+#~ msgstr "Fehlgeschlagen"
+
+#~ msgid "跳过"
+#~ msgstr "Übersprungen"
+
+#~ msgid "待处理"
+#~ msgstr "Ausstehend"
+
+#~ msgid "检查"
+#~ msgstr "Prüfen"
+
+#~ msgid "进度"
+#~ msgstr "Fortschritt"
+
+#~ msgid "DeleteStack 已提交，等待删除完成（{progress}）"
+#~ msgstr ""
+#~ "DeleteStack wurde übermittelt; warte auf "
+#~ "Abschluss des Löschvorgangs ({progress})"
+
+#~ msgid "DeleteStack 已提交，等待删除完成"
+#~ msgstr "DeleteStack wurde übermittelt; warte auf Abschluss des Löschvorgangs"
+
+#~ msgid "已跳过"
+#~ msgstr "Übersprungen"
+
+#~ msgid "正在删除（{progress}）"
+#~ msgstr "Wird gelöscht ({progress})"
+
+#~ msgid "{progress}，需要删除"
+#~ msgstr "{progress}, Löschen erforderlich"
+
+#~ msgid "资源栈"
+#~ msgstr "Ressourcen-Stack"
+
+#~ msgid "资源"
+#~ msgstr "Ressource"
+
+#~ msgid "无法读取回滚清理记录，已保留清理提示，请稍后继续或手动检查。"
+#~ msgstr ""
+#~ "Das Rollback-Bereinigungsprotokoll konnte "
+#~ "nicht gelesen werden; der Bereinigungs-"
+#~ "Prompt wurde beibehalten. Fahren Sie "
+#~ "später fort oder prüfen Sie manuell."
+
+#~ msgid "还有 {count} 个需要关注的资源未显示。"
+#~ msgstr ""
+#~ "{count} weitere Ressourcen, die Aufmerksamkeit"
+#~ " erfordern, werden nicht angezeigt."
+
+#~ msgid "↺ 回滚清理恢复：{count} 条记录均已完成。"
+#~ msgstr ""
+#~ "↺ Wiederaufnahme der Rollback-Bereinigung: "
+#~ "Alle {count} Einträge sind abgeschlossen."
+
+#~ msgid "进行中"
+#~ msgstr "In Bearbeitung"
+
+#~ msgid "已完成"
+#~ msgstr "Abgeschlossen"
+
+#~ msgid "↺ 回滚清理恢复：{count} 条记录，{summary}。"
+#~ msgstr "↺ Wiederaufnahme der Rollback-Bereinigung: {count} Einträge, {summary}."
+
+#~ msgid "↺ 回滚清理恢复：{count} 条记录。"
+#~ msgstr "↺ Wiederaufnahme der Rollback-Bereinigung: {count} Einträge."
+
+#~ msgid "Note: images are not supported in pipeline mode and will be ignored."
+#~ msgstr ""
+#~ "Hinweis: Bilder werden im Pipeline-Modus"
+#~ " nicht unterstützt und ignoriert."

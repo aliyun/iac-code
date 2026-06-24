@@ -10,6 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from iac_code.agent.message import ImageBlock
+from iac_code.pipeline.engine.user_input import (
+    IMAGE_INPUT_PLACEHOLDER,
+    PipelineUserInput,
+    normalize_pipeline_user_input,
+)
+
 logger = logging.getLogger(__name__)
 
 # LLM judge calls typically take 2-8s, but in parallel-pipeline mode candidate
@@ -72,15 +79,16 @@ class InterruptController:
         self._get_state = pipeline_state_getter
         self._pipeline_dir = pipeline_dir
 
-    async def judge(self, user_message: str) -> InterruptVerdict:
+    async def judge(self, user_message: str | PipelineUserInput) -> InterruptVerdict:
         """Judge a user message. Returns verdict. Defaults to 'continue' on failure."""
         import time
 
+        pipeline_input = normalize_pipeline_user_input(user_message)
         started = time.monotonic()
-        logger.info("interrupt judge START: message=%r", user_message[:200])
+        logger.info("interrupt judge START: message=%r", pipeline_input.display_text[:200])
         try:
             verdict = await asyncio.wait_for(
-                self._call_judge_llm(user_message),
+                self._call_judge_llm(pipeline_input),
                 timeout=JUDGE_TIMEOUT_SECONDS,
             )
             logger.info(
@@ -105,19 +113,32 @@ class InterruptController:
             logger.warning("interrupt judge FAILED: %s", e, exc_info=True)
             return InterruptVerdict(action="continue", reason=f"judge failed: {type(e).__name__}: {e}")
 
-    async def _call_judge_llm(self, user_message: str) -> InterruptVerdict:
+    async def _call_judge_llm(self, user_message: str | PipelineUserInput) -> InterruptVerdict:
         """Make the actual LLM call and parse the response."""
+        from iac_code.providers.base import ContentBlock as ProviderContentBlock
         from iac_code.providers.base import Message as ProviderMessage
 
+        pipeline_input = normalize_pipeline_user_input(user_message)
         state = self._get_state()
         system_prompt = self._build_judge_system_prompt(state)
-        user_prompt = self._build_judge_user_prompt(user_message, state)
+        user_prompt = self._build_judge_user_prompt(pipeline_input, state)
+        provider_content: str | list[ProviderContentBlock]
+        if pipeline_input.has_images and isinstance(pipeline_input.content, list):
+            provider_blocks = [ProviderContentBlock(type="text", text=user_prompt)]
+            for block in pipeline_input.content:
+                if isinstance(block, ImageBlock):
+                    provider_blocks.append(
+                        ProviderContentBlock(type="image", media_type=block.media_type, data=block.data)
+                    )
+            provider_content = provider_blocks
+        else:
+            provider_content = user_prompt
 
         max_attempts = 2
         last_response_text = ""
         for attempt in range(max_attempts):
             response = await self._provider_manager.complete(
-                messages=[ProviderMessage.user(user_prompt)],
+                messages=[ProviderMessage(role="user", content=provider_content)],
                 system=system_prompt,
             )
             last_response_text = response.text
@@ -187,8 +208,9 @@ class InterruptController:
             "输出严格的 JSON 格式，不要包含其他文字。"
         )
 
-    def _build_judge_user_prompt(self, user_message: str, state: dict) -> str:
+    def _build_judge_user_prompt(self, user_message: str | PipelineUserInput, state: dict) -> str:
         """Build the user prompt with full pipeline context."""
+        pipeline_input = normalize_pipeline_user_input(user_message)
         sections = []
 
         # Pipeline structure
@@ -229,7 +251,14 @@ class InterruptController:
             sections.append("=== Sub-pipeline 可回滚步骤 ===\n" + "\n".join(lines))
 
         # User message
-        sections.append(f"=== 用户新消息 ===\n{user_message}")
+        user_text = pipeline_input.display_text
+        if pipeline_input.has_images:
+            user_text = user_text if user_text.strip() else IMAGE_INPUT_PLACEHOLDER
+            user_text += (
+                "\n\n用户同时提供了图片输入。请检查图片内容，并在 reason 或 rollback_context "
+                "中写出与路由相关的图像信息。"
+            )
+        sections.append(f"=== 用户新消息 ===\n{user_text}")
 
         # Available actions
         sections.append(

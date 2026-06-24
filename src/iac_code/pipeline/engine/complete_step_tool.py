@@ -249,6 +249,7 @@ class CompleteStepTool(Tool):
                 continue
 
             required_tool = guard.get("require_tool")
+            required_tool_result = guard.get("require_tool_result")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
@@ -279,7 +280,116 @@ class CompleteStepTool(Tool):
                     message=message,
                     fields=fields,
                 )
+            if isinstance(required_tool_result, dict):
+                validation_error = self._validate_required_tool_result(
+                    required_tool_result,
+                    conclusion,
+                    guard.get("message"),
+                )
+                if validation_error is not None:
+                    return validation_error
         return None
+
+    def _validate_required_tool_result(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        tool_name = str(requirement.get("tool") or "")
+        actions = self._expected_actions(requirement)
+        expected_success = requirement.get("is_success")
+        status_in = {str(status) for status in requirement.get("status_in") or [] if status is not None}
+        match_conclusion_field = requirement.get("match_conclusion_field")
+        match_result_field = str(requirement.get("match_result_field") or "stack_id")
+        base_message = message or _("A successful tool result is required before completing the current step.")
+
+        records = self._completion_guard_state.get("tool_result_records") or []
+        mismatch_message: str | None = None
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if tool_name and record.get("tool_name") != tool_name:
+                continue
+            tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
+            if actions and self._first_string(tool_input, ("action", "Action")) not in actions:
+                continue
+            if record.get("is_error"):
+                continue
+            result = record.get("result")
+            if not isinstance(result, dict):
+                continue
+            if expected_success is not None and self._bool_from_result(result) is not bool(expected_success):
+                continue
+            if status_in:
+                status = self._status_from_result(result)
+                if status not in status_in:
+                    continue
+            if isinstance(match_conclusion_field, str) and match_conclusion_field:
+                conclusion_value = self._resolve_dotted(conclusion, match_conclusion_field)
+                result_value = (
+                    self._stack_id_from_result(result)
+                    if match_result_field == "stack_id"
+                    else self._resolve_dotted(result, match_result_field)
+                )
+                if conclusion_value != result_value:
+                    mismatch_message = _(
+                        "{message} complete_step.conclusion.{field} must match the {tool} result value {value}."
+                    ).format(
+                        message=base_message,
+                        field=match_conclusion_field,
+                        tool=tool_name or _("tool"),
+                        value=result_value or _("<missing>"),
+                    )
+                    continue
+            return None
+
+        if mismatch_message is not None:
+            return mismatch_message
+        status_hint = ""
+        if status_in:
+            status_hint = _(" with status {statuses}").format(statuses=", ".join(sorted(status_in)))
+        success_hint = ""
+        if expected_success is not None:
+            success_hint = _(" and is_success={expected}").format(expected=str(bool(expected_success)).lower())
+        action_hint = ""
+        if len(actions) == 1:
+            action_hint = f" {next(iter(actions))}"
+        elif actions:
+            action_hint = _(" one of {actions}").format(actions=", ".join(sorted(actions)))
+        return _(
+            "{message} Call {tool}{action} first and wait for a successful result{status_hint}{success_hint}."
+        ).format(
+            message=base_message,
+            tool=tool_name or _("the required tool"),
+            action=action_hint,
+            status_hint=status_hint,
+            success_hint=success_hint,
+        )
+
+    def validate_completion_input(self, tool_input: dict[str, Any]) -> str | None:
+        """Validate a complete_step input without mutating retry counters."""
+
+        self.normalize_input(tool_input)
+        rollback_target_error = self._validate_rollback_target_limit()
+        if rollback_target_error is not None:
+            return rollback_target_error
+
+        conclusion = tool_input["conclusion"]
+        rollback = tool_input.get("rollback_request")
+        rollback_tuple = (rollback["target_step"], rollback["reason"]) if rollback else None
+        if rollback_tuple and self._step_config.rollback_count >= self._step_config.max_rollbacks:
+            max_rollbacks = self._step_config.max_rollbacks
+            return _(
+                "Rollback count cannot exceed {max_rollbacks}. Complete the current step or ask the user for help."
+            ).format(max_rollbacks=max_rollbacks)
+
+        validation_error = self._validate_conclusion(conclusion)
+        if validation_error is None:
+            validation_error = self._validate_completion_guards(conclusion)
+        if validation_error is None:
+            validation_error = self._validate_candidate_limit(conclusion)
+        return validation_error
 
     def _guard_applies(self, guard: dict, conclusion: dict) -> bool:
         unless_patterns = guard.get("unless_user_message_matches_any") or []
@@ -329,6 +439,64 @@ class CompleteStepTool(Tool):
             if current is None:
                 return None
         return current
+
+    @classmethod
+    def _status_from_result(cls, result: dict[str, Any]) -> str | None:
+        nested = cls._dict_value(result.get("Stack") or result.get("stack"))
+        return cls._first_string(
+            result,
+            ("StackStatus", "stackStatus", "stack_status", "Status", "status"),
+        ) or cls._first_string(nested, ("StackStatus", "stackStatus", "stack_status", "Status", "status"))
+
+    @classmethod
+    def _stack_id_from_result(cls, result: dict[str, Any]) -> str | None:
+        nested = cls._dict_value(result.get("Stack") or result.get("stack"))
+        return cls._first_string(result, ("StackId", "stackId", "stack_id")) or cls._first_string(
+            nested,
+            ("StackId", "stackId", "stack_id"),
+        )
+
+    @classmethod
+    def _bool_from_result(cls, result: dict[str, Any]) -> bool | None:
+        value = result.get("is_success")
+        if value is None:
+            value = result.get("isSuccess")
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lower = value.strip().lower()
+            if lower in {"true", "1", "yes"}:
+                return True
+            if lower in {"false", "0", "no"}:
+                return False
+        return None
+
+    @staticmethod
+    def _dict_value(value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _first_string(source: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @classmethod
+    def _expected_actions(cls, requirement: dict[str, Any]) -> set[str]:
+        actions: set[str] = set()
+        for key in ("action", "action_in", "actions"):
+            actions.update(cls._string_set(requirement.get(key)))
+        return actions
+
+    @staticmethod
+    def _string_set(value: Any) -> set[str]:
+        if isinstance(value, str):
+            return {value} if value else set()
+        if isinstance(value, list | tuple | set):
+            return {str(item) for item in value if item not in (None, "")}
+        return set()
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         self.normalize_input(tool_input)

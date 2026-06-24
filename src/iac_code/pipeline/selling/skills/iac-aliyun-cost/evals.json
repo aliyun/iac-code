@@ -1,6 +1,6 @@
 {
   "skill_name": "iac-aliyun-cost",
-  "description": "验证成本预估技能：正确调用 GetTemplateEstimateCost API、参数平铺格式、模板校验修复、错误处理",
+  "description": "验证成本预估技能：正确调用 GetTemplateEstimateCost API、Parameters 字典格式、参数推荐传递、模板按需校验修复、错误处理",
   "evals": [
     {
       "id": 1,
@@ -11,12 +11,14 @@
         "file_path": "templates/1-simple-ecs.yml",
         "region": "cn-hangzhou"
       },
-      "expected_behavior": "直接调用 GetTemplateEstimateCost，参数按 Parameters.<N>.ParameterKey/ParameterValue 平铺传递",
+      "expected_behavior": "先形成 Preview-Validated Pricing Parameter Set，再调用 GetTemplateEstimateCost，Parameters 以字典形式传递，并在 conclusion.deployment_parameters 输出同一参数集",
       "assertions": [
+        {"name": "uses_preview_stack_api", "check": "PreviewStack 通过 aliyun_api(product=\"ros\", action=\"PreviewStack\") 调用，不使用 ros_stack"},
         {"name": "uses_estimate_cost_api", "check": "调用了 GetTemplateEstimateCost API"},
-        {"name": "params_flattened", "check": "参数使用 Parameters.1.ParameterKey / Parameters.1.ParameterValue 格式平铺"},
+        {"name": "params_dictionary", "check": "参数使用 Parameters 字典格式传递，由工具展开 API 参数"},
         {"name": "uses_template_url", "check": "通过 TemplateURL 传递模板文件路径而非内联模板内容"},
         {"name": "outputs_monthly_estimate", "check": "conclusion 中包含 monthly_estimate 和 resources 费用明细"},
+        {"name": "outputs_deployment_parameters", "check": "conclusion.deployment_parameters 包含最终用于询价的参数字典，供 deploying 使用"},
         {"name": "no_doc_search", "check": "不调用 aliyun_doc_search 或搜索定价文档"}
       ]
     },
@@ -29,11 +31,13 @@
         "file_path": "templates/2-ecs-rds.yml",
         "region": "cn-beijing"
       },
-      "expected_behavior": "ECS 和 RDS 的参数都通过平铺格式传入询价 API，费用明细分别列出",
+      "expected_behavior": "ECS 和 RDS 的参数都通过 Parameters 字典传入询价 API，费用明细分别列出，并输出 deployment_parameters",
       "assertions": [
+        {"name": "uses_preview_stack_api", "check": "PreviewStack 通过 aliyun_api(product=\"ros\", action=\"PreviewStack\") 调用，不使用 ros_stack"},
         {"name": "uses_estimate_cost_api", "check": "调用了 GetTemplateEstimateCost API"},
         {"name": "all_params_included", "check": "所有 6 个参数（ZoneId、InstanceType、ImageId、SystemDiskCategory、DBInstanceClass、DBInstanceStorageType）都传入 API"},
         {"name": "multi_resource_breakdown", "check": "费用明细中分别列出了 ECS 和 RDS 的费用"},
+        {"name": "outputs_deployment_parameters", "check": "conclusion.deployment_parameters 包含最终用于询价的完整参数字典"},
         {"name": "no_self_estimate", "check": "不自行估算费用数字，完全基于 API 返回"}
       ]
     },
@@ -47,12 +51,13 @@
         "region": "cn-hangzhou",
         "description": "VSwitch 缺少 CidrBlock，ImageId 引用了不存在的参数"
       },
-      "expected_behavior": "先校验发现模板问题，修复（补 CidrBlock、修正 ImageId 参数引用），再询价",
+      "expected_behavior": "先形成 Preview-Validated Pricing Parameter Set 并调用询价；当询价失败且错误指向模板问题时，修复（补 CidrBlock、修正 ImageId 参数引用），再校验改动并重新询价",
       "assertions": [
-        {"name": "validates_first", "check": "先调用 ValidateTemplate 校验模板"},
+        {"name": "uses_preview_stack_api", "check": "PreviewStack 通过 aliyun_api(product=\"ros\", action=\"PreviewStack\") 调用，不使用 ros_stack"},
+        {"name": "validates_after_template_change", "check": "仅在修复或改写模板后调用 ValidateTemplate 校验改动"},
         {"name": "fixes_template", "check": "修复了模板中的错误（VSwitch CidrBlock、ImageId 参数引用）"},
         {"name": "writes_back", "check": "修复后将模板写回文件"},
-        {"name": "retries_after_fix", "check": "修复后重新校验或直接询价"},
+        {"name": "retries_after_fix", "check": "修复并校验通过后重新询价"},
         {"name": "template_fixed_true", "check": "conclusion 中 template_fixed 为 true 且包含 fix_summary"}
       ]
     },
@@ -66,25 +71,66 @@
         "region": "cn-shanghai",
         "description": "仅 VPC+OSS 的模板，OSS 可能不支持询价"
       },
-      "expected_behavior": "询价 API 可能返回错误（OSS 不支持询价），应报告错误而不编造费用",
+      "expected_behavior": "PreviewStack 成功但询价失败（如 OSS 不支持询价）时，应报告错误而不编造费用，同时不丢弃已验证的 deployment_parameters",
       "assertions": [
+        {"name": "uses_preview_stack_api", "check": "PreviewStack 通过 aliyun_api(product=\"ros\", action=\"PreviewStack\") 调用，不使用 ros_stack"},
         {"name": "attempts_pricing", "check": "尝试调用了 GetTemplateEstimateCost API"},
         {"name": "reports_error_honestly", "check": "如果 API 返回错误，如实报告错误原因"},
         {"name": "no_fabricated_cost", "check": "不编造费用数据"},
+        {"name": "keeps_preview_parameters", "check": "PreviewStack 成功但询价失败时不丢弃 deployment_parameters"},
         {"name": "error_in_conclusion", "check": "conclusion 中包含 error 字段说明失败原因"}
       ]
     },
     {
       "id": 5,
+      "name": "existing-vpc-vswitch-cost",
+      "prompt": "预估在已有 VPC 中创建 VSwitch 的费用",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  VpcId:\n    Type: String\n    AssociationProperty: ALIYUN::ECS::VPC::VPCId\n    AssociationPropertyMetadata:\n      RegionId: ${ALIYUN::Region}\n  ZoneId:\n    Type: String\n    AssociationProperty: ALIYUN::ECS::ZoneId\n    AssociationPropertyMetadata:\n      RegionId: ${ALIYUN::Region}\nResources:\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n    Properties:\n      VpcId: !Ref VpcId\n      ZoneId: !Ref ZoneId\n      CidrBlock: 192.168.1.0/24",
+        "file_path": "templates/5-existing-vpc-vswitch.yml",
+        "region": "cn-hangzhou",
+        "description": "VpcId 和 ZoneId 都没有 Default，VpcId 是已有资源参数"
+      },
+      "expected_behavior": "先通过 GetTemplateParameterConstraints 或只读资源候选求解 VpcId/ZoneId；API 返回候选不是编造，可用于 PreviewStack。不要仅因 VpcId 是已有资源参数就直接停止询价；PreviewStack 成功后调用 GetTemplateEstimateCost，并输出 deployment_parameters",
+      "assertions": [
+        {"name": "queries_parameter_constraints", "check": "调用 GetTemplateParameterConstraints 或等价只读查询获取 VpcId/ZoneId 候选"},
+        {"name": "api_candidates_not_fabricated", "check": "明确区分 API 返回候选不是编造，不把 VpcId 名称本身当作停止条件"},
+        {"name": "uses_preview_stack_api", "check": "PreviewStack 通过 aliyun_api(product=\"ros\", action=\"PreviewStack\") 调用，不使用 ros_stack"},
+        {"name": "attempts_pricing", "check": "PreviewStack 成功后调用 GetTemplateEstimateCost API"},
+        {"name": "outputs_deployment_parameters", "check": "conclusion.deployment_parameters 包含最终用于 PreviewStack 的 VpcId 和 ZoneId"}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "preview-soft-gate-partial-pricing",
+      "prompt": "预估使用已有网络部署一台 ECS 的费用，网络参数可以稍后由用户补充",
+      "template_context": {
+        "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  VpcId:\n    Type: String\n    AssociationProperty: ALIYUN::ECS::VPC::VPCId\n  VSwitchId:\n    Type: String\n    AssociationProperty: ALIYUN::VPC::VSwitch::VSwitchId\n  SecurityGroupId:\n    Type: String\n    AssociationProperty: ALIYUN::ECS::SecurityGroup::SecurityGroupId\n  ZoneId:\n    Type: String\n    Default: cn-hangzhou-k\n  InstanceType:\n    Type: String\n    Default: ecs.g7.large\n  ImageId:\n    Type: String\n    Default: centos_stream_9_x64_20G_alibase_20260414.vhd\n  SystemDiskCategory:\n    Type: String\n    Default: cloud_essd\nResources:\n  Ecs:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      VpcId: !Ref VpcId\n      VSwitchId: !Ref VSwitchId\n      SecurityGroupId: !Ref SecurityGroupId\n      ZoneId: !Ref ZoneId\n      InstanceType: !Ref InstanceType\n      ImageId: !Ref ImageId\n      SystemDiskCategory: !Ref SystemDiskCategory\n      MaxAmount: 1",
+        "file_path": "templates/6-existing-network-ecs.yml",
+        "region": "cn-hangzhou",
+        "description": "PreviewStack 需要完整的已有网络参数，但 ECS 费用可先基于规格和磁盘参数估算"
+      },
+      "expected_behavior": "优先尝试参数推荐和 PreviewStack；如果 VpcId/VSwitchId/SecurityGroupId 无法自动补齐，PreviewStack 不是硬门禁，不要直接终止。可用 ZoneId、InstanceType、ImageId、SystemDiskCategory 等当前可询价参数调用 GetTemplateEstimateCost，并在 conclusion.missing_deployment_parameters 中列出仍需用户通过选择阶段 parameter_overrides 补充的完整部署参数缺口",
+      "assertions": [
+        {"name": "preview_is_soft_gate", "check": "明确说明 PreviewStack 不是硬门禁，不能仅因完整部署参数暂缺就停止询价"},
+        {"name": "attempts_pricing_with_available_params", "check": "调用 GetTemplateEstimateCost，用当前已选或可用于询价的参数估算费用"},
+        {"name": "reports_missing_deployment_parameters", "check": "conclusion.missing_deployment_parameters 包含 VpcId、VSwitchId、SecurityGroupId 等缺口"},
+        {"name": "outputs_partial_deployment_parameters", "check": "conclusion.deployment_parameters 保留已用于询价的 ZoneId、InstanceType、ImageId、SystemDiskCategory"},
+        {"name": "mentions_later_overrides", "check": "说明用户后续可在选择阶段通过 parameter_overrides 补充缺失参数"}
+      ]
+    },
+    {
+      "id": 7,
       "name": "ha-slb-ecs-cost",
       "prompt": "预估高可用方案（SLB + 2台 ECS）的费用",
       "template_context": {
         "template": "ROSTemplateFormatVersion: '2015-09-01'\nParameters:\n  ZoneId:\n    Type: String\n    Default: cn-hangzhou-i\n  InstanceType:\n    Type: String\n    Default: ecs.c7.xlarge\n  ImageId:\n    Type: String\n    Default: centos_stream_9_x64_20G_alibase_20260414.vhd\n  SystemDiskCategory:\n    Type: String\n    Default: cloud_essd\nResources:\n  Vpc:\n    Type: ALIYUN::ECS::VPC\n    Properties:\n      CidrBlock: 10.0.0.0/16\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n    Properties:\n      VpcId: !Ref Vpc\n      ZoneId: !Ref ZoneId\n      CidrBlock: 10.0.1.0/24\n  SecurityGroup:\n    Type: ALIYUN::ECS::SecurityGroup\n    Properties:\n      VpcId: !Ref Vpc\n  EcsGroup:\n    Type: ALIYUN::ECS::InstanceGroup\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      SecurityGroupId: !Ref SecurityGroup\n      ZoneId: !Ref ZoneId\n      InstanceType: !Ref InstanceType\n      ImageId: !Ref ImageId\n      SystemDiskCategory: !Ref SystemDiskCategory\n      MaxAmount: 2\n  Slb:\n    Type: ALIYUN::SLB::LoadBalancer\n    Properties:\n      VpcId: !Ref Vpc\n      VSwitchId: !Ref VSwitch\n      LoadBalancerSpec: slb.s1.small\n      PayType: PayOnDemand",
-        "file_path": "templates/5-ha-slb-ecs.yml",
+        "file_path": "templates/7-ha-slb-ecs.yml",
         "region": "cn-hangzhou"
       },
       "expected_behavior": "正确处理多资源模板，费用明细包含 ECS（x2）和 SLB",
       "assertions": [
+        {"name": "uses_preview_stack_api", "check": "PreviewStack 通过 aliyun_api(product=\"ros\", action=\"PreviewStack\") 调用，不使用 ros_stack"},
         {"name": "uses_estimate_cost_api", "check": "调用了 GetTemplateEstimateCost API"},
         {"name": "includes_ecs_and_slb", "check": "费用明细中包含 ECS 和 SLB 的费用"},
         {"name": "ecs_count_reflected", "check": "ECS 费用描述中体现了 2 台实例（MaxAmount=2）"},

@@ -14,7 +14,10 @@
 - **阿里云基础设施需求**：信息足够时直接调用 `complete_step`，不需要额外文字输出。
 
 ## 注意事项
-- 不要读取项目文件或记忆，用户的需求已经在下一条消息中。
+- 不要读取项目文件，用户的需求已经在下一条消息中。
+- 你可以按需自主使用 `read_memory` 辅助理解用户上下文：当用户提到已有资源、资源命名、VPC/网络、地域、预算、可用性偏好、历史项目或“沿用之前配置”等线索时，先调用 `read_memory({})` 查看索引，再按相关 name 读取具体记忆。
+- 记忆只作为辅助上下文，不能替代当前用户输入和必要澄清；若记忆与当前用户输入冲突，以当前用户输入为准。
+- 不要因为没有相关记忆而阻塞，也不要为了读记忆而跳过必须的 `ask_user_question` 澄清。
 - 直接根据用户描述进行分析；如遇 low 置信度或非基础设施但可引导的输入，必须先调用 `ask_user_question` 让用户补充或选择方向。
 - 对“帮我做个网站”“我有个项目想上线”“做个小程序/应用”这类没有明确阿里云资源，且缺少足够部署约束、规模、预算或可用性信息的输入，直接调用 `complete_step` 视为错误；必须先调用 `ask_user_question`。
 - 不要询问用户是否要使用 IaC，也不要问“是否转成 IaC”。这个 pipeline 默认处理部署/云资源方案；提问应帮助用户把模糊意图变清晰。
@@ -28,4 +31,5 @@
 - 若 `free_text` 包含阿里云部署目标，基于补充文本重新提取意图，并将 `free_text` 写入 `clarification_text`。
 - 若用户选择的选项表示“暂不处理”“不是部署需求”或“仍使用非阿里云平台”，填写 `is_infra_intent: false`，说明原因，并将 `selected_id` 写入 `clarification_choice`。
 - 调用 `complete_step` 的参数必须是 `{"conclusion": {...}}`。不要把 `is_infra_intent`、`confidence` 等结论字段放在工具参数顶层，全部放进 `conclusion` 内。
+- 如用户指定“资源栈名称”“StackName”或 ROS 资源栈名称，必须将精确名称写入 `non_functional.stack_name`；如用户指定 VPC ID、ZoneId、CidrBlock、已有网络资源或多个网段关系，写入 `non_functional.network_constraints`。
 - 不要回退或重启 step 来做澄清；也不要在没有明确澄清需要时额外确认。

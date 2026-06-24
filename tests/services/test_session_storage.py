@@ -11,6 +11,7 @@ from iac_code.agent.message import (
     create_recalled_memory_message,
     get_recalled_memory_files,
 )
+from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE, create_cleanup_prompt_message
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.session_usage import SessionUsageStore
@@ -105,6 +106,68 @@ class TestSessionStorage:
         tool_uses = loaded[2].get_tool_use_blocks()
         assert len(tool_uses) == 1
         assert tool_uses[0].name == "read_file"
+
+    def test_save_preserves_existing_cleanup_prompt_message(self, storage):
+        cleanup = create_cleanup_prompt_message("cleanup hidden prompt")
+        storage.append(CWD, "cleanup-save", cleanup, git_branch="main")
+
+        storage.save(
+            CWD,
+            "cleanup-save",
+            [Message(role="user", content="later"), Message(role="assistant", content="done")],
+            git_branch="main",
+            preserve_cleanup_prompts=True,
+        )
+
+        loaded = storage.load(CWD, "cleanup-save")
+        assert [message.content for message in loaded] == ["later", "done", "cleanup hidden prompt"]
+        assert loaded[-1].metadata["type"] == CLEANUP_PROMPT_METADATA_TYPE
+
+    def test_save_does_not_duplicate_existing_cleanup_prompt_message(self, storage):
+        cleanup = create_cleanup_prompt_message("cleanup hidden prompt")
+        storage.append(CWD, "cleanup-save-once", cleanup, git_branch="main")
+
+        storage.save(
+            CWD,
+            "cleanup-save-once",
+            [cleanup, Message(role="assistant", content="done")],
+            git_branch="main",
+            preserve_cleanup_prompts=True,
+        )
+
+        loaded = storage.load(CWD, "cleanup-save-once")
+        cleanup_messages = [
+            message for message in loaded if message.metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE
+        ]
+        assert len(cleanup_messages) == 1
+
+    def test_save_updates_cleanup_prompt_status_without_represerving_pending_prompt(self, storage, tmp_path):
+        cleanup = create_cleanup_prompt_message(
+            "cleanup hidden prompt",
+            cleanup_ledger_path=tmp_path / "cleanup.yaml",
+            cleanup_status="pending",
+        )
+        storage.append(CWD, "cleanup-status", cleanup, git_branch="main")
+
+        completed = create_cleanup_prompt_message(
+            "cleanup hidden prompt",
+            cleanup_ledger_path=tmp_path / "cleanup.yaml",
+            cleanup_status="completed",
+        )
+        storage.save(
+            CWD,
+            "cleanup-status",
+            [completed, Message(role="assistant", content="done")],
+            git_branch="main",
+            preserve_cleanup_prompts=True,
+        )
+
+        loaded = storage.load(CWD, "cleanup-status")
+        cleanup_messages = [
+            message for message in loaded if message.metadata.get("type") == CLEANUP_PROMPT_METADATA_TYPE
+        ]
+        assert len(cleanup_messages) == 1
+        assert cleanup_messages[0].metadata["cleanupStatus"] == "completed"
 
     def test_find_session_anywhere(self, storage):
         storage.append("/tmp/a", "id-aa", Message(role="user", content="from a"), git_branch=None)
@@ -239,3 +302,64 @@ def test_rename_to_existing_name_is_noop(storage):
     storage.rename_session(CWD, "same", "deploy-prod", git_branch=None)
 
     assert storage.rename_session(CWD, "same", "deploy-prod", git_branch=None) == "unchanged"
+
+
+def test_save_does_not_scan_old_file_unless_preserving_cleanup_prompts(tmp_path, monkeypatch):
+    storage = SessionStorage(projects_dir=tmp_path)
+    storage.append("/tmp/project", "sid", Message(role="user", content="old"))
+
+    def fail_load(cwd, session_id):
+        raise AssertionError("save should not load existing messages")
+
+    monkeypatch.setattr(storage, "load", fail_load)
+
+    storage.save("/tmp/project", "sid", [Message(role="user", content="new")])
+
+    assert [message.content for message in SessionStorage(projects_dir=tmp_path).load("/tmp/project", "sid")] == ["new"]
+
+
+def test_save_can_preserve_cleanup_prompts_when_requested(tmp_path):
+    storage = SessionStorage(projects_dir=tmp_path)
+    cleanup = create_cleanup_prompt_message("cleanup stack-123", cleanup_ledger_path=tmp_path / "cleanup.yaml")
+    storage.append("/tmp/project", "sid", cleanup)
+
+    storage.save(
+        "/tmp/project",
+        "sid",
+        [Message(role="user", content="new")],
+        preserve_cleanup_prompts=True,
+    )
+
+    loaded = SessionStorage(projects_dir=tmp_path).load("/tmp/project", "sid")
+    assert [message.content for message in loaded] == ["new", "cleanup stack-123"]
+
+
+def test_append_uses_locked_jsonl_helper(tmp_path, monkeypatch):
+    storage = SessionStorage(projects_dir=tmp_path)
+    calls = []
+
+    def fake_append(path, records, *, durable=False):
+        calls.append((path.name, list(records), durable))
+
+    monkeypatch.setattr("iac_code.services.session_storage.append_jsonl_locked", fake_append)
+
+    storage.append("/tmp/project", "sid", Message(role="user", content="hello"), git_branch="main")
+
+    assert calls[0][0] == "session.jsonl"
+    assert calls[0][1][0]["content"] == "hello"
+    assert calls[0][1][0]["git_branch"] == "main"
+
+
+def test_legacy_migration_keeps_directory_session_when_present(tmp_path):
+    storage = SessionStorage(projects_dir=tmp_path)
+    directory = storage.session_dir("/tmp/project", "sid")
+    directory.mkdir(parents=True)
+    directory_path = directory / "session.jsonl"
+    directory_path.write_text('{"role":"user","content":"directory"}\n', encoding="utf-8")
+    legacy_path = storage.legacy_session_path("/tmp/project", "sid")
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"role":"user","content":"legacy"}\n', encoding="utf-8")
+
+    assert storage._ensure_directory_format("/tmp/project", "sid") == directory
+
+    assert directory_path.read_text(encoding="utf-8") == '{"role":"user","content":"directory"}\n'

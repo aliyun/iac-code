@@ -6,40 +6,24 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
+from iac_code.utils.state_io import atomic_write_text as durable_atomic_write_text
+from iac_code.utils.state_io import safe_replace as durable_safe_replace
+
 _IS_WINDOWS = sys.platform == "win32"
+# Kept as a module attribute for callers that patch atomic_write_text internals.
+_TEMPFILE_FOR_COMPAT = tempfile
 
 
-def safe_replace(src: str, dst: str) -> None:
+def safe_replace(src: str | Path, dst: str | Path) -> None:
     """os.replace with retry for Windows file locking."""
-    for attempt in range(3):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError:
-            if attempt == 2:
-                raise
-            time.sleep(0.1 * (attempt + 1))
+    durable_safe_replace(src, dst)
 
 
 def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
     """Atomically replace *path* with text content."""
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    temp_path = Path(temp_name)
-    try:
-        with os.fdopen(fd, "w", encoding=encoding) as file:
-            file.write(content)
-            file.flush()
-            os.fsync(file.fileno())
-        safe_replace(str(temp_path), str(path))
-    except Exception:
-        try:
-            temp_path.unlink()
-        except FileNotFoundError:
-            pass
-        raise
+    durable_atomic_write_text(path, content, encoding=encoding, durable=True, _safe_replace=safe_replace)
 
 
 def restrict_file_permissions(path: Path, *, directory: bool) -> None:

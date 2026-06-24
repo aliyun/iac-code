@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +12,7 @@ from typing import Any, Literal, overload
 import yaml
 
 from iac_code.pipeline.engine.types import StepStatus
+from iac_code.utils.state_io import atomic_write_text
 
 PipelineStatus = Literal["running", "waiting_input", "completed", "user_aborted", "failed", "discarded"]
 RESUMABLE_STATUSES: set[PipelineStatus] = {"running", "waiting_input"}
@@ -373,9 +372,6 @@ class PipelineSession:
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.session_dir.mkdir(parents=True, exist_ok=True)
-        self._append_event(
-            {"type": "rollback", "from": from_step, "to": to_step, "reason": reason, "timestamp": time.time()}
-        )
         self.save_running_sync(
             to_step,
             state_machine_snapshot,
@@ -385,6 +381,9 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+        )
+        self._append_event(
+            {"type": "rollback", "from": from_step, "to": to_step, "reason": reason, "timestamp": time.time()}
         )
 
     def mark_discarded(self, reason: str | None = None) -> None:
@@ -781,19 +780,6 @@ class PipelineSession:
         return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
     def _atomic_write_yaml(self, path: Path, data: dict) -> None:
-        tmp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                "w",
-                dir=self.session_dir,
-                prefix=f".{path.name}.",
-                suffix=".tmp",
-                encoding="utf-8",
-                delete=False,
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
-                yaml.dump(data, tmp_file, allow_unicode=True)
-            os.replace(tmp_path, path)
-        finally:
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        content = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+        atomic_write_text(path, content, durable=True)

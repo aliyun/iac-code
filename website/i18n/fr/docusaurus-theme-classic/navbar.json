@@ -15,6 +15,10 @@
     "message": "CLI",
     "description": "Navbar item with label CLI"
   },
+  "item.label.Pipeline": {
+    "message": "Pipeline",
+    "description": "Navbar item with label Pipeline"
+  },
   "item.label.GitHub": {
     "message": "GitHub",
     "description": "Navbar item with label GitHub"

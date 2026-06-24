@@ -12,12 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from iac_code.agent.message import ContentBlock
+from iac_code.agent.message import ContentBlock, Message
 from iac_code.i18n import _
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.observability import PipelineObservability
 from iac_code.pipeline.engine.public_errors import public_error, public_error_from_exception
+from iac_code.pipeline.engine.resume_recovery import reconcile_resume_messages, user_message_already_in_resume
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, SubPipelineSpec
@@ -71,6 +72,7 @@ class SubPipelineExecutor:
         permission_context_getter: Callable[[], Any] | None = None,
         memory_content_getter: Callable[[], str] | None = None,
         auto_trigger_skills: list[Any] | None = None,
+        surface: str = "repl",
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -82,6 +84,7 @@ class SubPipelineExecutor:
         self._permission_context_getter = permission_context_getter
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
+        self._surface = surface
         self._active_step_executor = None
         self._telemetry_correlation: dict[str, str] = {}
         pipeline_name = getattr(pipeline, "name", "")
@@ -159,6 +162,7 @@ class SubPipelineExecutor:
             permission_context_getter=self._permission_context_getter,
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
+            surface=self._surface,
         )
         self._apply_telemetry_correlation(step_executor)
 
@@ -262,7 +266,7 @@ class SubPipelineExecutor:
                 if step_result.rollback_request:
                     target, reason = step_result.rollback_request
                     try:
-                        state_machine.rollback(target, reason, allow_completed_non_future=True)
+                        state_machine.rollback(target, reason)
                         conclusions = self._conclusions_before_step(sub_spec, target, conclusions)
                         self._mark_rolled_back_fields_stale(sub_context, sub_spec, target)
                     except ValueError as e:
@@ -332,6 +336,7 @@ class SubPipelineExecutor:
             permission_context_getter=self._permission_context_getter,
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
+            surface=self._surface,
         )
         self._apply_telemetry_correlation(executor)
         return executor
@@ -347,6 +352,7 @@ class SubPipelineExecutor:
         start_from_step: str | None = None,
         preserved_conclusions: dict[str, Any] | None = None,
         user_message: str | list[ContentBlock] | None = None,
+        resume_messages: list[Message] | None = None,
         parent_step_id: str | None = None,
         resume_state: dict[str, Any] | None = None,
         sub_step_attempt_allocator: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
@@ -578,7 +584,19 @@ class SubPipelineExecutor:
 
                         step_msg = user_message if is_first_step else None
                         step_precompleted_tools = precompleted_tools if is_first_step else None
-                        if isinstance(step_msg, str) and attempt_info.get("resume_messages"):
+                        attempt_resume_messages = attempt_info.get("resume_messages")
+                        if not isinstance(attempt_resume_messages, list):
+                            attempt_resume_messages = []
+                        explicit_resume_messages = (
+                            resume_messages if is_first_step and resume_messages is not None else []
+                        )
+                        step_resume_messages = reconcile_resume_messages(
+                            attempt_resume_messages,
+                            explicit_resume_messages,
+                        )
+                        if step_resume_messages and (
+                            isinstance(step_msg, str) or user_message_already_in_resume(step_msg, step_resume_messages)
+                        ):
                             step_msg = None
                         is_first_step = False
                         step_result: StepResult | None = None
@@ -587,7 +605,7 @@ class SubPipelineExecutor:
                                 "user_message": step_msg,
                                 "attempt_id": attempt_info.get("attempt_id"),
                                 "transcript_id": attempt_info.get("transcript_id"),
-                                "resume_messages": attempt_info.get("resume_messages"),
+                                "resume_messages": step_resume_messages,
                                 "precompleted_tools": step_precompleted_tools,
                                 "rollback_targets": state_machine.completed_non_future_rollback_targets(),
                                 "rollback_count": state_machine.rollback_count,
@@ -679,7 +697,7 @@ class SubPipelineExecutor:
                         if step_result.rollback_request:
                             target, reason = step_result.rollback_request
                             try:
-                                state_machine.rollback(target, reason, allow_completed_non_future=True)
+                                state_machine.rollback(target, reason)
                                 conclusions = self._conclusions_before_step(sub_spec, target, conclusions)
                                 self._observability.sub_step_completed(
                                     duration_ms=self._observability.duration_ms(sub_step_started_at),

@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from iac_code.agent.message import Message, ToolResultBlock
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
@@ -17,6 +18,7 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_storage import SessionStorage
+from iac_code.types.stream_events import ResourceObservedEvent
 
 
 def _selling_dir() -> Path:
@@ -33,6 +35,19 @@ class FakeSessionStorage:
 
     def session_path(self, cwd, session_id):
         return self._path
+
+
+class FailingAppendMetaSessionStorage(FakeSessionStorage):
+    def __init__(self, fail_types: set[str] | None = None):
+        super().__init__()
+        self.fail_types = fail_types
+        self.append_attempts = []
+
+    def append_meta(self, cwd, session_id, meta):
+        self.append_attempts.append(meta)
+        if self.fail_types is None or meta.get("type") in self.fail_types:
+            raise OSError("session meta unavailable")
+        super().append_meta(cwd, session_id, meta)
 
 
 class DirectorySessionStorage(FakeSessionStorage):
@@ -120,6 +135,41 @@ class FailingSavePipelineSession(RecordingPipelineSession):
         raise OSError("sidecar unavailable")
 
 
+class FailingAfterAdvancePipelineSession(RecordingPipelineSession):
+    async def save_running(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("running_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        if current_step == "b" and reason == "advanced from a":
+            raise OSError("sidecar unavailable")
+
+
+class FailingFinalCompletedPipelineSession(RecordingPipelineSession):
+    async def save_completed(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("completed_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        raise OSError("sidecar unavailable")
+
+
+class FailingCandidateFailedPipelineSession(RecordingPipelineSession):
+    async def save_running(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("running_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        if reason == "parallel candidate failed":
+            raise OSError("sidecar unavailable")
+
+
+class FailingUserInputCheckpointPipelineSession(RecordingPipelineSession):
+    async def save_running(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("running_attempted", current_step, state_machine_snapshot["current_index"], reason))
+        if reason in {"user input received", "pipeline pause confirmation received"}:
+            raise OSError("sidecar unavailable")
+
+
 class CapturingPipelineSession(RecordingPipelineSession):
     def __init__(self):
         super().__init__()
@@ -142,7 +192,7 @@ class CapturingPipelineSession(RecordingPipelineSession):
         )
 
 
-def _build_two_step_runner(tmp_path, *, auto_advance_first=True):
+def _build_two_step_runner(tmp_path, *, auto_advance_first=True, storage=None):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "a.md").write_text("A", encoding="utf-8")
     (tmp_path / "prompts" / "b.md").write_text("B", encoding="utf-8")
@@ -173,7 +223,7 @@ def _build_two_step_runner(tmp_path, *, auto_advance_first=True):
         pipeline_dir=tmp_path,
         provider_manager=MagicMock(),
         base_tool_registry=MagicMock(),
-        session_storage=FakeSessionStorage(),
+        session_storage=storage or FakeSessionStorage(),
         session_id="test",
         cwd=str(tmp_path),
     )
@@ -208,9 +258,6 @@ def _build_parallel_runner(tmp_path, *, storage=None):
                 forward: null
                 prompt: prompts/cost.md
                 context_fields: [template]
-                rollback:
-                  - target: template_gen
-                    condition: needs_template_rework
         steps:
           - id: arch
             conclusion_field: architecture
@@ -353,14 +400,14 @@ async def test_user_input_required_saves_waiting_input(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sidecar_save_failure_does_not_abort_pipeline(tmp_path):
-    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
-    runner.session = FailingSavePipelineSession()
+async def test_sidecar_save_failure_stops_before_next_step(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingAfterAdvancePipelineSession()
     executed_steps = []
 
     async def fake_execute(step, context, session_id, user_message=None, **kwargs):
         executed_steps.append(step.step_id)
-        conclusion = {"user_prompt": "choose", "options": ["one"]}
+        conclusion = {"value": step.step_id}
         context.set_conclusion(step.conclusion_field, conclusion)
         yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
 
@@ -372,9 +419,104 @@ async def test_sidecar_save_failure_does_not_abort_pipeline(tmp_path):
 
     assert executed_steps == ["a"]
     assert any(
-        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "a"
+        and "pipeline state persistence failed" in str(event.data).lower()
+        for event in events
     )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED and event.step_id == "a"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_STARTED and event.step_id == "b"
+        for event in events
+    )
+    assert runner.state_machine.current_step.step_id == "b"
+    assert ("running_attempted", "b", 1, "advanced from a") in runner.session.calls
     assert runner.sidecar_status is None
+
+
+@pytest.mark.asyncio
+async def test_final_completed_save_failure_yields_persistence_failure_event(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingFinalCompletedPipelineSession()
+    executed_steps = []
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        executed_steps.append(step.step_id)
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = []
+    async for event in runner._continue_from_current():
+        events.append(event)
+
+    assert executed_steps == ["a", "b"]
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "b"
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    assert ("completed_attempted", "b", 2, "pipeline completed") in runner.session.calls
+    assert runner.sidecar_status is None
+
+
+@pytest.mark.asyncio
+async def test_resume_input_save_failure_stops_before_input_received_event(tmp_path):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False)
+    runner.session = FailingUserInputCheckpointPipelineSession()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={})
+
+    runner._step_executor.execute = fake_execute
+
+    events = []
+    async for event in runner.resume("continue"):
+        events.append(event)
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_RECEIVED for event in events
+    )
+    assert ("running_attempted", "a", 0, "user input received") in runner.session.calls
+
+
+@pytest.mark.asyncio
+async def test_pause_confirmation_save_failure_stops_before_input_received_event(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingUserInputCheckpointPipelineSession()
+    runner._set_pending_input_kind("pipeline_pause_confirmation")
+
+    events = []
+    async for event in runner.continue_from_sidecar("continue"):
+        events.append(event)
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_RECEIVED for event in events
+    )
+    assert ("running_attempted", "a", 0, "pipeline pause confirmation received") in runner.session.calls
 
 
 @pytest.mark.asyncio
@@ -383,7 +525,8 @@ async def test_sidecar_save_failure_emits_sidecar_failed_telemetry(tmp_path):
     runner.session = FailingSavePipelineSession()
     runner._observability.sidecar_failed = MagicMock()
 
-    await runner._save_running("a", reason="step started")
+    with pytest.raises(RuntimeError, match="pipeline state persistence failed during save_running"):
+        await runner._save_running("a", reason="step started")
 
     runner._observability.sidecar_failed.assert_called_once_with(
         operation="save_running",
@@ -392,6 +535,203 @@ async def test_sidecar_save_failure_emits_sidecar_failed_telemetry(tmp_path):
         error_summary="sidecar unavailable",
         error_id=ANY,
     )
+
+
+@pytest.mark.asyncio
+async def test_resource_observed_save_failure_stops_before_continuing(tmp_path, monkeypatch):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = PipelineSession(tmp_path / "session" / "pipeline")
+    step = runner.state_machine.current_step
+
+    def on_resource_observed(ctx, event, *, ledger, step_id, attempt_id):
+        return ObservedResource(
+            provider=event.provider,
+            resource_type=event.resource_type,
+            resource_id=event.resource_id,
+            resource_name=event.resource_name,
+            region_id=event.region_id,
+            source_step_id=step_id,
+            source_attempt_id=attempt_id,
+            observed_action=event.action,
+            observed_at=1.0,
+        )
+
+    def fail_record_observed(self, observed):
+        raise OSError("cleanup disk full")
+
+    step.on_resource_observed = on_resource_observed
+    monkeypatch.setattr(CleanupLedger, "record_observed", fail_record_observed)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield ResourceObservedEvent(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-123",
+            resource_name="demo",
+            region_id="cn-hangzhou",
+            action="CreateStack",
+        )
+        context.set_conclusion(step.conclusion_field, {"value": step.step_id})
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"value": step.step_id})
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "a"
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED and event.step_id == "a"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_rollback_cleanup_required_save_failure_stops_before_rollback_event(tmp_path, monkeypatch):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = PipelineSession(tmp_path / "session" / "pipeline")
+
+    def on_rollback_cleanup_required(ctx, *, ledger, from_step, from_attempt_id, to_step, reason):
+        return [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                source_step_id=from_step,
+                source_attempt_id=from_attempt_id,
+                cleanup_reason=reason,
+            )
+        ]
+
+    def fail_mark_cleanup_required(self, resources, *, source_step_id, reason):
+        raise OSError("cleanup disk full")
+
+    runner._loaded.steps[1].on_rollback_cleanup_required = on_rollback_cleanup_required
+    monkeypatch.setattr(CleanupLedger, "mark_cleanup_required", fail_mark_cleanup_required)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        if step.step_id == "a":
+            conclusion = {"value": "a"}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+            return
+        conclusion = {"value": "b"}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=("a", "retry"),
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.step_id == "b"
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED and event.step_id == "b"
+        for event in events
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.ROLLBACK_TRIGGERED for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_initial_sidecar_save_failure_stops_before_pipeline_init_meta(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    runner.session = FailingSavePipelineSession()
+
+    events = [event async for event in runner.run("start")]
+
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    assert runner._session_storage.meta_entries == []
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_STARTED for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_meta_append_failure_is_best_effort_for_completed_pipeline(tmp_path, caplog):
+    storage = FailingAppendMetaSessionStorage()
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner.run("start")]
+
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_STARTED for event in events
+    )
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert {meta["type"] for meta in storage.append_attempts} >= {"pipeline_init", "pipeline_step_complete"}
+    assert "Failed to append pipeline session metadata" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rollback_session_meta_append_failure_is_best_effort(tmp_path, caplog):
+    storage = FailingAppendMetaSessionStorage(fail_types={"pipeline_rollback"})
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    requested_rollback = False
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        nonlocal requested_rollback
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        rollback_request = None
+        if step.step_id == "b" and not requested_rollback:
+            requested_rollback = True
+            rollback_request = ("a", "retry")
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=rollback_request,
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.ROLLBACK_TRIGGERED for event in events
+    )
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert any(meta["type"] == "pipeline_rollback" for meta in storage.append_attempts)
+    assert "Failed to append pipeline session metadata during pipeline_rollback" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -407,7 +747,8 @@ async def test_real_sidecar_save_failure_logs_once_at_runner_boundary(tmp_path, 
     monkeypatch.setattr(runner.session, "_atomic_write_yaml", fail_write)
     caplog.set_level(logging.WARNING)
 
-    await runner._save_running("a", reason="step started")
+    with pytest.raises(RuntimeError, match="pipeline state persistence failed during save_running"):
+        await runner._save_running("a", reason="step started")
 
     sidecar_records = [record for record in caplog.records if "pipeline sidecar" in record.getMessage()]
     assert len(sidecar_records) == 1
@@ -468,7 +809,7 @@ async def test_continue_from_sidecar_continues_without_user_prompt(tmp_path):
     assert seen_user_messages == [None]
 
 
-def test_sync_sidecar_save_failure_does_not_abort_hard_interrupt(tmp_path):
+def test_sync_sidecar_save_failure_raises_after_hard_interrupt_boundary(tmp_path):
     from iac_code.pipeline.engine.interrupt import InterruptVerdict
 
     runner = _build_two_step_runner(tmp_path)
@@ -476,11 +817,11 @@ def test_sync_sidecar_save_failure_does_not_abort_hard_interrupt(tmp_path):
     runner._observability.sidecar_failed = MagicMock()
     runner.state_machine.advance()
 
-    result = runner.apply_hard_interrupt(
-        InterruptVerdict(action="hard_interrupt", reason="changed mind", rollback_target="a")
-    )
+    with pytest.raises(RuntimeError, match="pipeline state persistence failed during save_rollback_sync"):
+        runner.apply_hard_interrupt(
+            InterruptVerdict(action="hard_interrupt", reason="changed mind", rollback_target="a")
+        )
 
-    assert result is True
     assert runner.state_machine.current_step.step_id == "a"
     assert any(call[0] == "rollback_sync_attempted" for call in runner.session.calls)
     assert runner.sidecar_status is None
@@ -1244,6 +1585,78 @@ class TestParallelSubPipelineStep:
         assert record.error_type == "RuntimeError"
         assert record.error_summary == "lost worker token=[REDACTED] [PATH]"
         assert record.error_id == failed_event.data["error_details"]["error_id"]
+
+    @pytest.mark.asyncio
+    async def test_parallel_candidate_failure_save_failure_stops_before_failed_event(self, tmp_path):
+        runner = _build_parallel_runner(tmp_path)
+        runner.session = FailingCandidateFailedPipelineSession()
+        step = runner.state_machine.current_step
+
+        async def failing_execute_streaming(*args, **kwargs):
+            raise RuntimeError("candidate worker failed")
+            if False:
+                yield
+
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_sub_exec:
+            instance = MagicMock()
+            instance.execute_streaming = failing_execute_streaming
+            instance.current_step_executor_agent_loop = None
+            mock_sub_exec.return_value = instance
+
+            events = [event async for event in runner._execute_parallel_sub_pipeline(step)]
+
+        assert any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.STEP_FAILED
+            and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+            and event.data.get("failed") is True
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED for event in events
+        )
+        assert ("running_attempted", "eval", 1, "parallel candidate failed") in runner.session.calls
+
+    @pytest.mark.asyncio
+    async def test_parallel_candidate_failure_save_failure_stops_outer_step(self, tmp_path):
+        runner = _build_parallel_runner(tmp_path)
+        runner.session = FailingCandidateFailedPipelineSession()
+
+        async def failing_execute_streaming(*args, **kwargs):
+            raise RuntimeError("candidate worker failed")
+            if False:
+                yield
+
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_sub_exec:
+            instance = MagicMock()
+            instance.execute_streaming = failing_execute_streaming
+            instance.current_step_executor_agent_loop = None
+            mock_sub_exec.return_value = instance
+
+            events = [event async for event in runner._continue_from_current()]
+
+        assert any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.STEP_FAILED
+            and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.STEP_COMPLETED
+            and event.step_id == "eval"
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+        )
+        assert not any(call[0] == "completed" for call in runner.session.calls)
+        assert ("running_attempted", "eval", 1, "parallel candidate failed") in runner.session.calls
 
     @pytest.mark.asyncio
     async def test_resolve_iterate_field_raises_for_missing_and_returns_for_present(self, tmp_path):

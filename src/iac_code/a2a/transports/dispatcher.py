@@ -49,6 +49,10 @@ from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
+from iac_code.a2a.jsonrpc_passthrough import (
+    install_jsonrpc_error_data_passthrough,
+    install_v03_jsonrpc_error_data_passthrough,
+)
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_executor import (
@@ -237,11 +241,13 @@ class IacCodeRequestHandler(DefaultRequestHandler):
 
     async def on_message_send(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
+        self._validate_pipeline_message_request(params)
         await self._hydrate_recoverable_pipeline_task_id(params)
         return await super().on_message_send(params, context)
 
     async def on_message_send_stream(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
+        self._validate_pipeline_message_request(params)
         await self._hydrate_recoverable_pipeline_task_id(params)
         task_id = params.message.task_id or None
         if task_id and isinstance(self.task_store, A2ATaskStore) and await self.task_store.is_task_active(task_id):
@@ -495,6 +501,13 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_extensions(context)
         await super().on_delete_task_push_notification_config(params, context)
 
+    def _validate_pipeline_message_request(self, params: SendMessageRequest) -> None:
+        if get_run_mode() != RunMode.PIPELINE:
+            return
+        executor = getattr(self, "agent_executor", None)
+        if isinstance(executor, IacCodeA2AExecutor):
+            executor.validate_pipeline_message_request(params.message)
+
     def _validate_extensions(self, context) -> None:
         requested = set(getattr(context, "requested_extensions", set()) or set())
         required = sorted(extension.uri for extension in self._agent_card.capabilities.extensions if extension.required)
@@ -511,7 +524,9 @@ def _task_is_input_required(task: Task) -> bool:
 
 
 def _create_dispatch_app(handler: DefaultRequestHandler) -> Starlette:
+    install_jsonrpc_error_data_passthrough()
     jsonrpc_endpoint = create_jsonrpc_routes(handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
+    install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint)
 
     async def handle_jsonrpc(request):
         await normalize_v03_jsonrpc_version(request)

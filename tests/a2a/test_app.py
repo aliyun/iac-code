@@ -37,6 +37,7 @@ from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.transports.dispatcher import create_runtime_components
+from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
 
@@ -486,6 +487,14 @@ def _pipeline_event(sequence: int, event_id: str) -> dict:
     }
 
 
+def _sse_json_events(body: str) -> list[dict]:
+    events: list[dict] = []
+    for line in body.splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line.removeprefix("data: ")))
+    return events
+
+
 def _pipeline_pending_ask_event() -> dict:
     event = _pipeline_event(1, "evt-ask")
     event["eventType"] = "input_required"
@@ -787,6 +796,188 @@ def test_streaming_v03_method_with_v10_header_returns_sse(monkeypatch, tmp_path)
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "hello from mixed streaming route" in body
     assert loop.prompts == ["hello mixed"]
+
+
+def test_streaming_v03_active_sidecar_mismatch_preserves_recoverable_error_data(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-owner", context_id="ctx-1", state="working"))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-new", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    owner_event = _pipeline_event(1, "evt-owner")
+    owner_event["taskId"] = "task-owner"
+    A2APipelineJournal(pipeline_dir).append(owner_event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([owner_event]))
+
+    class RunningPipeline:
+        pipeline_name = "selling"
+        sidecar_status = "running"
+        handoff_enabled = False
+
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(
+                session_dir=SessionStorage().session_dir(str(tmp_path), session_id) / "pipeline"
+            )
+
+        async def run(self, prompt: str):  # pragma: no cover - regression asserts this is not reached
+            yield TextDeltaEvent(text=f"unexpected {prompt}")
+
+        def clear_sidecar(self) -> None:  # pragma: no cover - regression asserts this is not reached
+            raise AssertionError("active sidecar should not be cleared")
+
+    fake_runtime = SimpleNamespace(provider_manager=object(), tool_registry=object())
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: fake_runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: RunningPipeline())
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "message/stream",
+                "params": {
+                    "message": {
+                        "messageId": "msg-new",
+                        "taskId": "task-new",
+                        "contextId": "ctx-1",
+                        "role": "user",
+                        "parts": [{"kind": "text", "text": "new request"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ) as response:
+            body = response.read().decode()
+
+    events = _sse_json_events(body)
+    assert response.status_code == 200
+    assert events
+    error = events[-1]["error"]
+    assert error["code"] == -32602
+    assert error["data"] == {
+        "recoverableTaskId": "task-owner",
+        "contextId": "ctx-1",
+        "sidecarStatus": "running",
+    }
+
+
+def test_pipeline_streaming_starts_with_task_before_status_update(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    class StreamingPipeline:
+        pipeline_name = "selling"
+        sidecar_status = None
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+            self.session = SimpleNamespace(session_dir=tmp_path / "pipeline-sidecar")
+            self.handoff_enabled = False
+
+        async def run(self, prompt: str):
+            self.prompts.append(prompt)
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_STARTED,
+                step_id=None,
+                timestamp=1717821600.0,
+                data={"total_steps": 1, "step_names": ["intent_parsing"]},
+            )
+            yield TextDeltaEvent(text="pipeline streaming output")
+
+        def should_switch_to_normal(self, data: dict) -> bool:  # noqa: ARG002
+            return False
+
+    fake_pipeline = StreamingPipeline()
+    fake_runtime = SimpleNamespace(provider_manager=object(), tool_registry=object())
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: fake_runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendStreamingMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "选择一个已有vpc，创建一个vswitch"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ) as response:
+            body = response.read().decode()
+
+    assert response.status_code == 200
+    assert "Agent should enqueue Task before TaskStatusUpdateEvent event" not in body
+    assert "pipeline streaming output" in body
+    assert fake_pipeline.prompts == ["选择一个已有vpc，创建一个vswitch"]
+
+
+def test_pipeline_streaming_workspace_error_returns_request_error(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(allowed))
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+
+    with TestClient(app) as client:
+        with client.stream(
+            "POST",
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendStreamingMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "选择一个已有vpc，创建一个vswitch"}],
+                        "metadata": {"iac_code": {"cwd": str(outside)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        ) as response:
+            body = response.read().decode()
+
+    assert response.status_code == 200
+    assert "Agent should enqueue Task before TaskStatusUpdateEvent event" not in body
+    data = response.json()
+    assert data["error"]["code"] == -32602
+    assert data["error"]["message"] == "Invalid A2A workspace metadata."
+    assert data["error"]["data"][0]["reason"] == "INVALID_PARAMS"
 
 
 def test_follow_up_message_through_sdk_route_updates_existing_task(monkeypatch, tmp_path) -> None:
@@ -1686,7 +1877,12 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
         assert persistence.load_task("task-1").state == "canceled"
         snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
         assert snapshot["status"] == "canceled"
-        assert A2APipelineJournal(pipeline_dir).read_all_repairing_tail()[-1]["eventType"] == "pipeline_canceled"
+        assert snapshot["normalHandoff"]["action"] == "switch_to_normal"
+        assert snapshot["normalHandoff"]["targetMode"] == "normal"
+        assert snapshot["normalHandoff"]["outcome"] == "canceled"
+        assert "Outcome: canceled" in snapshot["normalHandoff"]["summary"]
+        events = A2APipelineJournal(pipeline_dir).read_all_repairing_tail()
+        assert [event["eventType"] for event in events[-2:]] == ["pipeline_canceled", "pipeline_handoff_ready"]
     finally:
         await components.aclose()
 
