@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import errno
+import gc
 import json
 import os
 import sys
 import types
+import weakref
 from pathlib import Path
 
 import pytest
 
-from iac_code.utils.state_io import append_jsonl_locked, atomic_write_json, atomic_write_text
+from iac_code.utils.state_io import append_jsonl_locked, atomic_write_json, atomic_write_text, safe_replace
 
 
 def test_atomic_write_text_replaces_file_and_removes_temp(tmp_path: Path) -> None:
@@ -55,6 +58,90 @@ def test_append_jsonl_locked_writes_one_complete_line_per_record(tmp_path: Path)
 
     lines = path.read_text(encoding="utf-8").splitlines()
     assert [json.loads(line) for line in lines] == [{"a": 1}, {"b": 2}]
+
+
+def test_path_lock_registry_reuses_held_lock_for_same_path(tmp_path: Path) -> None:
+    from iac_code.utils.path_locks import PathLockRegistry
+
+    registry = PathLockRegistry()
+    path = tmp_path / "state.jsonl"
+
+    with registry.lock_for(path) as first:
+        with registry.lock_for(path) as second:
+            assert second is first
+
+
+def test_path_lock_registry_releases_stale_locks_after_callers_drop_references(tmp_path: Path) -> None:
+    from iac_code.utils.path_locks import PathLockRegistry
+
+    registry = PathLockRegistry()
+    path = tmp_path / "state.jsonl"
+
+    with registry.lock_for(path) as first:
+        ref = weakref.ref(first)
+
+    del first
+    gc.collect()
+    registry.prune()
+
+    assert ref() is None
+
+
+def test_safe_replace_cross_device_fallback_copies_then_unlinks_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from iac_code.utils import state_io
+
+    src = tmp_path / "legacy.jsonl"
+    dst = tmp_path / "session" / "session.jsonl"
+    dst.parent.mkdir()
+    src.write_text("legacy", encoding="utf-8")
+
+    real_replace = os.replace
+
+    def raise_exdev_for_legacy_src(_src: str | Path, _dst: str | Path) -> None:
+        if Path(_src) == src:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        real_replace(_src, _dst)
+
+    monkeypatch.setattr(state_io.os, "replace", raise_exdev_for_legacy_src)
+
+    safe_replace(src, dst)
+
+    assert dst.read_text(encoding="utf-8") == "legacy"
+    assert not src.exists()
+
+
+def test_safe_replace_cross_device_fallback_retries_transient_final_replace_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from iac_code.utils import state_io
+
+    src = tmp_path / "legacy.jsonl"
+    dst = tmp_path / "session" / "session.jsonl"
+    dst.parent.mkdir()
+    src.write_text("legacy", encoding="utf-8")
+    real_replace = os.replace
+    final_replace_attempts = 0
+
+    def fail_exdev_then_transient_final_lock(_src: str | Path, _dst: str | Path) -> None:
+        nonlocal final_replace_attempts
+        src_path = Path(_src)
+        if src_path == src:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        if src_path.parent == dst.parent and src_path.name.startswith(f".{dst.name}."):
+            final_replace_attempts += 1
+            if final_replace_attempts == 1:
+                raise PermissionError("target locked")
+        real_replace(_src, _dst)
+
+    monkeypatch.setattr(state_io.os, "replace", fail_exdev_then_transient_final_lock)
+
+    safe_replace(src, dst, attempts=2, delay=0)
+
+    assert final_replace_attempts == 2
+    assert dst.read_text(encoding="utf-8") == "legacy"
+    assert not src.exists()
 
 
 def test_durable_append_jsonl_fsyncs_parent_directory_for_new_file(

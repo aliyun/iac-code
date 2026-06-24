@@ -44,11 +44,15 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 
 from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
-from iac_code.a2a.app import install_v03_jsonrpc_error_data_passthrough, normalize_v03_jsonrpc_version
+from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
+from iac_code.a2a.jsonrpc_passthrough import (
+    install_jsonrpc_error_data_passthrough,
+    install_v03_jsonrpc_error_data_passthrough,
+)
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_executor import (
@@ -520,6 +524,7 @@ def _task_is_input_required(task: Task) -> bool:
 
 
 def _create_dispatch_app(handler: DefaultRequestHandler) -> Starlette:
+    install_jsonrpc_error_data_passthrough()
     jsonrpc_endpoint = create_jsonrpc_routes(handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
     install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint)
 

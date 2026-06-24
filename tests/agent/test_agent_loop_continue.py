@@ -56,7 +56,7 @@ async def test_continue_streaming_uses_existing_context_without_appending_user_m
     assert appended_roles == ["assistant"]
 
 
-def test_stamp_last_turn_elapsed_does_not_request_cleanup_prompt_preservation():
+def test_stamp_last_turn_elapsed_preserves_cleanup_prompts():
     storage = RecordingStorage()
     loop = AgentLoop(
         provider_manager=FakeProviderManager(),
@@ -74,4 +74,4 @@ def test_stamp_last_turn_elapsed_does_not_request_cleanup_prompt_preservation():
     _cwd, _session_id, messages, _branch, preserve_cleanup_prompts = storage.saved[0]
     assert [message.content for message in messages] == ["later", "done"]
     assert messages[-1].elapsed_seconds == 1.5
-    assert preserve_cleanup_prompts is False
+    assert preserve_cleanup_prompts is True

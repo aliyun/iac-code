@@ -704,6 +704,33 @@ class TestRenderDoesNotMutateState:
 
 
 class TestPipelineEventStyles:
+    def test_render_pipeline_warning_prints_non_terminal_warning(self, mock_repl):
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+
+        printed = []
+
+        class CaptureConsole:
+            def print(self, *args, **kwargs):
+                if args:
+                    printed.extend(str(arg) for arg in args)
+                else:
+                    printed.append("")
+
+        mock_repl.renderer = SimpleNamespace(console=CaptureConsole())
+
+        mock_repl._render_pipeline_event(
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_WARNING,
+                step_id="deploying",
+                timestamp=0,
+                data={"reason": "cleanup_tracking_unavailable"},
+            )
+        )
+
+        rendered = "\n".join(printed)
+        assert "cleanup_tracking_unavailable" in rendered
+        assert "yellow" in rendered
+
     def test_render_pipeline_event_uses_slate_sky_label_styles(self, mock_repl):
         from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
         from iac_code.ui.pipeline_styles import PIPELINE_STEP_HEADER_STYLE, PIPELINE_TITLE_STYLE

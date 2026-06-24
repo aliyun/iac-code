@@ -338,6 +338,16 @@ class PipelineEventTranslator:
             return [self._envelope("pipeline_started", "pipeline", "working", _event_data(data), created_at=created_at)]
         if event.type == PipelineEventType.PIPELINE_RESUMED:
             return [self._envelope("pipeline_resumed", "pipeline", "working", _event_data(data), created_at=created_at)]
+        if event.type == PipelineEventType.PIPELINE_WARNING:
+            return [
+                self._envelope(
+                    "pipeline_warning",
+                    "pipeline",
+                    "working",
+                    _warning_event_data(data),
+                    created_at=created_at,
+                )
+            ]
         if event.type == PipelineEventType.PIPELINE_COMPLETED:
             event_type = "pipeline_failed" if data.get("failed") is True else "pipeline_completed"
             status = "failed" if event_type == "pipeline_failed" else "completed"
@@ -960,6 +970,11 @@ def _event_data(data: dict[str, Any]) -> dict[str, Any]:
         _TOP_LEVEL_DATA_KEY_ALIASES.get(str(key), str(key)): _sanitize_event_value(str(key), value)
         for key, value in data.items()
     }
+
+
+def _warning_event_data(data: dict[str, Any]) -> dict[str, Any]:
+    private_keys = {"ledger_path", "ledgerPath", "load_error", "loadError"}
+    return _event_data({key: value for key, value in data.items() if str(key) not in private_keys})
 
 
 def _sanitize_event_value(key: str, value: Any) -> Any:

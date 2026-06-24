@@ -50,9 +50,11 @@ def test_active_sidecar_mismatch_error_exposes_jsonrpc_data() -> None:
 
 
 def test_active_sidecar_mismatch_error_serializes_raw_jsonrpc_data() -> None:
-    from a2a.server.request_handlers.response_helpers import build_error_response
-
+    from iac_code.a2a.jsonrpc_passthrough import install_jsonrpc_error_data_passthrough
     from iac_code.a2a.pipeline_executor import _active_sidecar_mismatch_error
+
+    install_jsonrpc_error_data_passthrough()
+    from a2a.server.request_handlers.response_helpers import build_error_response
 
     error = _active_sidecar_mismatch_error(
         recoverable_task_id="task-owner",
@@ -2279,6 +2281,35 @@ def test_cleanup_handoff_missing_ledger_ignores_empty_public_cleanup_snapshot(tm
     )
 
     assert cleanup is None
+
+
+def test_cleanup_handoff_missing_ledger_does_not_reconstruct_prompt_from_public_snapshot(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_executor import _pipeline_cleanup_handoff_data_from_session
+
+    cleanup = _pipeline_cleanup_handoff_data_from_session(
+        cwd=str(tmp_path),
+        session_id="session-public-cleanup-only",
+        public_snapshot={
+            "cleanup": {
+                "resourceCount": 1,
+                "resources": [
+                    {
+                        "provider": "ros",
+                        "resourceType": "stack",
+                        "resourceId": "stack-public-only",
+                        "cleanupStatus": "pending",
+                    }
+                ],
+                "status": "pending",
+            }
+        },
+    )
+
+    assert cleanup is not None
+    assert cleanup["status"] == "unavailable"
+    assert "prompt" not in cleanup
+    assert "resources" not in cleanup
+    assert "stack-public-only" not in repr(cleanup)
 
 
 @pytest.mark.asyncio

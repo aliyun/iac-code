@@ -28,18 +28,28 @@ class TestReadFileTool:
         assert read_file_tool.supports_blanket_allow is False
 
     def test_path_is_under_windows_case_insensitive(self, monkeypatch):
-        monkeypatch.setattr("iac_code.tools.read_file.sys.platform", "win32")
+        monkeypatch.setattr("iac_code.tools.path_safety.sys.platform", "win32")
         from iac_code.tools.read_file import _path_is_under
 
         assert _path_is_under("C:\\Users\\Alice\\project\\file.txt", "c:/users/alice/project")
 
     def test_path_is_under_windows_ntpath_separator_normalization(self, monkeypatch):
+        import iac_code.tools.path_safety as path_safety
         import iac_code.tools.read_file as read_file
 
-        monkeypatch.setattr(read_file.sys, "platform", "win32")
-        monkeypatch.setattr(read_file.os, "path", ntpath)
+        monkeypatch.setattr(path_safety.sys, "platform", "win32")
+        monkeypatch.setattr(path_safety.os, "path", ntpath)
 
         assert read_file._path_is_under("C:\\Users\\Alice\\project\\file.txt", "c:/users/alice/project")
+
+    def test_path_is_under_darwin_case_insensitive_volume(self, monkeypatch):
+        import iac_code.tools.path_safety as path_safety
+        import iac_code.tools.read_file as read_file
+
+        monkeypatch.setattr(path_safety.sys, "platform", "darwin")
+        monkeypatch.setattr(path_safety, "_path_case_sensitive", lambda _root: False, raising=False)
+
+        assert read_file._path_is_under("/Users/Alice/project/file.txt", "/users/alice/project")
 
     @pytest.mark.asyncio
     async def test_read_normal_file(self, tmp_path, read_file_tool):

@@ -44,6 +44,12 @@ from iac_code.agent.message import Message as AgentMessage
 from iac_code.config import get_active_provider_key, get_provider_config, load_credentials
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
+from iac_code.pipeline.constants import (
+    PIPELINE_EVENT_CLEANUP_COMPLETED,
+    PIPELINE_EVENT_CLEANUP_FAILED,
+    PIPELINE_EVENT_CLEANUP_PROGRESS,
+    PIPELINE_EVENT_CLEANUP_STARTED,
+)
 from iac_code.pipeline.engine.cleanup import (
     CLEANUP_PROMPT_METADATA_TYPE,
     CleanupLedger,
@@ -109,7 +115,6 @@ def _cleanup_ledger_path_from_handoff(handoff: dict[str, Any]) -> str | None:
 def _cleanup_payload_from_private_ledger_or_unavailable(
     *,
     ledger_path: Path,
-    public_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ledger = CleanupLedger(ledger_path)
     try:
@@ -629,13 +634,13 @@ async def _publish_cleanup_resource_changes(
 
 def _cleanup_event_type_for_status(status: str) -> str | None:
     if status == "started":
-        return "cleanup_started"
+        return PIPELINE_EVENT_CLEANUP_STARTED
     if status == "in_progress":
-        return "cleanup_progress"
+        return PIPELINE_EVENT_CLEANUP_PROGRESS
     if status == "completed":
-        return "cleanup_completed"
+        return PIPELINE_EVENT_CLEANUP_COMPLETED
     if status == "failed":
-        return "cleanup_failed"
+        return PIPELINE_EVENT_CLEANUP_FAILED
     return None
 
 
@@ -1298,7 +1303,6 @@ class IacCodeA2AExecutor(AgentExecutor):
         if isinstance(data, dict) and isinstance(data.get("cleanup"), dict):
             cleanup_payload = _cleanup_payload_from_private_ledger_or_unavailable(
                 ledger_path=_default_cleanup_ledger_path(cwd=cwd, session_id=ctx.session_id),
-                public_snapshot=snapshot,
             )
         cleanup_prompt = cleanup_payload.get("prompt") if isinstance(cleanup_payload, dict) else None
         cleanup_ledger_path = cleanup_payload.get("ledgerPath") if isinstance(cleanup_payload, dict) else None

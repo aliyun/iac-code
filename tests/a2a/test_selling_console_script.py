@@ -177,6 +177,23 @@ def start_console(console, *, default_cwd: str = "/workspace/demo"):
     return RunningServer()
 
 
+def test_create_server_disables_address_reuse_on_windows(monkeypatch) -> None:
+    console = load_module()
+    monkeypatch.setattr(console.sys, "platform", "win32")
+    config = console.SellingConsoleConfig(
+        host="127.0.0.1",
+        port=0,
+        default_server_url="http://127.0.0.1:41299",
+        default_cwd="/workspace/demo",
+    )
+
+    server = console.create_server(config)
+    try:
+        assert server.allow_reuse_address is False
+    finally:
+        server.server_close()
+
+
 def get_text(url: str) -> tuple[int, str, str]:
     with urlopen(url, timeout=5) as response:
         return response.status, response.headers.get("Content-Type", ""), response.read().decode("utf-8")

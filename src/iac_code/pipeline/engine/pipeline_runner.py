@@ -16,7 +16,12 @@ from typing import Any, cast
 
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
-from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
+from iac_code.pipeline.engine.cleanup import (
+    CleanupLedger,
+    CleanupLedgerWriteStatus,
+    CleanupResource,
+    ObservedResource,
+)
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
@@ -504,11 +509,11 @@ class PipelineRunner:
         event: ResourceObservedEvent,
         *,
         attempt_id: str | None,
-    ) -> None:
+    ) -> list[PipelineEvent]:
         hook = getattr(step, "on_resource_observed", None)
         ledger = self.cleanup_ledger()
         if ledger is None or not callable(hook):
-            return
+            return []
         try:
             result = hook(
                 self.context,
@@ -519,10 +524,11 @@ class PipelineRunner:
             )
         except Exception:
             logger.warning("Pipeline resource-observed hook failed: step_id=%s", step.step_id, exc_info=True)
-            return
+            return []
+        events: list[PipelineEvent] = []
         for observed in self._observed_resources_from_hook_result(result):
             try:
-                ledger.record_observed(observed)
+                status = ledger.record_observed(observed)
             except Exception as exc:
                 logger.warning(
                     "Failed to persist observed cleanup resource: step_id=%s resource_id=%s error=%s",
@@ -535,6 +541,17 @@ class PipelineRunner:
                     "pipeline state persistence failed during record_observed_cleanup_resource",
                     step_id=step.step_id,
                 ) from exc
+            if status.unavailable:
+                events.append(
+                    self._cleanup_tracking_unavailable_event(
+                        step_id=step.step_id,
+                        operation="record_observed",
+                        ledger=ledger,
+                        status=status,
+                        resource_id=observed.resource_id,
+                    )
+                )
+        return events
 
     def _mark_rollback_cleanup_required(
         self,
@@ -543,11 +560,11 @@ class PipelineRunner:
         reason: str,
         *,
         from_attempt_id: str | None,
-    ) -> None:
+    ) -> list[PipelineEvent]:
         hook = getattr(step, "on_rollback_cleanup_required", None)
         ledger = self.cleanup_ledger()
         if ledger is None or not callable(hook):
-            return
+            return []
         try:
             result = hook(
                 self.context,
@@ -559,11 +576,11 @@ class PipelineRunner:
             )
         except Exception:
             logger.warning("Pipeline rollback cleanup hook failed: step_id=%s", step.step_id, exc_info=True)
-            return
+            return []
         resources = self._cleanup_resources_from_hook_result(result)
         if resources:
             try:
-                ledger.mark_cleanup_required(resources, source_step_id=step.step_id, reason=reason)
+                status = ledger.mark_cleanup_required(resources, source_step_id=step.step_id, reason=reason)
             except Exception as exc:
                 logger.warning(
                     "Failed to persist rollback cleanup resources: step_id=%s target_step_id=%s error=%s",
@@ -576,6 +593,49 @@ class PipelineRunner:
                     "pipeline state persistence failed during mark_rollback_cleanup_required",
                     step_id=step.step_id,
                 ) from exc
+            if status.unavailable:
+                return [
+                    self._cleanup_tracking_unavailable_event(
+                        step_id=step.step_id,
+                        operation="mark_cleanup_required",
+                        ledger=ledger,
+                        status=status,
+                        resource_count=len(resources),
+                    )
+                ]
+        return []
+
+    def _cleanup_tracking_unavailable_event(
+        self,
+        *,
+        step_id: str,
+        operation: str,
+        ledger: CleanupLedger,
+        status: CleanupLedgerWriteStatus,
+        resource_id: str | None = None,
+        resource_count: int | None = None,
+    ) -> PipelineEvent:
+        data: dict[str, Any] = {
+            "reason": "cleanup_tracking_unavailable",
+            "operation": operation,
+        }
+        if resource_id:
+            data["resource_id"] = resource_id
+        if resource_count is not None:
+            data["resource_count"] = resource_count
+        logger.warning(
+            "Pipeline cleanup tracking unavailable: step_id=%s operation=%s ledger_path=%s error=%s",
+            step_id,
+            operation,
+            ledger.path,
+            status.load_error,
+        )
+        return PipelineEvent(
+            type=PipelineEventType.PIPELINE_WARNING,
+            step_id=step_id,
+            timestamp=time.time(),
+            data=data,
+        )
 
     @staticmethod
     def _observed_resources_from_hook_result(result: object) -> list[ObservedResource]:
@@ -3123,11 +3183,12 @@ class PipelineRunner:
                     else:
                         if isinstance(event, ResourceObservedEvent):
                             try:
-                                self._handle_resource_observed(
+                                for warning_event in self._handle_resource_observed(
                                     step,
                                     event,
                                     attempt_id=attempt.get("attempt_id"),
-                                )
+                                ):
+                                    yield warning_event
                             except PipelineStatePersistenceError as exc:
                                 yield self._persistence_failure_event(exc)
                                 return
@@ -3335,12 +3396,13 @@ class PipelineRunner:
                 stale = self.context.mark_stale(target_field) if target_field else []
                 self._set_current_step_user_input(None)
                 try:
-                    self._mark_rollback_cleanup_required(
+                    for warning_event in self._mark_rollback_cleanup_required(
                         step,
                         target,
                         reason,
                         from_attempt_id=current_attempt_id if isinstance(current_attempt_id, str) else None,
-                    )
+                    ):
+                        yield warning_event
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return

@@ -12,6 +12,12 @@ from iac_code.a2a.artifacts import (
     sanitize_public_tool_output_data,
 )
 from iac_code.a2a.pipeline_journal import to_json_safe
+from iac_code.pipeline.constants import (
+    PIPELINE_EVENT_CLEANUP_COMPLETED,
+    PIPELINE_EVENT_CLEANUP_FAILED,
+    PIPELINE_EVENT_CLEANUP_PROGRESS,
+    PIPELINE_EVENT_CLEANUP_STARTED,
+)
 from iac_code.utils.public_errors import sanitize_public_text
 from iac_code.utils.state_io import atomic_write_json
 
@@ -25,10 +31,10 @@ _TERMINAL_STATUS_BY_EVENT_TYPE = {
     "pipeline_canceled": "canceled",
 }
 _CLEANUP_STATUS_BY_EVENT_TYPE = {
-    "cleanup_started": "started",
-    "cleanup_progress": "in_progress",
-    "cleanup_completed": "completed",
-    "cleanup_failed": "failed",
+    PIPELINE_EVENT_CLEANUP_STARTED: "started",
+    PIPELINE_EVENT_CLEANUP_PROGRESS: "in_progress",
+    PIPELINE_EVENT_CLEANUP_COMPLETED: "completed",
+    PIPELINE_EVENT_CLEANUP_FAILED: "failed",
 }
 _KNOWN_CLEANUP_STATUSES = {"pending", "started", "in_progress", "completed", "failed", "skipped"}
 _CLEANUP_ERROR_KEYS = {
@@ -40,6 +46,7 @@ _CLEANUP_ERROR_KEYS = {
     "lastError",
     "last_error",
 }
+_PIPELINE_WARNING_PRIVATE_DATA_KEYS = {"ledger_path", "ledgerPath", "load_error", "loadError"}
 
 
 class A2APipelineSnapshotStore:
@@ -128,6 +135,10 @@ def sanitize_pipeline_cleanup_private_fields(value: Any) -> Any:
         data = _dict_or_none(sanitized.get("data"))
         if data is not None:
             sanitized["data"] = _sanitize_cleanup_private_fields(data, root_is_cleanup=True)
+    elif event_type == "pipeline_warning":
+        data = _dict_or_none(sanitized.get("data"))
+        if data is not None:
+            sanitized["data"] = _pipeline_warning_public_data(data)
     return sanitized
 
 
@@ -150,6 +161,7 @@ class _PipelineSnapshotReducer:
         self._rollback_keys: set[str] = set()
         self._candidate_restart_keys: set[str] = set()
         self._handoff_history_keys: set[str] = set()
+        self._warning_history_keys: set[str] = set()
         self._stack_history_keys: set[str] = set()
         self._cleanup_history_keys: set[str] = set()
         self._skip_sequences_through = 0
@@ -201,6 +213,7 @@ class _PipelineSnapshotReducer:
         self._hydrate_rollbacks()
         self._hydrate_candidate_restarts()
         self._hydrate_control_history("handoffHistory", self._handoff_history_keys)
+        self._hydrate_control_history("warningHistory", self._warning_history_keys)
         self._hydrate_stack_history()
         self._hydrate_cleanup_history()
 
@@ -409,6 +422,12 @@ class _PipelineSnapshotReducer:
             cleanup_data = _dict_or_none(data.get("cleanup"))
             if cleanup_data is not None:
                 self._apply_cleanup_data(cleanup_data, event)
+        elif event_type == "pipeline_warning":
+            self._append_control_history(
+                "warningHistory",
+                self._warning_history_keys,
+                _warning_history_entry(event),
+            )
 
         step = self._upsert_step(event.get("step"), event)
         candidate = self._upsert_candidate(step, event.get("candidate"), event)
@@ -972,6 +991,23 @@ def _normal_handoff(event: dict[str, Any]) -> dict[str, Any]:
     return handoff
 
 
+def _warning_history_entry(event: dict[str, Any]) -> dict[str, Any]:
+    entry = {
+        "eventId": _string_or_none(event.get("eventId")),
+        "sequence": _sequence_value(event),
+        "createdAt": _string_or_none(event.get("createdAt")),
+        "data": _pipeline_warning_public_data(_dict_or_empty(event.get("data"))),
+    }
+    _merge_event_coordinates(entry, event)
+    return entry
+
+
+def _pipeline_warning_public_data(data: dict[str, Any]) -> dict[str, Any]:
+    return copy.deepcopy(
+        {key: value for key, value in data.items() if str(key) not in _PIPELINE_WARNING_PRIVATE_DATA_KEYS}
+    )
+
+
 def _interaction_history_entry(event: dict[str, Any]) -> dict[str, Any]:
     data = copy.deepcopy(_dict_or_empty(event.get("data")))
     input_value = copy.deepcopy(_dict_or_empty(event.get("input")))
@@ -1062,6 +1098,7 @@ def _empty_snapshot() -> dict[str, Any]:
             "rollbackHistory": [],
             "candidateRestarts": [],
             "handoffHistory": [],
+            "warningHistory": [],
         },
         "seenEventIds": [],
     }
@@ -1157,6 +1194,7 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
         "rollbackHistory",
         "candidateRestarts",
         "handoffHistory",
+        "warningHistory",
     ):
         value = snapshot["control"].get(key)
         snapshot["control"][key] = copy.deepcopy(value) if isinstance(value, list) else []
@@ -1186,6 +1224,19 @@ def _sanitize_public_snapshot_private_cleanup_fields(value: dict[str, Any]) -> d
             control["handoffHistory"] = [
                 _sanitize_cleanup_private_fields(item) if isinstance(item, dict) else item for item in handoff_history
             ]
+        warning_history = control.get("warningHistory")
+        if isinstance(warning_history, list):
+            control["warningHistory"] = [
+                _sanitize_pipeline_warning_history(item) if isinstance(item, dict) else item for item in warning_history
+            ]
+    return sanitized
+
+
+def _sanitize_pipeline_warning_history(item: dict[str, Any]) -> dict[str, Any]:
+    sanitized = copy.deepcopy(item)
+    data = _dict_or_none(sanitized.get("data"))
+    if data is not None:
+        sanitized["data"] = _pipeline_warning_public_data(data)
     return sanitized
 
 

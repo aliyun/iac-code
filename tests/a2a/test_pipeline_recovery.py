@@ -61,6 +61,49 @@ async def test_recovery_returns_snapshot_and_replay_events(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_recovery_keeps_pipeline_warning_visible_after_snapshot_sequence(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: object(),
+    )
+    context = await store.get_context_record("ctx-1")
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), context.session_id) / "pipeline"
+    started = _event(1, "evt-1")
+    warning = _event(2, "evt-warning")
+    warning["eventType"] = "pipeline_warning"
+    warning["data"] = {
+        "reason": "cleanup_tracking_unavailable",
+        "operation": "record_observed",
+        "ledger_path": "/Users/alice/.iac-code/projects/demo/cleanup.yaml",
+        "load_error": "while parsing /Users/alice/.iac-code/projects/demo/cleanup.yaml",
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(started)
+    journal.append(warning)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([started, warning]))
+
+    service = A2APipelineRecoveryService(task_store=store)
+    state = await service.get_state(context_id="ctx-1")
+
+    assert state["events"] == []
+    assert state["snapshot"]["lastSequence"] == 2
+    assert state["snapshot"]["control"]["warningHistory"][0]["eventId"] == "evt-warning"
+    assert state["snapshot"]["control"]["warningHistory"][0]["data"]["reason"] == "cleanup_tracking_unavailable"
+    assert "ledger_path" not in state["snapshot"]["control"]["warningHistory"][0]["data"]
+    assert "load_error" not in state["snapshot"]["control"]["warningHistory"][0]["data"]
+
+    replay_state = await service.get_state(context_id="ctx-1", after_sequence=1)
+
+    assert replay_state["events"][0]["eventType"] == "pipeline_warning"
+    assert replay_state["events"][0]["data"]["reason"] == "cleanup_tracking_unavailable"
+    assert "ledger_path" not in replay_state["events"][0]["data"]
+    assert "load_error" not in replay_state["events"][0]["data"]
+
+
+@pytest.mark.asyncio
 async def test_recovery_sanitizes_legacy_artifact_file_uris_from_snapshot_and_replay(tmp_path) -> None:
     persistence = A2APersistenceStore(tmp_path / "a2a")
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)

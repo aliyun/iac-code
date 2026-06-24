@@ -669,7 +669,7 @@ def test_corrupt_ledger_records_unavailable_without_overwrite(tmp_path) -> None:
     path.write_text("[broken", encoding="utf-8")
     ledger = CleanupLedger(path)
 
-    ledger.mark_cleanup_required(
+    status = ledger.mark_cleanup_required(
         [CleanupResource.from_observed(_observed_stack(), reason="rollback")],
         source_step_id="deploying",
         reason="rollback",
@@ -678,6 +678,24 @@ def test_corrupt_ledger_records_unavailable_without_overwrite(tmp_path) -> None:
     assert path.read_text(encoding="utf-8") == "[broken"
     assert ledger.load_failed()
     assert ledger.load_error()
+    assert status.written is False
+    assert status.unavailable is True
+    assert status.reason == "load_failed"
+    assert status.load_error
+
+
+def test_corrupt_ledger_record_observed_reports_unavailable_without_overwrite(tmp_path) -> None:
+    path = tmp_path / "cleanup.yaml"
+    path.write_text("[broken", encoding="utf-8")
+    ledger = CleanupLedger(path)
+
+    status = ledger.record_observed(_observed_stack())
+
+    assert path.read_text(encoding="utf-8") == "[broken"
+    assert status.written is False
+    assert status.unavailable is True
+    assert status.reason == "load_failed"
+    assert status.load_error
 
 
 def test_cleanup_ledger_save_uses_state_io_atomic_durable_write(tmp_path, monkeypatch) -> None:

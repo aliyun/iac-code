@@ -15,6 +15,12 @@ from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.pipeline_events import PipelineEventTranslator, safe_permission_metadata
 from iac_code.a2a.pipeline_journal import A2APipelineJournal, to_json_safe
 from iac_code.a2a.pipeline_snapshot import SNAPSHOT_SCHEMA_VERSION, A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.pipeline.constants import (
+    PIPELINE_EVENT_CLEANUP_COMPLETED,
+    PIPELINE_EVENT_CLEANUP_FAILED,
+    PIPELINE_EVENT_CLEANUP_PROGRESS,
+    PIPELINE_EVENT_CLEANUP_STARTED,
+)
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, ToolResultEvent
 
 PipelinePermissionResolver = Callable[[PermissionRequestEvent], bool | Awaitable[bool]]
@@ -38,10 +44,11 @@ _RECOVERY_SEMANTIC_EVENT_TYPES = {
     "pipeline_failed",
     "pipeline_canceled",
     "pipeline_handoff_ready",
-    "cleanup_started",
-    "cleanup_progress",
-    "cleanup_completed",
-    "cleanup_failed",
+    "pipeline_warning",
+    PIPELINE_EVENT_CLEANUP_STARTED,
+    PIPELINE_EVENT_CLEANUP_PROGRESS,
+    PIPELINE_EVENT_CLEANUP_COMPLETED,
+    PIPELINE_EVENT_CLEANUP_FAILED,
     "artifact_created",
     "rollback_completed",
     "candidate_restart_requested",
@@ -54,7 +61,7 @@ _DISPLAY_ONLY_EVENT_TYPES = {
     "tool_result",
 }
 _RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"}
-_RECOVERY_STATE_STATUSES = {"working", "waiting_input", "input_required", "completed", "failed", "canceled"}
+_RECOVERY_STATE_STATUSES = {"working"}
 
 
 class _SnapshotCatchUpUnavailableError(Exception):

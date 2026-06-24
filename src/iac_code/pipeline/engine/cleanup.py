@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -14,8 +13,15 @@ import yaml
 
 from iac_code.agent.message import Message
 from iac_code.i18n import _
-from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
+from iac_code.pipeline.constants import (
+    CLEANUP_PROMPT_METADATA_TYPE,
+    PIPELINE_EVENT_CLEANUP_COMPLETED,
+    PIPELINE_EVENT_CLEANUP_FAILED,
+    PIPELINE_EVENT_CLEANUP_PROGRESS,
+    PIPELINE_EVENT_CLEANUP_STARTED,
+)
 from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
+from iac_code.utils.path_locks import PathLockRegistry
 from iac_code.utils.public_errors import sanitize_public_text
 from iac_code.utils.state_io import atomic_write_text
 
@@ -30,12 +36,13 @@ _FOLLOWUP_CLEANUP_STATUSES = _RETRYABLE_CLEANUP_STATUSES | _ACTIVE_CLEANUP_STATU
 _TERMINAL_CLEANUP_STATUSES = {"completed", "skipped"}
 _DELETE_COMPLETE_STATUSES = {"DELETE_COMPLETE"}
 _DELETE_FAILED_STATUSES = {"DELETE_FAILED"}
-_LEDGER_LOCKS: dict[Path, threading.RLock] = {}
-_LEDGER_LOCKS_LOCK = threading.Lock()
+_LEDGER_LOCKS = PathLockRegistry()
 
 
 @dataclass(frozen=True)
 class ObservedResource:
+    """Cloud resource observed during a side-effecting pipeline step."""
+
     provider: str
     resource_type: str
     resource_id: str
@@ -69,6 +76,8 @@ class ObservedResource:
 
 @dataclass(frozen=True)
 class CleanupResource:
+    """Resource that may need cleanup after rollback or handoff."""
+
     provider: str
     resource_type: str
     resource_id: str
@@ -138,12 +147,36 @@ class CleanupResource:
 
 @dataclass(frozen=True)
 class CleanupPrompt:
+    """Hidden user message content that constrains cleanup to ledger resources."""
+
     resources: list[CleanupResource]
     prompt: str
     status_message: str
 
 
+@dataclass(frozen=True)
+class CleanupLedgerWriteStatus:
+    """Result of a cleanup ledger write attempt."""
+
+    written: bool
+    unavailable: bool = False
+    reason: str | None = None
+    load_error: str | None = None
+
+
+_WRITE_SKIPPED = CleanupLedgerWriteStatus(written=False)
+_WRITE_OK = CleanupLedgerWriteStatus(written=True)
+
+
 class CleanupLedger:
+    """Durable cleanup state for rollback leftovers.
+
+    The ledger is fail-closed for writes: corrupt or unreadable files are never
+    replaced with empty state. Key write methods return
+    `CleanupLedgerWriteStatus` so callers can surface unavailable cleanup
+    tracking without broadening cleanup scope.
+    """
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
@@ -186,13 +219,20 @@ class CleanupLedger:
             if resource.cleanup_required and resource.cleanup_status in _ACTIVE_CLEANUP_STATUSES
         ]
 
-    def record_observed(self, resource: ObservedResource) -> None:
+    def record_observed(self, resource: ObservedResource) -> CleanupLedgerWriteStatus:
+        """Persist an observed resource and report whether the write happened."""
+
         if not resource.resource_id:
-            return
+            return _WRITE_SKIPPED
         with self._write_lock():
             data = self._load_for_write()
             if data is None:
-                return
+                return CleanupLedgerWriteStatus(
+                    written=False,
+                    unavailable=True,
+                    reason="load_failed",
+                    load_error=self.load_error(),
+                )
             observed = {
                 ObservedResource.from_dict(item).key: ObservedResource.from_dict(item)
                 for item in _dict_list(data.get("observed_resources"))
@@ -200,6 +240,7 @@ class CleanupLedger:
             observed[resource.key] = resource
             data["observed_resources"] = [asdict(item) for item in observed.values()]
             self._save(data)
+            return _WRITE_OK
 
     def mark_cleanup_required(
         self,
@@ -207,13 +248,20 @@ class CleanupLedger:
         *,
         source_step_id: str,
         reason: str,
-    ) -> None:
+    ) -> CleanupLedgerWriteStatus:
+        """Mark resources for cleanup after rollback without overwriting corrupt state."""
+
         if not resources:
-            return
+            return _WRITE_SKIPPED
         with self._write_lock():
             data = self._load_for_write()
             if data is None:
-                return
+                return CleanupLedgerWriteStatus(
+                    written=False,
+                    unavailable=True,
+                    reason="load_failed",
+                    load_error=self.load_error(),
+                )
             cleanup = {
                 CleanupResource.from_dict(item).key: CleanupResource.from_dict(item)
                 for item in _dict_list(data.get("cleanup_resources"))
@@ -236,7 +284,7 @@ class CleanupLedger:
                 cleanup[resource.key] = merged
                 changed_count += 1
             if changed_count == 0:
-                return
+                return _WRITE_SKIPPED
             data["cleanup_resources"] = [asdict(item) for item in cleanup.values()]
             self._append_history(
                 data,
@@ -249,6 +297,7 @@ class CleanupLedger:
                 },
             )
             self._save(data)
+            return _WRITE_OK
 
     def update_resource(
         self,
@@ -524,11 +573,13 @@ class CleanupLedger:
         if isinstance(history, list):
             history.append(entry)
 
-    def _write_lock(self) -> threading.RLock:
+    def _write_lock(self):
         return _ledger_path_lock(self.path)
 
 
 class CleanupObserver:
+    """Observe tool calls/results and update cleanup resource lifecycle state."""
+
     def __init__(self, ledger: CleanupLedger) -> None:
         self._ledger = ledger
         self._tool_inputs: dict[str, dict[str, Any]] = {}
@@ -739,14 +790,8 @@ def mark_cleanup_prompt_message_completed(message: Message, *, cleanup_ledger_pa
     return True
 
 
-def _ledger_path_lock(path: Path) -> threading.RLock:
-    resolved = path.resolve()
-    with _LEDGER_LOCKS_LOCK:
-        lock = _LEDGER_LOCKS.get(resolved)
-        if lock is None:
-            lock = threading.RLock()
-            _LEDGER_LOCKS[resolved] = lock
-        return lock
+def _ledger_path_lock(path: Path):
+    return _LEDGER_LOCKS.lock_for(path)
 
 
 def _merge_cleanup_required(
@@ -888,13 +933,13 @@ def _cleanup_lifecycle_state(resource: CleanupResource) -> tuple[Any, ...]:
 
 def _cleanup_lifecycle_history_entry(resource: CleanupResource) -> dict[str, Any]:
     event_type = {
-        "started": "cleanup_started",
-        "in_progress": "cleanup_progress",
-        "completed": "cleanup_completed",
-        "failed": "cleanup_failed",
+        "started": PIPELINE_EVENT_CLEANUP_STARTED,
+        "in_progress": PIPELINE_EVENT_CLEANUP_PROGRESS,
+        "completed": PIPELINE_EVENT_CLEANUP_COMPLETED,
+        "failed": PIPELINE_EVENT_CLEANUP_FAILED,
         "skipped": "cleanup_skipped",
         "pending": "cleanup_pending",
-    }.get(resource.cleanup_status, "cleanup_progress")
+    }.get(resource.cleanup_status, PIPELINE_EVENT_CLEANUP_PROGRESS)
     entry = {
         "type": event_type,
         "resource": _cleanup_resource_history_data(resource),

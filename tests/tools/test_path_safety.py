@@ -147,3 +147,23 @@ def test_windows_root_containment_is_case_insensitive(monkeypatch, tmp_path):
     child = root / "src" / "app.py"
 
     assert _path_is_under(str(child).upper(), str(root).lower())
+
+
+def test_macos_case_insensitive_root_containment_allows_differently_cased_project_path(monkeypatch, tmp_path):
+    import iac_code.tools.path_safety as path_safety
+
+    monkeypatch.setattr(path_safety.sys, "platform", "darwin")
+    monkeypatch.setattr(path_safety, "_path_case_sensitive", lambda _root: False, raising=False)
+    cwd = tmp_path / "Project"
+    child = cwd / "src" / "app.py"
+    child.parent.mkdir(parents=True)
+    child.write_text("print('ok')", encoding="utf-8")
+
+    result = check_read_path(
+        str(child).upper(),
+        cwd=str(cwd).lower(),
+        additional_directories=[],
+        trusted_read_directories=[],
+    )
+
+    assert result.behavior == "allow"

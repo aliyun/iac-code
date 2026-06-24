@@ -91,6 +91,26 @@ def test_reduce_steps_and_pending_input() -> None:
     assert snapshot["pendingInput"]["inputId"] == "input-confirm_and_select-1"
 
 
+def test_pipeline_warning_does_not_change_terminal_snapshot_status() -> None:
+    started = _base("evt-start", 1, "pipeline_started")
+    warning = _base("evt-warning", 2, "pipeline_warning", status="working")
+    warning["data"] = {"reason": "cleanup_tracking_unavailable"}
+
+    snapshot = reduce_pipeline_events([started, warning])
+
+    assert snapshot["status"] == "working"
+    assert snapshot["lastSequence"] == 2
+    assert snapshot.get("completedAt") is None
+    assert snapshot["control"]["warningHistory"] == [
+        {
+            "eventId": "evt-warning",
+            "sequence": 2,
+            "createdAt": "2026-06-08T10:00:00Z",
+            "data": {"reason": "cleanup_tracking_unavailable"},
+        }
+    ]
+
+
 def test_reduce_input_received_completes_waiting_step() -> None:
     step = _base("evt-1", 1, "step_started", scope="step")
     step["step"] = {

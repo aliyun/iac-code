@@ -58,6 +58,31 @@ def test_pipeline_started_has_stable_envelope() -> None:
     assert envelope["data"]["totalSteps"] == 4
 
 
+def test_pipeline_warning_translates_to_non_terminal_envelope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.PIPELINE_WARNING,
+            step_id="deploying",
+            timestamp=1717821600.0,
+            data={
+                "reason": "cleanup_tracking_unavailable",
+                "operation": "record_observed",
+                "ledger_path": "/Users/alice/.iac-code/projects/demo/cleanup.yaml",
+                "load_error": "while parsing /Users/alice/.iac-code/projects/demo/cleanup.yaml",
+            },
+        )
+    )
+
+    assert envelope["eventType"] == "pipeline_warning"
+    assert envelope["scope"] == "pipeline"
+    assert envelope["status"] == "working"
+    assert envelope["data"]["reason"] == "cleanup_tracking_unavailable"
+    assert "ledger_path" not in envelope["data"]
+    assert "load_error" not in envelope["data"]
+
+
 def test_manual_cleanup_event_normalizes_cleanup_data_keys() -> None:
     translator = PipelineEventTranslator(_ctx())
 

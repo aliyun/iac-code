@@ -7,6 +7,7 @@ import yaml
 
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
+from iac_code.pipeline.engine.events import PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner, PipelineStatePersistenceError
 from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec
@@ -205,3 +206,103 @@ def test_runner_raises_cleanup_required_write_failure(tmp_path, monkeypatch, cap
     assert "Failed to persist rollback cleanup resources" in caplog.text
     assert "step_id=deploying" in caplog.text
     assert "cleanup disk full" in caplog.text
+
+
+def test_runner_emits_warning_event_when_observed_cleanup_ledger_unavailable(tmp_path, caplog) -> None:
+    runner = _runner(tmp_path)
+    ledger_path = runner.session.session_dir / "cleanup.yaml"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text("[broken", encoding="utf-8")
+
+    def on_resource_observed(ctx, event, *, ledger, step_id, attempt_id):
+        return ObservedResource(
+            provider=event.provider,
+            resource_type=event.resource_type,
+            resource_id=event.resource_id,
+            resource_name=event.resource_name,
+            region_id=event.region_id,
+            source_step_id=step_id,
+            source_attempt_id=attempt_id,
+            observed_action=event.action,
+        )
+
+    step = StepSpec(
+        step_id="deploying",
+        conclusion_field="deployment",
+        forward=None,
+        prompt_file="deploying.md",
+    )
+    step.on_resource_observed = on_resource_observed
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    events = runner._handle_resource_observed(
+        step,
+        ResourceObservedEvent(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-123",
+            resource_name="demo",
+            region_id="cn-hangzhou",
+            action="CreateStack",
+        ),
+        attempt_id="att_0001",
+    )
+
+    assert ledger_path.read_text(encoding="utf-8") == "[broken"
+    assert len(events) == 1
+    event = events[0]
+    assert event.type == PipelineEventType.PIPELINE_WARNING
+    assert event.step_id == "deploying"
+    assert event.data["reason"] == "cleanup_tracking_unavailable"
+    assert event.data["operation"] == "record_observed"
+    assert event.data["resource_id"] == "stack-123"
+    assert "ledger_path" not in event.data
+    assert "load_error" not in event.data
+    assert "cleanup tracking unavailable" in caplog.text.lower()
+
+
+def test_runner_emits_warning_event_when_required_cleanup_ledger_unavailable(tmp_path, caplog) -> None:
+    runner = _runner(tmp_path)
+    ledger_path = runner.session.session_dir / "cleanup.yaml"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text("[broken", encoding="utf-8")
+
+    def on_rollback_cleanup_required(ctx, *, ledger, from_step, from_attempt_id, to_step, reason):
+        return [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                source_step_id=from_step,
+                source_attempt_id=from_attempt_id,
+                cleanup_reason=reason,
+            )
+        ]
+
+    step = StepSpec(
+        step_id="deploying",
+        conclusion_field="deployment",
+        forward=None,
+        prompt_file="deploying.md",
+    )
+    step.on_rollback_cleanup_required = on_rollback_cleanup_required
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    events = runner._mark_rollback_cleanup_required(
+        step,
+        "confirm_and_select",
+        "invalid selection",
+        from_attempt_id="att_0001",
+    )
+
+    assert ledger_path.read_text(encoding="utf-8") == "[broken"
+    assert len(events) == 1
+    event = events[0]
+    assert event.type == PipelineEventType.PIPELINE_WARNING
+    assert event.step_id == "deploying"
+    assert event.data["reason"] == "cleanup_tracking_unavailable"
+    assert event.data["operation"] == "mark_cleanup_required"
+    assert event.data["resource_count"] == 1
+    assert "ledger_path" not in event.data
+    assert "load_error" not in event.data
+    assert "cleanup tracking unavailable" in caplog.text.lower()

@@ -53,16 +53,12 @@ class _TaskStore:
 
 
 def test_a2a_handoff_does_not_reconstruct_cleanup_prompt_from_public_snapshot(tmp_path: Path) -> None:
-    snapshot = {
-        "cleanup": {
-            "resources": [{"provider": "ros", "resourceId": "stack-123", "resourceType": "stack"}],
-            "status": "pending",
-        }
-    }
+    import inspect
+
+    assert "public_snapshot" not in inspect.signature(_cleanup_payload_from_private_ledger_or_unavailable).parameters
 
     cleanup = _cleanup_payload_from_private_ledger_or_unavailable(
         ledger_path=tmp_path / "missing-cleanup.yaml",
-        public_snapshot=snapshot,
     )
 
     assert cleanup["status"] == "unavailable"

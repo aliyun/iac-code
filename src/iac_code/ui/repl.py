@@ -1828,6 +1828,12 @@ class InlineREPL:
 
     @staticmethod
     def _cleanup_resume_history_resources(ledger) -> list[Any]:
+        from iac_code.pipeline.constants import (
+            PIPELINE_EVENT_CLEANUP_COMPLETED,
+            PIPELINE_EVENT_CLEANUP_FAILED,
+            PIPELINE_EVENT_CLEANUP_PROGRESS,
+            PIPELINE_EVENT_CLEANUP_STARTED,
+        )
         from iac_code.pipeline.engine.cleanup import CleanupResource
 
         get_history = getattr(ledger, "history_entries", None)
@@ -1837,10 +1843,10 @@ class InlineREPL:
         for entry in get_history():
             event_type = str(entry.get("type") or "")
             if event_type not in {
-                "cleanup_started",
-                "cleanup_progress",
-                "cleanup_completed",
-                "cleanup_failed",
+                PIPELINE_EVENT_CLEANUP_STARTED,
+                PIPELINE_EVENT_CLEANUP_PROGRESS,
+                PIPELINE_EVENT_CLEANUP_COMPLETED,
+                PIPELINE_EVENT_CLEANUP_FAILED,
                 "cleanup_skipped",
                 "cleanup_pending",
             }:
@@ -4009,6 +4015,10 @@ class InlineREPL:
                 err = event.data.get("error", "")
                 step_id = event.step_id or ""
                 con.print(f"  [red]✗ {display_step_name(step_id)}[/] [dim]── {err}[/]")
+            case PipelineEventType.PIPELINE_WARNING:
+                reason = str(event.data.get("reason") or "warning")
+                message = str(event.data.get("message") or _("Pipeline warning: {reason}").format(reason=reason))
+                con.print(f"  [yellow]⚠[/] [yellow]{message}[/]")
             case PipelineEventType.USER_INPUT_REQUIRED:
                 options = event.data.get("options", [])
                 prompt_text = event.data.get("prompt", "")

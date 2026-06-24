@@ -11,7 +11,6 @@ from typing import Any
 import httpx
 from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
-from jsonrpc.jsonrpc2 import JSONRPC20Response
 
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
@@ -74,37 +73,6 @@ def _retry_text() -> str:
 
 def _auth_error_text() -> str:
     return _("Authentication required. Configure credentials and retry.")
-
-
-def _install_jsonrpc_error_data_passthrough() -> None:
-    try:
-        from a2a.server.request_handlers import response_helpers
-        from a2a.server.routes import jsonrpc_dispatcher
-    except Exception:
-        return
-    current = response_helpers.build_error_response
-    if getattr(current, "_iac_code_recoverable_data_passthrough", False):
-        return
-    original = current
-
-    def build_error_response_with_passthrough(request_id: str | int | None, error: Any) -> dict[str, Any]:
-        if getattr(error, "jsonrpc_error_data_passthrough", False):
-            payload = {
-                "code": int(getattr(error, "code", -32603)),
-                "message": str(error),
-            }
-            data = getattr(error, "data", None)
-            if data is not None:
-                payload["data"] = data
-            return JSONRPC20Response(error=payload, _id=request_id).data
-        return original(request_id, error)
-
-    setattr(build_error_response_with_passthrough, "_iac_code_recoverable_data_passthrough", True)
-    setattr(response_helpers, "build_error_response", build_error_response_with_passthrough)
-    setattr(jsonrpc_dispatcher, "build_error_response", build_error_response_with_passthrough)
-
-
-_install_jsonrpc_error_data_passthrough()
 
 
 class RecoverablePipelineInvalidParamsError(InvalidParamsError):

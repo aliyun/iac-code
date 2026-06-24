@@ -4,27 +4,22 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
-import threading
 import time
 from collections.abc import Callable, Iterable
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Iterator
 
-_PATH_LOCKS: dict[Path, threading.RLock] = {}
-_PATH_LOCKS_LOCK = threading.Lock()
+from iac_code.utils.path_locks import PathLockRegistry
+
+_PATH_LOCKS = PathLockRegistry()
 
 
-def _path_lock(path: Path) -> threading.RLock:
-    resolved = path.resolve()
-    with _PATH_LOCKS_LOCK:
-        lock = _PATH_LOCKS.get(resolved)
-        if lock is None:
-            lock = threading.RLock()
-            _PATH_LOCKS[resolved] = lock
-        return lock
+def _path_lock(path: Path):
+    return _PATH_LOCKS.lock_for(path)
 
 
 def safe_replace(src: str | Path, dst: str | Path, *, attempts: int = 3, delay: float = 0.05) -> None:
@@ -38,6 +33,37 @@ def safe_replace(src: str | Path, dst: str | Path, *, attempts: int = 3, delay: 
             if attempt >= attempts - 1:
                 raise
             time.sleep(delay * (attempt + 1))
+        except OSError as exc:
+            if exc.errno != getattr(os, "EXDEV", 18):
+                raise
+            _copy_replace_across_devices(Path(src), Path(dst), attempts=attempts, delay=delay)
+            return
+
+
+def _copy_replace_across_devices(src: Path, dst: Path, *, attempts: int, delay: float) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        prefix=f".{dst.name}.",
+        suffix=".tmp",
+        dir=dst.parent,
+        delete=False,
+    )
+    tmp_path = Path(handle.name)
+    handle.close()
+    try:
+        shutil.copy2(src, tmp_path)
+        try:
+            with tmp_path.open("rb") as handle:
+                os.fsync(handle.fileno())
+        except OSError:
+            pass
+        safe_replace(tmp_path, dst, attempts=attempts, delay=delay)
+        fsync_parent_dir(dst)
+        src.unlink()
+    except Exception:
+        with suppress(OSError):
+            tmp_path.unlink()
+        raise
 
 
 def fsync_parent_dir(path: Path) -> None:

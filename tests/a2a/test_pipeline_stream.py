@@ -15,7 +15,7 @@ from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
-from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, is_recovery_semantic_event
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
@@ -79,6 +79,17 @@ def _envelope(event_type: str, status: str = "working") -> dict[str, Any]:
         "status": status,
         "data": {},
     }
+
+
+def test_pipeline_warning_is_recovery_semantic() -> None:
+    assert is_recovery_semantic_event(_envelope("pipeline_warning")) is True
+
+
+def test_unknown_working_step_event_is_recovery_semantic() -> None:
+    envelope = _envelope("custom_step_progress")
+    envelope["scope"] = "step"
+
+    assert is_recovery_semantic_event(envelope) is True
 
 
 @pytest.mark.asyncio

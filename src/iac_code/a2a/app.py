@@ -12,14 +12,12 @@ from contextlib import asynccontextmanager, suppress
 from email.utils import formatdate
 from pathlib import Path
 from time import time
-from types import MethodType
-from typing import Any, AsyncIterable, AsyncIterator, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from a2a.auth.user import User
 from a2a.server.context import ServerCallContext
 from a2a.server.routes import create_jsonrpc_routes, create_rest_routes
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
-from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
 from starlette.authentication import AuthCredentials, SimpleUser
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -28,6 +26,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import BaseRoute, Route
 
 from iac_code.a2a.agent_card import agent_card_to_client_dict
+from iac_code.a2a.jsonrpc_passthrough import (
+    install_jsonrpc_error_data_passthrough,
+    install_v03_jsonrpc_error_data_passthrough,
+)
 from iac_code.i18n import _
 
 logger = logging.getLogger(__name__)
@@ -161,53 +163,6 @@ async def normalize_v03_jsonrpc_version(request: Request) -> None:
         delattr(request, "_headers")
 
 
-def install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint: Callable[..., Awaitable[Response]]) -> None:
-    dispatcher = getattr(jsonrpc_endpoint, "__self__", None)
-    adapter = getattr(dispatcher, "_v03_adapter", None)
-    if adapter is None or getattr(adapter, "_iac_code_recoverable_error_passthrough", False):
-        return
-
-    try:
-        from a2a.compat.v0_3 import types as types_v03
-    except Exception:
-        logger.debug("A2A v0.3 compatibility types are unavailable", exc_info=True)
-        return
-
-    async def _process_streaming_request_with_passthrough(
-        self: Any,
-        request_id: str | int | None,
-        request_obj: Any,
-        context: ServerCallContext,
-    ) -> EventSourceResponse:
-        method = request_obj.method
-        if method == "message/stream":
-            stream_gen = self.handler.on_message_send_stream(request_obj, context)
-        elif method == "tasks/resubscribe":
-            stream_gen = self.handler.on_subscribe_to_task(request_obj, context)
-        else:
-            raise ValueError(f"Unsupported streaming method {method}")
-
-        async def event_generator(stream: AsyncIterable[Any]) -> AsyncIterator[dict[str, str]]:
-            try:
-                async for item in stream:
-                    yield {"data": item.model_dump_json(by_alias=True, exclude_none=True)}
-            except Exception as exc:
-                logger.exception("Error during stream generation in v0.3 JSONRPCAdapter")
-                if getattr(exc, "jsonrpc_error_data_passthrough", False):
-                    error = types_v03.InvalidParamsError(message=str(exc), data=getattr(exc, "data", None))
-                else:
-                    error = types_v03.InternalError(message=str(exc))
-                err_resp = types_v03.SendStreamingMessageResponse(
-                    root=types_v03.JSONRPCErrorResponse(id=request_id, error=error)
-                )
-                yield {"data": err_resp.model_dump_json(by_alias=True, exclude_none=True)}
-
-        return EventSourceResponse(event_generator(stream_gen))
-
-    adapter._process_streaming_request = MethodType(_process_streaming_request_with_passthrough, adapter)
-    adapter._iac_code_recoverable_error_passthrough = True
-
-
 def create_app(
     *,
     host: str,
@@ -324,6 +279,7 @@ def create_app(
         Route(AGENT_CARD_WELL_KNOWN_PATH, get_agent_card, methods=["GET"]),
         Route("/iac-code/pipeline/state", get_pipeline_state, methods=["GET"]),
     ]
+    install_jsonrpc_error_data_passthrough()
     jsonrpc_endpoint = create_jsonrpc_routes(components.handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
     install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint)
 
