@@ -4,7 +4,7 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: iac-code 0.6.0\n"
+"Project-Id-Version: iac-code 0.7.0\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-06-04 15:58+0800\n"
 "PO-Revision-Date: 2026-04-02 00:00+0000\n"
