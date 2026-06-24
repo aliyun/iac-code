@@ -387,7 +387,12 @@ def test_message_stream_route_forwards_sse_and_cwd_metadata() -> None:
         try:
             status, text, content_type = post_raw(
                 f"{running.url}/api/message/stream",
-                {"serverUrl": target, "cwd": "/workspace/demo", "prompt": "部署一个静态网站"},
+                {
+                    "serverUrl": target,
+                    "cwd": "/workspace/demo",
+                    "iacCodeModel": " kimi-k2.7-code ",
+                    "prompt": "部署一个静态网站",
+                },
             )
         finally:
             running.close()
@@ -397,7 +402,9 @@ def test_message_stream_route_forwards_sse_and_cwd_metadata() -> None:
     assert "TASK_STATE_WORKING" in text
     payload = json.loads(SseTargetHandler.requests[0]["body"])
     assert payload["method"] == "SendStreamingMessage"
-    assert payload["params"]["message"]["metadata"] == {"iac_code": {"cwd": "/workspace/demo"}}
+    assert payload["params"]["message"]["metadata"] == {
+        "iac_code": {"cwd": "/workspace/demo", "iac_code_model": "kimi-k2.7-code"}
+    }
 
 
 def test_message_stream_route_surfaces_recoverable_task_id_from_jsonrpc_error() -> None:
@@ -939,6 +946,7 @@ def test_index_html_contains_screenshot_layout_regions() -> None:
         'id="debug-drawer"',
         'id="server-url"',
         'id="cwd"',
+        'id="iac-code-model"',
         'id="health-button"',
         'id="fetch-state-button"',
         'id="cancel-button"',

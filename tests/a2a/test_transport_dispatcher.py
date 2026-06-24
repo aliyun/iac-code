@@ -20,8 +20,11 @@ from .fakes import FakeAgentLoop, FakeRuntime
 @pytest.mark.asyncio
 async def test_dispatcher_handles_unary_v03_message(monkeypatch, tmp_path) -> None:
     loop = FakeAgentLoop([TextDeltaEvent(text="hello from dispatcher")])
-    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
-    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    def factory(options):
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
     dispatcher = A2AJsonRpcDispatcher(components)
 
@@ -44,6 +47,8 @@ async def test_dispatcher_handles_unary_v03_message(monkeypatch, tmp_path) -> No
 
     assert response["id"] == "1"
     assert response["result"]["status"]["state"] == "input-required"
+    session_id = components.task_store._contexts[response["result"]["contextId"]].session_id
+    assert response["result"]["metadata"]["iac_code"]["iacCodeSessionId"] == session_id
     assert loop.prompts == ["hello"]
     await components.aclose()
 

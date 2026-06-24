@@ -60,6 +60,7 @@ timeout: 30
 cwd: /path/to/workspace
 context-id: ctx-123
 iac-code-model: qwen-plus
+iac-code-api-key: provider-api-key
 task-id: task-123
 config-id: webhook-1
 callback-url: https://hooks.example.com/a2a
@@ -269,7 +270,8 @@ thinking-exposure:
 iac-code a2a-client --config a2a-client.yml call \
   --prompt "Create a ROS VPC template with two vSwitches." \
   --cwd "$PWD" \
-  --iac-code-model qwen-plus
+  --iac-code-model qwen-plus \
+  --iac-code-api-key "$IAC_CODE_API_KEY"
 ```
 
 | 选项 | 默认值 | 描述 |
@@ -281,11 +283,14 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--cwd` | `.` | 作为 `message.metadata.iac_code.cwd` 发送的 workspace path |
 | `--context-id` | 空 | 用于后续消息的现有 A2A context ID |
 | `--iac-code-model` | 空 | 作为 `message.metadata.iac_code.iac_code_model` 发送的 LLM model；只在本次 message turn 覆盖 server model 配置 |
+| `--iac-code-api-key` | 空 | 作为 `message.metadata.iac_code.iac_code_api_key` 发送的 LLM provider API key；只在本次 message turn 覆盖 `IAC_CODE_API_KEY` 和 `.credentials.yml` |
 | `--verify-card-secret`, `--signing-secret` | 空 | Agent Card verification 的 HMAC secret |
 | `--verify-card-jwks-url` | 空 | 用于 Agent Card verification 的远程 JWKS URL |
 | `--require-card-signature`, `--require-signature` | `false` | 拒绝未签名或无效的 Agent Cards |
 | `--timeout` | `30.0` | 调用 timeout（秒） |
 | `--stream` | `false` | 使用 `SendStreamingMessage` 并打印 stream events |
+
+`--iac-code-api-key` 是远端 iac-code runtime 调用 LLM provider 使用的 key；它和用于认证 A2A HTTP 请求本身的 `--api-key` 不是同一个配置。
 
 在同一 context 中发送后续消息：
 

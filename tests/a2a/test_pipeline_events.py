@@ -113,6 +113,28 @@ def test_manual_cleanup_event_normalizes_cleanup_data_keys() -> None:
     assert event["data"]["lastError"] == "DELETE_FAILED"
 
 
+def test_pipeline_envelope_exposes_iac_code_session_id() -> None:
+    context = PipelineA2AContext(
+        pipeline_run_id="ctx-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        pipeline_name="selling",
+        iac_code_session_id="session-1",
+    )
+    translator = PipelineEventTranslator(context)
+
+    [envelope] = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.PIPELINE_STARTED,
+            step_id=None,
+            timestamp=1717821600.0,
+            data={},
+        )
+    )
+
+    assert envelope["iacCodeSessionId"] == "session-1"
+
+
 def test_parent_step_attempt_increments_after_rollback() -> None:
     translator = PipelineEventTranslator(_ctx())
     translator.translate(

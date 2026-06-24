@@ -130,6 +130,7 @@
       defaults: stateDefaults,
       serverUrl: stateDefaults.serverUrl || "",
       cwd: stateDefaults.cwd || "",
+      iacCodeModel: stateDefaults.iacCodeModel || "",
       contextId: "",
       pipelineTaskId: "",
       activeTaskId: "",
@@ -1354,6 +1355,7 @@
     return {
       serverUrl: source.serverUrl || "",
       cwd: source.cwd || "",
+      iacCodeModel: source.iacCodeModel || "",
       contextId: source.contextId || "",
       taskId: source.normalHandoffReady ? "" : source.activeTaskId || source.pipelineTaskId || "",
       prompt: prompt || "",
@@ -2583,11 +2585,15 @@
     const state = ensureState();
     const serverInput = byId("server-url");
     const cwdInput = byId("cwd");
+    const modelInput = byId("iac-code-model");
     if (serverInput && "value" in serverInput && !serverInput.value && state.serverUrl) {
       serverInput.value = state.serverUrl;
     }
     if (cwdInput && "value" in cwdInput && !cwdInput.value && state.cwd) {
       cwdInput.value = state.cwd;
+    }
+    if (modelInput && "value" in modelInput && !modelInput.value && state.iacCodeModel) {
+      modelInput.value = state.iacCodeModel;
     }
   }
 
@@ -2595,11 +2601,15 @@
     const state = ensureState();
     const serverInput = byId("server-url");
     const cwdInput = byId("cwd");
+    const modelInput = byId("iac-code-model");
     if (serverInput && "value" in serverInput) {
       state.serverUrl = String(serverInput.value || "").trim();
     }
     if (cwdInput && "value" in cwdInput) {
       state.cwd = String(cwdInput.value || "").trim();
+    }
+    if (modelInput && "value" in modelInput) {
+      state.iacCodeModel = String(modelInput.value || "").trim();
     }
     return state;
   }
@@ -3842,6 +3852,7 @@
     const fields = [
       ["serverUrl", "Server URL", state.serverUrl || ""],
       ["cwd", "CWD", state.cwd || ""],
+      ["iacCodeModel", "Model", state.iacCodeModel || ""],
       ["contextId", "Context ID", state.contextId || "未获取"],
       ["pipelineTaskId", "Pipeline Task", state.pipelineTaskId || "未获取"],
       ["activeTaskId", "Active Task", state.activeTaskId || "未获取"],
@@ -4220,6 +4231,7 @@
     }
     const serverInput = byId("server-url");
     const cwdInput = byId("cwd");
+    const modelInput = byId("iac-code-model");
     const sendButton = byId("send-button");
     const composer = byId("composer-input");
     const healthButton = byId("health-button");
@@ -4234,6 +4246,7 @@
 
     addListener(serverInput, "input", syncStateFromConnectionControls);
     addListener(cwdInput, "input", syncStateFromConnectionControls);
+    addListener(modelInput, "input", syncStateFromConnectionControls);
     addListener(sendButton, "click", sendComposerMessage);
     addListener(healthButton, "click", healthCheck);
     addListener(fetchStateButton, "click", fetchState);
@@ -4246,7 +4259,15 @@
       }
     });
     controller.bound = Boolean(
-      serverInput || cwdInput || sendButton || composer || healthButton || fetchStateButton || cancelButton || debugDrawer
+      serverInput ||
+        cwdInput ||
+        modelInput ||
+        sendButton ||
+        composer ||
+        healthButton ||
+        fetchStateButton ||
+        cancelButton ||
+        debugDrawer
     );
   }
 

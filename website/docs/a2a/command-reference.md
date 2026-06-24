@@ -60,6 +60,7 @@ timeout: 30
 cwd: /path/to/workspace
 context-id: ctx-123
 iac-code-model: qwen-plus
+iac-code-api-key: provider-api-key
 task-id: task-123
 config-id: webhook-1
 callback-url: https://hooks.example.com/a2a
@@ -271,7 +272,8 @@ Discover an Agent Card, choose the advertised endpoint, and send a prompt.
 iac-code a2a-client --config a2a-client.yml call \
   --prompt "Create a ROS VPC template with two vSwitches." \
   --cwd "$PWD" \
-  --iac-code-model qwen-plus
+  --iac-code-model qwen-plus \
+  --iac-code-api-key "$IAC_CODE_API_KEY"
 ```
 
 | Option | Default | Description |
@@ -283,11 +285,14 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--cwd` | `.` | Workspace path sent as `message.metadata.iac_code.cwd` |
 | `--context-id` | empty | Existing A2A context ID for a follow-up message |
 | `--iac-code-model` | empty | LLM model sent as `message.metadata.iac_code.iac_code_model`; overrides server model config for this message turn only |
+| `--iac-code-api-key` | empty | LLM provider API key sent as `message.metadata.iac_code.iac_code_api_key`; overrides `IAC_CODE_API_KEY` and `.credentials.yml` for this message turn only |
 | `--verify-card-secret`, `--signing-secret` | empty | HMAC secret for Agent Card verification |
 | `--verify-card-jwks-url` | empty | Remote JWKS URL used for Agent Card verification |
 | `--require-card-signature`, `--require-signature` | `false` | Reject unsigned or invalid Agent Cards |
 | `--timeout` | `30.0` | Call timeout in seconds |
 | `--stream` | `false` | Use `SendStreamingMessage` and print stream events |
+
+`--iac-code-api-key` is the key used by the remote iac-code runtime to call its LLM provider. It is separate from `--api-key`, which authenticates the A2A HTTP request itself.
 
 Follow-up in the same context:
 

@@ -166,6 +166,214 @@ def _status_events(queue: FakeEventQueue) -> list[dict]:
     return [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
 
 
+@pytest.mark.asyncio
+async def test_pipeline_executor_applies_aliyun_metadata_while_creating_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+
+    captured_credentials: list[tuple[str, str | None, str | None]] = []
+
+    def runtime_factory(options):
+        credential = AliyunCredentials.load()
+        captured_credentials.append(
+            (
+                options.model,
+                credential.access_key_id if credential else None,
+                credential.region_id if credential else None,
+            )
+        )
+        return _fake_runtime()
+
+    fake_pipeline = FakePipeline(
+        [PipelineEvent(type=PipelineEventType.PIPELINE_COMPLETED, step_id=None, timestamp=1717821601.0, data={})],
+        session_dir=tmp_path / "sidecar",
+    )
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "env-id")
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "env-secret")
+    monkeypatch.setenv("ALIBABA_CLOUD_REGION_ID", "cn-shanghai")
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", runtime_factory)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", lambda *args, **kwargs: None)
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+        aliyun_credential=AliyunCredential(
+            access_key_id="client-id",
+            access_key_secret="client-secret",
+            region_id="cn-beijing",
+        ),
+    )
+
+    await executor.execute(
+        context=FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=FakeEventQueue(),
+        task=await store.get_or_create_task(task_id="task-1", context_id="ctx-1"),
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        prompt="部署网站",
+    )
+
+    assert captured_credentials == [("qwen3.6-plus", "client-id", "cn-beijing")]
+    assert AliyunCredentials.load().access_key_id == "env-id"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+
+    seen_access_key_ids: list[str | None] = []
+    runtime = _fake_runtime()
+
+    def fake_register_cloud_tools(registry, credentials):
+        assert registry is runtime.tool_registry
+        credential = credentials.get_provider("aliyun")
+        seen_access_key_ids.append(credential.access_key_id if credential else None)
+
+    fake_pipeline = FakePipeline(
+        [PipelineEvent(type=PipelineEventType.PIPELINE_COMPLETED, step_id=None, timestamp=1717821601.0, data={})],
+        session_dir=tmp_path / "sidecar",
+    )
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "env-id")
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "env-secret")
+    monkeypatch.setenv("ALIBABA_CLOUD_REGION_ID", "cn-shanghai")
+    monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", fake_register_cloud_tools)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: runtime,
+    )
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+        aliyun_credential=AliyunCredential(
+            access_key_id="client-id",
+            access_key_secret="client-secret",
+            region_id="cn-beijing",
+        ),
+    )
+
+    await executor.execute(
+        context=FakeRequestContext(context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=FakeEventQueue(),
+        task=await store.get_or_create_task(task_id="task-1", context_id="ctx-1"),
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        prompt="部署网站",
+    )
+
+    assert seen_access_key_ids == ["client-id"]
+    assert AliyunCredentials.load().access_key_id == "env-id"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_reconfigures_cached_runtime_model_and_api_key_per_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, str]]] = []
+
+        def reconfigure(self, model, credentials, provider_key_override=None, base_url_override=None):
+            self.calls.append((model, dict(credentials)))
+
+    provider_manager = FakeProviderManager()
+    runtime = SimpleNamespace(provider_manager=provider_manager, tool_registry=object())
+    created_pipeline_count = 0
+
+    def fake_create_pipeline(*args, **kwargs):
+        nonlocal created_pipeline_count
+        created_pipeline_count += 1
+        return FakePipeline(
+            [PipelineEvent(type=PipelineEventType.PIPELINE_COMPLETED, step_id=None, timestamp=1717821601.0, data={})],
+            session_dir=tmp_path / f"sidecar-{created_pipeline_count}",
+        )
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.config.load_credentials", lambda model=None: {"dashscope": "fallback-key"})
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task_one = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    metadata_executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-max",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+        model_from_metadata=True,
+        metadata_api_key="metadata-key",
+    )
+    await metadata_executor.execute(
+        context=FakeRequestContext(context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=FakeEventQueue(),
+        task=task_one,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        prompt="部署网站",
+    )
+
+    task_two = await store.get_or_create_task(task_id="task-2", context_id="ctx-1")
+    default_executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    await default_executor.execute(
+        context=FakeRequestContext(context_id="ctx-1", task_id="task-2", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=FakeEventQueue(),
+        task=task_two,
+        task_id="task-2",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        prompt="继续",
+    )
+
+    assert provider_manager.calls == [
+        ("qwen3.6-max", {"dashscope": "metadata-key"}),
+        ("qwen3.6-plus", {"dashscope": "fallback-key"}),
+    ]
+
+
 async def _wait_for_output_text(task, expected: str) -> None:
     for _ in range(100):
         if "".join(task.output_text) == expected:
@@ -2319,6 +2527,9 @@ async def test_pipeline_executor_routes_second_prompt_as_interrupt(tmp_path: Pat
     from iac_code.a2a.pipeline_journal import A2APipelineJournal
     from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
     from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+    from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
+
+    captured_interrupt_credentials: list[str | None] = []
 
     class InterruptiblePipeline(FakePipeline):
         def __init__(self, *, session_dir: Path) -> None:
@@ -2326,6 +2537,8 @@ async def test_pipeline_executor_routes_second_prompt_as_interrupt(tmp_path: Pat
             self.interrupts: list[str] = []
 
         async def handle_user_interrupt(self, message: str) -> SimpleNamespace:
+            credential = AliyunCredentials.load()
+            captured_interrupt_credentials.append(credential.access_key_id if credential else None)
             self.interrupts.append(message)
             return SimpleNamespace(
                 action="supplement",
@@ -2370,6 +2583,11 @@ async def test_pipeline_executor_routes_second_prompt_as_interrupt(tmp_path: Pat
         permission_resolver=None,
         auto_approve_permissions=False,
         thinking_exposure_types=None,
+        aliyun_credential=AliyunCredential(
+            access_key_id="client-id",
+            access_key_secret="client-secret",
+            region_id="cn-beijing",
+        ),
     )
 
     await executor.execute(
@@ -2386,6 +2604,7 @@ async def test_pipeline_executor_routes_second_prompt_as_interrupt(tmp_path: Pat
     )
 
     assert pipeline.interrupts == ["please change cpu"]
+    assert captured_interrupt_credentials == ["client-id"]
     event_types = [event["eventType"] for event in publisher.journal.read_all()]
     assert event_types == ["interrupt_received", "interrupt_classified"]
 
@@ -3421,7 +3640,10 @@ async def test_executor_routes_running_sidecar_pending_ask_to_ask_resume(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from iac_code.services.providers.aliyun import AliyunCredentials
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    captured_resume_credentials: list[str | None] = []
 
     class AskResumePipeline(FakePipeline):
         def __init__(self, *, session_dir: Path) -> None:
@@ -3447,6 +3669,8 @@ async def test_executor_routes_running_sidecar_pending_ask_to_ask_resume(
             tool_use_id: str,
             pending_input: dict[str, object] | None = None,
         ):
+            credential = AliyunCredentials.load()
+            captured_resume_credentials.append(credential.access_key_id if credential else None)
             self.ask_answers.append(answer)
             self.pending_inputs.append(pending_input)
             assert tool_use_id == "ask-1"
@@ -3489,6 +3713,7 @@ async def test_executor_routes_running_sidecar_pending_ask_to_ask_resume(
     fake_pipeline.sidecar_status = "running"
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", lambda *args, **kwargs: None)
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
@@ -3497,13 +3722,21 @@ async def test_executor_routes_running_sidecar_pending_ask_to_ask_resume(
     await executor.execute(
         FakeRequestContext(
             text="Nginx 网站",
-            metadata={"iac_code": {"cwd": str(tmp_path)}},
+            metadata={
+                "iac_code": {
+                    "cwd": str(tmp_path),
+                    "alibaba_cloud_access_key_id": "client-id",
+                    "alibaba_cloud_access_key_secret": "client-secret",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                }
+            },
         ),
         queue,
     )
 
     assert fake_pipeline.continue_calls == 0
     assert fake_pipeline.ask_answers == [{"selected_id": "nginx", "selected_label": "Nginx 网站", "free_text": ""}]
+    assert captured_resume_credentials == ["client-id"]
     assert fake_pipeline.pending_inputs[0]["candidate"] == {
         "runId": "candidate-evaluate_candidate-0-1",
         "id": "evaluate_candidate",

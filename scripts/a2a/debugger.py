@@ -177,16 +177,22 @@ def build_message_stream_payload(
     request_id: str,
     message_id: str,
     images: Any = None,
+    iac_code_model: str | None = None,
 ) -> dict[str, Any]:
     parts = []
     if prompt:
         parts.append({"text": prompt})
     parts.extend(_normalize_image_parts(images))
+    iac_code_metadata = {"cwd": cwd}
+    if iac_code_model:
+        stripped_model = iac_code_model.strip()
+        if stripped_model:
+            iac_code_metadata["iac_code_model"] = stripped_model
     message: dict[str, Any] = {
         "messageId": message_id,
         "role": "ROLE_USER",
         "parts": parts,
-        "metadata": {"iac_code": {"cwd": cwd}},
+        "metadata": {"iac_code": iac_code_metadata},
     }
     if context_id:
         message["contextId"] = context_id
@@ -1386,6 +1392,9 @@ def render_index_html(config: DebuggerConfig) -> str:
         <label for="cwd">cwd
           <input id="cwd" value="__DEFAULT_CWD__" autocomplete="off">
         </label>
+        <label for="iac-code-model">iac_code_model
+          <input id="iac-code-model" autocomplete="off">
+        </label>
         <label for="context-id">contextId
           <input id="context-id" autocomplete="off">
         </label>
@@ -1583,6 +1592,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       return {
         serverUrl: byId("server-url").value.trim(),
         cwd: byId("cwd").value.trim(),
+        iacCodeModel: byId("iac-code-model").value.trim(),
         contextId: byId("context-id").value.trim(),
         taskId: byId("task-id").value.trim(),
         activeTaskId: byId("active-task-id").value.trim(),
@@ -4271,6 +4281,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       const payload = {
         serverUrl: controls.serverUrl,
         cwd: controls.cwd,
+        iacCodeModel: controls.iacCodeModel,
         contextId: controls.contextId || state.contextId,
         taskId: streamTaskIdForControls(controls),
         prompt: controls.prompt
@@ -4542,7 +4553,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       if (subtitle) {
         subtitle.textContent = "Read-only exported debugger snapshot";
       }
-      ["server-url", "cwd", "context-id", "task-id", "active-task-id", "prompt"].forEach((id) => {
+      ["server-url", "cwd", "iac-code-model", "context-id", "task-id", "active-task-id", "prompt"].forEach((id) => {
         const element = byId(id);
         if (element) {
           element.readOnly = true;
@@ -4586,10 +4597,10 @@ def render_index_html(config: DebuggerConfig) -> str:
         body.setAttribute("data-export-mode", "true");
       }
       clone.querySelectorAll("#debug-export-data").forEach((node) => node.remove());
-      ["server-url", "cwd", "context-id", "task-id", "active-task-id", "prompt"].forEach((id) => {
+      ["server-url", "cwd", "iac-code-model", "context-id", "task-id", "active-task-id", "prompt"].forEach((id) => {
         copyControlValueToClone(clone, id);
       });
-      ["server-url", "cwd", "context-id", "task-id", "active-task-id", "prompt"].forEach((id) => {
+      ["server-url", "cwd", "iac-code-model", "context-id", "task-id", "active-task-id", "prompt"].forEach((id) => {
         const element = clone.querySelector(`#${cssEscape(id)}`);
         if (element) {
           element.setAttribute("readonly", "readonly");
@@ -4840,6 +4851,7 @@ def _open_sse_stream(server_url: str, payload: dict[str, Any], timeout: float = 
 def _message_stream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     server_url = normalize_server_url(str(body.get("serverUrl", "")))
     cwd = str(body.get("cwd", ""))
+    iac_code_model = str(body.get("iacCodeModel") or body.get("iac_code_model") or "")
     prompt = str(body.get("prompt", ""))
     context_id = str(body.get("contextId", ""))
     task_id = str(body.get("taskId", ""))
@@ -4855,6 +4867,7 @@ def _message_stream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         request_id=str(uuid.uuid4()),
         message_id=str(uuid.uuid4()),
         images=body.get("images"),
+        iac_code_model=iac_code_model,
     )
     return server_url, payload
 

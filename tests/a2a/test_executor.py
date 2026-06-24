@@ -64,6 +64,30 @@ async def test_executor_runs_prompt_and_finishes_input_required(
 
 
 @pytest.mark.asyncio
+async def test_executor_exposes_iac_code_session_id_in_status_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def factory(options):
+        return FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]), session_id=options.session_id)
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(
+        FakeRequestContext(task_id="task-1", context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        queue,
+    )
+
+    session_id = store._contexts["ctx-1"].session_id
+    status_updates = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert status_updates
+    assert all(event["metadata"]["iac_code"]["iacCodeSessionId"] == session_id for event in status_updates)
+
+
+@pytest.mark.asyncio
 async def test_executor_passes_artifact_store_to_stream_event_publisher(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -82,6 +106,7 @@ async def test_executor_passes_artifact_store_to_stream_event_publisher(
         permission_resolver=None,
         auto_approve_permissions=False,
         exposure_types=None,
+        iac_code_session_id=None,
     ):
         seen_artifact_stores.append(artifact_store)
         seen_auto_approve_permissions.append(auto_approve_permissions)
@@ -417,8 +442,33 @@ async def test_executor_delegates_pipeline_mode_after_validation(
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
 
-    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+    await executor.execute(
+        FakeRequestContext(
+            metadata={
+                "iac_code": {
+                    "cwd": str(tmp_path),
+                    "user_id": "client-user",
+                    "iac_code_model": "metadata-model",
+                    "iac_code_api_key": "metadata-api-key",
+                    "alibaba_cloud_access_key_id": "client-id",
+                    "alibaba_cloud_access_key_secret": "client-secret",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                    "alibaba_cloud_security_token": "client-sts",
+                }
+            }
+        ),
+        FakeEventQueue(),
+    )
 
+    init_kwargs = calls[0][1]
+    assert init_kwargs["model"] == "metadata-model"
+    assert init_kwargs["user_id"] == "client-user"
+    assert init_kwargs["model_from_metadata"] is True
+    assert init_kwargs["metadata_api_key"] == "metadata-api-key"
+    assert init_kwargs["aliyun_credential"].access_key_id == "client-id"
+    assert init_kwargs["aliyun_credential"].access_key_secret == "client-secret"
+    assert init_kwargs["aliyun_credential"].region_id == "cn-beijing"
+    assert init_kwargs["aliyun_credential"].sts_token == "client-sts"
     assert calls[-1] == (
         "execute",
         {
@@ -1711,6 +1761,47 @@ async def test_executor_reconfigures_cached_runtime_iac_code_model_per_call(
     )
 
     assert provider_manager.calls == ["metadata-model", "server-default-model"]
+
+
+@pytest.mark.asyncio
+async def test_executor_reconfigures_cached_runtime_iac_code_api_key_per_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, str]]] = []
+
+        def reconfigure(self, model, credentials, provider_key_override=None, base_url_override=None):
+            self.calls.append((model, dict(credentials)))
+
+    provider_manager = FakeProviderManager()
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
+        session_id="session-1",
+        provider_manager=provider_manager,
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.config.load_credentials", lambda model=None: {"dashscope": "fallback-key"})
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(
+            context_id="ctx-1",
+            metadata={"iac_code": {"cwd": str(tmp_path), "iac_code_api_key": "metadata-key"}},
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(context_id="ctx-1", task_id="task-2", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert provider_manager.calls == [
+        ("qwen3.6-plus", {"dashscope": "metadata-key"}),
+        ("qwen3.6-plus", {"dashscope": "fallback-key"}),
+    ]
 
 
 @pytest.mark.asyncio

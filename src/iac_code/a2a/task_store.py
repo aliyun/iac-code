@@ -14,7 +14,9 @@ from a2a.server.tasks.inmemory_task_store import DEFAULT_LIST_TASKS_PAGE_SIZE, d
 from a2a.server.tasks.inmemory_task_store import resolve_user_scope as default_owner_resolver
 from a2a.types import ListTasksRequest, ListTasksResponse, Message, Part, Role, Task, TaskState, TaskStatus
 from a2a.utils.errors import InvalidParamsError
+from google.protobuf.json_format import MessageToDict, ParseDict
 
+from iac_code.a2a.events import with_iac_code_session_metadata
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.types import (
@@ -74,6 +76,7 @@ class A2ATaskStore(TaskStore):
         owner = self._owner(context)
         task_id = validate_protocol_id(task.id)
         async with self._mutation_lock:
+            self._attach_context_metadata(task)
             owner_tasks = self._sdk_tasks.setdefault(owner, {})
             previous = owner_tasks.get(task_id)
             if previous is not None:
@@ -97,6 +100,15 @@ class A2ATaskStore(TaskStore):
                 record.updated_at = _task_updated_at_from_sdk_task(task)
                 record.touch()
             self._mirror_task(record)
+
+    def _attach_context_metadata(self, task: Task) -> None:
+        context = self._contexts.get(task.context_id)
+        if context is None:
+            return
+        metadata = MessageToDict(task.metadata, preserving_proto_field_name=False) if task.metadata.fields else {}
+        metadata = with_iac_code_session_metadata(metadata, context.session_id)
+        if metadata is not None:
+            ParseDict(metadata, task.metadata)
 
     async def delete(self, task_id: str, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)

@@ -134,7 +134,8 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
         "iac_code": {
           "cwd": "/absolute/path/to/project",
           "user_id": "client-user-123",
-          "iac_code_model": "qwen-plus"
+          "iac_code_model": "qwen-plus",
+          "iac_code_api_key": "provider-api-key"
         }
       }
     },
@@ -155,6 +156,7 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
 | `metadata.iac_code.cwd` | string | Recommended | Absolute workspace path; defaults to the server process directory if omitted |
 | `metadata.iac_code.user_id` | string | Optional | Per-task telemetry user ID override; ignored when blank or non-string |
 | `metadata.iac_code.iac_code_model` | string | Optional | Per-call LLM model override; this is the lowercase form of `IAC_CODE_MODEL` and is ignored when blank or non-string |
+| `metadata.iac_code.iac_code_api_key` | string | Optional | Per-call LLM provider API key override; this is the lowercase form of `IAC_CODE_API_KEY` and is ignored when blank or non-string |
 | `metadata.iac_code.alibaba_cloud_access_key_id` | string | Optional | Alibaba Cloud AccessKey ID for this task |
 | `metadata.iac_code.alibaba_cloud_access_key_secret` | string | Optional | Alibaba Cloud AccessKey Secret for this task |
 | `metadata.iac_code.alibaba_cloud_region_id` | string | Optional | Alibaba Cloud region for this task; defaults to `cn-hangzhou` when omitted with task credentials |
@@ -167,6 +169,8 @@ When `metadata.iac_code` includes both `alibaba_cloud_access_key_id` and `alibab
 `metadata.iac_code.user_id` only affects telemetry identity for the current task. It does not change the A2A `contextId`, `taskId`, or iac-code's internal session ID.
 
 `metadata.iac_code.iac_code_model` only affects the current A2A message turn. It takes priority over `IAC_CODE_MODEL`, `settings.yml`, and the server startup default model. Follow-up turns without this metadata field fall back to the server default model even when they reuse the same `contextId`.
+
+`metadata.iac_code.iac_code_api_key` only affects the current A2A message turn. It takes priority over `IAC_CODE_API_KEY` and `.credentials.yml` for the provider selected by the effective model. Follow-up turns without this metadata field reload normal credentials, so a per-call key does not leak across reused `contextId`s. This field is for the LLM provider key and is separate from A2A transport authentication such as `api-key` / `IACCODE_A2A_API_KEY`.
 
 Supported input categories:
 
@@ -381,6 +385,7 @@ Tool and usage details are delivered through `metadata.iac_code`:
 | `iac_code.tool.name` | Tool name when available |
 | `iac_code.tool.input` | Completed tool input, truncated to 4000 characters per field |
 | `iac_code.tool.result` | Tool result, truncated to 4000 characters per field |
+| `iac_code.iacCodeSessionId` | Internal iac-code execution session ID for correlating logs and local session artifacts |
 | `iac_code.permission.autoApproved` | `false` when a tool permission request was rejected by A2A server mode |
 | `iac_code.thinking.type` | `raw_thinking` when `raw-thinking` is enabled in `thinking-exposure` |
 | `iac_code.thinking.text` | Raw provider reasoning chunk, truncated to 4000 characters, emitted only for trusted configurations that enable `raw-thinking` |

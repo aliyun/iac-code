@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -22,6 +23,11 @@ from iac_code.a2a.pipeline_paths import (
 )
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+from iac_code.a2a.runtime_overrides import (
+    a2a_request_context,
+    configure_runtime_model,
+    refresh_runtime_cloud_tools,
+)
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
     TASK_STATE_COMPLETED,
@@ -41,8 +47,8 @@ from iac_code.pipeline.engine.public_errors import public_error
 from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.session_storage import SessionStorage
-from iac_code.services.telemetry import use_session_id
 from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent
 from iac_code.utils.public_errors import sanitize_public_text
 
@@ -164,6 +170,10 @@ class IacCodeA2APipelineExecutor:
         permission_resolver: Any | None,
         auto_approve_permissions: bool,
         thinking_exposure_types: Any,
+        user_id: str | None = None,
+        aliyun_credential: AliyunCredential | None = None,
+        model_from_metadata: bool = False,
+        metadata_api_key: str | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -173,6 +183,10 @@ class IacCodeA2APipelineExecutor:
         self._permission_resolver = permission_resolver
         self._auto_approve_permissions = auto_approve_permissions
         self._thinking_exposure_types = thinking_exposure_types
+        self._user_id = user_id
+        self._aliyun_credential = aliyun_credential
+        self._model_from_metadata = model_from_metadata
+        self._metadata_api_key = metadata_api_key
 
     async def execute(
         self,
@@ -196,11 +210,12 @@ class IacCodeA2APipelineExecutor:
             return create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd))
 
         try:
-            ctx = await self._task_store.get_or_create_context(
-                context_id=context_id,
-                cwd=cwd,
-                runtime_factory=runtime_factory,
-            )
+            with self._request_context():
+                ctx = await self._task_store.get_or_create_context(
+                    context_id=context_id,
+                    cwd=cwd,
+                    runtime_factory=runtime_factory,
+                )
         except Exception as exc:
             await self._publish_exception_status(
                 event_queue,
@@ -217,16 +232,17 @@ class IacCodeA2APipelineExecutor:
         if ctx.active_task_id is not None:
             preserve_active_task = _is_active_task_record(task, ctx.active_task_id)
             if _is_active_task_request(task, task_id, ctx.active_task_id):
-                routed = await self._route_active_pipeline_interrupt(
-                    event_queue,
-                    task=task,
-                    ctx=ctx,
-                    task_id=task_id,
-                    context_id=context_id,
-                    cwd=cwd,
-                    pipeline_input=pipeline_input,
-                    preserve_task_record=preserve_active_task,
-                )
+                with self._request_context(session_id=ctx.session_id):
+                    routed = await self._route_active_pipeline_interrupt(
+                        event_queue,
+                        task=task,
+                        ctx=ctx,
+                        task_id=task_id,
+                        context_id=context_id,
+                        cwd=cwd,
+                        pipeline_input=pipeline_input,
+                        preserve_task_record=preserve_active_task,
+                    )
                 if routed:
                     return
             await self._fail_already_active(
@@ -252,55 +268,68 @@ class IacCodeA2APipelineExecutor:
             pipeline = None
             publisher: PipelineA2AEventPublisher | None = None
             try:
-                pipeline_runtime = self._pipeline_runtime_from_context(ctx.runtime, session_id=ctx.session_id, cwd=cwd)
-                agent_runtime = pipeline_runtime.agent_runtime
-                pipeline = self._create_pipeline(
-                    session_id=ctx.session_id,
-                    cwd=cwd,
-                    runtime=agent_runtime,
-                    session_storage=session_storage,
-                )
-                self._set_pipeline_telemetry_correlation(pipeline, task_id=task_id, context_id=context_id)
-                publisher = self._publisher(
-                    event_queue=event_queue,
-                    pipeline=pipeline,
-                    task_id=task_id,
-                    context_id=context_id,
-                    session_id=ctx.session_id,
-                    cwd=cwd,
-                )
-                pipeline_runtime = A2APipelineRuntime(
-                    agent_runtime=agent_runtime,
-                    pipeline=pipeline,
-                    publisher=publisher,
-                )
-                ctx.runtime = pipeline_runtime
-                self._task_store.mirror_context(ctx)
-
-                def fresh_pipeline_factory() -> Any:
-                    fresh_pipeline = self._create_pipeline(
+                with self._request_context(session_id=ctx.session_id):
+                    pipeline_runtime = self._pipeline_runtime_from_context(
+                        ctx.runtime,
+                        session_id=ctx.session_id,
+                        cwd=cwd,
+                    )
+                    agent_runtime = pipeline_runtime.agent_runtime
+                    configure_runtime_model(
+                        agent_runtime,
+                        self._model,
+                        from_metadata=self._model_from_metadata,
+                        metadata_api_key=self._metadata_api_key,
+                    )
+                    if self._aliyun_credential is not None:
+                        refresh_runtime_cloud_tools(agent_runtime)
+                    pipeline = self._create_pipeline(
                         session_id=ctx.session_id,
                         cwd=cwd,
                         runtime=agent_runtime,
                         session_storage=session_storage,
-                        resume_from_sidecar=False,
                     )
-                    self._set_pipeline_telemetry_correlation(
-                        fresh_pipeline,
+                    self._set_pipeline_telemetry_correlation(pipeline, task_id=task_id, context_id=context_id)
+                    publisher = self._publisher(
+                        event_queue=event_queue,
+                        pipeline=pipeline,
                         task_id=task_id,
                         context_id=context_id,
+                        session_id=ctx.session_id,
+                        cwd=cwd,
                     )
-                    return fresh_pipeline
+                    pipeline_runtime = A2APipelineRuntime(
+                        agent_runtime=agent_runtime,
+                        pipeline=pipeline,
+                        publisher=publisher,
+                    )
+                    ctx.runtime = pipeline_runtime
+                    self._task_store.mirror_context(ctx)
 
-                selected = self._select_stream(
-                    pipeline,
-                    prompt,
-                    pipeline_input=pipeline_input,
-                    publisher=publisher,
-                    task_id=task_id,
-                    context_id=context_id,
-                    fresh_pipeline_factory=fresh_pipeline_factory,
-                )
+                    def fresh_pipeline_factory() -> Any:
+                        fresh_pipeline = self._create_pipeline(
+                            session_id=ctx.session_id,
+                            cwd=cwd,
+                            runtime=agent_runtime,
+                            session_storage=session_storage,
+                            resume_from_sidecar=False,
+                        )
+                        self._set_pipeline_telemetry_correlation(
+                            fresh_pipeline,
+                            task_id=task_id,
+                            context_id=context_id,
+                        )
+                        return fresh_pipeline
+
+                    selected = self._select_stream(
+                        pipeline,
+                        prompt,
+                        pipeline_input=pipeline_input,
+                        publisher=publisher,
+                        task_id=task_id,
+                        context_id=context_id,
+                        fresh_pipeline_factory=fresh_pipeline_factory,
+                    )
                 if selected.pipeline is not pipeline:
                     pipeline = selected.pipeline
                     pipeline_runtime.pipeline = pipeline
@@ -313,7 +342,7 @@ class IacCodeA2APipelineExecutor:
                 self._task_store.mirror_task(task)
                 self._task_store.mirror_context(ctx)
                 stream_had_events = False
-                with use_session_id(ctx.session_id):
+                with self._request_context(session_id=ctx.session_id):
                     while True:
                         stream_result = await self._consume_stream_until_restart(
                             stream=stream,
@@ -412,6 +441,13 @@ class IacCodeA2APipelineExecutor:
                 await _flush_telemetry_safely()
         finally:
             lock.release()
+
+    def _request_context(self, *, session_id: str | None = None) -> contextlib.AbstractContextManager[None]:
+        return a2a_request_context(
+            session_id=session_id,
+            user_id=self._user_id,
+            aliyun_credential=self._aliyun_credential,
+        )
 
     def _pipeline_runtime_from_context(self, runtime: Any, *, session_id: str, cwd: str) -> A2APipelineRuntime:
         if isinstance(runtime, A2APipelineRuntime):
@@ -622,7 +658,7 @@ class IacCodeA2APipelineExecutor:
                 stream = pipeline.continue_from_sidecar()
             task.state = TASK_STATE_WORKING
             self._task_store.mirror_task(task)
-            with use_session_id(session_id):
+            with self._request_context(session_id=session_id):
                 while True:
                     stream_result = await self._consume_stream_until_restart(
                         stream=stream,
@@ -800,6 +836,7 @@ class IacCodeA2APipelineExecutor:
             task_id=task_id,
             context_id=context_id,
             pipeline_name=getattr(pipeline, "pipeline_name", get_pipeline_name()),
+            iac_code_session_id=session_id,
             parent_step_order=_pipeline_parent_step_order(pipeline),
             candidate_step_order=_pipeline_candidate_step_order(pipeline),
             emit_stack_events=bool(getattr(pipeline, "emit_stack_events", False)),
@@ -1520,6 +1557,7 @@ def cancel_waiting_input_task_from_sidecar(
         task_id=task_id,
         context_id=context_id,
         pipeline_name=pipeline_name,
+        iac_code_session_id=session_id,
     )
     translator = PipelineEventTranslator(context)
     translator.hydrate_from_events(events)

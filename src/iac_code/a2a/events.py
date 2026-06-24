@@ -40,6 +40,21 @@ _ERROR_TEXT_MAX_CHARS = 1000
 _METADATA_MAX_DEPTH = 32
 logger = logging.getLogger(__name__)
 A2APermissionResolver: TypeAlias = Callable[[PermissionRequestEvent], "bool | Awaitable[bool]"]
+IAC_CODE_SESSION_ID_METADATA_KEY = "iacCodeSessionId"
+
+
+def iac_code_session_metadata(session_id: str) -> dict[str, Any]:
+    return {"iac_code": {IAC_CODE_SESSION_ID_METADATA_KEY: session_id}}
+
+
+def with_iac_code_session_metadata(metadata: dict[str, Any] | None, session_id: str | None) -> dict[str, Any] | None:
+    if not session_id:
+        return metadata
+    merged = dict(metadata or {})
+    iac_code = dict(merged.get("iac_code") or {})
+    iac_code[IAC_CODE_SESSION_ID_METADATA_KEY] = session_id
+    merged["iac_code"] = iac_code
+    return merged
 
 
 def _truncate(value: Any, *, _depth: int = 0) -> Any:
@@ -144,12 +159,14 @@ async def _enqueue_status(
     state: int,
     message: Message | None = None,
     metadata: dict[str, Any] | None = None,
+    iac_code_session_id: str | None = None,
 ) -> None:
     update = TaskStatusUpdateEvent(
         task_id=task_id,
         context_id=context_id,
         status=TaskStatus(state=TaskState.Name(state), message=message),
     )
+    metadata = with_iac_code_session_metadata(metadata, iac_code_session_id)
     if metadata is not None:
         ParseDict(metadata, update.metadata)
     await event_queue.enqueue_event(update)
@@ -165,6 +182,7 @@ async def publish_stream_event(
     permission_resolver: A2APermissionResolver | None = None,
     auto_approve_permissions: bool = False,
     exposure_types: Any = None,
+    iac_code_session_id: str | None = None,
 ) -> str | None:
     enabled_exposure_types = normalize_a2a_exposure_types(exposure_types)
 
@@ -177,6 +195,7 @@ async def publish_stream_event(
             context_id=context_id,
             state=TaskState.TASK_STATE_WORKING,
             message=_agent_text_message(task_id=task_id, context_id=context_id, text=event.text),
+            iac_code_session_id=iac_code_session_id,
         )
         return event.text
 
@@ -189,6 +208,7 @@ async def publish_stream_event(
             context_id=context_id,
             state=TaskState.TASK_STATE_WORKING,
             metadata={"iac_code": {"thinking": {"type": "raw_thinking", "text": _truncate(event.text)}}},
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 
@@ -201,6 +221,7 @@ async def publish_stream_event(
             context_id=context_id,
             state=TaskState.TASK_STATE_WORKING,
             metadata={"iac_code": {"tool": {"status": "started", "toolUseId": event.tool_use_id, "name": event.name}}},
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 
@@ -221,6 +242,7 @@ async def publish_stream_event(
                     }
                 }
             },
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 
@@ -242,6 +264,7 @@ async def publish_stream_event(
                     }
                 }
             },
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 
@@ -270,6 +293,7 @@ async def publish_stream_event(
             context_id=context_id,
             state=TaskState.TASK_STATE_WORKING,
             metadata={"iac_code": {"tool": tool_metadata}},
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 
@@ -297,6 +321,7 @@ async def publish_stream_event(
                     }
                 }
             },
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 
@@ -315,6 +340,7 @@ async def publish_stream_event(
                     }
                 }
             },
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 
@@ -336,6 +362,7 @@ async def publish_stream_event(
             state=state,
             message=_agent_text_message(task_id=task_id, context_id=context_id, text=text),
             metadata={"iac_code": {"error": error_metadata}},
+            iac_code_session_id=iac_code_session_id,
         )
         return None
 

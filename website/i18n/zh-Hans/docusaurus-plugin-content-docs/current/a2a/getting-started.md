@@ -140,6 +140,7 @@ verify-card-secret: your-card-signing-secret
 require-card-signature: true
 cwd: /path/to/workspace
 iac-code-model: qwen-plus
+iac-code-api-key: provider-api-key
 ```
 
 使用 `a2a-client call` 进行直接的 Phase 1 client 调用：
@@ -184,6 +185,8 @@ iac-code a2a-client route-preview \
 
 如需按调用覆盖 LLM，请在 `message.metadata.iac_code` 下传入非空字符串 `iac_code_model`。该字段是 `IAC_CODE_MODEL` 的小写形式；它只在当前 A2A message turn 中覆盖 `IAC_CODE_MODEL`、`settings.yml` 和 server 启动默认 model。
 
+如需按调用覆盖 LLM provider key，请在 `message.metadata.iac_code` 下传入非空字符串 `iac_code_api_key`。该字段是 `IAC_CODE_API_KEY` 的小写形式；它只在当前 A2A message turn 中覆盖 `IAC_CODE_API_KEY` 和 `.credentials.yml`。它和用于保护 A2A endpoint 的 HTTP 认证（`api-key` / `IACCODE_A2A_API_KEY`）是两件事。
+
 如需按请求传入 Alibaba Cloud 凭据，请在 `message.metadata.iac_code` 下包含 `alibaba_cloud_access_key_id`、`alibaba_cloud_access_key_secret`、`alibaba_cloud_region_id` 和可选的 `alibaba_cloud_security_token`。这些任务凭据只在本次 A2A 执行中覆盖 server 环境和 `.cloud-credentials.yml`。
 
 服务器接受类文本 parts、JSON 数据 parts、原始 UTF-8 文本、本地工作区 `file://` 文本文件和有界多模态附件。不支持远程 URL 摄取；`url` parts 必须是位于允许工作区内的本地 `file://` URLs。
@@ -205,7 +208,9 @@ curl -s -X POST http://127.0.0.1:41242/ \
         ],
         "metadata": {
           "iac_code": {
-            "cwd": "/path/to/project"
+            "cwd": "/path/to/project",
+            "iac_code_model": "qwen-plus",
+            "iac_code_api_key": "provider-api-key"
           }
         }
       },
