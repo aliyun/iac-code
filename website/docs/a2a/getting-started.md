@@ -140,6 +140,7 @@ verify-card-secret: your-card-signing-secret
 require-card-signature: true
 cwd: /path/to/workspace
 iac-code-model: qwen-plus
+iac-code-api-key: provider-api-key
 ```
 
 Use `a2a-client call` for a direct Phase 1 client call:
@@ -184,6 +185,8 @@ For per-task telemetry attribution, include a non-empty string `user_id` under `
 
 For a per-call LLM override, include a non-empty string `iac_code_model` under `message.metadata.iac_code`. This field is the lowercase form of `IAC_CODE_MODEL`; it overrides `IAC_CODE_MODEL`, `settings.yml`, and the server startup default model only for the current A2A message turn.
 
+For a per-call LLM provider key override, include a non-empty string `iac_code_api_key` under `message.metadata.iac_code`. This field is the lowercase form of `IAC_CODE_API_KEY`; it overrides `IAC_CODE_API_KEY` and `.credentials.yml` only for the current A2A message turn. It is separate from A2A HTTP authentication (`api-key` / `IACCODE_A2A_API_KEY`), which protects access to the A2A endpoint.
+
 For per-request Alibaba Cloud credentials, include `alibaba_cloud_access_key_id`, `alibaba_cloud_access_key_secret`, `alibaba_cloud_region_id`, and optional `alibaba_cloud_security_token` under `message.metadata.iac_code`. These task credentials override the server environment and `.cloud-credentials.yml` for that A2A execution only.
 
 The server accepts text-like parts, JSON data parts, raw UTF-8 text, local workspace `file://` text files, and bounded multimodal attachments. Remote URL ingestion is not supported; `url` parts must be local `file://` URLs inside the allowed workspace.
@@ -205,7 +208,9 @@ curl -s -X POST http://127.0.0.1:41242/ \
         ],
         "metadata": {
           "iac_code": {
-            "cwd": "/path/to/project"
+            "cwd": "/path/to/project",
+            "iac_code_model": "qwen-plus",
+            "iac_code_api_key": "provider-api-key"
           }
         }
       },

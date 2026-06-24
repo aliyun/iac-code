@@ -191,6 +191,7 @@ const elements = {{
   "status-alert": new FakeElement("div", "status-alert"),
   "server-url": new FakeElement("input", "server-url"),
   cwd: new FakeElement("input", "cwd"),
+  "iac-code-model": new FakeElement("input", "iac-code-model"),
   "composer-input": new FakeElement("textarea", "composer-input"),
   "send-button": new FakeElement("button", "send-button"),
   "health-button": new FakeElement("button", "health-button"),
@@ -873,7 +874,11 @@ return {
 def test_reducer_does_not_mutate_original_state() -> None:
     output = reducer_harness(
         """
-const state = reducers.createInitialState({serverUrl: "http://server", cwd: "/workspace"});
+const state = reducers.createInitialState({
+  serverUrl: "http://server",
+  cwd: "/workspace",
+  iacCodeModel: "kimi-k2.7-code"
+});
 const originalStep = state.steps.architecture_planning;
 const next = reducers.reducePipelinePayload(state, {
   metadata: {iac_code: {pipeline: {
@@ -1129,7 +1134,11 @@ return {
 def test_build_stream_payload_uses_active_task_before_handoff() -> None:
     output = reducer_harness(
         """
-const state = reducers.createInitialState({serverUrl: "http://server", cwd: "/workspace"});
+const state = reducers.createInitialState({
+  serverUrl: "http://server",
+  cwd: "/workspace",
+  iacCodeModel: "kimi-k2.7-code"
+});
 state.contextId = "ctx-1";
 state.pipelineTaskId = "pipeline-task";
 state.activeTaskId = "active-task";
@@ -1147,6 +1156,7 @@ return {
         "beforeHandoff": {
             "serverUrl": "http://server",
             "cwd": "/workspace",
+            "iacCodeModel": "kimi-k2.7-code",
             "contextId": "ctx-1",
             "taskId": "active-task",
             "prompt": "部署 nginx",
@@ -1154,6 +1164,7 @@ return {
         "afterHandoff": {
             "serverUrl": "http://server",
             "cwd": "/workspace",
+            "iacCodeModel": "kimi-k2.7-code",
             "contextId": "ctx-1",
             "taskId": "",
             "prompt": "继续部署",
@@ -3979,6 +3990,7 @@ return {fields};
     assert output["fields"] == [
         {"key": "serverUrl", "text": "Server URLhttp://127.0.0.1:41299"},
         {"key": "cwd", "text": "CWD/workspace"},
+        {"key": "iacCodeModel", "text": "Model"},
         {"key": "contextId", "text": "Context IDctx-1"},
         {"key": "pipelineTaskId", "text": "Pipeline Tasktask-pipeline"},
         {"key": "activeTaskId", "text": "Active Tasktask-active"},

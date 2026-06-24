@@ -422,8 +422,16 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
             cwd: str,
             context_id: str | None = None,
             model: str | None = None,
+            iac_code_api_key: str | None = None,
         ):
-            called["send"] = {"url": url, "prompt": prompt, "cwd": cwd, "context_id": context_id, "model": model}
+            called["send"] = {
+                "url": url,
+                "prompt": prompt,
+                "cwd": cwd,
+                "context_id": context_id,
+                "model": model,
+                "iac_code_api_key": iac_code_api_key,
+            }
             return SimpleNamespace(text="created stack", payload={"result": {"text": "created stack"}})
 
         async def discover(self, url: str):
@@ -465,6 +473,8 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
             "ctx-1",
             "--iac-code-model",
             "metadata-model",
+            "--iac-code-api-key",
+            "metadata-api-key",
             "--token",
             "bearer",
             "--api-key",
@@ -493,6 +503,7 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
         "cwd": str(tmp_path),
         "context_id": "ctx-1",
         "model": "metadata-model",
+        "iac_code_api_key": "metadata-api-key",
     }
     assert called["discover"] == "http://agent.example/rpc"
     assert called["fallback_url"] == "http://agent.example/rpc"
@@ -564,8 +575,16 @@ def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
             cwd: str,
             context_id: str | None = None,
             model: str | None = None,
+            iac_code_api_key: str | None = None,
         ):
-            called["stream"] = {"url": url, "prompt": prompt, "cwd": cwd, "context_id": context_id, "model": model}
+            called["stream"] = {
+                "url": url,
+                "prompt": prompt,
+                "cwd": cwd,
+                "context_id": context_id,
+                "model": model,
+                "iac_code_api_key": iac_code_api_key,
+            }
             yield {"result": {"status": {"state": "working", "message": {"parts": [{"text": "planning"}]}}}}
             yield {"result": {"text": "created stack"}}
 
@@ -603,6 +622,7 @@ def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
         "cwd": str(tmp_path),
         "context_id": "ctx-1",
         "model": None,
+        "iac_code_api_key": None,
     }
     assert called["closed"] is True
 
@@ -654,6 +674,7 @@ def test_a2a_client_call_loads_config_and_allows_cli_overrides(monkeypatch, tmp_
                 "cwd: /workspace/from-config",
                 "context-id: ctx-from-config",
                 "iac-code-model: config-model",
+                "iac-code-api-key: config-iac-code-api-key",
                 "token: config-token",
                 "basic-username: config-user",
                 "basic-password: config-pass",
@@ -691,6 +712,7 @@ def test_a2a_client_call_loads_config_and_allows_cli_overrides(monkeypatch, tmp_
         "cwd": "/workspace/from-config",
         "context_id": "ctx-from-config",
         "model": "config-model",
+        "iac_code_api_key": "config-iac-code-api-key",
         "token": "config-token",
         "basic_username": "config-user",
         "basic_password": "config-pass",

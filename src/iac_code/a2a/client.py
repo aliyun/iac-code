@@ -132,6 +132,7 @@ class A2AClient:
         cwd: str,
         context_id: str | None = None,
         model: str | None = None,
+        iac_code_api_key: str | None = None,
     ) -> A2AClientResponse:
         payload = self._message_payload(
             method="SendMessage",
@@ -139,6 +140,7 @@ class A2AClient:
             cwd=cwd,
             context_id=context_id,
             model=model,
+            iac_code_api_key=iac_code_api_key,
         )
         transport = self._make_transport_client(url)
         response = await transport.send(payload)
@@ -152,6 +154,7 @@ class A2AClient:
         cwd: str,
         context_id: str | None = None,
         model: str | None = None,
+        iac_code_api_key: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         payload = self._message_payload(
             method="SendStreamingMessage",
@@ -159,6 +162,7 @@ class A2AClient:
             cwd=cwd,
             context_id=context_id,
             model=model,
+            iac_code_api_key=iac_code_api_key,
         )
         transport = self._make_transport_client(url)
         async for event in transport.stream(payload):
@@ -354,12 +358,17 @@ class A2AClient:
         cwd: str,
         context_id: str | None,
         model: str | None,
+        iac_code_api_key: str | None,
     ) -> dict[str, Any]:
         iac_code_metadata = {"cwd": cwd}
         if model:
             stripped_model = model.strip()
             if stripped_model:
                 iac_code_metadata["iac_code_model"] = stripped_model
+        if iac_code_api_key:
+            stripped_api_key = iac_code_api_key.strip()
+            if stripped_api_key:
+                iac_code_metadata["iac_code_api_key"] = stripped_api_key
         message: dict[str, Any] = {
             "messageId": str(uuid.uuid4()),
             "role": "ROLE_USER",

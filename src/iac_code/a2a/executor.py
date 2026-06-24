@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -15,9 +14,14 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import Message, Role, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
-from google.protobuf.json_format import MessageToDict
+from google.protobuf.json_format import MessageToDict, ParseDict
 
-from iac_code.a2a.events import make_text_part, publish_stream_event
+from iac_code.a2a.events import (
+    iac_code_session_metadata,
+    make_text_part,
+    publish_stream_event,
+    with_iac_code_session_metadata,
+)
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.parts import (
@@ -33,6 +37,12 @@ from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+from iac_code.a2a.runtime_overrides import (
+    a2a_request_context,
+    configure_runtime_model,
+    credentials_with_metadata_api_key,
+    refresh_runtime_cloud_tools,
+)
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
@@ -62,9 +72,8 @@ from iac_code.pipeline.engine.cleanup import (
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
-from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, use_aliyun_credential
+from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential
 from iac_code.services.session_storage import SessionStorage
-from iac_code.services.telemetry import use_session_id, use_user_id
 from iac_code.types.stream_events import TextDeltaEvent
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
@@ -798,6 +807,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             cwd = self._resolve_cwd(metadata)
             user_id = self._resolve_user_id(metadata)
             metadata_model = self._resolve_model(metadata)
+            metadata_api_key = self._resolve_api_key(metadata)
             model = metadata_model or self._model
             aliyun_credential = self._resolve_aliyun_credential(metadata)
             pipeline_mode = get_run_mode() == RunMode.PIPELINE
@@ -888,6 +898,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                 permission_resolver=self._permission_resolver,
                 auto_approve_permissions=self._auto_approve_permissions,
                 thinking_exposure_types=self._thinking_exposure_types,
+                user_id=user_id,
+                aliyun_credential=aliyun_credential,
+                model_from_metadata=metadata_model is not None,
+                metadata_api_key=metadata_api_key,
             )
             await pipeline_executor.execute(
                 context=context,
@@ -918,10 +932,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
 
         try:
-            aliyun_credential_ctx = (
-                use_aliyun_credential(aliyun_credential) if aliyun_credential else contextlib.nullcontext()
-            )
-            with aliyun_credential_ctx:
+            with a2a_request_context(user_id=user_id, aliyun_credential=aliyun_credential):
                 ctx = await self._task_store.get_or_create_context(
                     context_id=context_id,
                     cwd=cwd,
@@ -956,6 +967,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 context_id=context_id,
                 state=TaskState.TASK_STATE_FAILED,
                 text=_("Task is already working."),
+                session_id=ctx.session_id,
             )
             self._task_store.mirror_task(task)
             await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -973,6 +985,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 context_id=context_id,
                 state=TaskState.TASK_STATE_FAILED,
                 text=_("Task is already working."),
+                session_id=ctx.session_id,
             )
             self._task_store.mirror_task(task)
             await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -994,20 +1007,27 @@ class IacCodeA2AExecutor(AgentExecutor):
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_SUBMITTED,
+                    session_id=ctx.session_id,
                 )
                 await self._publish_status(
                     event_queue,
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_WORKING,
+                    session_id=ctx.session_id,
                 )
-                user_id_ctx = use_user_id(user_id) if user_id else contextlib.nullcontext()
-                aliyun_credential_ctx = (
-                    use_aliyun_credential(aliyun_credential) if aliyun_credential else contextlib.nullcontext()
-                )
-                with use_session_id(ctx.session_id), user_id_ctx, aliyun_credential_ctx:
-                    self._configure_runtime_model(runtime, model, from_metadata=metadata_model is not None)
-                    self._refresh_runtime_cloud_tools(runtime)
+                with a2a_request_context(
+                    session_id=ctx.session_id,
+                    user_id=user_id,
+                    aliyun_credential=aliyun_credential,
+                ):
+                    configure_runtime_model(
+                        runtime,
+                        model,
+                        from_metadata=metadata_model is not None,
+                        metadata_api_key=metadata_api_key,
+                    )
+                    refresh_runtime_cloud_tools(runtime)
                     cleanup_ledger = _cleanup_ledger_for_a2a_normal_chat(cwd=cwd, session_id=ctx.session_id)
                     _prune_completed_cleanup_prompt_from_runtime(runtime, cleanup_ledger)
                     cleanup_publisher = None
@@ -1039,6 +1059,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                             permission_resolver=self._permission_resolver,
                             auto_approve_permissions=self._auto_approve_permissions,
                             exposure_types=self._thinking_exposure_types,
+                            iac_code_session_id=ctx.session_id,
                         )
                         if text_chunk:
                             task.output_text.append(text_chunk)
@@ -1048,6 +1069,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    session_id=ctx.session_id,
                 )
                 self._task_store.mirror_task(task)
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -1060,6 +1082,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     context_id=context_id,
                     state=TaskState.TASK_STATE_CANCELED,
                     text=_("Task canceled."),
+                    session_id=ctx.session_id,
                 )
                 self._task_store.mirror_task(task)
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -1073,6 +1096,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         context_id=context_id,
                         state=TaskState.TASK_STATE_INPUT_REQUIRED,
                         text="A temporary error occurred. Please retry.",
+                        session_id=ctx.session_id,
                     )
                     self._task_store.mirror_task(task)
                     await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -1086,6 +1110,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         context_id=context_id,
                         state=TaskState.TASK_STATE_FAILED,
                         text=self._sanitize_error(exc),
+                        session_id=ctx.session_id,
                     )
                     self._task_store.mirror_task(task)
                     await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
@@ -1182,6 +1207,19 @@ class IacCodeA2AExecutor(AgentExecutor):
         raw_model = raw_iac_meta.get("iac_code_model")
         if isinstance(raw_model, str) and raw_model.strip():
             return raw_model.strip()
+        return None
+
+    def _resolve_api_key(self, metadata: Any | None) -> str | None:
+        if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+            metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+        if not isinstance(metadata, Mapping):
+            return None
+        raw_iac_meta = metadata.get("iac_code")
+        if not isinstance(raw_iac_meta, Mapping):
+            return None
+        raw_api_key = raw_iac_meta.get("iac_code_api_key")
+        if isinstance(raw_api_key, str) and raw_api_key.strip():
+            return raw_api_key.strip()
         return None
 
     def _resolve_aliyun_credential(self, metadata: Any | None) -> AliyunCredential | None:
@@ -1356,6 +1394,8 @@ class IacCodeA2AExecutor(AgentExecutor):
         context_id: str,
         state: int,
         text: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> None:
         message = None
         if text:
@@ -1368,7 +1408,11 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
         status = TaskStatus(state=TaskState.Name(state), message=message)
         status.timestamp.GetCurrentTime()
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(task_id=task_id, context_id=context_id, status=status))
+        update = TaskStatusUpdateEvent(task_id=task_id, context_id=context_id, status=status)
+        metadata = with_iac_code_session_metadata(metadata, session_id)
+        if metadata is not None:
+            ParseDict(metadata, update.metadata)
+        await event_queue.enqueue_event(update)
 
     async def _publish_initial_task(
         self,
@@ -1377,48 +1421,52 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_id: str,
         context_id: str,
         context: RequestContext,
+        session_id: str | None = None,
     ) -> None:
         task = Task(
             id=task_id,
             context_id=context_id,
             status=TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_SUBMITTED)),
         )
+        if session_id:
+            ParseDict(iac_code_session_metadata(session_id), task.metadata)
         message = getattr(context, "message", None)
         if isinstance(message, Message):
             task.history.append(message)
         await event_queue.enqueue_event(task)
 
     def _refresh_runtime_cloud_tools(self, runtime: Any) -> None:
-        refresh_cloud_tools = getattr(runtime, "refresh_cloud_tools", None)
-        if callable(refresh_cloud_tools):
-            refresh_cloud_tools()
-            return
-        tool_registry = getattr(runtime, "tool_registry", None)
-        if tool_registry is None:
-            return
-        from iac_code.services.cloud_credentials import CloudCredentials
-        from iac_code.tools.cloud.registry import register_cloud_tools
+        refresh_runtime_cloud_tools(runtime)
 
-        register_cloud_tools(tool_registry, CloudCredentials())
+    def _configure_runtime_model(
+        self,
+        runtime: Any,
+        model: str,
+        *,
+        from_metadata: bool,
+        metadata_api_key: str | None = None,
+    ) -> None:
+        configure_runtime_model(
+            runtime,
+            model,
+            from_metadata=from_metadata,
+            metadata_api_key=metadata_api_key,
+        )
 
-    def _configure_runtime_model(self, runtime: Any, model: str, *, from_metadata: bool) -> None:
-        provider_manager = getattr(runtime, "provider_manager", None)
-        reconfigure = getattr(provider_manager, "reconfigure", None)
-        if not callable(reconfigure):
-            return
-        was_metadata_model = bool(getattr(runtime, "_iac_code_a2a_metadata_model_applied", False))
-        if not from_metadata and not was_metadata_model:
-            return
-
-        from iac_code.config import load_credentials
-
-        provider_key_override = getattr(provider_manager, "_provider_key_override", None)
-        base_url_override = getattr(provider_manager, "_base_url_override", None)
-        credentials = getattr(provider_manager, "_credentials", None)
-        if not isinstance(credentials, dict) or provider_key_override is None:
-            credentials = load_credentials(model=model)
-        reconfigure(model, credentials, provider_key_override, base_url_override)
-        setattr(runtime, "_iac_code_a2a_metadata_model_applied", from_metadata)
+    def _credentials_with_metadata_api_key(
+        self,
+        *,
+        model: str,
+        credentials: dict[str, str],
+        provider_key_override: str | None,
+        metadata_api_key: str,
+    ) -> dict[str, str]:
+        return credentials_with_metadata_api_key(
+            model=model,
+            credentials=credentials,
+            provider_key_override=provider_key_override,
+            metadata_api_key=metadata_api_key,
+        )
 
     async def _notify_terminal_task(self, *, task_id: str, context_id: str, state: str) -> None:
         if self._push_notifier is None:

@@ -161,6 +161,35 @@ async def test_message_payload_includes_metadata_iac_code_model() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_message_payload_includes_metadata_iac_code_api_key() -> None:
+    http = FakeHTTPClient()
+    client = A2AClient(http_client=http)
+
+    await client.send_message("http://remote/", "hello", cwd="/tmp/work", iac_code_api_key="metadata-key")
+    events = [
+        event
+        async for event in client.stream_message(
+            "http://remote/",
+            "hello",
+            cwd="/tmp/work",
+            iac_code_api_key="stream-key",
+        )
+    ]
+
+    assert events
+    send_payload = http.requests[-2][2]
+    stream_payload = http.requests[-1][2]
+    assert send_payload["params"]["message"]["metadata"]["iac_code"] == {
+        "cwd": "/tmp/work",
+        "iac_code_api_key": "metadata-key",
+    }
+    assert stream_payload["params"]["message"]["metadata"]["iac_code"] == {
+        "cwd": "/tmp/work",
+        "iac_code_api_key": "stream-key",
+    }
+
+
 def test_response_text_extracts_from_task_history_agent_message() -> None:
     response = A2AClientResponse(
         payload={

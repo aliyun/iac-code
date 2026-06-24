@@ -841,6 +841,11 @@ def a2a_call(
         "--iac-code-model",
         help=_("Model metadata to send with this A2A request"),
     ),
+    iac_code_api_key: str = typer.Option(
+        "",
+        "--iac-code-api-key",
+        help=_("API key metadata to send with this A2A request"),
+    ),
     token: str = typer.Option("", "--token", help=_("Bearer token for A2A HTTP requests")),
     basic_username: str = typer.Option("", "--basic-username", help=_("Basic auth username for A2A HTTP requests")),
     basic_password: str = typer.Option("", "--basic-password", help=_("Basic auth password for A2A HTTP requests")),
@@ -877,6 +882,7 @@ def a2a_call(
             cwd = _current_logical_cwd()
         context_id = _a2a_config_value(ctx, config, "context_id", context_id)
         iac_code_model = _a2a_config_value(ctx, config, "iac_code_model", iac_code_model)
+        iac_code_api_key = _a2a_config_value(ctx, config, "iac_code_api_key", iac_code_api_key)
         timeout = _a2a_config_value(ctx, config, "timeout", timeout)
         stream = _a2a_config_value(ctx, config, "stream", stream)
         auth_options = _a2a_client_auth_options(
@@ -914,6 +920,7 @@ def a2a_call(
                 cwd=cwd,
                 context_id=context_id or None,
                 model=iac_code_model or None,
+                iac_code_api_key=iac_code_api_key or None,
                 token=auth_options["token"] or None,
                 basic_username=auth_options["basic_username"] or None,
                 basic_password=auth_options["basic_password"] or None,
@@ -1578,6 +1585,7 @@ async def _run_a2a_call(
     cwd: str,
     context_id: str | None,
     model: str | None,
+    iac_code_api_key: str | None,
     token: str | None,
     basic_username: str | None,
     basic_password: str | None,
@@ -1616,6 +1624,7 @@ async def _run_a2a_call(
                 cwd=str(Path(cwd)),
                 context_id=context_id,
                 model=model,
+                iac_code_api_key=iac_code_api_key,
             ):
                 line = _format_a2a_stream_event(event)
                 if stream_callback is not None:
@@ -1629,6 +1638,7 @@ async def _run_a2a_call(
             cwd=str(Path(cwd)),
             context_id=context_id,
             model=model,
+            iac_code_api_key=iac_code_api_key,
         )
         return response.text or json.dumps(response.payload, ensure_ascii=False, indent=2, sort_keys=True)
     finally:

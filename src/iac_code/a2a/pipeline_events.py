@@ -106,6 +106,7 @@ class PipelineA2AContext:
     task_id: str
     context_id: str
     pipeline_name: str
+    iac_code_session_id: str | None = None
     parent_step_order: list[str] = field(default_factory=list)
     candidate_step_order: list[str] = field(default_factory=list)
     emit_stack_events: bool = False
@@ -716,7 +717,7 @@ class PipelineEventTranslator:
         created_at: str | None = None,
     ) -> dict[str, Any]:
         self._sequence += 1
-        return {
+        envelope = {
             "schemaVersion": PIPELINE_METADATA_SCHEMA_VERSION,
             "extensionUri": PIPELINE_EVENTS_EXTENSION_URI,
             "eventId": f"evt-{uuid.uuid4().hex}",
@@ -731,6 +732,9 @@ class PipelineEventTranslator:
             "status": status,
             "data": data,
         }
+        if self._context.iac_code_session_id is not None:
+            envelope["iacCodeSessionId"] = self._context.iac_code_session_id
+        return envelope
 
     def _parent_step_coordinate(self, step_id: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         data = data or {}

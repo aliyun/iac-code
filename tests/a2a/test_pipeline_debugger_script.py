@@ -237,6 +237,27 @@ def test_build_message_stream_payload_uses_a2a_v1_method_and_cwd_metadata() -> N
     assert payload["params"]["configuration"] == {"acceptedOutputModes": ["text/plain"]}
 
 
+def test_build_message_stream_payload_includes_iac_code_model_metadata() -> None:
+    debugger = load_debugger_module()
+
+    payload = debugger.build_message_stream_payload(
+        cwd="/workspace/demo",
+        prompt="帮我生成售卖 pipeline 方案",
+        context_id="ctx-demo",
+        task_id="task-demo",
+        request_id="req-1",
+        message_id="msg-1",
+        iac_code_model=" kimi-k2.7-code ",
+    )
+
+    assert payload["params"]["message"]["metadata"] == {
+        "iac_code": {
+            "cwd": "/workspace/demo",
+            "iac_code_model": "kimi-k2.7-code",
+        }
+    }
+
+
 def test_build_message_stream_payload_adds_image_data_parts() -> None:
     debugger = load_debugger_module()
 

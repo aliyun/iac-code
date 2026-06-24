@@ -64,7 +64,13 @@ async def main() -> None:
                 message_id=f"msg-{uuid.uuid4().hex}",
                 role=Role.ROLE_USER,
                 parts=[Part(text="Create a ROS VPC template with two vSwitches.")],
-                metadata={"iac_code": {"cwd": str(Path.cwd())}},
+                metadata={
+                    "iac_code": {
+                        "cwd": str(Path.cwd()),
+                        "iac_code_model": "qwen-plus",
+                        "iac_code_api_key": "provider-api-key",
+                    }
+                },
             )
         )
 
@@ -138,6 +144,7 @@ iac-code a2a-client --config a2a-client.yml call \
   --prompt "Create a ROS VPC template with two vSwitches." \
   --cwd "$PWD" \
   --iac-code-model qwen-plus \
+  --iac-code-api-key "$IAC_CODE_API_KEY" \
   --stream
 ```
 
@@ -191,7 +198,7 @@ def build_follow_up(task_id: str, context_id: str, text: str) -> SendMessageRequ
             context_id=context_id,
             role=Role.ROLE_USER,
             parts=[Part(text=text)],
-            metadata={"iac_code": {"cwd": str(Path.cwd())}},
+            metadata={"iac_code": {"cwd": str(Path.cwd()), "iac_code_api_key": "provider-api-key"}},
         )
     )
 
@@ -245,7 +252,13 @@ async def main() -> None:
                         "messageId": "msg-1",
                         "role": "ROLE_USER",
                         "parts": [{"text": "Review this ROS template for missing parameters."}],
-                        "metadata": {"iac_code": {"cwd": str(Path.cwd())}},
+                        "metadata": {
+                            "iac_code": {
+                                "cwd": str(Path.cwd()),
+                                "iac_code_model": "qwen-plus",
+                                "iac_code_api_key": "provider-api-key",
+                            }
+                        },
                     },
                     "configuration": {"acceptedOutputModes": ["text/plain"]},
                 },
@@ -287,7 +300,12 @@ async def main() -> None:
                         "messageId": "msg-1",
                         "role": "ROLE_USER",
                         "parts": [{"text": "Generate a Terraform VPC example."}],
-                        "metadata": {"iac_code": {"cwd": str(Path.cwd())}},
+                        "metadata": {
+                            "iac_code": {
+                                "cwd": str(Path.cwd()),
+                                "iac_code_api_key": "provider-api-key",
+                            }
+                        },
                     },
                     "configuration": {"acceptedOutputModes": ["text/plain"]},
                 },

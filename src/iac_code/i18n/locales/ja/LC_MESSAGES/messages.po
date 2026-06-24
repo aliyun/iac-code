@@ -695,6 +695,10 @@ msgid "Model metadata to send with this A2A request"
 msgstr "この A2A リクエストで送信するモデルメタデータ"
 
 #: src/iac_code/cli/main.py
+msgid "API key metadata to send with this A2A request"
+msgstr "この A2A リクエストで送信する API キーメタデータ"
+
+#: src/iac_code/cli/main.py
 msgid "Bearer token for A2A HTTP requests"
 msgstr "A2A HTTP リクエスト用の Bearer トークン"
 
