@@ -40,7 +40,13 @@ def run_node_script(source: str) -> dict:
     with tempfile.TemporaryDirectory(prefix="iac-code-selling-console-test-") as temp_dir:
         script_path = Path(temp_dir) / "script.js"
         script_path.write_text(source, encoding="utf-8")
-        result = subprocess.run([*node_command(), str(script_path)], capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            [*node_command(), str(script_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
@@ -49,11 +55,12 @@ def test_run_node_script_uses_file_instead_of_inline_eval(monkeypatch: pytest.Mo
     source = 'console.log(JSON.stringify({"ok": true}));'
     command_seen: list[str] = []
 
-    def fake_run(command, *, capture_output, text, check):
+    def fake_run(command, *, capture_output, text, check, encoding):
         command_seen.extend(str(part) for part in command)
         assert capture_output is True
         assert text is True
         assert check is False
+        assert encoding == "utf-8"
         assert "-e" not in command_seen
         script_path = Path(command_seen[-1])
         assert script_path.read_text(encoding="utf-8") == source
