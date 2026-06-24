@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -36,9 +37,33 @@ def node_command() -> list[str]:
 
 
 def run_node_script(source: str) -> dict:
-    result = subprocess.run([*node_command(), "-e", source], capture_output=True, text=True, check=False)
+    with tempfile.TemporaryDirectory(prefix="iac-code-selling-console-test-") as temp_dir:
+        script_path = Path(temp_dir) / "script.js"
+        script_path.write_text(source, encoding="utf-8")
+        result = subprocess.run([*node_command(), str(script_path)], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+def test_run_node_script_uses_file_instead_of_inline_eval(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = 'console.log(JSON.stringify({"ok": true}));'
+    command_seen: list[str] = []
+
+    def fake_run(command, *, capture_output, text, check):
+        command_seen.extend(str(part) for part in command)
+        assert capture_output is True
+        assert text is True
+        assert check is False
+        assert "-e" not in command_seen
+        script_path = Path(command_seen[-1])
+        assert script_path.read_text(encoding="utf-8") == source
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok": true}\n', stderr="")
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert run_node_script(source) == {"ok": True}
+    assert command_seen[:1] == ["/usr/bin/node"]
 
 
 def test_node_command_falls_back_to_home_bundled_node_when_path_is_empty(

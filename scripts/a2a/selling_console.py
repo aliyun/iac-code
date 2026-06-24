@@ -26,16 +26,23 @@ if str(REPO_ROOT) not in sys.path:
 a2a_debugger = importlib.import_module("scripts.a2a.debugger")
 
 WEB_ROOT = Path(__file__).resolve().with_name("selling_console_web")
-STATIC_CONTENT_TYPES = {
-    "/styles.css": "text/css; charset=utf-8",
-    "/app.js": "application/javascript; charset=utf-8",
-}
 TEMPLATE_PLACEHOLDERS = (
     "__DEFAULTS_JSON__",
     "__DEFAULT_SERVER_URL_ATTR__",
     "__DEFAULT_CWD_ATTR__",
     "__STATIC_ASSET_VERSION__",
 )
+
+
+@dataclass(frozen=True)
+class StaticAsset:
+    path: Path
+    content_type: str
+
+
+STYLE_ASSET = StaticAsset(WEB_ROOT / "styles.css", "text/css; charset=utf-8")
+APP_ASSET = StaticAsset(WEB_ROOT / "app.js", "application/javascript; charset=utf-8")
+STATIC_ASSETS = (STYLE_ASSET, APP_ASSET)
 
 
 @dataclass(frozen=True)
@@ -71,9 +78,9 @@ def _json_for_template(value: object) -> str:
 
 def _static_asset_version() -> str:
     digest = hashlib.sha256()
-    for asset_name in ("styles.css", "app.js"):
-        digest.update(asset_name.encode("utf-8"))
-        digest.update((WEB_ROOT / asset_name).read_bytes())
+    for asset in STATIC_ASSETS:
+        digest.update(asset.path.name.encode("utf-8"))
+        digest.update(asset.path.read_bytes())
     return digest.hexdigest()[:12]
 
 
@@ -103,13 +110,27 @@ def _send_text(handler: BaseHTTPRequestHandler, status: int, body: str, content_
     handler.wfile.write(raw_body)
 
 
+def _static_asset_for_request(path: str) -> StaticAsset | None:
+    if path == "/styles.css":
+        return STYLE_ASSET
+    if path == "/app.js":
+        return APP_ASSET
+    return None
+
+
 def _send_static(handler: BaseHTTPRequestHandler, path: str) -> bool:
-    if path not in STATIC_CONTENT_TYPES:
+    asset = _static_asset_for_request(path)
+    if asset is None:
         return False
-    candidate = (WEB_ROOT / path.lstrip("/")).resolve()
-    if not candidate.is_file() or WEB_ROOT.resolve() not in candidate.parents:
+    web_root = WEB_ROOT.resolve()
+    candidate = asset.path.resolve()
+    try:
+        candidate.relative_to(web_root)
+    except ValueError:
         return False
-    _send_text(handler, 200, candidate.read_text(encoding="utf-8"), STATIC_CONTENT_TYPES[path])
+    if not candidate.is_file():
+        return False
+    _send_text(handler, 200, candidate.read_text(encoding="utf-8"), asset.content_type)
     return True
 
 

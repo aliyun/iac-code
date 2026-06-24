@@ -256,7 +256,7 @@ class TestRendererHelpers:
         output = console.file.getvalue()
         assert "see " in output
         assert "[Image #8]" in output
-        assert "file:///tmp/session-image-8.png" in output
+        assert renderer._file_url("/tmp/session-image-8.png") in output
 
     def test_any_segment_has_verbose_content(self):
         renderer = make_renderer()

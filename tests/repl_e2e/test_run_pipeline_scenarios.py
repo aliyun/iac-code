@@ -16,6 +16,19 @@ def _load_runner():
     return module
 
 
+def _repl_pty_unit_instance(runner, *, args, run_dir: Path, cwd: Path, env: dict[str, str]):
+    pty = runner.ReplPty.__new__(runner.ReplPty)
+    pty.args = args
+    pty.run_dir = run_dir
+    pty.cwd = cwd
+    pty.env = env
+    pty.events = []
+    pty.raw_chunks = []
+    pty.child = None
+    pty._live_transcript = False
+    return pty
+
+
 def _install_flow_fake_pty(
     monkeypatch,
     runner,
@@ -556,7 +569,7 @@ def test_expect_any_auto_approves_permission_prompt(tmp_path: Path) -> None:
 
     args = runner.parse_args(["--allow-real-cloud"])
     child = FakeChild()
-    pty = runner.ReplPty(args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
     pty.child = child
 
     matched = pty.expect_any((r"Pipeline completed",), description="pipeline completed", timeout=10)
@@ -595,7 +608,7 @@ def test_repl_pty_sendline_chunks_long_input(tmp_path: Path, monkeypatch) -> Non
             raise runner.pexpect.TIMEOUT("done")
 
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
-    pty = runner.ReplPty(args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
     pty.child = FakeChild()
 
     pty.sendline("x" * (runner.PTY_SEND_CHUNK_SIZE + 1))
