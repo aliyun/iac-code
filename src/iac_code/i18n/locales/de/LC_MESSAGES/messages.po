@@ -90,9 +90,9 @@ msgid "Task canceled."
 msgstr "Aufgabe abgebrochen."
 
 #: src/iac_code/a2a/executor.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Current model {model} does not support image input."
-msgstr "Modell {model} unterstützt keinen Thinking-Effort."
+msgstr "Aktuelles Modell {model} unterstützt keine Bildeingabe."
 
 #: src/iac_code/a2a/pipeline_executor.py
 msgid "A temporary error occurred. Please retry."
@@ -1657,7 +1657,6 @@ msgid "cleanup prompt"
 msgstr "Bereinigungs-Prompt"
 
 #: src/iac_code/commands/prompt.py
-#, fuzzy
 msgid "cleanup prompt · removed"
 msgstr "Bereinigungs-Prompt · entfernt"
 
@@ -2262,9 +2261,8 @@ msgstr ""
 "abgeschlossen ist."
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Requirements:"
-msgstr "erforderlich"
+msgstr "Anforderungen:"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -2376,9 +2374,8 @@ msgstr ""
 "Fortschritt."
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Cleanup resources:"
-msgstr "Bereinigungs-Prompts"
+msgstr "Bereinigungsressourcen:"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 #, python-brace-format
@@ -2601,9 +2598,8 @@ msgid "Step {step_id} completed. Conclusion submitted."
 msgstr "Schritt {step_id} abgeschlossen. Schlussfolgerung übermittelt."
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
-#, fuzzy
 msgid "Pipeline state persistence failed."
-msgstr "A2A-Pipeline-Zustand nicht gefunden"
+msgstr "Persistenz des Pipeline-Zustands fehlgeschlagen."
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 #: src/iac_code/pipeline/engine/sub_pipeline_executor.py
@@ -4005,7 +4001,7 @@ msgid "Command has no handler: {name}"
 msgstr "Kein Handler für Befehl: {name}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "↺ Rollback cleanup [{badge}] {label}"
 msgstr "↺ Rollback-Bereinigung [{badge}] {label}"
 
@@ -4015,29 +4011,24 @@ msgid "{kind} {resource_id}"
 msgstr "{kind} {resource_id}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Deleting"
-msgstr "Bereitstellung"
+msgstr "Löschen"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Skipped"
-msgstr "Überspringen"
+msgstr "Übersprungen"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pending"
-msgstr "OpenAI"
+msgstr "Ausstehend"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Checking"
-msgstr "PRÜFUNG LÄUFT"
+msgstr "Prüfen"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Progress"
-msgstr "Verarbeitet"
+msgstr "Fortschritt"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -4059,12 +4050,10 @@ msgid "{progress}; deletion required"
 msgstr "{progress}; Löschung erforderlich"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "stack"
-msgstr "ROS Stack"
+msgstr "Stack"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "resource"
 msgstr "Ressource"
 
@@ -4092,32 +4081,27 @@ msgstr ""
 "abgeschlossen."
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "failed"
-msgstr "Fehlgeschlagen"
+msgstr "fehlgeschlagen"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "pending"
-msgstr "OpenAI"
+msgstr "ausstehend"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "in progress"
-msgstr "PRÜFUNG LÄUFT"
+msgstr "in Bearbeitung"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "completed"
-msgstr "Abgeschlossen"
+msgstr "abgeschlossen"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "skipped"
-msgstr "Überspringen"
+msgstr "übersprungen"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{count} {label}"
 msgstr "{count} {label}"
 
@@ -4165,13 +4149,12 @@ msgstr ""
 " Chat wurde nicht dauerhaft markiert."
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid ""
 "Pipeline completed, but the handoff context could not be injected or "
 "saved."
 msgstr ""
-"Die Pipeline wurde abgeschlossen. Der normale Chat ist aktiv, aber der "
-"Übergabekontext konnte nicht eingefügt oder gespeichert werden."
+"Pipeline abgeschlossen, aber der Handoff-Kontext konnte nicht eingefügt "
+"oder gespeichert werden."
 
 #: src/iac_code/ui/repl.py
 msgid "Judging your input..."
@@ -4353,6 +4336,11 @@ msgstr "  ✘ {name}: fehlgeschlagen"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
+msgid "Pipeline warning: {reason}"
+msgstr "Pipeline-Warnung: {reason}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
 msgid "Option {index}"
 msgstr "Option {index}"
 
@@ -4433,14 +4421,13 @@ msgid "Resumed pipeline at step: {step}"
 msgstr "Pipeline bei Schritt fortgesetzt: {step}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Could not read pipeline state metadata: {reason}"
-msgstr "Pipeline-Zustand konnte nicht fortgesetzt werden: {reason}"
+msgstr "Pipeline-Zustandsmetadaten konnten nicht gelesen werden: {reason}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pipeline state metadata is invalid; continuing as normal chat."
-msgstr "Pipeline-Zustand verwerfen und als normalen Chat fortfahren"
+msgstr "Pipeline-Zustandsmetadaten sind ungültig; fahre als normaler Chat fort."
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format

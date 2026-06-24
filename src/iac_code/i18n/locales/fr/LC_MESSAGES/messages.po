@@ -91,9 +91,9 @@ msgid "Task canceled."
 msgstr "Tâche annulée."
 
 #: src/iac_code/a2a/executor.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Current model {model} does not support image input."
-msgstr "Le modèle {model} ne prend pas en charge l’effort de raisonnement."
+msgstr "Le modèle actuel {model} ne prend pas en charge l’entrée d’image."
 
 #: src/iac_code/a2a/pipeline_executor.py
 msgid "A temporary error occurred. Please retry."
@@ -1661,7 +1661,6 @@ msgid "cleanup prompt"
 msgstr "prompt de nettoyage"
 
 #: src/iac_code/commands/prompt.py
-#, fuzzy
 msgid "cleanup prompt · removed"
 msgstr "prompt de nettoyage · supprimé"
 
@@ -2268,9 +2267,8 @@ msgstr ""
 "de la suppression."
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Requirements:"
-msgstr "obligatoire"
+msgstr "Exigences :"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -2379,9 +2377,8 @@ msgid "- Briefly update the user during cleanup."
 msgstr "- Tenez brièvement l’utilisateur informé pendant le nettoyage."
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Cleanup resources:"
-msgstr "Prompts de nettoyage"
+msgstr "Ressources de nettoyage :"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 #, python-brace-format
@@ -2596,9 +2593,8 @@ msgid "Step {step_id} completed. Conclusion submitted."
 msgstr "Étape {step_id} terminée. Conclusion soumise."
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
-#, fuzzy
 msgid "Pipeline state persistence failed."
-msgstr "État du pipeline A2A introuvable"
+msgstr "Échec de la persistance de l’état du pipeline."
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 #: src/iac_code/pipeline/engine/sub_pipeline_executor.py
@@ -4008,7 +4004,7 @@ msgid "Command has no handler: {name}"
 msgstr "Aucun gestionnaire pour la commande : {name}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "↺ Rollback cleanup [{badge}] {label}"
 msgstr "↺ Nettoyage du rollback [{badge}] {label}"
 
@@ -4018,29 +4014,24 @@ msgid "{kind} {resource_id}"
 msgstr "{kind} {resource_id}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Deleting"
-msgstr "Déploiement"
+msgstr "Suppression"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Skipped"
-msgstr "Ignorer"
+msgstr "Ignoré"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pending"
-msgstr "OpenAI"
+msgstr "En attente"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Checking"
-msgstr "VÉRIFICATION EN COURS"
+msgstr "Vérification"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Progress"
-msgstr "Traité"
+msgstr "Progression"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -4062,14 +4053,12 @@ msgid "{progress}; deletion required"
 msgstr "{progress} ; suppression requise"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "stack"
-msgstr "ROS Stack"
+msgstr "stack"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "resource"
-msgstr "Ressource"
+msgstr "ressource"
 
 #: src/iac_code/ui/repl.py
 msgid ""
@@ -4095,32 +4084,27 @@ msgstr ""
 "terminés."
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "failed"
-msgstr "Échec"
+msgstr "échoué"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "pending"
-msgstr "OpenAI"
+msgstr "en attente"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "in progress"
-msgstr "VÉRIFICATION EN COURS"
+msgstr "en cours"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "completed"
-msgstr "Terminé"
+msgstr "terminé"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "skipped"
-msgstr "Ignorer"
+msgstr "ignoré"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{count} {label}"
 msgstr "{count} {label}"
 
@@ -4167,13 +4151,12 @@ msgstr ""
 "normal n'a pas été marqué comme durable."
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid ""
 "Pipeline completed, but the handoff context could not be injected or "
 "saved."
 msgstr ""
-"Le pipeline est terminé. Le chat normal est actif, mais le contexte de "
-"transfert n'a pas pu être injecté ou enregistré."
+"Le pipeline est terminé, mais le contexte de handoff n’a pas pu être "
+"injecté ou enregistré."
 
 #: src/iac_code/ui/repl.py
 msgid "Judging your input..."
@@ -4355,6 +4338,11 @@ msgstr "  ✘ {name} : échec"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
+msgid "Pipeline warning: {reason}"
+msgstr "Avertissement du pipeline : {reason}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
 msgid "Option {index}"
 msgstr "Option {index}"
 
@@ -4435,14 +4423,15 @@ msgid "Resumed pipeline at step: {step}"
 msgstr "Pipeline repris à l'étape : {step}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Could not read pipeline state metadata: {reason}"
-msgstr "Impossible de reprendre l'état du pipeline : {reason}"
+msgstr "Impossible de lire les métadonnées d'état du pipeline : {reason}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pipeline state metadata is invalid; continuing as normal chat."
-msgstr "Ignorer l'état du pipeline et continuer comme un chat normal"
+msgstr ""
+"Les métadonnées d’état du pipeline sont invalides ; poursuite en chat "
+"normal."
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format

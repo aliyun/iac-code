@@ -556,14 +556,14 @@ async def test_pipeline_mode_image_input_checks_provider_context(
         )
         return False
 
-    monkeypatch.setattr("iac_code.a2a.executor.get_active_provider_key", lambda: "openapi_compatible")
+    monkeypatch.setattr("iac_code.a2a.executor.get_active_provider_key", lambda: "openai_compatible")
     monkeypatch.setattr(
         "iac_code.a2a.executor.get_provider_config",
         lambda provider_key: {"keyName": provider_key, "apiBase": "https://example.test/v1"},
     )
     monkeypatch.setattr(
         "iac_code.a2a.executor.load_credentials",
-        lambda model=None: {"openapi_compatible": "test-key"},
+        lambda model=None: {"openai_compatible": "test-key"},
     )
     monkeypatch.setattr("iac_code.a2a.executor.is_model_multimodal", fake_is_model_multimodal)
 
@@ -579,7 +579,7 @@ async def test_pipeline_mode_image_input_checks_provider_context(
 
     assert seen == {
         "model": "custom-vl",
-        "provider_key": "openapi_compatible",
+        "provider_key": "openai_compatible",
         "base_url": "https://example.test/v1",
         "api_key": "test-key",
     }

@@ -78,9 +78,9 @@ msgid "Task canceled."
 msgstr "タスクがキャンセルされました。"
 
 #: src/iac_code/a2a/executor.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Current model {model} does not support image input."
-msgstr "モデル {model} は effort（思考の負荷）をサポートしていません。"
+msgstr "現在のモデル {model} は画像入力をサポートしていません。"
 
 #: src/iac_code/a2a/pipeline_executor.py
 msgid "A temporary error occurred. Please retry."
@@ -1611,7 +1611,6 @@ msgid "cleanup prompt"
 msgstr "クリーンアッププロンプト"
 
 #: src/iac_code/commands/prompt.py
-#, fuzzy
 msgid "cleanup prompt · removed"
 msgstr "クリーンアッププロンプト · 削除済み"
 
@@ -2188,9 +2187,8 @@ msgid ""
 msgstr "パイプラインのロールバック後もクラウドリソースのクリーンアップが必要です。今すぐクリーンアップし、削除が完了するまで確認を続けてください。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Requirements:"
-msgstr "必須"
+msgstr "要件:"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -2280,9 +2278,8 @@ msgid "- Briefly update the user during cleanup."
 msgstr "- クリーンアップ中はユーザーに簡潔に進捗を伝えてください。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Cleanup resources:"
-msgstr "クリーンアッププロンプト"
+msgstr "クリーンアップリソース:"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 #, python-brace-format
@@ -2476,9 +2473,8 @@ msgid "Step {step_id} completed. Conclusion submitted."
 msgstr "ステップ {step_id} が完了しました。結論を送信しました。"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
-#, fuzzy
 msgid "Pipeline state persistence failed."
-msgstr "A2A パイプライン状態が見つかりません"
+msgstr "パイプライン状態の永続化に失敗しました。"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 #: src/iac_code/pipeline/engine/sub_pipeline_executor.py
@@ -3835,7 +3831,7 @@ msgid "Command has no handler: {name}"
 msgstr "ハンドラーがないコマンドです：{name}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "↺ Rollback cleanup [{badge}] {label}"
 msgstr "↺ ロールバッククリーンアップ [{badge}] {label}"
 
@@ -3845,29 +3841,24 @@ msgid "{kind} {resource_id}"
 msgstr "{kind} {resource_id}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Deleting"
-msgstr "デプロイ"
+msgstr "削除中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Skipped"
-msgstr "スキップ"
+msgstr "スキップ済み"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pending"
-msgstr "OpenAI"
+msgstr "保留中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Checking"
-msgstr "チェック進行中"
+msgstr "確認中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Progress"
-msgstr "処理しました"
+msgstr "進捗"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -3889,12 +3880,10 @@ msgid "{progress}; deletion required"
 msgstr "{progress}; 削除が必要です"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "stack"
-msgstr "ROS スタック"
+msgstr "スタック"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "resource"
 msgstr "リソース"
 
@@ -3915,34 +3904,29 @@ msgid "↺ Rollback cleanup resume: all {count} records are completed."
 msgstr "↺ ロールバッククリーンアップ再開: {count} 件のレコードはすべて完了しています。"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "failed"
 msgstr "失敗"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "pending"
-msgstr "OpenAI"
+msgstr "保留中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "in progress"
-msgstr "チェック進行中"
+msgstr "進行中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "completed"
 msgstr "完了"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "skipped"
-msgstr "スキップ"
+msgstr "スキップ済み"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{count} {label}"
-msgstr "{label} {count} 件"
+msgstr "{count} 件の{label}"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -3981,11 +3965,10 @@ msgid ""
 msgstr "パイプライン状態の永続化に失敗しました。通常チャットへのハンドオフは永続化済みとしてマークされていません。"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid ""
 "Pipeline completed, but the handoff context could not be injected or "
 "saved."
-msgstr "パイプラインが完了しました。通常チャットは有効ですが、引き継ぎコンテキストを注入または保存できませんでした。"
+msgstr "パイプラインは完了しましたが、handoff コンテキストを注入または保存できませんでした。"
 
 #: src/iac_code/ui/repl.py
 msgid "Judging your input..."
@@ -4153,6 +4136,11 @@ msgstr "  ✘ {name}: 失敗"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
+msgid "Pipeline warning: {reason}"
+msgstr "パイプライン警告: {reason}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
 msgid "Option {index}"
 msgstr "オプション {index}"
 
@@ -4231,14 +4219,13 @@ msgid "Resumed pipeline at step: {step}"
 msgstr "パイプラインをステップ {step} から再開しました"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Could not read pipeline state metadata: {reason}"
-msgstr "パイプライン状態を再開できませんでした: {reason}"
+msgstr "パイプライン状態メタデータを読み取れませんでした: {reason}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pipeline state metadata is invalid; continuing as normal chat."
-msgstr "パイプライン状態を破棄して通常のチャットとして続行"
+msgstr "パイプライン状態メタデータが無効です。通常チャットとして続行します。"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format

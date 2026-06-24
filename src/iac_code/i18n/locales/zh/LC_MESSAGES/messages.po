@@ -78,9 +78,9 @@ msgid "Task canceled."
 msgstr "任务已取消。"
 
 #: src/iac_code/a2a/executor.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Current model {model} does not support image input."
-msgstr "模型 {model} 不支持调整思考强度。"
+msgstr "当前模型 {model} 不支持图片输入。"
 
 #: src/iac_code/a2a/pipeline_executor.py
 msgid "A temporary error occurred. Please retry."
@@ -1597,9 +1597,8 @@ msgid "cleanup prompt"
 msgstr "清理提示词"
 
 #: src/iac_code/commands/prompt.py
-#, fuzzy
 msgid "cleanup prompt · removed"
-msgstr "清理提示词 · 已移除"
+msgstr "清理提示 · 已移除"
 
 #: src/iac_code/commands/prompt.py
 msgid "Instruction Memory"
@@ -2172,9 +2171,8 @@ msgid ""
 msgstr "管道回滚后仍有云资源需要清理。请立即清理，并持续检查直到删除完成。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Requirements:"
-msgstr "必填"
+msgstr "需求："
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -2258,9 +2256,8 @@ msgid "- Briefly update the user during cleanup."
 msgstr "- 清理过程中简要向用户更新进展。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
-#, fuzzy
 msgid "Cleanup resources:"
-msgstr "清理提示词"
+msgstr "清理资源："
 
 #: src/iac_code/pipeline/engine/cleanup.py
 #, python-brace-format
@@ -2446,9 +2443,8 @@ msgid "Step {step_id} completed. Conclusion submitted."
 msgstr "步骤 {step_id} 已完成。结论已提交。"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
-#, fuzzy
 msgid "Pipeline state persistence failed."
-msgstr "未找到 A2A pipeline 状态"
+msgstr "管道状态持久化失败。"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 #: src/iac_code/pipeline/engine/sub_pipeline_executor.py
@@ -3786,7 +3782,7 @@ msgid "Command has no handler: {name}"
 msgstr "命令没有处理器：{name}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "↺ Rollback cleanup [{badge}] {label}"
 msgstr "↺ 回滚清理 [{badge}] {label}"
 
@@ -3796,29 +3792,24 @@ msgid "{kind} {resource_id}"
 msgstr "{kind} {resource_id}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Deleting"
-msgstr "部署执行"
+msgstr "删除中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Skipped"
-msgstr "跳过"
+msgstr "已跳过"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pending"
-msgstr "OpenAI"
+msgstr "待处理"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Checking"
 msgstr "检查中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Progress"
-msgstr "已处理"
+msgstr "进度"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -3840,12 +3831,10 @@ msgid "{progress}; deletion required"
 msgstr "{progress}；需要删除"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "stack"
-msgstr "ROS 资源栈"
+msgstr "资源栈"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "resource"
 msgstr "资源"
 
@@ -3866,34 +3855,29 @@ msgid "↺ Rollback cleanup resume: all {count} records are completed."
 msgstr "↺ 回滚清理恢复：所有 {count} 条记录都已完成。"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "failed"
-msgstr "失败"
+msgstr "已失败"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "pending"
-msgstr "OpenAI"
+msgstr "待处理"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "in progress"
-msgstr "检查中"
+msgstr "进行中"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "completed"
 msgstr "已完成"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "skipped"
-msgstr "跳过"
+msgstr "已跳过"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "{count} {label}"
-msgstr "{count} 条{label}"
+msgstr "{count} 个{label}"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -3932,11 +3916,10 @@ msgid ""
 msgstr "管道状态持久化失败。普通聊天 handoff 未标记为已持久化。"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid ""
 "Pipeline completed, but the handoff context could not be injected or "
 "saved."
-msgstr "Pipeline 已完成。普通聊天已启用，但交接上下文无法注入或保存。"
+msgstr "管道已完成，但无法注入或保存 handoff 上下文。"
 
 #: src/iac_code/ui/repl.py
 msgid "Judging your input..."
@@ -4102,6 +4085,11 @@ msgstr "  ✘ {name}: 失败"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
+msgid "Pipeline warning: {reason}"
+msgstr "管道警告：{reason}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
 msgid "Option {index}"
 msgstr "选项 {index}"
 
@@ -4180,14 +4168,13 @@ msgid "Resumed pipeline at step: {step}"
 msgstr "已恢复 pipeline 到步骤：{step}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy, python-brace-format
+#, python-brace-format
 msgid "Could not read pipeline state metadata: {reason}"
-msgstr "无法恢复 pipeline 状态：{reason}"
+msgstr "无法读取管道状态元数据：{reason}"
 
 #: src/iac_code/ui/repl.py
-#, fuzzy
 msgid "Pipeline state metadata is invalid; continuing as normal chat."
-msgstr "丢弃 pipeline 状态并按普通聊天继续"
+msgstr "管道状态元数据无效；继续按普通聊天处理。"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
