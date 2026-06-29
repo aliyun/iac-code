@@ -8,7 +8,7 @@ from iac_code.agent.message import RECALLED_MEMORY_MARKER
 from iac_code.agent.system_prompt import split_by_dynamic_boundary
 from iac_code.providers.base import Message
 from iac_code.providers.openai_provider import OpenAIProvider
-from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec
+from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 
 DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DASHSCOPE_TOKEN_PLAN_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
@@ -50,6 +50,8 @@ class DashScopeProvider(OpenAIProvider):
         effort: str | None = None,
         base_url: str = DASHSCOPE_BASE_URL,
         provider_key: str = "dashscope",
+        thinking_budget: int | None = None,
+        max_completion_tokens: int | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -57,6 +59,8 @@ class DashScopeProvider(OpenAIProvider):
             api_key=api_key,
             base_url=base_url,
             effort=effort,
+            thinking_budget=thinking_budget,
+            max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
         )
 
@@ -124,7 +128,23 @@ class DashScopeProvider(OpenAIProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}
-        return {"extra_body": {"enable_thinking": True}}
+        extra_body: dict[str, Any] = {"enable_thinking": True}
+        thinking_budget = self._effective_thinking_budget()
+        if thinking_budget is not None:
+            extra_body["thinking_budget"] = thinking_budget
+
+        kwargs: dict[str, Any] = {"extra_body": extra_body}
+        if not spec.uses_reasoning_effort_param:
+            return kwargs
+        effort = normalize_effort(self._effort)
+        if effort is None or effort == "auto":
+            return kwargs
+        allowed = {e.value for e in spec.allowed_efforts}
+        if effort in allowed:
+            kwargs["reasoning_effort"] = effort
+        elif spec.default_effort is not None:
+            kwargs["reasoning_effort"] = spec.default_effort.value
+        return kwargs
 
 
 def _is_recalled_memory_reminder(content: Any) -> bool:

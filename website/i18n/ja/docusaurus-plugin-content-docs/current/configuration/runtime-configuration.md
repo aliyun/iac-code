@@ -63,6 +63,33 @@ IaC Code には公開されているメモリ場所が 2 つあります。
 
 マージ順序：**ユーザー設定 → プロジェクト設定 → プロジェクトローカル設定 → CLI 引数**（後のソースが前のものを上書きします）。
 
+## Provider リクエストポリシー
+
+`settings.yml` の provider エントリには、OpenAI 互換 provider 向けのリクエストポリシーフィールドを設定できます。モデルが表示される回答 token と reasoning/thinking token を分けて扱う場合に役立ちます。
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: glm-5.2
+    thinkingBudget: 8192
+    maxCompletionTokens: 16384
+    models:
+      kimi-k2.7-code:
+        thinkingBudget: 8192
+        maxCompletionTokens: 16384
+```
+
+| フィールド | スコープ | 説明 |
+|---|---|---|
+| `thinkingBudget` | Provider またはモデル | 正の整数の reasoning/thinking 予算。対応している provider に渡されます。 |
+| `maxCompletionTokens` | Provider またはモデル | `max_completion_tokens` を使う provider/model 向けの、正の整数の上書き値。 |
+| `effort` | Provider またはモデル | thinking effort の任意の上書き値。effort 制御に対応したモデルでのみ有効です。 |
+
+`providers.<provider>.models.<model>` 以下のモデル単位の有効な値は、provider 単位の値を上書きします。無効な数値は無視されるため、IaC Code は provider 単位の値または組み込みのモデルポリシーにフォールバックします。
+
+Alibaba Cloud DashScope と DashScope Token Plan では、IaC Code は `glm-5.2` と `kimi-k2.7-code` に組み込みで `thinkingBudget=8192` を設定しています。`maxCompletionTokens` が未設定の場合、リクエスト上限は通常の回答 token 上限に有効な thinking budget を加えて計算されます。
+
 ## ツール権限設定
 
 `settings.yml` の `permissions` セクションで、どのツールアクションを許可、拒否、または確認を必要とするかを設定します：

@@ -1303,6 +1303,10 @@ msgstr "非法的思考强度。允许的值：{labels}"
 msgid "Current effort: {effort}"
 msgstr "当前思考强度：{effort}"
 
+#: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+msgid "not configured"
+msgstr "未配置"
+
 #: src/iac_code/commands/effort.py
 #, python-brace-format
 msgid "Select effort for {model}"
@@ -1832,10 +1836,6 @@ msgstr "status 命令需要 REPL 上下文。"
 #: src/iac_code/commands/status.py
 msgid "Status is only available in interactive mode."
 msgstr "status 仅在交互模式下可用。"
-
-#: src/iac_code/commands/status.py
-msgid "not configured"
-msgstr "未配置"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -4848,3 +4848,4 @@ msgstr "公开事件中已省略堆栈跟踪；请查看 error_id。"
 
 #~ msgid "Note: images are not supported in pipeline mode and will be ignored."
 #~ msgstr "注意：pipeline 模式不支持图像，将忽略图像。"
+

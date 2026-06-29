@@ -242,12 +242,16 @@ class ModelPicker:
             return
 
         allowed = spec.allowed_efforts
-        current = self._efforts.get(pair, spec.default_effort)
-        try:
-            current_idx = allowed.index(current)
-        except ValueError:
-            current_idx = allowed.index(spec.default_effort)
-        new_idx = max(0, min(len(allowed) - 1, current_idx + direction))
+        current = self._efforts.get(pair)
+        if current is None:
+            new_idx = 0 if direction >= 0 else len(allowed) - 1
+        else:
+            try:
+                current_idx = allowed.index(current)
+            except ValueError:
+                default = spec.default_effort if spec.default_effort in allowed else allowed[0]
+                current_idx = allowed.index(default)
+            new_idx = max(0, min(len(allowed) - 1, current_idx + direction))
         self._efforts[pair] = allowed[new_idx]
 
     def _render_model_line(self, item: dict, is_focused: bool) -> Text:
@@ -272,8 +276,8 @@ class ModelPicker:
 
         # Effort symbol for effort-capable models
         spec = get_thinking_spec(provider_key, model)
-        if spec.supports_effort and spec.default_effort is not None:
-            effort = self._efforts.get((provider_key, model), spec.default_effort)
+        effort = self._efforts.get((provider_key, model))
+        if spec.supports_effort and effort is not None:
             symbol = EFFORT_SYMBOLS[effort]
             text.append(f" {symbol}", style="yellow")
 

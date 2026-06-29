@@ -34,8 +34,10 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "qwen-flash",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
+        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
+        "glm-5.2",
         "glm-5.1",
         "MiniMax-M2.5",
     ):
@@ -48,7 +50,14 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
 
     assert PROVIDER_REGISTRY["dashscope"].default_model == "qwen3.7-max"
     assert not _model_entry("dashscope", "qwen3.7-max").support_multimodal
-    for model_id in ("qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "qwen3.5-plus", "qwen3.5-flash"):
+    for model_id in (
+        "qwen3.7-plus",
+        "qwen3.6-plus",
+        "qwen3.6-flash",
+        "qwen3.5-plus",
+        "qwen3.5-flash",
+        "kimi-k2.7-code",
+    ):
         assert _model_entry("dashscope", model_id).support_multimodal
 
 
@@ -63,9 +72,11 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
         "deepseek-v4-pro",
         "deepseek-v4-flash",
         "deepseek-v3.2",
+        "glm-5.2",
         "glm-5.1",
         "glm-5",
         "MiniMax-M2.5",
+        "kimi-k2.7-code",
         "kimi-k2.5",
         "kimi-k2.6",
     ):
@@ -75,7 +86,7 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
     assert "MiniMax-M2.7" not in models
     assert PROVIDER_REGISTRY["dashscope_token_plan"].default_model == "qwen3.7-max"
     assert not _model_entry("dashscope_token_plan", "qwen3.7-max").support_multimodal
-    for model_id in ("qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.5", "kimi-k2.6"):
+    for model_id in ("qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.7-code", "kimi-k2.5", "kimi-k2.6"):
         assert _model_entry("dashscope_token_plan", model_id).support_multimodal
 
 
@@ -119,7 +130,9 @@ def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
         assert get_thinking_spec(provider_key, "MiniMax-M3").family is ThinkingFamily.MINIMAX
 
     for provider_key in ("zhipu_cn", "zhipu_intl"):
-        assert "glm-5.2" not in _model_ids(provider_key)
+        assert "glm-5.2" in _model_ids(provider_key)
+        assert PROVIDER_REGISTRY[provider_key].default_model == "glm-5.2"
+        assert get_thinking_spec(provider_key, "glm-5.2").family is ThinkingFamily.ZHIPU
         assert get_thinking_spec(provider_key, "glm-5.1").family is ThinkingFamily.ZHIPU
 
     for provider_key in ("zhipu_cn_codingplan", "zhipu_intl_codingplan"):

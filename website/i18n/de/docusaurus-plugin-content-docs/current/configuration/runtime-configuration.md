@@ -63,6 +63,33 @@ Zusätzlich zur benutzerbezogenen `~/.iac-code/settings.yml` lädt IaC Code proj
 
 Zusammenführungsreihenfolge: **Benutzereinstellungen → Projekteinstellungen → Lokale Projekteinstellungen → CLI-Argumente** (spätere Quellen überschreiben frühere).
 
+## Anfragerichtlinie für Provider
+
+Provider-Einträge in `settings.yml` können Felder für Anfragerichtlinien bei OpenAI-kompatiblen Providern enthalten. Diese Einstellungen sind nützlich, wenn ein Modell sichtbare Antwort-Tokens getrennt von Reasoning-/Thinking-Tokens behandelt.
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: glm-5.2
+    thinkingBudget: 8192
+    maxCompletionTokens: 16384
+    models:
+      kimi-k2.7-code:
+        thinkingBudget: 8192
+        maxCompletionTokens: 16384
+```
+
+| Feld | Geltungsbereich | Beschreibung |
+|---|---|---|
+| `thinkingBudget` | Provider oder Modell | Positives ganzzahliges Budget für Reasoning/Thinking, das an Provider übergeben wird, die es unterstützen. |
+| `maxCompletionTokens` | Provider oder Modell | Positiver ganzzahliger Überschreibungswert für `max_completion_tokens` bei Providern/Modellen, die dieses Anfragefeld verwenden. |
+| `effort` | Provider oder Modell | Optionale Überschreibung des Thinking-Aufwands; nur wirksam bei Modellen, die Effort-Steuerung unterstützen. |
+
+Gültige modellbezogene Werte unter `providers.<provider>.models.<model>` überschreiben providerbezogene Werte. Ungültige numerische Werte werden ignoriert, sodass IaC Code auf den providerbezogenen Wert oder die eingebaute Modellrichtlinie zurückfällt.
+
+Für Alibaba Cloud DashScope und DashScope Token Plan hat IaC Code ein eingebautes `thinkingBudget=8192` für `glm-5.2` und `kimi-k2.7-code`. Wenn `maxCompletionTokens` nicht gesetzt ist, wird das Anfrage-Limit aus dem normalen Antwort-Token-Limit plus dem wirksamen Thinking Budget berechnet.
+
 ## Werkzeug-Berechtigungskonfiguration
 
 Der Abschnitt `permissions` in `settings.yml` konfiguriert, welche Werkzeugaktionen erlaubt, verweigert oder bestätigt werden müssen:

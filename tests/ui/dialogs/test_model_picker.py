@@ -214,6 +214,24 @@ class TestModelPickerEffortCycle:
         picker._cycle_effort(("deepseek", "deepseek-v4-pro"), 1)
         assert picker._efforts[("deepseek", "deepseek-v4-pro")] == EffortLevel.MAX
 
+    def test_effort_cycle_initializes_model_without_default_effort_on_user_action(self):
+        picker = make_picker(configured_providers=["dashscope"])
+        pair = ("dashscope", "glm-5.2")
+        assert pair not in picker._efforts
+
+        picker._cycle_effort(pair, 1)
+
+        assert picker._efforts[pair] == EffortLevel.LOW
+
+    def test_effort_cycle_down_initializes_model_without_default_effort_to_max(self):
+        picker = make_picker(configured_providers=["dashscope"])
+        pair = ("dashscope", "glm-5.2")
+        assert pair not in picker._efforts
+
+        picker._cycle_effort(pair, -1)
+
+        assert picker._efforts[pair] == EffortLevel.MAX
+
 
 # ---------------------------------------------------------------------------
 # ModelPicker — key navigation

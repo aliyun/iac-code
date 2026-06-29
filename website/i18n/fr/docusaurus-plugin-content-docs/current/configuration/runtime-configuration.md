@@ -63,6 +63,33 @@ En plus du fichier `~/.iac-code/settings.yml` au niveau utilisateur, IaC Code ch
 
 Ordre de fusion : **paramètres utilisateur → paramètres projet → paramètres locaux projet → arguments CLI** (les sources ultérieures remplacent les précédentes).
 
+## Politique de requête du fournisseur
+
+Les entrées de fournisseur dans `settings.yml` peuvent contenir des champs de politique de requête pour les fournisseurs compatibles OpenAI. Ces réglages sont utiles lorsqu'un modèle distingue les tokens de réponse visibles des tokens de reasoning/thinking.
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: glm-5.2
+    thinkingBudget: 8192
+    maxCompletionTokens: 16384
+    models:
+      kimi-k2.7-code:
+        thinkingBudget: 8192
+        maxCompletionTokens: 16384
+```
+
+| Champ | Portée | Description |
+|---|---|---|
+| `thinkingBudget` | Fournisseur ou modèle | Budget de reasoning/thinking sous forme d'entier positif, transmis aux fournisseurs qui le prennent en charge. |
+| `maxCompletionTokens` | Fournisseur ou modèle | Valeur positive entière qui remplace `max_completion_tokens` pour les fournisseurs/modèles utilisant ce champ de requête. |
+| `effort` | Fournisseur ou modèle | Surcharge optionnelle de l'effort de thinking, uniquement pour les modèles qui prennent en charge le contrôle d'effort. |
+
+Les valeurs valides définies au niveau du modèle sous `providers.<provider>.models.<model>` remplacent les valeurs définies au niveau du fournisseur. Les valeurs numériques invalides sont ignorées ; IaC Code revient alors à la valeur du fournisseur ou à la politique intégrée du modèle.
+
+Pour Alibaba Cloud DashScope et DashScope Token Plan, IaC Code définit une valeur intégrée `thinkingBudget=8192` pour `glm-5.2` et `kimi-k2.7-code`. Si `maxCompletionTokens` n'est pas défini, la limite de requête est calculée comme la limite normale de tokens de réponse plus le thinking budget effectif.
+
 ## Configuration des permissions d'outils
 
 La section `permissions` dans `settings.yml` configure quelles actions d'outils sont autorisées, refusées ou nécessitent une confirmation :

@@ -141,6 +141,65 @@ class TestEffortPerProviderRouting:
         assert "bailian" not in body
 
     @pytest.mark.asyncio
+    async def test_bailian_glm52_accepts_effort_without_default_effort(self, tmp_path, monkeypatch):
+        from iac_code import config
+        from iac_code.commands import auth as auth_mod
+        from iac_code.commands.effort import effort_command
+
+        settings_path = tmp_path / "settings.yml"
+        settings_path.write_text(
+            "activeProvider: dashscope\nproviders:\n  dashscope:\n    model: glm-5.2\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(config, "get_settings_path", lambda: settings_path)
+        monkeypatch.setattr(auth_mod, "get_settings_path", lambda: settings_path)
+
+        from types import SimpleNamespace
+
+        class _Store:
+            def get_state(self):
+                return SimpleNamespace(model="glm-5.2")
+
+            def set_state(self, **_):
+                pass
+
+        ctx = SimpleNamespace(store=_Store(), console=None)
+        result = await effort_command(context=ctx, args=["high"])
+
+        assert "high" in result.lower()
+        body = settings_path.read_text(encoding="utf-8")
+        assert "effort: high" in body
+
+    @pytest.mark.asyncio
+    async def test_bailian_glm52_without_saved_effort_reports_not_configured(self, tmp_path, monkeypatch):
+        from iac_code import config
+        from iac_code.commands import auth as auth_mod
+        from iac_code.commands.effort import effort_command
+
+        settings_path = tmp_path / "settings.yml"
+        settings_path.write_text(
+            "activeProvider: dashscope\nproviders:\n  dashscope:\n    model: glm-5.2\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(config, "get_settings_path", lambda: settings_path)
+        monkeypatch.setattr(auth_mod, "get_settings_path", lambda: settings_path)
+
+        from types import SimpleNamespace
+
+        class _Store:
+            def get_state(self):
+                return SimpleNamespace(model="glm-5.2")
+
+            def set_state(self, **_):
+                pass
+
+        ctx = SimpleNamespace(store=_Store(), console=None)
+        result = await effort_command(context=ctx, args=[])
+
+        assert "not configured" in result
+        assert "low" not in result.lower()
+
+    @pytest.mark.asyncio
     async def test_official_deepseek_accepts_high_in_separate_slot(self, tmp_path, monkeypatch):
         from iac_code import config
         from iac_code.commands import auth as auth_mod

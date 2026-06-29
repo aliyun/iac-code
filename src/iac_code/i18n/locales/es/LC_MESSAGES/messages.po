@@ -1360,6 +1360,10 @@ msgstr "Valor de effort no válido. Valores permitidos: {labels}"
 msgid "Current effort: {effort}"
 msgstr "Effort actual: {effort}"
 
+#: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+msgid "not configured"
+msgstr "no configurado"
+
 #: src/iac_code/commands/effort.py
 #, python-brace-format
 msgid "Select effort for {model}"
@@ -1905,10 +1909,6 @@ msgstr "El comando status requiere un contexto REPL."
 #: src/iac_code/commands/status.py
 msgid "Status is only available in interactive mode."
 msgstr "status solo está disponible en modo interactivo."
-
-#: src/iac_code/commands/status.py
-msgid "not configured"
-msgstr "no configurado"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -5187,3 +5187,4 @@ msgstr "La traza de pila se omitió del evento público; consulta error_id."
 #~ "Nota: las imágenes no son compatibles"
 #~ " con el modo pipeline y se "
 #~ "ignorarán."
+

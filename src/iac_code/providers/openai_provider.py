@@ -32,6 +32,20 @@ from iac_code.types.stream_events import (
 from iac_code.utils.tool_input_parser import parse_tool_input_events
 
 
+def _positive_int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped.isdigit():
+        return None
+    parsed = int(stripped)
+    return parsed if parsed > 0 else None
+
+
 class OpenAIProvider(Provider):
     """Provider implementation for OpenAI API (GPT-4, etc.)."""
 
@@ -47,12 +61,16 @@ class OpenAIProvider(Provider):
         base_url: str | None = None,
         client: Any = None,
         effort: str | None = None,
+        thinking_budget: int | None = None,
+        max_completion_tokens: int | None = None,
         provider_key: str = "openai",
         **kwargs,
     ):
         self._model = model
         self._base_url = base_url
         self._effort = effort
+        self._thinking_budget = _positive_int_or_none(thinking_budget)
+        self._max_completion_tokens = _positive_int_or_none(max_completion_tokens)
         # Subclasses may set this before calling super().stream/complete to
         # inject provider-specific kwargs (e.g. DeepSeek thinking mode).
         self._extra_request_kwargs: dict[str, Any] = {}
@@ -82,6 +100,23 @@ class OpenAIProvider(Provider):
     def _effort_request_kwargs(self) -> dict[str, Any]:
         # Backwards-compatible alias used by the streaming/non-streaming paths.
         return self._build_thinking_kwargs()
+
+    def _effective_thinking_budget(self) -> int | None:
+        spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
+        if not spec.supports_thinking_budget:
+            return None
+        return self._thinking_budget if self._thinking_budget is not None else spec.default_thinking_budget
+
+    def _token_limit_kwargs(self, max_tokens: int) -> dict[str, int]:
+        spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
+        if not spec.use_max_completion_tokens:
+            return {"max_tokens": max_tokens}
+        if self._max_completion_tokens is not None:
+            return {"max_completion_tokens": self._max_completion_tokens}
+        thinking_budget = self._effective_thinking_budget()
+        if thinking_budget is None:
+            return {"max_tokens": max_tokens}
+        return {"max_completion_tokens": max_tokens + thinking_budget}
 
     def get_model_name(self) -> str:
         return self._model
@@ -212,9 +247,9 @@ class OpenAIProvider(Provider):
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": api_messages,
-            "max_tokens": max_tokens,
             "stream": True,
         }
+        kwargs.update(self._token_limit_kwargs(max_tokens))
         if self.supports_stream_options:
             kwargs["stream_options"] = {"include_usage": True}
         if tools:
@@ -333,8 +368,8 @@ class OpenAIProvider(Provider):
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": api_messages,
-            "max_tokens": max_tokens,
         }
+        kwargs.update(self._token_limit_kwargs(max_tokens))
         if tools:
             kwargs["tools"] = self._convert_tools(tools)
         for k, v in self._effort_request_kwargs().items():

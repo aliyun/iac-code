@@ -49,6 +49,50 @@ class TestGetThinkingSpec:
         assert spec.family is ThinkingFamily.DASHSCOPE
         assert spec.allowed_efforts == ()
 
+    def test_dashscope_glm52_has_bounded_default_request_policy(self):
+        spec = get_thinking_spec("dashscope", "glm-5.2")
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.allowed_efforts == (
+            EffortLevel.LOW,
+            EffortLevel.MEDIUM,
+            EffortLevel.HIGH,
+            EffortLevel.XHIGH,
+            EffortLevel.MAX,
+        )
+        assert spec.default_thinking_budget == 8192
+        assert spec.supports_thinking_budget is True
+        assert spec.use_max_completion_tokens is True
+        assert spec.uses_reasoning_effort_param is True
+
+    def test_dashscope_kimi_k27_code_has_bounded_default_request_policy(self):
+        spec = get_thinking_spec("dashscope", "kimi-k2.7-code")
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.allowed_efforts == ()
+        assert spec.default_thinking_budget == 8192
+        assert spec.supports_thinking_budget is True
+        assert spec.use_max_completion_tokens is True
+        assert spec.uses_reasoning_effort_param is False
+
+    def test_token_plan_glm52_and_kimi_k27_code_have_bounded_default_request_policy(self):
+        from iac_code.providers.thinking import MODEL_THINKING
+
+        glm = get_thinking_spec("dashscope_token_plan", "glm-5.2")
+        kimi = get_thinking_spec("dashscope_token_plan", "kimi-k2.7-code")
+
+        assert "glm-5.2" in MODEL_THINKING["dashscope_token_plan"]
+        assert "kimi-k2.7-code" in MODEL_THINKING["dashscope_token_plan"]
+        assert glm.family is ThinkingFamily.DASHSCOPE
+        assert glm.default_thinking_budget == 8192
+        assert glm.supports_thinking_budget is True
+        assert glm.use_max_completion_tokens is True
+        assert glm.uses_reasoning_effort_param is True
+
+        assert kimi.family is ThinkingFamily.DASHSCOPE
+        assert kimi.default_thinking_budget == 8192
+        assert kimi.supports_thinking_budget is True
+        assert kimi.use_max_completion_tokens is True
+        assert kimi.uses_reasoning_effort_param is False
+
     def test_dashscope_deepseek_supports_high_max(self):
         spec = get_thinking_spec("dashscope", "deepseek-v4-pro")
         assert spec.family is ThinkingFamily.DASHSCOPE
@@ -68,7 +112,7 @@ class TestGetThinkingSpec:
         spec = get_thinking_spec("openai", "no-such-model")
         assert spec.family is ThinkingFamily.NONE
 
-    def test_default_thinking_budget_is_none_for_all_current_models(self):
+    def test_default_thinking_budget_is_none_for_models_without_bounded_policy(self):
         for provider_key in (
             "anthropic",
             "openai",
@@ -79,6 +123,13 @@ class TestGetThinkingSpec:
             from iac_code.providers.thinking import MODEL_THINKING
 
             for model, spec in MODEL_THINKING[provider_key].items():
+                if (provider_key, model) in {
+                    ("dashscope", "glm-5.2"),
+                    ("dashscope", "kimi-k2.7-code"),
+                    ("dashscope_token_plan", "glm-5.2"),
+                    ("dashscope_token_plan", "kimi-k2.7-code"),
+                }:
+                    continue
                 assert spec.default_thinking_budget is None, (provider_key, model)
 
     def test_token_plan_qwen36_plus(self):

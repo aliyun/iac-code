@@ -6,6 +6,7 @@ import asyncio
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
 
@@ -130,13 +131,25 @@ def create_provider(
         if isinstance(saved_base, str) and saved_base:
             effective_base_url = saved_base
     provider_cls = _import_provider_class(desc.provider_class)
-    effort = provider_cfg.get("effort")
+    effort_value = _get_provider_config_value(provider_cfg, model, "effort")
+    effort = effort_value if isinstance(effort_value, str) else None
+    request_policy_kwargs: dict[str, int] = {}
+    from iac_code.providers.openai_provider import OpenAIProvider
+
+    if issubclass(provider_cls, OpenAIProvider):
+        thinking_budget = _get_positive_int_provider_config_value(provider_cfg, model, "thinkingBudget")
+        max_completion_tokens = _get_positive_int_provider_config_value(provider_cfg, model, "maxCompletionTokens")
+        if thinking_budget is not None:
+            request_policy_kwargs["thinking_budget"] = thinking_budget
+        if max_completion_tokens is not None:
+            request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
     return provider_cls(
         model=model,
         api_key=api_key or None,
         base_url=effective_base_url,
-        effort=effort if isinstance(effort, str) else None,
+        effort=effort,
         provider_key=provider_key,
+        **request_policy_kwargs,
     )
 
 
@@ -147,6 +160,44 @@ def _import_provider_class(dotted_path: str):
 
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
+
+
+def _get_model_provider_config(provider_cfg: dict[str, Any], model: str) -> dict[str, Any]:
+    models = provider_cfg.get("models")
+    if not isinstance(models, dict):
+        return {}
+    raw = models.get(model)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _get_provider_config_value(provider_cfg: dict[str, Any], model: str, key: str) -> Any:
+    model_cfg = _get_model_provider_config(provider_cfg, model)
+    if key in model_cfg:
+        return model_cfg[key]
+    return provider_cfg.get(key)
+
+
+def _get_positive_int_provider_config_value(provider_cfg: dict[str, Any], model: str, key: str) -> int | None:
+    model_cfg = _get_model_provider_config(provider_cfg, model)
+    if key in model_cfg:
+        model_value = _positive_int_or_none(model_cfg[key])
+        if model_value is not None:
+            return model_value
+    return _positive_int_or_none(provider_cfg.get(key))
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped.isdigit():
+        return None
+    parsed = int(stripped)
+    return parsed if parsed > 0 else None
 
 
 class ProviderManager:

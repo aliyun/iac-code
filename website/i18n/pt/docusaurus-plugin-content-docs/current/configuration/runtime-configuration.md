@@ -63,6 +63,33 @@ Além do `~/.iac-code/settings.yml` no nível do usuário, o IaC Code carrega co
 
 Ordem de mesclagem: **configurações do usuário → configurações do projeto → configurações locais do projeto → argumentos CLI** (fontes posteriores substituem as anteriores).
 
+## Política de requisição do provedor
+
+As entradas de provedor em `settings.yml` podem incluir campos de política de requisição para provedores compatíveis com OpenAI. Essas configurações são úteis quando um modelo separa os tokens da resposta visível dos tokens de reasoning/thinking.
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: glm-5.2
+    thinkingBudget: 8192
+    maxCompletionTokens: 16384
+    models:
+      kimi-k2.7-code:
+        thinkingBudget: 8192
+        maxCompletionTokens: 16384
+```
+
+| Campo | Escopo | Descrição |
+|---|---|---|
+| `thinkingBudget` | Provedor ou modelo | Orçamento de reasoning/thinking como inteiro positivo, enviado aos provedores que oferecem suporte a ele. |
+| `maxCompletionTokens` | Provedor ou modelo | Valor inteiro positivo que substitui `max_completion_tokens` para provedores/modelos que usam esse campo de requisição. |
+| `effort` | Provedor ou modelo | Substituição opcional do effort de thinking, válida apenas para modelos que oferecem controle de effort. |
+
+Valores válidos no nível do modelo em `providers.<provider>.models.<model>` substituem os valores no nível do provedor. Valores numéricos inválidos são ignorados, então o IaC Code volta ao valor do provedor ou à política integrada do modelo.
+
+Para Alibaba Cloud DashScope e DashScope Token Plan, o IaC Code tem um `thinkingBudget=8192` integrado para `glm-5.2` e `kimi-k2.7-code`. Quando `maxCompletionTokens` não é definido, o limite da requisição é calculado como o limite normal de tokens de resposta mais o thinking budget efetivo.
+
 ## Configuração de permissões de ferramentas
 
 A seção `permissions` em `settings.yml` configura quais ações de ferramentas são permitidas, negadas ou requerem confirmação:
