@@ -113,10 +113,10 @@ def parts_to_prompt(message_parts: Iterable[Any], *, cwd: str | Path) -> str:
     return "\n".join(value for value in values if value)
 
 
-def parts_to_pipeline_input(message_parts: Iterable[Any], *, cwd: str | Path) -> PipelineUserInput:
+def parts_to_user_input(message_parts: Iterable[Any], *, cwd: str | Path) -> PipelineUserInput:
     blocks: list[ContentBlock] = []
     for part in message_parts:
-        converted = part_to_pipeline_block(part, cwd=cwd)
+        converted = part_to_content_block(part, cwd=cwd)
         if isinstance(converted, list):
             blocks.extend(converted)
         elif converted:
@@ -131,7 +131,7 @@ def parts_to_pipeline_input(message_parts: Iterable[Any], *, cwd: str | Path) ->
     return PipelineUserInput(content=text, display_text=text, has_images=False)
 
 
-def part_to_pipeline_block(part: Any, *, cwd: str | Path) -> str | list[ContentBlock]:
+def part_to_content_block(part: Any, *, cwd: str | Path) -> str | list[ContentBlock]:
     media_type = _media_type(part)
     if _has_field(part, "text"):
         _ensure_text_like(media_type)
@@ -140,7 +140,7 @@ def part_to_pipeline_block(part: Any, *, cwd: str | Path) -> str | list[ContentB
         if media_type in SUPPORTED_IMAGE_MIME_TYPES:
             return [_image_block_from_binary(_binary_data_part_bytes(part), requested_media_type=media_type)]
         if _is_multimodal(media_type):
-            raise ValueError("A2A pipeline input has unsupported image media type.")
+            raise ValueError("A2A input has unsupported image media type.")
         if media_type != "application/json":
             raise ValueError("A2A data parts must use application/json media type.")
         data = MessageToDict(part.data, preserving_proto_field_name=False)
@@ -153,7 +153,7 @@ def part_to_pipeline_block(part: Any, *, cwd: str | Path) -> str | list[ContentB
             _ensure_size(raw, limit=MAX_BINARY_INLINE_BYTES, label="A2A binary raw part")
             return [_image_block_from_binary(raw, requested_media_type=media_type)]
         if _is_multimodal(media_type):
-            raise ValueError("A2A pipeline input has unsupported image media type.")
+            raise ValueError("A2A input has unsupported image media type.")
         _ensure_text_like(media_type)
         _ensure_size(raw, limit=MAX_INLINE_BYTES, label="A2A raw part")
         try:
@@ -167,7 +167,7 @@ def part_to_pipeline_block(part: Any, *, cwd: str | Path) -> str | list[ContentB
                 raise ValueError("A2A binary file URL part content is too large.")
             return [_image_block_from_binary(path.read_bytes(), requested_media_type=media_type)]
         if _is_multimodal(media_type):
-            raise ValueError("A2A pipeline input has unsupported image media type.")
+            raise ValueError("A2A input has unsupported image media type.")
         _ensure_text_like(media_type)
         return _read_file_url_part(str(part.url), cwd=Path(cwd))
     raise ValueError("A2A server supports text, JSON data, raw text, or workspace file URL parts only.")
@@ -283,7 +283,7 @@ def _binary_data_part_bytes(part: Any) -> bytes:
 
 def _image_block_from_binary(raw: bytes, *, requested_media_type: str) -> ImageBlock:
     if requested_media_type not in SUPPORTED_IMAGE_MIME_TYPES:
-        raise ValueError("A2A pipeline input has unsupported image media type.")
+        raise ValueError("A2A input has unsupported image media type.")
     resized = maybe_resize_and_downsample(raw)
     return ImageBlock(
         media_type=resized.media_type,

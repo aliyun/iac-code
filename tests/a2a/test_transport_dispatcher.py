@@ -87,6 +87,72 @@ async def test_dispatcher_stream_yields_events(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_stream_redacts_sensitive_message_metadata_echo(monkeypatch, tmp_path) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="streamed")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    dispatcher = A2AJsonRpcDispatcher(components)
+
+    events = [
+        event
+        async for event in dispatcher.dispatch_stream(
+            {
+                "jsonrpc": "2.0",
+                "id": "metadata-redaction",
+                "method": "message/stream",
+                "params": {
+                    "message": {
+                        "messageId": "msg-metadata-redaction",
+                        "role": "user",
+                        "parts": [{"kind": "text", "text": "hello"}],
+                        "metadata": {
+                            "iac_code": {
+                                "cwd": str(tmp_path),
+                                "iac_code_model": "qwen3.6-plus",
+                                "iac_code_api_key": "provider-secret",
+                                "alibaba_cloud_access_key_id": "ak-id-secret",
+                                "alibaba_cloud_access_key_secret": "ak-secret",
+                                "alibaba_cloud_security_token": "sts-token-secret",
+                                "alibaba_cloud_region_id": "cn-hangzhou",
+                            },
+                            "custom": {
+                                "apikey": "custom-api-key",
+                                "nested": [{"accessKeySecret": "nested-ak-secret"}],
+                            },
+                        },
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            }
+        )
+    ]
+
+    echoed_metadata = events[0]["result"]["history"][0]["metadata"]
+    assert echoed_metadata["iac_code"] == {
+        "cwd": str(tmp_path),
+        "iac_code_model": "qwen3.6-plus",
+        "iac_code_api_key": "***",
+        "alibaba_cloud_access_key_id": "***",
+        "alibaba_cloud_access_key_secret": "***",
+        "alibaba_cloud_security_token": "***",
+        "alibaba_cloud_region_id": "cn-hangzhou",
+    }
+    assert echoed_metadata["custom"] == {
+        "apikey": "***",
+        "nested": [{"accessKeySecret": "***"}],
+    }
+    rendered = str(events[0])
+    assert "provider-secret" not in rendered
+    assert "ak-id-secret" not in rendered
+    assert "ak-secret" not in rendered
+    assert "sts-token-secret" not in rendered
+    assert "custom-api-key" not in rendered
+    assert "nested-ak-secret" not in rendered
+    await components.aclose()
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_rejects_pipeline_image_before_executor_runs(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     monkeypatch.setattr(

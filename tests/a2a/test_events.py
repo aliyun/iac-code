@@ -83,6 +83,36 @@ async def test_permission_request_tool_input_redacts_secret_values() -> None:
 
 
 @pytest.mark.asyncio
+async def test_permission_request_tool_input_redacts_sensitive_keys() -> None:
+    queue = FakeEventQueue()
+    event = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={
+            "cmd": "pwd",
+            "api_key": "plain-api-key",
+            "nested": [{"accessKeySecret": "nested-access-key-secret"}],
+            "headers": {"Authorization": "Bearer auth-token-secret"},
+        },
+        tool_use_id="tool-1",
+    )
+
+    await publish_stream_event(queue, task_id="task-1", context_id="ctx-1", event=event)
+
+    dumped = dump(queue.events[0])
+    tool_input = dumped["metadata"]["iac_code"]["permission"]["toolInput"]
+    assert tool_input == {
+        "cmd": "pwd",
+        "api_key": "***",
+        "nested": [{"accessKeySecret": "***"}],
+        "headers": {"Authorization": "***"},
+    }
+    rendered = str(tool_input)
+    assert "plain-api-key" not in rendered
+    assert "nested-access-key-secret" not in rendered
+    assert "auth-token-secret" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_permission_request_uses_configured_default_decision() -> None:
     queue = FakeEventQueue()
     future = pending_future()
@@ -323,6 +353,40 @@ async def test_tool_use_input_metadata_redacts_secret_values() -> None:
     assert "/Users/alice" not in str(tool_input)
     assert "[REDACTED]" in str(tool_input)
     assert "[PATH]" in str(tool_input)
+
+
+@pytest.mark.asyncio
+async def test_tool_use_input_metadata_redacts_sensitive_keys() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(
+            tool_use_id="tool-1",
+            name="bash",
+            input={
+                "cmd": "pwd",
+                "apiKey": "plain-api-key",
+                "env": {"ALIBABA_CLOUD_ACCESS_KEY_SECRET": "ak-secret"},
+                "headers": [{"x-acs-security-token": "sts-token"}],
+            },
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool_input = dumped["metadata"]["iac_code"]["tool"]["input"]
+    assert tool_input == {
+        "cmd": "pwd",
+        "apiKey": "***",
+        "env": {"ALIBABA_CLOUD_ACCESS_KEY_SECRET": "***"},
+        "headers": [{"x-acs-security-token": "***"}],
+    }
+    rendered = str(tool_input)
+    assert "plain-api-key" not in rendered
+    assert "ak-secret" not in rendered
+    assert "sts-token" not in rendered
 
 
 @pytest.mark.asyncio

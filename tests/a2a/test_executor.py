@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from a2a.types import TaskStatusUpdateEvent
@@ -14,7 +16,7 @@ from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.task_store import A2ATaskStore
-from iac_code.agent.message import ImageBlock
+from iac_code.agent.message import ImageBlock, TextBlock
 from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent, ToolResultEvent
 
@@ -707,6 +709,44 @@ async def test_executor_runs_normal_mode_when_iac_code_mode_is_normal(
 
 
 @pytest.mark.asyncio
+async def test_normal_mode_image_request_passes_image_blocks_to_agent_loop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from a2a.types import Message, Part, Role
+
+    monkeypatch.setenv("IAC_CODE_MODE", "normal")
+    monkeypatch.setattr(
+        "iac_code.a2a.parts.maybe_resize_and_downsample",
+        lambda raw: SimpleNamespace(data=b"resized-image", media_type="image/webp"),
+    )
+    loop = FakeAgentLoop([TextDeltaEvent(text="normal")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
+    context.message = Message(
+        role=Role.ROLE_USER,
+        parts=[
+            Part(text="请识别附件架构图", media_type="text/plain"),
+            Part(raw=b"fake-image", media_type="image/png", filename="diagram.png"),
+        ],
+        message_id="msg-normal-image",
+    )
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    await executor.execute(context, FakeEventQueue())
+
+    assert loop.prompts == [
+        [
+            TextBlock(text="请识别附件架构图"),
+            ImageBlock(media_type="image/webp", data=base64.b64encode(b"resized-image").decode("ascii")),
+        ]
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cancel_bypasses_context_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     started = asyncio.Event()
 
@@ -1026,7 +1066,7 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
 
 
 @pytest.mark.asyncio
-async def test_pipeline_handoff_image_request_uses_normal_manifest_prompt(
+async def test_pipeline_handoff_image_request_passes_image_blocks_to_normal_agent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1038,6 +1078,10 @@ async def test_pipeline_handoff_image_request_uses_normal_manifest_prompt(
     from iac_code.services.session_storage import SessionStorage
 
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setattr(
+        "iac_code.a2a.parts.maybe_resize_and_downsample",
+        lambda raw: SimpleNamespace(data=b"resized-handoff-image", media_type="image/png"),
+    )
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
@@ -1093,10 +1137,9 @@ async def test_pipeline_handoff_image_request_uses_normal_manifest_prompt(
         FakeEventQueue(),
     )
 
-    assert loop.prompts
-    assert "A2A multimodal attachment:" in loop.prompts[0]
-    assert "mediaType=image/png" in loop.prompts[0]
-    assert "[Image input]" not in loop.prompts[0]
+    assert loop.prompts == [
+        [ImageBlock(media_type="image/png", data=base64.b64encode(b"resized-handoff-image").decode("ascii"))]
+    ]
 
 
 @pytest.mark.asyncio

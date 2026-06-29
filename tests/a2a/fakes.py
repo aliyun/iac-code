@@ -40,9 +40,9 @@ def pending_future() -> asyncio.Future[bool]:
 class FakeAgentLoop:
     def __init__(self, events: list[Any]) -> None:
         self.events = events
-        self.prompts: list[str] = []
+        self.prompts: list[Any] = []
 
-    async def run_streaming(self, prompt: str):
+    async def run_streaming(self, prompt: Any):
         self.prompts.append(prompt)
         for event in self.events:
             await asyncio.sleep(0)

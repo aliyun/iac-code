@@ -23,6 +23,7 @@ from iac_code.a2a.artifacts import (
     sanitize_public_tool_output_data,
 )
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
+from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -41,6 +42,7 @@ _METADATA_MAX_DEPTH = 32
 logger = logging.getLogger(__name__)
 A2APermissionResolver: TypeAlias = Callable[[PermissionRequestEvent], "bool | Awaitable[bool]"]
 IAC_CODE_SESSION_ID_METADATA_KEY = "iacCodeSessionId"
+_METADATA_REDACTOR = A2AMetadataEchoRedactor()
 
 
 def iac_code_session_metadata(session_id: str) -> dict[str, Any]:
@@ -67,6 +69,10 @@ def _truncate(value: Any, *, _depth: int = 0) -> Any:
     if isinstance(value, list):
         return [_truncate(v, _depth=_depth + 1) for v in value]
     return value
+
+
+def _sanitize_trace_input(value: Any) -> Any:
+    return _METADATA_REDACTOR.redact(_truncate(value))
 
 
 def make_text_part(text: str) -> Part:
@@ -260,7 +266,7 @@ async def publish_stream_event(
                         "status": "input_complete",
                         "toolUseId": event.tool_use_id,
                         "name": event.name,
-                        "input": _truncate(event.input),
+                        "input": _sanitize_trace_input(event.input),
                     }
                 }
             },
@@ -317,7 +323,7 @@ async def publish_stream_event(
                         "autoApproved": approved,
                         "toolName": event.tool_name,
                         "toolUseId": event.tool_use_id,
-                        "toolInput": _truncate(event.tool_input),
+                        "toolInput": _sanitize_trace_input(event.tool_input),
                     }
                 }
             },
