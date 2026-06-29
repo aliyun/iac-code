@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ from google.protobuf.json_format import MessageToDict, ParseDict
 from iac_code.a2a.events import (
     iac_code_session_metadata,
     make_text_part,
+    publish_mcp_warnings,
     publish_stream_event,
     with_iac_code_session_metadata,
 )
@@ -44,7 +46,7 @@ from iac_code.a2a.runtime_overrides import (
     credentials_with_metadata_api_key,
     refresh_runtime_cloud_tools,
 )
-from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.a2a.task_store import A2ATaskStore, _close_runtime
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
     TASK_STATE_FAILED,
@@ -934,6 +936,10 @@ class IacCodeA2AExecutor(AgentExecutor):
         if route_pipeline_handoff_to_normal:
             await self._ensure_pipeline_handoff_context_in_session(context_id=context_id, cwd=cwd)
 
+        task.active_task = asyncio.current_task()
+        task.state = TASK_STATE_WORKING
+        self._task_store.mirror_task(task)
+
         def runtime_factory(session_id: str) -> Any:
             session_storage = SessionStorage()
             resume_messages = None
@@ -957,10 +963,28 @@ class IacCodeA2AExecutor(AgentExecutor):
                     runtime_factory=runtime_factory,
                 )
                 if not hasattr(ctx.runtime, "agent_loop"):
+                    old_runtime = ctx.runtime
                     ctx.runtime = runtime_factory(ctx.session_id)
                     self._task_store.mirror_context(ctx)
+                    await _close_runtime(old_runtime)
+        except asyncio.CancelledError:
+            task.active_task = None
+            task.state = TASK_STATE_CANCELED
+            self._task_store.mirror_task(task)
+            with contextlib.suppress(Exception):
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_CANCELED,
+                    text=_("Task canceled."),
+                )
+                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+            self._metrics.record_task_canceled()
+            raise
         except Exception as exc:
             self._log_executor_exception("runtime setup", task_id=task_id, context_id=context_id)
+            task.active_task = None
             await self._publish_status(
                 event_queue,
                 task_id=task_id,
@@ -978,6 +1002,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         if ctx.lock is None:
             ctx.lock = asyncio.Lock()
         if ctx.active_task_id is not None:
+            task.active_task = None
             task.state = TASK_STATE_FAILED
             await self._publish_status(
                 event_queue,
@@ -995,7 +1020,24 @@ class IacCodeA2AExecutor(AgentExecutor):
         lock = ctx.lock
         try:
             await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            task.active_task = None
+            task.state = TASK_STATE_CANCELED
+            self._task_store.mirror_task(task)
+            with contextlib.suppress(Exception):
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_CANCELED,
+                    text=_("Task canceled."),
+                    session_id=ctx.session_id,
+                )
+                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+            self._metrics.record_task_canceled()
+            raise
         except TimeoutError:
+            task.active_task = None
             task.state = TASK_STATE_FAILED
             await self._publish_status(
                 event_queue,
@@ -1020,6 +1062,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                 runtime = ctx.runtime
                 if runtime is None:
                     raise RuntimeError("A2A context runtime missing")
+                await publish_mcp_warnings(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    runtime=runtime,
+                    iac_code_session_id=ctx.session_id,
+                )
                 await self._publish_status(
                     event_queue,
                     task_id=task_id,
@@ -1070,6 +1119,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                         session_id=ctx.session_id,
                     )
                     async for event in stream:
+                        await publish_mcp_warnings(
+                            event_queue,
+                            task_id=task_id,
+                            context_id=context_id,
+                            runtime=runtime,
+                            iac_code_session_id=ctx.session_id,
+                        )
                         text_chunk = await publish_stream_event(
                             event_queue,
                             task_id=task_id,
@@ -1083,6 +1139,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                         )
                         if text_chunk:
                             task.output_text.append(text_chunk)
+                    await publish_mcp_warnings(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        runtime=runtime,
+                        iac_code_session_id=ctx.session_id,
+                    )
                 task.state = TASK_STATE_INPUT_REQUIRED
                 await self._publish_status(
                     event_queue,

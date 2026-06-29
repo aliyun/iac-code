@@ -174,7 +174,8 @@ async def test_initialize_advertises_only_implemented_initial_capabilities() -> 
     assert response.agent_capabilities.load_session is True
     assert response.agent_capabilities.prompt_capabilities.embedded_context is True
     assert response.agent_capabilities.prompt_capabilities.image is False
-    assert response.agent_capabilities.mcp_capabilities.http is False
+    assert response.agent_capabilities.mcp_capabilities.http is True
+    assert response.agent_capabilities.mcp_capabilities.sse is True
     # auth_methods should declare supported provider env-var authentication
     assert len(response.auth_methods) > 0
     for method in response.auth_methods:

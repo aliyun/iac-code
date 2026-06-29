@@ -27,6 +27,7 @@ from iac_code.agent.message import (
     ToolUseBlock,
     is_recalled_memory_message,
 )
+from iac_code.commands.registry import PromptCommand
 from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
 from iac_code.types.permissions import PermissionDecision
@@ -220,11 +221,16 @@ class ACPSession:
         agent_loop,
         conn: acp.Client,
         mcp_configs: list[dict] | None = None,
+        mcp_manager=None,
+        command_registry=None,
         metrics: ACPMetrics | None = None,
         memory_manager=None,
+        runtime=None,
+        mcp_config_warnings: list[Any] | None = None,
     ) -> None:
         self.id = session_id
         self.agent_loop = agent_loop
+        self.runtime = runtime
         self.memory_manager = memory_manager
         self._conn = conn
         self._current_task: asyncio.Task | None = None
@@ -237,9 +243,11 @@ class ACPSession:
         self._permission_cache: OrderedDict[str, PermissionDecision] = OrderedDict()
         # Auto-detect tool names whose output is already displayed via ACP terminal.
         self._terminal_tool_names: set[str] = self._detect_terminal_tools()
-        # MCP server configs passed from the client (internal dict format)
-        # TODO: Wire into agent tool registry when MCP tool integration is implemented
         self.mcp_configs: list[dict] = mcp_configs or []
+        self.mcp_manager = mcp_manager
+        self.mcp_config_warnings = mcp_config_warnings if mcp_config_warnings is not None else []
+        self._mcp_warnings_pushed_count = 0
+        self.command_registry = command_registry
         # Dynamic session configuration (temperature, max_tokens, etc.)
         self._config: dict[str, Any] = {}
         # Whether this session has been closed
@@ -335,6 +343,14 @@ class ACPSession:
         # Clean up turn state
         self._current_turn = None
 
+        runtime_close = getattr(self.runtime, "aclose", None)
+        if callable(runtime_close):
+            with contextlib.suppress(Exception):
+                await runtime_close()
+        elif self.mcp_manager is not None:
+            with contextlib.suppress(Exception):
+                await self.mcp_manager.disconnect_all()
+
         # Clear permission cache and config
         self._permission_cache.clear()
         self._config.clear()
@@ -350,20 +366,30 @@ class ACPSession:
         # Intercept slash commands before sending to agent loop
         prompt_text = acp_blocks_to_prompt_text(prompt)
         slash_registry = ACPSlashRegistry()
+        stream_factory = None
         if slash_registry.is_slash_command(prompt_text):
-            result = await slash_registry.execute(
-                prompt_text,
-                self.agent_loop,
-                memory_manager=self.memory_manager,
-            )
-            await self._conn.session_update(
-                session_id=self.id,
-                update=acp.schema.AgentMessageChunk(
-                    session_update="agent_message_chunk",
-                    content=acp.schema.TextContentBlock(type="text", text=result),
-                ),
-            )
-            return acp.PromptResponse(stop_reason="end_turn")
+            prompt_command = self._lookup_prompt_command(prompt_text)
+            if prompt_command is not None:
+                prompt_text, stream_factory = await self._prepare_prompt_command(prompt_text, prompt_command)
+            else:
+                result = await slash_registry.execute(
+                    prompt_text,
+                    self.agent_loop,
+                    memory_manager=self.memory_manager,
+                )
+                await self._conn.session_update(
+                    session_id=self.id,
+                    update=acp.schema.AgentMessageChunk(
+                        session_update="agent_message_chunk",
+                        content=acp.schema.TextContentBlock(type="text", text=result),
+                    ),
+                )
+                return acp.PromptResponse(stop_reason="end_turn")
+
+        if stream_factory is None:
+
+            def stream_factory():
+                return self.agent_loop.run_streaming(prompt_text)
 
         converter: ACPEventConverter | None = None
 
@@ -380,7 +406,7 @@ class ACPSession:
             )
             logger.debug("Prompt started, session_id=%s, turn_id=%s", self.id, turn_id)
             with use_session_id(self.id):
-                async for event in self.agent_loop.run_streaming(prompt_text):
+                async for event in stream_factory():
                     if isinstance(event, PermissionRequestEvent):
                         allowed = await self._request_permission(event)
                         if event.response_future is not None and not event.response_future.done():
@@ -451,6 +477,42 @@ class ACPSession:
         response = acp.PromptResponse(stop_reason="end_turn")
         response.field_meta = meta
         return response
+
+    def _lookup_prompt_command(self, prompt_text: str) -> PromptCommand | None:
+        command_registry = self.command_registry
+        if command_registry is None:
+            return None
+        stripped = prompt_text.strip()
+        parts = stripped[1:].split(None, 1)
+        if not parts:
+            return None
+        name = parts[0]
+        command = command_registry.get(name) or command_registry.get(name.lower())
+        return command if isinstance(command, PromptCommand) else None
+
+    async def _prepare_prompt_command(self, prompt_text: str, command: PromptCommand):
+        from iac_code.skills.processor import process_prompt_command
+
+        stripped = prompt_text.strip()
+        parts = stripped[1:].split(None, 1)
+        args = parts[1] if len(parts) > 1 else ""
+        result = await process_prompt_command(command, args, session_id=self.id)
+        if result.is_fork:
+            return result.prompt_content, lambda: self.agent_loop.run_streaming(result.prompt_content)
+        context_manager = getattr(self.agent_loop, "context_manager", None)
+        if context_manager is not None:
+            for message in result.new_messages:
+                add_raw_message = getattr(context_manager, "add_raw_message", None)
+                if add_raw_message is not None:
+                    add_raw_message(message)
+        if result.context_modifier:
+            apply_context_modifier = getattr(self.agent_loop, "_apply_context_modifier", None)
+            if apply_context_modifier is not None:
+                apply_context_modifier(result.context_modifier)
+        continue_streaming = getattr(self.agent_loop, "continue_streaming", None)
+        if callable(continue_streaming):
+            return result.prompt_content, continue_streaming
+        return result.prompt_content, lambda: self.agent_loop.run_streaming(result.prompt_content)
 
     async def cancel(self) -> None:
         if self._current_task is not None and not self._current_task.done():

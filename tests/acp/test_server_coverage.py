@@ -450,6 +450,7 @@ async def test_push_available_commands_with_arg_names_fallback(monkeypatch) -> N
     conn = FakeConn()
     server = ACPServer()
     server.conn = conn
+    server.sessions["sess-1"] = ACPSession("sess-1", FakeLoop(), conn, command_registry=fake_registry())
 
     await server._push_available_commands("sess-1")
 
@@ -476,6 +477,7 @@ async def test_push_available_commands_no_matching_commands(monkeypatch) -> None
     conn = FakeConn()
     server = ACPServer()
     server.conn = conn
+    server.sessions["sess-1"] = ACPSession("sess-1", FakeLoop(), conn, command_registry=empty_registry())
 
     await server._push_available_commands("sess-1")
 

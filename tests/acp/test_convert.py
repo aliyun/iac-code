@@ -9,6 +9,7 @@ from iac_code.acp.state import ToolCallState, TurnState
 from iac_code.types.stream_events import (
     CompactionEvent,
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
@@ -298,6 +299,49 @@ def test_stack_instances_progress_event_returns_empty() -> None:
         )
     )
     assert updates == []
+
+
+def test_mcp_progress_event_to_tool_call_progress() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+
+    updates = converter.event_to_updates(
+        MCPProgressEvent(
+            server_name="live",
+            tool_name="echo",
+            progress=1,
+            total=2,
+            message="halfway",
+            tool_use_id="tool-1",
+        )
+    )
+
+    assert len(updates) == 1
+    update = updates[0]
+    assert isinstance(update, acp.schema.ToolCallProgress)
+    assert update.tool_call_id == "turn-1/tool-1"
+    assert update.status == "in_progress"
+    assert update.content[0].content.text == "MCP live:echo: 1/2: halfway"
+
+
+def test_mcp_progress_event_redacts_public_message_text() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+
+    updates = converter.event_to_updates(
+        MCPProgressEvent(
+            server_name="live",
+            tool_name="echo",
+            progress=1,
+            total=2,
+            message="api_key=sk-live-secret path=/Users/alice/.iac-code/settings.yml",
+            tool_use_id="tool-1",
+        )
+    )
+
+    text = updates[0].content[0].content.text
+    assert "sk-live-secret" not in text
+    assert "/Users/alice" not in text
+    assert "api_key=[REDACTED]" in text
+    assert "path=[PATH]" in text
 
 
 # ---------------------------------------------------------------------------
@@ -851,6 +895,8 @@ def test_tool_kind_suffix_heuristics_for_dynamic_names() -> None:
     assert _tool_kind("aliyun_api") == "execute"
     assert _tool_kind("foo_api") == "execute"
     assert _tool_kind("bar_doc_search") == "fetch"
+    assert _tool_kind("mcp__ros__plan") == "execute"
+    assert _tool_kind("mcp__ros__search") == "fetch"
 
 
 def test_tool_kind_falls_back_to_other_for_unknown_tool() -> None:

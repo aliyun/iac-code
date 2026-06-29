@@ -232,6 +232,19 @@ class StackInstancesProgressEvent(ToolEmittedEvent):
 
 
 @dataclass
+class MCPProgressEvent(ToolEmittedEvent):
+    """Real-time progress emitted by an MCP tool call."""
+
+    server_name: str
+    tool_name: str
+    progress: float | None = None
+    total: float | None = None
+    message: str | None = None
+    tool_use_id: str | None = None
+    type: Literal["mcp_progress"] = "mcp_progress"
+
+
+@dataclass
 class PlanStep:
     """A single step in an agent plan."""
 
@@ -314,6 +327,7 @@ StreamEvent = Union[
     ResourceObservedEvent,
     StackProgressEvent,
     StackInstancesProgressEvent,
+    MCPProgressEvent,
     PlanEvent,
     SubPipelineStreamEvent,
     DiagramEvent,

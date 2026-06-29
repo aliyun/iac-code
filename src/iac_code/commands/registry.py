@@ -139,6 +139,15 @@ class CommandRegistry:
         for alias in command.aliases:
             self._commands[alias] = command
 
+    def unregister(self, name: str) -> None:
+        """Unregister a command and aliases that point at it."""
+        command = self._commands.pop(name, None)
+        if command is None:
+            return
+        for alias in command.aliases:
+            if self._commands.get(alias) is command:
+                del self._commands[alias]
+
     def clear_prompt_commands(self) -> None:
         """Remove all skill-backed commands while preserving local commands."""
         for name, command in list(self._commands.items()):

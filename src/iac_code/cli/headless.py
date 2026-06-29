@@ -22,6 +22,7 @@ from iac_code.i18n import _
 from iac_code.providers.manager import ProviderNotConfiguredError
 from iac_code.types.stream_events import (
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     PermissionRequestEvent,
     StackInstancesProgressEvent,
@@ -74,10 +75,23 @@ class _ProgressWriter:
                 event.status,
                 event.progress_percentage,
             )
+        elif isinstance(event, MCPProgressEvent):
+            line = _format_mcp_progress(event)
 
         if line is not None:
             self._stream.write(line + "\n")
             self._stream.flush()
+
+
+def _format_mcp_progress(event: MCPProgressEvent) -> str:
+    parts = [_("MCP {server}:{tool}").format(server=event.server_name, tool=event.tool_name)]
+    if event.progress is not None and event.total is not None:
+        parts.append("{:g}/{:g}".format(event.progress, event.total))
+    elif event.progress is not None:
+        parts.append("{:g}".format(event.progress))
+    if event.message:
+        parts.append(event.message)
+    return ": ".join(parts)
 
 
 class HeadlessRunner:
@@ -104,6 +118,9 @@ class HeadlessRunner:
         self._cli_permission_mode = cli_permission_mode
         self._verbose = verbose
         self._progress_stream = progress_stream or sys.stderr
+        self._mcp_config_warnings: list[Any] = []
+        self._mcp_warnings_printed_count = 0
+        self._runtime: Any | None = None
 
     def _print_provider_not_configured(self, exc: Exception) -> None:
         logger.error("Provider not configured: {}", exc)
@@ -139,7 +156,18 @@ class HeadlessRunner:
                 cli_permission_mode=self._cli_permission_mode,
             )
         )
+        self._runtime = runtime
+        self._mcp_config_warnings = runtime.mcp_config_warnings if runtime.mcp_config_warnings is not None else []
         return runtime.agent_loop
+
+    def _print_mcp_config_warnings(self) -> None:
+        warnings = list(self._mcp_config_warnings or [])
+        for warning in warnings[self._mcp_warnings_printed_count :]:
+            self._progress_stream.write(
+                _("MCP warning: {message}\n").format(message=getattr(warning, "message", warning))
+            )
+            self._progress_stream.flush()
+        self._mcp_warnings_printed_count = len(warnings)
 
     async def run(self, prompt: str) -> int:
         """Execute a single prompt to completion and return an exit code."""
@@ -157,7 +185,9 @@ class HeadlessRunner:
 
         try:
             agent_loop = self._create_agent_loop()
+            self._print_mcp_config_warnings()
             async for event in agent_loop.run_streaming(prompt):
+                self._print_mcp_config_warnings()
                 if isinstance(event, PermissionRequestEvent):
                     if event.response_future is not None:
                         from iac_code.services.telemetry import log_event
@@ -191,6 +221,15 @@ class HeadlessRunner:
             self._print_unexpected_error(exc)
             self._record_structured_error(writer, exc)
             has_error = True
+        finally:
+            runtime = self._runtime
+            self._runtime = None
+            close = getattr(runtime, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception:
+                    logger.debug("Headless runtime close failed", exc_info=True)
 
         writer.finalize()
 

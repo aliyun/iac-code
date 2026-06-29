@@ -21,6 +21,7 @@ from iac_code.acp.tools import replace_bash_with_acp_terminal
 from iac_code.acp.types import ACPContentBlock, MCPServer
 from iac_code.acp.version import negotiate_version
 from iac_code.commands import LocalCommand, create_default_registry
+from iac_code.commands.registry import PromptCommand
 from iac_code.config import DEFAULT_MODEL, get_active_provider_key, load_saved_model
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
@@ -170,7 +171,7 @@ class ACPServer:
                     image=False,
                     audio=False,
                 ),
-                mcp_capabilities=acp.schema.McpCapabilities(http=False, sse=False),
+                mcp_capabilities=acp.schema.McpCapabilities(http=True, sse=True),
                 session_capabilities=acp.schema.SessionCapabilities(
                     close=acp.schema.SessionCloseCapabilities(),
                     list=acp.schema.SessionListCapabilities(),
@@ -196,7 +197,7 @@ class ACPServer:
         mcp_configs = _convert_mcp_servers(mcp_servers)
 
         model = load_saved_model() or DEFAULT_MODEL
-        runtime = self._create_runtime_with_auth_check(model=model, cwd=cwd)
+        runtime = await self._create_runtime_with_auth_check_async(model=model, cwd=cwd, mcp_configs=mcp_configs)
         replace_bash_with_acp_terminal(
             runtime.tool_registry,
             self.client_capabilities,
@@ -220,6 +221,7 @@ class ACPServer:
         )
 
         # Push available commands to the client
+        await self._push_mcp_warnings(session.id)
         await self._push_available_commands(session.id)
 
         return response
@@ -332,7 +334,12 @@ class ACPServer:
 
         # 3. Rebuild agent runtime with restored history
         model = load_saved_model() or DEFAULT_MODEL
-        runtime = self._create_runtime_with_auth_check(model=model, session_id=session_id, cwd=cwd)
+        runtime = await self._create_runtime_with_auth_check_async(
+            model=model,
+            session_id=session_id,
+            cwd=cwd,
+            mcp_configs=mcp_configs,
+        )
         replace_bash_with_acp_terminal(
             runtime.tool_registry,
             self.client_capabilities,
@@ -357,6 +364,7 @@ class ACPServer:
             session._replay_task = asyncio.create_task(self._replay_session_history(session, history))
 
         # 6. Push available commands
+        await self._push_mcp_warnings(session_id)
         await self._push_available_commands(session_id)
 
         return acp.LoadSessionResponse(models=self._build_model_state(model))
@@ -399,7 +407,12 @@ class ACPServer:
         # 2. Create a new runtime for the fork
         new_session_id = str(uuid.uuid4())
         model = load_saved_model() or DEFAULT_MODEL
-        runtime = self._create_runtime_with_auth_check(model=model, session_id=new_session_id, cwd=cwd)
+        runtime = await self._create_runtime_with_auth_check_async(
+            model=model,
+            session_id=new_session_id,
+            cwd=cwd,
+            mcp_configs=mcp_configs,
+        )
         replace_bash_with_acp_terminal(
             runtime.tool_registry,
             self.client_capabilities,
@@ -424,6 +437,7 @@ class ACPServer:
         if history:
             session._replay_task = asyncio.create_task(self._replay_session_history(session, history))
 
+        await self._push_mcp_warnings(new_session_id)
         await self._push_available_commands(new_session_id)
 
         return acp.schema.ForkSessionResponse(
@@ -447,6 +461,7 @@ class ACPServer:
             error = _active_session_project_error(cwd, session_id, session_id, active_session)
             if error is not None:
                 raise error
+            await self._push_mcp_warnings(session_id)
             await self._push_available_commands(session_id)
             return acp.schema.ResumeSessionResponse()
 
@@ -492,6 +507,7 @@ class ACPServer:
             error = _active_session_project_error(cwd, session_id, resolved_session_id, active_session)
             if error is not None:
                 raise error
+            await self._push_mcp_warnings(resolved_session_id)
             await self._push_available_commands(resolved_session_id)
             return acp.schema.ResumeSessionResponse()
 
@@ -508,7 +524,12 @@ class ACPServer:
 
         # 3. Rebuild agent runtime with restored history
         model = load_saved_model() or DEFAULT_MODEL
-        runtime = self._create_runtime_with_auth_check(model=model, session_id=resolved_session_id, cwd=cwd)
+        runtime = await self._create_runtime_with_auth_check_async(
+            model=model,
+            session_id=resolved_session_id,
+            cwd=cwd,
+            mcp_configs=mcp_configs,
+        )
         replace_bash_with_acp_terminal(
             runtime.tool_registry,
             self.client_capabilities,
@@ -527,6 +548,7 @@ class ACPServer:
         )
         self.sessions[resolved_session_id] = session
         self.metrics.record_session_created()
+        await self._push_mcp_warnings(resolved_session_id)
         await self._push_available_commands(resolved_session_id)
 
         return acp.schema.ResumeSessionResponse()
@@ -544,13 +566,60 @@ class ACPServer:
         if self.conn is None:
             raise acp.RequestError.internal_error({"error": "ACP client not connected"})
 
-        return ACPSession(
+        session = ACPSession(
             runtime.session_id,
             runtime.agent_loop,
             self.conn,
             mcp_configs=mcp_configs,
+            mcp_manager=getattr(runtime, "mcp_manager", None),
+            command_registry=getattr(runtime, "command_registry", None),
             metrics=self.metrics,
             memory_manager=_runtime_command_memory_manager(runtime),
+            runtime=runtime,
+            mcp_config_warnings=getattr(runtime, "mcp_config_warnings", None),
+        )
+        add_mcp_change_listener = getattr(runtime, "add_mcp_change_listener", None)
+        if add_mcp_change_listener is not None:
+            server_loop = asyncio.get_running_loop()
+
+            async def on_mcp_commands_changed(server_name: str, capability: str) -> None:
+                _ = server_name
+                if session.id in self.sessions:
+
+                    async def push_updates() -> None:
+                        if session.id not in self.sessions:
+                            return
+                        await self._push_mcp_warnings(session.id)
+                        if capability in {"prompts", "resources"}:
+                            await self._push_available_commands(session.id)
+
+                    try:
+                        running_loop = asyncio.get_running_loop()
+                    except RuntimeError:  # pragma: no cover - async listener normally has a loop.
+                        running_loop = None
+                    if running_loop is server_loop:
+                        await push_updates()
+                    else:
+                        future = asyncio.run_coroutine_threadsafe(push_updates(), server_loop)
+                        await asyncio.wrap_future(future)
+
+            add_mcp_change_listener(on_mcp_commands_changed)
+        return session
+
+    @staticmethod
+    async def _create_runtime_with_auth_check_async(
+        *,
+        model: str,
+        cwd: str,
+        session_id: str | None = None,
+        mcp_configs: list[dict[str, Any]] | None = None,
+    ):
+        return await asyncio.to_thread(
+            ACPServer._create_runtime_with_auth_check,
+            model=model,
+            session_id=session_id,
+            cwd=cwd,
+            mcp_configs=mcp_configs,
         )
 
     @staticmethod
@@ -559,10 +628,13 @@ class ACPServer:
         model: str,
         cwd: str,
         session_id: str | None = None,
+        mcp_configs: list[dict[str, Any]] | None = None,
     ):
         """Create an agent runtime, converting auth errors to ACP RequestError."""
         try:
-            return create_agent_runtime(AgentFactoryOptions(model=model, session_id=session_id, cwd=cwd))
+            return create_agent_runtime(
+                AgentFactoryOptions(model=model, session_id=session_id, cwd=cwd, mcp_configs=mcp_configs)
+            )
         except Exception as exc:
             if _is_auth_error(exc):
                 logger.warning("Authentication error during runtime creation: %s", exc)
@@ -619,10 +691,13 @@ class ACPServer:
         """Push the list of available slash commands to the client via session_update."""
         if self.conn is None:
             return
-        registry = create_default_registry()
+        session = self.sessions.get(session_id)
+        if session is None:
+            return
+        registry = getattr(session, "command_registry", None) or create_default_registry()
         commands = []
         for cmd in registry.get_all():
-            if cmd.name not in ACP_SUPPORTED_COMMANDS:
+            if cmd.name not in ACP_SUPPORTED_COMMANDS and not isinstance(cmd, PromptCommand):
                 continue
             # Build input hint: prefer arg_hint, fall back to arg_names
             hint = None
@@ -631,6 +706,9 @@ class ACPServer:
                     hint = cmd.arg_hint
                 elif cmd.arg_names:
                     hint = " ".join(f"[{name}]" for name in cmd.arg_names)
+            elif isinstance(cmd, PromptCommand):
+                frontmatter = getattr(cmd.skill, "frontmatter", None)
+                hint = getattr(frontmatter, "argument_hint", None)
 
             input_spec = (
                 acp.schema.AvailableCommandInput(root=acp.schema.UnstructuredCommandInput(hint=hint)) if hint else None
@@ -651,6 +729,31 @@ class ACPServer:
                 available_commands=commands,
             ),
         )
+
+    async def _push_mcp_warnings(self, session_id: str) -> None:
+        """Surface MCP startup/config warnings to ACP clients once per session."""
+        if self.conn is None:
+            return
+        session = self.sessions.get(session_id)
+        if session is None:
+            return
+        warnings = list(getattr(session, "mcp_config_warnings", None) or [])
+        pushed_count = getattr(session, "_mcp_warnings_pushed_count", 0)
+        if pushed_count >= len(warnings):
+            return
+        for warning in warnings[pushed_count:]:
+            message = getattr(warning, "message", None) or str(warning)
+            await self.conn.session_update(
+                session_id=session_id,
+                update=acp.schema.AgentMessageChunk(
+                    session_update="agent_message_chunk",
+                    content=acp.schema.TextContentBlock(
+                        type="text",
+                        text=_("MCP warning: {message}").format(message=message),
+                    ),
+                ),
+            )
+        setattr(session, "_mcp_warnings_pushed_count", len(warnings))
 
     # ------------------------------------------------------------------
     # Cleanup loop

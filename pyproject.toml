@@ -35,6 +35,7 @@ dependencies = [
     "keyring>=25.0",
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-bash>=0.25,<0.26",
+    "mcp>=1.28.0",
 ]
 
 [project.optional-dependencies]

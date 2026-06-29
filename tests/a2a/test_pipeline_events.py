@@ -11,6 +11,7 @@ from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.types.stream_events import (
     CandidateDetailEvent,
     DiagramEvent,
+    MCPProgressEvent,
     PermissionRequestEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
@@ -56,6 +57,30 @@ def test_pipeline_started_has_stable_envelope() -> None:
     assert envelope["pipelineName"] == "selling"
     assert envelope["status"] == "working"
     assert envelope["data"]["totalSteps"] == 4
+
+
+def test_mcp_progress_event_has_tool_progress_envelope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelope = translator.translate(
+        MCPProgressEvent(
+            server_name="live",
+            tool_name="echo",
+            progress=1,
+            total=2,
+            message="halfway",
+            tool_use_id="tool-1",
+        )
+    )[0]
+
+    assert envelope["eventType"] == "tool_progress"
+    assert envelope["scope"] == "pipeline"
+    assert envelope["data"]["toolUseId"] == "tool-1"
+    assert envelope["data"]["serverName"] == "live"
+    assert envelope["data"]["mcpToolName"] == "echo"
+    assert envelope["data"]["progress"] == 1
+    assert envelope["data"]["total"] == 2
+    assert envelope["data"]["message"] == "halfway"
 
 
 def test_pipeline_warning_translates_to_non_terminal_envelope() -> None:
