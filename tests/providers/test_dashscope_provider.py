@@ -95,6 +95,177 @@ class TestDashScopeBuildThinkingKwargs:
         assert p._effort_request_kwargs() == p._build_thinking_kwargs()
 
 
+@pytest.mark.asyncio
+class TestDashScopeThinkingBudgetRequestPolicy:
+    async def test_glm52_defaults_to_bounded_thinking_budget_and_max_completion_tokens(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="glm-5.2", api_key="k")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_completion_tokens"] == 16384
+        assert "max_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert "reasoning_effort" not in call_kwargs
+
+    async def test_kimi_k27_code_defaults_to_bounded_thinking_budget_and_max_completion_tokens(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="kimi-k2.7-code", api_key="k")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_completion_tokens"] == 16384
+        assert "max_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert "reasoning_effort" not in call_kwargs
+
+    async def test_qwen_request_policy_keeps_existing_max_tokens_behavior(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="qwen3.7-max", api_key="k")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_tokens"] == 8192
+        assert "max_completion_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
+
+    async def test_token_plan_glm52_uses_same_bounded_request_policy(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="glm-5.2", api_key="k", provider_key="dashscope_token_plan")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_completion_tokens"] == 16384
+        assert "max_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+
+    async def test_glm52_uses_user_configured_reasoning_effort(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="glm-5.2", api_key="k", effort="low")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["reasoning_effort"] == "low"
+
+    async def test_kimi_k27_code_ignores_reasoning_effort(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="kimi-k2.7-code", api_key="k", effort="high")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert "reasoning_effort" not in call_kwargs
+
+    async def test_complete_uses_same_glm52_request_policy(self):
+        response = ns(
+            id="cmpl_1",
+            choices=[ns(finish_reason="stop", message=ns(content="ok", tool_calls=None))],
+            usage=ns(prompt_tokens=1, completion_tokens=1),
+        )
+        client = FakeOpenAIClient(create_response=response)
+        provider = DashScopeProvider(model="glm-5.2", api_key="k")
+        provider._client = client
+
+        await provider.complete(messages=[Message.user("hi")], system="", max_tokens=8192)
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_completion_tokens"] == 16384
+        assert "max_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+
+    async def test_configured_request_policy_overrides_default_request_payload(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(
+            model="glm-5.2",
+            api_key="k",
+            thinking_budget=2048,
+            max_completion_tokens=10000,
+        )
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_completion_tokens"] == 10000
+        assert "max_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 2048}
+
+    async def test_float_request_policy_values_are_rejected_not_truncated(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(
+            model="glm-5.2",
+            api_key="k",
+            thinking_budget=2048.9,
+            max_completion_tokens=10000.5,
+        )
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_completion_tokens"] == 16384
+        assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+
+
 class TestDashScopeTokenPlanBaseUrl:
     def test_token_plan_base_url_constant(self):
         from iac_code.providers.dashscope_provider import DASHSCOPE_TOKEN_PLAN_BASE_URL

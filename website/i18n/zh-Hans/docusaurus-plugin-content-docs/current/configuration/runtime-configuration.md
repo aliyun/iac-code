@@ -63,6 +63,33 @@ IaC Code 有两个公开的记忆位置：
 
 合并顺序：**用户设置 → 项目设置 → 项目本地设置 → CLI 参数**（后者覆盖前者）。
 
+## Provider 请求策略
+
+`settings.yml` 中的 provider 配置可以为 OpenAI 兼容类 provider 设置请求策略字段。当模型把可见回答 token 和 reasoning/thinking token 分开计算时，这些配置很有用。
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: glm-5.2
+    thinkingBudget: 8192
+    maxCompletionTokens: 16384
+    models:
+      kimi-k2.7-code:
+        thinkingBudget: 8192
+        maxCompletionTokens: 16384
+```
+
+| 字段 | 作用范围 | 说明 |
+|---|---|---|
+| `thinkingBudget` | Provider 或模型 | 正整数 reasoning/thinking 预算，会传给支持该参数的 provider。 |
+| `maxCompletionTokens` | Provider 或模型 | 正整数 `max_completion_tokens` 覆盖值，用于采用该请求字段的 provider/model。 |
+| `effort` | Provider 或模型 | 可选 thinking effort 覆盖值，仅对支持 effort 控制的模型生效。 |
+
+`providers.<provider>.models.<model>` 下的模型级有效值会覆盖 provider 级值。无效数值会被忽略，IaC Code 会回退到 provider 级值或内置模型策略。
+
+对阿里云百炼 DashScope 和 DashScope Token Plan，IaC Code 为 `glm-5.2` 和 `kimi-k2.7-code` 内置了 `thinkingBudget=8192`。未设置 `maxCompletionTokens` 时，请求上限会按普通回答 token 上限加上有效 thinking budget 计算。
+
 ## 工具权限配置
 
 `settings.yml` 中的 `permissions` 部分用于配置工具操作的允许、拒绝或需要确认的规则：

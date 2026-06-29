@@ -63,6 +63,33 @@ In addition to the user-level `~/.iac-code/settings.yml`, IaC Code loads project
 
 Merge order: **user settings → project settings → project local settings → CLI arguments** (later sources override earlier ones).
 
+## Provider Request Policy
+
+Provider entries in `settings.yml` can include request policy fields for OpenAI-compatible providers. These settings are useful when a model separates visible answer tokens from reasoning/thinking tokens.
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: glm-5.2
+    thinkingBudget: 8192
+    maxCompletionTokens: 16384
+    models:
+      kimi-k2.7-code:
+        thinkingBudget: 8192
+        maxCompletionTokens: 16384
+```
+
+| Field | Scope | Description |
+|---|---|---|
+| `thinkingBudget` | Provider or model | Positive integer reasoning/thinking budget passed to providers that support it. |
+| `maxCompletionTokens` | Provider or model | Positive integer `max_completion_tokens` override for providers/models that use that request field. |
+| `effort` | Provider or model | Optional thinking effort override for models that support effort control. |
+
+Model-level values under `providers.<provider>.models.<model>` override provider-level values when they are valid. Invalid numeric values are ignored, so IaC Code falls back to the provider-level value or built-in model policy.
+
+For Alibaba Cloud DashScope and DashScope Token Plan, IaC Code has a built-in `thinkingBudget` of `8192` for `glm-5.2` and `kimi-k2.7-code`. When `maxCompletionTokens` is not set, the request limit is computed as the normal answer token limit plus the effective thinking budget.
+
 ## Tool Permission Configuration
 
 The `permissions` section in `settings.yml` configures which tool actions are allowed, denied, or require confirmation:

@@ -1359,6 +1359,10 @@ msgstr "Ungültiger Thinking-Effort. Zulässig: {labels}"
 msgid "Current effort: {effort}"
 msgstr "Aktueller Thinking-Effort: {effort}"
 
+#: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+msgid "not configured"
+msgstr "nicht konfiguriert"
+
 #: src/iac_code/commands/effort.py
 #, python-brace-format
 msgid "Select effort for {model}"
@@ -1900,10 +1904,6 @@ msgstr "Der Befehl status benötigt einen REPL-Kontext."
 #: src/iac_code/commands/status.py
 msgid "Status is only available in interactive mode."
 msgstr "status ist nur im interaktiven Modus verfügbar."
-
-#: src/iac_code/commands/status.py
-msgid "not configured"
-msgstr "nicht konfiguriert"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -5199,3 +5199,4 @@ msgstr "Stacktrace im öffentlichen Ereignis ausgelassen; siehe error_id."
 #~ msgstr ""
 #~ "Hinweis: Bilder werden im Pipeline-Modus"
 #~ " nicht unterstützt und ignoriert."
+

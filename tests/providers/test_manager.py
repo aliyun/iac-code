@@ -38,6 +38,97 @@ class TestCreateProvider:
         p = create_provider("deepseek-v4-pro", credentials={"dashscope": "key"})
         assert getattr(p, "_effort", None) == "max"
 
+    def test_model_config_overrides_provider_request_policy(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {
+                "effort": "high",
+                "thinkingBudget": 4096,
+                "maxCompletionTokens": 12288,
+                "models": {
+                    "glm-5.2": {
+                        "effort": "low",
+                        "thinkingBudget": 2048,
+                        "maxCompletionTokens": 10000,
+                    }
+                },
+            },
+        )
+
+        p = create_provider("glm-5.2", credentials={"dashscope": "key"})
+
+        assert getattr(p, "_effort", None) == "low"
+        assert getattr(p, "_thinking_budget", None) == 2048
+        assert getattr(p, "_max_completion_tokens", None) == 10000
+
+    def test_provider_request_policy_used_when_model_config_absent(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {
+                "thinkingBudget": 2048,
+                "maxCompletionTokens": 10000,
+            },
+        )
+
+        p = create_provider("kimi-k2.7-code", credentials={"dashscope": "key"})
+
+        assert getattr(p, "_thinking_budget", None) == 2048
+        assert getattr(p, "_max_completion_tokens", None) == 10000
+
+    def test_invalid_model_request_policy_config_falls_back_to_provider_config(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {
+                "thinkingBudget": 2048,
+                "maxCompletionTokens": 10000,
+                "models": {
+                    "glm-5.2": {
+                        "thinkingBudget": "bad",
+                        "maxCompletionTokens": 0,
+                    }
+                },
+            },
+        )
+
+        p = create_provider("glm-5.2", credentials={"dashscope": "key"})
+
+        assert getattr(p, "_thinking_budget", None) == 2048
+        assert getattr(p, "_max_completion_tokens", None) == 10000
+
+    def test_float_request_policy_config_is_rejected_not_truncated(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {
+                "thinkingBudget": 2048.9,
+                "maxCompletionTokens": "10000.5",
+            },
+        )
+
+        p = create_provider("glm-5.2", credentials={"dashscope": "key"})
+
+        assert getattr(p, "_thinking_budget", None) is None
+        assert getattr(p, "_max_completion_tokens", None) is None
+
+    def test_non_openai_provider_ignores_request_policy_config(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {
+                "thinkingBudget": 2048,
+                "maxCompletionTokens": 10000,
+            },
+        )
+
+        p = create_provider("claude-sonnet-4-6", credentials={"anthropic": "key"})
+
+        assert p.get_model_name() == "claude-sonnet-4-6"
+        assert not hasattr(p, "_thinking_budget")
+        assert not hasattr(p, "_max_completion_tokens")
+
     def test_unknown_raises(self, monkeypatch):
         """Unknown model with no saved provider config raises ValueError."""
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)

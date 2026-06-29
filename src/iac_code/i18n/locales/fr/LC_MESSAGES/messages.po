@@ -1363,6 +1363,10 @@ msgstr "Effort de raisonnement invalide. Valeurs autorisées : {labels}"
 msgid "Current effort: {effort}"
 msgstr "Effort de raisonnement actuel : {effort}"
 
+#: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+msgid "not configured"
+msgstr "non configuré"
+
 #: src/iac_code/commands/effort.py
 #, python-brace-format
 msgid "Select effort for {model}"
@@ -1906,10 +1910,6 @@ msgstr "La commande status nécessite un contexte REPL."
 #: src/iac_code/commands/status.py
 msgid "Status is only available in interactive mode."
 msgstr "status n’est disponible qu’en mode interactif."
-
-#: src/iac_code/commands/status.py
-msgid "not configured"
-msgstr "non configuré"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -5191,3 +5191,4 @@ msgstr "Trace de pile omise de l’événement public ; consultez error_id."
 #~ "Remarque : les images ne sont pas"
 #~ " prises en charge en mode pipeline"
 #~ " et seront ignorées."
+

@@ -63,6 +63,33 @@ Además del archivo `~/.iac-code/settings.yml` a nivel de usuario, IaC Code carg
 
 Orden de fusión: **configuración de usuario → configuración del proyecto → configuración local del proyecto → argumentos CLI** (las fuentes posteriores anulan las anteriores).
 
+## Política de solicitudes del proveedor
+
+Las entradas de proveedor en `settings.yml` pueden incluir campos de política de solicitudes para proveedores compatibles con OpenAI. Estas opciones son útiles cuando un modelo separa los tokens de respuesta visibles de los tokens de reasoning/thinking.
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: glm-5.2
+    thinkingBudget: 8192
+    maxCompletionTokens: 16384
+    models:
+      kimi-k2.7-code:
+        thinkingBudget: 8192
+        maxCompletionTokens: 16384
+```
+
+| Campo | Alcance | Descripción |
+|---|---|---|
+| `thinkingBudget` | Proveedor o modelo | Presupuesto de reasoning/thinking como entero positivo, enviado a los proveedores que lo admiten. |
+| `maxCompletionTokens` | Proveedor o modelo | Valor entero positivo que anula `max_completion_tokens` para proveedores/modelos que usan ese campo de solicitud. |
+| `effort` | Proveedor o modelo | Anulación opcional del effort de thinking, solo para modelos que admiten control de effort. |
+
+Los valores válidos a nivel de modelo bajo `providers.<provider>.models.<model>` anulan los valores a nivel de proveedor. Los valores numéricos no válidos se ignoran, por lo que IaC Code recurre al valor del proveedor o a la política integrada del modelo.
+
+Para Alibaba Cloud DashScope y DashScope Token Plan, IaC Code incluye un `thinkingBudget=8192` integrado para `glm-5.2` y `kimi-k2.7-code`. Si `maxCompletionTokens` no está configurado, el límite de la solicitud se calcula como el límite normal de tokens de respuesta más el thinking budget efectivo.
+
 ## Configuración de permisos de herramientas
 
 La sección `permissions` en `settings.yml` configura qué acciones de herramientas se permiten, deniegan o requieren confirmación:

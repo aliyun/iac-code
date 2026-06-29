@@ -64,7 +64,10 @@ class ThinkingSpec:
     family: ThinkingFamily
     allowed_efforts: tuple[EffortLevel, ...] = ()
     default_effort: EffortLevel | None = None
-    default_thinking_budget: int | None = None  # reserved; not yet emitted
+    default_thinking_budget: int | None = None
+    supports_thinking_budget: bool = False
+    use_max_completion_tokens: bool = False
+    uses_reasoning_effort_param: bool = False
 
     @property
     def supports_effort(self) -> bool:
@@ -107,8 +110,32 @@ _ANTHROPIC_EFFORTS: tuple[EffortLevel, ...] = (
 # DeepSeek V4 accepts only high/max — XHIGH is intentionally skipped.
 _DEEPSEEK_EFFORTS: tuple[EffortLevel, ...] = (EffortLevel.HIGH, EffortLevel.MAX)
 
+_GLM_EFFORTS: tuple[EffortLevel, ...] = (
+    EffortLevel.LOW,
+    EffortLevel.MEDIUM,
+    EffortLevel.HIGH,
+    EffortLevel.XHIGH,
+    EffortLevel.MAX,
+)
+
 
 _NONE_SPEC = ThinkingSpec(family=ThinkingFamily.NONE)
+
+_DASHSCOPE_KIMI_K27_CODE_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    default_thinking_budget=8192,
+    supports_thinking_budget=True,
+    use_max_completion_tokens=True,
+)
+
+_DASHSCOPE_GLM52_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    _GLM_EFFORTS,
+    default_thinking_budget=8192,
+    supports_thinking_budget=True,
+    use_max_completion_tokens=True,
+    uses_reasoning_effort_param=True,
+)
 
 
 MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
@@ -150,6 +177,8 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "qwq-plus": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "kimi-k2.6": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "kimi-k2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "kimi-k2.7-code": _DASHSCOPE_KIMI_K27_CODE_SPEC,
+        "glm-5.2": _DASHSCOPE_GLM52_SPEC,
         "glm-5.1": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "deepseek-v4-pro": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
@@ -168,6 +197,8 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "kimi-k2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "kimi-k2.6": ThinkingSpec(ThinkingFamily.DASHSCOPE),
+        "kimi-k2.7-code": _DASHSCOPE_KIMI_K27_CODE_SPEC,
+        "glm-5.2": _DASHSCOPE_GLM52_SPEC,
     },
     "gemini": {
         "gemini-3.5-flash": ThinkingSpec(ThinkingFamily.GEMINI, _GEMINI_EFFORTS, EffortLevel.MEDIUM),
@@ -197,6 +228,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "MiniMax-M2.5-highspeed": ThinkingSpec(ThinkingFamily.MINIMAX),
     },
     "zhipu_cn": {
+        "glm-5.2": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-5.1": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-5": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-5-turbo": ThinkingSpec(ThinkingFamily.ZHIPU),

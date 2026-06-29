@@ -1315,6 +1315,10 @@ msgstr "無効な effort です。許可される値：{labels}"
 msgid "Current effort: {effort}"
 msgstr "現在の effort：{effort}"
 
+#: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+msgid "not configured"
+msgstr "未設定"
+
 #: src/iac_code/commands/effort.py
 #, python-brace-format
 msgid "Select effort for {model}"
@@ -1846,10 +1850,6 @@ msgstr "status コマンドには REPL コンテキストが必要です。"
 #: src/iac_code/commands/status.py
 msgid "Status is only available in interactive mode."
 msgstr "status は対話モードでのみ利用できます。"
-
-#: src/iac_code/commands/status.py
-msgid "not configured"
-msgstr "未設定"
 
 #: src/iac_code/commands/status.py
 msgid "API Token Usage (recorded):"
@@ -4921,3 +4921,4 @@ msgstr "公開イベントではスタックトレースを省略しました。
 
 #~ msgid "Note: images are not supported in pipeline mode and will be ignored."
 #~ msgstr "注: パイプラインモードでは画像はサポートされておらず、無視されます。"
+

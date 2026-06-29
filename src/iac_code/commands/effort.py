@@ -31,13 +31,13 @@ def _active_provider() -> LLMProvider | None:
     return None
 
 
-def _load_current_effort(key_name: str, fallback: "EffortLevel") -> "EffortLevel":
+def _load_saved_effort(key_name: str) -> "EffortLevel | None":
     picker = _load_picker_module()
     level_by_value = {lvl.value: lvl for lvl in picker.EffortLevel}
     saved = get_provider_config(key_name).get("effort")
     if isinstance(saved, str) and saved in level_by_value:
         return level_by_value[saved]
-    return fallback
+    return None
 
 
 async def effort_command(
@@ -68,9 +68,6 @@ async def effort_command(
     allowed = list(spec.allowed_efforts)
     level_by_value = {lvl.value: lvl for lvl in picker.EffortLevel}
 
-    assert spec.default_effort is not None  # guarded by supports_effort above
-    current = _load_current_effort(provider_key, spec.default_effort)
-
     # Non-interactive: /effort <level>
     if args:
         token = args[0].strip().lower()
@@ -80,8 +77,15 @@ async def effort_command(
             return _("Invalid effort. Allowed: {labels}").format(labels=labels)
         return _apply_effort(provider, current_model, target, store)
 
+    saved_effort = _load_saved_effort(provider_key)
+    has_effective_effort = saved_effort is not None or spec.default_effort is not None
+    default_effort = spec.default_effort or allowed[0]
+    current = saved_effort or default_effort
+
     # Interactive: show picker
     if not context or not context.console:
+        if not has_effective_effort:
+            return _("Current effort: {effort}").format(effort=_("not configured"))
         return _("Current effort: {effort}").format(effort=current.value)
 
     options = [f"{picker.EFFORT_SYMBOLS[lvl]}  {lvl.value}" for lvl in allowed]
@@ -100,10 +104,12 @@ async def effort_command(
         sys.stdout.flush()
 
     if idx is None or idx is _BACK:
+        if not has_effective_effort:
+            return _("Kept effort as {effort}").format(effort=_("not configured"))
         return _("Kept effort as {effort}").format(effort=current.value)
 
     selected = allowed[idx]
-    if selected == current:
+    if selected == current and has_effective_effort:
         return _("Kept effort as {effort}").format(effort=current.value)
 
     return _apply_effort(provider, current_model, selected, store)
