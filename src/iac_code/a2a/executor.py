@@ -23,12 +23,13 @@ from iac_code.a2a.events import (
     with_iac_code_session_metadata,
 )
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
+from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.parts import (
     allowed_cwd_roots,
     is_relative_to,
-    parts_to_pipeline_input,
     parts_to_prompt,
+    parts_to_user_input,
     resolve_workspace_path,
 )
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
@@ -50,6 +51,7 @@ from iac_code.a2a.types import (
     TASK_STATE_INPUT_REQUIRED,
     TASK_STATE_WORKING,
 )
+from iac_code.agent.message import ContentBlock
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.config import get_active_provider_key, get_provider_config, load_credentials
 from iac_code.i18n import _
@@ -683,14 +685,15 @@ def _public_cleanup_error(value: Any) -> str | None:
 async def _stream_a2a_normal_events(
     *,
     runtime: Any,
-    prompt: str,
+    prompt: str | list[ContentBlock],
+    prompt_text: str,
     cleanup_ledger: CleanupLedger | None,
     cleanup_publisher: PipelineA2AEventPublisher | None,
     cwd: str,
     session_id: str,
 ) -> AsyncIterator[Any]:
     if _a2a_cleanup_ledger_unavailable(cleanup_ledger, runtime=runtime, cwd=cwd, session_id=session_id):
-        if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt):
+        if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt_text):
             yield TextDeltaEvent(
                 text=_("Rollback cleanup deferred prompt state is unavailable. Please repair it before continuing.")
             )
@@ -702,7 +705,7 @@ async def _stream_a2a_normal_events(
 
     if cleanup_ledger is not None and cleanup_ledger.load_failed():
         if _runtime_has_cleanup_prompt(runtime) or _session_has_cleanup_prompt(cwd=cwd, session_id=session_id):
-            if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt):
+            if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt_text):
                 yield TextDeltaEvent(
                     text=_("Rollback cleanup deferred prompt state is unavailable. Please repair it before continuing.")
                 )
@@ -728,7 +731,7 @@ async def _stream_a2a_normal_events(
         async for event in cleanup_stream:
             yield event
         if cleanup_ledger.pending_resources():
-            if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt):
+            if not _append_a2a_deferred_cleanup_prompt(cwd=cwd, session_id=session_id, prompt=prompt_text):
                 yield TextDeltaEvent(
                     text=_("Rollback cleanup deferred prompt state is unavailable. Please repair it before continuing.")
                 )
@@ -740,13 +743,18 @@ async def _stream_a2a_normal_events(
         _mark_completed_cleanup_prompts(runtime=runtime, cwd=cwd, session_id=session_id, ledger=cleanup_ledger)
         _prune_completed_cleanup_prompt_from_runtime(runtime, cleanup_ledger)
 
-    prompts_after_cleanup = _a2a_prompts_after_cleanup(cwd=cwd, session_id=session_id, prompt=prompt)
+    prompts_after_cleanup = _a2a_prompts_after_cleanup(cwd=cwd, session_id=session_id, prompt=prompt_text)
     if prompts_after_cleanup is None:
         yield TextDeltaEvent(
             text=_("Rollback cleanup deferred prompt state is unavailable. Please repair it before continuing.")
         )
         return
-    prompts_to_run, has_deferred_prompts = prompts_after_cleanup
+    deferred_prompts, has_deferred_prompts = prompts_after_cleanup
+    prompts_to_run: list[str | list[ContentBlock]] = []
+    if has_deferred_prompts:
+        prompts_to_run.extend(deferred_prompts)
+    else:
+        prompts_to_run.append(prompt)
     for prompt_to_run in prompts_to_run:
         prompt_stream = runtime.agent_loop.run_streaming(prompt_to_run)
         if cleanup_ledger is not None:
@@ -785,6 +793,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._permission_resolver = permission_resolver
         self._auto_approve_permissions = auto_approve_permissions
         self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
+        self._metadata_echo_redactor = A2AMetadataEchoRedactor()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         requested_task_id = context.task_id or None
@@ -818,15 +827,20 @@ class IacCodeA2AExecutor(AgentExecutor):
                     cwd=cwd,
                 )
             pipeline_input: PipelineUserInput | None = None
+            normal_input: PipelineUserInput | None = None
             if pipeline_mode and not route_pipeline_handoff_to_normal:
                 try:
                     pipeline_input = self._pipeline_input_from_context(context, cwd=cwd)
                 except ValueError as exc:
                     raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
-                prompt = pipeline_input.display_text
                 self._validate_pipeline_request_input(pipeline_input, model=model)
             else:
-                prompt = self._prompt_from_context(context, cwd=cwd)
+                try:
+                    normal_input = self._normal_input_from_context(context, cwd=cwd)
+                except ValueError as exc:
+                    raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
+                if normal_input.has_images:
+                    self._validate_pipeline_request_input(normal_input, model=model)
             if pipeline_mode and requested_task_id is None:
                 recovered_task_id = await self._recoverable_pipeline_task_id_for_context(context_id=context_id, cwd=cwd)
                 if recovered_task_id is not None:
@@ -873,7 +887,11 @@ class IacCodeA2AExecutor(AgentExecutor):
             self._metrics.record_task_failed()
             return
 
-        if not (pipeline_mode and not route_pipeline_handoff_to_normal) and not prompt.strip():
+        if (
+            not (pipeline_mode and not route_pipeline_handoff_to_normal)
+            and normal_input is not None
+            and normal_input.is_empty
+        ):
             task.state = TASK_STATE_FAILED
             await self._publish_status(
                 event_queue,
@@ -1041,9 +1059,11 @@ class IacCodeA2AExecutor(AgentExecutor):
                             artifact_store=self._artifact_store,
                             exposure_types=self._thinking_exposure_types,
                         )
+                    assert normal_input is not None
                     stream = _stream_a2a_normal_events(
                         runtime=runtime,
-                        prompt=prompt,
+                        prompt=normal_input.content,
+                        prompt_text=normal_input.display_text,
                         cleanup_ledger=cleanup_ledger,
                         cleanup_publisher=cleanup_publisher,
                         cwd=cwd,
@@ -1256,17 +1276,26 @@ class IacCodeA2AExecutor(AgentExecutor):
             return context.get_user_input()
         return parts_to_prompt(message.parts, cwd=cwd)
 
+    def _normal_input_from_context(self, context: RequestContext, *, cwd: str) -> PipelineUserInput:
+        message = getattr(context, "message", None)
+        if not isinstance(message, Message):
+            return normalize_pipeline_user_input(context.get_user_input())
+        user_input = parts_to_user_input(message.parts, cwd=cwd)
+        if user_input.has_images:
+            return user_input
+        return normalize_pipeline_user_input(user_input.display_text)
+
     def _pipeline_input_from_context(self, context: RequestContext, *, cwd: str) -> PipelineUserInput:
         message = getattr(context, "message", None)
         if not isinstance(message, Message):
             return normalize_pipeline_user_input(context.get_user_input())
-        return parts_to_pipeline_input(message.parts, cwd=cwd)
+        return parts_to_user_input(message.parts, cwd=cwd)
 
     def validate_pipeline_message_request(self, message: Message) -> None:
         metadata = getattr(message, "metadata", None)
         try:
             cwd = self._resolve_cwd(metadata)
-            pipeline_input = parts_to_pipeline_input(message.parts, cwd=cwd)
+            pipeline_input = parts_to_user_input(message.parts, cwd=cwd)
         except ValueError as exc:
             raise InvalidParamsError(sanitize_public_text(str(exc))) from exc
         model = self._resolve_model(metadata) or self._model
@@ -1432,7 +1461,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             ParseDict(iac_code_session_metadata(session_id), task.metadata)
         message = getattr(context, "message", None)
         if isinstance(message, Message):
-            task.history.append(message)
+            task.history.append(self._metadata_echo_redactor.redact_message_echo(message))
         await event_queue.enqueue_event(task)
 
     def _refresh_runtime_cloud_tools(self, runtime: Any) -> None:
