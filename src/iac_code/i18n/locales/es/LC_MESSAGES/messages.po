@@ -49,6 +49,11 @@ msgstr "Nombre de archivo de artefacto no seguro"
 msgid "Unknown error"
 msgstr "Error desconocido"
 
+#: src/iac_code/a2a/events.py src/iac_code/acp/server.py
+#, python-brace-format
+msgid "MCP warning: {message}"
+msgstr "Advertencia MCP: {message}"
+
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 msgid ""
 "Cleanup state unavailable. Inspect the session file and cloud resources "
@@ -82,13 +87,13 @@ msgstr ""
 "limpieza."
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid "Task is already working."
-msgstr "La tarea ya está en ejecución."
-
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "Tarea cancelada."
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid "Task is already working."
+msgstr "La tarea ya está en ejecución."
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -170,6 +175,13 @@ msgstr "Tarea completada."
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task failed."
 msgstr "La tarea falló."
+
+#: src/iac_code/acp/convert.py src/iac_code/cli/headless.py
+#: src/iac_code/mcp/tools.py src/iac_code/ui/renderer.py
+#: src/iac_code/ui/stream_accumulator.py
+#, python-brace-format
+msgid "MCP {server}:{tool}"
+msgstr "MCP {server}:{tool}"
 
 #: src/iac_code/acp/server.py
 msgid "Session not found"
@@ -505,6 +517,11 @@ msgstr ""
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "Error: {error}"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "MCP warning: {message}\n"
+msgstr "Advertencia MCP: {message}\n"
 
 #: src/iac_code/cli/install_git_bash.py
 #, python-brace-format
@@ -2127,6 +2144,571 @@ msgstr "hace {n} minuto{s}"
 msgid "{n} more line{s}"
 msgstr "{n} línea{s} más"
 
+#: src/iac_code/mcp/cli.py
+msgid "Manage MCP servers."
+msgstr "Administrar servidores MCP."
+
+#: src/iac_code/mcp/cli.py
+msgid "Command for stdio MCP server."
+msgstr "Comando para servidor MCP stdio."
+
+#: src/iac_code/mcp/cli.py
+msgid "Command argument. Can be repeated."
+msgstr "Argumento de comando. Se puede repetir."
+
+#: src/iac_code/mcp/cli.py
+msgid "Environment variable KEY=VALUE. Can be repeated."
+msgstr "Variable de entorno KEY=VALUE. Se puede repetir."
+
+#: src/iac_code/mcp/cli.py
+msgid "Transport type: stdio, http, sse."
+msgstr "Tipo de transporte: stdio, http, sse."
+
+#: src/iac_code/mcp/cli.py
+msgid "Remote MCP URL for http/sse."
+msgstr "URL MCP remota para http/sse."
+
+#: src/iac_code/mcp/cli.py
+msgid "HTTP header KEY=VALUE. Can be repeated."
+msgstr "Encabezado HTTP KEY=VALUE. Se puede repetir."
+
+#: src/iac_code/mcp/cli.py
+msgid "Config scope: user, local, project."
+msgstr "Ámbito de configuración: user, local, project."
+
+#: src/iac_code/mcp/cli.py
+msgid "OAuth client id."
+msgstr "ID de cliente OAuth."
+
+#: src/iac_code/mcp/cli.py
+msgid "OAuth client secret. Pass the option without a value to enter it securely."
+msgstr ""
+"Secreto de cliente OAuth. Pasa la opción sin valor para introducirlo de "
+"forma segura."
+
+#: src/iac_code/mcp/cli.py
+msgid "OAuth client secret env var name."
+msgstr "Nombre de variable de entorno del secreto de cliente OAuth."
+
+#: src/iac_code/mcp/cli.py
+msgid "OAuth loopback callback port."
+msgstr "Puerto de callback loopback de OAuth."
+
+#: src/iac_code/mcp/cli.py
+msgid "OAuth authorization server metadata URL."
+msgstr "URL de metadatos del servidor de autorización OAuth."
+
+#: src/iac_code/mcp/cli.py
+msgid "--command is required for stdio MCP servers."
+msgstr "--command es obligatorio para servidores MCP stdio."
+
+#: src/iac_code/mcp/cli.py
+msgid "Warning: on Windows, bare npx may need to be configured as: cmd /c npx"
+msgstr ""
+"Advertencia: en Windows, npx sin envoltorio puede tener que configurarse "
+"como: cmd /c npx"
+
+#: src/iac_code/mcp/cli.py
+msgid "--url is required for remote MCP servers."
+msgstr "--url es obligatorio para servidores MCP remotos."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Added MCP server {name!r} to {scope} config."
+msgstr "Servidor MCP {name!r} añadido a la configuración {scope}."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Invalid JSON: {error}"
+msgstr "JSON no válido: {error}"
+
+#: src/iac_code/mcp/cli.py
+msgid "MCP server JSON must be an object."
+msgstr "El JSON del servidor MCP debe ser un objeto."
+
+#: src/iac_code/mcp/cli.py
+msgid "No MCP servers configured."
+msgstr "No hay servidores MCP configurados."
+
+#: src/iac_code/mcp/cli.py
+msgid "approved"
+msgstr "aprobado"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/repl.py
+msgid "pending"
+msgstr "pendiente"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "MCP server {name!r} not found in {scope} config."
+msgstr "No se encontró el servidor MCP {name!r} en la configuración {scope}."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Removed MCP server {name!r} from {path}."
+msgstr "Servidor MCP {name!r} eliminado de {path}."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Approved MCP server {name!r}."
+msgstr "Servidor MCP {name!r} aprobado."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Rejected MCP server {name!r}."
+msgstr "Servidor MCP {name!r} rechazado."
+
+#: src/iac_code/mcp/cli.py
+msgid "Reset MCP project approval choices."
+msgstr "Se restablecieron las decisiones de aprobación de MCP del proyecto."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "MCP auth failed for {name!r}: {error}"
+msgstr "Falló la autenticación MCP para {name!r}: {error}"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Authenticated MCP server {name!r}."
+msgstr "Servidor MCP {name!r} autenticado."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Reset stored MCP auth state for {name!r}."
+msgstr ""
+"Se restableció el estado de autenticación guardado para el servidor MCP "
+"{name!r}."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
+msgstr "Ámbito MCP no válido {scope!r}. Valores válidos: user, local, project."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Scope {scope!r} cannot be used for persisted MCP config."
+msgstr "El ámbito {scope!r} no se puede usar para configuración MCP persistida."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid ""
+"MCP {section} {key!r} may contain a secret; use an environment variable "
+"reference like ${{VAR}} instead of storing plaintext."
+msgstr ""
+"MCP {section} {key!r} puede contener un secreto; usa una referencia de "
+"variable de entorno como ${{VAR}} en lugar de guardar texto plano."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "{option} expects KEY=VALUE, got {value!r}."
+msgstr "{option} espera KEY=VALUE, se recibió {value!r}."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "{option} expects a non-empty key."
+msgstr "{option} espera una clave no vacía."
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Project MCP server {name!r} not found."
+msgstr "No se encontró el servidor MCP de proyecto {name!r}."
+
+#: src/iac_code/mcp/client.py src/iac_code/mcp/manager.py
+#, python-brace-format
+msgid "MCP server {server!r} is not connected."
+msgstr "El servidor MCP {server!r} no está conectado."
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "Unsupported MCP transport: {transport}"
+msgstr "Transporte MCP no compatible: {transport}"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP server {server!r} requires authentication."
+msgstr "El servidor MCP {server!r} requiere autenticación."
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid ""
+"{message}\n"
+"MCP server stderr:\n"
+"{stderr}"
+msgstr ""
+"{message}\n"
+"stderr del servidor MCP:\n"
+"{stderr}"
+
+#: src/iac_code/mcp/config.py
+msgid "MCP server names must be non-empty strings."
+msgstr "Los nombres de servidores MCP deben ser cadenas no vacías."
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid "Project MCP server {name!r} is pending approval."
+msgstr "El servidor MCP de proyecto {name!r} está pendiente de aprobación."
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid "Cannot persist MCP server config to {scope!r} scope."
+msgstr ""
+"No se puede persistir la configuración del servidor MCP en el ámbito "
+"{scope!r}."
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid "MCP scope {scope!r} is not a persisted config scope."
+msgstr "El ámbito MCP {scope!r} no es un ámbito de configuración persistida."
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid ""
+"MCP server {existing!r} has the same content signature as {current!r}; "
+"keeping higher-precedence server {current!r}."
+msgstr ""
+"El servidor MCP {existing!r} tiene la misma firma de contenido que "
+"{current!r}; se conserva el servidor {current!r} de mayor precedencia."
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid "MCP server name {name!r} is reserved."
+msgstr "El nombre de servidor MCP {name!r} está reservado."
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid ""
+"MCP server name {name!r} may only contain letters, numbers, dot, "
+"underscore, and hyphen."
+msgstr ""
+"El nombre de servidor MCP {name!r} solo puede contener letras, números, "
+"punto, guion bajo y guion."
+
+#: src/iac_code/mcp/env_expansion.py
+#, python-brace-format
+msgid "Environment variable {name!r} is not set for MCP config."
+msgstr ""
+"La variable de entorno {name!r} no está definida para la configuración "
+"MCP."
+
+#: src/iac_code/mcp/manager.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} requested elicitation, but iac-code does not "
+"support elicitation yet."
+msgstr ""
+"El servidor MCP {server!r} solicitó elicitation, pero iac-code todavía no"
+" la admite."
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid "Could not discover OAuth metadata for MCP server {server!r}."
+msgstr "No se pudieron descubrir los metadatos OAuth del servidor MCP {server!r}."
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid ""
+"OAuth token response for MCP server {server!r} did not include an access "
+"token."
+msgstr ""
+"La respuesta de token OAuth del servidor MCP {server!r} no incluyó un "
+"token de acceso."
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid "No refresh token is available for MCP server {server!r}."
+msgstr "No hay token de actualización disponible para el servidor MCP {server!r}."
+
+#: src/iac_code/mcp/oauth.py src/iac_code/services/agent_factory.py
+#, python-brace-format
+msgid "MCP server {server!r} requires authentication: {error}"
+msgstr "El servidor MCP {server!r} requiere autenticación: {error}"
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid ""
+"OAuth refresh response for MCP server {server!r} did not include an "
+"access token."
+msgstr ""
+"La respuesta de actualización OAuth del servidor MCP {server!r} no "
+"incluyó un token de acceso."
+
+#: src/iac_code/mcp/oauth.py
+msgid "Timed out waiting for MCP OAuth callback."
+msgstr "Se agotó el tiempo de espera para el callback OAuth de MCP."
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth callback did not include a code."
+msgstr "El callback OAuth no incluyó un código."
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth flow closed."
+msgstr "El flujo OAuth se cerró."
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth callback state did not match."
+msgstr "El estado del callback OAuth no coincidió."
+
+#: src/iac_code/mcp/oauth.py
+msgid "MCP authentication complete. You can close this window."
+msgstr "Autenticación MCP completa. Puede cerrar esta ventana."
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint did not return an object."
+msgstr "El endpoint de metadatos OAuth no devolvió un objeto."
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth token endpoint did not return an object."
+msgstr "El endpoint de token OAuth no devolvió un objeto."
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid ""
+"Structured content:\n"
+"{content}"
+msgstr ""
+"Contenido estructurado:\n"
+"{content}"
+
+#: src/iac_code/mcp/output.py
+msgid "MCP tool returned no content."
+msgstr "La herramienta MCP no devolvió contenido."
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid ""
+"Resource from MCP server {server!r}\n"
+"URI: {uri}"
+msgstr ""
+"Recurso del servidor MCP {server!r}\n"
+"URI: {uri}"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid ""
+"{header}\n"
+"MIME: {mime_type}"
+msgstr ""
+"{header}\n"
+"MIME: {mime_type}"
+
+#: src/iac_code/mcp/output.py
+msgid "(unnamed)"
+msgstr "(sin nombre)"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid "Resource link: {name}"
+msgstr "Enlace de recurso: {name}"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid "URI: {uri}"
+msgstr "URI: {uri}"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid "MIME: {mime_type}"
+msgstr "MIME: {mime_type}"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid ""
+"Unsupported MCP content block:\n"
+"{content}"
+msgstr ""
+"Bloque de contenido MCP no compatible:\n"
+"{content}"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid "MCP {kind} content must contain base64 string data."
+msgstr "El contenido MCP {kind} debe contener datos de cadena base64."
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid "Saved {mime_type} artifact as {artifact_id} ({bytes} bytes)."
+msgstr "Artefacto {mime_type} guardado como {artifact_id} ({bytes} bytes)."
+
+#: src/iac_code/mcp/prompts.py
+#, python-brace-format
+msgid "MCP prompt command {command!r} conflicts with an existing command."
+msgstr ""
+"El comando de prompt MCP {command!r} entra en conflicto con un comando "
+"existente."
+
+#: src/iac_code/mcp/prompts.py
+#, python-brace-format
+msgid "MCP prompt {prompt}"
+msgstr "Prompt MCP {prompt}"
+
+#: src/iac_code/mcp/prompts.py
+#, python-brace-format
+msgid "Missing required MCP prompt argument: {name}"
+msgstr "Falta el argumento obligatorio de prompt MCP: {name}"
+
+#: src/iac_code/mcp/prompts.py
+msgid "MCP prompt arguments JSON must be an object."
+msgstr "Los argumentos de prompt MCP en JSON deben ser un objeto."
+
+#: src/iac_code/mcp/prompts.py
+msgid "MCP prompt arguments must use key=value syntax."
+msgstr "Los argumentos de prompt MCP deben usar sintaxis key=value."
+
+#: src/iac_code/mcp/prompts.py
+msgid "MCP prompt arguments contain an unterminated quoted value."
+msgstr "Los argumentos de prompt MCP contienen un valor entre comillas sin cerrar."
+
+#: src/iac_code/mcp/skills.py
+#, python-brace-format
+msgid "MCP skill command {command!r} conflicts with an existing command."
+msgstr ""
+"El comando de skill MCP {command!r} entra en conflicto con un comando "
+"existente."
+
+#: src/iac_code/mcp/skills.py
+#, python-brace-format
+msgid "MCP skill command {command!r} could not be loaded: {error}"
+msgstr "No se pudo cargar el comando de skill MCP {command!r}: {error}"
+
+#: src/iac_code/mcp/skills.py
+#, python-brace-format
+msgid "MCP skill {command!r} was truncated to fit safety limits."
+msgstr ""
+"La skill MCP {command!r} se truncó para ajustarse a los límites de "
+"seguridad."
+
+#: src/iac_code/mcp/tools.py
+#, python-brace-format
+msgid "MCP tool {tool!r} from server {server!r}."
+msgstr "Herramienta MCP {tool!r} del servidor {server!r}."
+
+#: src/iac_code/mcp/tools.py
+msgid "List resources exposed by connected MCP servers."
+msgstr "Lista los recursos expuestos por servidores MCP conectados."
+
+#: src/iac_code/mcp/tools.py
+msgid "Optional MCP server name filter."
+msgstr "Filtro opcional por nombre de servidor MCP."
+
+#: src/iac_code/mcp/tools.py
+msgid "No MCP resources are currently available."
+msgstr "Actualmente no hay recursos MCP disponibles."
+
+#: src/iac_code/mcp/tools.py
+msgid "Read a resource exposed by a connected MCP server."
+msgstr "Lee un recurso expuesto por un servidor MCP conectado."
+
+#: src/iac_code/mcp/tools.py
+msgid "Start authentication for an MCP server."
+msgstr "Iniciar autenticación para un servidor MCP."
+
+#: src/iac_code/mcp/tools.py
+#, python-brace-format
+msgid "No MCP authentication flow is configured for {server!r}."
+msgstr "No hay flujo de autenticación MCP configurado para {server!r}."
+
+#: src/iac_code/mcp/tools.py src/iac_code/services/agent_factory.py
+#, python-brace-format
+msgid ""
+"Open this URL to authenticate MCP server {server!r}:\n"
+"{url}"
+msgstr ""
+"Abre esta URL para autenticar el servidor MCP {server!r}:\n"
+"{url}"
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"Unsupported MCP transport {transport!r} for server {server!r}. Supported "
+"transports: {supported}."
+msgstr ""
+"Transporte MCP {transport!r} no compatible para el servidor {server!r}. "
+"Transportes compatibles: {supported}."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} oauth config must be an object."
+msgstr "La configuración oauth del servidor MCP {server!r} debe ser un objeto."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} uses oauth.clientSecret, but plaintext client "
+"secrets are not supported. Use oauth.clientSecretEnv instead."
+msgstr ""
+"El servidor MCP {server!r} usa oauth.clientSecret, pero no se admiten "
+"secretos de cliente en texto plano. Usa oauth.clientSecretEnv en su "
+"lugar."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} has unsupported oauth fields: {fields}."
+msgstr "El servidor MCP {server!r} tiene campos oauth no compatibles: {fields}."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} oauth.callbackPort must be an integer."
+msgstr "oauth.callbackPort del servidor MCP {server!r} debe ser un entero."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} config must be an object."
+msgstr "La configuración del servidor MCP {server!r} debe ser un objeto."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} requires a type unless a stdio command is provided."
+msgstr ""
+"El servidor MCP {server!r} requiere un type salvo que se proporcione un "
+"comando stdio."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} type must be a string."
+msgstr "El type del servidor MCP {server!r} debe ser una cadena."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} uses unsupported field 'headersHelper'. Static "
+"headers are supported; dynamic headers need a later trusted-execution "
+"design."
+msgstr ""
+"El servidor MCP {server!r} usa el campo no compatible 'headersHelper'. Se"
+" admiten encabezados estáticos; los encabezados dinámicos necesitan un "
+"diseño posterior de ejecución confiable."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} has unsupported config fields: {fields}."
+msgstr ""
+"El servidor MCP {server!r} tiene campos de configuración no compatibles: "
+"{fields}."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} requires a {field} string."
+msgstr "El servidor MCP {server!r} requiere una cadena {field}."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} field {field} must be a string."
+msgstr "El campo {field} del servidor MCP {server!r} debe ser una cadena."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} field {field} must be a list of strings."
+msgstr ""
+"El campo {field} del servidor MCP {server!r} debe ser una lista de "
+"cadenas."
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid "MCP server {server!r} field {field} must be an object of string values."
+msgstr ""
+"El campo {field} del servidor MCP {server!r} debe ser un objeto de "
+"valores de cadena."
+
 #: src/iac_code/memory/memory_tools.py
 msgid ""
 "Read persistent memories. Omit name to list all, or provide name to read "
@@ -2856,6 +3438,27 @@ msgstr "Volcengine CodingPlan"
 #: src/iac_code/providers/registry.py
 msgid "Anthropic Compatible"
 msgstr "Compatible con Anthropic"
+
+#: src/iac_code/services/agent_factory.py
+#, python-brace-format
+msgid "MCP server {server!r} connection failed: {error}"
+msgstr "Falló la conexión del servidor MCP {server!r}: {error}"
+
+#: src/iac_code/services/agent_factory.py
+#, python-brace-format
+msgid "MCP server {server!r} {capability} discovery failed: {error}"
+msgstr ""
+"Falló el descubrimiento de {capability} del servidor MCP {server!r}: "
+"{error}"
+
+#: src/iac_code/services/agent_factory.py
+#, python-brace-format
+msgid ""
+"Opened MCP auth URL for {server!r}:\n"
+"{url}"
+msgstr ""
+"URL de autenticación MCP abierta para {server!r}:\n"
+"{url}"
 
 #: src/iac_code/services/qwenpaw_source.py
 #, python-brace-format
@@ -3852,7 +4455,7 @@ msgstr "Completado ({child_count} usos de herramientas{token_info}{elapsed})"
 #: src/iac_code/ui/renderer.py
 #, python-brace-format
 msgid "+ {count} more tool uses (ctrl+o to expand)"
-msgstr "+ {count} usos de herramientas más (ctrl+o para expandir)"
+msgstr "+ {count} usos adicionales de herramienta (ctrl+o para expandir)"
 
 #: src/iac_code/ui/renderer.py
 #, python-brace-format
@@ -3904,6 +4507,15 @@ msgstr "No, siempre denegar \"{rule}\" (esta sesión)"
 #: src/iac_code/ui/renderer.py
 msgid "No, always reject this tool"
 msgstr "No, rechazar siempre esta herramienta"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Approve project MCP server {server!r} from {source}? [y/N] "
+msgstr "¿Aprobar el servidor MCP de proyecto {server!r} desde {source}? [y/N] "
+
+#: src/iac_code/ui/repl.py
+msgid "MCP warning:"
+msgstr "Advertencia MCP:"
 
 #: src/iac_code/ui/repl.py
 msgid "Press Ctrl+C again to exit."
@@ -3987,9 +4599,8 @@ msgstr ""
 #, python-brace-format
 msgid "Unknown command: /{name}. Type /help for available commands."
 msgstr ""
-"Unknown command: /{name}. Type /help for available commands.Unknown "
-"command: /{name}. Type /help for available commands.Comando desconocido: "
-"/{name}. Escriba /help para ver los comandos disponibles."
+"Comando desconocido: /{name}. Escriba /help para ver los comandos "
+"disponibles."
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -4088,10 +4699,6 @@ msgstr ""
 #: src/iac_code/ui/repl.py
 msgid "failed"
 msgstr "fallido"
-
-#: src/iac_code/ui/repl.py
-msgid "pending"
-msgstr "pendiente"
 
 #: src/iac_code/ui/repl.py
 msgid "in progress"

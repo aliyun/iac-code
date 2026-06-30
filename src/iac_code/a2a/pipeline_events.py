@@ -15,6 +15,7 @@ from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
     DiagramEvent,
+    MCPProgressEvent,
     PermissionRequestEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
@@ -148,6 +149,10 @@ class PipelineEventTranslator:
     def last_sequence(self) -> int:
         return self._sequence
 
+    @property
+    def context(self) -> PipelineA2AContext:
+        return self._context
+
     def hydrate_from_events(self, events: list[dict[str, Any]]) -> None:
         latest_parent_step_sequence = -1
         for event in events:
@@ -273,6 +278,8 @@ class PipelineEventTranslator:
             return [self._translate_diagram_event(event)]
         if isinstance(event, ToolResultEvent):
             return self._translate_tool_result_event(event)
+        if isinstance(event, MCPProgressEvent):
+            return [self._translate_parent_scoped_display_event("tool_progress", _mcp_progress_data(event))]
         if isinstance(event, SubPipelineStreamEvent):
             return self._translate_sub_pipeline_stream_event(event)
         return []
@@ -537,6 +544,11 @@ class PipelineEventTranslator:
         elif isinstance(inner, ToolResultEvent):
             event_type = "tool_result"
             data = _tool_result_data(inner)
+            input_data = None
+            permission = None
+        elif isinstance(inner, MCPProgressEvent):
+            event_type = "tool_progress"
+            data = _mcp_progress_data(inner)
             input_data = None
             permission = None
         else:
@@ -1239,6 +1251,22 @@ def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
         "isError": event.is_error,
         "result": _tool_result_metadata(event.result, is_error=event.is_error),
     }
+
+
+def _mcp_progress_data(event: MCPProgressEvent) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "toolName": "mcp__{}__{}".format(event.server_name, event.tool_name),
+        "toolUseId": event.tool_use_id or "",
+        "serverName": event.server_name,
+        "mcpToolName": event.tool_name,
+    }
+    if event.progress is not None:
+        data["progress"] = event.progress
+    if event.total is not None:
+        data["total"] = event.total
+    if event.message:
+        data["message"] = _truncate(event.message)
+    return data
 
 
 def _completion_step_id(envelope: dict[str, Any]) -> str | None:

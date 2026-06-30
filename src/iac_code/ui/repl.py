@@ -218,8 +218,17 @@ class InlineREPL:
         self.tool_registry.register(TaskGetTool(self._task_manager))
         self.tool_registry.register(TaskStopTool(self._task_manager))
 
+        self._mcp_manager = None
+        self.mcp_config_warnings = []
+        self._mcp_warnings_printed_count = 0
+        self._registered_mcp_tool_names: set[str] = set()
+        self._registered_mcp_command_names: set[str] = set()
+        self._registered_mcp_auth_tool_names: set[str] = set()
+        self._mcp_auth_tasks: set[asyncio.Task[Any]] = set()
+        self._mcp_auth_flows: set[Any] = set()
         cwd = os.getcwd()
         self.refresh_skills()
+        self._register_mcp_integrations()
         skill_commands = self.command_registry.get_model_invocable_skills()
 
         from iac_code.services.permissions.loader import load_permission_context
@@ -321,6 +330,128 @@ class InlineREPL:
         """Return skill names that cannot be disabled."""
         return getattr(self, "_locked_skill_names", set())
 
+    def _register_mcp_integrations(self) -> None:
+        from pathlib import Path
+
+        from iac_code.mcp.config import load_mcp_configs, resolve_mcp_workspace_root
+        from iac_code.mcp.manager import MCPManager
+        from iac_code.services.agent_factory import (
+            _append_new_mcp_connection_warnings,
+            _mcp_connection_warnings,
+            _run_async_blocking,
+            _sync_mcp_auth_tools,
+            _sync_mcp_command_registry,
+            _sync_mcp_tool_registry,
+        )
+
+        self._prompt_for_pending_project_mcp_servers()
+        mcp_workspace_root = resolve_mcp_workspace_root(Path(self._original_cwd))
+        load_result = load_mcp_configs(cwd=Path(self._original_cwd), workspace_root=mcp_workspace_root)
+        self.mcp_config_warnings = list(load_result.warnings)
+        if not load_result.servers:
+            return
+
+        self._mcp_manager = MCPManager(load_result.servers, roots=[mcp_workspace_root], session_id=self._session_id)
+        try:
+            _run_async_blocking(self._mcp_manager.connect_all())
+            self.mcp_config_warnings.extend(_mcp_connection_warnings(self._mcp_manager))
+            scoped_configs_by_name = {server.name: server for server in load_result.servers}
+            self._registered_mcp_auth_tool_names = _sync_mcp_auth_tools(
+                self.tool_registry,
+                scoped_configs_by_name,
+                self._mcp_manager,
+                self._registered_mcp_auth_tool_names,
+                auth_tasks=self._mcp_auth_tasks,
+                auth_flows=self._mcp_auth_flows,
+                session_id=self._session_id,
+            )
+            self._registered_mcp_tool_names = _sync_mcp_tool_registry(
+                self.tool_registry,
+                self._mcp_manager,
+                self._session_id,
+                self._registered_mcp_tool_names,
+            )
+            self._registered_mcp_command_names, command_warnings = _run_async_blocking(
+                _sync_mcp_command_registry(self.command_registry, self._mcp_manager, self._registered_mcp_command_names)
+            )
+            self.mcp_config_warnings.extend(command_warnings)
+
+            async def on_mcp_changed(server_name: str, capability: str) -> None:
+                _ = server_name
+                self._registered_mcp_auth_tool_names = _sync_mcp_auth_tools(
+                    self.tool_registry,
+                    scoped_configs_by_name,
+                    self._mcp_manager,
+                    self._registered_mcp_auth_tool_names,
+                    auth_tasks=self._mcp_auth_tasks,
+                    auth_flows=self._mcp_auth_flows,
+                    session_id=self._session_id,
+                )
+                if capability in {"tools", "resources", "auth"}:
+                    self._registered_mcp_tool_names = _sync_mcp_tool_registry(
+                        self.tool_registry,
+                        self._mcp_manager,
+                        self._session_id,
+                        self._registered_mcp_tool_names,
+                    )
+                if capability in {"prompts", "resources"}:
+                    self._registered_mcp_command_names, warnings = await _sync_mcp_command_registry(
+                        self.command_registry,
+                        self._mcp_manager,
+                        self._registered_mcp_command_names,
+                    )
+                    self.mcp_config_warnings.extend(warnings)
+                    self._refresh_model_skill_listing()
+                _append_new_mcp_connection_warnings(self.mcp_config_warnings, self._mcp_manager)
+                self._print_mcp_config_warnings()
+
+            add_change_listener = getattr(self._mcp_manager, "add_change_listener", None)
+            if add_change_listener is not None:
+                add_change_listener(on_mcp_changed)
+        except BaseException:
+            _run_async_blocking(self._close_mcp_manager())
+            raise
+
+    def _prompt_for_pending_project_mcp_servers(self) -> None:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return
+        from pathlib import Path
+
+        from iac_code.mcp.config import (
+            approve_project_mcp_server,
+            load_mcp_configs,
+            reject_project_mcp_server,
+            resolve_mcp_workspace_root,
+        )
+        from iac_code.mcp.types import MCPConfigScope
+
+        root = resolve_mcp_workspace_root(Path(self._original_cwd))
+        load_result = load_mcp_configs(cwd=Path(self._original_cwd), include_pending_project=True)
+        for server in load_result.servers:
+            if server.scope is not MCPConfigScope.PROJECT or server.approved or not server.source_path:
+                continue
+            answer = self.console.input(
+                _("Approve project MCP server {server!r} from {source}? [y/N] ").format(
+                    server=server.name,
+                    source=server.source_path,
+                ),
+                markup=False,
+            )
+            if answer.strip().lower() in {"y", "yes"}:
+                approve_project_mcp_server(
+                    server.name,
+                    project_file=Path(server.source_path),
+                    workspace_root=root,
+                    config_signature=server.config.content_signature(),
+                )
+            else:
+                reject_project_mcp_server(
+                    server.name,
+                    project_file=Path(server.source_path),
+                    workspace_root=root,
+                    config_signature=server.config.content_signature(),
+                )
+
     def refresh_cloud_tools(self) -> None:
         """Register cloud tools that are available with current cloud credentials."""
         from iac_code.services.cloud_credentials import CloudCredentials
@@ -354,7 +485,6 @@ class InlineREPL:
         """Rediscover skills and refresh enabled/disabled skill state."""
         from iac_code.skills.bundled import init_bundled_skills
         from iac_code.skills.discovery import discover_all_skills
-        from iac_code.skills.listing import build_skill_listing
         from iac_code.skills.management import build_skill_management_state
         from iac_code.skills.settings import load_disabled_skills
         from iac_code.skills.skill_tool import SkillTool
@@ -395,13 +525,42 @@ class InlineREPL:
                 ),
             )
         )
+        if self._mcp_manager is not None:
+            from iac_code.services.agent_factory import _run_async_blocking, _sync_mcp_command_registry
+
+            self._registered_mcp_command_names, warnings = _run_async_blocking(
+                _sync_mcp_command_registry(
+                    self.command_registry,
+                    self._mcp_manager,
+                    self._registered_mcp_command_names,
+                )
+            )
+            self.mcp_config_warnings.extend(warnings)
+
+        self._refresh_model_skill_listing()
+
+    def _refresh_model_skill_listing(self) -> None:
+        from iac_code.skills.listing import build_skill_listing
 
         skill_commands = self.command_registry.get_model_invocable_skills()
         self._skill_listing = build_skill_listing(skill_commands)
-
         if hasattr(self, "_agent_loop"):
             self._agent_loop.set_auto_trigger_skills(skill_commands)
             self._agent_loop.set_provider(self._provider_manager, system_prompt=self._build_current_system_prompt())
+
+    def _print_mcp_config_warnings(self) -> None:
+        warnings = list(getattr(self, "mcp_config_warnings", []) or [])
+        start = getattr(self, "_mcp_warnings_printed_count", 0)
+        if start >= len(warnings):
+            return
+        for warning in warnings[start:]:
+            self.console.print(
+                "[yellow]{label}[/yellow] {message}".format(
+                    label=_("MCP warning:"),
+                    message=getattr(warning, "message", warning),
+                )
+            )
+        self._mcp_warnings_printed_count = len(warnings)
 
     async def run(self, initial_prompt: str | None = None) -> None:
         """Run the REPL until the user exits.
@@ -418,6 +577,7 @@ class InlineREPL:
         self.console.print(
             render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
         )
+        self._print_mcp_config_warnings()
         if self._resume_messages:
             self._replay_resume_messages(self._resume_messages)
             self.console.print()  # blank line before first new user turn
@@ -552,6 +712,7 @@ class InlineREPL:
                     # Terminal fd became invalid (e.g. after double Ctrl+C during response)
                     break
         finally:
+            await self._close_mcp_manager()
             # Persist a tail-readable last-prompt entry so the /resume picker
             # can show what the user was last doing without parsing the whole
             # JSONL. Best-effort — failures must not block shutdown.
@@ -581,13 +742,31 @@ class InlineREPL:
 
     async def run_once(self, prompt: str) -> None:
         """Process a single prompt and exit (non-interactive mode)."""
-        stripped_prompt = prompt.strip()
-        if stripped_prompt.startswith("!"):
-            await self._handle_shell_escape(stripped_prompt)
-        elif self.command_registry.is_command(prompt):
-            await self._handle_command(prompt)
-        else:
-            await self._handle_chat(prompt)
+        try:
+            stripped_prompt = prompt.strip()
+            if stripped_prompt.startswith("!"):
+                await self._handle_shell_escape(stripped_prompt)
+            elif self.command_registry.is_command(prompt):
+                await self._handle_command(prompt)
+            else:
+                await self._handle_chat(prompt)
+        finally:
+            await self._close_mcp_manager()
+
+    async def _close_mcp_manager(self) -> None:
+        from iac_code.services.agent_factory import _close_mcp_auth_flows
+
+        auth_tasks = getattr(self, "_mcp_auth_tasks", set())
+        auth_flows = getattr(self, "_mcp_auth_flows", set())
+        await _close_mcp_auth_flows(auth_tasks, auth_flows)
+        manager = getattr(self, "_mcp_manager", None)
+        if manager is None:
+            return
+        self._mcp_manager = None
+        try:
+            await manager.disconnect_all()
+        except Exception:
+            logger.debug("MCP manager close failed", exc_info=True)
 
     def _handle_startup_update(self) -> PendingUpdate | None:
         """Prompt for a cached update before the welcome banner."""
@@ -1128,6 +1307,7 @@ class InlineREPL:
         self.console.print(
             render_welcome_banner(state.model, state.cwd, session_id=self._session_id, session_name=self._session_name)
         )
+        self._print_mcp_config_warnings()
         messages = self._agent_loop.context_manager.get_messages()
         if not messages and not self._command_log and not self._streaming_error_log:
             return

@@ -66,6 +66,68 @@ async def test_executor_runs_prompt_and_finishes_input_required(
 
 
 @pytest.mark.asyncio
+async def test_executor_publishes_mcp_warnings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]),
+        session_id="session-1",
+        mcp_config_warnings=[
+            SimpleNamespace(server_name="broken", code="connection_failed", message="MCP server failed")
+        ],
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    warning_events = [
+        dump(event)
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and "mcpWarning" in dump(event).get("metadata", {}).get("iac_code", {})
+    ]
+    assert len(warning_events) == 1
+    assert warning_events[0]["status"]["message"]["parts"][0]["text"] == "MCP warning: MCP server failed"
+    assert warning_events[0]["metadata"]["iac_code"]["mcpWarning"]["code"] == "connection_failed"
+
+
+@pytest.mark.asyncio
+async def test_executor_closes_pipeline_runtime_when_replacing_with_normal_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime
+
+    old_agent_runtime = SimpleNamespace(closed=False)
+
+    async def old_aclose() -> None:
+        old_agent_runtime.closed = True
+
+    old_agent_runtime.aclose = old_aclose
+    old_pipeline_runtime = A2APipelineRuntime(agent_runtime=old_agent_runtime)
+    new_runtime = FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: new_runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda sid: old_pipeline_runtime,
+    )
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(task_id="task-1", context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert old_agent_runtime.closed is True
+    assert store._contexts["ctx-1"].runtime is new_runtime
+
+
+@pytest.mark.asyncio
 async def test_executor_exposes_iac_code_session_id_in_status_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -850,6 +912,60 @@ async def test_same_context_lock_race_fails_fast(monkeypatch: pytest.MonkeyPatch
     dumped = dump(queue.events[-1])
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     assert "already working" in dumped["status"]["message"]["parts"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_cancelling_during_context_lock_acquire_clears_active_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class ContendedLock:
+        def __init__(self) -> None:
+            self.acquire_requested = asyncio.Event()
+            self.acquire_waiter = asyncio.get_running_loop().create_future()
+
+        def acquire(self) -> asyncio.Future[bool]:
+            self.acquire_requested.set()
+            return self.acquire_waiter
+
+        def release(self) -> None:
+            raise AssertionError("release should not be called when acquire is cancelled")
+
+    runtime = FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="never")]), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda sid: runtime,
+    )
+    lock = ContendedLock()
+    ctx.lock = lock
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    run_task = asyncio.create_task(
+        executor.execute(
+            FakeRequestContext(
+                task_id="task-lock-cancel",
+                context_id="ctx-1",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            queue,
+        )
+    )
+    await lock.acquire_requested.wait()
+    task_record = await store.get_or_create_task(task_id="task-lock-cancel", context_id="ctx-1")
+    assert task_record.active_task is run_task
+
+    run_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run_task
+
+    assert task_record.active_task is None
+    assert task_record.state == "canceled"
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_CANCELED"
 
 
 @pytest.mark.asyncio

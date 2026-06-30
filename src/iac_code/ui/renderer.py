@@ -46,6 +46,7 @@ from iac_code.types.stream_events import (
     CompactionEvent,
     DiagramEvent,
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
@@ -592,6 +593,18 @@ class Renderer:
                 f"{status_icon} {status}",
             )
         return Group(title, table)
+
+    def _render_mcp_progress(self, event: MCPProgressEvent) -> Text:
+        text = Text("  ⎿  ", style="dim")
+        parts = [_("MCP {server}:{tool}").format(server=event.server_name, tool=event.tool_name)]
+        if event.progress is not None and event.total is not None:
+            parts.append("{:g}/{:g}".format(event.progress, event.total))
+        elif event.progress is not None:
+            parts.append("{:g}".format(event.progress))
+        if event.message:
+            parts.append(event.message)
+        text.append(": ".join(parts), style="dim")
+        return text
 
     def _render_diagram(self, event: DiagramEvent) -> Group:
         """Render an architecture diagram using termaid or fallback to code block."""
@@ -1312,6 +1325,22 @@ class Renderer:
                         if rec.tool_name == "ros_stack_instances" and not rec.done:
                             rec.progress_renderable = self._render_instances_progress(event)
                             break
+                    _ensure_live()
+                    _update_live()
+
+                # ── MCP progress ───────────────────────────────
+                elif isinstance(event, MCPProgressEvent):
+                    rec = tool_records.get(event.tool_use_id or "")
+                    if rec is None and event.tool_use_id is None:
+                        matches = [
+                            item
+                            for item in tool_records.values()
+                            if item.tool_name.startswith("mcp__{}__".format(event.server_name)) and not item.done
+                        ]
+                        if len(matches) == 1:
+                            rec = matches[0]
+                    if rec:
+                        rec.progress_renderable = self._render_mcp_progress(event)
                     _ensure_live()
                     _update_live()
 

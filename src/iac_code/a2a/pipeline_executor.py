@@ -13,7 +13,7 @@ import httpx
 from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 
-from iac_code.a2a.events import make_text_part
+from iac_code.a2a.events import make_text_part, publish_mcp_warnings
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import (
@@ -275,6 +275,13 @@ class IacCodeA2APipelineExecutor:
                         cwd=cwd,
                     )
                     agent_runtime = pipeline_runtime.agent_runtime
+                    await publish_mcp_warnings(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        runtime=agent_runtime,
+                        iac_code_session_id=ctx.session_id,
+                    )
                     configure_runtime_model(
                         agent_runtime,
                         self._model,
@@ -790,11 +797,25 @@ class IacCodeA2APipelineExecutor:
                     event = await next_task
                 except StopAsyncIteration:
                     next_task = None
+                    await publish_mcp_warnings(
+                        publisher.event_queue,
+                        task_id=publisher.translator.context.task_id,
+                        context_id=publisher.translator.context.context_id,
+                        runtime=runtime.agent_runtime,
+                        iac_code_session_id=publisher.translator.context.iac_code_session_id,
+                    )
                     return _StreamConsumeResult(had_events=had_events, restart_requested=False)
                 finally:
                     next_task = None
 
                 had_events = True
+                await publish_mcp_warnings(
+                    publisher.event_queue,
+                    task_id=publisher.translator.context.task_id,
+                    context_id=publisher.translator.context.context_id,
+                    runtime=runtime.agent_runtime,
+                    iac_code_session_id=publisher.translator.context.iac_code_session_id,
+                )
                 text = await publisher.publish(
                     event,
                     permission_resolver=self._permission_resolver,

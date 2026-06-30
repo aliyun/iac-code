@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -57,7 +58,12 @@ from iac_code.agent.message import (
     ToolUseBlock,
     create_recalled_memory_message,
 )
+from iac_code.commands.registry import CommandRegistry, PromptCommand
+from iac_code.mcp.types import MCPConfigWarning
+from iac_code.skills.frontmatter import SkillFrontmatter
+from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.types.skill_source import SkillSource
 from iac_code.types.stream_events import (
     MessageEndEvent,
     TextDeltaEvent,
@@ -92,6 +98,11 @@ class FakeContextManager:
     def get_messages(self) -> list[Message]:
         return list(self._messages)
 
+    def add_raw_message(self, message: dict) -> Message:
+        converted = Message(role=message.get("role", "user"), content=[TextBlock(text=str(message.get("content", "")))])
+        self._messages.append(converted)
+        return converted
+
 
 class FakeLoop:
     def __init__(self) -> None:
@@ -99,6 +110,21 @@ class FakeLoop:
 
     async def run_streaming(self, prompt: str):
         yield TextDeltaEvent(text=f"echo: {prompt}")
+        yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+
+class PromptCommandFakeLoop:
+    def __init__(self) -> None:
+        self.context_manager = FakeContextManager()
+        self.continued = False
+
+    async def run_streaming(self, prompt: str):
+        yield TextDeltaEvent(text=f"unexpected run: {prompt}")
+        yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+    async def continue_streaming(self):
+        self.continued = True
+        yield TextDeltaEvent(text="MCP prompt executed")
         yield MessageEndEvent(stop_reason="stop", usage=Usage())
 
 
@@ -177,10 +203,17 @@ class _P14FakeLoop:
 
 
 class _P14FakeRuntime:
-    def __init__(self, session_id: str = "phase14-s1", tool_registry: ToolRegistry | None = None) -> None:
+    def __init__(
+        self,
+        session_id: str = "phase14-s1",
+        tool_registry: ToolRegistry | None = None,
+        command_registry: CommandRegistry | None = None,
+    ) -> None:
         self.session_id = session_id
         self.tool_registry = tool_registry or ToolRegistry()
         self.agent_loop = _P14FakeLoop(self.tool_registry)
+        self.command_registry = command_registry
+        self.mcp_config_warnings = []
 
 
 def _patch_server_p14(monkeypatch: pytest.MonkeyPatch, runtime: _P14FakeRuntime | None = None) -> None:
@@ -1188,6 +1221,26 @@ class TestStructuredLogging:
         assert any("closed" in rec.message.lower() for rec in caplog.records)
 
     @pytest.mark.asyncio
+    async def test_close_session_closes_agent_runtime(self, caplog) -> None:
+        """B8 addendum: ACP session close releases runtime-owned MCP resources."""
+
+        class _Runtime:
+            def __init__(self) -> None:
+                self.closed = False
+
+            async def aclose(self) -> None:
+                self.closed = True
+
+        runtime = _Runtime()
+        session = ACPSession("runtime-close", _P24FakeLoop(), FakeConn(), runtime=runtime)
+
+        with caplog.at_level(logging.INFO, logger="iac_code.acp.session"):
+            await session.close()
+
+        assert runtime.closed is True
+        assert session.is_closed is True
+
+    @pytest.mark.asyncio
     async def test_auth_error_logs_warning(self, caplog) -> None:
         """B9: Authentication error during prompt emits WARNING log."""
 
@@ -1443,6 +1496,230 @@ async def test_pushed_commands_match_registry(monkeypatch: pytest.MonkeyPatch) -
 
     assert pushed_names == expected_names, f"Mismatch: pushed={pushed_names}, expected={expected_names}"
     assert "memory-folder" not in pushed_names
+
+
+@pytest.mark.asyncio
+async def test_pushed_commands_include_mcp_prompt_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCP prompt/skill commands registered on the runtime should be advertised to ACP clients."""
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__review",
+            description="Review ROS template",
+            skill=SkillDefinition(
+                name="mcp__ros__review",
+                description="Review ROS template",
+                frontmatter=SkillFrontmatter(description="Review ROS template"),
+                content="",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/prompt/review",
+                content_length=0,
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    runtime = _P14FakeRuntime(command_registry=registry)
+    _patch_server_p14(monkeypatch, runtime=runtime)
+    monkeypatch.setattr("iac_code.acp.server.get_active_provider_key", lambda: "dashscope")
+    conn = FakeConn()
+    server = ACPServer()
+    server.conn = conn
+    await server.initialize(protocol_version=1, client_capabilities=acp.schema.ClientCapabilities())
+
+    await server.new_session(cwd="/tmp")
+
+    cmd_updates = [u for _, u in conn.updates if isinstance(u, acp.schema.AvailableCommandsUpdate)]
+    pushed_names = {cmd.name for cmd in cmd_updates[0].available_commands}
+    assert "mcp__ros__review" in pushed_names
+
+
+@pytest.mark.asyncio
+async def test_new_session_pushes_mcp_config_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCP connection/config warnings should be visible to ACP clients."""
+    runtime = _P14FakeRuntime()
+    runtime.mcp_config_warnings = [
+        MCPConfigWarning(
+            source="mcp",
+            server_name="broken",
+            code="connection_failed",
+            message="MCP server 'broken' connection failed: boom",
+        )
+    ]
+    _patch_server_p14(monkeypatch, runtime=runtime)
+    conn = FakeConn()
+    server = ACPServer()
+    server.conn = conn
+    await server.initialize(protocol_version=1, client_capabilities=acp.schema.ClientCapabilities())
+
+    await server.new_session(cwd="/tmp")
+
+    warning_texts = [
+        update.content.text for _, update in conn.updates if isinstance(update, acp.schema.AgentMessageChunk)
+    ]
+    assert any("MCP server 'broken' connection failed" in text for text in warning_texts)
+    assert any(isinstance(update, acp.schema.AvailableCommandsUpdate) for _, update in conn.updates)
+
+
+@pytest.mark.asyncio
+async def test_mcp_change_listener_pushes_acp_updates_on_server_loop() -> None:
+    """MCP worker-thread list_changed callbacks should marshal ACP updates to the server loop."""
+
+    class ThreadRecordingConn(FakeConn):
+        def __init__(self) -> None:
+            super().__init__()
+            self.thread_ids: list[int] = []
+
+        async def session_update(self, session_id: str, update: object, **kwargs: object) -> None:
+            self.thread_ids.append(threading.get_ident())
+            await super().session_update(session_id, update, **kwargs)
+
+    class Runtime(_P14FakeRuntime):
+        def __init__(self) -> None:
+            super().__init__(session_id="mcp-change-loop")
+            self.listener = None
+
+        def add_mcp_change_listener(self, listener) -> None:
+            self.listener = listener
+
+    main_thread = threading.get_ident()
+    runtime = Runtime()
+    conn = ThreadRecordingConn()
+    server = ACPServer()
+    server.conn = conn
+    session = server._create_acp_session_from_runtime(runtime=runtime, mcp_configs=[])
+    server.sessions[session.id] = session
+
+    def run_listener_in_worker_thread() -> None:
+        asyncio.run(runtime.listener("ros", "prompts"))
+
+    await asyncio.to_thread(run_listener_in_worker_thread)
+
+    assert conn.thread_ids
+    assert set(conn.thread_ids) == {main_thread}
+
+
+@pytest.mark.asyncio
+async def test_mcp_change_listener_does_not_push_after_session_close() -> None:
+    class Runtime(_P14FakeRuntime):
+        def __init__(self) -> None:
+            super().__init__(session_id="mcp-change-closed")
+            self.listener = None
+
+        def add_mcp_change_listener(self, listener) -> None:
+            self.listener = listener
+
+    runtime = Runtime()
+    conn = FakeConn()
+    server = ACPServer()
+    server.conn = conn
+    session = server._create_acp_session_from_runtime(runtime=runtime, mcp_configs=[])
+    server.sessions[session.id] = session
+    server.sessions.pop(session.id)
+
+    await runtime.listener("ros", "prompts")
+
+    assert conn.updates == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_change_listener_pushes_new_mcp_warnings() -> None:
+    class Runtime(_P14FakeRuntime):
+        def __init__(self) -> None:
+            super().__init__(session_id="mcp-change-warning")
+            self.listener = None
+
+        def add_mcp_change_listener(self, listener) -> None:
+            self.listener = listener
+
+    runtime = Runtime()
+    conn = FakeConn()
+    server = ACPServer()
+    server.conn = conn
+    session = server._create_acp_session_from_runtime(runtime=runtime, mcp_configs=[])
+    server.sessions[session.id] = session
+    conn.updates.clear()
+    runtime.mcp_config_warnings.append(
+        MCPConfigWarning(
+            source="mcp",
+            server_name="broken",
+            code="prompts_failed",
+            message="MCP server 'broken' tools discovery failed",
+        )
+    )
+
+    await runtime.listener("broken", "tools")
+
+    warning_texts = [
+        update.content.text for _, update in conn.updates if isinstance(update, acp.schema.AgentMessageChunk)
+    ]
+    assert warning_texts == ["MCP warning: MCP server 'broken' tools discovery failed"]
+
+
+@pytest.mark.asyncio
+async def test_new_session_runtime_creation_does_not_block_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Slow runtime creation should not block unrelated ACP event-loop work."""
+
+    def create_runtime(options):
+        time.sleep(0.2)
+        return _P14FakeRuntime(session_id=options.session_id or "slow-runtime")
+
+    monkeypatch.setattr("iac_code.acp.server.load_saved_model", lambda: "fake-model")
+    monkeypatch.setattr("iac_code.acp.server.create_agent_runtime", create_runtime)
+    monkeypatch.setattr("iac_code.acp.server.replace_bash_with_acp_terminal", lambda *args, **kwargs: set())
+    conn = FakeConn()
+    server = ACPServer()
+    server.conn = conn
+    await server.initialize(protocol_version=1, client_capabilities=acp.schema.ClientCapabilities())
+
+    start = time.monotonic()
+    session_task = asyncio.create_task(server.new_session(cwd="/tmp"))
+    await asyncio.sleep(0.01)
+    tick_elapsed = time.monotonic() - start
+    response = await session_task
+
+    assert response.session_id == "slow-runtime"
+    assert tick_elapsed < 0.15
+
+
+@pytest.mark.asyncio
+async def test_acp_executes_advertised_mcp_prompt_command() -> None:
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__review",
+            description="Review ROS template",
+            skill=SkillDefinition(
+                name="mcp__ros__review",
+                description="Review ROS template",
+                frontmatter=SkillFrontmatter(description="Review ROS template"),
+                content="Review the template with these args: {{args}}",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/prompt/review",
+                content_length=0,
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    conn = FakeConn()
+    loop = PromptCommandFakeLoop()
+    session = ACPSession("mcp-session", loop, conn, command_registry=registry)
+
+    response = await session.prompt(
+        [acp.schema.TextContentBlock(type="text", text="/mcp__ros__review template=manual-real")]
+    )
+
+    assert response.stop_reason == "end_turn"
+    assert loop.continued is True
+    assert any(
+        "mcp__ros__review" in block.text for message in loop.context_manager.get_messages() for block in message.content
+    )
+    text_chunks = [
+        update.content.text
+        for _, update in conn.updates
+        if getattr(update, "session_update", None) == "agent_message_chunk"
+    ]
+    assert "MCP prompt executed" in "".join(text_chunks)
+    assert "not supported over ACP" not in "".join(text_chunks)
 
 
 @pytest.mark.asyncio

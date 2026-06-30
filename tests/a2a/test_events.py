@@ -6,6 +6,7 @@ from iac_code.a2a.events import _ERROR_TEXT_MAX_CHARS, _METADATA_MAX_CHARS, _tru
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.types.stream_events import (
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     PermissionRequestEvent,
     TextDeltaEvent,
@@ -60,6 +61,35 @@ async def test_permission_request_is_denied_by_default_and_truncated() -> None:
     dumped = dump(queue.events[0])
     assert dumped["metadata"]["iac_code"]["permission"]["autoApproved"] is False
     assert len(dumped["metadata"]["iac_code"]["permission"]["toolInput"]["cmd"]) == _METADATA_MAX_CHARS
+
+
+@pytest.mark.asyncio
+async def test_mcp_progress_publishes_tool_trace_metadata() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=MCPProgressEvent(
+            server_name="live",
+            tool_name="echo",
+            progress=1,
+            total=2,
+            message="halfway",
+            tool_use_id="tool-1",
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    assert tool["status"] == "progress"
+    assert tool["toolUseId"] == "tool-1"
+    assert tool["mcp"]["serverName"] == "live"
+    assert tool["mcp"]["toolName"] == "echo"
+    assert tool["mcp"]["progress"] == 1
+    assert tool["mcp"]["total"] == 2
+    assert tool["mcp"]["message"] == "halfway"
 
 
 @pytest.mark.asyncio

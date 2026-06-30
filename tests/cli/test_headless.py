@@ -19,6 +19,7 @@ from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.types.stream_events import (
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     PermissionRequestEvent,
     StackInstancesProgressEvent,
@@ -74,6 +75,75 @@ async def test_text_output():
     assert exit_code == EXIT_OK
     output = buf.getvalue()
     assert "Hello, world!" in output
+
+
+@pytest.mark.asyncio
+async def test_headless_emits_mcp_config_warnings_to_progress_stream():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.TEXT,
+        output_stream=stdout,
+        progress_stream=progress,
+    )
+    events = [MessageEndEvent(stop_reason="end_turn", usage=Usage())]
+
+    def create_loop_with_mcp_warning():
+        runner._mcp_config_warnings = [SimpleNamespace(message="Project MCP server 'pending' is pending approval.")]
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+        return mock_loop
+
+    with patch.object(runner, "_create_agent_loop", side_effect=create_loop_with_mcp_warning):
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    assert "MCP warning: Project MCP server 'pending' is pending approval." in progress.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_headless_emits_dynamic_mcp_config_warnings_to_progress_stream():
+    stdout = io.StringIO()
+    progress = io.StringIO()
+    runner = HeadlessRunner(
+        model="test-model",
+        output_format=OutputFormat.TEXT,
+        output_stream=stdout,
+        progress_stream=progress,
+    )
+    warnings = []
+
+    async def stream_with_dynamic_warning(prompt: str):
+        warnings.append(SimpleNamespace(message="MCP server 'broken' prompts discovery failed."))
+        yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    def create_loop_with_warning_reference():
+        runner._mcp_config_warnings = warnings
+        mock_loop = AsyncMock()
+        mock_loop.run_streaming = stream_with_dynamic_warning
+        return mock_loop
+
+    with patch.object(runner, "_create_agent_loop", side_effect=create_loop_with_warning_reference):
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    assert "MCP warning: MCP server 'broken' prompts discovery failed." in progress.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_headless_closes_agent_runtime_after_run(monkeypatch):
+    runner = _make_runner()
+    events = [MessageEndEvent(stop_reason="end_turn", usage=Usage())]
+    mock_loop = AsyncMock()
+    mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+    runtime = SimpleNamespace(agent_loop=mock_loop, mcp_config_warnings=[], aclose=AsyncMock())
+    monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", lambda options: runtime)
+
+    exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    runtime.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -665,6 +735,14 @@ async def test_verbose_progress_writes_subagent_and_stack_events():
             instances=[],
             elapsed_seconds=4,
         ),
+        MCPProgressEvent(
+            server_name="live",
+            tool_name="echo",
+            progress=1,
+            total=2,
+            message="halfway",
+            tool_use_id="tu_mcp",
+        ),
         MessageEndEvent(stop_reason="end_turn", usage=Usage()),
     ]
 
@@ -681,6 +759,7 @@ async def test_verbose_progress_writes_subagent_and_stack_events():
     assert "Child tool finished: read_file" in progress_output
     assert "Stack stack: CREATE_IN_PROGRESS (42.5%)" in progress_output
     assert "Stack group group: RUNNING (67%)" in progress_output
+    assert "MCP live:echo: 1/2: halfway" in progress_output
 
 
 class FakeToolRegistry:

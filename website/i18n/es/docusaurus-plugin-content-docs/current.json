@@ -11,6 +11,10 @@
     "message": "Usar IaC Code",
     "description": "The label for category 'Using iac-code' in sidebar 'docsSidebar'"
   },
+  "sidebar.docsSidebar.category.MCP Integration": {
+    "message": "Integración MCP",
+    "description": "The label for category 'MCP Integration' in sidebar 'docsSidebar'"
+  },
   "sidebar.docsSidebar.category.Configuration": {
     "message": "Configuracion",
     "description": "The label for category 'Configuration' in sidebar 'docsSidebar'"

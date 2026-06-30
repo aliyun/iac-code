@@ -175,6 +175,7 @@ class FakeRuntime:
     session_id = "test-session"
     agent_loop = FakeLoop()
     tool_registry = None
+    mcp_manager = None
 
 
 def _patch_runtime(monkeypatch):
@@ -261,6 +262,23 @@ class TestNewSessionMcpInjection:
         assert session.mcp_configs[0]["name"] == "resumed-sse"
         assert session.mcp_configs[0]["type"] == "sse"
 
+    @pytest.mark.asyncio
+    async def test_fork_session_with_mcp_servers(self, monkeypatch) -> None:
+        _patch_runtime(monkeypatch)
+        server = ACPServer()
+        conn = FakeConn()
+        server.on_connect(conn)
+        await server.initialize(protocol_version=1, client_capabilities=acp.schema.ClientCapabilities())
+        source = await server.new_session(cwd="/tmp")
+
+        http = _make_http_server(name="forked-http")
+        forked = await server.fork_session(cwd="/tmp", session_id=source.session_id, mcp_servers=[http])
+
+        session = server.sessions[forked.session_id]
+        assert len(session.mcp_configs) == 1
+        assert session.mcp_configs[0]["name"] == "forked-http"
+        assert session.mcp_configs[0]["type"] == "http"
+
 
 # ===========================================================================
 # C. Capability declaration scenarios
@@ -284,8 +302,8 @@ class TestMcpCapabilities:
 
         caps = resp.agent_capabilities.mcp_capabilities
         assert caps is not None
-        assert caps.http is False
-        assert caps.sse is False
+        assert caps.http is True
+        assert caps.sse is True
 
     # C-12: mcp_capabilities field exists and has correct format
     @pytest.mark.asyncio
@@ -301,3 +319,31 @@ class TestMcpCapabilities:
 
         caps = resp.agent_capabilities.mcp_capabilities
         assert isinstance(caps, acp.schema.McpCapabilities)
+
+
+class TestMcpSessionLifecycle:
+    """MCP manager lifecycle scenarios."""
+
+    @pytest.mark.asyncio
+    async def test_acp_session_close_disconnects_mcp_manager(self) -> None:
+        from iac_code.acp.session import ACPSession
+
+        manager = FakeMCPManager()
+        session = ACPSession(
+            "mcp-session",
+            FakeLoop(),
+            FakeConn(),
+            mcp_manager=manager,
+        )
+
+        await session.close()
+
+        assert manager.disconnected is True
+
+
+class FakeMCPManager:
+    def __init__(self) -> None:
+        self.disconnected = False
+
+    async def disconnect_all(self) -> None:
+        self.disconnected = True

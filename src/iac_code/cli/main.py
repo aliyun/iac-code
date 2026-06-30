@@ -71,6 +71,10 @@ if sys.platform == "win32":
 
 app.command(name="update", help=_("Update iac-code to the latest version."))(_update_command)
 
+from iac_code.mcp.cli import app as _mcp_app  # noqa: E402
+
+app.add_typer(_mcp_app, name="mcp")
+
 
 @a2a_client_app.callback()
 def a2a_client(

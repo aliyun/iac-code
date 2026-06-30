@@ -9,9 +9,11 @@ import acp
 from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.acp.state import TurnState, display_tool_title
 from iac_code.acp.types import ACPContentBlock
+from iac_code.i18n import _
 from iac_code.types.stream_events import (
     CompactionEvent,
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     PermissionRequestEvent,
     PlanEvent,
@@ -93,6 +95,10 @@ def _tool_kind(tool_name: str) -> ToolKind:
         return "execute"
     if tool_name.endswith("_doc_search"):
         return "fetch"
+    if tool_name.startswith("mcp__"):
+        if tool_name.endswith("__search") or tool_name.endswith("_search"):
+            return "fetch"
+        return "execute"
     return "other"
 
 
@@ -226,6 +232,33 @@ class ACPEventConverter:
                         content=[_text_tool_content(str(input))],
                     )
                 ]
+            case MCPProgressEvent(
+                server_name=server_name,
+                tool_name=tool_name,
+                progress=progress_value,
+                total=total,
+                message=message,
+                tool_use_id=tool_use_id,
+            ):
+                return [
+                    acp.schema.ToolCallProgress(
+                        session_update="tool_call_update",
+                        tool_call_id=self.acp_tool_call_id(tool_use_id or f"mcp-{server_name}-{tool_name}"),
+                        title=_("MCP {server}:{tool}").format(server=server_name, tool=tool_name),
+                        status="in_progress",
+                        content=[
+                            _text_tool_content(
+                                _format_mcp_progress_text(
+                                    server_name=server_name,
+                                    tool_name=tool_name,
+                                    progress=progress_value,
+                                    total=total,
+                                    message=message,
+                                )
+                            )
+                        ],
+                    )
+                ]
             case ToolResultEvent(tool_use_id=tool_use_id, tool_name=tool_name, result=result, is_error=is_error):
                 visible_result = _public_tool_result_text(result)
                 content: list[
@@ -324,6 +357,24 @@ def _text_tool_content(text: str) -> acp.schema.ContentToolCallContent:
         type="content",
         content=acp.schema.TextContentBlock(type="text", text=text),
     )
+
+
+def _format_mcp_progress_text(
+    *,
+    server_name: str,
+    tool_name: str,
+    progress: float | None,
+    total: float | None,
+    message: str | None,
+) -> str:
+    parts = [_("MCP {server}:{tool}").format(server=server_name, tool=tool_name)]
+    if progress is not None and total is not None:
+        parts.append("{:g}/{:g}".format(progress, total))
+    elif progress is not None:
+        parts.append("{:g}".format(progress))
+    if message:
+        parts.append(sanitize_public_text(message))
+    return ": ".join(parts)
 
 
 def _public_tool_result_text(value: Any) -> str:

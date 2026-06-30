@@ -57,6 +57,10 @@ class A2ATaskStore(TaskStore):
         self._cleanup_interval_seconds = cleanup_interval_seconds
         self._cleanup_task: asyncio.Task[None] | None = None
         self._mutation_lock = asyncio.Lock()
+        self._context_runtime_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._context_runtime_waiters: dict[str, int] = {}
+        self._discarded_context_runtime_tasks: set[asyncio.Task[Any]] = set()
+        self._discarded_context_runtime_task_waiters: dict[asyncio.Task[Any], int] = {}
         self._owner_resolver = owner_resolver
 
     async def get(self, task_id: str, context: ServerCallContext | None = None) -> Task | None:
@@ -228,6 +232,7 @@ class A2ATaskStore(TaskStore):
         runtime_factory: Callable[[str], Any],
     ) -> A2AContextRecord:
         context_id = validate_protocol_id(context_id)
+        create_task: asyncio.Task[Any] | None = None
         async with self._mutation_lock:
             if context_id in self._contexts:
                 record = self._contexts[context_id]
@@ -235,28 +240,100 @@ class A2ATaskStore(TaskStore):
                     raise ValueError(_("A2A context expired"))
                 if record.cwd != cwd:
                     raise ValueError(_("A2A context belongs to a different workspace"))
+                if record.runtime is None:
+                    create_task = self._context_runtime_tasks.get(context_id)
+                else:
+                    record.touch()
+                    self._mirror_context(record)
+                    return record
+            else:
+                session_id: str | None = None
+                if self._persistence is not None:
+                    snapshot = self._persistence.load_context(context_id)
+                    if snapshot is not None:
+                        if snapshot.cwd != cwd:
+                            raise ValueError(_("A2A context belongs to a different workspace"))
+                        session_id = snapshot.session_id
+
+                if session_id is None:
+                    session_id = str(uuid.uuid4())
+                record = A2AContextRecord(
+                    context_id=context_id,
+                    session_id=session_id,
+                    cwd=cwd,
+                    runtime=None,
+                    lock=asyncio.Lock(),
+                )
+                self._contexts[context_id] = record
+                create_task = self._context_runtime_tasks.get(context_id)
+                if create_task is None:
+                    create_task = asyncio.create_task(asyncio.to_thread(runtime_factory, session_id))
+                    self._context_runtime_tasks[context_id] = create_task
+            self._context_runtime_waiters[context_id] = self._context_runtime_waiters.get(context_id, 0) + 1
+
+        if create_task is None:  # pragma: no cover - defensive guard for inconsistent state.
+            raise ValueError(_("A2A context not found"))
+        try:
+            runtime = await asyncio.shield(create_task)
+        except asyncio.CancelledError:
+            discard_task: asyncio.Task[Any] | None = None
+            async with self._mutation_lock:
+                remaining = self._decrement_context_runtime_waiter_locked(context_id)
+                if remaining == 0:
+                    record = self._contexts.get(context_id)
+                    if record is not None and record.runtime is None:
+                        self._contexts.pop(context_id, None)
+                    if self._context_runtime_tasks.get(context_id) is create_task:
+                        discard_task = self._context_runtime_tasks.pop(context_id, None)
+                    if discard_task is not None:
+                        self._mark_discarded_context_runtime_task_locked(discard_task, waiters=0)
+            if discard_task is not None:
+                _close_runtime_task_when_done(
+                    discard_task,
+                    self._discarded_context_runtime_tasks,
+                    self._discarded_context_runtime_task_waiters,
+                )
+            raise
+        except Exception:
+            async with self._mutation_lock:
+                self._decrement_context_runtime_waiter_locked(context_id)
+                record = self._contexts.get(context_id)
+                if record is not None and record.runtime is None:
+                    self._contexts.pop(context_id, None)
+                if self._context_runtime_tasks.get(context_id) is create_task:
+                    self._context_runtime_tasks.pop(context_id, None)
+            raise
+
+        async with self._mutation_lock:
+            self._decrement_context_runtime_waiter_locked(context_id)
+            record = self._contexts.get(context_id)
+            if record is None:
+                if self._context_runtime_tasks.get(context_id) is create_task:
+                    self._context_runtime_tasks.pop(context_id, None)
+                if not self._release_discarded_context_runtime_task_locked(create_task):
+                    await _close_runtime(runtime)
+                raise ValueError(_("A2A context not found"))
+            if record.expired:
+                if self._context_runtime_tasks.get(context_id) is create_task:
+                    self._context_runtime_tasks.pop(context_id, None)
+                if not self._release_discarded_context_runtime_task_locked(create_task):
+                    await _close_runtime(runtime)
+                raise ValueError(_("A2A context expired"))
+            if record.cwd != cwd:
+                if self._context_runtime_tasks.get(context_id) is create_task:
+                    self._context_runtime_tasks.pop(context_id, None)
+                if not self._release_discarded_context_runtime_task_locked(create_task):
+                    await _close_runtime(runtime)
+                raise ValueError(_("A2A context belongs to a different workspace"))
+            if record.runtime is None:
+                record.runtime = runtime
+                if self._context_runtime_tasks.get(context_id) is create_task:
+                    self._context_runtime_tasks.pop(context_id, None)
                 record.touch()
                 self._mirror_context(record)
-                return record
-
-            session_id: str | None = None
-            if self._persistence is not None:
-                snapshot = self._persistence.load_context(context_id)
-                if snapshot is not None:
-                    if snapshot.cwd != cwd:
-                        raise ValueError(_("A2A context belongs to a different workspace"))
-                    session_id = snapshot.session_id
-
-            if session_id is None:
-                session_id = str(uuid.uuid4())
-            record = A2AContextRecord(
-                context_id=context_id,
-                session_id=session_id,
-                cwd=cwd,
-                runtime=runtime_factory(session_id),
-                lock=asyncio.Lock(),
-            )
-            self._contexts[context_id] = record
+            elif runtime is not record.runtime:
+                await _close_runtime(runtime)
+            record.touch()
             self._mirror_context(record)
             return record
 
@@ -311,6 +388,29 @@ class A2ATaskStore(TaskStore):
 
         raise ValueError(_("A2A task not found"))
 
+    def _decrement_context_runtime_waiter_locked(self, context_id: str) -> int:
+        count = self._context_runtime_waiters.get(context_id, 0)
+        if count <= 1:
+            self._context_runtime_waiters.pop(context_id, None)
+            return 0
+        self._context_runtime_waiters[context_id] = count - 1
+        return count - 1
+
+    def _mark_discarded_context_runtime_task_locked(self, task: asyncio.Task[Any], *, waiters: int) -> None:
+        self._discarded_context_runtime_tasks.add(task)
+        self._discarded_context_runtime_task_waiters[task] = max(waiters, 0)
+
+    def _release_discarded_context_runtime_task_locked(self, task: asyncio.Task[Any]) -> bool:
+        if task not in self._discarded_context_runtime_tasks:
+            return False
+        remaining = self._discarded_context_runtime_task_waiters.get(task, 0)
+        if remaining <= 1:
+            self._discarded_context_runtime_task_waiters.pop(task, None)
+            self._discarded_context_runtime_tasks.discard(task)
+        else:
+            self._discarded_context_runtime_task_waiters[task] = remaining - 1
+        return True
+
     async def ensure_task_not_expired(self, task_id: str) -> None:
         async with self._mutation_lock:
             if validate_protocol_id(task_id) in self._expired_task_tombstones:
@@ -342,10 +442,14 @@ class A2ATaskStore(TaskStore):
             expired_context_ids = [
                 context_id
                 for context_id, context in self._contexts.items()
-                if context.active_task_id is None and now - context.last_active > self._idle_timeout_seconds
+                if context.active_task_id is None
+                and now - context.last_active > self._idle_timeout_seconds
+                and context_id not in self._context_runtime_tasks
             ]
             for context_id in expired_context_ids:
-                self._contexts.pop(context_id, None)
+                record = self._contexts.pop(context_id, None)
+                if record is not None:
+                    await _close_runtime(record.runtime)
                 for task_id, task in list(self._tasks.items()):
                     if task.context_id == context_id:
                         task.expired = True
@@ -369,14 +473,32 @@ class A2ATaskStore(TaskStore):
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
     async def stop_cleanup_loop(self) -> None:
-        if self._cleanup_task is None:
-            return
-        self._cleanup_task.cancel()
-        try:
-            await self._cleanup_task
-        except asyncio.CancelledError:
-            pass
-        self._cleanup_task = None
+        if self._cleanup_task is not None:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._cleanup_task = None
+        async with self._mutation_lock:
+            records = list(self._contexts.values())
+            runtime_tasks = [
+                (task, self._context_runtime_waiters.get(context_id, 0))
+                for context_id, task in self._context_runtime_tasks.items()
+            ]
+            self._contexts.clear()
+            self._context_runtime_tasks.clear()
+            self._context_runtime_waiters.clear()
+            for task, waiters in runtime_tasks:
+                self._mark_discarded_context_runtime_task_locked(task, waiters=waiters)
+        for record in records:
+            await _close_runtime(record.runtime)
+        for task, _waiters in runtime_tasks:
+            _close_runtime_task_when_done(
+                task,
+                self._discarded_context_runtime_tasks,
+                self._discarded_context_runtime_task_waiters,
+            )
 
     async def _cleanup_loop(self) -> None:
         while True:
@@ -483,6 +605,65 @@ class A2ATaskStore(TaskStore):
                 owner_contexts.pop(context_id, None)
                 if not owner_contexts:
                     self._sdk_tasks_by_context.pop(owner, None)
+
+
+async def _close_runtime(runtime: Any | None) -> None:
+    if runtime is None:
+        return
+    close = getattr(runtime, "aclose", None)
+    if callable(close):
+        try:
+            result = close()
+            if asyncio.iscoroutine(result):
+                await result
+            return
+        except Exception:
+            logger.exception("Failed to close A2A runtime")
+            return
+    manager = getattr(runtime, "mcp_manager", None)
+    if manager is not None:
+        try:
+            await manager.disconnect_all()
+        except Exception:
+            logger.exception("Failed to disconnect A2A MCP manager")
+    agent_runtime = getattr(runtime, "agent_runtime", None)
+    if agent_runtime is not None and agent_runtime is not runtime:
+        await _close_runtime(agent_runtime)
+
+
+def _close_runtime_task_when_done(
+    task: asyncio.Task[Any],
+    discarded_tasks: set[asyncio.Task[Any]] | None = None,
+    discarded_task_waiters: dict[asyncio.Task[Any], int] | None = None,
+) -> None:
+    def discard_marker(done: asyncio.Task[Any]) -> None:
+        if discarded_task_waiters is not None:
+            discarded_task_waiters.pop(done, None)
+        if discarded_tasks is not None:
+            discarded_tasks.discard(done)
+
+    def close_result(done: asyncio.Task[Any]) -> None:
+        try:
+            runtime = done.result()
+        except asyncio.CancelledError:
+            discard_marker(done)
+            return
+        except Exception:
+            discard_marker(done)
+            logger.debug("Discarded A2A runtime creation task failed", exc_info=True)
+            return
+        loop = done.get_loop()
+        if loop.is_closed():
+            discard_marker(done)
+            return
+        loop.create_task(_close_runtime(runtime))
+        if discarded_task_waiters is None or discarded_task_waiters.get(done, 0) <= 0:
+            discard_marker(done)
+
+    if task.done():
+        close_result(task)
+    else:
+        task.add_done_callback(close_result)
 
 
 def _copy_task(task: Task) -> Task:

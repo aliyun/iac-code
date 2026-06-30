@@ -25,6 +25,17 @@ const sidebars: SidebarsConfig = {
         'cli/commands',
         'cli/skills',
         'cli/sessions',
+        {
+          type: 'category',
+          label: 'MCP Integration',
+          items: [
+            'mcp/overview',
+            'mcp/configuration',
+            'mcp/capabilities',
+            'mcp/oauth-and-security',
+            'mcp/troubleshooting',
+          ],
+        },
       ],
     },
     {

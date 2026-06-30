@@ -1,4 +1,8 @@
 import asyncio
+import threading
+import time
+from collections.abc import Callable
+from types import SimpleNamespace
 
 import pytest
 from a2a.auth.user import User
@@ -53,6 +57,15 @@ def timestamp_with_nanos(seconds: int, nanos: int) -> Timestamp:
     return value
 
 
+async def wait_until(condition: Callable[[], bool], *, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    assert condition()
+
+
 def sdk_task(
     task_id: str,
     *,
@@ -82,6 +95,103 @@ async def test_context_reuses_runtime_until_evicted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_context_runtime_factory_runs_outside_mutation_lock() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
+
+    def slow_runtime_factory(session_id: str):
+        time.sleep(0.2)
+        return f"rt-{session_id}"
+
+    start = time.monotonic()
+    context_task = asyncio.create_task(
+        store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=slow_runtime_factory)
+    )
+    await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(store.save(sdk_task("task-while-runtime-starts")), timeout=0.1)
+    save_elapsed = time.monotonic() - start
+
+    context = await context_task
+    assert context.runtime == f"rt-{context.session_id}"
+    assert save_elapsed < 0.15
+
+
+@pytest.mark.asyncio
+async def test_cancelled_context_runtime_creation_does_not_poison_follow_up() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
+    release = threading.Event()
+    call_index = 0
+    runtimes = []
+
+    def runtime_factory(session_id: str):
+        nonlocal call_index
+        call_index += 1
+        index = call_index
+        release.wait(timeout=2)
+        runtime = SimpleNamespace(index=index, session_id=session_id, closed=False)
+
+        async def aclose() -> None:
+            runtime.closed = True
+
+        runtime.aclose = aclose
+        runtimes.append(runtime)
+        return runtime
+
+    first = asyncio.create_task(
+        store.get_or_create_context(context_id="ctx-cancel", cwd="/tmp", runtime_factory=runtime_factory)
+    )
+    await asyncio.sleep(0.01)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    second = asyncio.create_task(
+        store.get_or_create_context(context_id="ctx-cancel", cwd="/tmp", runtime_factory=runtime_factory)
+    )
+    release.set()
+    context = await asyncio.wait_for(second, timeout=1)
+
+    def cancelled_runtime_closed() -> bool:
+        runtime = next((runtime for runtime in runtimes if runtime.index == 1), None)
+        return runtime is not None and runtime.closed is True
+
+    await wait_until(cancelled_runtime_closed)
+
+    assert context.runtime.index == 2
+    assert context.runtime.closed is False
+
+
+@pytest.mark.asyncio
+async def test_stop_cleanup_loop_discards_pending_context_runtime() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
+    release = threading.Event()
+    runtimes = []
+
+    def runtime_factory(session_id: str):
+        release.wait(timeout=2)
+        runtime = SimpleNamespace(session_id=session_id, close_count=0)
+
+        async def aclose() -> None:
+            runtime.close_count += 1
+
+        runtime.aclose = aclose
+        runtimes.append(runtime)
+        return runtime
+
+    pending = asyncio.create_task(
+        store.get_or_create_context(context_id="ctx-stop", cwd="/tmp", runtime_factory=runtime_factory)
+    )
+    await asyncio.sleep(0.01)
+
+    await store.stop_cleanup_loop()
+    release.set()
+
+    with pytest.raises(ValueError, match="not found"):
+        await asyncio.wait_for(pending, timeout=1)
+    assert runtimes[0].close_count == 1
+
+
+@pytest.mark.asyncio
 async def test_context_rejects_workspace_change() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
     await store.get_or_create_context(context_id="ctx-1", cwd="/tmp/one", runtime_factory=lambda sid: object())
@@ -99,6 +209,40 @@ async def test_expired_task_rejects_follow_up() -> None:
 
     with pytest.raises(ValueError, match="expired"):
         await store.ensure_task_not_expired("task-1")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_disconnects_mcp_manager_on_evicted_runtime() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=0, cleanup_interval_seconds=300)
+    manager = SimpleNamespace(disconnected=False)
+
+    async def disconnect_all() -> None:
+        manager.disconnected = True
+
+    manager.disconnect_all = disconnect_all
+    runtime = SimpleNamespace(mcp_manager=manager)
+    await store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=lambda sid: runtime)
+
+    await store.cleanup_once(now_offset_seconds=1)
+
+    assert manager.disconnected is True
+
+
+@pytest.mark.asyncio
+async def test_cleanup_disconnects_nested_pipeline_agent_runtime_mcp_manager() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=0, cleanup_interval_seconds=300)
+    manager = SimpleNamespace(disconnected=False)
+
+    async def disconnect_all() -> None:
+        manager.disconnected = True
+
+    manager.disconnect_all = disconnect_all
+    runtime = SimpleNamespace(agent_runtime=SimpleNamespace(mcp_manager=manager))
+    await store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=lambda sid: runtime)
+
+    await store.cleanup_once(now_offset_seconds=1)
+
+    assert manager.disconnected is True
 
 
 @pytest.mark.asyncio

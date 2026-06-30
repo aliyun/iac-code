@@ -11,6 +11,10 @@
     "message": "IaC Code の使い方",
     "description": "The label for category 'Using iac-code' in sidebar 'docsSidebar'"
   },
+  "sidebar.docsSidebar.category.MCP Integration": {
+    "message": "MCP 連携",
+    "description": "The label for category 'MCP Integration' in sidebar 'docsSidebar'"
+  },
   "sidebar.docsSidebar.category.Configuration": {
     "message": "設定",
     "description": "The label for category 'Configuration' in sidebar 'docsSidebar'"

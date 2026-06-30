@@ -107,6 +107,176 @@ class TestREPLProviderIntegration:
         assert repl.tool_registry.get("task_list") is not None
         assert repl.tool_registry.get("task_stop") is not None
 
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_mcp_tools_registered_in_interactive_repl(self, mock_mm, mock_ss, mock_pm, monkeypatch, tmp_path):
+        from iac_code.mcp.types import MCPToolRecord
+        from iac_code.ui.repl import InlineREPL
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+        (tmp_path / ".iac-code").mkdir()
+        (tmp_path / ".iac-code" / "settings.local.yml").write_text(
+            "mcpServers:\n  ros:\n    command: uvx\n",
+            encoding="utf-8",
+        )
+        manager = SimpleNamespace(
+            connect_all=AsyncMock(),
+            list_tools=Mock(
+                return_value=[
+                    MCPToolRecord(
+                        server_name="ros",
+                        tool_name="plan",
+                        public_name="mcp__ros__plan",
+                        input_schema={"type": "object"},
+                    )
+                ]
+            ),
+            list_resources=Mock(return_value=[]),
+            list_prompts=Mock(return_value=[]),
+            needs_auth_servers=Mock(return_value=[]),
+        )
+        monkeypatch.setattr("iac_code.mcp.manager.MCPManager", lambda configs, roots, **kwargs: manager)
+
+        repl = InlineREPL(model="claude-sonnet-4-6")
+
+        assert manager.connect_all.await_count == 1
+        assert repl.tool_registry.get("mcp__ros__plan") is not None
+
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_mcp_init_failure_disconnects_manager(self, mock_mm, mock_ss, mock_pm, monkeypatch, tmp_path):
+        from iac_code.ui.repl import InlineREPL
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+        (tmp_path / ".iac-code").mkdir()
+        (tmp_path / ".iac-code" / "settings.local.yml").write_text(
+            "mcpServers:\n  ros:\n    command: uvx\n",
+            encoding="utf-8",
+        )
+        manager = SimpleNamespace(
+            connect_all=AsyncMock(),
+            disconnect_all=AsyncMock(),
+            list_tools=Mock(side_effect=RuntimeError("tool sync failed")),
+            list_resources=Mock(return_value=[]),
+            list_prompts=Mock(return_value=[]),
+            needs_auth_servers=Mock(return_value=[]),
+        )
+        monkeypatch.setattr("iac_code.mcp.manager.MCPManager", lambda configs, roots, **kwargs: manager)
+
+        with pytest.raises(RuntimeError, match="tool sync failed"):
+            InlineREPL(model="claude-sonnet-4-6")
+
+        manager.disconnect_all.assert_awaited_once()
+
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_refresh_skills_preserves_mcp_prompt_commands(self, mock_mm, mock_ss, mock_pm, monkeypatch, tmp_path):
+        from iac_code.mcp.types import MCPPromptRecord
+        from iac_code.ui.repl import InlineREPL
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+        (tmp_path / ".iac-code").mkdir()
+        (tmp_path / ".iac-code" / "settings.local.yml").write_text(
+            "mcpServers:\n  ros:\n    command: uvx\n",
+            encoding="utf-8",
+        )
+        manager = SimpleNamespace(
+            connect_all=AsyncMock(),
+            list_tools=Mock(return_value=[]),
+            list_resources=Mock(return_value=[]),
+            list_prompts=Mock(
+                return_value=[
+                    MCPPromptRecord(
+                        server_name="ros",
+                        prompt_name="review",
+                        public_name="mcp__ros__review",
+                        description="Review template",
+                    )
+                ]
+            ),
+            needs_auth_servers=Mock(return_value=[]),
+            add_change_listener=Mock(),
+        )
+        monkeypatch.setattr("iac_code.mcp.manager.MCPManager", lambda configs, roots, **kwargs: manager)
+
+        repl = InlineREPL(model="claude-sonnet-4-6")
+        assert repl.command_registry.get("mcp__ros__review") is not None
+
+        repl.refresh_skills()
+
+        assert repl.command_registry.get("mcp__ros__review") is not None
+        assert "mcp__ros__review" in repl._skill_listing
+
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_repl_prompts_for_project_mcp_approval_before_connecting(
+        self,
+        mock_mm,
+        mock_ss,
+        mock_pm,
+        monkeypatch,
+        tmp_path,
+    ):
+        from iac_code.mcp.types import MCPToolRecord
+        from iac_code.ui.repl import InlineREPL
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".mcp.json").write_text(
+            '{"mcpServers": {"project-ros": {"command": "uvx"}}}',
+            encoding="utf-8",
+        )
+        connected_names = []
+        prompts = []
+        manager = SimpleNamespace(
+            connect_all=AsyncMock(),
+            list_tools=Mock(
+                return_value=[
+                    MCPToolRecord(
+                        server_name="project-ros",
+                        tool_name="plan",
+                        public_name="mcp__project_ros__plan",
+                        input_schema={"type": "object"},
+                    )
+                ]
+            ),
+            list_resources=Mock(return_value=[]),
+            list_prompts=Mock(return_value=[]),
+            needs_auth_servers=Mock(return_value=[]),
+        )
+
+        def make_manager(configs, roots, **kwargs):
+            connected_names.extend(config.name for config in configs)
+            return manager
+
+        prompt_kwargs = []
+
+        def approve_input(console, prompt, **kwargs):
+            prompts.append(prompt)
+            prompt_kwargs.append(kwargs)
+            return "y"
+
+        monkeypatch.setattr("iac_code.mcp.manager.MCPManager", make_manager)
+        monkeypatch.setattr("iac_code.ui.repl.Console.input", approve_input)
+
+        repl = InlineREPL(model="claude-sonnet-4-6")
+
+        assert prompts == ["Approve project MCP server 'project-ros' from {}? [y/N] ".format(tmp_path / ".mcp.json")]
+        assert prompt_kwargs == [{"markup": False}]
+        assert connected_names == ["project-ros"]
+        assert manager.connect_all.await_count == 1
+        assert repl.tool_registry.get("mcp__project_ros__plan") is not None
+
 
 UUID4_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
@@ -447,6 +617,30 @@ def test_swap_session_refreshes_session_name_and_renders_banner():
         session_name="deploy-prod",
     )
     repl.console.print.assert_called_once_with("banner")
+
+
+def test_print_mcp_config_warnings_prints_each_warning_once():
+    from iac_code.mcp.types import MCPConfigWarning
+    from iac_code.ui.repl import InlineREPL
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.console = SimpleNamespace(print=Mock())
+    repl._mcp_warnings_printed_count = 0
+    repl.mcp_config_warnings = [
+        MCPConfigWarning(source="mcp", server_name="broken", code="connection_failed", message="first warning")
+    ]
+
+    repl._print_mcp_config_warnings()
+    repl._print_mcp_config_warnings()
+    repl.mcp_config_warnings.append(
+        MCPConfigWarning(source="mcp", server_name="broken", code="resources_failed", message="second warning")
+    )
+    repl._print_mcp_config_warnings()
+
+    printed = [call.args[0] for call in repl.console.print.call_args_list]
+    assert len(printed) == 2
+    assert "first warning" in printed[0]
+    assert "second warning" in printed[1]
 
 
 def test_swap_session_marks_completed_cleanup_prompt(tmp_path: Path):
