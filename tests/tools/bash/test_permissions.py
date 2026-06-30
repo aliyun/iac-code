@@ -29,10 +29,73 @@ class TestBashToolHasPermission:
         assert r.behavior == "deny"
 
     @pytest.mark.asyncio
+    async def test_full_command_deny_rule_returns_audit_metadata(self):
+        ctx = _ctx(deny={"user_settings": ["bash(rm -rf /)"]})
+        r = await bash_tool_has_permission("rm -rf /", ctx)
+
+        assert r.behavior == "deny"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.source == "permission_pipeline"
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.rule == "bash(rm -rf /)"
+        assert r.audit.reason_type == "rule"
+        assert r.audit.reason_detail == r.message
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {"is_read_only": False}
+
+    @pytest.mark.asyncio
     async def test_allow_rule_passes(self):
         ctx = _ctx(allow={"user_settings": ["bash(git:*)"]})
         r = await bash_tool_has_permission("git push", ctx)
         assert r.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_allow_rule_returns_audit_metadata_for_non_readonly_command(self):
+        ctx = _ctx(allow={"session": ["bash(mkdir:*)"]})
+        r = await bash_tool_has_permission("mkdir foo", ctx)
+
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "session_rule"
+        assert r.audit.source == "permission_pipeline"
+        assert r.audit.rule_source == "session"
+        assert r.audit.rule == "bash(mkdir:*)"
+        assert r.audit.reason_type == "rule"
+        assert r.audit.reason_detail == r.message
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {"is_read_only": False}
+
+    @pytest.mark.asyncio
+    async def test_ask_rule_returns_audit_metadata_for_non_readonly_command(self):
+        ctx = _ctx(ask={"project_settings": ["bash(mkdir:*)"]})
+        r = await bash_tool_has_permission("mkdir foo", ctx)
+
+        assert r.behavior == "ask"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.source == "permission_pipeline"
+        assert r.audit.rule_source == "project_settings"
+        assert r.audit.rule == "bash(mkdir:*)"
+        assert r.audit.reason_type == "rule"
+        assert r.audit.reason_detail == r.message
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {"is_read_only": False}
+
+    @pytest.mark.asyncio
+    async def test_compound_allow_rule_returns_audit_metadata_for_write_subcommand(self):
+        ctx = _ctx(allow={"session": ["bash(mkdir:*)"]})
+        r = await bash_tool_has_permission("cat file.txt && mkdir foo", ctx)
+
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "session_rule"
+        assert r.audit.source == "permission_pipeline"
+        assert r.audit.rule_source == "session"
+        assert r.audit.rule == "bash(mkdir:*)"
+        assert r.audit.reason_type == "rule"
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {"is_read_only": False}
 
     @pytest.mark.asyncio
     async def test_unknown_command_asks(self):
@@ -50,6 +113,13 @@ class TestBashToolHasPermission:
         ctx = _ctx(mode=PermissionMode.ACCEPT_EDITS)
         r = await bash_tool_has_permission("mkdir foo", ctx)
         assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "mode"
+        assert r.audit.source == "permission_pipeline"
+        assert r.audit.rule_source == "mode"
+        assert r.audit.reason_type == "accept_edits"
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {"is_read_only": False}
 
     @pytest.mark.parametrize(
         "cmd",
@@ -303,6 +373,15 @@ class TestBashToolCheckPermission:
         cmd = SimpleCommand(text="git push origin main", argv=["git", "push", "origin", "main"])
         r = bash_tool_check_permission(cmd, ctx)
         assert r.behavior == "deny"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.source == "permission_pipeline"
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.rule == "bash(git push:*)"
+        assert r.audit.reason_type == "rule"
+        assert r.audit.reason_detail == r.message
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {"is_read_only": False}
 
     def test_readonly_auto_allow(self):
         cmd = SimpleCommand(text="cat file.txt", argv=["cat", "file.txt"])

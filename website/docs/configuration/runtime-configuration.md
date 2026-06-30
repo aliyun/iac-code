@@ -19,7 +19,7 @@ The runtime directory defaults to:
 ~/.iac-code/
 ```
 
-You can relocate it by setting the `IAC_CODE_CONFIG_DIR` environment variable (supports `~` and `$VAR` expansion). When set, every persisted artifact — credentials, settings, history, `projects/`, `image-cache/`, `tool-results/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — follows the new location. Logs default to `<config-dir>/logs/` but can be moved separately with `IAC_CODE_LOG_DIR`.
+You can relocate it by setting the `IAC_CODE_CONFIG_DIR` environment variable (supports `~` and `$VAR` expansion). When set, every persisted artifact — credentials, settings, history, `projects/`, `image-cache/`, `tool-results/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — follows the new location. Startup/debug logs default to `<config-dir>/logs/` but can be moved separately with `IAC_CODE_LOG_DIR`; permission audit records stay under `<config-dir>/logs/`.
 
 Common files:
 
@@ -106,6 +106,10 @@ permissions:
     - "bash(curl:*)"
   additional_directories:
     - "/tmp/workspace"
+  audit:
+    include_tool_input: false
+    max_file_bytes: 10485760
+    max_files: 5
 ```
 
 | Field | Description |
@@ -115,6 +119,7 @@ permissions:
 | `deny` | List of tool permission patterns to auto-deny. |
 | `ask` | List of tool permission patterns that always require confirmation. |
 | `additional_directories` | Extra directories beyond cwd that the agent is allowed to write to. |
+| `audit` | Local permission audit log settings. |
 
 ### Pattern Syntax
 
@@ -126,5 +131,40 @@ Tool permission patterns follow the format `tool_name(rule)`:
 | `bash(git *)` | Match bash commands starting with `git`. |
 | `bash(curl:*)` | Match bash commands starting with `curl`. |
 | `write_file` | Match all write_file tool calls. |
+| `aliyun_api(ros:CreateStack)` | Match one Alibaba Cloud API product/action pair. |
 
 Rules are evaluated in order: **deny → ask → allow → default behavior**. CLI arguments (`--allowed-tools`, `--disallowed-tools`) take the highest precedence.
+
+### Alibaba Cloud API Permissions
+
+`aliyun_api` distinguishes read-only API calls from calls that may modify cloud resources. Read-only API actions are allowed automatically. Non-read-only API calls require confirmation or an exact allow rule for that product/action, for example:
+
+```yaml
+permissions:
+  allow:
+    - "aliyun_api(ros:CreateStack)"
+```
+
+A bare `aliyun_api` allow rule does not blanket-approve Alibaba Cloud write APIs. Outside `bypass_permissions`, write allow rules must match the exact canonical `product:action` pair. In `bypass_permissions` mode, protected Alibaba Cloud write APIs are auto-approved, but every allow decision that requires an audit record still fails closed if audit persistence fails. Wildcards can still be useful for deny or ask rules, and for read-only rule matching.
+
+ROA-style requests are treated as read-only only when the method is `GET` and the request has no body. Non-read-only ROA requests follow the same exact canonical `product:action` allow-rule requirement as RPC-style write APIs: an exact rule such as `aliyun_api(cs:CreateCluster)` can approve the write, while wildcard allow rules still do not approve non-read-only calls.
+
+### Permission Audit Log
+
+Permission decisions that cross user prompts, tool-cache boundaries, automation approval, or resolver approval are appended to:
+
+```text
+<config-dir>/logs/permission-audit.jsonl
+```
+
+By default, this is `~/.iac-code/logs/permission-audit.jsonl`. The permission audit log follows `IAC_CODE_CONFIG_DIR`; `IAC_CODE_LOG_DIR` only moves startup/debug logs. The audit writer appends JSONL records with file locking, rotates the file, and restricts local file permissions where the operating system supports it. Routine read-only auto-allow decisions may be omitted, but denials, prompts, cached decisions, automation approvals, resolver approvals, and other audited permission boundaries are recorded.
+
+Audit settings are configured under `permissions.audit`:
+
+| Field | Default | Description |
+|---|---:|---|
+| `include_tool_input` | `false` | Include shape-only tool input in JSONL audit records. String values are stored as type, length, and fingerprint; secret-looking keys are redacted; non-whitelisted field names may be fingerprinted; raw business payload strings are not written. Alibaba Cloud API entries also keep a safe operation summary. |
+| `max_file_bytes` | `10485760` | Rotate `permission-audit.jsonl` when it grows past this size. |
+| `max_files` | `5` | Number of rotated audit files to keep. Values above the built-in maximum are clamped. |
+
+If any allow decision that requires an audit record cannot be persisted to the audit log, IaC Code fails closed and denies the action instead of executing it without an audit trail.

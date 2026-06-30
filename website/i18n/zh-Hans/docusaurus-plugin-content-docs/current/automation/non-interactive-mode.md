@@ -47,6 +47,14 @@ iac-code --prompt "创建一个 VPC" --max-turns 20
 iac-code --prompt "部署资源栈" --permission-mode bypass_permissions
 ```
 
+在 `bypass_permissions` 下，工具操作会被自动批准（安全检查除外），但任何需要审计记录的允许决策在审计持久化失败时都会 fail closed。阿里云写 API 在 `bypass_permissions` 之外仍有单独保护；对于更窄范围的可信自动化，请不要使用 `bypass_permissions`，而是显式允许每个需要的写 API：
+
+```bash
+iac-code --prompt "部署资源栈" \
+  --allowed-tools 'aliyun_api(ros:CreateStack)' \
+  --permission-mode dont_ask
+```
+
 要限制代理的操作范围，可以组合使用 `--allowed-tools` 和 `--disallowed-tools`：
 
 ```bash

@@ -258,7 +258,7 @@ thinking-exposure:
 |--------|---------|-------------|
 | `auto-approve-permissions` | `false` | A2A ターン中に発生したツール権限リクエストを自動承認 |
 
-`auto-approve-permissions: true` がない場合、A2A モードは権限プロンプトを拒否し、権限メタデータを出力します。信頼できる自動化環境でのみ使用してください。
+`auto-approve-permissions: true` がない場合、A2A モードは権限プロンプトを拒否し、権限メタデータを出力します。有効にすると、権限決定はローカルの権限監査ログに書き込まれます。監査レコードを必要とする allow 決定は、そのレコードを永続化できない場合に fail-closed になります。保護された Alibaba Cloud 書き込み API は通常の allow ルールでは一括承認されません。信頼できる自動化では、正確な `aliyun_api(product:action)` allow ルールを構成してください。
 
 ## `iac-code a2a-client call`
 

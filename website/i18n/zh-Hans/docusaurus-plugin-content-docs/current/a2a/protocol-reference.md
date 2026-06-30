@@ -383,9 +383,13 @@ Assistant text 作为 status message 投递：
 | `iac_code.tool.status` | `started`、`input_delta`、`input_complete`、`completed` 或 `failed` |
 | `iac_code.tool.toolUseId` | 用于关联工具事件的稳定 tool-use ID |
 | `iac_code.tool.name` | 可用时的工具名称 |
-| `iac_code.tool.input` | 已完成工具输入，每个字段截断为 4000 个字符 |
+| `iac_code.tool.inputSummary` | 已完成工具输入的仅形态摘要；字符串值和非白名单字段名不会以业务原文表示 |
 | `iac_code.tool.result` | 工具结果，每个字段截断为 4000 个字符 |
-| `iac_code.permission.autoApproved` | A2A server 模式拒绝工具权限请求时为 `false` |
+| `iac_code.permission.autoApproved` | A2A 是否通过自动批准或 resolver 批准了该权限请求 |
+| `iac_code.permission.toolName` | 请求权限的工具 |
+| `iac_code.permission.safeSummary` | 脱敏后的人类可读权限摘要 |
+| `iac_code.permission.inputSummary` | `aliyun_api` 权限请求的安全操作摘要 |
+| `iac_code.permission.toolInput` | 非 `aliyun_api` 权限请求的仅形态工具输入；字符串值使用类型、长度和指纹表示，非白名单字段名可能以指纹表示 |
 | `iac_code.thinking.type` | 在 `thinking-exposure` 中启用 `raw-thinking` 时为 `raw_thinking` |
 | `iac_code.thinking.text` | 原始 provider 推理 chunk，截断为 4000 个字符，仅在受信任配置启用 `raw-thinking` 时发出 |
 | `iac_code.usage.inputTokens` | 该轮次的 input token 数 |

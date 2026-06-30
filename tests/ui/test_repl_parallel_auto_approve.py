@@ -75,6 +75,45 @@ async def _stream_permission_request(response_future: asyncio.Future):
     )
 
 
+async def _stream_nested_permission_request(response_future: asyncio.Future):
+    from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+    from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
+
+    sub_id = "sub_nested_inner"
+    yield PipelineEvent(
+        type=PipelineEventType.SUB_PIPELINE_STARTED,
+        step_id=None,
+        timestamp=time.time(),
+        data={
+            "sub_pipeline_id": sub_id,
+            "candidate_index": 0,
+            "candidate_name": "方案1",
+            "total_steps": 1,
+            "sub_pipeline_name": "test",
+        },
+    )
+    yield SubPipelineStreamEvent(
+        sub_pipeline_id="sub_nested_outer",
+        candidate_index=1,
+        inner=SubPipelineStreamEvent(
+            sub_pipeline_id=sub_id,
+            candidate_index=0,
+            inner=PermissionRequestEvent(
+                tool_name="bash",
+                tool_input={},
+                tool_use_id="t_nested",
+                response_future=response_future,
+            ),
+        ),
+    )
+    yield PipelineEvent(
+        type=PipelineEventType.STEP_COMPLETED,
+        step_id=None,
+        timestamp=time.time(),
+        data={},
+    )
+
+
 def _make_repl(prompt_result: bool):
     from iac_code.ui.repl import InlineREPL
 
@@ -121,6 +160,20 @@ async def test_parallel_permission_request_prompts_and_allows():
     future = asyncio.get_running_loop().create_future()
 
     interrupted = await repl._render_parallel_tabs(_stream_permission_request(future))
+
+    assert interrupted is False
+    repl.renderer.prompt_permission.assert_awaited_once()
+    assert future.done()
+    assert future.result() is True
+    assert "auto-approved" not in _console_text(repl)
+
+
+@pytest.mark.asyncio
+async def test_parallel_nested_permission_request_prompts_and_allows():
+    repl = _make_repl(prompt_result=True)
+    future = asyncio.get_running_loop().create_future()
+
+    interrupted = await repl._render_parallel_tabs(_stream_nested_permission_request(future))
 
     assert interrupted is False
     repl.renderer.prompt_permission.assert_awaited_once()

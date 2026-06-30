@@ -42,6 +42,14 @@ from iac_code.memory.project_memory import ProjectMemoryRuntime
 from iac_code.memory.recall import MemoryRecallService
 from iac_code.providers.manager import ProviderManager
 from iac_code.providers.registry import PROVIDER_REGISTRY
+from iac_code.services.permissions.audit import (
+    PermissionAuditRecord,
+    build_input_summary,
+    emit_permission_audit,
+    is_routine_read_only_allow,
+    permission_audit_operation,
+    redacted_tool_input_for_settings,
+)
 from iac_code.services.session_index import SessionIndex
 from iac_code.services.session_metadata import normalize_session_name
 from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
@@ -128,6 +136,12 @@ def _normalize_command_result(result: object) -> tuple[str, bool, bool]:
     if isinstance(result, CommandResult):
         return result.message, result.is_error, result.refresh_banner
     return str(result), False, False
+
+
+def _innermost_sub_pipeline_stream_event(event: SubPipelineStreamEvent) -> SubPipelineStreamEvent:
+    while isinstance(event.inner, SubPipelineStreamEvent):
+        event = event.inner
+    return event
 
 
 class InlineREPL:
@@ -1092,10 +1106,21 @@ class InlineREPL:
             permission = await check_tool_permission(tool, tool_input, permission_context)
         else:
             permission = await tool.check_permissions(tool_input, {"cwd": self._original_cwd})
+        audit_settings = permission_context.audit_settings if permission_context is not None else None
 
         if permission.behavior == "allow":
+            audit_ok = self._audit_shell_escape_permission(
+                permission,
+                tool_input,
+                decision="allow",
+                settings=audit_settings,
+            )
+            if not audit_ok:
+                self.renderer.print_system_message(_("Permission denied."), style="red")
+                return False
             return True
         if permission.behavior == "deny":
+            self._audit_shell_escape_permission(permission, tool_input, decision="deny", settings=audit_settings)
             self.renderer.print_system_message(permission.message or _("Permission denied."), style="red")
             return False
 
@@ -1107,11 +1132,51 @@ class InlineREPL:
                 tool_input=tool_input,
                 tool_use_id="shell-escape",
                 permission_result=permission,
+                audit_context={
+                    "session_id": getattr(self, "_session_id", "") or "",
+                    "settings": audit_settings,
+                    "metadata": permission.audit,
+                },
             )
         )
         if not allowed:
             self.renderer.print_system_message(_("Permission denied."), style="red")
         return allowed
+
+    def _audit_shell_escape_permission(
+        self,
+        permission,
+        tool_input: dict,
+        *,
+        decision: Literal["allow", "deny"],
+        settings=None,
+    ) -> bool:
+        audit = getattr(permission, "audit", None)
+        if audit is None:
+            return True
+        if is_routine_read_only_allow(decision, audit):
+            return True
+        return (
+            emit_permission_audit(
+                PermissionAuditRecord(
+                    session_id=getattr(self, "_session_id", "") or "",
+                    tool_name="bash",
+                    tool_use_id="shell-escape",
+                    decision=decision,
+                    scope=audit.scope,
+                    source=audit.source,
+                    rule_source=audit.rule_source,
+                    rule=audit.rule,
+                    reason_type=audit.reason_type,
+                    reason_detail=audit.reason_detail,
+                    operation=permission_audit_operation(audit),
+                    input_summary=build_input_summary("bash", tool_input),
+                    tool_input_redacted=redacted_tool_input_for_settings(tool_input, settings),
+                ),
+                settings=settings,
+            )
+            is not False
+        )
 
     def _is_pipeline_safe_command(self, user_input: str) -> bool:
         """Commands always allowed mid-pipeline regardless of allow_user_escapes.command."""
@@ -4076,8 +4141,9 @@ class InlineREPL:
                         break
 
                 elif isinstance(event, SubPipelineStreamEvent):
-                    sub_id = event.sub_pipeline_id
-                    inner = event.inner
+                    stream_event = _innermost_sub_pipeline_stream_event(event)
+                    sub_id = stream_event.sub_pipeline_id
+                    inner = stream_event.inner
                     if isinstance(inner, PermissionRequestEvent):
                         await _prompt_child_permission(sub_id, inner)
                         continue

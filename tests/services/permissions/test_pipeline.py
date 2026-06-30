@@ -3,6 +3,7 @@ import pytest
 from iac_code.services.permissions.pipeline import check_tool_permission
 from iac_code.tools.base import Tool, ToolResult
 from iac_code.tools.bash.bash_tool import BashTool
+from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
 from iac_code.tools.edit_file import EditFileTool
 from iac_code.tools.glob import GlobTool
 from iac_code.tools.grep import GrepTool
@@ -265,16 +266,121 @@ class TestPipeline:
         assert r.behavior == "deny"
 
     @pytest.mark.asyncio
+    async def test_deny_rule_includes_audit_metadata(self):
+        r = await check_tool_permission(FakeWriteTool(), {}, _ctx(deny={"user_settings": ["write_file"]}))
+        assert r.behavior == "deny"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.reason_detail == "matched deny rule: write_file"
+
+    @pytest.mark.asyncio
+    async def test_cli_bare_deny_rule_includes_cli_rule_audit_scope(self):
+        r = await check_tool_permission(FakeWriteTool(), {}, _ctx(deny={"cli_arg": ["write_file"]}))
+        assert r.behavior == "deny"
+        assert r.audit is not None
+        assert r.audit.scope == "cli_rule"
+        assert r.audit.rule_source == "cli_arg"
+        assert r.audit.rule == "write_file"
+
+    @pytest.mark.asyncio
+    async def test_tool_level_ask_rule_includes_audit_metadata(self):
+        r = await check_tool_permission(FakeReadTool(), {}, _ctx(ask={"project_settings": ["read_file"]}))
+        assert r.behavior == "ask"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.rule_source == "project_settings"
+        assert r.audit.rule == "read_file"
+        assert r.audit.reason_type == "rule"
+        assert r.audit.reason_detail == "matched ask rule(s): read_file"
+        assert r.audit.is_read_only is True
+
+    @pytest.mark.asyncio
     async def test_tool_level_allow(self):
         ctx = _ctx(allow={"user_settings": ["write_file"]})
         r = await check_tool_permission(FakeWriteTool(), {}, ctx)
         assert r.behavior == "allow"
 
     @pytest.mark.asyncio
+    async def test_bare_allow_rule_includes_audit_metadata(self):
+        r = await check_tool_permission(FakeWriteTool(), {}, _ctx(allow={"user_settings": ["write_file"]}))
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.rule == "write_file"
+        assert r.audit.reason_detail == "matched allow rule: write_file"
+
+    @pytest.mark.asyncio
+    async def test_session_bare_allow_rule_includes_session_rule_audit_scope(self):
+        r = await check_tool_permission(FakeWriteTool(), {}, _ctx(allow={"session": ["write_file"]}))
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "session_rule"
+        assert r.audit.rule_source == "session"
+        assert r.audit.rule == "write_file"
+
+    @pytest.mark.asyncio
+    async def test_bare_aliyun_api_allow_does_not_auto_allow_aliyun_write(self):
+        r = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ros", "action": "CreateStack"},
+            _ctx(allow={"user_settings": ["aliyun_api"]}),
+        )
+        assert r.behavior == "ask"
+        assert r.audit is not None
+        assert r.audit.scope == "once"
+        assert r.audit.operation["action"] == "CreateStack"
+        assert r.audit.is_read_only is False
+
+    @pytest.mark.asyncio
     async def test_bypass_mode_allows(self):
         ctx = _ctx(mode=PermissionMode.BYPASS_PERMISSIONS)
         r = await check_tool_permission(FakeWriteTool(), {}, ctx)
         assert r.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_bypass_mode_includes_audit_metadata(self):
+        r = await check_tool_permission(FakeWriteTool(), {}, _ctx(mode=PermissionMode.BYPASS_PERMISSIONS))
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "mode"
+        assert r.audit.rule_source == "mode"
+
+    @pytest.mark.asyncio
+    async def test_aliyun_api_bypass_mode_allows_write_with_audit(self):
+        r = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ros", "action": "CreateStack"},
+            _ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
+        )
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "mode"
+        assert r.audit.rule_source == "mode"
+        assert r.audit.reason_type == "bypass_permissions"
+        assert r.audit.operation["action"] == "CreateStack"
+        assert r.audit.is_read_only is False
+
+    @pytest.mark.asyncio
+    async def test_aliyun_api_bypass_mode_preserves_explicit_write_rule_audit(self):
+        r = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ros", "action": "CreateStack"},
+            _ctx(
+                mode=PermissionMode.BYPASS_PERMISSIONS,
+                allow={"user_settings": ["aliyun_api(ros:CreateStack)"]},
+            ),
+        )
+
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.rule == "ros:CreateStack"
+        assert r.audit.reason_type == "rule"
+        assert r.audit.operation["action"] == "CreateStack"
+        assert r.audit.is_read_only is False
 
     @pytest.mark.parametrize(
         ("tool", "tool_input"),
@@ -312,6 +418,29 @@ class TestPipeline:
         ctx = _ctx(mode=PermissionMode.DONT_ASK)
         r = await check_tool_permission(FakeWriteTool(), {}, ctx)
         assert r.behavior == "deny"
+
+    @pytest.mark.asyncio
+    async def test_dont_ask_mode_includes_audit_metadata(self):
+        r = await check_tool_permission(FakeWriteTool(), {}, _ctx(mode=PermissionMode.DONT_ASK))
+        assert r.behavior == "deny"
+        assert r.audit is not None
+        assert r.audit.scope == "mode"
+        assert r.audit.rule_source == "mode"
+
+    @pytest.mark.asyncio
+    async def test_aliyun_api_dont_ask_mode_preserves_tool_audit_operation(self):
+        r = await check_tool_permission(
+            AliyunApi(),
+            {"product": "ros", "action": "CreateStack"},
+            _ctx(mode=PermissionMode.DONT_ASK),
+        )
+        assert r.behavior == "deny"
+        assert r.audit is not None
+        assert r.audit.scope == "mode"
+        assert r.audit.rule_source == "mode"
+        assert r.audit.reason_type == "dont_ask"
+        assert r.audit.operation["action"] == "CreateStack"
+        assert r.audit.is_read_only is False
 
     @pytest.mark.asyncio
     async def test_default_mode_asks(self):

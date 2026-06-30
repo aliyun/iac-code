@@ -363,9 +363,13 @@ Tool- und Nutzungsdetails werden ueber `metadata.iac_code` geliefert:
 | `iac_code.tool.status` | `started`, `input_delta`, `input_complete`, `completed` oder `failed` |
 | `iac_code.tool.toolUseId` | Stabile Tool-Use-ID zur Korrelation von Tool-Events |
 | `iac_code.tool.name` | Tool-Name, wenn verfuegbar |
-| `iac_code.tool.input` | Abgeschlossene Tool-Eingabe, pro Feld auf 4000 Zeichen gekuerzt |
+| `iac_code.tool.inputSummary` | Nur die Form der abgeschlossenen Tool-Eingabe; String-Werte und Feldnamen ausserhalb der Whitelist werden ohne rohe fachliche Payloads dargestellt |
 | `iac_code.tool.result` | Tool-Ergebnis, pro Feld auf 4000 Zeichen gekuerzt |
-| `iac_code.permission.autoApproved` | `false`, wenn eine Tool-Berechtigungsanfrage vom A2A-Servermodus abgelehnt wurde |
+| `iac_code.permission.autoApproved` | Ob A2A die Berechtigungsanfrage automatisch oder ueber einen Resolver genehmigt hat |
+| `iac_code.permission.toolName` | Tool, das die Berechtigung angefordert hat |
+| `iac_code.permission.safeSummary` | Redigierte, menschenlesbare Berechtigungszusammenfassung |
+| `iac_code.permission.inputSummary` | Sichere Operationszusammenfassung fuer `aliyun_api`-Berechtigungsanfragen |
+| `iac_code.permission.toolInput` | Nur die Form der Tool-Eingabe fuer Berechtigungsanfragen ausserhalb von `aliyun_api`; String-Werte verwenden Typ, Laenge und Fingerprint, und Feldnamen ausserhalb der Whitelist koennen als Fingerprint erscheinen |
 | `iac_code.thinking.type` | `raw_thinking`, wenn `raw-thinking` in `thinking-exposure` aktiviert ist |
 | `iac_code.thinking.text` | Roher Provider-Reasoning-Chunk, auf 4000 Zeichen gekuerzt, nur fuer vertrauenswuerdige Konfigurationen ausgegeben, die `raw-thinking` aktivieren |
 | `iac_code.usage.inputTokens` | Anzahl der Eingabetoken fuer den Turn |

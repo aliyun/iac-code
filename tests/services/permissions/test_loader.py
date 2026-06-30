@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
+import iac_code.services.permissions.loader as loader
 from iac_code.services.permissions.loader import load_permission_context, load_settings_permissions
 from iac_code.types.permissions import PermissionMode
 
@@ -112,3 +115,96 @@ def test_load_permission_context_initializes_trusted_read_directories(tmp_path, 
     ctx = load_permission_context(str(tmp_path))
 
     assert ctx.trusted_read_directories == []
+
+
+def test_load_permission_context_merges_audit_settings(tmp_path: Path, monkeypatch) -> None:
+    config_dir = tmp_path / "config"
+    project_dir = tmp_path / "project"
+    config_dir.mkdir()
+    project_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+
+    (config_dir / "settings.yml").write_text(
+        "permissions:\n  audit:\n    include_tool_input: false\n    max_file_bytes: 100\n    max_files: 1\n",
+        encoding="utf-8",
+    )
+    (project_dir / ".iac-code").mkdir()
+    (project_dir / ".iac-code" / "settings.yml").write_text(
+        "permissions:\n  audit:\n    max_file_bytes: 200\n",
+        encoding="utf-8",
+    )
+    (project_dir / ".iac-code" / "settings.local.yml").write_text(
+        "permissions:\n  audit:\n    include_tool_input: true\n    max_files: 3\n",
+        encoding="utf-8",
+    )
+
+    context = load_permission_context(str(project_dir))
+
+    assert context.audit_settings.include_tool_input is True
+    assert context.audit_settings.max_file_bytes == 200
+    assert context.audit_settings.max_files == 3
+
+
+def test_load_permission_context_env_overrides_audit_tool_input(tmp_path: Path, monkeypatch) -> None:
+    config_dir = tmp_path / "config"
+    project_dir = tmp_path / "project"
+    config_dir.mkdir()
+    project_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("IAC_CODE_PERMISSION_AUDIT_INCLUDE_TOOL_INPUT", "1")
+    (config_dir / "settings.yml").write_text(
+        "permissions:\n  audit:\n    include_tool_input: false\n",
+        encoding="utf-8",
+    )
+
+    context = load_permission_context(str(project_dir))
+
+    assert context.audit_settings.include_tool_input is True
+
+
+def test_load_permission_context_ignores_invalid_audit_retention(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dir = tmp_path / "config"
+    project_dir = tmp_path / "project"
+    config_dir.mkdir()
+    project_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    (config_dir / "settings.yml").write_text(
+        "permissions:\n  audit:\n    max_file_bytes: -1\n    max_files: nope\n",
+        encoding="utf-8",
+    )
+    warnings: list[str] = []
+
+    monkeypatch.setattr(loader.logger, "warning", lambda message, *args: warnings.append(message.format(*args)))
+
+    context = load_permission_context(str(project_dir))
+
+    assert context.audit_settings.max_file_bytes == 10 * 1024 * 1024
+    assert context.audit_settings.max_files == 5
+    assert any("Invalid permissions.audit.max_file_bytes" in warning for warning in warnings)
+    assert any("Invalid permissions.audit.max_files" in warning for warning in warnings)
+
+
+def test_load_permission_context_clamps_excessive_audit_max_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dir = tmp_path / "config"
+    project_dir = tmp_path / "project"
+    config_dir.mkdir()
+    project_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    (config_dir / "settings.yml").write_text(
+        "permissions:\n  audit:\n    max_files: 100000000\n",
+        encoding="utf-8",
+    )
+    warnings: list[str] = []
+
+    monkeypatch.setattr(loader.logger, "warning", lambda message, *args: warnings.append(message.format(*args)))
+
+    context = load_permission_context(str(project_dir))
+
+    assert context.audit_settings.max_files == 100
+    assert any("permissions.audit.max_files value 100000000 exceeds maximum 100" in warning for warning in warnings)

@@ -47,6 +47,14 @@ Cuando ejecute en modo no interactivo, use `--permission-mode` para controlar c�
 iac-code --prompt "Deploy the stack" --permission-mode bypass_permissions
 ```
 
+En `bypass_permissions`, las acciones de herramientas se aprueban automáticamente excepto las comprobaciones de seguridad, pero toda decisión allow que requiere un registro de auditoría sigue fallando en modo cerrado si falla la persistencia de auditoría. Las API de escritura de Alibaba Cloud siguen protegidas por separado fuera de `bypass_permissions`; para una automatización confiable más acotada, no use `bypass_permissions` y permita explícitamente cada API de escritura requerida:
+
+```bash
+iac-code --prompt "Deploy the stack" \
+  --allowed-tools 'aliyun_api(ros:CreateStack)' \
+  --permission-mode dont_ask
+```
+
 Para restringir lo que el agente puede hacer, combine `--allowed-tools` y `--disallowed-tools`:
 
 ```bash

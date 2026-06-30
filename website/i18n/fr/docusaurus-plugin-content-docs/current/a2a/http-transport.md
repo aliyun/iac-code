@@ -264,6 +264,6 @@ Pour la liste complète des options, consultez la [référence des commandes](./
 
 - Liez à `127.0.0.1` pour une utilisation locale uniquement.
 - Utilisez `token` dans la configuration A2A ou `IACCODE_A2A_HTTP_TOKEN` avant de lier le serveur à une interface réseau partagée.
-- Le mode A2A rejette automatiquement les demandes d'autorisation d'outil ; protégez les endpoints non authentifiés comme des services d'automatisation locaux.
+- Le mode A2A rejette automatiquement les demandes d'autorisation d'outil, sauf si `auto-approve-permissions` ou une règle de permission explicite les autorise. Les décisions de permissions sont auditées localement ; toute décision allow nécessitant un enregistrement d'audit échoue en mode fail-closed si cet enregistrement ne peut pas être persisté. Les API d'écriture Alibaba Cloud protégées nécessitent une autorisation exacte par API hors des modes de bypass global.
 - L'état runtime actif est en mémoire. La persistance duplique les métadonnées de tâche et de contexte, mais le redémarrage du processus ne reprend pas le travail asyncio en cours.
 - Un contexte ne peut exécuter qu'une seule tâche à la fois ; des contextes séparés peuvent s'exécuter simultanément.

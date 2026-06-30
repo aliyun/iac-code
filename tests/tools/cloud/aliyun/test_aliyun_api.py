@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.providers.aliyun_oauth import AliyunOAuthError, AliyunOAuthReloginRequired
 from iac_code.tools.base import ToolContext
@@ -105,6 +106,50 @@ class TestAliyunApiProperties:
 
     def test_is_read_only_false_for_delete(self, api: AliyunApi) -> None:
         assert api.is_read_only({"action": "DeleteInstance"}) is False
+
+    @pytest.mark.parametrize("method", ["DELETE", "PUT", "POST"])
+    def test_roa_write_methods_are_not_read_only_even_with_read_action(self, api: AliyunApi, method: str) -> None:
+        assert (
+            api.is_read_only(
+                {
+                    "product": "cs",
+                    "action": "DescribeClusters",
+                    "style": "ROA",
+                    "method": method,
+                    "pathname": "/clusters/c-123",
+                }
+            )
+            is False
+        )
+
+    def test_roa_get_without_body_can_be_read_only(self, api: AliyunApi) -> None:
+        assert (
+            api.is_read_only(
+                {
+                    "product": "cs",
+                    "action": "DescribeClusters",
+                    "style": "ROA",
+                    "method": "GET",
+                    "pathname": "/clusters",
+                }
+            )
+            is True
+        )
+
+    def test_roa_get_with_body_is_not_read_only(self, api: AliyunApi) -> None:
+        assert (
+            api.is_read_only(
+                {
+                    "product": "cs",
+                    "action": "DescribeClusters",
+                    "style": "ROA",
+                    "method": "GET",
+                    "pathname": "/clusters",
+                    "body": {"force": True},
+                }
+            )
+            is False
+        )
 
 
 class TestAliyunApiVersionResolution:
@@ -364,6 +409,71 @@ class TestAliyunApiExecute:
         data = json.loads(result.content)
         assert data == {"Instances": []}
         mock_client.call_api.assert_called_once()
+
+    @pytest.mark.parametrize("fails", [False, True])
+    @pytest.mark.asyncio
+    async def test_execution_telemetry_fingerprints_unsafe_identifiers(
+        self, api: AliyunApi, context: ToolContext, mock_credentials, fails: bool
+    ) -> None:
+        product = "Ro*Secret"
+        action = "Create:Stack SECRET"
+        region = "CN-Hangzhou/Secret"
+        version = "2023-01-01/Secret"
+        mock_client = MagicMock()
+        if fails:
+            mock_client.call_api.side_effect = Exception(
+                "boom for {} {} {} {}".format(product.lower(), action.lower(), region.lower(), version.lower())
+            )
+        else:
+            mock_client.call_api.return_value = {"body": {"Result": "ok"}}
+
+        with (
+            patch.object(api, "_discover_endpoint", return_value=None),
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client),
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.log_event") as log_event,
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.add_metric") as add_metric,
+        ):
+            result = await api.execute(
+                tool_input={
+                    "product": product,
+                    "action": action,
+                    "version": version,
+                    "region_id": region,
+                },
+                context=context,
+            )
+
+        assert result.is_error is fails
+        event_payload = log_event.call_args.args[1]
+        assert "api_service" not in event_payload
+        assert "api_name" not in event_payload
+        assert "region" not in event_payload
+        assert event_payload["api_service_fingerprint"] == fingerprint_text(product)
+        assert event_payload["api_name_fingerprint"] == fingerprint_text(action)
+        assert event_payload["region_fingerprint"] == fingerprint_text(region)
+        assert event_payload["api_version_fingerprint"] == fingerprint_text(version)
+        assert "api_version" not in event_payload
+        metric_attrs = add_metric.call_args_list[0].args[2]
+        assert metric_attrs["api_service"] == "unsafe"
+        telemetry_dump = json.dumps(
+            {
+                "events": [call.args for call in log_event.call_args_list],
+                "metrics": [call.args for call in add_metric.call_args_list],
+            },
+            default=str,
+        )
+        for raw_value in (
+            product,
+            product.upper(),
+            product.lower(),
+            action,
+            action.lower(),
+            region,
+            region.lower(),
+            version,
+            version.lower(),
+        ):
+            assert raw_value not in telemetry_dump
 
     @pytest.mark.asyncio
     async def test_ros_create_stack_emits_resource_observed_event(self, api: AliyunApi, mock_credentials) -> None:

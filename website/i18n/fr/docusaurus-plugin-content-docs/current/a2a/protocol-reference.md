@@ -363,9 +363,13 @@ Les détails d'outils et d'utilisation sont livrés via `metadata.iac_code` :
 | `iac_code.tool.status` | `started`, `input_delta`, `input_complete`, `completed` ou `failed` |
 | `iac_code.tool.toolUseId` | ID d'utilisation d'outil stable pour corréler les événements d'outil |
 | `iac_code.tool.name` | Nom de l'outil lorsqu'il est disponible |
-| `iac_code.tool.input` | Entrée d'outil terminée, tronquée à 4000 caractères par champ |
+| `iac_code.tool.inputSummary` | Résumé sous forme uniquement de l'entrée d'outil terminée ; les chaînes et les noms de champs hors liste blanche sont représentés sans payload métier brut |
 | `iac_code.tool.result` | Résultat d'outil, tronqué à 4000 caractères par champ |
-| `iac_code.permission.autoApproved` | `false` lorsqu'une demande d'autorisation d'outil a été rejetée par le mode serveur A2A |
+| `iac_code.permission.autoApproved` | Indique si A2A a approuvé la demande de permission automatiquement ou via un resolver |
+| `iac_code.permission.toolName` | Outil qui a demandé la permission |
+| `iac_code.permission.safeSummary` | Résumé de permission expurgé et lisible par un humain |
+| `iac_code.permission.inputSummary` | Résumé sûr de l'opération pour les demandes de permission `aliyun_api` |
+| `iac_code.permission.toolInput` | Entrée d'outil sous forme uniquement pour les demandes de permission hors `aliyun_api` ; les chaînes utilisent type, longueur et empreinte, et les noms de champs hors liste blanche peuvent être représentés par une empreinte |
 | `iac_code.thinking.type` | `raw_thinking` lorsque `raw-thinking` est activé dans `thinking-exposure` |
 | `iac_code.thinking.text` | Chunk brut de raisonnement du provider, tronqué à 4000 caractères, émis seulement pour les configurations de confiance qui activent `raw-thinking` |
 | `iac_code.usage.inputTokens` | Nombre de jetons d'entrée pour le tour |

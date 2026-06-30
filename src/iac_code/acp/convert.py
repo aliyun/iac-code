@@ -10,6 +10,7 @@ from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.acp.state import TurnState, display_tool_title
 from iac_code.acp.types import ACPContentBlock
 from iac_code.i18n import _
+from iac_code.services.permissions.audit import build_input_summary
 from iac_code.types.stream_events import (
     CompactionEvent,
     ErrorEvent,
@@ -212,15 +213,14 @@ class ACPEventConverter:
                 tc_state = self._turn_state.get_tool_call(tool_use_id) if self._turn_state else None
                 if tc_state is not None:
                     tc_state.update_input(partial_json)
-                title = tc_state.title if tc_state else None
                 update = acp.schema.ToolCallProgress(
                     session_update="tool_call_update",
                     tool_call_id=self.acp_tool_call_id(tool_use_id),
                     status="pending",
-                    content=[_text_tool_content(self._tool_inputs[tool_use_id])],
+                    content=[_text_tool_content(_input_delta_summary_text(self._tool_inputs[tool_use_id]))],
                 )
-                if title:
-                    update.title = title
+                if tc_state is not None:
+                    update.title = display_tool_title(tc_state.tool_name)
                 return [update]
             case ToolUseEndEvent(tool_use_id=tool_use_id, name=name, input=input):
                 return [
@@ -229,7 +229,7 @@ class ACPEventConverter:
                         tool_call_id=self.acp_tool_call_id(tool_use_id),
                         title=display_tool_title(name),
                         status="in_progress",
-                        content=[_text_tool_content(str(input))],
+                        content=[_text_tool_content(_input_summary_text(name, input))],
                     )
                 ]
             case MCPProgressEvent(
@@ -375,6 +375,15 @@ def _format_mcp_progress_text(
     if message:
         parts.append(sanitize_public_text(message))
     return ": ".join(parts)
+
+
+def _input_summary_text(tool_name: str, tool_input: dict[str, Any]) -> str:
+    summary = json.dumps(build_input_summary(tool_name, tool_input), ensure_ascii=False, sort_keys=True)
+    return _("Input summary: {summary}").format(summary=summary)
+
+
+def _input_delta_summary_text(accumulated_input: str) -> str:
+    return _("Input received ({count} chars)").format(count=len(accumulated_input))
 
 
 def _public_tool_result_text(value: Any) -> str:

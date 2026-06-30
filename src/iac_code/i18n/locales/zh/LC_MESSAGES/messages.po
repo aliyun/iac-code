@@ -166,6 +166,17 @@ msgstr "任务失败。"
 msgid "MCP {server}:{tool}"
 msgstr "MCP {server}:{tool}"
 
+#: src/iac_code/acp/convert.py src/iac_code/acp/session.py
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "Input summary: {summary}"
+msgstr "输入摘要：{summary}"
+
+#: src/iac_code/acp/convert.py
+#, python-brace-format
+msgid "Input received ({count} chars)"
+msgstr "已接收输入（{count} 个字符）"
+
 #: src/iac_code/acp/server.py
 msgid "Session not found"
 msgstr "未找到会话"
@@ -179,6 +190,60 @@ msgstr "会话名称不唯一。候选项：{candidates}"
 #, python-brace-format
 msgid "Session belongs to another project. Run: {hint}"
 msgstr "会话属于另一个项目。请运行：{hint}"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Input: {input}"
+msgstr "输入：{input}"
+
+#: src/iac_code/acp/session.py
+msgid "Allow once"
+msgstr "仅允许一次"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Always allow \"{rule}\" (this session)"
+msgstr "始终允许 “{rule}”（本会话）"
+
+#: src/iac_code/acp/session.py
+msgid "Always allow this tool"
+msgstr "始终允许此工具"
+
+#: src/iac_code/acp/session.py
+msgid "Reject once"
+msgstr "拒绝一次"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Always deny \"{rule}\" (this session)"
+msgstr "始终拒绝 “{rule}”（本会话）"
+
+#: src/iac_code/acp/session.py
+msgid "Always reject this tool"
+msgstr "始终拒绝此工具"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid ""
+"Approve tool call: {tool}\n"
+"Input summary: {summary}"
+msgstr ""
+"批准工具调用：{tool}\n"
+"输入摘要：{summary}"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid ""
+"Approve tool call: {tool}\n"
+"Input: {input}"
+msgstr ""
+"批准工具调用：{tool}\n"
+"输入：{input}"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Suggested rule: {rule}"
+msgstr "建议规则：{rule}"
 
 #: src/iac_code/acp/slash_registry.py
 #, python-brace-format
@@ -3285,6 +3350,7 @@ msgstr "匹配到询问规则：{}"
 
 #: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
 #: src/iac_code/tools/bash/bash_tool.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "允许 {}？"
@@ -3888,6 +3954,11 @@ msgstr "导入失败"
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 msgid "Aliyun API"
 msgstr "阿里云 API"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
+msgid "matched {behavior} rule: {rule}"
+msgstr "匹配到 {behavior} 规则：{rule}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format

@@ -139,11 +139,13 @@ class Events:
     API_REQUEST_RETRIED = "iac.api.request.retried"
     MODEL_FALLBACK_TRIGGERED = "iac.model.fallback.triggered"
 
-    # --- Tool (4) ---
+    # --- Tool (6) ---
     TOOL_USE_SUCCEEDED = "iac.tool.use.succeeded"
     TOOL_USE_FAILED = "iac.tool.use.failed"
     TOOL_USE_GRANTED_IN_PROMPT = "iac.tool.use.granted_in_prompt"
     TOOL_USE_REJECTED_IN_PROMPT = "iac.tool.use.rejected_in_prompt"
+    TOOL_PERMISSION_GRANTED = "iac.tool.permission.granted"
+    TOOL_PERMISSION_REJECTED = "iac.tool.permission.rejected"
 
     # --- IaC core (9) ---
     TEMPLATE_GENERATED = "iac.template.generated"

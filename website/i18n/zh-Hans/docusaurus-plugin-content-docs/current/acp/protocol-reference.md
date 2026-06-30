@@ -304,7 +304,7 @@ Fork 一个现有会话，创建一个具有相同历史记录的独立分支。
 ```
 ToolCallStart (status=in_progress)
     │
-    ├── ToolCallProgress (status=in_progress, raw_input=工具输入)
+    ├── ToolCallProgress (status=in_progress, 输入摘要 / 安全提示输入)
     │
     ├── ToolCallProgress (status=completed, raw_output=结果)   ← 成功
     │
@@ -333,8 +333,10 @@ ToolCallStart (status=in_progress)
 | 分类 | 工具 | 自动允许 |
 |----------|-------|-------------|
 | 只读 | `read_file`, `list_files`, `glob`, `grep`, `web_fetch` | 是 |
+| 只读云 API | 被判定为只读的 `aliyun_api` 动作 | 是 |
 | 写入 | `write_file`, `edit_file` | 否 — 需要审批 |
 | 执行 | `bash`, `agent` | 否 — 需要审批 |
+| 云写 API | 非只读 `aliyun_api` 调用 | 否 — 需要按 API 批准 |
 
 ### request_permission 事件
 
@@ -351,11 +353,13 @@ ToolCallStart (status=in_progress)
 | 选项 ID | 含义 |
 |-----------|---------|
 | `allow_once` | 允许本次调用 |
-| `allow_always` | 当工具支持整工具永久允许时，允许本会话中该工具的所有后续调用；`bash` 默认不提供 |
+| `allow_always` | 当工具支持整工具永久允许时，允许本会话中该工具的所有后续调用；`bash` 和 `aliyun_api` 默认不提供 |
 | `allow_rule:<rules>` | 允许本会话中匹配建议规则的后续调用 |
 | `deny_rule:<rules>` | 拒绝本会话中匹配建议规则的后续调用 |
 | `reject_once` | 拒绝本次调用 |
 | `reject_always` | 拒绝本会话中该工具的所有后续调用 |
+
+对于 `aliyun_api`，只读动作会自动允许。非只读 RPC 和 ROA 动作都可以提供形如 `aliyun_api(ros:CreateStack)` 或 `aliyun_api(cs:CreateCluster)` 的精确规则。通配允许规则仍不会批准非只读调用。
 
 ### 响应格式
 

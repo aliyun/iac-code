@@ -19,7 +19,7 @@ CLI 参数 > 环境变量 > 配置文件
 ~/.iac-code/
 ```
 
-可通过设置 `IAC_CODE_CONFIG_DIR` 环境变量更改该目录（支持 `~` 和 `$VAR` 展开）。设置后，所有持久化产物——凭证、设置、历史、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/`——都会跟随到新位置。
+可通过设置 `IAC_CODE_CONFIG_DIR` 环境变量更改该目录（支持 `~` 和 `$VAR` 展开）。设置后，所有持久化产物——凭证、设置、历史、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/`——都会跟随到新位置。启动/调试日志默认位于 `<config-dir>/logs/`，可用 `IAC_CODE_LOG_DIR` 单独移动；权限审计记录仍位于 `<config-dir>/logs/`。
 
 常见文件：
 
@@ -106,6 +106,10 @@ permissions:
     - "bash(curl:*)"
   additional_directories:
     - "/tmp/workspace"
+  audit:
+    include_tool_input: false
+    max_file_bytes: 10485760
+    max_files: 5
 ```
 
 | 字段 | 说明 |
@@ -115,6 +119,7 @@ permissions:
 | `deny` | 自动拒绝的工具权限模式列表。 |
 | `ask` | 始终需要确认的工具权限模式列表。 |
 | `additional_directories` | 允许代理写入的额外目录（cwd 之外）。 |
+| `audit` | 本地权限审计日志设置。 |
 
 ### 模式语法
 
@@ -126,5 +131,40 @@ permissions:
 | `bash(git *)` | 匹配以 `git` 开头的 bash 命令。 |
 | `bash(curl:*)` | 匹配以 `curl` 开头的 bash 命令。 |
 | `write_file` | 匹配所有 write_file 工具调用。 |
+| `aliyun_api(ros:CreateStack)` | 匹配一个阿里云 API 产品/动作对。 |
 
 规则按以下顺序评估：**deny → ask → allow → 默认行为**。CLI 参数（`--allowed-tools`、`--disallowed-tools`）具有最高优先级。
+
+### 阿里云 API 权限
+
+`aliyun_api` 会区分只读 API 调用和可能修改云资源的调用。只读 API 动作会自动允许。非只读 API 调用需要确认，或需要为该产品/动作配置精确允许规则，例如：
+
+```yaml
+permissions:
+  allow:
+    - "aliyun_api(ros:CreateStack)"
+```
+
+裸的 `aliyun_api` 允许规则不会一概批准阿里云写 API。在 `bypass_permissions` 之外，写入允许规则必须精确匹配规范化后的 `product:action`。在 `bypass_permissions` 模式下，受保护的阿里云写 API 会被自动批准，但任何需要审计记录的允许决策在审计持久化失败时都会 fail closed。通配符仍可用于 deny 或 ask 规则，也可用于只读规则匹配。
+
+ROA 风格请求只有在方法为 `GET` 且请求没有 body 时才视为只读。非只读 ROA 请求与 RPC 风格写 API 一样，都必须精确匹配规范化后的 `product:action` 允许规则：形如 `aliyun_api(cs:CreateCluster)` 的精确规则可以批准该写操作，但通配允许规则仍不会批准非只读调用。
+
+### 权限审计日志
+
+跨越用户提示、工具缓存边界、自动化批准或 resolver 批准的权限决策会追加写入：
+
+```text
+<config-dir>/logs/permission-audit.jsonl
+```
+
+默认情况下，该路径是 `~/.iac-code/logs/permission-audit.jsonl`。权限审计日志跟随 `IAC_CODE_CONFIG_DIR`；`IAC_CODE_LOG_DIR` 只移动启动/调试日志。审计写入器会用文件锁追加 JSONL 记录，执行日志轮转，并在操作系统支持时限制本地文件权限。常规只读自动允许决策可能会省略，但拒绝、提示、缓存决策、自动化批准、resolver 批准以及其他被审计的权限边界都会记录。
+
+审计设置位于 `permissions.audit` 下：
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `include_tool_input` | `false` | 在 JSONL 审计记录中包含仅保留形态的工具输入。字符串会记录为类型、长度和指纹；疑似密钥的字段会被隐藏；非白名单字段名可能以指纹表示；不会写入业务原文。阿里云 API 条目还会保留安全的操作摘要。 |
+| `max_file_bytes` | `10485760` | 当 `permission-audit.jsonl` 超过此大小时进行轮转。 |
+| `max_files` | `5` | 保留的轮转审计文件数量。超过内置上限的值会被截断到上限。 |
+
+如果任何需要审计记录的允许决策无法持久化到审计日志，IaC Code 会 fail closed，拒绝该操作，而不是在没有审计轨迹的情况下执行。

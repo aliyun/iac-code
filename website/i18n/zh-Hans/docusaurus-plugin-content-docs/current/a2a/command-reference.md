@@ -260,7 +260,7 @@ thinking-exposure:
 |--------|---------|-------------|
 | `auto-approve-permissions` | `false` | 自动批准 A2A 轮次期间发起的工具权限请求 |
 
-如果没有 `auto-approve-permissions: true`，A2A 模式会拒绝权限提示并发出权限元数据。仅在受信任的自动化环境中使用它。
+如果没有 `auto-approve-permissions: true`，A2A 模式会拒绝权限提示并发出权限元数据。启用后，权限决策会写入本地权限审计日志；任何需要审计记录的允许决策在审计记录无法持久化时都会 fail closed。受保护的阿里云写 API 不会被普通允许规则一概批准；可信自动化需要配置精确的 `aliyun_api(product:action)` 允许规则。
 
 ## `iac-code a2a-client call`
 

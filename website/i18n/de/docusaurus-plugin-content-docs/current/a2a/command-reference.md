@@ -258,7 +258,7 @@ thinking-exposure:
 |--------|---------|-------------|
 | `auto-approve-permissions` | `false` | Tool-Berechtigungsanfragen, die waehrend A2A-Turns entstehen, automatisch genehmigen |
 
-Ohne `auto-approve-permissions: true` lehnt der A2A-Modus Berechtigungsabfragen ab und gibt Berechtigungsmetadaten aus. Verwenden Sie es nur fuer vertrauenswuerdige Automatisierungsumgebungen.
+Ohne `auto-approve-permissions: true` lehnt der A2A-Modus Berechtigungsabfragen ab und gibt Berechtigungsmetadaten aus. Wenn es aktiviert ist, werden Berechtigungsentscheidungen in das lokale Berechtigungsauditprotokoll geschrieben; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn dieser Datensatz nicht persistiert werden kann. Geschuetzte Alibaba-Cloud-Schreib-APIs werden durch gewoehnliche Allow-Regeln nicht pauschal genehmigt; konfigurieren Sie fuer vertrauenswuerdige Automatisierung exakte `aliyun_api(product:action)`-Allow-Regeln.
 
 ## `iac-code a2a-client call`
 

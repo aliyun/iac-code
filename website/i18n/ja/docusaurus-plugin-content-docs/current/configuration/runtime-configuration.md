@@ -19,7 +19,7 @@ CLI 引数 > 環境変数 > 設定ファイル
 ~/.iac-code/
 ```
 
-`IAC_CODE_CONFIG_DIR` 環境変数を設定すると、ディレクトリを変更できます（`~` と `$VAR` の展開をサポート）。設定すると、永続化されるすべての成果物 — 認証情報、設定、履歴、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/` — が新しい場所に追従します。
+`IAC_CODE_CONFIG_DIR` 環境変数を設定すると、ディレクトリを変更できます（`~` と `$VAR` の展開をサポート）。設定すると、永続化されるすべての成果物 — 認証情報、設定、履歴、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/` — が新しい場所に追従します。起動/デバッグログはデフォルトで `<config-dir>/logs/` に置かれ、`IAC_CODE_LOG_DIR` で別に移動できます。権限監査レコードは `<config-dir>/logs/` に残ります。
 
 主要ファイル：
 
@@ -106,6 +106,10 @@ permissions:
     - "bash(curl:*)"
   additional_directories:
     - "/tmp/workspace"
+  audit:
+    include_tool_input: false
+    max_file_bytes: 10485760
+    max_files: 5
 ```
 
 | フィールド | 説明 |
@@ -115,6 +119,7 @@ permissions:
 | `deny` | 自動拒否するツール権限パターンのリスト。 |
 | `ask` | 常に確認が必要なツール権限パターンのリスト。 |
 | `additional_directories` | cwd 以外でエージェントが書き込み可能な追加ディレクトリ。 |
+| `audit` | ローカルの権限監査ログ設定。 |
 
 ### パターン構文
 
@@ -126,5 +131,40 @@ permissions:
 | `bash(git *)` | `git` で始まる bash コマンドにマッチ。 |
 | `bash(curl:*)` | `curl` で始まる bash コマンドにマッチ。 |
 | `write_file` | すべての write_file ツール呼び出しにマッチ。 |
+| `aliyun_api(ros:CreateStack)` | Alibaba Cloud API の product/action ペア 1 つにマッチ。 |
 
 ルールは次の順序で評価されます：**deny → ask → allow → デフォルト動作**。CLI 引数（`--allowed-tools`、`--disallowed-tools`）が最も高い優先度を持ちます。
+
+### Alibaba Cloud API 権限
+
+`aliyun_api` は、読み取り専用 API 呼び出しとクラウドリソースを変更し得る呼び出しを区別します。読み取り専用 API アクションは自動的に許可されます。読み取り専用ではない API 呼び出しには確認、またはその product/action に対する正確な allow ルールが必要です。例：
+
+```yaml
+permissions:
+  allow:
+    - "aliyun_api(ros:CreateStack)"
+```
+
+裸の `aliyun_api` allow ルールは Alibaba Cloud の書き込み API を一括承認しません。`bypass_permissions` 以外では、書き込み allow ルールは正規化された `product:action` ペアに正確に一致する必要があります。`bypass_permissions` モードでは、保護された Alibaba Cloud 書き込み API は自動承認されますが、監査レコードを必要とする allow 決定は、監査の永続化に失敗すると引き続き fail-closed になります。ワイルドカードは deny ルールや ask ルール、読み取り専用ルールのマッチングには引き続き有用です。
+
+ROA 形式のリクエストは、メソッドが `GET` で body がない場合にのみ読み取り専用として扱われます。読み取り専用ではない ROA リクエストは、RPC 形式の書き込み API と同じく、正規化された `product:action` に正確に一致する allow ルールが必要です。`aliyun_api(cs:CreateCluster)` のような正確なルールなら書き込みを承認できますが、ワイルドカードの allow ルールは読み取り専用ではない呼び出しを引き続き承認しません。
+
+### 権限監査ログ
+
+ユーザープロンプト、ツールキャッシュ境界、自動化承認、または resolver 承認をまたぐ権限決定は、次のファイルに追記されます：
+
+```text
+<config-dir>/logs/permission-audit.jsonl
+```
+
+デフォルトでは `~/.iac-code/logs/permission-audit.jsonl` です。権限監査ログは `IAC_CODE_CONFIG_DIR` に従います。`IAC_CODE_LOG_DIR` で移動されるのは起動/デバッグログだけです。監査 writer はファイルロック付きで JSONL レコードを追記し、ファイルをローテーションし、OS が対応している場合はローカルファイル権限を制限します。通常の読み取り専用自動許可は省略されることがありますが、拒否、プロンプト、キャッシュ済み決定、自動化承認、resolver 承認、その他の監査対象の権限境界は記録されます。
+
+監査設定は `permissions.audit` の下で構成します：
+
+| フィールド | 既定値 | 説明 |
+|---|---:|---|
+| `include_tool_input` | `false` | JSONL 監査レコードに、形状のみのツール入力を含めます。文字列値は型、長さ、フィンガープリントとして保存されます。secret らしいキーはマスクされます。ホワイトリスト外のフィールド名はフィンガープリントで表される場合があります。業務 payload の生文字列は書き込まれません。Alibaba Cloud API の項目では安全な操作サマリーも保持します。 |
+| `max_file_bytes` | `10485760` | `permission-audit.jsonl` がこのサイズを超えたらローテーションします。 |
+| `max_files` | `5` | 保持するローテーション済み監査ファイル数。組み込み上限を超える値は上限に丸められます。 |
+
+監査レコードを必要とする allow 決定を監査ログへ永続化できない場合、IaC Code は fail-closed となり、監査証跡なしで実行する代わりにそのアクションを拒否します。

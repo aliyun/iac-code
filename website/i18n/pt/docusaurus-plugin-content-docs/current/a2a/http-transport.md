@@ -264,6 +264,6 @@ Para a lista completa de opções, consulte a [Referência de comandos](./comman
 
 - Faça bind em `127.0.0.1` para uso apenas local.
 - Use `token` na configuração A2A ou `IACCODE_A2A_HTTP_TOKEN` antes de fazer bind a uma interface de rede compartilhada.
-- O modo A2A rejeita solicitações de permissão de ferramentas automaticamente; proteja endpoints não autenticados como serviços de automação local.
+- O modo A2A rejeita solicitações de permissão de ferramentas automaticamente, a menos que `auto-approve-permissions` ou uma regra de permissão explícita as permita. Decisões de permissão são auditadas localmente; toda decisão allow que exige um registro de auditoria falha de forma fechada se esse registro não puder ser persistido. APIs protegidas de escrita Alibaba Cloud exigem autorização exata por API fora de modos de bypass global.
 - O estado ativo do runtime fica em memória. A persistência espelha metadados de tarefas e contextos, mas reiniciar o processo não retoma trabalho asyncio em andamento.
 - Um contexto pode executar apenas uma tarefa por vez; contextos separados podem executar simultaneamente.

@@ -30,8 +30,10 @@ The `--permission-mode` flag controls how the agent handles tool permission chec
 |---|---|
 | `default` | The agent prompts for confirmation when a tool action requires approval. |
 | `accept_edits` | Auto-approve file system commands that are considered edits (e.g. `mkdir`, `cp`). Other actions still prompt. |
-| `bypass_permissions` | Auto-approve all tool actions except safety checks. Intended for trusted automation. |
+| `bypass_permissions` | Auto-approve tool actions except safety checks. Any allow decision that requires an audit record fails closed if audit persistence fails. Intended for trusted automation. |
 | `dont_ask` | Silently deny any action that would normally prompt. Useful for strict read-only runs. |
+
+Alibaba Cloud write API calls made through `aliyun_api` are protected separately: a bare `aliyun_api` allow rule does not blanket-approve them, and outside `bypass_permissions` write allow rules must match the exact canonical `product:action` pair. `bypass_permissions` does auto-approve them, but like other audited allow decisions, the action is denied if the permission audit record cannot be persisted. Use exact rules such as `aliyun_api(ros:CreateStack)` when trusted automation should allow only a specific write API.
 
 ## Common Startup Commands
 
@@ -69,6 +71,12 @@ Allow only git and read-only bash commands:
 
 ```bash
 iac-code --allowed-tools 'bash(git *)'
+```
+
+Allow one specific Alibaba Cloud write API:
+
+```bash
+iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 Run in automation with no interactive prompts:

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from iac_code.types.permissions import PermissionMode, PermissionResult
+from iac_code.types.permissions import (
+    PermissionAuditMetadata,
+    PermissionDecisionReason,
+    PermissionMode,
+    PermissionResult,
+)
 
 if TYPE_CHECKING:
     from iac_code.tools.bash.command_parser import SimpleCommand
@@ -23,5 +28,18 @@ def check_permission_mode(cmd: SimpleCommand, mode: PermissionMode) -> Permissio
         return PermissionResult(behavior="passthrough")
     base = cmd.argv[0] if cmd.argv else ""
     if is_filesystem_command(base):
-        return PermissionResult(behavior="allow")
+        detail = "accept_edits mode"
+        return PermissionResult(
+            behavior="allow",
+            reason=PermissionDecisionReason(type="accept_edits", detail=detail),
+            audit=PermissionAuditMetadata(
+                scope="mode",
+                source="permission_pipeline",
+                rule_source="mode",
+                reason_type="accept_edits",
+                reason_detail=detail,
+                is_read_only=False,
+                operation={"is_read_only": False},
+            ),
+        )
     return PermissionResult(behavior="passthrough")

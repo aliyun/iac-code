@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from iac_code.i18n import _
+from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.tools.bash.argv_safety import dangerous_readonly_argument
 from iac_code.tools.bash.command_parser import ParseResult, SimpleCommand, parse_command
 from iac_code.tools.bash.mode_validation import check_permission_mode
@@ -13,6 +14,7 @@ from iac_code.tools.bash.readonly_commands import is_command_readonly
 from iac_code.tools.bash.rule_matching import find_matching_rules, normalize_command
 from iac_code.tools.bash.safety_checks import check_command_safety, check_safety
 from iac_code.types.permissions import (
+    PermissionAuditMetadata,
     PermissionDecisionReason,
     PermissionResult,
     PermissionRuleValue,
@@ -22,6 +24,51 @@ from iac_code.types.permissions import (
 _MAX_SUBCOMMANDS = 10
 
 _BEHAVIOR_ORDER = {"deny": 0, "ask": 1, "passthrough": 2, "allow": 3}
+
+
+def _matching_rules_with_sources(
+    command: str,
+    rules_by_source: dict[str, list[str]],
+    behavior: str,
+) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for source, rules in rules_by_source.items():
+        if behavior == "allow":
+            matched = find_matching_rules(command, rules, [], [])["allow"]
+        elif behavior == "deny":
+            matched = find_matching_rules(command, [], rules, [])["deny"]
+        else:
+            matched = find_matching_rules(command, [], [], rules)["ask"]
+        out.extend((source, rule) for rule in matched)
+    return out
+
+
+def _rule_audit(
+    matches: list[tuple[str, str]],
+    *,
+    reason_detail: str,
+    is_read_only: bool,
+) -> PermissionAuditMetadata | None:
+    if not matches:
+        return None
+    source, rule = matches[0]
+    return PermissionAuditMetadata(
+        scope=scope_for_rule_source(source),
+        source="permission_pipeline",
+        rule_source=source,
+        rule=rule,
+        reason_type="rule",
+        reason_detail=reason_detail,
+        is_read_only=is_read_only,
+        operation={"is_read_only": is_read_only},
+    )
+
+
+def _command_text_is_readonly(command: str) -> bool:
+    parsed = parse_command(command)
+    if parsed.kind != "simple" or not parsed.commands:
+        return False
+    return all(is_command_readonly(cmd) for cmd in parsed.commands)
 
 
 def _collect_all_rules(rules_by_source: dict[str, list[str]]) -> list[str]:
@@ -70,11 +117,18 @@ def _merge_results(results: list[PermissionResult]) -> PermissionResult:
     if not results:
         return PermissionResult(behavior="passthrough")
     _, best = min(enumerate(results), key=lambda ie: (_BEHAVIOR_ORDER[ie[1].behavior], ie[0]))
+    audit = best.audit
+    if audit is None and best.behavior == "allow":
+        audit = next(
+            (result.audit for result in results if result.behavior == "allow" and result.audit is not None),
+            None,
+        )
     return PermissionResult(
         behavior=best.behavior,
         message=best.message,
         reason=best.reason,
         suggestions=best.suggestions,
+        audit=audit,
     )
 
 
@@ -99,6 +153,7 @@ def _with_suggestions_if_needed(
         message=result.message,
         reason=result.reason,
         suggestions=sug,
+        audit=result.audit,
     )
 
 
@@ -128,17 +183,19 @@ def bash_tool_check_permission(
     if not cmd.argv:
         return PermissionResult(behavior="passthrough")
 
-    allow_flat = _collect_all_rules(context.allow_rules)
-    deny_flat = _collect_all_rules(context.deny_rules)
-    ask_flat = _collect_all_rules(context.ask_rules)
-
-    matched = find_matching_rules(cmd.text, allow_flat, deny_flat, ask_flat)
+    matched_by_source = {
+        "allow": _matching_rules_with_sources(cmd.text, context.allow_rules, "allow"),
+        "deny": _matching_rules_with_sources(cmd.text, context.deny_rules, "deny"),
+        "ask": _matching_rules_with_sources(cmd.text, context.ask_rules, "ask"),
+    }
+    matched = {behavior: [rule for _source, rule in matches] for behavior, matches in matched_by_source.items()}
     if matched["deny"]:
         detail = _("matched deny rule(s): {}").format(", ".join(matched["deny"]))
         return PermissionResult(
             behavior="deny",
             message=detail,
             reason=PermissionDecisionReason(type="rule", detail=detail),
+            audit=_rule_audit(matched_by_source["deny"], reason_detail=detail, is_read_only=is_command_readonly(cmd)),
         )
     if matched["ask"]:
         detail = _("matched ask rule(s): {}").format(", ".join(matched["ask"]))
@@ -146,6 +203,7 @@ def bash_tool_check_permission(
             behavior="ask",
             message=detail,
             reason=PermissionDecisionReason(type="rule", detail=detail),
+            audit=_rule_audit(matched_by_source["ask"], reason_detail=detail, is_read_only=is_command_readonly(cmd)),
         )
 
     path_res = check_path_constraints(cmd, context.cwd, context.additional_directories)
@@ -185,6 +243,7 @@ def bash_tool_check_permission(
             behavior="allow",
             message=detail,
             reason=PermissionDecisionReason(type="rule", detail=detail),
+            audit=_rule_audit(matched_by_source["allow"], reason_detail=detail, is_read_only=is_command_readonly(cmd)),
         )
 
     mode_res = check_permission_mode(cmd, context.mode)
@@ -214,16 +273,21 @@ async def bash_tool_has_permission(command: str, context: ToolPermissionContext)
         )
 
     allow_flat = _collect_all_rules(context.allow_rules)
-    deny_flat = _collect_all_rules(context.deny_rules)
     ask_flat = _collect_all_rules(context.ask_rules)
 
-    full_matches = find_matching_rules(command, allow_flat, deny_flat, ask_flat)
+    full_deny_matches = _matching_rules_with_sources(command, context.deny_rules, "deny")
+    full_matches = {
+        "allow": find_matching_rules(command, allow_flat, [], [])["allow"],
+        "deny": [rule for _source, rule in full_deny_matches],
+        "ask": find_matching_rules(command, [], [], ask_flat)["ask"],
+    }
     if full_matches["deny"]:
         detail = _("matched deny rule(s) on full command: {}").format(", ".join(full_matches["deny"]))
         return PermissionResult(
             behavior="deny",
             message=detail,
             reason=PermissionDecisionReason(type="rule", detail=detail),
+            audit=_rule_audit(full_deny_matches, reason_detail=detail, is_read_only=_command_text_is_readonly(command)),
         )
 
     parsed: ParseResult = parse_command(command)

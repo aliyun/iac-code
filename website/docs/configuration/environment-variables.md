@@ -52,7 +52,8 @@ See [Alibaba Cloud Credentials](./alibaba-cloud-credentials.md) for more details
 | Variable | Description |
 |---|---|
 | `IAC_CODE_CONFIG_DIR` | Override the runtime configuration directory (default `~/.iac-code/`); supports `~` and `$VAR` expansion. All persisted artifacts (credentials, settings, history, projects, image cache, skills, telemetry, etc.) follow it |
-| `IAC_CODE_LOG_DIR` | Override the local log directory (default `<config-dir>/logs/`); supports `~` and `$VAR` expansion. Use this to keep startup/debug logs outside `IAC_CODE_CONFIG_DIR` when that directory is mounted or replaced at runtime |
+| `IAC_CODE_LOG_DIR` | Override the local startup/debug log directory (default `<config-dir>/logs/`); supports `~` and `$VAR` expansion. Permission audit records still stay under `<config-dir>/logs/permission-audit.jsonl` |
+| `IAC_CODE_PERMISSION_AUDIT_INCLUDE_TOOL_INPUT` | Override `permissions.audit.include_tool_input`; set to `1` / `true` / `yes` / `on` to include shape-only tool input in permission audit records, using type/length/fingerprint instead of raw business payload strings and fingerprinting non-whitelisted field names |
 | `IAC_CODE_ENV` | Deployment environment label (default: `production`) |
 | `IAC_CODE_TENANT_ID` | Tenant identifier for telemetry; auto-prefixed with `iac_tenant_` if not already |
 | `IAC_CODE_GIT_BASH_PATH` | Path to Git Bash `bash.exe` on Windows when it is not on PATH |

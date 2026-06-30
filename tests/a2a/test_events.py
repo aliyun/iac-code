@@ -4,11 +4,13 @@ from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.events import _ERROR_TEXT_MAX_CHARS, _METADATA_MAX_CHARS, _truncate, publish_stream_event
 from iac_code.a2a.exposure import A2AExposureType
+from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.types.stream_events import (
     ErrorEvent,
     MCPProgressEvent,
     MessageEndEvent,
     PermissionRequestEvent,
+    SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolInputDeltaEvent,
@@ -47,7 +49,7 @@ async def test_empty_text_delta_is_ignored() -> None:
 
 
 @pytest.mark.asyncio
-async def test_permission_request_is_denied_by_default_and_truncated() -> None:
+async def test_permission_request_is_denied_by_default_and_uses_shape_only_tool_input() -> None:
     queue = FakeEventQueue()
     future = pending_future()
     long_value = "x" * (_METADATA_MAX_CHARS + 100)
@@ -60,7 +62,11 @@ async def test_permission_request_is_denied_by_default_and_truncated() -> None:
     assert future.result() is False
     dumped = dump(queue.events[0])
     assert dumped["metadata"]["iac_code"]["permission"]["autoApproved"] is False
-    assert len(dumped["metadata"]["iac_code"]["permission"]["toolInput"]["cmd"]) == _METADATA_MAX_CHARS
+    assert dumped["metadata"]["iac_code"]["permission"]["toolInput"]["cmd"] == {
+        "type": "str",
+        "length": len(long_value),
+        "fingerprint": fingerprint_text(long_value),
+    }
 
 
 @pytest.mark.asyncio
@@ -108,8 +114,97 @@ async def test_permission_request_tool_input_redacts_secret_values() -> None:
     assert "sk-live-secret" not in str(tool_input)
     assert "Authorization: Bearer" not in str(tool_input)
     assert "/Users/alice" not in str(tool_input)
-    assert "[REDACTED]" in str(tool_input)
-    assert "[PATH]" in str(tool_input)
+    assert tool_input["cmd"] == {
+        "type": "str",
+        "length": len(event.tool_input["cmd"]),
+        "fingerprint": fingerprint_text(event.tool_input["cmd"]),
+    }
+
+
+@pytest.mark.asyncio
+async def test_permission_request_tool_input_redacts_nested_secret_fields() -> None:
+    queue = FakeEventQueue()
+    event = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={
+            "product": "ros",
+            "action": "CreateStack",
+            "customerEmail": "alice@example.com",
+            "params": {
+                "StackName": "demo",
+                "customer-prod-123": "tenant-id",
+                "AccessKeySecret": "secret-value",
+                "private_key": "private-secret",
+                "Signature": "signature-secret",
+            },
+        },
+        tool_use_id="tool-1",
+    )
+
+    await publish_stream_event(queue, task_id="task-1", context_id="ctx-1", event=event)
+
+    dumped = dump(queue.events[0])
+    tool_input = dumped["metadata"]["iac_code"]["permission"]["toolInput"]
+    for forbidden in (
+        "secret-value",
+        "private-secret",
+        "signature-secret",
+        "AccessKeySecret",
+        "private_key",
+        "Signature",
+        "customerEmail",
+        "customer-prod-123",
+    ):
+        assert forbidden not in str(tool_input)
+    assert tool_input[fingerprint_text("customerEmail")] == {
+        "type": "str",
+        "length": len("alice@example.com"),
+        "fingerprint": fingerprint_text("alice@example.com"),
+    }
+    assert tool_input["params"][fingerprint_text("StackName")] == {
+        "type": "str",
+        "length": 4,
+        "fingerprint": fingerprint_text("demo"),
+    }
+    assert tool_input["params"][fingerprint_text("customer-prod-123")] == {
+        "type": "str",
+        "length": len("tenant-id"),
+        "fingerprint": fingerprint_text("tenant-id"),
+    }
+    assert tool_input["params"][fingerprint_text("AccessKeySecret")] == {"redacted": True}
+    assert tool_input["params"][fingerprint_text("private_key")] == {"redacted": True}
+    assert tool_input["params"][fingerprint_text("Signature")] == {"redacted": True}
+
+
+@pytest.mark.asyncio
+async def test_aliyun_permission_metadata_uses_summary_for_sensitive_safe_fields() -> None:
+    queue = FakeEventQueue()
+    pem = "-----BEGIN PRIVATE KEY-----\nprivate-body\n-----END PRIVATE KEY-----"
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={
+            "product": "ros",
+            "action": "CreateStack",
+            "params": {"TemplateBody": pem, "StackName": "demo"},
+        },
+        tool_use_id="tool-1",
+    )
+
+    await publish_stream_event(queue, task_id="task-1", context_id="ctx-1", event=event)
+
+    dumped = dump(queue.events[0])
+    permission = dumped["metadata"]["iac_code"]["permission"]
+    rendered = str(permission)
+    assert "toolInput" not in permission
+    assert permission["inputSummary"]["tool_name"] == "aliyun_api"
+    assert permission["inputSummary"]["params_fields"] == sorted(
+        [fingerprint_text("StackName"), fingerprint_text("TemplateBody")]
+    )
+    assert permission["inputSummary"]["params_field_count"] == 2
+    assert "StackName" not in rendered
+    assert "TemplateBody" not in rendered
+    assert "private-body" not in rendered
+    assert "BEGIN PRIVATE KEY" not in rendered
 
 
 @pytest.mark.asyncio
@@ -130,13 +225,18 @@ async def test_permission_request_tool_input_redacts_sensitive_keys() -> None:
 
     dumped = dump(queue.events[0])
     tool_input = dumped["metadata"]["iac_code"]["permission"]["toolInput"]
-    assert tool_input == {
-        "cmd": "pwd",
-        "api_key": "***",
-        "nested": [{"accessKeySecret": "***"}],
-        "headers": {"Authorization": "***"},
+    assert tool_input["cmd"] == {
+        "type": "str",
+        "length": len("pwd"),
+        "fingerprint": fingerprint_text("pwd"),
     }
+    assert tool_input[fingerprint_text("api_key")] == {"redacted": True}
+    assert tool_input[fingerprint_text("nested")] == {"type": "array", "length": 1}
+    assert tool_input["headers"][fingerprint_text("Authorization")] == {"redacted": True}
     rendered = str(tool_input)
+    assert "api_key" not in rendered
+    assert "nested" not in rendered
+    assert "Authorization" not in rendered
     assert "plain-api-key" not in rendered
     assert "nested-access-key-secret" not in rendered
     assert "auth-token-secret" not in rendered
@@ -194,6 +294,46 @@ async def test_permission_request_uses_async_resolver() -> None:
     assert future.result() is True
     dumped = dump(queue.events[0])
     assert dumped["metadata"]["iac_code"]["permission"]["autoApproved"] is True
+
+
+@pytest.mark.asyncio
+async def test_wrapped_permission_request_uses_inner_event() -> None:
+    queue = FakeEventQueue()
+    future = pending_future()
+    inner = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": "pwd"},
+        tool_use_id="tool-1",
+        response_future=future,
+    )
+    event = SubPipelineStreamEvent(sub_pipeline_id="candidate-1", candidate_index=0, inner=inner)
+    seen: list[PermissionRequestEvent] = []
+
+    async def approve(request: PermissionRequestEvent) -> bool:
+        seen.append(request)
+        return True
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=event,
+        permission_resolver=approve,
+    )
+
+    assert seen == [inner]
+    assert future.done()
+    assert future.result() is True
+    dumped = dump(queue.events[0])
+    permission = dumped["metadata"]["iac_code"]["permission"]
+    assert permission["autoApproved"] is True
+    assert permission["toolName"] == "bash"
+    assert permission["toolUseId"] == "tool-1"
+    assert permission["toolInput"]["cmd"] == {
+        "type": "str",
+        "length": 3,
+        "fingerprint": fingerprint_text("pwd"),
+    }
 
 
 @pytest.mark.asyncio
@@ -356,9 +496,36 @@ async def test_tool_events_publish_metadata_updates() -> None:
     dumped = [dump(event) for event in queue.events]
     assert dumped[0]["metadata"]["iac_code"]["tool"]["status"] == "started"
     assert dumped[1]["metadata"]["iac_code"]["tool"]["status"] == "input_delta"
+    assert "partialJson" not in dumped[1]["metadata"]["iac_code"]["tool"]
+    assert dumped[1]["metadata"]["iac_code"]["tool"]["partialJsonLength"] == 6
     assert dumped[2]["metadata"]["iac_code"]["tool"]["status"] == "input_complete"
     assert dumped[2]["metadata"]["iac_code"]["tool"]["name"] == "bash"
+    assert dumped[2]["metadata"]["iac_code"]["tool"]["inputSummary"] == {
+        "tool_name": "bash",
+        "fields": {"cmd": {"type": "str"}},
+    }
+    assert "input" not in dumped[2]["metadata"]["iac_code"]["tool"]
     assert dumped[3]["metadata"]["iac_code"]["tool"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_tool_input_delta_metadata_omits_raw_partial_json() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolInputDeltaEvent(tool_use_id="tool-1", partial_json='ature":"signature-secret"'),
+    )
+
+    dumped = dump(queue.events[0])
+    tool_metadata = dumped["metadata"]["iac_code"]["tool"]
+    rendered = str(tool_metadata)
+    assert tool_metadata["status"] == "input_delta"
+    assert tool_metadata["partialJsonLength"] == len('ature":"signature-secret"')
+    assert "partialJson" not in tool_metadata
+    assert "signature-secret" not in rendered
 
 
 @pytest.mark.asyncio
@@ -377,12 +544,99 @@ async def test_tool_use_input_metadata_redacts_secret_values() -> None:
     )
 
     dumped = dump(queue.events[0])
-    tool_input = dumped["metadata"]["iac_code"]["tool"]["input"]
-    assert "sk-live-secret" not in str(tool_input)
-    assert "Authorization: Bearer" not in str(tool_input)
-    assert "/Users/alice" not in str(tool_input)
-    assert "[REDACTED]" in str(tool_input)
-    assert "[PATH]" in str(tool_input)
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    rendered = str(tool)
+    assert "input" not in tool
+    assert tool["inputSummary"] == {"tool_name": "bash", "fields": {"cmd": {"type": "str"}}}
+    assert "sk-live-secret" not in rendered
+    assert "Authorization: Bearer" not in rendered
+    assert "/Users/alice" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_use_input_metadata_redacts_structured_secret_fields() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(
+            tool_use_id="tool-1",
+            name="bash",
+            input={
+                "product": "ros",
+                "action": "CreateStack",
+                "params": {
+                    "StackName": "demo",
+                    "AccessKeySecret": "secret-value",
+                    "Signature": "signature-secret",
+                    "private_key": "private-secret",
+                    "Authorization": "Bearer bearer-secret",
+                    "apiKey": "api-secret",
+                },
+            },
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    tool_input = tool["inputSummary"]["fields"]
+    for forbidden in (
+        "secret-value",
+        "signature-secret",
+        "private-secret",
+        "bearer-secret",
+        "api-secret",
+        "AccessKeySecret",
+        "Signature",
+        "private_key",
+        "Authorization",
+        "apiKey",
+    ):
+        assert forbidden not in str(tool_input)
+    assert "input" not in tool
+    assert tool_input["params"]["fields"][fingerprint_text("StackName")] == {"type": "str"}
+    assert tool_input["params"]["fields"][fingerprint_text("AccessKeySecret")] == {"type": "str"}
+    assert tool_input["params"]["fields"][fingerprint_text("Signature")] == {"type": "str"}
+    assert tool_input["params"]["fields"][fingerprint_text("private_key")] == {"type": "str"}
+    assert tool_input["params"]["fields"][fingerprint_text("Authorization")] == {"type": "str"}
+    assert tool_input["params"]["fields"][fingerprint_text("apiKey")] == {"type": "str"}
+
+
+@pytest.mark.asyncio
+async def test_aliyun_tool_use_input_metadata_uses_summary_for_sensitive_safe_fields() -> None:
+    queue = FakeEventQueue()
+    pem = "-----BEGIN PRIVATE KEY-----\nprivate-body\n-----END PRIVATE KEY-----"
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(
+            tool_use_id="tool-1",
+            name="aliyun_api",
+            input={
+                "product": "ros",
+                "action": "CreateStack",
+                "params": {"TemplateBody": pem, "StackName": "demo"},
+            },
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    rendered = str(tool)
+    assert "input" not in tool
+    assert tool["inputSummary"]["tool_name"] == "aliyun_api"
+    assert tool["inputSummary"]["params_fields"] == sorted(
+        [fingerprint_text("StackName"), fingerprint_text("TemplateBody")]
+    )
+    assert tool["inputSummary"]["params_field_count"] == 2
+    assert "StackName" not in rendered
+    assert "TemplateBody" not in rendered
+    assert "private-body" not in rendered
+    assert "BEGIN PRIVATE KEY" not in rendered
 
 
 @pytest.mark.asyncio
@@ -406,14 +660,18 @@ async def test_tool_use_input_metadata_redacts_sensitive_keys() -> None:
     )
 
     dumped = dump(queue.events[0])
-    tool_input = dumped["metadata"]["iac_code"]["tool"]["input"]
-    assert tool_input == {
-        "cmd": "pwd",
-        "apiKey": "***",
-        "env": {"ALIBABA_CLOUD_ACCESS_KEY_SECRET": "***"},
-        "headers": [{"x-acs-security-token": "***"}],
-    }
-    rendered = str(tool_input)
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    assert "input" not in tool
+    summary = tool["inputSummary"]
+    fields = summary["fields"]
+    assert summary["tool_name"] == "bash"
+    assert fields["cmd"] == {"type": "str"}
+    assert fields[fingerprint_text("apiKey")] == {"type": "str"}
+    assert fields[fingerprint_text("env")]["type"] == "object"
+    assert fields["headers"] == {"type": "array", "length": 1}
+    rendered = str(tool)
+    assert "apiKey" not in rendered
+    assert "env" not in rendered
     assert "plain-api-key" not in rendered
     assert "ak-secret" not in rendered
     assert "sts-token" not in rendered
@@ -436,9 +694,11 @@ async def test_tool_use_input_metadata_redacts_malformed_opaque_artifact_uri() -
     )
 
     dumped = dump(queue.events[0])
-    tool_input = dumped["metadata"]["iac_code"]["tool"]["input"]
-    rendered = str(tool_input)
-    assert "[PATH]" in rendered
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    rendered = str(tool)
+    assert "input" not in tool
+    assert tool["inputSummary"]["fields"]["cmd"] == {"type": "str"}
+    assert tool["inputSummary"]["fields"][fingerprint_text("note")] == {"type": "str"}
     assert "iac-code-artifac[PATH]" not in rendered
     assert "Users" not in rendered
     assert ".iac-code" not in rendered
@@ -461,10 +721,45 @@ async def test_tool_use_input_metadata_redacts_percent_encoded_local_path() -> N
     )
 
     dumped = dump(queue.events[0])
-    rendered = str(dumped["metadata"]["iac_code"]["tool"]["input"])
-    assert "[PATH]" in rendered
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    rendered = str(tool)
+    assert "input" not in tool
+    assert tool["inputSummary"]["fields"]["cmd"] == {"type": "str"}
     assert "%2FUsers" not in rendered
     assert ".iac-code" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_tool_use_input_summary_fingerprints_business_field_names() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolUseEndEvent(
+            tool_use_id="tool-1",
+            name="bash",
+            input={
+                "cmd": "git status",
+                "customerEmail": "alice@example.com",
+                "customer-prod-123": "tenant-id",
+            },
+        ),
+    )
+
+    tool = dump(queue.events[0])["metadata"]["iac_code"]["tool"]
+    rendered = str(tool)
+    assert "input" not in tool
+    assert tool["inputSummary"]["tool_name"] == "bash"
+    fields = tool["inputSummary"]["fields"]
+    assert fields["cmd"] == {"type": "str"}
+    assert fields[fingerprint_text("customerEmail")] == {"type": "str"}
+    assert fields[fingerprint_text("customer-prod-123")] == {"type": "str"}
+    assert "customerEmail" not in rendered
+    assert "customer-prod-123" not in rendered
+    assert "alice@example.com" not in rendered
+    assert "tenant-id" not in rendered
 
 
 @pytest.mark.asyncio

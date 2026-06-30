@@ -3,10 +3,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from iac_code.services.telemetry.names import Events
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
+    PermissionRequestEvent,
     TaskNotificationEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -77,6 +79,47 @@ class TestRendererStreamEvents:
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
         await renderer.run_streaming_output(events(), permission_handler=None)
+
+    @pytest.mark.parametrize(
+        ("allowed", "legacy_event"),
+        [
+            (True, Events.TOOL_USE_GRANTED_IN_PROMPT),
+            (False, Events.TOOL_USE_REJECTED_IN_PROMPT),
+        ],
+    )
+    async def test_permission_request_does_not_emit_legacy_prompt_telemetry(
+        self,
+        renderer,
+        monkeypatch,
+        allowed,
+        legacy_event,
+    ):
+        logged_events = []
+        future = asyncio.get_running_loop().create_future()
+        permission_event = PermissionRequestEvent(
+            tool_name="write_file",
+            tool_input={"path": "main.tf"},
+            tool_use_id="tool1",
+            response_future=future,
+        )
+
+        async def events():
+            yield permission_event
+
+        async def permission_handler(event):
+            assert event is permission_event
+            return allowed
+
+        monkeypatch.setattr(
+            "iac_code.ui.renderer.log_event",
+            lambda event_name, payload=None: logged_events.append((event_name, payload)),
+            raising=False,
+        )
+
+        await renderer.run_streaming_output(events(), permission_handler=permission_handler)
+
+        assert future.result() is allowed
+        assert legacy_event not in [event_name for event_name, _payload in logged_events]
 
 
 def _make_renderer_for_thinking_test():

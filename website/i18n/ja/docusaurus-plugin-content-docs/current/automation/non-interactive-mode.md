@@ -47,6 +47,14 @@ iac-code --prompt "Create a VPC" --max-turns 20
 iac-code --prompt "Deploy the stack" --permission-mode bypass_permissions
 ```
 
+`bypass_permissions` では、セーフティチェックを除くツールアクションが自動承認されますが、監査レコードを必要とする allow 決定は、監査の永続化に失敗すると引き続き fail-closed になります。Alibaba Cloud 書き込み API は `bypass_permissions` 以外では引き続き別枠で保護されます。より範囲を絞った信頼できる自動化では、`bypass_permissions` を使わず、必要な書き込み API をそれぞれ明示的に許可してください：
+
+```bash
+iac-code --prompt "Deploy the stack" \
+  --allowed-tools 'aliyun_api(ros:CreateStack)' \
+  --permission-mode dont_ask
+```
+
 エージェントが実行できる内容を制限するには、`--allowed-tools` と `--disallowed-tools` を組み合わせます：
 
 ```bash

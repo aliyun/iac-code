@@ -304,7 +304,7 @@ Jede `session/update`-Benachrichtigung traegt ein Update-Objekt mit einem bestim
 ```
 ToolCallStart (status=in_progress)
     │
-    ├── ToolCallProgress (status=in_progress, raw_input=tool input)
+    ├── ToolCallProgress (status=in_progress, Eingabezusammenfassung / sichere Prompt-Eingabe)
     │
     ├── ToolCallProgress (status=completed, raw_output=result)   ← success
     │
@@ -333,8 +333,10 @@ Vor der Ausfuehrung risikoreicher Tools sendet iac-code einen `request_permissio
 | Kategorie | Tools | Automatisch erlaubt |
 |----------|-------|-------------|
 | Nur-Lese | `read_file`, `list_files`, `glob`, `grep`, `web_fetch` | Ja |
+| Nur-Lese-Cloud-API | Als nur lesend eingestufte `aliyun_api`-Aktionen | Ja |
 | Schreiben | `write_file`, `edit_file` | Nein -- erfordert Genehmigung |
 | Ausfuehren | `bash`, `agent` | Nein -- erfordert Genehmigung |
+| Cloud-Schreib-API | Nicht nur lesende `aliyun_api`-Aufrufe | Nein -- erfordert Genehmigung pro API |
 
 ### request_permission-Ereignis
 
@@ -351,11 +353,13 @@ Der Server sendet einen `request_permission`-Callback mit:
 | Options-ID | Bedeutung |
 |-----------|---------|
 | `allow_once` | Diesen spezifischen Aufruf erlauben |
-| `allow_always` | Alle zukuenftigen Aufrufe dieses Tools in dieser Sitzung erlauben, wenn das Tool blanket allow unterstuetzt; fuer `bash` standardmaessig nicht angeboten |
+| `allow_always` | Alle zukuenftigen Aufrufe dieses Tools in dieser Sitzung erlauben, wenn das Tool blanket allow unterstuetzt; fuer `bash` und `aliyun_api` standardmaessig nicht angeboten |
 | `allow_rule:<rules>` | Zukuenftige Aufrufe erlauben, die den vorgeschlagenen Regeln in dieser Sitzung entsprechen |
 | `deny_rule:<rules>` | Zukuenftige Aufrufe verweigern, die den vorgeschlagenen Regeln in dieser Sitzung entsprechen |
 | `reject_once` | Diesen spezifischen Aufruf verweigern |
 | `reject_always` | Alle zukuenftigen Aufrufe dieses Tools in dieser Sitzung verweigern |
+
+Fuer `aliyun_api` werden Nur-Lese-Aktionen automatisch erlaubt. Nicht nur lesende RPC- und ROA-Aktionen koennen eine exakte Regel wie `aliyun_api(ros:CreateStack)` oder `aliyun_api(cs:CreateCluster)` anbieten. Wildcard-Allow-Regeln genehmigen nicht nur lesende Aufrufe weiterhin nicht.
 
 ### Antwortformat
 

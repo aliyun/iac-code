@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,8 @@ from darabonba.runtime import RuntimeOptions
 
 from iac_code.i18n import _
 from iac_code.services.cloud_credentials import CloudCredentials
+from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
 from iac_code.services.providers.aliyun_oauth import AliyunOAuthError
 from iac_code.services.telemetry import add_metric, log_event
@@ -24,6 +28,13 @@ from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.template_source import reject_template_body_param
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
+from iac_code.types.permissions import (
+    PermissionAuditMetadata,
+    PermissionDecisionReason,
+    PermissionResult,
+    PermissionRuleValue,
+    ToolPermissionContext,
+)
 from iac_code.types.stream_events import ResourceObservedEvent
 
 logger = logging.getLogger(__name__)
@@ -62,6 +73,7 @@ _ENDPOINTS: dict[str, Any] = _load_endpoints()
 _VERSION_MAP_LOWER: dict[str, str] = {k.lower(): v for k, v in VERSION_MAP.items()}
 _PRODUCT_CANONICAL: dict[str, str] = {k.lower(): k for k in VERSION_MAP}
 _ENDPOINTS_CANONICAL: dict[str, str] = {k.lower(): k for k in _ENDPOINTS}
+_SAFE_API_VERSION = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Cache for Location service discovered endpoints
 _endpoint_cache: dict[tuple[str, str], str | None] = {}
@@ -150,6 +162,127 @@ def _string_value(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+_SAFE_RULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+_SAFE_WILDCARD_SEGMENT = re.compile(r"^[A-Za-z0-9_*-]{1,128}$")
+_RULE_SOURCE_ORDER = {
+    "session": 5,
+    "cli_arg": 4,
+    "local_settings": 3,
+    "project_settings": 2,
+    "user_settings": 1,
+}
+
+
+def _canonical_product(product: str) -> str:
+    return _PRODUCT_CANONICAL.get(product.lower(), product)
+
+
+def _safe_exact_identifier(value: str) -> bool:
+    return bool(_SAFE_RULE_ID.fullmatch(value))
+
+
+def _add_telemetry_identifier(
+    metadata: dict[str, Any],
+    key: str,
+    fingerprint_key: str,
+    value: str,
+    *,
+    uppercase: bool = False,
+) -> None:
+    if not value:
+        return
+    if _safe_exact_identifier(value):
+        metadata[key] = value.upper() if uppercase else value
+    else:
+        metadata[fingerprint_key] = fingerprint_text(value)
+
+
+def _aliyun_api_telemetry_identifiers(product: str, action: str, region: str) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    _add_telemetry_identifier(
+        metadata,
+        "api_service",
+        "api_service_fingerprint",
+        product,
+        uppercase=True,
+    )
+    _add_telemetry_identifier(metadata, "api_name", "api_name_fingerprint", action)
+    _add_telemetry_identifier(metadata, "region", "region_fingerprint", region)
+    return metadata
+
+
+def _aliyun_api_metric_attrs(product: str, outcome: str) -> dict[str, str]:
+    api_service = product.upper() if product and _safe_exact_identifier(product) else "unsafe"
+    return {"api_service": api_service, "outcome": outcome}
+
+
+def _aliyun_api_version_telemetry(version: str) -> dict[str, str]:
+    if _SAFE_API_VERSION.fullmatch(version):
+        return {"api_version": version}
+    return {"api_version_fingerprint": fingerprint_text(version)}
+
+
+def _scrub_unsafe_identifier_text(value: str | None, *identifiers: str) -> str | None:
+    if value is None:
+        return None
+    sanitized = sanitize_error_message(value)
+    if sanitized is None:
+        return None
+    for identifier in identifiers:
+        if not identifier or _safe_exact_identifier(identifier):
+            continue
+        sanitized = re.sub(re.escape(identifier), fingerprint_text(identifier), sanitized, flags=re.IGNORECASE)
+    return sanitized
+
+
+def _parse_aliyun_rule(rule: str) -> tuple[str, str] | None:
+    prefix = "aliyun_api("
+    if not rule.startswith(prefix) or not rule.endswith(")"):
+        return None
+    inner = rule[len(prefix) : -1]
+    if inner.count(":") != 1:
+        return None
+    product_pattern, action_pattern = inner.split(":", 1)
+    if not (_SAFE_WILDCARD_SEGMENT.fullmatch(product_pattern) and _SAFE_WILDCARD_SEGMENT.fullmatch(action_pattern)):
+        return None
+    return product_pattern, action_pattern
+
+
+def _literal_count(pattern: str) -> int:
+    return len(pattern.replace("*", ""))
+
+
+def _side_specificity(pattern: str, value: str) -> tuple[int, int]:
+    if pattern.lower() == value.lower():
+        return (3, len(pattern))
+    if pattern == "*":
+        return (1, 0)
+    return (2, _literal_count(pattern))
+
+
+def _safe_operation_identifiers(input: dict) -> tuple[str, str] | None:
+    product = _string_value(input.get("product"))
+    action = _string_value(input.get("action"))
+    if product is None or action is None:
+        return None
+    canonical_product = _canonical_product(product)
+    if not (_safe_exact_identifier(canonical_product) and _safe_exact_identifier(action)):
+        return None
+    return canonical_product, action
+
+
+def _is_roa_style(input: dict) -> bool:
+    style = _string_value(input.get("style"))
+    return style is not None and style.upper() == "ROA"
+
+
+def _is_roa_read_only_request(input: dict) -> bool:
+    method = _string_value(input.get("method"))
+    if method is None or method.upper() != "GET":
+        return False
+    return "body" not in input or input.get("body") is None
+
+
 class AliyunApi(BaseCloudApi):
     """Generic Alibaba Cloud API tool.
 
@@ -177,6 +310,10 @@ class AliyunApi(BaseCloudApi):
     def user_facing_name(self, input: dict | None = None) -> str:
         return _("Aliyun API")
 
+    @property
+    def supports_blanket_allow(self) -> bool:
+        return False
+
     def _get_default_region(self) -> str:
         credentials = CloudCredentials()
         cred = credentials.get_provider("aliyun")
@@ -185,11 +322,171 @@ class AliyunApi(BaseCloudApi):
     def is_read_only(self, input: dict | None = None) -> bool:
         if input is None:
             return False
-        product = input.get("product", "")
-        action = input.get("action", "")
-        if product == "ros" and action == "PreviewStack":
+        action = _string_value(input.get("action"))
+        if action is None or not _safe_exact_identifier(action):
+            return False
+        product = _string_value(input.get("product")) or ""
+        if product:
+            operation = _safe_operation_identifiers(input)
+            if operation is None:
+                return False
+            product, action = operation
+        if _is_roa_style(input) and not _is_roa_read_only_request(input):
+            return False
+        if product.lower() == "ros" and action.lower() == "previewstack":
             return True
-        return super().is_read_only(input)
+        return super().is_read_only({"action": action})
+
+    def _operation_metadata(self, input: dict) -> dict[str, object]:
+        product = _string_value(input.get("product"))
+        action = _string_value(input.get("action"))
+        region = _string_value(input.get("region_id"))
+        operation: dict[str, object] = {}
+        if product is not None:
+            canonical_product = _canonical_product(product)
+            if _safe_exact_identifier(canonical_product):
+                operation["product"] = canonical_product
+            else:
+                operation["product_fingerprint"] = fingerprint_text(product)
+        if action is not None and _safe_exact_identifier(action):
+            operation["action"] = action
+        elif action is not None:
+            operation["action_fingerprint"] = fingerprint_text(action)
+        if region is not None and _safe_exact_identifier(region):
+            operation["region"] = region
+        elif region is not None:
+            operation["region_fingerprint"] = fingerprint_text(region)
+        return operation
+
+    def _audit(
+        self,
+        input: dict,
+        *,
+        scope: str,
+        rule_source: str | None = None,
+        rule: str | None = None,
+        reason: PermissionDecisionReason | None = None,
+        is_read_only: bool | None = None,
+    ) -> PermissionAuditMetadata:
+        return PermissionAuditMetadata(
+            scope=scope,
+            source="permission_pipeline",
+            rule_source=rule_source,
+            rule=rule,
+            reason_type=reason.type if reason else None,
+            reason_detail=reason.detail if reason else None,
+            is_read_only=is_read_only,
+            operation=self._operation_metadata(input),
+        )
+
+    def _supports_persistent_allow(self, input: dict, *, is_read_only: bool) -> bool:
+        return True
+
+    def _suggestion(self, input: dict, *, is_read_only: bool = False) -> list[PermissionRuleValue] | None:
+        if not self._supports_persistent_allow(input, is_read_only=is_read_only):
+            return None
+        product = _string_value(input.get("product"))
+        action = _string_value(input.get("action"))
+        if product is None or action is None:
+            return None
+        product = _canonical_product(product)
+        if not (_safe_exact_identifier(product) and _safe_exact_identifier(action)):
+            return None
+        return [PermissionRuleValue(tool_name=self.name, rule_content="{}:{}".format(product, action))]
+
+    def _matching_rule(
+        self,
+        input: dict,
+        rules_by_source: dict[str, list[str]],
+        *,
+        require_exact: bool = False,
+    ) -> tuple[str, str] | None:
+        operation = _safe_operation_identifiers(input)
+        if operation is None:
+            return None
+        canonical_product, action = operation
+        best: tuple[tuple[tuple[int, int], tuple[int, int], int, int], str, str] | None = None
+
+        for source, rules in rules_by_source.items():
+            for index, rule in enumerate(rules):
+                parsed = _parse_aliyun_rule(rule)
+                if parsed is None:
+                    continue
+                product_pattern, action_pattern = parsed
+                if not fnmatch.fnmatchcase(canonical_product.lower(), product_pattern.lower()):
+                    continue
+                if not fnmatch.fnmatchcase(action.lower(), action_pattern.lower()):
+                    continue
+                if require_exact and (
+                    product_pattern.lower() != canonical_product.lower() or action_pattern.lower() != action.lower()
+                ):
+                    continue
+                score = (
+                    _side_specificity(product_pattern, canonical_product),
+                    _side_specificity(action_pattern, action),
+                    _RULE_SOURCE_ORDER.get(source, 0),
+                    index,
+                )
+                rule_content = "{}:{}".format(product_pattern, action_pattern)
+                if best is None or score > best[0]:
+                    best = (score, source, rule_content)
+
+        if best is None:
+            return None
+        return best[1], best[2]
+
+    async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        if not isinstance(context, ToolPermissionContext):
+            context = ToolPermissionContext(cwd=context.get("cwd", "") if isinstance(context, dict) else "")
+
+        is_read_only = _safe_operation_identifiers(input) is not None and self.is_read_only(input)
+        supports_persistent_allow = self._supports_persistent_allow(input, is_read_only=is_read_only)
+        for behavior, rules_by_source in (
+            ("deny", context.deny_rules),
+            ("ask", context.ask_rules),
+            ("allow", context.allow_rules),
+        ):
+            if behavior == "allow" and not supports_persistent_allow:
+                continue
+            match = self._matching_rule(input, rules_by_source, require_exact=behavior == "allow" and not is_read_only)
+            if match is None:
+                continue
+            rule_source, rule = match
+            detail = _("matched {behavior} rule: {rule}").format(behavior=behavior, rule=rule)
+            reason = PermissionDecisionReason(type="rule", detail=detail)
+            return PermissionResult(
+                behavior=behavior,
+                message=detail,
+                reason=reason,
+                audit=self._audit(
+                    input,
+                    scope=scope_for_rule_source(rule_source),
+                    rule_source=rule_source,
+                    rule=rule,
+                    reason=reason,
+                    is_read_only=is_read_only,
+                ),
+            )
+
+        if is_read_only:
+            reason = PermissionDecisionReason(type="read_only", detail="read-only Aliyun API action")
+            return PermissionResult(
+                behavior="allow",
+                reason=reason,
+                audit=self._audit(input, scope="read_only", reason=reason, is_read_only=True),
+            )
+
+        reason = PermissionDecisionReason(
+            type="untrusted_write",
+            detail="Aliyun API action may modify cloud resources",
+        )
+        return PermissionResult(
+            behavior="ask",
+            message=_("Allow {}?").format(self.user_facing_name(input)),
+            reason=reason,
+            suggestions=self._suggestion(input, is_read_only=is_read_only),
+            audit=self._audit(input, scope="once", reason=reason, is_read_only=False),
+        )
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -488,6 +785,7 @@ class AliyunApi(BaseCloudApi):
 
         # Prepare telemetry metadata
         api_service = product.upper()
+        telemetry_identifiers = _aliyun_api_telemetry_identifiers(product, action, region)
         started = time.monotonic()
         http_status: int | None = None
         error_code: str | None = None
@@ -510,16 +808,14 @@ class AliyunApi(BaseCloudApi):
             log_event(
                 Events.ALIYUN_API_CALLED,
                 {
-                    "api_service": api_service,
-                    "api_name": action,
-                    "api_version": version,
-                    "region": region,
+                    **telemetry_identifiers,
+                    **_aliyun_api_version_telemetry(version),
                     "outcome": outcome,
                     "duration_ms": duration_ms,
                     "http_status": http_status,
                 },
             )
-            add_metric(Metrics.ALIYUN_API_CALLED_COUNT, 1, {"api_service": api_service, "outcome": outcome})
+            add_metric(Metrics.ALIYUN_API_CALLED_COUNT, 1, _aliyun_api_metric_attrs(product, outcome))
             add_metric(Metrics.ALIYUN_API_CALLED_DURATION, duration_ms)
 
             # Special case: ROS ValidateTemplate
@@ -557,18 +853,16 @@ class AliyunApi(BaseCloudApi):
             log_event(
                 Events.ALIYUN_API_CALLED,
                 {
-                    "api_service": api_service,
-                    "api_name": action,
-                    "api_version": version,
-                    "region": region,
+                    **telemetry_identifiers,
+                    **_aliyun_api_version_telemetry(version),
                     "outcome": outcome,
                     "duration_ms": duration_ms,
                     "http_status": http_status,
-                    "error_code": error_code,
-                    "error_message": sanitize_error_message(error_message),
+                    "error_code": _scrub_unsafe_identifier_text(error_code, product, action, region, version),
+                    "error_message": _scrub_unsafe_identifier_text(error_message, product, action, region, version),
                 },
             )
-            add_metric(Metrics.ALIYUN_API_CALLED_COUNT, 1, {"api_service": api_service, "outcome": outcome})
+            add_metric(Metrics.ALIYUN_API_CALLED_COUNT, 1, _aliyun_api_metric_attrs(product, outcome))
             add_metric(Metrics.ALIYUN_API_CALLED_DURATION, duration_ms)
 
             return ToolResult.error(self._clean_error_message(error_str))

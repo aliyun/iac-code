@@ -304,7 +304,7 @@ Cada notificacao `session/update` carrega um objeto de atualizacao com um tipo e
 ```
 ToolCallStart (status=in_progress)
     │
-    ├── ToolCallProgress (status=in_progress, raw_input=tool input)
+    ├── ToolCallProgress (status=in_progress, resumo de entrada / entrada segura de prompt)
     │
     ├── ToolCallProgress (status=completed, raw_output=result)   ← sucesso
     │
@@ -333,8 +333,10 @@ Antes de executar ferramentas de alto risco, o iac-code envia um callback `reque
 | Categoria | Ferramentas | Auto-aprovada |
 |----------|-------|-------------|
 | Somente leitura | `read_file`, `list_files`, `glob`, `grep`, `web_fetch` | Sim |
+| API de nuvem somente leitura | Ações `aliyun_api` classificadas como somente leitura | Sim |
 | Escrita | `write_file`, `edit_file` | Nao — requer aprovacao |
 | Execucao | `bash`, `agent` | Nao — requer aprovacao |
+| API de escrita de nuvem | Chamadas `aliyun_api` que não são somente leitura | Não — requer aprovação por API |
 
 ### Evento request_permission
 
@@ -351,11 +353,13 @@ O servidor envia um callback `request_permission` com:
 | ID da opcao | Significado |
 |-----------|---------|
 | `allow_once` | Permitir esta invocacao especifica |
-| `allow_always` | Permitir todas as futuras chamadas desta ferramenta nesta sessao quando a ferramenta oferece permissao global; nao e oferecido para `bash` por padrao |
+| `allow_always` | Permitir todas as futuras chamadas desta ferramenta nesta sessao quando a ferramenta oferece permissao global; nao e oferecido para `bash` nem `aliyun_api` por padrao |
 | `allow_rule:<rules>` | Permitir futuras chamadas que correspondam as regras sugeridas nesta sessao |
 | `deny_rule:<rules>` | Negar futuras chamadas que correspondam as regras sugeridas nesta sessao |
 | `reject_once` | Negar esta invocacao especifica |
 | `reject_always` | Negar todas as futuras chamadas desta ferramenta nesta sessao |
+
+Para `aliyun_api`, ações somente leitura são permitidas automaticamente. Ações RPC e ROA que não são somente leitura podem oferecer uma regra exata como `aliyun_api(ros:CreateStack)` ou `aliyun_api(cs:CreateCluster)`. Regras allow com wildcards continuam não aprovando chamadas que não são somente leitura.
 
 ### Formato de resposta
 

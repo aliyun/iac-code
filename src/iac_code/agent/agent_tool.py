@@ -9,6 +9,7 @@ from typing import Any
 
 from iac_code.agent.agent_types import filter_tools, get_agent_definition, get_builtin_agents
 from iac_code.i18n import _, ngettext
+from iac_code.services.permissions.audit import emit_auto_permission_audit
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 
 
@@ -75,6 +76,12 @@ async def run_sub_agent(
     async for event in sub_loop.run_streaming(prompt):
         if isinstance(event, PermissionRequestEvent):
             if event.response_future is not None and not event.response_future.done():
+                emit_auto_permission_audit(
+                    event,
+                    decision="deny",
+                    scope="auto_deny",
+                    source="agent_tool_auto_deny",
+                )
                 event.response_future.set_result(False)
             continue
         if isinstance(event, TextDeltaEvent):

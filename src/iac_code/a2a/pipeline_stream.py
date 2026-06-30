@@ -10,7 +10,13 @@ from typing import Any
 from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
 from google.protobuf.json_format import ParseDict
 
-from iac_code.a2a.events import _artifact_update_event, _extract_artifact_metadata, make_text_part
+from iac_code.a2a.events import (
+    _artifact_update_event,
+    _emit_auto_permission_audit,
+    _emit_resolver_permission_audit,
+    _extract_artifact_metadata,
+    make_text_part,
+)
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.pipeline_events import PipelineEventTranslator, safe_permission_metadata
 from iac_code.a2a.pipeline_journal import A2APipelineJournal, to_json_safe
@@ -21,6 +27,7 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_PROGRESS,
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
+from iac_code.services.permissions.audit import is_aliyun_api_non_read_only_permission_event
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, ToolResultEvent
 
 PipelinePermissionResolver = Callable[[PermissionRequestEvent], bool | Awaitable[bool]]
@@ -129,8 +136,20 @@ class PipelineA2AEventPublisher:
                     permission_resolver=permission_resolver,
                     auto_approve_permissions=auto_approve_permissions,
                 )
+                permission_audit_emitted = False
+                if approved and _can_resolve_permission_future(permission_request):
+                    audit_ok = (
+                        _emit_resolver_permission_audit(permission_request, approved)
+                        if permission_resolver is not None
+                        else _emit_auto_permission_audit(permission_request, approved)
+                    )
+                    permission_audit_emitted = True
+                    if not audit_ok:
+                        approved = False
+                        _set_permission_approval(envelope, approved)
             else:
                 approved = None
+                permission_audit_emitted = False
 
             persisted = await self._persist_and_enqueue(
                 envelope,
@@ -138,7 +157,30 @@ class PipelineA2AEventPublisher:
                 require_durable_metadata=permission_request is not None,
             )
             if permission_request is not None:
-                _resolve_permission_future(permission_request, bool(approved) if persisted else False)
+                final_approved = bool(approved) if persisted else False
+                if _can_resolve_permission_future(permission_request):
+                    if permission_audit_emitted and bool(approved) and not persisted:
+                        if permission_resolver is not None:
+                            _emit_resolver_permission_audit(
+                                permission_request,
+                                False,
+                                persistence_failure=True,
+                            )
+                        else:
+                            _emit_auto_permission_audit(
+                                permission_request,
+                                False,
+                                persistence_failure=True,
+                            )
+                    elif not permission_audit_emitted:
+                        audit_ok = (
+                            _emit_resolver_permission_audit(permission_request, final_approved)
+                            if permission_resolver is not None
+                            else _emit_auto_permission_audit(permission_request, final_approved)
+                        )
+                        if final_approved and not audit_ok:
+                            final_approved = False
+                    _resolve_permission_future(permission_request, final_approved)
 
             if envelope.get("eventType") == "text_delta":
                 text_parts.append(_text_from_envelope(envelope))
@@ -439,17 +481,14 @@ class PipelineA2AEventPublisher:
         if permission_resolver is not None:
             result = permission_resolver(request)
             approved = bool(await result) if inspect.isawaitable(result) else bool(result)
+        elif is_aliyun_api_non_read_only_permission_event(request):
+            approved = False
 
         include_tool_input = A2AExposureType.TOOL_TRACE in self.exposure_types
         permission = envelope.setdefault("permission", {})
         permission.clear()
         permission.update(safe_permission_metadata(request, include_tool_input=include_tool_input))
-        permission.update(
-            {
-                "approved": approved,
-                "decision": "allow_once" if approved else "deny",
-            }
-        )
+        permission.update(_permission_approval_metadata(approved))
         return approved
 
     async def _enqueue_status(self, envelope: dict[str, Any]) -> None:
@@ -474,18 +513,40 @@ class PipelineA2AEventPublisher:
 
 
 def _permission_request_from(event: Any) -> PermissionRequestEvent | None:
-    inner = event.inner if isinstance(event, SubPipelineStreamEvent) else event
+    inner = _unwrap_stream_event(event)
     return inner if isinstance(inner, PermissionRequestEvent) else None
 
 
 def _tool_result_from(event: Any) -> ToolResultEvent | None:
-    inner = event.inner if isinstance(event, SubPipelineStreamEvent) else event
+    inner = _unwrap_stream_event(event)
     return inner if isinstance(inner, ToolResultEvent) else None
 
 
-def _resolve_permission_future(request: PermissionRequestEvent, approved: bool) -> None:
-    if request.response_future is not None and not request.response_future.done():
-        request.response_future.set_result(approved)
+def _unwrap_stream_event(event: Any) -> Any:
+    while isinstance(event, SubPipelineStreamEvent):
+        event = event.inner
+    return event
+
+
+def _resolve_permission_future(request: PermissionRequestEvent, approved: bool) -> bool:
+    future = request.response_future
+    if future is not None and not future.done():
+        future.set_result(approved)
+        return True
+    return False
+
+
+def _can_resolve_permission_future(request: PermissionRequestEvent) -> bool:
+    return request.response_future is not None and not request.response_future.done()
+
+
+def _set_permission_approval(envelope: dict[str, Any], approved: bool) -> None:
+    permission = envelope.setdefault("permission", {})
+    permission.update(_permission_approval_metadata(approved))
+
+
+def _permission_approval_metadata(approved: bool) -> dict[str, Any]:
+    return {"approved": approved, "decision": "allow_once" if approved else "deny"}
 
 
 def is_recovery_semantic_event(envelope: dict[str, Any]) -> bool:

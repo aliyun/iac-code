@@ -304,7 +304,7 @@ initialize → new_session → prompt (loop) → close_session
 ```
 ToolCallStart (status=in_progress)
     │
-    ├── ToolCallProgress (status=in_progress, raw_input=tool input)
+    ├── ToolCallProgress (status=in_progress, 入力要約 / 安全なプロンプト入力)
     │
     ├── ToolCallProgress (status=completed, raw_output=result)   ← success
     │
@@ -333,8 +333,10 @@ ToolCallStart (status=in_progress)
 | カテゴリ | ツール | 自動許可 |
 |----------|-------|-------------|
 | 読み取り専用 | `read_file`, `list_files`, `glob`, `grep`, `web_fetch` | はい |
+| 読み取り専用クラウド API | 読み取り専用に分類された `aliyun_api` アクション | はい |
 | 書き込み | `write_file`, `edit_file` | いいえ — 承認が必要 |
 | 実行 | `bash`, `agent` | いいえ — 承認が必要 |
+| クラウド書き込み API | 読み取り専用ではない `aliyun_api` 呼び出し | いいえ — API ごとの承認が必要 |
 
 ### request_permission イベント
 
@@ -351,11 +353,13 @@ ToolCallStart (status=in_progress)
 | オプション ID | 意味 |
 |-----------|---------|
 | `allow_once` | この特定の呼び出しを許可 |
-| `allow_always` | ツールが blanket allow をサポートする場合のみ、このセッション内でこのツールの今後のすべての呼び出しを許可（`bash` ではデフォルトで表示されません） |
+| `allow_always` | ツールが blanket allow をサポートする場合のみ、このセッション内でこのツールの今後のすべての呼び出しを許可（`bash` と `aliyun_api` ではデフォルトで表示されません） |
 | `allow_rule:<rules>` | 提案されたルールに一致する今後の呼び出しをこのセッション内で許可 |
 | `deny_rule:<rules>` | 提案されたルールに一致する今後の呼び出しをこのセッション内で拒否 |
 | `reject_once` | この特定の呼び出しを拒否 |
 | `reject_always` | このセッション内でこのツールの今後のすべての呼び出しを拒否 |
+
+`aliyun_api` では、読み取り専用アクションは自動的に許可されます。読み取り専用ではない RPC および ROA アクションでは、`aliyun_api(ros:CreateStack)` や `aliyun_api(cs:CreateCluster)` のような正確なルールを提示できます。ワイルドカードの allow ルールは、読み取り専用ではない呼び出しを引き続き承認しません。
 
 ### レスポンス形式
 

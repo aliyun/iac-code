@@ -19,7 +19,7 @@ Das Laufzeitverzeichnis ist standardmäßig:
 ~/.iac-code/
 ```
 
-Sie können es verlegen, indem Sie die Umgebungsvariable `IAC_CODE_CONFIG_DIR` setzen (unterstützt `~`- und `$VAR`-Erweiterung). Sobald gesetzt, folgen alle persistierten Artefakte — Anmeldedaten, Einstellungen, Verlauf, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — dem neuen Speicherort.
+Sie können es verlegen, indem Sie die Umgebungsvariable `IAC_CODE_CONFIG_DIR` setzen (unterstützt `~`- und `$VAR`-Erweiterung). Sobald gesetzt, folgen alle persistierten Artefakte — Anmeldedaten, Einstellungen, Verlauf, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — dem neuen Speicherort. Start-/Debug-Logs liegen standardmaessig unter `<config-dir>/logs/` und koennen separat mit `IAC_CODE_LOG_DIR` verschoben werden; Berechtigungsauditdatensaetze bleiben unter `<config-dir>/logs/`.
 
 Häufige Dateien:
 
@@ -106,6 +106,10 @@ permissions:
     - "bash(curl:*)"
   additional_directories:
     - "/tmp/workspace"
+  audit:
+    include_tool_input: false
+    max_file_bytes: 10485760
+    max_files: 5
 ```
 
 | Feld | Beschreibung |
@@ -115,6 +119,7 @@ permissions:
 | `deny` | Liste der automatisch verweigerten Werkzeug-Berechtigungsmuster. |
 | `ask` | Liste der Werkzeug-Berechtigungsmuster, die immer eine Bestätigung erfordern. |
 | `additional_directories` | Zusätzliche Verzeichnisse über cwd hinaus, in die der Agent schreiben darf. |
+| `audit` | Lokale Einstellungen fuer das Berechtigungsauditprotokoll. |
 
 ### Mustersyntax
 
@@ -126,5 +131,40 @@ Werkzeug-Berechtigungsmuster folgen dem Format `tool_name(rule)`:
 | `bash(git *)` | Bash-Befehle abgleichen, die mit `git` beginnen. |
 | `bash(curl:*)` | Bash-Befehle abgleichen, die mit `curl` beginnen. |
 | `write_file` | Alle write_file-Werkzeugaufrufe abgleichen. |
+| `aliyun_api(ros:CreateStack)` | Ein Alibaba-Cloud-API-Produkt/Aktion-Paar abgleichen. |
 
 Regeln werden in folgender Reihenfolge ausgewertet: **deny → ask → allow → Standardverhalten**. CLI-Argumente (`--allowed-tools`, `--disallowed-tools`) haben die höchste Priorität.
+
+### Alibaba-Cloud-API-Berechtigungen
+
+`aliyun_api` unterscheidet reine Lese-API-Aufrufe von Aufrufen, die Cloud-Ressourcen veraendern koennen. Nur-Lese-API-Aktionen werden automatisch erlaubt. Nicht nur lesende API-Aufrufe erfordern eine Bestaetigung oder eine exakte Allow-Regel fuer das jeweilige Produkt und die jeweilige Aktion, zum Beispiel:
+
+```yaml
+permissions:
+  allow:
+    - "aliyun_api(ros:CreateStack)"
+```
+
+Eine blosse `aliyun_api`-Allow-Regel genehmigt Alibaba-Cloud-Schreib-APIs nicht pauschal. Ausserhalb von `bypass_permissions` muessen Allow-Regeln fuer Schreibzugriffe exakt zum kanonischen `product:action`-Paar passen. Im Modus `bypass_permissions` werden geschuetzte Alibaba-Cloud-Schreib-APIs automatisch genehmigt, aber jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt weiterhin fail-closed fehl, wenn die Auditpersistenz fehlschlaegt. Wildcards koennen weiterhin fuer deny- oder ask-Regeln sowie fuer Nur-Lese-Regelabgleiche nuetzlich sein.
+
+ROA-artige Requests gelten nur dann als nur lesend, wenn die Methode `GET` ist und der Request keinen Body hat. Nicht nur lesende ROA-Requests folgen derselben Anforderung an eine exakte kanonische `product:action`-Allow-Regel wie RPC-artige Schreib-APIs: Eine exakte Regel wie `aliyun_api(cs:CreateCluster)` kann den Schreibzugriff genehmigen, waehrend Wildcard-Allow-Regeln nicht nur lesende Aufrufe weiterhin nicht genehmigen.
+
+### Berechtigungsauditprotokoll
+
+Berechtigungsentscheidungen, die Benutzerabfragen, Tool-Cache-Grenzen, Automatisierungsgenehmigungen oder Resolver-Genehmigungen ueberschreiten, werden angehaengt an:
+
+```text
+<config-dir>/logs/permission-audit.jsonl
+```
+
+Standardmaessig ist dies `~/.iac-code/logs/permission-audit.jsonl`. Das Berechtigungsauditlog folgt `IAC_CODE_CONFIG_DIR`; `IAC_CODE_LOG_DIR` verschiebt nur Start-/Debug-Logs. Der Audit-Writer haengt JSONL-Datensaetze mit Dateisperren an, rotiert die Datei und schraenkt lokale Dateiberechtigungen ein, soweit das Betriebssystem dies unterstuetzt. Routinemaessige automatische Nur-Lese-Genehmigungen koennen ausgelassen werden, aber Ablehnungen, Prompts, gecachte Entscheidungen, Automatisierungsgenehmigungen, Resolver-Genehmigungen und andere auditierte Berechtigungsgrenzen werden aufgezeichnet.
+
+Audit-Einstellungen werden unter `permissions.audit` konfiguriert:
+
+| Feld | Standard | Beschreibung |
+|---|---:|---|
+| `include_tool_input` | `false` | Nur die Form der Tool-Eingabe in JSONL-Auditdatensaetze aufnehmen. String-Werte werden als Typ, Laenge und Fingerprint gespeichert; geheimnisverdaechtige Schluessel werden redigiert; Feldnamen ausserhalb der Whitelist koennen als Fingerprint erscheinen; rohe fachliche Payload-Strings werden nicht geschrieben. Alibaba-Cloud-API-Eintraege behalten zusaetzlich eine sichere Operationszusammenfassung. |
+| `max_file_bytes` | `10485760` | `permission-audit.jsonl` rotieren, wenn diese Groesse ueberschritten wird. |
+| `max_files` | `5` | Anzahl der aufzubewahrenden rotierten Auditdateien. Werte ueber dem eingebauten Maximum werden begrenzt. |
+
+Wenn eine Allow-Entscheidung, die einen Auditdatensatz erfordert, nicht im Auditprotokoll persistiert werden kann, verhaelt sich IaC Code fail-closed und lehnt die Aktion ab, statt sie ohne Auditspur auszufuehren.

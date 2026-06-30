@@ -30,8 +30,10 @@ El parámetro `--permission-mode` controla cómo el agente maneja las comprobaci
 |---|---|
 | `default` | El agente solicita confirmación cuando una acción de herramienta requiere aprobación. |
 | `accept_edits` | Aprobar automáticamente comandos del sistema de archivos considerados como ediciones (ej. `mkdir`, `cp`). Otras acciones aún solicitan confirmación. |
-| `bypass_permissions` | Aprobar automáticamente todas las acciones de herramientas excepto las comprobaciones de seguridad. Destinado para automatización confiable. |
+| `bypass_permissions` | Aprobar automáticamente acciones de herramientas excepto comprobaciones de seguridad. Toda decisión allow que requiere un registro de auditoría falla en modo cerrado si falla la persistencia de auditoría. Destinado para automatización confiable. |
 | `dont_ask` | Denegar silenciosamente cualquier acción que normalmente solicitaría confirmación. Útil para ejecuciones estrictamente de solo lectura. |
+
+Las llamadas a API de escritura de Alibaba Cloud realizadas mediante `aliyun_api` están protegidas por separado: una regla allow simple `aliyun_api` no las aprueba de forma global, y fuera de `bypass_permissions` las reglas allow de escritura deben coincidir exactamente con el par canónico `product:action`. `bypass_permissions` sí las aprueba automáticamente, pero igual que otras decisiones allow auditadas, la acción se deniega si el registro de auditoría de permisos no se puede persistir. Usa reglas exactas como `aliyun_api(ros:CreateStack)` cuando la automatización confiable deba permitir solo una API de escritura específica.
 
 ## Comandos de inicio comunes
 
@@ -69,6 +71,12 @@ Permitir solo comandos git y bash de solo lectura:
 
 ```bash
 iac-code --allowed-tools 'bash(git *)'
+```
+
+Permitir una API de escritura específica de Alibaba Cloud:
+
+```bash
+iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 Ejecutar en automatización sin prompts interactivos:

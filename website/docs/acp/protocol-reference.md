@@ -304,7 +304,7 @@ Each `session/update` notification carries an update object with a specific type
 ```
 ToolCallStart (status=in_progress)
     │
-    ├── ToolCallProgress (status=in_progress, raw_input=tool input)
+    ├── ToolCallProgress (status=in_progress, input summary / safe prompt input)
     │
     ├── ToolCallProgress (status=completed, raw_output=result)   ← success
     │
@@ -333,8 +333,10 @@ Before executing high-risk tools, iac-code sends a `request_permission` callback
 | Category | Tools | Auto-allowed |
 |----------|-------|-------------|
 | Read-only | `read_file`, `list_files`, `glob`, `grep`, `web_fetch` | Yes |
+| Read-only cloud API | `aliyun_api` actions classified as read-only | Yes |
 | Write | `write_file`, `edit_file` | No — requires approval |
 | Execute | `bash`, `agent` | No — requires approval |
+| Cloud write API | Non-read-only `aliyun_api` calls | No — requires per-API approval |
 
 ### request_permission Event
 
@@ -351,11 +353,13 @@ The server sends a `request_permission` callback with:
 | Option ID | Meaning |
 |-----------|---------|
 | `allow_once` | Allow this specific invocation |
-| `allow_always` | Allow all future calls of this tool in this session when the tool supports blanket allow; not offered for `bash` by default |
+| `allow_always` | Allow all future calls of this tool in this session when the tool supports blanket allow; not offered for `bash` or `aliyun_api` by default |
 | `allow_rule:<rules>` | Allow future calls matching the suggested rule(s) in this session |
 | `deny_rule:<rules>` | Deny future calls matching the suggested rule(s) in this session |
 | `reject_once` | Deny this specific invocation |
 | `reject_always` | Deny all future calls of this tool in this session |
+
+For `aliyun_api`, read-only actions are auto-allowed. Non-read-only RPC and ROA actions can offer an exact rule such as `aliyun_api(ros:CreateStack)` or `aliyun_api(cs:CreateCluster)`. Wildcard allow rules still do not approve non-read-only calls.
 
 ### Response Format
 

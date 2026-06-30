@@ -264,6 +264,6 @@ Die vollstaendige Optionsliste finden Sie in der [Befehlsreferenz](./command-ref
 
 - Binden Sie fuer rein lokale Nutzung an `127.0.0.1`.
 - Verwenden Sie `token` in der A2A-Konfiguration oder `IACCODE_A2A_HTTP_TOKEN`, bevor Sie an eine gemeinsam genutzte Netzwerkschnittstelle binden.
-- Der A2A-Modus lehnt Tool-Berechtigungsanfragen automatisch ab; schuetzen Sie unauthentifizierte Endpunkte wie lokale Automatisierungsservices.
+- Der A2A-Modus lehnt Tool-Berechtigungsanfragen automatisch ab, sofern sie nicht durch `auto-approve-permissions` oder eine explizite Berechtigungsregel erlaubt werden. Berechtigungsentscheidungen werden lokal auditiert; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn dieser Datensatz nicht persistiert werden kann. Geschuetzte Alibaba-Cloud-Schreib-APIs erfordern ausserhalb pauschaler Bypass-Modi eine exakte Autorisierung pro API.
 - Aktiver Laufzeitzustand liegt im Speicher. Persistenz spiegelt Task- und Kontextmetadaten, aber ein Prozessneustart setzt laufende asyncio-Arbeit nicht fort.
 - Ein Kontext kann jeweils nur einen Task ausfuehren; getrennte Kontexte koennen parallel laufen.

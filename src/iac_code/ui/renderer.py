@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+import json
 import os
 import re
 import sys
@@ -19,7 +20,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Literal
 
 if sys.platform != "win32":
     import termios
@@ -38,8 +39,12 @@ from rich.table import Table
 from rich.text import Text
 
 from iac_code.i18n import _
-from iac_code.services.telemetry import add_metric, log_event
-from iac_code.services.telemetry.names import Events, Metrics
+from iac_code.services.permissions.audit import (
+    build_input_summary,
+    emit_permission_boundary_audit,
+    is_permission_audit_non_read_only,
+    should_fail_closed_permission_audit,
+)
 from iac_code.tools.cloud.types import translate_status
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
@@ -81,6 +86,13 @@ def _display_tool_name(tool_name: str, candidate: str | None = None) -> str:
     from iac_code.pipeline.display_names import known_tool_display_name
 
     return known_tool_display_name(tool_name) or candidate or tool_name
+
+
+def _permission_detail_text(tool_name: str, tool_input: dict[str, Any], tool: Any | None) -> str | None:
+    if tool_name == "aliyun_api":
+        summary = json.dumps(build_input_summary(tool_name, tool_input), ensure_ascii=False, sort_keys=True)
+        return _("Input summary: {summary}").format(summary=summary)
+    return tool.render_tool_use_message(tool_input) if tool else None
 
 
 def _windows_msvcrt_reader_loop(
@@ -1397,29 +1409,6 @@ class Renderer:
                     # task cancellation during a pipeline interrupt; mirrors the
                     # defensive pattern in agent_tool / acp/session.
                     if event.response_future is not None and not event.response_future.done():
-                        if allowed:
-                            log_event(
-                                Events.TOOL_USE_GRANTED_IN_PROMPT,
-                                {
-                                    "tool_name": event.tool_name,
-                                    "scope": "once",
-                                },
-                            )
-                        else:
-                            log_event(
-                                Events.TOOL_USE_REJECTED_IN_PROMPT,
-                                {
-                                    "tool_name": event.tool_name,
-                                },
-                            )
-                            add_metric(
-                                Metrics.TOOL_USE_COUNT,
-                                1,
-                                {
-                                    "tool_name": event.tool_name,
-                                    "outcome": "denied",
-                                },
-                            )
                         event.response_future.set_result(allowed)
 
                 # ── User question request ─────────────────────
@@ -1628,9 +1617,31 @@ class Renderer:
 
         tool_name = event.tool_name
         cache = self._app_state_store.get_state().always_allow_rules if self._app_state_store is not None else None
+        is_non_read_only = is_permission_audit_non_read_only(event)
+
+        def _suggestion_rule() -> str | None:
+            if not suggestions:
+                return None
+            return ", ".join(f"{suggestion.tool_name}({suggestion.rule_content})" for suggestion in suggestions)
 
         # Short-circuit on cached sticky decisions — no prompt, no input read.
         cached = lookup_permission(cache, tool_name)
+        if cached == "always_allow" and tool_name == "aliyun_api" and is_non_read_only:
+            if cache is not None:
+                cache.pop(tool_name, None)
+            cached = None
+        if cached in ("always_allow", "always_deny"):
+            audit_ok = emit_permission_boundary_audit(
+                event,
+                decision="allow" if cached == "always_allow" else "deny",
+                scope="tool_cache",
+                source="repl_tool_cache",
+                rule_source="tool_cache",
+                reason_type="tool_cache",
+                reason_detail=cached,
+            )
+            if cached == "always_allow" and not audit_ok and should_fail_closed_permission_audit(event, "allow"):
+                return False
         if cached == "always_allow":
             return True
         if cached == "always_deny":
@@ -1638,9 +1649,7 @@ class Renderer:
 
         tool = self._tool_registry.get(tool_name)
         tool_display = _display_tool_name(tool_name, tool.user_facing_name(event.tool_input) if tool else tool_name)
-        detail = None
-        if tool:
-            detail = tool.render_tool_use_message(event.tool_input)
+        detail = _permission_detail_text(tool_name, event.tool_input, tool)
 
         # Tool-use header.
         line = Text()
@@ -1701,6 +1710,27 @@ class Renderer:
         result = await loop.run_in_executor(None, select.run)
 
         if result is None:
+            result = "reject_once"
+
+        prompt_audit: dict[str, tuple[Literal["allow", "deny"], str]] = {
+            "allow_once": ("allow", "once"),
+            "reject_once": ("deny", "once"),
+            "always_allow": ("allow", "tool_cache"),
+            "always_deny": ("deny", "tool_cache"),
+            "always_allow_rule": ("allow", "session_rule"),
+            "always_deny_rule": ("deny", "session_rule"),
+        }
+        audit_decision, audit_scope = prompt_audit.get(result, ("deny", "once"))
+        audit_ok = emit_permission_boundary_audit(
+            event,
+            decision=audit_decision,
+            scope=audit_scope,
+            source="repl_prompt",
+            reason_type="prompt_selection",
+            reason_detail=result,
+            rule=_suggestion_rule() if audit_scope == "session_rule" else None,
+        )
+        if audit_decision == "allow" and not audit_ok and should_fail_closed_permission_audit(event, "allow"):
             return False
 
         if result == "allow_once":
