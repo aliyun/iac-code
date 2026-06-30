@@ -30,8 +30,10 @@ Der Parameter `--permission-mode` steuert, wie der Agent Werkzeug-Berechtigungsp
 |---|---|
 | `default` | Der Agent fragt nach Bestätigung, wenn eine Werkzeugaktion eine Genehmigung erfordert. |
 | `accept_edits` | Dateisystem-Befehle, die als Bearbeitungen gelten (z.B. `mkdir`, `cp`), automatisch genehmigen. Andere Aktionen erfordern weiterhin Bestätigung. |
-| `bypass_permissions` | Alle Werkzeugaktionen außer Sicherheitsprüfungen automatisch genehmigen. Für vertrauenswürdige Automatisierung vorgesehen. |
+| `bypass_permissions` | Werkzeugaktionen ausser Sicherheitspruefungen automatisch genehmigen. Jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn die Auditpersistenz fehlschlaegt. Fuer vertrauenswuerdige Automatisierung vorgesehen. |
 | `dont_ask` | Jede Aktion, die normalerweise eine Bestätigung erfordern würde, stillschweigend ablehnen. Nützlich für strenge Nur-Lese-Läufe. |
+
+Alibaba-Cloud-Schreib-API-Aufrufe ueber `aliyun_api` sind gesondert geschuetzt: Eine blosse `aliyun_api`-Allow-Regel genehmigt sie nicht pauschal, und ausserhalb von `bypass_permissions` muessen Allow-Regeln fuer Schreibzugriffe exakt zum kanonischen `product:action`-Paar passen. `bypass_permissions` genehmigt sie automatisch, aber wie bei anderen auditierten Allow-Entscheidungen wird die Aktion abgelehnt, wenn der Berechtigungsauditdatensatz nicht persistiert werden kann. Verwenden Sie exakte Regeln wie `aliyun_api(ros:CreateStack)`, wenn vertrauenswuerdige Automatisierung nur eine bestimmte Schreib-API erlauben soll.
 
 ## Häufige Startbefehle
 
@@ -69,6 +71,12 @@ Nur git und schreibgeschützte Bash-Befehle erlauben:
 
 ```bash
 iac-code --allowed-tools 'bash(git *)'
+```
+
+Eine bestimmte Alibaba-Cloud-Schreib-API erlauben:
+
+```bash
+iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 In der Automatisierung ohne interaktive Abfragen ausführen:

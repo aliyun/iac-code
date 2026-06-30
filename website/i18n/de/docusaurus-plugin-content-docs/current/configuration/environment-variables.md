@@ -52,6 +52,8 @@ Siehe [Alibaba Cloud-Anmeldedaten](./alibaba-cloud-credentials.md) fuer weitere 
 | Variable | Beschreibung |
 |---|---|
 | `IAC_CODE_CONFIG_DIR` | Ueberschreibt das Laufzeitkonfigurationsverzeichnis (Standard `~/.iac-code/`); unterstuetzt `~`- und `$VAR`-Erweiterung. Alle persistierten Artefakte (Anmeldedaten, Einstellungen, Verlauf, projects, image-cache, skills, telemetry usw.) folgen diesem Verzeichnis |
+| `IAC_CODE_LOG_DIR` | Ueberschreibt das lokale Verzeichnis fuer Start-/Debug-Logs (Standard `<config-dir>/logs/`); unterstuetzt `~`- und `$VAR`-Erweiterung. Berechtigungsauditdatensaetze bleiben unter `<config-dir>/logs/permission-audit.jsonl` |
+| `IAC_CODE_PERMISSION_AUDIT_INCLUDE_TOOL_INPUT` | Ueberschreibt `permissions.audit.include_tool_input`; auf `1` / `true` / `yes` / `on` setzen, um die Form der Tool-Eingabe in Berechtigungsauditdatensaetze aufzunehmen, mit Typ/Laenge/Fingerprint statt roher fachlicher Payload-Strings und mit Fingerprints fuer Feldnamen ausserhalb der Whitelist |
 | `IAC_CODE_ENV` | Bezeichnung der Bereitstellungsumgebung (Standard: `production`) |
 | `IAC_CODE_TENANT_ID` | Mandantenkennung fuer Telemetrie; wird automatisch mit `iac_tenant_` vorangestellt, wenn nicht bereits vorhanden |
 | `IAC_CODE_GIT_BASH_PATH` | Pfad zu Git Bash `bash.exe` unter Windows, wenn nicht im PATH |

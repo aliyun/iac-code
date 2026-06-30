@@ -58,12 +58,38 @@ def test_tool_input_delta_event_accumulates_args() -> None:
     assert len(updates1) == 1
     assert updates1[0].session_update == "tool_call_update"
     assert updates1[0].status == "pending"
-    # First chunk only
-    assert updates1[0].content[0].content.text == '{"cmd":'
+    assert updates1[0].content[0].content.text == "Input received (7 chars)"
 
     assert len(updates2) == 1
-    # Accumulated
-    assert updates2[0].content[0].content.text == '{"cmd": "ls"}'
+    assert updates2[0].content[0].content.text == "Input received (13 chars)"
+
+
+def test_tool_input_delta_event_omits_raw_partial_json() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="aliyun_api"))
+
+    [update] = converter.event_to_updates(
+        ToolInputDeltaEvent(tool_use_id="t1", partial_json='ature":"signature-secret"')
+    )
+
+    rendered = update.content[0].content.text
+    assert rendered == "Input received (25 chars)"
+    assert "signature-secret" not in rendered
+
+
+def test_tool_input_delta_event_omits_secret_from_progress_title() -> None:
+    turn_state = TurnState(turn_id="turn-1")
+    converter = ACPEventConverter(turn_id="turn-1", turn_state=turn_state)
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
+
+    [update] = converter.event_to_updates(
+        ToolInputDeltaEvent(tool_use_id="t1", partial_json='{"command": "curl -H Authorization:Bearer abc123"}')
+    )
+
+    rendered = str(update.model_dump(mode="json"))
+    assert "Authorization" not in rendered
+    assert "abc123" not in rendered
+    assert update.title == "bash"
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +173,7 @@ def test_tool_call_full_lifecycle_events() -> None:
     end_updates = converter.event_to_updates(ToolUseEndEvent(tool_use_id="t1", name="read_file", input={"path": "x"}))
     assert len(end_updates) == 1
     assert end_updates[0].status == "in_progress"
+    assert "Input summary:" in end_updates[0].content[0].content.text
 
     # 4. ToolResult → progress (in_progress) + end (completed)
     result_updates = converter.event_to_updates(
@@ -689,8 +716,8 @@ def test_tool_use_start_triggers_turn_state_start_tool_call() -> None:
     assert tc.tool_call_id == "tc-1"
 
 
-def test_tool_input_delta_updates_tool_call_state_and_generates_title_in_progress() -> None:
-    """Scenario 10: ToolInputDeltaEvent updates ToolCallState, progress has computed title."""
+def test_tool_input_delta_updates_tool_call_state_without_public_raw_title() -> None:
+    """Scenario 10: ToolInputDeltaEvent updates ToolCallState but keeps ACP title generic."""
     ts = TurnState(turn_id="turn-10")
     converter = ACPEventConverter(turn_id="turn-10", turn_state=ts)
 
@@ -705,13 +732,13 @@ def test_tool_input_delta_updates_tool_call_state_and_generates_title_in_progres
     assert len(updates) == 1
     progress = updates[0]
     assert progress.session_update == "tool_call_update"
-    assert progress.title is not None
-    assert "/tmp/test.tf" in progress.title
+    assert progress.title == "read_file"
 
     # Verify the underlying ToolCallState was updated
     tc = ts.get_tool_call("tc-2")
     assert tc is not None
     assert tc.accumulated_input == '{"file_path": "/tmp/test.tf"}'
+    assert "/tmp/test.tf" in tc.title
 
 
 def test_pipeline_tool_call_titles_use_display_names() -> None:

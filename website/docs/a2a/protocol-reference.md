@@ -383,10 +383,14 @@ Tool and usage details are delivered through `metadata.iac_code`:
 | `iac_code.tool.status` | `started`, `input_delta`, `input_complete`, `completed`, or `failed` |
 | `iac_code.tool.toolUseId` | Stable tool-use ID for correlating tool events |
 | `iac_code.tool.name` | Tool name when available |
-| `iac_code.tool.input` | Completed tool input, truncated to 4000 characters per field |
+| `iac_code.tool.inputSummary` | Shape-only summary for completed tool input; string values and non-whitelisted field names are represented without raw business payloads |
 | `iac_code.tool.result` | Tool result, truncated to 4000 characters per field |
 | `iac_code.iacCodeSessionId` | Internal iac-code execution session ID for correlating logs and local session artifacts |
-| `iac_code.permission.autoApproved` | `false` when a tool permission request was rejected by A2A server mode |
+| `iac_code.permission.autoApproved` | Whether A2A approved the permission request automatically or through a resolver |
+| `iac_code.permission.toolName` | Tool that requested permission |
+| `iac_code.permission.safeSummary` | Redacted human-readable permission summary |
+| `iac_code.permission.inputSummary` | Safe operation summary for `aliyun_api` permission requests |
+| `iac_code.permission.toolInput` | Shape-only tool input for non-`aliyun_api` permission requests; string values use type, length, and fingerprint, and non-whitelisted field names may be fingerprinted |
 | `iac_code.thinking.type` | `raw_thinking` when `raw-thinking` is enabled in `thinking-exposure` |
 | `iac_code.thinking.text` | Raw provider reasoning chunk, truncated to 4000 characters, emitted only for trusted configurations that enable `raw-thinking` |
 | `iac_code.usage.inputTokens` | Input token count for the turn |

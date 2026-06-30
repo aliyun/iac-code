@@ -11,6 +11,7 @@ from typing import Any
 from iac_code.a2a.artifacts import UnsafeArtifactNameError, artifact_filename_from_path, sanitize_public_artifact_text
 from iac_code.a2a.events import _tool_result_metadata, _truncate
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.permissions.audit import build_input_summary, build_redacted_tool_input, fingerprint_text
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
@@ -75,10 +76,27 @@ _TOP_LEVEL_DATA_KEY_ALIASES = {
 _NESTED_DATA_KEY_ALIASES = {
     "error_id": "errorId",
 }
-_PERMISSION_METADATA_MAX_CHARS = 4000
-_PERMISSION_METADATA_MAX_DEPTH = 32
 _PERMISSION_SUMMARY_MAX_FIELDS = 20
 _PERMISSION_SUMMARY_MAX_CHARS = 256
+_SAFE_PERMISSION_SUMMARY_FIELDS = {
+    "action",
+    "body",
+    "cmd",
+    "command",
+    "content",
+    "cwd",
+    "input",
+    "method",
+    "params",
+    "path",
+    "pathname",
+    "product",
+    "query",
+    "region",
+    "region_id",
+    "timeout",
+    "url",
+}
 _SECRET_KEY_FRAGMENTS = (
     "api_key",
     "apikey",
@@ -96,6 +114,7 @@ _SECRET_KEY_FRAGMENTS = (
     "credential",
     "authorization",
     "private_key",
+    "signature",
 )
 _STACK_TOOL_ACTIONS = {"CreateStack", "UpdateStack", "ContinueCreateStack", "DeleteStack"}
 _STACK_CLEAR_ACTIONS = {"DeleteStack"}
@@ -501,8 +520,9 @@ class PipelineEventTranslator:
         return events
 
     def _translate_sub_pipeline_stream_event(self, event: SubPipelineStreamEvent) -> list[dict[str, Any]]:
-        state = self._candidate_from_stream_event(event)
-        inner = event.inner
+        stream_event = _innermost_sub_pipeline_stream_event(event)
+        state = self._candidate_from_stream_event(stream_event)
+        inner = stream_event.inner
         if isinstance(inner, TextDeltaEvent):
             event_type = "text_delta"
             data = {"text": inner.text}
@@ -1181,19 +1201,28 @@ def _permission_request_metadata(event: PermissionRequestEvent) -> dict[str, Any
     return safe_permission_metadata(event)
 
 
+def _innermost_sub_pipeline_stream_event(event: SubPipelineStreamEvent) -> SubPipelineStreamEvent:
+    while isinstance(event.inner, SubPipelineStreamEvent):
+        event = event.inner
+    return event
+
+
 def safe_permission_metadata(
     event: PermissionRequestEvent,
     *,
     include_tool_input: bool = True,
 ) -> dict[str, Any]:
-    metadata = {
+    metadata: dict[str, Any] = {
         "permissionId": f"perm-{event.tool_use_id}",
         "toolName": event.tool_name,
         "toolUseId": event.tool_use_id,
         "safeSummary": _permission_safe_summary(event),
     }
     if include_tool_input:
-        metadata["toolInput"] = _redact_permission_value(event.tool_input)
+        if event.tool_name == "aliyun_api":
+            metadata["inputSummary"] = build_input_summary(event.tool_name, event.tool_input)
+        else:
+            metadata["toolInput"] = build_redacted_tool_input(event.tool_input)
     return metadata
 
 
@@ -1219,21 +1248,6 @@ def _permission_safe_summary(event: PermissionRequestEvent) -> str:
     return summary[: _PERMISSION_SUMMARY_MAX_CHARS - 3] + "..."
 
 
-def _redact_permission_value(value: Any, *, _depth: int = 0) -> Any:
-    if _depth >= _PERMISSION_METADATA_MAX_DEPTH:
-        return "[truncated-depth]"
-    if isinstance(value, str):
-        return sanitize_public_artifact_text(value)[:_PERMISSION_METADATA_MAX_CHARS]
-    if isinstance(value, dict):
-        return {
-            str(key): "[redacted]" if _is_secret_key(key) else _redact_permission_value(item, _depth=_depth + 1)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_permission_value(item, _depth=_depth + 1) for item in value]
-    return _truncate(value, _depth=_depth)
-
-
 def _is_secret_key(key: Any) -> bool:
     normalized = str(key).lower().replace("-", "_")
     compact = normalized.replace("_", "")
@@ -1241,7 +1255,10 @@ def _is_secret_key(key: Any) -> bool:
 
 
 def _safe_permission_field_name(key: Any) -> str:
-    return "[redacted]" if _is_secret_key(key) else str(key)
+    if _is_secret_key(key):
+        return "[redacted]"
+    text = str(key)
+    return text if text in _SAFE_PERMISSION_SUMMARY_FIELDS else fingerprint_text(text)
 
 
 def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:

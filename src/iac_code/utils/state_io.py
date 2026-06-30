@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import sys
@@ -15,6 +16,7 @@ from typing import Any, Iterator
 
 from iac_code.utils.path_locks import PathLockRegistry
 
+logger = logging.getLogger(__name__)
 _PATH_LOCKS = PathLockRegistry()
 
 
@@ -198,3 +200,70 @@ def append_jsonl_locked(
                     os.fsync(handle.fileno())
             if durable and created:
                 fsync_parent_dir(target)
+
+
+def _rotate_jsonl_files(target: Path, *, max_file_bytes: int, max_files: int, pending_bytes: int = 0) -> None:
+    if max_file_bytes <= 0 or max_files <= 0:
+        return
+    if not target.exists():
+        return
+    current_size = target.stat().st_size
+    if pending_bytes > 0:
+        if current_size + pending_bytes <= max_file_bytes:
+            return
+    elif current_size < max_file_bytes:
+        return
+    oldest = target.with_name(f"{target.name}.{max_files}")
+    if oldest.exists():
+        oldest.unlink()
+    for index in range(max_files - 1, 0, -1):
+        current = target.with_name(f"{target.name}.{index}")
+        if current.exists():
+            current.replace(target.with_name(f"{target.name}.{index + 1}"))
+    target.replace(target.with_name(f"{target.name}.1"))
+
+
+def append_jsonl_rotating_locked(
+    path: str | Path,
+    records: Iterable[dict[str, Any]],
+    *,
+    max_file_bytes: int,
+    max_files: int,
+    durable: bool = False,
+    create_mode: int | None = None,
+) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n" for record in records
+    ]
+    if not lines:
+        return
+    with _path_lock(target):
+        with _cross_process_append_lock(target):
+            try:
+                pending_bytes = sum(len(line.encode("utf-8")) for line in lines)
+                _rotate_jsonl_files(
+                    target,
+                    max_file_bytes=max_file_bytes,
+                    max_files=max_files,
+                    pending_bytes=pending_bytes,
+                )
+            except OSError as exc:
+                logger.warning("Could not rotate JSONL file %s; appending to active file: %s", target, exc)
+            created = not target.exists()
+            with _open_append_binary(target, create_mode=create_mode) as handle:
+                for line in lines:
+                    handle.write(line.encode("utf-8"))
+                handle.flush()
+                if durable:
+                    os.fsync(handle.fileno())
+            if durable and created:
+                fsync_parent_dir(target)
+
+
+def _open_append_binary(path: Path, *, create_mode: int | None = None):
+    if create_mode is None:
+        return path.open("ab")
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, create_mode)
+    return os.fdopen(fd, "ab")

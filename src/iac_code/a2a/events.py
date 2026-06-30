@@ -25,11 +25,19 @@ from iac_code.a2a.artifacts import (
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.i18n import _
+from iac_code.services.permissions.audit import (
+    build_input_summary,
+    build_redacted_tool_input,
+    emit_auto_permission_audit,
+    emit_permission_boundary_audit,
+    is_aliyun_api_non_read_only_permission_event,
+)
 from iac_code.types.stream_events import (
     ErrorEvent,
     MCPProgressEvent,
     MessageEndEvent,
     PermissionRequestEvent,
+    SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolInputDeltaEvent,
@@ -75,6 +83,22 @@ def _truncate(value: Any, *, _depth: int = 0) -> Any:
 
 def _sanitize_trace_input(value: Any) -> Any:
     return _METADATA_REDACTOR.redact(_truncate(value))
+
+
+def _public_tool_input_metadata(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    return {"inputSummary": build_input_summary(tool_name, tool_input)}
+
+
+def _public_permission_input_metadata(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    if tool_name == "aliyun_api":
+        return {"inputSummary": build_input_summary(tool_name, tool_input)}
+    return {"toolInput": build_redacted_tool_input(tool_input)}
+
+
+def _permission_request_event(event: Any) -> PermissionRequestEvent | None:
+    while isinstance(event, SubPipelineStreamEvent):
+        event = event.inner
+    return event if isinstance(event, PermissionRequestEvent) else None
 
 
 def make_text_part(text: str) -> Part:
@@ -285,7 +309,7 @@ async def publish_stream_event(
                     "tool": {
                         "status": "input_delta",
                         "toolUseId": event.tool_use_id,
-                        "partialJson": _truncate(event.partial_json),
+                        "partialJsonLength": len(event.partial_json),
                     }
                 }
             },
@@ -307,7 +331,7 @@ async def publish_stream_event(
                         "status": "input_complete",
                         "toolUseId": event.tool_use_id,
                         "name": event.name,
-                        "input": _sanitize_trace_input(event.input),
+                        **_public_tool_input_metadata(event.name, event.input),
                     }
                 }
             },
@@ -369,13 +393,23 @@ async def publish_stream_event(
         )
         return None
 
-    if isinstance(event, PermissionRequestEvent):
+    permission_event = _permission_request_event(event)
+    if permission_event is not None:
         approved = auto_approve_permissions
         if permission_resolver is not None:
-            decision = permission_resolver(event)
+            decision = permission_resolver(permission_event)
             approved = bool(await decision) if inspect.isawaitable(decision) else bool(decision)
-        if event.response_future is not None and not event.response_future.done():
-            event.response_future.set_result(approved)
+        elif is_aliyun_api_non_read_only_permission_event(permission_event):
+            approved = False
+        if permission_event.response_future is not None and not permission_event.response_future.done():
+            audit_ok = True
+            if permission_resolver is not None:
+                audit_ok = _emit_resolver_permission_audit(permission_event, approved)
+            else:
+                audit_ok = _emit_auto_permission_audit(permission_event, approved)
+            if approved and not audit_ok:
+                approved = False
+            permission_event.response_future.set_result(approved)
         if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
             return None
         await _enqueue_status(
@@ -387,9 +421,9 @@ async def publish_stream_event(
                 "iac_code": {
                     "permission": {
                         "autoApproved": approved,
-                        "toolName": event.tool_name,
-                        "toolUseId": event.tool_use_id,
-                        "toolInput": _sanitize_trace_input(event.tool_input),
+                        "toolName": permission_event.tool_name,
+                        "toolUseId": permission_event.tool_use_id,
+                        **_public_permission_input_metadata(permission_event.tool_name, permission_event.tool_input),
                     }
                 }
             },
@@ -440,3 +474,50 @@ async def publish_stream_event(
 
     logger.debug("Skipping unmapped A2A stream event: %s", type(event).__name__)
     return None
+
+
+def _emit_auto_permission_audit(
+    request: PermissionRequestEvent,
+    approved: bool,
+    *,
+    persistence_failure: bool = False,
+) -> bool:
+    if persistence_failure:
+        return emit_permission_boundary_audit(
+            request,
+            decision="deny",
+            scope="auto_deny",
+            source="a2a_auto_persistence_failure",
+            reason_type="persistence_failure",
+            reason_detail="permission metadata persistence failed",
+        )
+    source = "a2a_auto_approve" if approved else "a2a_auto_deny"
+    return emit_auto_permission_audit(
+        request,
+        decision="allow" if approved else "deny",
+        scope="auto_approve" if approved else "auto_deny",
+        source=source,
+    )
+
+
+def _emit_resolver_permission_audit(
+    request: PermissionRequestEvent,
+    approved: bool,
+    *,
+    persistence_failure: bool = False,
+) -> bool:
+    source = "a2a_resolver"
+    reason_type = "a2a_resolver"
+    reason_detail = "allow" if approved else "deny"
+    if persistence_failure:
+        source = "a2a_resolver_persistence_failure"
+        reason_type = "persistence_failure"
+        reason_detail = "permission metadata persistence failed"
+    return emit_permission_boundary_audit(
+        request,
+        decision="allow" if approved else "deny",
+        scope="a2a_resolver",
+        source=source,
+        reason_type=reason_type,
+        reason_detail=reason_detail,
+    )

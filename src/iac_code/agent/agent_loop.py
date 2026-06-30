@@ -17,10 +17,19 @@ from loguru import logger
 from iac_code.agent.message import ContentBlock, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
 from iac_code.i18n import _
 from iac_code.services.context_manager import ContextManager
+from iac_code.services.permissions.audit import (
+    PermissionAuditRecord,
+    build_input_summary,
+    emit_permission_audit,
+    is_routine_read_only_allow,
+    permission_audit_operation,
+    redacted_tool_input_for_settings,
+)
 from iac_code.services.session_usage import SessionUsageStore, SessionUsageTotals
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.result_storage import ResultStorage
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
+from iac_code.types.permissions import PermissionAuditSettings, PermissionResult
 from iac_code.types.stream_events import (
     CompactionEvent,
     MessageEndEvent,
@@ -91,6 +100,39 @@ def _with_trusted_read_directories(permission_context: Any, directories: list[st
     if len(trusted_read_directories) == original_count:
         return permission_context
     return replace(permission_context, trusted_read_directories=trusted_read_directories)
+
+
+def _emit_no_prompt_permission_audit(
+    *,
+    session_id: str,
+    request: ToolCallRequest,
+    permission: PermissionResult,
+    decision: Literal["allow", "deny"],
+    settings: PermissionAuditSettings | None,
+) -> bool:
+    audit = permission.audit
+    if audit is None or is_routine_read_only_allow(decision, audit):
+        return True
+
+    result = emit_permission_audit(
+        PermissionAuditRecord(
+            session_id=session_id,
+            tool_name=request.name,
+            tool_use_id=request.id,
+            decision=decision,
+            scope=audit.scope,
+            source=audit.source,
+            rule_source=audit.rule_source,
+            rule=audit.rule,
+            reason_type=audit.reason_type,
+            reason_detail=audit.reason_detail,
+            operation=permission_audit_operation(audit),
+            input_summary=build_input_summary(request.name, request.input),
+            tool_input_redacted=redacted_tool_input_for_settings(request.input, settings),
+        ),
+        settings=settings,
+    )
+    return result is not False
 
 
 def _filter_recalled_memory_content(content: str, selected_files: list[str]) -> str:
@@ -975,10 +1017,33 @@ class AgentLoop:
                     else:
                         permission = await tool.check_permissions(request.input, {"cwd": context.cwd})
 
+                    audit_context = {
+                        "session_id": self._session_id,
+                        "settings": perm_ctx.audit_settings if perm_ctx is not None else None,
+                        "metadata": permission.audit,
+                    }
+
                     if permission.behavior == "allow":
+                        audit_ok = _emit_no_prompt_permission_audit(
+                            session_id=self._session_id,
+                            request=request,
+                            permission=permission,
+                            decision="allow",
+                            settings=audit_context["settings"],
+                        )
+                        if not audit_ok:
+                            denied_results.append((request, ToolResult.error(_("Permission denied."))))
+                            continue
                         allowed_requests.append(request)
                         continue
                     if permission.behavior == "deny":
+                        _emit_no_prompt_permission_audit(
+                            session_id=self._session_id,
+                            request=request,
+                            permission=permission,
+                            decision="deny",
+                            settings=audit_context["settings"],
+                        )
                         msg = permission.message or _("Permission denied.")
                         denied_results.append((request, ToolResult.error(msg)))
                         continue
@@ -990,6 +1055,7 @@ class AgentLoop:
                         tool_use_id=request.id,
                         response_future=response_future,
                         permission_result=permission,
+                        audit_context=audit_context,
                     )
                     try:
                         approved = await asyncio.shield(response_future)

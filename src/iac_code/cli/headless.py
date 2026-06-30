@@ -20,6 +20,9 @@ from loguru import logger
 from iac_code.cli.output_formats import OutputFormat, create_writer
 from iac_code.i18n import _
 from iac_code.providers.manager import ProviderNotConfiguredError
+from iac_code.services.permissions.audit import emit_auto_permission_audit, is_aliyun_api_non_read_only_permission_event
+from iac_code.services.telemetry import graceful_shutdown, log_event
+from iac_code.services.telemetry.names import Events
 from iac_code.types.stream_events import (
     ErrorEvent,
     MCPProgressEvent,
@@ -28,6 +31,7 @@ from iac_code.types.stream_events import (
     StackInstancesProgressEvent,
     StackProgressEvent,
     SubAgentToolEvent,
+    SubPipelineStreamEvent,
     ToolResultEvent,
     ToolUseStartEvent,
 )
@@ -92,6 +96,14 @@ def _format_mcp_progress(event: MCPProgressEvent) -> str:
     if event.message:
         parts.append(event.message)
     return ": ".join(parts)
+
+
+def _permission_request_event(event: Any) -> PermissionRequestEvent | None:
+    if isinstance(event, PermissionRequestEvent):
+        return event
+    if isinstance(event, SubPipelineStreamEvent):
+        return _permission_request_event(event.inner)
+    return None
 
 
 class HeadlessRunner:
@@ -171,9 +183,6 @@ class HeadlessRunner:
 
     async def run(self, prompt: str) -> int:
         """Execute a single prompt to completion and return an exit code."""
-        from iac_code.services.telemetry import graceful_shutdown, log_event
-        from iac_code.services.telemetry.names import Events
-
         started = time.monotonic()
         start_background_housekeeping()
 
@@ -188,19 +197,19 @@ class HeadlessRunner:
             self._print_mcp_config_warnings()
             async for event in agent_loop.run_streaming(prompt):
                 self._print_mcp_config_warnings()
-                if isinstance(event, PermissionRequestEvent):
-                    if event.response_future is not None:
-                        from iac_code.services.telemetry import log_event
-                        from iac_code.services.telemetry.names import Events
-
-                        log_event(
-                            Events.TOOL_USE_GRANTED_IN_PROMPT,
-                            {
-                                "tool_name": event.tool_name,
-                                "scope": "once",
-                            },
+                permission_event = _permission_request_event(event)
+                if permission_event is not None:
+                    if permission_event.response_future is not None and not permission_event.response_future.done():
+                        approved = not is_aliyun_api_non_read_only_permission_event(permission_event)
+                        audit_ok = emit_auto_permission_audit(
+                            permission_event,
+                            decision="allow" if approved else "deny",
+                            scope="auto_approve" if approved else "auto_deny",
+                            source="headless_auto_approve" if approved else "headless_auto_deny",
                         )
-                        event.response_future.set_result(True)
+                        if approved and not audit_ok:
+                            approved = False
+                        permission_event.response_future.set_result(approved)
                     continue
 
                 if isinstance(event, ErrorEvent):

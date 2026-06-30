@@ -52,6 +52,8 @@ CLI 引数 > 環境変数 > 設定ファイル
 | 変数 | 説明 |
 |---|---|
 | `IAC_CODE_CONFIG_DIR` | ランタイム設定ディレクトリを上書き（デフォルト `~/.iac-code/`）。`~` と `$VAR` の展開をサポート。永続化されるすべての成果物（認証情報、設定、履歴、projects、image-cache、skills、telemetry など）はこのディレクトリに従います |
+| `IAC_CODE_LOG_DIR` | ローカルの起動/デバッグログディレクトリを上書き（デフォルト `<config-dir>/logs/`）。`~` と `$VAR` の展開をサポート。権限監査レコードは引き続き `<config-dir>/logs/permission-audit.jsonl` に保存されます |
+| `IAC_CODE_PERMISSION_AUDIT_INCLUDE_TOOL_INPUT` | `permissions.audit.include_tool_input` を上書きします。`1` / `true` / `yes` / `on` に設定すると、権限監査レコードに形状のみのツール入力を含め、業務 payload の生文字列の代わりに型/長さ/フィンガープリントを記録し、ホワイトリスト外のフィールド名もフィンガープリント化します |
 | `IAC_CODE_ENV` | デプロイ環境ラベル（デフォルト：`production`） |
 | `IAC_CODE_TENANT_ID` | テレメトリ用テナント識別子。`iac_tenant_` プレフィックスが付いていない場合は自動的に付加されます |
 | `IAC_CODE_GIT_BASH_PATH` | Windows で Git Bash が PATH にない場合の `bash.exe` パス |

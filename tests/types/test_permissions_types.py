@@ -86,6 +86,19 @@ class TestPermissionResultExtended:
         assert result.behavior == "passthrough"
 
 
+def test_permission_audit_metadata_defaults_to_safe_values() -> None:
+    from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
+
+    metadata = PermissionAuditMetadata(scope="settings_rule", source="permission_pipeline")
+    result = PermissionResult(behavior="allow", audit=metadata)
+
+    assert result.audit is metadata
+    assert result.audit.scope == "settings_rule"
+    assert result.audit.source == "permission_pipeline"
+    assert result.audit.rule_source is None
+    assert result.audit.is_read_only is None
+
+
 class TestPermissionDecisionReason:
     def test_creation(self) -> None:
         reason = PermissionDecisionReason(type="rule", detail="matched bash(git *)")
@@ -131,3 +144,14 @@ class TestToolPermissionContext:
         for rules in ctx.allow_rules.values():
             all_allow.extend(rules)
         assert len(all_allow) == 2
+
+
+def test_tool_permission_context_carries_audit_settings() -> None:
+    from iac_code.types.permissions import PermissionAuditSettings, ToolPermissionContext
+
+    settings = PermissionAuditSettings(include_tool_input=True, max_file_bytes=4096, max_files=2)
+    context = ToolPermissionContext(cwd="/tmp/project", audit_settings=settings)
+
+    assert context.audit_settings.include_tool_input is True
+    assert context.audit_settings.max_file_bytes == 4096
+    assert context.audit_settings.max_files == 2

@@ -28,10 +28,18 @@ from iac_code.agent.message import (
     is_recalled_memory_message,
 )
 from iac_code.commands.registry import PromptCommand
+from iac_code.i18n import _
+from iac_code.services.permissions.audit import (
+    build_input_summary,
+    build_prompt_tool_input,
+    emit_permission_boundary_audit,
+    is_permission_audit_non_read_only,
+    should_fail_closed_permission_audit,
+)
 from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
 from iac_code.types.permissions import PermissionDecision
-from iac_code.types.stream_events import PermissionRequestEvent
+from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
 from iac_code.utils.public_errors import public_error
 
 logger = logging.getLogger(__name__)
@@ -81,6 +89,33 @@ def _history_tool_result_text(value: Any) -> str:
     if isinstance(sanitized, str):
         return sanitized
     return json.dumps(sanitized, ensure_ascii=False, default=str)
+
+
+def _history_tool_input_text(tool_name: str, tool_input: dict[str, Any]) -> str:
+    if not tool_input:
+        return ""
+    return _display_tool_input_text(tool_name, tool_input)
+
+
+def _display_tool_input_text(tool_name: str, tool_input: dict[str, Any]) -> str:
+    if tool_name != "aliyun_api":
+        tool_input_redacted = json.dumps(
+            build_prompt_tool_input(tool_input),
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        return _("Input: {input}").format(input=tool_input_redacted)
+    summary = json.dumps(build_input_summary(tool_name, tool_input), ensure_ascii=False, sort_keys=True)
+    return _("Input summary: {summary}").format(summary=summary)
+
+
+def _permission_request_event(event: Any) -> PermissionRequestEvent | None:
+    if isinstance(event, PermissionRequestEvent):
+        return event
+    if isinstance(event, SubPipelineStreamEvent):
+        return _permission_request_event(event.inner)
+    return None
 
 
 def _history_message_to_updates(
@@ -179,7 +214,7 @@ def _history_message_to_updates(
                     status="pending",
                 )
             )
-            input_text = json.dumps(block.input, ensure_ascii=False) if block.input else ""
+            input_text = _history_tool_input_text(block.name, block.input)
             updates.append(
                 acp.schema.ToolCallProgress(
                     session_update="tool_call_update",
@@ -407,10 +442,11 @@ class ACPSession:
             logger.debug("Prompt started, session_id=%s, turn_id=%s", self.id, turn_id)
             with use_session_id(self.id):
                 async for event in stream_factory():
-                    if isinstance(event, PermissionRequestEvent):
-                        allowed = await self._request_permission(event)
-                        if event.response_future is not None and not event.response_future.done():
-                            event.response_future.set_result(allowed)
+                    permission_event = _permission_request_event(event)
+                    if permission_event is not None:
+                        allowed = await self._request_permission(permission_event)
+                        if permission_event.response_future is not None and not permission_event.response_future.done():
+                            permission_event.response_future.set_result(allowed)
                         continue
 
                     for update in converter.event_to_updates(event):
@@ -545,10 +581,41 @@ class ACPSession:
 
     async def _request_permission(self, event: PermissionRequestEvent) -> bool:
         tool_name = event.tool_name
+        is_non_read_only = is_permission_audit_non_read_only(event)
+
+        def _rule_from_option(option_id: str, prefix: str) -> str | None:
+            rules_str = option_id[len(prefix) :]
+            if not rules_str:
+                return None
+            return ", ".join(f"{tool_name}({rule.strip()})" for rule in rules_str.split(",") if rule.strip())
+
+        def _prompt_option_reason(option_id: str) -> str:
+            if option_id.startswith(_PREFIX_ALLOW_RULE):
+                return _PREFIX_ALLOW_RULE.rstrip(":")
+            if option_id.startswith(_PREFIX_DENY_RULE):
+                return _PREFIX_DENY_RULE.rstrip(":")
+            return option_id
 
         # Check permission cache first; helper marks the entry as recently-used.
         cached = lookup_permission(self._permission_cache, tool_name)
+        if cached == "always_allow" and tool_name == "aliyun_api" and is_non_read_only:
+            self._permission_cache.pop(tool_name, None)
+            cached = None
+        cached_audit_ok = True
+        if cached in ("always_allow", "always_deny"):
+            cached_audit_ok = emit_permission_boundary_audit(
+                event,
+                session_id=self.id,
+                decision="allow" if cached == "always_allow" else "deny",
+                scope="tool_cache",
+                source="acp_tool_cache",
+                rule_source="tool_cache",
+                reason_type="tool_cache",
+                reason_detail=cached,
+            )
         if cached == "always_allow":
+            if not cached_audit_ok and should_fail_closed_permission_audit(event, "allow"):
+                return False
             logger.debug("Permission auto-allowed for tool %s (cached)", tool_name)
             return True
         if cached == "always_deny":
@@ -568,7 +635,7 @@ class ACPSession:
         options: list[acp.schema.PermissionOption] = [
             acp.schema.PermissionOption(
                 option_id=_OPTION_ALLOW_ONCE,
-                name="Allow once",
+                name=_("Allow once"),
                 kind="allow_once",
             ),
         ]
@@ -578,7 +645,7 @@ class ACPSession:
             options.append(
                 acp.schema.PermissionOption(
                     option_id=_PREFIX_ALLOW_RULE + rules_display,
-                    name='Always allow "{}" (this session)'.format(rules_display),
+                    name=_('Always allow "{rule}" (this session)').format(rule=rules_display),
                     kind="allow_always",
                 )
             )
@@ -586,7 +653,7 @@ class ACPSession:
             options.append(
                 acp.schema.PermissionOption(
                     option_id=_OPTION_ALLOW_ALWAYS,
-                    name="Always allow this tool",
+                    name=_("Always allow this tool"),
                     kind="allow_always",
                 )
             )
@@ -594,7 +661,7 @@ class ACPSession:
         options.append(
             acp.schema.PermissionOption(
                 option_id=_OPTION_REJECT_ONCE,
-                name="Reject once",
+                name=_("Reject once"),
                 kind="reject_once",
             )
         )
@@ -604,7 +671,7 @@ class ACPSession:
             options.append(
                 acp.schema.PermissionOption(
                     option_id=_PREFIX_DENY_RULE + rules_display,
-                    name='Always deny "{}" (this session)'.format(rules_display),
+                    name=_('Always deny "{rule}" (this session)').format(rule=rules_display),
                     kind="reject_always",
                 )
             )
@@ -612,16 +679,39 @@ class ACPSession:
         options.append(
             acp.schema.PermissionOption(
                 option_id=_OPTION_REJECT_ALWAYS,
-                name="Always reject this tool",
+                name=_("Always reject this tool"),
                 kind="reject_always",
             ),
         )
+        offered_option_ids = {option.option_id for option in options}
 
         # Build content with command details and suggested rule.
         tool_title = display_tool_title(tool_name)
-        content_text = "Approve tool call: {}\nInput: {}".format(tool_title, event.tool_input)
+        if tool_name == "aliyun_api":
+            input_summary = json.dumps(
+                build_input_summary(tool_name, event.tool_input),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            content_text = _("Approve tool call: {tool}\nInput summary: {summary}").format(
+                tool=tool_title,
+                summary=input_summary,
+            )
+        else:
+            tool_input_redacted = json.dumps(
+                build_prompt_tool_input(event.tool_input),
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            content_text = _("Approve tool call: {tool}\nInput: {input}").format(
+                tool=tool_title,
+                input=tool_input_redacted,
+            )
         if suggestions:
-            content_text += "\nSuggested rule: {}".format(",".join(s.rule_content for s in suggestions))
+            content_text += "\n" + _("Suggested rule: {rule}").format(
+                rule=",".join(s.rule_content for s in suggestions)
+            )
 
         response = await self._conn.request_permission(
             options,
@@ -643,12 +733,45 @@ class ACPSession:
 
         # Interpret the outcome and update permission state.
         if isinstance(response.outcome, acp.schema.AllowedOutcome):
-            option_id = response.outcome.option_id
+            option_id = response.outcome.option_id or _OPTION_ALLOW_ONCE
+            if option_id not in offered_option_ids:
+                emit_permission_boundary_audit(
+                    event,
+                    session_id=self.id,
+                    decision="deny",
+                    scope="once",
+                    source="acp_prompt",
+                    reason_type="invalid_option",
+                    reason_detail="invalid_option",
+                )
+                return False
+            audit_scope = "once"
+            audit_rule = None
+            cache_decision: PermissionDecision | None = None
+            allow_rules_str: str | None = None
             if option_id == _OPTION_ALLOW_ALWAYS:
-                self._cache_permission(tool_name, "always_allow")
+                cache_decision = "always_allow"
+                audit_scope = "tool_cache"
             elif option_id and option_id.startswith(_PREFIX_ALLOW_RULE):
-                rules_str = option_id[len(_PREFIX_ALLOW_RULE) :]
-                self._apply_rule(tool_name, rules_str, "allow")
+                allow_rules_str = option_id[len(_PREFIX_ALLOW_RULE) :]
+                audit_scope = "session_rule"
+                audit_rule = _rule_from_option(option_id, _PREFIX_ALLOW_RULE)
+            audit_ok = emit_permission_boundary_audit(
+                event,
+                session_id=self.id,
+                decision="allow",
+                scope=audit_scope,
+                source="acp_prompt",
+                reason_type="prompt_selection",
+                reason_detail=_prompt_option_reason(option_id),
+                rule=audit_rule,
+            )
+            if not audit_ok and should_fail_closed_permission_audit(event, "allow"):
+                return False
+            if cache_decision is not None:
+                self._cache_permission(tool_name, cache_decision)
+            if allow_rules_str is not None:
+                self._apply_rule(tool_name, allow_rules_str, "allow")
             return True
 
         # DeniedOutcome — parse option_id from meta or direct field.
@@ -657,12 +780,30 @@ class ACPSession:
             if option_id is None:
                 resp_meta = getattr(response, "field_meta", None) or {}
                 option_id = resp_meta.get("option_id")
+            option_id = option_id or _OPTION_REJECT_ONCE
+            if option_id not in offered_option_ids:
+                option_id = _OPTION_REJECT_ONCE
 
+            audit_scope = "once"
+            audit_rule = None
             if option_id == _OPTION_REJECT_ALWAYS:
                 self._cache_permission(tool_name, "always_deny")
+                audit_scope = "tool_cache"
             elif option_id and option_id.startswith(_PREFIX_DENY_RULE):
                 rules_str = option_id[len(_PREFIX_DENY_RULE) :]
                 self._apply_rule(tool_name, rules_str, "deny")
+                audit_scope = "session_rule"
+                audit_rule = _rule_from_option(option_id, _PREFIX_DENY_RULE)
+            emit_permission_boundary_audit(
+                event,
+                session_id=self.id,
+                decision="deny",
+                scope=audit_scope,
+                source="acp_prompt",
+                reason_type="prompt_selection",
+                reason_detail=_prompt_option_reason(option_id),
+                rule=audit_rule,
+            )
 
         return False
 

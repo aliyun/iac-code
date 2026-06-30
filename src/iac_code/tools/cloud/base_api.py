@@ -83,6 +83,8 @@ class BaseCloudApi(Tool):
         if input is None:
             return False
         action = input.get("action", "")
+        if not isinstance(action, str):
+            return False
         return action.startswith(("Get", "List", "Describe", "Query", "Validate"))
 
     def is_concurrency_safe(self, tool_input: dict[str, Any]) -> bool:

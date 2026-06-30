@@ -258,7 +258,7 @@ thinking-exposure:
 |--------|---------|-------------|
 | `auto-approve-permissions` | `false` | Approuver automatiquement les demandes d'autorisation d'outil levées pendant les tours A2A |
 
-Sans `auto-approve-permissions: true`, le mode A2A rejette les prompts d'autorisation et émet des métadonnées d'autorisation. Utilisez-le seulement pour les environnements d'automatisation de confiance.
+Sans `auto-approve-permissions: true`, le mode A2A rejette les prompts d'autorisation et émet des métadonnées d'autorisation. Lorsqu'il est activé, les décisions de permissions sont écrites dans le journal local d'audit des permissions ; toute décision allow nécessitant un enregistrement d'audit échoue en mode fail-closed si cet enregistrement ne peut pas être persisté. Les API d'écriture Alibaba Cloud protégées ne sont pas approuvées globalement par des règles allow ordinaires ; configurez des règles allow exactes `aliyun_api(product:action)` pour l'automatisation de confiance.
 
 ## `iac-code a2a-client call`
 

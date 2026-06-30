@@ -8,6 +8,7 @@ import pytest
 
 from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI, PipelineA2AContext, PipelineEventTranslator
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.types.stream_events import (
     CandidateDetailEvent,
     DiagramEvent,
@@ -29,6 +30,14 @@ def _ctx() -> PipelineA2AContext:
         parent_step_order=["intent_parsing", "architecture_planning", "evaluate_candidates", "confirm_and_select"],
         candidate_step_order=["template_generating", "cost_estimating", "reviewing"],
     )
+
+
+def _has_truncated_object(value: object) -> bool:
+    if isinstance(value, dict):
+        if value.get("type") == "object" and value.get("truncated") is True:
+            return True
+        return any(_has_truncated_object(child) for child in value.values())
+    return False
 
 
 def test_pipeline_started_has_stable_envelope() -> None:
@@ -564,6 +573,45 @@ def test_candidate_stream_text_has_parent_and_candidate_coordinates() -> None:
     assert envelopes[0]["candidate"]["runId"] == "candidate-evaluate_candidate_abcd-0-1"
     assert envelopes[0]["candidate"]["index"] == 0
     assert envelopes[0]["data"]["text"] == "hello"
+
+
+def test_nested_sub_pipeline_permission_request_uses_inner_candidate_scope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_inner",
+                "candidate_index": 0,
+                "candidate_name": "candidate",
+                "parent_step_id": "evaluate_candidates",
+            },
+        )
+    )
+
+    envelopes = translator.translate(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="evaluate_candidate_outer",
+            candidate_index=1,
+            inner=SubPipelineStreamEvent(
+                sub_pipeline_id="evaluate_candidate_inner",
+                candidate_index=0,
+                inner=PermissionRequestEvent(
+                    tool_name="aliyun_api",
+                    tool_input={"product": "ros", "action": "CreateStack"},
+                    tool_use_id="toolu-nested",
+                ),
+            ),
+        )
+    )
+
+    assert envelopes[0]["eventType"] == "permission_requested"
+    assert envelopes[0]["scope"] == "candidate"
+    assert envelopes[0]["candidate"]["runId"] == "candidate-evaluate_candidate_inner-0-1"
+    assert envelopes[0]["permission"]["toolName"] == "aliyun_api"
+    assert envelopes[0]["permission"]["inputSummary"]["tool_name"] == "aliyun_api"
 
 
 def test_candidate_started_includes_candidate_step_skeleton() -> None:
@@ -1251,7 +1299,7 @@ def test_stack_current_changed_does_not_clear_current_stack_after_failed_delete(
     assert "cleared" not in stack_event["data"]
 
 
-def test_permission_request_metadata_redacts_and_truncates_tool_input_size_and_depth() -> None:
+def test_permission_request_metadata_uses_shape_only_tool_input() -> None:
     nested: object = "leaf"
     for _ in range(80):
         nested = {"next": nested}
@@ -1265,31 +1313,62 @@ def test_permission_request_metadata_redacts_and_truncates_tool_input_size_and_d
         )
     )[0]
 
-    assert envelope["permission"]["safeSummary"] == "bash permission request (fields: [redacted], cmd, nested)"
+    assert envelope["permission"]["safeSummary"] == (
+        "bash permission request (fields: [redacted], cmd, {})".format(fingerprint_text("nested"))
+    )
     tool_input = envelope["permission"]["toolInput"]
-    assert len(tool_input["cmd"]) == 4000
-    assert tool_input["api_key"] == "[redacted]"
-    current = tool_input["nested"]
-    while isinstance(current, dict):
-        current = current["next"]
-    assert current == "[truncated-depth]"
+    assert tool_input["cmd"] == {
+        "type": "str",
+        "length": 5000,
+        "fingerprint": fingerprint_text("x" * 5000),
+    }
+    assert tool_input[fingerprint_text("api_key")] == {"redacted": True}
+    assert _has_truncated_object(tool_input[fingerprint_text("nested")])
     assert "secret-value" not in str(envelope)
+
+
+def test_permission_request_safe_summary_fingerprints_business_field_names() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelope = translator.translate(
+        PermissionRequestEvent(
+            tool_name="bash",
+            tool_input={
+                "/Users/alice/.iac-code/settings.yml": "value",
+                "alice@example.com": "value",
+                "customer-prod-123": "value",
+                "token=secret-token": "value",
+                "command": "git status",
+            },
+            tool_use_id="toolu-1",
+        )
+    )[0]
+
+    summary = envelope["permission"]["safeSummary"]
+    assert "command" in summary
+    assert "[redacted]" in summary
+    assert fingerprint_text("/Users/alice/.iac-code/settings.yml") in summary
+    assert fingerprint_text("alice@example.com") in summary
+    assert fingerprint_text("customer-prod-123") in summary
+    assert "/Users/alice" not in summary
+    assert "alice@example.com" not in summary
+    assert "customer-prod-123" not in summary
+    assert "token=secret-token" not in summary
 
 
 def test_permission_request_metadata_redacts_secret_strings_in_safe_keys() -> None:
     translator = PipelineEventTranslator(_ctx())
     malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"
     encoded_path = "file%3A%2F%2F%2FUsers%2Falice%2F.iac-code%2Fprojects%2Fdemo%2Ftemplate.yaml"
+    cmd = (
+        f"cat /Users/alice/.iac-code/settings.yml && cat {malformed_uri} && cat {encoded_path} "
+        '&& curl -H "Authorization: Bearer sk-live-secret"'
+    )
 
     envelope = translator.translate(
         PermissionRequestEvent(
             tool_name="bash",
-            tool_input={
-                "cmd": (
-                    f"cat /Users/alice/.iac-code/settings.yml && cat {malformed_uri} && cat {encoded_path} "
-                    '&& curl -H "Authorization: Bearer sk-live-secret"'
-                )
-            },
+            tool_input={"cmd": cmd},
             tool_use_id="toolu-1",
         )
     )[0]
@@ -1298,14 +1377,49 @@ def test_permission_request_metadata_redacts_secret_strings_in_safe_keys() -> No
     assert "sk-live-secret" not in str(tool_input)
     assert "Authorization: Bearer" not in str(tool_input)
     assert "/Users/alice" not in str(tool_input)
-    assert "[REDACTED]" in str(tool_input)
-    assert "[PATH]" in str(tool_input)
-    assert "iac-code-artifac[PATH]" not in str(tool_input)
+    assert tool_input["cmd"] == {
+        "type": "str",
+        "length": len(cmd),
+        "fingerprint": fingerprint_text(cmd),
+    }
     assert "%2FUsers" not in str(tool_input)
     assert "Users" not in str(tool_input)
 
 
-@pytest.mark.parametrize("sensitive_key", ["pwd", "passphrase", "auth", "cookie", "session", "session_id"])
+def test_aliyun_permission_request_metadata_uses_summary_for_sensitive_safe_fields() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    pem = "-----BEGIN PRIVATE KEY-----\nprivate-body\n-----END PRIVATE KEY-----"
+
+    envelope = translator.translate(
+        PermissionRequestEvent(
+            tool_name="aliyun_api",
+            tool_input={
+                "product": "ros",
+                "action": "CreateStack",
+                "params": {"TemplateBody": pem, "StackName": "demo"},
+            },
+            tool_use_id="toolu-1",
+        )
+    )[0]
+
+    permission = envelope["permission"]
+    rendered = str(permission)
+    assert "toolInput" not in permission
+    assert permission["inputSummary"]["tool_name"] == "aliyun_api"
+    assert permission["inputSummary"]["params_fields"] == sorted(
+        [fingerprint_text("StackName"), fingerprint_text("TemplateBody")]
+    )
+    assert permission["inputSummary"]["params_field_count"] == 2
+    assert "StackName" not in rendered
+    assert "TemplateBody" not in rendered
+    assert "private-body" not in rendered
+    assert "BEGIN PRIVATE KEY" not in rendered
+
+
+@pytest.mark.parametrize(
+    "sensitive_key",
+    ["pwd", "passphrase", "auth", "cookie", "session", "session_id", "private_key", "Signature"],
+)
 def test_permission_request_metadata_redacts_common_sensitive_key_aliases(sensitive_key: str) -> None:
     translator = PipelineEventTranslator(_ctx())
 
@@ -1318,8 +1432,9 @@ def test_permission_request_metadata_redacts_common_sensitive_key_aliases(sensit
     )[0]
 
     tool_input = envelope["permission"]["toolInput"]
-    assert tool_input[sensitive_key] == "[redacted]"
-    assert tool_input["nested"][0]["Authorization"] == "[redacted]"
+    assert tool_input[fingerprint_text(sensitive_key)] == {"redacted": True}
+    assert tool_input[fingerprint_text("nested")] == {"type": "array", "length": 1}
+    assert sensitive_key not in str(tool_input)
     assert "secret-value" not in str(envelope)
 
 
@@ -1334,13 +1449,10 @@ def test_permission_request_safe_summary_caps_field_names() -> None:
         )
     )[0]
 
-    assert envelope["permission"]["safeSummary"] == (
-        "bash permission request (fields: "
-        "field_00, field_01, field_02, field_03, field_04, "
-        "field_05, field_06, field_07, field_08, field_09, "
-        "field_10, field_11, field_12, field_13, field_14, "
-        "field_15, field_16, field_17, field_18, field_19, +5 more)"
-    )
+    summary = envelope["permission"]["safeSummary"]
+    assert "field_00" not in summary
+    assert "sha256:" in summary
+    assert len(summary) <= 256
 
 
 def test_permission_request_safe_summary_caps_total_length() -> None:

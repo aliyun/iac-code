@@ -30,8 +30,10 @@ description: IaC Code 启动选项和一次性执行参数参考。
 |---|---|
 | `default` | 当工具操作需要确认时，代理会弹出提示让用户选择。 |
 | `accept_edits` | 自动批准被视为编辑操作的文件系统命令（如 `mkdir`、`cp`），其他操作仍需确认。 |
-| `bypass_permissions` | 自动批准所有工具操作（安全检查除外）。适用于可信的自动化场景。 |
+| `bypass_permissions` | 自动批准工具操作（安全检查除外）。任何需要审计记录的允许决策在审计持久化失败时都会 fail closed。适用于可信的自动化场景。 |
 | `dont_ask` | 静默拒绝所有需要确认的操作。适用于严格的只读运行。 |
+
+通过 `aliyun_api` 发起的阿里云写 API 调用有单独保护：裸的 `aliyun_api` 允许规则不会一概批准这些调用，并且在 `bypass_permissions` 之外，写入允许规则必须精确匹配规范化后的 `product:action`。`bypass_permissions` 会自动批准它们，但与其他被审计的允许决策一样，如果权限审计记录无法持久化，该操作会被拒绝。需要在可信自动化中只允许某个具体写 API 时，请使用 `aliyun_api(ros:CreateStack)` 这样的精确规则。
 
 ## 常用启动命令
 
@@ -69,6 +71,12 @@ iac-code --continue
 
 ```bash
 iac-code --allowed-tools 'bash(git *)'
+```
+
+仅允许一个具体的阿里云写 API：
+
+```bash
+iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 在自动化中运行，无需交互确认：

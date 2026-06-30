@@ -17,6 +17,8 @@ from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
 from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, is_recovery_semantic_event
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.types.permissions import PermissionAuditMetadata
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
@@ -32,6 +34,14 @@ from .fakes import FakeEventQueue
 
 def dump(event: Any) -> dict[str, Any]:
     return MessageToDict(event, preserving_proto_field_name=False)
+
+
+def _has_truncated_object(value: object) -> bool:
+    if isinstance(value, dict):
+        if value.get("type") == "object" and value.get("truncated") is True:
+            return True
+        return any(_has_truncated_object(child) for child in value.values())
+    return False
 
 
 def _publisher(
@@ -250,10 +260,66 @@ async def test_publish_sub_pipeline_permission_resolves_inner_future_and_publish
     assert permission["toolName"] == "bash"
     assert permission["toolUseId"] == "toolu-1"
     assert permission["safeSummary"] == "bash permission request (fields: cmd)"
-    assert permission["toolInput"] == {"cmd": "pwd"}
+    assert permission["toolInput"] == {"cmd": {"type": "str", "length": 3, "fingerprint": fingerprint_text("pwd")}}
     assert permission["approved"] is True
     assert permission["decision"] == "allow_once"
     assert publisher.journal.read_all()[-1]["permission"]["approved"] is True
+
+
+@pytest.mark.asyncio
+async def test_publish_nested_sub_pipeline_permission_resolves_inner_future(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=1717821600.0,
+            data={
+                "sub_pipeline_id": "eval-inner",
+                "candidate_index": 0,
+                "candidate_name": "candidate",
+                "parent_step_id": "evaluate_candidates",
+                "total_steps": 1,
+            },
+        )
+    )
+    future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+
+    returned = await publisher.publish(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="eval-outer",
+            candidate_index=1,
+            inner=SubPipelineStreamEvent(
+                sub_pipeline_id="eval-inner",
+                candidate_index=0,
+                inner=PermissionRequestEvent(
+                    tool_name="aliyun_api",
+                    tool_input={"product": "ros", "action": "CreateStack"},
+                    tool_use_id="toolu-nested",
+                    response_future=future,
+                    audit_context={
+                        "metadata": PermissionAuditMetadata(
+                            scope="once",
+                            source="permission_pipeline",
+                            reason_type="untrusted_write",
+                            reason_detail="untrusted Aliyun write",
+                            is_read_only=False,
+                            operation={"product": "ros", "action": "CreateStack", "is_read_only": False},
+                        )
+                    },
+                ),
+            ),
+        ),
+        auto_approve_permissions=False,
+    )
+
+    assert returned is None
+    assert future.result() is False
+    permission = dump(queue.events[-1])["metadata"]["iac_code"]["pipeline"]["permission"]
+    assert permission["toolName"] == "aliyun_api"
+    assert permission["toolUseId"] == "toolu-nested"
+    assert permission["inputSummary"]["tool_name"] == "aliyun_api"
+    assert permission["approved"] is False
 
 
 @pytest.mark.asyncio
@@ -278,6 +344,39 @@ async def test_publish_direct_permission_resolver_overrides_auto_approve(tmp_pat
     assert permission["approved"] is False
     assert permission["decision"] == "deny"
     assert permission["toolUseId"] == "toolu-direct"
+
+
+@pytest.mark.asyncio
+async def test_publish_direct_auto_approve_denies_untrusted_aliyun_write(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+
+    returned = await publisher.publish(
+        PermissionRequestEvent(
+            tool_name="aliyun_api",
+            tool_input={"product": "ros", "action": "CreateStack"},
+            tool_use_id="toolu-aliyun-write",
+            response_future=future,
+            audit_context={
+                "metadata": PermissionAuditMetadata(
+                    scope="once",
+                    source="permission_pipeline",
+                    reason_type="untrusted_write",
+                    reason_detail="untrusted Aliyun write",
+                    is_read_only=False,
+                    operation={"product": "ros", "action": "CreateStack", "is_read_only": False},
+                )
+            },
+        ),
+        auto_approve_permissions=True,
+    )
+
+    assert returned is None
+    assert future.result() is False
+    permission = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]["permission"]
+    assert permission["approved"] is False
+    assert permission["decision"] == "deny"
+    assert permission["toolUseId"] == "toolu-aliyun-write"
 
 
 @pytest.mark.asyncio
@@ -432,7 +531,12 @@ async def test_publish_permission_redacts_and_truncates_tool_input_in_status_met
     await publisher.publish(
         PermissionRequestEvent(
             tool_name="bash",
-            tool_input={"cmd": "x" * 5000, "apiKey": "secret-value", "nested": nested},
+            tool_input={
+                "cmd": "x" * 5000,
+                "apiKey": "secret-value",
+                "Signature": "signature-secret",
+                "nested": nested,
+            },
             tool_use_id="toolu-large",
         ),
         auto_approve_permissions=True,
@@ -441,14 +545,20 @@ async def test_publish_permission_redacts_and_truncates_tool_input_in_status_met
     status_tool_input = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]["permission"]["toolInput"]
     journal_tool_input = publisher.journal.read_all()[0]["permission"]["toolInput"]
     for tool_input in (status_tool_input, journal_tool_input):
-        assert len(tool_input["cmd"]) == 4000
-        assert tool_input["apiKey"] == "[redacted]"
-        current = tool_input["nested"]
-        while isinstance(current, dict):
-            current = current["next"]
-        assert current == "[truncated-depth]"
+        assert tool_input["cmd"] == {
+            "type": "str",
+            "length": 5000,
+            "fingerprint": fingerprint_text("x" * 5000),
+        }
+        assert tool_input[fingerprint_text("apiKey")] == {"redacted": True}
+        assert tool_input[fingerprint_text("Signature")] == {"redacted": True}
+        assert "apiKey" not in str(tool_input)
+        assert "Signature" not in str(tool_input)
+        assert _has_truncated_object(tool_input[fingerprint_text("nested")])
     assert "secret-value" not in str(dump(queue.events[0]))
+    assert "signature-secret" not in str(dump(queue.events[0]))
     assert "secret-value" not in str(publisher.journal.read_all()[0])
+    assert "signature-secret" not in str(publisher.journal.read_all()[0])
 
 
 @pytest.mark.asyncio

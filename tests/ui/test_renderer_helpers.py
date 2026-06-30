@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +11,7 @@ from iac_code.agent.message import ImageBlock, Message, TextBlock, create_recall
 from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.read_file import ReadFileTool
-from iac_code.types.stream_events import StackInstancesProgressEvent, StackProgressEvent
+from iac_code.types.stream_events import PermissionRequestEvent, StackInstancesProgressEvent, StackProgressEvent
 from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.renderer import (
     RenderedTurn,
@@ -385,9 +386,15 @@ class TestRendererHelpers:
         fake_view.run.assert_called_once_with()
 
     @pytest.mark.asyncio
-    async def test_prompt_permission_allow_once(self):
+    async def test_prompt_permission_allow_once(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
         renderer = make_renderer()
-        event = MagicMock(tool_name="demo", tool_input={"path": "a.txt"})
+        event = PermissionRequestEvent(
+            tool_name="demo",
+            tool_input={"path": "a.txt"},
+            tool_use_id="toolu-demo",
+            response_future=asyncio.get_running_loop().create_future(),
+        )
 
         with patch("iac_code.ui.components.select.Select.run", return_value="allow_once"):
             allowed = await renderer.prompt_permission(event)

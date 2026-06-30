@@ -19,7 +19,7 @@ El directorio de tiempo de ejecución por defecto es:
 ~/.iac-code/
 ```
 
-Puede reubicarlo estableciendo la variable de entorno `IAC_CODE_CONFIG_DIR` (admite expansión de `~` y `$VAR`). Cuando se establece, todos los artefactos persistidos — credenciales, ajustes, historial, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — siguen la nueva ubicación.
+Puede reubicarlo estableciendo la variable de entorno `IAC_CODE_CONFIG_DIR` (admite expansión de `~` y `$VAR`). Cuando se establece, todos los artefactos persistidos — credenciales, ajustes, historial, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — siguen la nueva ubicación. Los logs de arranque/depuración van por defecto a `<config-dir>/logs/` y se pueden mover por separado con `IAC_CODE_LOG_DIR`; los registros de auditoría de permisos permanecen en `<config-dir>/logs/`.
 
 Archivos comunes:
 
@@ -106,6 +106,10 @@ permissions:
     - "bash(curl:*)"
   additional_directories:
     - "/tmp/workspace"
+  audit:
+    include_tool_input: false
+    max_file_bytes: 10485760
+    max_files: 5
 ```
 
 | Campo | Descripción |
@@ -115,6 +119,7 @@ permissions:
 | `deny` | Lista de patrones de permisos de herramientas para denegar automáticamente. |
 | `ask` | Lista de patrones de permisos de herramientas que siempre requieren confirmación. |
 | `additional_directories` | Directorios adicionales más allá de cwd en los que el agente puede escribir. |
+| `audit` | Configuración local del registro de auditoría de permisos. |
 
 ### Sintaxis de patrones
 
@@ -126,5 +131,40 @@ Los patrones de permisos de herramientas siguen el formato `tool_name(rule)`:
 | `bash(git *)` | Coincidir con comandos bash que comienzan con `git`. |
 | `bash(curl:*)` | Coincidir con comandos bash que comienzan con `curl`. |
 | `write_file` | Coincidir con todas las llamadas a la herramienta write_file. |
+| `aliyun_api(ros:CreateStack)` | Coincidir con un par producto/acción de API de Alibaba Cloud. |
 
 Las reglas se evalúan en orden: **deny → ask → allow → comportamiento predeterminado**. Los argumentos CLI (`--allowed-tools`, `--disallowed-tools`) tienen la mayor precedencia.
+
+### Permisos de API de Alibaba Cloud
+
+`aliyun_api` distingue entre llamadas API de solo lectura y llamadas que pueden modificar recursos en la nube. Las acciones API de solo lectura se permiten automáticamente. Las llamadas API que no son de solo lectura requieren confirmación o una regla de allow exacta para ese producto/acción, por ejemplo:
+
+```yaml
+permissions:
+  allow:
+    - "aliyun_api(ros:CreateStack)"
+```
+
+Una regla allow simple `aliyun_api` no aprueba de forma global las API de escritura de Alibaba Cloud. Fuera de `bypass_permissions`, las reglas allow de escritura deben coincidir exactamente con el par canónico `product:action`. En modo `bypass_permissions`, las API protegidas de escritura de Alibaba Cloud se aprueban automáticamente, pero toda decisión allow que requiere un registro de auditoría falla en modo cerrado si falla la persistencia de auditoría. Los comodines siguen siendo útiles para reglas deny o ask, y para coincidencias de reglas de solo lectura.
+
+Las solicitudes de estilo ROA se tratan como de solo lectura únicamente cuando el método es `GET` y la solicitud no tiene body. Las solicitudes ROA que no son de solo lectura siguen el mismo requisito de regla allow canónica exacta `product:action` que las API de escritura de estilo RPC: una regla exacta como `aliyun_api(cs:CreateCluster)` puede aprobar la escritura, mientras que las reglas allow con comodines siguen sin aprobar llamadas que no son de solo lectura.
+
+### Registro de auditoría de permisos
+
+Las decisiones de permisos que cruzan prompts de usuario, límites de caché de herramientas, aprobación de automatización o aprobación de un resolver se anexan a:
+
+```text
+<config-dir>/logs/permission-audit.jsonl
+```
+
+De forma predeterminada, esta ruta es `~/.iac-code/logs/permission-audit.jsonl`. El registro de auditoría de permisos sigue `IAC_CODE_CONFIG_DIR`; `IAC_CODE_LOG_DIR` solo mueve los logs de arranque/depuración. El escritor de auditoría anexa registros JSONL con bloqueo de archivo, rota el archivo y restringe los permisos del archivo local cuando el sistema operativo lo permite. Las aprobaciones automáticas rutinarias de solo lectura pueden omitirse, pero se registran denegaciones, prompts, decisiones en caché, aprobaciones de automatización, aprobaciones de resolver y otros límites de permisos auditados.
+
+La configuración de auditoría se define en `permissions.audit`:
+
+| Campo | Predeterminado | Descripción |
+|---|---:|---|
+| `include_tool_input` | `false` | Incluir entrada de herramienta solo con forma en los registros JSONL de auditoría. Los valores de cadena se guardan como tipo, longitud y huella; las claves que parecen secretas se redactan; los nombres de campo fuera de la lista permitida pueden representarse con huella; no se escriben cadenas de payload de negocio sin procesar. Las entradas de API de Alibaba Cloud también conservan un resumen seguro de la operación. |
+| `max_file_bytes` | `10485760` | Rotar `permission-audit.jsonl` cuando supere este tamaño. |
+| `max_files` | `5` | Número de archivos de auditoría rotados que se conservan. Los valores por encima del máximo integrado se limitan. |
+
+Si una decisión allow que requiere un registro de auditoría no se puede persistir en el registro de auditoría, IaC Code falla en modo cerrado y deniega la acción en lugar de ejecutarla sin rastro de auditoría.

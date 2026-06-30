@@ -264,6 +264,6 @@ iac-code a2a-client --config a2a-client.yml task-cancel --task-id task-id
 
 - 对仅本地使用，请绑定到 `127.0.0.1`。
 - 绑定到共享网络接口前，请在 A2A 配置中使用 `token` 或设置 `IACCODE_A2A_HTTP_TOKEN`。
-- A2A 模式会自动拒绝工具权限请求；请像保护本地自动化服务一样保护未认证端点。
+- A2A 模式会自动拒绝工具权限请求，除非 `auto-approve-permissions` 或显式权限规则允许。权限决策会在本地审计；任何需要审计记录的允许决策在审计记录无法持久化时都会 fail closed。在非 blanket bypass 模式下，受保护的阿里云写 API 需要按 API 精确授权。
 - 活动运行时状态位于内存中。持久化会镜像任务和上下文元数据，但重启进程不会恢复正在运行的 asyncio 工作。
 - 一个上下文同一时间只能运行一个任务；不同上下文可以并发运行。

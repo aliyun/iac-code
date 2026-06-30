@@ -12,11 +12,16 @@ from enum import Enum
 from typing import IO, Any
 
 from iac_code.a2a.artifacts import sanitize_public_tool_output_data
+from iac_code.services.permissions.audit import build_input_summary
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
+    PermissionRequestEvent,
     StreamEvent,
+    SubAgentToolEvent,
+    SubPipelineStreamEvent,
     TextDeltaEvent,
+    ToolInputDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
@@ -50,6 +55,56 @@ def _sanitize_public_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _sanitize_public_value(item) for key, item in value.items()}
     return value
+
+
+def _stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
+    if isinstance(event, PermissionRequestEvent):
+        return {
+            "input_summary": build_input_summary(event.tool_name, event.tool_input),
+            "tool_name": event.tool_name,
+            "tool_use_id": event.tool_use_id,
+            "type": event.type,
+        }
+    if isinstance(event, ToolInputDeltaEvent):
+        return {
+            "partial_json_length": len(event.partial_json),
+            "tool_use_id": event.tool_use_id,
+            "type": event.type,
+        }
+    if isinstance(event, ToolUseEndEvent):
+        return {
+            "input_summary": build_input_summary(event.name, event.input),
+            "name": event.name,
+            "tool_use_id": event.tool_use_id,
+            "type": event.type,
+        }
+    if isinstance(event, SubAgentToolEvent):
+        return {
+            "child_input_summary": build_input_summary(event.child_tool_name, event.child_tool_input),
+            "child_tool_name": event.child_tool_name,
+            "is_done": event.is_done,
+            "is_error": event.is_error,
+            "parent_tool_use_id": event.parent_tool_use_id,
+            "type": event.type,
+        }
+    if isinstance(event, SubPipelineStreamEvent):
+        return {
+            "candidate_index": event.candidate_index,
+            "inner": _stream_json_event_data(event.inner),
+            "sub_pipeline_id": event.sub_pipeline_id,
+            "type": event.type,
+        }
+
+    data = dataclasses.asdict(event)
+    if isinstance(event, ErrorEvent):
+        data["error"] = sanitize_public_text(event.error)
+    elif isinstance(event, ToolResultEvent):
+        if data.get("metadata") is None:
+            data.pop("metadata", None)
+        elif "metadata" in data:
+            data["metadata"] = _public_tool_metadata(event, data["metadata"])
+        data["result"] = _public_tool_result(event)
+    return data
 
 
 class TextWriter:
@@ -98,7 +153,9 @@ class JsonWriter:
         elif isinstance(event, ToolUseStartEvent):
             self._tool_uses.setdefault(event.tool_use_id, {})["name"] = event.name
         elif isinstance(event, ToolUseEndEvent):
-            self._tool_uses.setdefault(event.tool_use_id, {})["input"] = event.input
+            self._tool_uses.setdefault(event.tool_use_id, {})["input_summary"] = build_input_summary(
+                event.name, event.input
+            )
         elif isinstance(event, ToolResultEvent):
             entry = self._tool_uses.setdefault(event.tool_use_id, {})
             entry["result"] = _public_tool_result(event)
@@ -141,15 +198,7 @@ class StreamJsonWriter:
         self._stream = stream or sys.stdout
 
     def handle(self, event: StreamEvent) -> None:
-        data = dataclasses.asdict(event)
-        if isinstance(event, ErrorEvent):
-            data["error"] = sanitize_public_text(event.error)
-        elif isinstance(event, ToolResultEvent):
-            if data.get("metadata") is None:
-                data.pop("metadata", None)
-            elif "metadata" in data:
-                data["metadata"] = _public_tool_metadata(event, data["metadata"])
-            data["result"] = _public_tool_result(event)
+        data = _stream_json_event_data(event)
         self._stream.write(json.dumps(data, ensure_ascii=False, default=str))
         self._stream.write("\n")
         self._stream.flush()

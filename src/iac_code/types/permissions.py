@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
+MAX_PERMISSION_AUDIT_FILES = 100
+
 
 class PermissionMode(str, Enum):
     """Permission mode."""
@@ -52,6 +54,29 @@ class PermissionDecisionReason:
 
 
 @dataclass
+class PermissionAuditSettings:
+    """Resolved permission audit settings."""
+
+    include_tool_input: bool = False
+    max_file_bytes: int = 10 * 1024 * 1024
+    max_files: int = 5
+
+
+@dataclass
+class PermissionAuditMetadata:
+    """Structured metadata used by the permission audit service."""
+
+    scope: str
+    source: str
+    rule_source: str | None = None
+    rule: str | None = None
+    reason_type: str | None = None
+    reason_detail: str | None = None
+    is_read_only: bool | None = None
+    operation: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
 class PermissionResult:
     """Permission check result."""
 
@@ -59,6 +84,7 @@ class PermissionResult:
     message: str = ""
     reason: PermissionDecisionReason | None = None
     suggestions: list[PermissionRuleValue] | None = None
+    audit: PermissionAuditMetadata | None = None
 
 
 @dataclass
@@ -72,6 +98,7 @@ class ToolPermissionContext:
     ask_rules: dict[str, list[str]] = field(default_factory=dict)
     additional_directories: list[str] = field(default_factory=list)
     trusted_read_directories: list[str] = field(default_factory=list)
+    audit_settings: PermissionAuditSettings = field(default_factory=PermissionAuditSettings)
 
 
 PermissionDecision = Literal["always_allow", "always_deny"]

@@ -47,6 +47,14 @@ When running non-interactively, use `--permission-mode` to control how the agent
 iac-code --prompt "Deploy the stack" --permission-mode bypass_permissions
 ```
 
+In `bypass_permissions`, tool actions are auto-approved except safety checks, but every allow decision that requires an audit record still fails closed if audit persistence fails. Alibaba Cloud write APIs are still protected outside `bypass_permissions`: for narrower trusted automation, stay outside `bypass_permissions` and allow each required write API explicitly:
+
+```bash
+iac-code --prompt "Deploy the stack" \
+  --allowed-tools 'aliyun_api(ros:CreateStack)' \
+  --permission-mode dont_ask
+```
+
 To restrict what the agent can do, combine `--allowed-tools` and `--disallowed-tools`:
 
 ```bash

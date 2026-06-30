@@ -92,7 +92,7 @@ async def test_permission_request_shows_rule_options():
 
 @pytest.mark.asyncio
 async def test_permission_content_shows_command_and_rule():
-    """ToolCallUpdate content includes the command and suggested rule."""
+    """ToolCallUpdate content includes redacted input and suggested rule."""
     suggestions = [PermissionRuleValue(tool_name="bash", rule_content="git:*")]
     conn = _CapturingConn(response_option_id="allow_once")
     loop = _PermissionTriggeringLoop(suggestions)
@@ -101,6 +101,8 @@ async def test_permission_content_shows_command_and_rule():
     await session.prompt([acp.schema.TextContentBlock(type="text", text="push")])
 
     print("\n[Content]:", conn.captured_content)
+    assert "Input:" in conn.captured_content
+    assert "command" in conn.captured_content
     assert "git push origin main" in conn.captured_content
     assert "Suggested rule: git:*" in conn.captured_content
 

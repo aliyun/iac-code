@@ -52,6 +52,8 @@ Consulte [Credenciais da Alibaba Cloud](./alibaba-cloud-credentials.md) para mai
 | Variavel | Descricao |
 |---|---|
 | `IAC_CODE_CONFIG_DIR` | Substitui o diretorio de configuracao em tempo de execucao (padrao `~/.iac-code/`); suporta expansao de `~` e `$VAR`. Todos os artefatos persistidos (credenciais, configuracoes, historico, projects, image-cache, skills, telemetry, etc.) seguem este diretorio |
+| `IAC_CODE_LOG_DIR` | Substitui o diretório local de logs de inicialização/depuração (padrão `<config-dir>/logs/`); suporta expansão de `~` e `$VAR`. Registros de auditoria de permissões continuam em `<config-dir>/logs/permission-audit.jsonl` |
+| `IAC_CODE_PERMISSION_AUDIT_INCLUDE_TOOL_INPUT` | Substitui `permissions.audit.include_tool_input`; defina como `1` / `true` / `yes` / `on` para incluir entrada de ferramenta apenas em forma estrutural nos registros de auditoria de permissões, usando tipo/tamanho/fingerprint em vez de strings brutas de payload de negócio e aplicando fingerprint a nomes de campo fora da lista permitida |
 | `IAC_CODE_ENV` | Rotulo do ambiente de implantacao (padrao: `production`) |
 | `IAC_CODE_TENANT_ID` | Identificador de tenant para telemetria; prefixado automaticamente com `iac_tenant_` se ainda nao estiver |
 | `IAC_CODE_GIT_BASH_PATH` | Caminho para `bash.exe` do Git Bash no Windows quando nao esta no PATH |

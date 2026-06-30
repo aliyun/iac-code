@@ -304,7 +304,7 @@ Cada notificacion `session/update` lleva un objeto de actualizacion con un tipo 
 ```
 ToolCallStart (status=in_progress)
     │
-    ├── ToolCallProgress (status=in_progress, raw_input=tool input)
+    ├── ToolCallProgress (status=in_progress, resumen de entrada / entrada segura para prompt)
     │
     ├── ToolCallProgress (status=completed, raw_output=result)   ← success
     │
@@ -333,8 +333,10 @@ Antes de ejecutar herramientas de alto riesgo, iac-code envia un callback `reque
 | Categoria | Herramientas | Auto-permitidas |
 |----------|-------|-------------|
 | Solo lectura | `read_file`, `list_files`, `glob`, `grep`, `web_fetch` | Si |
+| API de nube de solo lectura | Acciones `aliyun_api` clasificadas como de solo lectura | Sí |
 | Escritura | `write_file`, `edit_file` | No — requiere aprobacion |
 | Ejecucion | `bash`, `agent` | No — requiere aprobacion |
+| API de escritura de nube | Llamadas `aliyun_api` que no son de solo lectura | No — requiere aprobación por API |
 
 ### Evento request_permission
 
@@ -351,11 +353,13 @@ El servidor envia un callback `request_permission` con:
 | ID de opcion | Significado |
 |-----------|---------|
 | `allow_once` | Permitir esta invocacion especifica |
-| `allow_always` | Permitir todas las futuras llamadas de esta herramienta en esta sesion cuando la herramienta admite permiso global; no se ofrece para `bash` por defecto |
+| `allow_always` | Permitir todas las futuras llamadas de esta herramienta en esta sesion cuando la herramienta admite permiso global; no se ofrece para `bash` ni `aliyun_api` por defecto |
 | `allow_rule:<rules>` | Permitir futuras llamadas que coincidan con las reglas sugeridas en esta sesion |
 | `deny_rule:<rules>` | Denegar futuras llamadas que coincidan con las reglas sugeridas en esta sesion |
 | `reject_once` | Denegar esta invocacion especifica |
 | `reject_always` | Denegar todas las futuras llamadas de esta herramienta en esta sesion |
+
+Para `aliyun_api`, las acciones de solo lectura se permiten automáticamente. Las acciones RPC y ROA que no son de solo lectura pueden ofrecer una regla exacta como `aliyun_api(ros:CreateStack)` o `aliyun_api(cs:CreateCluster)`. Las reglas allow con comodines siguen sin aprobar llamadas que no son de solo lectura.
 
 ### Formato de respuesta
 

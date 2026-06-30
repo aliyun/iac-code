@@ -363,9 +363,13 @@ iac-code は A2A コンテキストを内部エージェントランタイムに
 | `iac_code.tool.status` | `started`, `input_delta`, `input_complete`, `completed`, or `failed` |
 | `iac_code.tool.toolUseId` | ツールイベントを関連付ける安定した tool-use ID |
 | `iac_code.tool.name` | 利用可能な場合のツール名 |
-| `iac_code.tool.input` | 完了したツール入力。フィールドごとに 4000 文字へ切り詰め |
+| `iac_code.tool.inputSummary` | 完了したツール入力の形状のみの要約。文字列値とホワイトリスト外のフィールド名は、生の業務 payload を含めずに表されます |
 | `iac_code.tool.result` | ツール結果。フィールドごとに 4000 文字へ切り詰め |
-| `iac_code.permission.autoApproved` | A2A サーバーモードによってツール権限リクエストが拒否された場合は `false` |
+| `iac_code.permission.autoApproved` | A2A が権限リクエストを自動承認または resolver 経由で承認したかどうか |
+| `iac_code.permission.toolName` | 権限を要求したツール |
+| `iac_code.permission.safeSummary` | マスク済みの人間向け権限サマリー |
+| `iac_code.permission.inputSummary` | `aliyun_api` 権限リクエスト向けの安全な操作サマリー |
+| `iac_code.permission.toolInput` | `aliyun_api` 以外の権限リクエスト向けの形状のみのツール入力。文字列値は型、長さ、フィンガープリントで表され、ホワイトリスト外のフィールド名もフィンガープリントで表される場合があります |
 | `iac_code.thinking.type` | `thinking-exposure` で `raw-thinking` が有効な場合は `raw_thinking` |
 | `iac_code.thinking.text` | 生の provider 推論チャンク。4000 文字に切り詰められ、信頼済み設定で `raw-thinking` が有効な場合のみ出力 |
 | `iac_code.usage.inputTokens` | ターンの入力トークン数 |

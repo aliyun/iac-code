@@ -334,6 +334,134 @@ def test_a4_history_message_to_updates_all_types() -> None:
     assert updates[1].tool_call_id == "history/0/tool-1"
     assert updates[1].status == "in_progress"
 
+    asst_business_tool = Message(
+        role="assistant",
+        content=[
+            ToolUseBlock(
+                id="tool-business",
+                name="bash",
+                input={
+                    "cmd": "git status --short",
+                    "customerEmail": "alice@example.com",
+                    "customer-prod-123": "tenant-id",
+                },
+            )
+        ],
+    )
+    updates = _history_message_to_updates(asst_business_tool)
+    rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
+    assert "git status --short" in rendered
+    for forbidden in ("customerEmail", "customer-prod-123", "alice@example.com", "tenant-id"):
+        assert forbidden not in rendered
+
+    asst_secret_flag_tool = Message(
+        role="assistant",
+        content=[
+            ToolUseBlock(
+                id="tool-secret-flag",
+                name="bash",
+                input={
+                    "cmd": (
+                        "cat /Users/alice/project/main.tf "
+                        "--token abc123value --password 'hunter2' --api-key sk-live-secret"
+                    ),
+                    "path": "/Users/alice/project/main.tf",
+                },
+            )
+        ],
+    )
+    updates = _history_message_to_updates(asst_secret_flag_tool)
+    rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
+    assert "/Users/alice/project/main.tf" in rendered
+    assert "--token [REDACTED]" in rendered
+    assert "--password [REDACTED]" in rendered
+    assert "--api-key [REDACTED]" in rendered
+    for forbidden in ("abc123value", "hunter2", "sk-live-secret", "[PATH]"):
+        assert forbidden not in rendered
+
+    asst_env_secret_tool = Message(
+        role="assistant",
+        content=[
+            ToolUseBlock(
+                id="tool-env-secret",
+                name="bash",
+                input={
+                    "cmd": (
+                        "OPENAI_API_KEY=sk-openai AWS_SECRET_ACCESS_KEY='aws-secret' "
+                        "ALIBABA_CLOUD_ACCESS_KEY_SECRET=aliyun-secret "
+                        "echo my-secret value /Users/alice/project/main.tf"
+                    ),
+                    "path": "/Users/alice/project/main.tf",
+                },
+            )
+        ],
+    )
+    updates = _history_message_to_updates(asst_env_secret_tool)
+    rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
+    assert "OPENAI_API_KEY=[REDACTED]" in rendered
+    assert "AWS_SECRET_ACCESS_KEY=[REDACTED]" in rendered
+    assert "ALIBABA_CLOUD_ACCESS_KEY_SECRET=[REDACTED]" in rendered
+    assert "my-secret value" in rendered
+    assert "/Users/alice/project/main.tf" in rendered
+    for forbidden in ("sk-openai", "aws-secret", "aliyun-secret", "[PATH]"):
+        assert forbidden not in rendered
+
+    long_env_secret = "sk-" + ("x" * 260) + "tail-secret"
+    asst_long_secret_tool = Message(
+        role="assistant",
+        content=[
+            ToolUseBlock(
+                id="tool-long-secret",
+                name="bash",
+                input={
+                    "cmd": (
+                        f"OPENAI_API_KEY={long_env_secret} "
+                        'curl -d \'{"apiKey":"sk-json-secret"}\' '
+                        'SERVICE_TOKEN="abc\\"escaped-tail-secret" '
+                        "/Users/alice/project/main.tf"
+                    ),
+                    "path": "/Users/alice/project/main.tf",
+                },
+            )
+        ],
+    )
+    updates = _history_message_to_updates(asst_long_secret_tool)
+    rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
+    assert "OPENAI_API_KEY=[REDACTED]" in rendered
+    assert "apiKey" in rendered
+    assert "/Users/alice/project/main.tf" in rendered
+    for forbidden in (long_env_secret, "tail-secret", "sk-json-secret", "escaped-tail-secret", "[PATH]"):
+        assert forbidden not in rendered
+
+    asst_aliyun_tool = Message(
+        role="assistant",
+        content=[
+            ToolUseBlock(
+                id="tool-aliyun",
+                name="aliyun_api",
+                input={
+                    "product": "ROS",
+                    "action": "CreateStack",
+                    "params": {
+                        "RegionId": "cn-hangzhou",
+                        "AccessKeySecret": "secret-value",
+                        "Signature": "signature-secret",
+                    },
+                    "headers": {"Authorization": "Bearer bearer-secret"},
+                },
+            )
+        ],
+    )
+    updates = _history_message_to_updates(asst_aliyun_tool)
+    rendered = json.dumps([update.model_dump(mode="json") for update in updates], ensure_ascii=False)
+    assert "Input summary:" in rendered
+    assert "secret-value" not in rendered
+    assert "signature-secret" not in rendered
+    assert "bearer-secret" not in rendered
+    assert "AccessKeySecret" not in rendered
+    assert "Signature" not in rendered
+    assert "Authorization" not in rendered
+
     user_result = Message(
         role="user",
         content=[ToolResultBlock(tool_use_id="tool-1", content="file list", is_error=False)],

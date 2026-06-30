@@ -30,8 +30,10 @@ Le paramètre `--permission-mode` contrôle comment l'agent gère les vérificat
 |---|---|
 | `default` | L'agent demande une confirmation lorsqu'une action d'outil nécessite une approbation. |
 | `accept_edits` | Approuver automatiquement les commandes du système de fichiers considérées comme des modifications (ex. `mkdir`, `cp`). Les autres actions demandent toujours confirmation. |
-| `bypass_permissions` | Approuver automatiquement toutes les actions d'outils sauf les vérifications de sécurité. Destiné à l'automatisation de confiance. |
+| `bypass_permissions` | Approuver automatiquement les actions d'outils sauf les vérifications de sécurité. Toute décision allow nécessitant un enregistrement d'audit échoue en mode fail-closed si la persistance de l'audit échoue. Destiné à l'automatisation de confiance. |
 | `dont_ask` | Refuser silencieusement toute action qui nécessiterait normalement une confirmation. Utile pour les exécutions strictement en lecture seule. |
+
+Les appels d'API d'écriture Alibaba Cloud effectués via `aliyun_api` sont protégés séparément : une règle allow nue `aliyun_api` ne les approuve pas globalement, et hors `bypass_permissions`, les règles allow d'écriture doivent correspondre exactement à la paire canonique `product:action`. `bypass_permissions` les approuve automatiquement, mais comme les autres décisions allow auditées, l'action est refusée si l'enregistrement d'audit des permissions ne peut pas être persisté. Utilisez des règles exactes comme `aliyun_api(ros:CreateStack)` lorsque l'automatisation de confiance ne doit autoriser qu'une API d'écriture précise.
 
 ## Commandes de démarrage courantes
 
@@ -69,6 +71,12 @@ Autoriser uniquement les commandes git et bash en lecture seule :
 
 ```bash
 iac-code --allowed-tools 'bash(git *)'
+```
+
+Autoriser une API d'écriture Alibaba Cloud précise :
+
+```bash
+iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 Exécuter en automatisation sans prompts interactifs :

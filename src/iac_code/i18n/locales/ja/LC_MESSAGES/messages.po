@@ -168,6 +168,17 @@ msgstr "タスクが失敗しました。"
 msgid "MCP {server}:{tool}"
 msgstr "MCP {server}:{tool}"
 
+#: src/iac_code/acp/convert.py src/iac_code/acp/session.py
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "Input summary: {summary}"
+msgstr "入力サマリー: {summary}"
+
+#: src/iac_code/acp/convert.py
+#, python-brace-format
+msgid "Input received ({count} chars)"
+msgstr "入力を受信しました（{count} 文字）"
+
 #: src/iac_code/acp/server.py
 msgid "Session not found"
 msgstr "セッションが見つかりません"
@@ -181,6 +192,60 @@ msgstr "セッション名があいまいです。候補: {candidates}"
 #, python-brace-format
 msgid "Session belongs to another project. Run: {hint}"
 msgstr "セッションは別のプロジェクトに属しています。実行: {hint}"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Input: {input}"
+msgstr "入力: {input}"
+
+#: src/iac_code/acp/session.py
+msgid "Allow once"
+msgstr "今回のみ許可"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Always allow \"{rule}\" (this session)"
+msgstr "\"{rule}\" を常に許可（このセッション）"
+
+#: src/iac_code/acp/session.py
+msgid "Always allow this tool"
+msgstr "このツールを常に許可"
+
+#: src/iac_code/acp/session.py
+msgid "Reject once"
+msgstr "今回のみ拒否"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Always deny \"{rule}\" (this session)"
+msgstr "\"{rule}\" を常に拒否（このセッション）"
+
+#: src/iac_code/acp/session.py
+msgid "Always reject this tool"
+msgstr "このツールを常に拒否"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid ""
+"Approve tool call: {tool}\n"
+"Input summary: {summary}"
+msgstr ""
+"ツール呼び出しを承認: {tool}\n"
+"入力サマリー: {summary}"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid ""
+"Approve tool call: {tool}\n"
+"Input: {input}"
+msgstr ""
+"ツール呼び出しを承認: {tool}\n"
+"入力: {input}"
+
+#: src/iac_code/acp/session.py
+#, python-brace-format
+msgid "Suggested rule: {rule}"
+msgstr "推奨ルール: {rule}"
 
 #: src/iac_code/acp/slash_registry.py
 #, python-brace-format
@@ -3328,6 +3393,7 @@ msgstr "一致した確認ルール: {}"
 
 #: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
 #: src/iac_code/tools/bash/bash_tool.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format
 msgid "Allow {}?"
 msgstr "{} を許可しますか？"
@@ -3940,6 +4006,11 @@ msgstr "インポート失敗"
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 msgid "Aliyun API"
 msgstr "Aliyun API"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
+msgid "matched {behavior} rule: {rule}"
+msgstr "一致した {behavior} ルール: {rule}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format

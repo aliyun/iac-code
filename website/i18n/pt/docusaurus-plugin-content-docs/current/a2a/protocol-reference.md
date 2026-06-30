@@ -363,9 +363,13 @@ Detalhes de ferramentas e uso são entregues por `metadata.iac_code`:
 | `iac_code.tool.status` | `started`, `input_delta`, `input_complete`, `completed` ou `failed` |
 | `iac_code.tool.toolUseId` | ID estável de uso de ferramenta para correlacionar eventos de ferramenta |
 | `iac_code.tool.name` | Nome da ferramenta quando disponível |
-| `iac_code.tool.input` | Entrada completa da ferramenta, truncada para 4000 caracteres por campo |
+| `iac_code.tool.inputSummary` | Resumo apenas em forma estrutural da entrada completa da ferramenta; valores de string e nomes de campo fora da lista permitida são representados sem payloads de negócio brutos |
 | `iac_code.tool.result` | Resultado da ferramenta, truncado para 4000 caracteres por campo |
-| `iac_code.permission.autoApproved` | `false` quando uma solicitação de permissão de ferramenta foi rejeitada pelo modo servidor A2A |
+| `iac_code.permission.autoApproved` | Se o A2A aprovou a solicitação de permissão automaticamente ou por meio de um resolver |
+| `iac_code.permission.toolName` | Ferramenta que solicitou permissão |
+| `iac_code.permission.safeSummary` | Resumo de permissão redigido e legível por humanos |
+| `iac_code.permission.inputSummary` | Resumo seguro da operação para solicitações de permissão de `aliyun_api` |
+| `iac_code.permission.toolInput` | Entrada de ferramenta apenas em forma estrutural para solicitações de permissão que não são de `aliyun_api`; valores de string usam tipo, tamanho e fingerprint, e nomes de campo fora da lista permitida podem ser representados por fingerprint |
 | `iac_code.thinking.type` | `raw_thinking` quando `raw-thinking` está habilitado em `thinking-exposure` |
 | `iac_code.thinking.text` | Chunk bruto de raciocínio do provider, truncado para 4000 caracteres, emitido apenas em configurações confiáveis que habilitam `raw-thinking` |
 | `iac_code.usage.inputTokens` | Contagem de tokens de entrada do turno |

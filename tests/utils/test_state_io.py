@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import gc
 import json
+import logging
 import os
 import sys
 import types
@@ -58,6 +59,67 @@ def test_append_jsonl_locked_writes_one_complete_line_per_record(tmp_path: Path)
 
     lines = path.read_text(encoding="utf-8").splitlines()
     assert [json.loads(line) for line in lines] == [{"a": 1}, {"b": 2}]
+
+
+def test_append_jsonl_rotating_locked_rotates_before_append(tmp_path: Path) -> None:
+    from iac_code.utils.state_io import append_jsonl_rotating_locked
+
+    path = tmp_path / "permission-audit.jsonl"
+    path.write_text('{"old":true}\n', encoding="utf-8")
+
+    append_jsonl_rotating_locked(path, [{"created": True}], max_file_bytes=10, max_files=2, durable=False)
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"created": True}
+    assert (tmp_path / "permission-audit.jsonl.1").exists()
+
+
+def test_append_jsonl_rotating_locked_rotates_when_pending_record_would_exceed_limit(tmp_path: Path) -> None:
+    from iac_code.utils.state_io import append_jsonl_rotating_locked
+
+    path = tmp_path / "permission-audit.jsonl"
+    path.write_text('{"old":true}\n', encoding="utf-8")
+
+    append_jsonl_rotating_locked(path, [{"created": True}], max_file_bytes=25, max_files=2, durable=False)
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"created": True}
+    assert json.loads((tmp_path / "permission-audit.jsonl.1").read_text(encoding="utf-8")) == {"old": True}
+
+
+def test_append_jsonl_rotating_locked_enforces_retention(tmp_path: Path) -> None:
+    from iac_code.utils.state_io import append_jsonl_rotating_locked
+
+    path = tmp_path / "permission-audit.jsonl"
+    for index in range(4):
+        path.write_text("x" * 20, encoding="utf-8")
+        append_jsonl_rotating_locked(path, [{"index": index}], max_file_bytes=10, max_files=2, durable=False)
+
+    assert (tmp_path / "permission-audit.jsonl.1").exists()
+    assert (tmp_path / "permission-audit.jsonl.2").exists()
+    assert not (tmp_path / "permission-audit.jsonl.3").exists()
+
+
+def test_append_jsonl_rotating_locked_writes_when_rotation_fails_best_effort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from iac_code.utils import state_io
+
+    path = tmp_path / "permission-audit.jsonl"
+    path.write_text('{"old":true}\n', encoding="utf-8")
+
+    def fail_rotation(*args: object, **kwargs: object) -> None:
+        raise OSError("rename denied")
+
+    monkeypatch.setattr(state_io, "_rotate_jsonl_files", fail_rotation)
+
+    with caplog.at_level(logging.WARNING, logger="iac_code.utils.state_io"):
+        state_io.append_jsonl_rotating_locked(path, [{"created": True}], max_file_bytes=10, max_files=2)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0]) == {"old": True}
+    assert json.loads(lines[1]) == {"created": True}
+    assert "Could not rotate JSONL file" in caplog.text
 
 
 def test_path_lock_registry_reuses_held_lock_for_same_path(tmp_path: Path) -> None:

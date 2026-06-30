@@ -18,8 +18,9 @@ from iac_code.acp.session import (
     _PREFIX_DENY_RULE,
     ACPSession,
 )
+from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
 from iac_code.tools.read_file import ReadFileTool
-from iac_code.types.permissions import PermissionRuleValue, ToolPermissionContext
+from iac_code.types.permissions import PermissionAuditMetadata, PermissionRuleValue, ToolPermissionContext
 from iac_code.types.stream_events import MessageEndEvent, PermissionRequestEvent, TextDeltaEvent, Usage
 
 
@@ -139,6 +140,44 @@ async def test_read_file_without_suggestions_omits_allow_always():
 
     option_ids = [opt.option_id for opt in conn.last_options]
     assert _OPTION_ALLOW_ALWAYS not in option_ids
+
+
+@pytest.mark.asyncio
+async def test_unoffered_allow_always_response_for_aliyun_write_is_rejected(monkeypatch):
+    """ACP clients cannot select a broad allow option that was not offered."""
+    records = []
+    monkeypatch.setattr(
+        "iac_code.services.permissions.audit.emit_permission_audit",
+        lambda record, settings=None: records.append(record),
+    )
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ALWAYS))
+    loop = _FakeLoop()
+    loop.tool_registry.get.return_value = AliyunApi()
+    session = ACPSession("s1", loop, conn)
+    event = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack"},
+        tool_use_id="tu-aliyun-write",
+        audit_context={
+            "metadata": PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                reason_type="untrusted_write",
+                reason_detail="untrusted Aliyun write",
+                is_read_only=False,
+                operation={"product": "ros", "action": "CreateStack", "is_read_only": False},
+            )
+        },
+    )
+
+    result = await session._request_permission(event)
+
+    option_ids = {option.option_id for option in conn.last_options}
+    assert _OPTION_ALLOW_ALWAYS not in option_ids
+    assert result is False
+    assert "aliyun_api" not in session._permission_cache
+    assert records[-1].decision == "deny"
+    assert records[-1].reason_detail == "invalid_option"
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +357,195 @@ async def test_content_includes_suggested_rule():
 
     assert "Suggested rule: git:*" in conn.last_content
     assert "bash" in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_uses_safe_input_summary_for_aliyun_api():
+    """ToolCallUpdate content does not expose raw Aliyun request input."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    event = _make_event(
+        tool_name="aliyun_api",
+        tool_input={
+            "product": "ros",
+            "action": "CreateStack",
+            "params": {
+                "StackName": "demo",
+                "AccessKeySecret": "secret-value",
+                "Signature": "signature-secret",
+                "Authorization": "Bearer bearer-secret",
+            },
+            "body": {"PrivateKey": "private-secret"},
+        },
+    )
+
+    await session._request_permission(event)
+
+    assert "Input summary:" in conn.last_content
+    assert "product" in conn.last_content
+    assert "action" in conn.last_content
+    for forbidden in (
+        "secret-value",
+        "signature-secret",
+        "bearer-secret",
+        "private-secret",
+        "AccessKeySecret",
+        "Signature",
+        "Authorization",
+        "PrivateKey",
+    ):
+        assert forbidden not in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_preserves_redacted_non_aliyun_tool_input():
+    """Non-Aliyun permission prompts keep decision-critical input visible."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    event = _make_event(
+        tool_name="bash",
+        tool_input={"command": "git status --short", "apiKey": "secret-value"},
+    )
+
+    await session._request_permission(event)
+
+    assert "Input:" in conn.last_content
+    assert "Input summary:" not in conn.last_content
+    assert "git status --short" in conn.last_content
+    assert "secret-value" not in conn.last_content
+    assert "apiKey" not in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_fingerprints_business_fields_in_non_aliyun_tool_input():
+    """Non-Aliyun permission prompts hide business field names and values."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    event = _make_event(
+        tool_name="bash",
+        tool_input={
+            "command": "git status --short",
+            "customerEmail": "alice@example.com",
+            "customer-prod-123": "tenant-id",
+        },
+    )
+
+    await session._request_permission(event)
+
+    assert "git status --short" in conn.last_content
+    for forbidden in ("customerEmail", "customer-prod-123", "alice@example.com", "tenant-id"):
+        assert forbidden not in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_redacts_space_separated_secret_flags_and_preserves_paths():
+    """Non-Aliyun permission prompts redact CLI secret flags without hiding paths."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    event = _make_event(
+        tool_name="bash",
+        tool_input={
+            "command": (
+                "cat /Users/alice/project/main.tf --token abc123value --password 'hunter2' --api-key sk-live-secret"
+            ),
+            "path": "/Users/alice/project/main.tf",
+        },
+    )
+
+    await session._request_permission(event)
+
+    assert "/Users/alice/project/main.tf" in conn.last_content
+    assert "--token [REDACTED]" in conn.last_content
+    assert "--password [REDACTED]" in conn.last_content
+    assert "--api-key [REDACTED]" in conn.last_content
+    for forbidden in ("abc123value", "hunter2", "sk-live-secret", "[PATH]"):
+        assert forbidden not in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_redacts_env_secret_assignments_without_false_flag_matches():
+    """Non-Aliyun permission prompts redact env-style secrets without hiding paths."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    event = _make_event(
+        tool_name="bash",
+        tool_input={
+            "command": (
+                "OPENAI_API_KEY=sk-openai AWS_SECRET_ACCESS_KEY='aws-secret' "
+                "ALIBABA_CLOUD_ACCESS_KEY_SECRET=aliyun-secret "
+                "echo my-secret value /Users/alice/project/main.tf"
+            ),
+            "path": "/Users/alice/project/main.tf",
+        },
+    )
+
+    await session._request_permission(event)
+
+    assert "OPENAI_API_KEY=[REDACTED]" in conn.last_content
+    assert "AWS_SECRET_ACCESS_KEY=[REDACTED]" in conn.last_content
+    assert "ALIBABA_CLOUD_ACCESS_KEY_SECRET=[REDACTED]" in conn.last_content
+    assert "my-secret value" in conn.last_content
+    assert "/Users/alice/project/main.tf" in conn.last_content
+    for forbidden in ("sk-openai", "aws-secret", "aliyun-secret", "[PATH]"):
+        assert forbidden not in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_redacts_long_json_and_escaped_quote_secret_values():
+    """Non-Aliyun permission prompts redact secrets before long-string slicing."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    long_secret = "sk-" + ("x" * 260) + "tail-secret"
+    event = _make_event(
+        tool_name="bash",
+        tool_input={
+            "command": (
+                f"OPENAI_API_KEY={long_secret} "
+                'curl -d \'{"apiKey":"sk-json-secret"}\' '
+                'SERVICE_TOKEN="abc\\"escaped-tail-secret" '
+                "/Users/alice/project/main.tf"
+            ),
+            "path": "/Users/alice/project/main.tf",
+        },
+    )
+
+    await session._request_permission(event)
+
+    assert "OPENAI_API_KEY=[REDACTED]" in conn.last_content
+    assert "apiKey" in conn.last_content
+    assert "/Users/alice/project/main.tf" in conn.last_content
+    for forbidden in (long_secret, "tail-secret", "sk-json-secret", "escaped-tail-secret", "[PATH]"):
+        assert forbidden not in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_marks_truncated_long_non_aliyun_tool_input():
+    """Non-Aliyun permission prompts make long decision input truncation explicit."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    command = ("echo safe && " * 40) + "rm -rf /"
+    event = _make_event(tool_name="bash", tool_input={"command": command})
+
+    await session._request_permission(event)
+
+    assert '"truncated": true' in conn.last_content
+    assert "rm -rf /" in conn.last_content
+
+
+@pytest.mark.asyncio
+async def test_content_preserves_priority_fields_in_wide_non_aliyun_tool_input():
+    """Non-Aliyun permission prompts do not let low-value fields hide command/path."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    tool_input = {f"field_{index}": index for index in range(100)}
+    tool_input["command"] = "rm -rf /"
+    event = _make_event(tool_name="bash", tool_input=tool_input)
+
+    await session._request_permission(event)
+
+    assert "rm -rf /" in conn.last_content
+    assert '"_truncated"' in conn.last_content
+    assert "field_99" not in conn.last_content
 
 
 @pytest.mark.asyncio

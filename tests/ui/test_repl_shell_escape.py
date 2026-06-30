@@ -6,8 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.tools.base import Tool, ToolResult
-from iac_code.types.permissions import PermissionResult, ToolPermissionContext
+from iac_code.tools.bash.bash_tool import BashTool
+from iac_code.types.permissions import (
+    PermissionAuditMetadata,
+    PermissionAuditSettings,
+    PermissionResult,
+    ToolPermissionContext,
+)
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.ui.repl import InlineREPL
 
@@ -209,15 +216,233 @@ async def test_shell_escape_permission_deny_does_not_execute(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_shell_escape_permission_allow_is_audited_without_raw_command(tmp_path, monkeypatch):
+    audit_records = []
+    tool = FakeBashTool(
+        ToolResult.success("STDOUT:\nok\nExit code: 0"),
+        PermissionResult(
+            behavior="allow",
+            audit=PermissionAuditMetadata(
+                scope="settings_rule",
+                source="permission_pipeline",
+                rule_source="project_settings",
+                reason_type="rule",
+                is_read_only=False,
+            ),
+        ),
+    )
+    repl = make_repl(tool, str(tmp_path), permission_context=ToolPermissionContext(cwd=str(tmp_path)))
+    monkeypatch.setattr(
+        "iac_code.ui.repl.emit_permission_audit",
+        lambda record, settings=None: audit_records.append(record),
+        raising=False,
+    )
+
+    await repl._handle_shell_escape("!echo secret-value")
+
+    assert tool.calls == [({"command": "echo secret-value"}, str(tmp_path))]
+    assert len(audit_records) == 1
+    record = audit_records[0]
+    assert record.source == "permission_pipeline"
+    assert record.scope == "settings_rule"
+    assert record.decision == "allow"
+    assert record.operation == {"is_read_only": False}
+    assert "echo secret-value" not in str(record.input_summary)
+
+
+@pytest.mark.asyncio
+async def test_shell_escape_permission_allow_denies_when_audit_log_write_fails(tmp_path, monkeypatch):
+    tool = FakeBashTool(
+        ToolResult.success("unused"),
+        PermissionResult(
+            behavior="allow",
+            audit=PermissionAuditMetadata(
+                scope="settings_rule",
+                source="permission_pipeline",
+                rule_source="project_settings",
+                reason_type="rule",
+                is_read_only=False,
+            ),
+        ),
+    )
+    repl = make_repl(tool, str(tmp_path), permission_context=ToolPermissionContext(cwd=str(tmp_path)))
+    monkeypatch.setattr("iac_code.ui.repl.emit_permission_audit", lambda record, settings=None: False, raising=False)
+
+    await repl._handle_shell_escape("!mkdir blocked")
+
+    assert tool.calls == []
+    assert repl.renderer.messages == [("Permission denied.", "red")]
+
+
+@pytest.mark.asyncio
+async def test_shell_escape_permission_denial_is_audited(tmp_path, monkeypatch):
+    audit_records = []
+    tool = FakeBashTool(
+        ToolResult.success("unused"),
+        PermissionResult(
+            behavior="deny",
+            message="blocked",
+            audit=PermissionAuditMetadata(
+                scope="settings_rule",
+                source="permission_pipeline",
+                rule_source="project_settings",
+                reason_type="rule",
+                is_read_only=False,
+            ),
+        ),
+    )
+    repl = make_repl(tool, str(tmp_path), permission_context=ToolPermissionContext(cwd=str(tmp_path)))
+    monkeypatch.setattr(
+        "iac_code.ui.repl.emit_permission_audit",
+        lambda record, settings=None: audit_records.append(record),
+        raising=False,
+    )
+
+    await repl._handle_shell_escape("!mkdir blocked")
+
+    assert tool.calls == []
+    assert repl.renderer.messages == [("blocked", "red")]
+    assert len(audit_records) == 1
+    record = audit_records[0]
+    assert record.source == "permission_pipeline"
+    assert record.scope == "settings_rule"
+    assert record.decision == "deny"
+    assert record.tool_name == "bash"
+
+
+@pytest.mark.asyncio
+async def test_shell_escape_read_only_permission_denial_is_audited(tmp_path, monkeypatch):
+    audit_records = []
+    tool = FakeBashTool(
+        ToolResult.success("unused"),
+        PermissionResult(
+            behavior="deny",
+            message="blocked",
+            audit=PermissionAuditMetadata(
+                scope="read_only",
+                source="permission_pipeline",
+                reason_type="read_only",
+                is_read_only=True,
+            ),
+        ),
+    )
+    repl = make_repl(tool, str(tmp_path), permission_context=ToolPermissionContext(cwd=str(tmp_path)))
+    monkeypatch.setattr(
+        "iac_code.ui.repl.emit_permission_audit",
+        lambda record, settings=None: audit_records.append(record),
+        raising=False,
+    )
+
+    await repl._handle_shell_escape("!cat blocked")
+
+    assert tool.calls == []
+    assert repl.renderer.messages == [("blocked", "red")]
+    assert len(audit_records) == 1
+    assert audit_records[0].decision == "deny"
+    assert audit_records[0].scope == "read_only"
+
+
+@pytest.mark.asyncio
+async def test_shell_escape_bash_internal_allow_rule_emits_audit(tmp_path, monkeypatch):
+    audit_records = []
+    settings_seen = []
+    tool = BashTool()
+    permission_context = ToolPermissionContext(
+        cwd=str(tmp_path),
+        allow_rules={"session": ["bash(mkdir:*)"]},
+        audit_settings=PermissionAuditSettings(include_tool_input=True),
+    )
+    repl = make_repl(tool, str(tmp_path), permission_context=permission_context)
+
+    async def fake_execute_batch(self, calls, context):
+        return [ToolResult.success("Exit code: 0")]
+
+    monkeypatch.setattr("iac_code.tools.tool_executor.ToolExecutor.execute_batch", fake_execute_batch)
+    monkeypatch.setattr(
+        "iac_code.ui.repl.emit_permission_audit",
+        lambda record, settings=None: (audit_records.append(record), settings_seen.append(settings)),
+        raising=False,
+    )
+
+    await repl._handle_shell_escape("!mkdir foo")
+
+    assert len(audit_records) == 1
+    record = audit_records[0]
+    assert record.decision == "allow"
+    assert record.scope == "session_rule"
+    assert record.source == "permission_pipeline"
+    assert record.rule_source == "session"
+    assert record.rule == "bash(mkdir:*)"
+    assert record.operation == {"is_read_only": False}
+    assert record.tool_input_redacted == {
+        "command": {"type": "str", "length": 9, "fingerprint": fingerprint_text("mkdir foo")}
+    }
+    assert settings_seen == [permission_context.audit_settings]
+
+
+@pytest.mark.asyncio
+async def test_shell_escape_bash_internal_deny_rule_emits_audit(tmp_path, monkeypatch):
+    audit_records = []
+    settings_seen = []
+    tool = BashTool()
+    permission_context = ToolPermissionContext(
+        cwd=str(tmp_path),
+        deny_rules={"session": ["bash(mkdir:*)"]},
+        audit_settings=PermissionAuditSettings(include_tool_input=True),
+    )
+    repl = make_repl(tool, str(tmp_path), permission_context=permission_context)
+    monkeypatch.setattr(
+        "iac_code.ui.repl.emit_permission_audit",
+        lambda record, settings=None: (audit_records.append(record), settings_seen.append(settings)),
+        raising=False,
+    )
+
+    await repl._handle_shell_escape("!mkdir blocked")
+
+    assert len(audit_records) == 1
+    record = audit_records[0]
+    assert record.decision == "deny"
+    assert record.scope == "session_rule"
+    assert record.source == "permission_pipeline"
+    assert record.rule_source == "session"
+    assert record.rule == "bash(mkdir:*)"
+    assert record.operation == {"is_read_only": False}
+    assert record.tool_input_redacted == {
+        "command": {"type": "str", "length": 13, "fingerprint": fingerprint_text("mkdir blocked")}
+    }
+    assert settings_seen == [permission_context.audit_settings]
+
+
+@pytest.mark.asyncio
 async def test_shell_escape_permission_prompt_rejection_does_not_execute(tmp_path):
-    tool = FakeBashTool(ToolResult.success("unused"), PermissionResult(behavior="ask", message="confirm"))
-    repl = make_repl(tool, str(tmp_path), permission_allowed=False)
+    settings = PermissionAuditSettings(include_tool_input=True)
+    metadata = PermissionAuditMetadata(
+        scope="once",
+        source="permission_pipeline",
+        reason_type="untrusted_write",
+        is_read_only=False,
+    )
+    tool = FakeBashTool(
+        ToolResult.success("unused"),
+        PermissionResult(behavior="ask", message="confirm", audit=metadata),
+    )
+    repl = make_repl(
+        tool,
+        str(tmp_path),
+        permission_context=ToolPermissionContext(cwd=str(tmp_path), audit_settings=settings),
+        permission_allowed=False,
+    )
 
     await repl._handle_shell_escape("!mkdir maybe")
 
     assert tool.calls == []
     assert repl.renderer.messages == [("Permission denied.", "red")]
     assert [event.tool_input for event in repl.renderer.permission_events] == [{"command": "mkdir maybe"}]
+    assert repl.renderer.permission_events[0].audit_context == {
+        "session_id": "",
+        "settings": settings,
+        "metadata": metadata,
+    }
 
 
 @pytest.mark.asyncio

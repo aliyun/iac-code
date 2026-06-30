@@ -65,6 +65,8 @@ def test_spec_events_are_all_defined():
         "iac.tool.use.failed",
         "iac.tool.use.granted_in_prompt",
         "iac.tool.use.rejected_in_prompt",
+        "iac.tool.permission.granted",
+        "iac.tool.permission.rejected",
         "iac.template.generated",
         "iac.template.validated",
         "iac.deployment.started",
@@ -84,6 +86,11 @@ def test_spec_events_are_all_defined():
     defined = {getattr(Events, a) for a in dir(Events) if not a.startswith("_")}
     missing = spec_events - defined
     assert not missing, f"Missing event constants: {missing}"
+
+
+def test_permission_audit_events_are_defined():
+    assert Events.TOOL_PERMISSION_GRANTED == "iac.tool.permission.granted"
+    assert Events.TOOL_PERMISSION_REJECTED == "iac.tool.permission.rejected"
 
 
 def test_spec_metrics_are_all_defined():
