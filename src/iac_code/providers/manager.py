@@ -12,6 +12,7 @@ from loguru import logger
 
 from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, Provider, ToolDefinition
+from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_none
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
 from iac_code.providers.stream_watchdog import StreamWatchdog
 from iac_code.services.telemetry import add_metric, get_session_id, log_event, start_span
@@ -106,6 +107,7 @@ def create_provider(
     *,
     base_url: str | None = None,
     provider_key_override: str | None = None,
+    request_policy_override: ProviderRequestPolicy | None = None,
 ) -> Provider:
     from iac_code.providers.registry import PROVIDER_REGISTRY
 
@@ -115,13 +117,6 @@ def create_provider(
         raise ProviderNotConfiguredError(
             _("Unknown provider key: '{key}'. Run /auth to configure.").format(key=provider_key)
         )
-    api_key = credentials.get(provider_key, "")
-    if desc.require_api_key and not api_key:
-        raise ProviderNotConfiguredError(
-            _("No API key configured for provider '{provider}' (model: {model}). Run /auth to configure.").format(
-                provider=desc.display_name, model=model
-            )
-        )
     from iac_code.config import get_provider_config
 
     provider_cfg = get_provider_config(provider_key)
@@ -130,25 +125,63 @@ def create_provider(
         saved_base = provider_cfg.get("apiBase")
         if isinstance(saved_base, str) and saved_base:
             effective_base_url = saved_base
-    provider_cls = _import_provider_class(desc.provider_class)
     effort_value = _get_provider_config_value(provider_cfg, model, "effort")
     effort = effort_value if isinstance(effort_value, str) else None
-    request_policy_kwargs: dict[str, int] = {}
+    if request_policy_override is not None and request_policy_override.effort is not None:
+        effort = request_policy_override.effort
+    thinking_enabled = _get_bool_provider_config_value(provider_cfg, model, "thinkingEnabled")
+    if request_policy_override is not None and request_policy_override.thinking_enabled is not None:
+        thinking_enabled = request_policy_override.thinking_enabled
+    thinking_budget = _get_positive_int_provider_config_value(provider_cfg, model, "thinkingBudget")
+    max_completion_tokens = _get_positive_int_provider_config_value(provider_cfg, model, "maxCompletionTokens")
+    if request_policy_override is not None and request_policy_override.thinking_budget is not None:
+        thinking_budget = request_policy_override.thinking_budget
+    if request_policy_override is not None and request_policy_override.max_completion_tokens is not None:
+        max_completion_tokens = request_policy_override.max_completion_tokens
+    wire_provider_key = _wire_provider_key_for_openai_compatible_base(
+        provider_key,
+        effective_base_url,
+    )
+    api_key = credentials.get(provider_key, "")
+    if not api_key and wire_provider_key != provider_key:
+        api_key = credentials.get(wire_provider_key, "")
+    if desc.require_api_key and not api_key:
+        raise ProviderNotConfiguredError(
+            _("No API key configured for provider '{provider}' (model: {model}). Run /auth to configure.").format(
+                provider=desc.display_name, model=model
+            )
+        )
+    provider_class_path = desc.provider_class
+    if wire_provider_key != provider_key:
+        wire_desc = PROVIDER_REGISTRY.get(wire_provider_key)
+        if wire_desc is not None:
+            provider_class_path = wire_desc.provider_class
+    provider_cls = _import_provider_class(provider_class_path)
+    request_policy_kwargs: dict[str, Any] = {}
+    if thinking_enabled is not None:
+        request_policy_kwargs["thinking_enabled"] = thinking_enabled
     from iac_code.providers.openai_provider import OpenAIProvider
 
     if issubclass(provider_cls, OpenAIProvider):
-        thinking_budget = _get_positive_int_provider_config_value(provider_cfg, model, "thinkingBudget")
-        max_completion_tokens = _get_positive_int_provider_config_value(provider_cfg, model, "maxCompletionTokens")
         if thinking_budget is not None:
             request_policy_kwargs["thinking_budget"] = thinking_budget
         if max_completion_tokens is not None:
             request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
+    else:
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        if (
+            request_policy_override is not None
+            and request_policy_override.thinking_budget is not None
+            and issubclass(provider_cls, AnthropicProvider)
+        ):
+            request_policy_kwargs["thinking_budget"] = request_policy_override.thinking_budget
     return provider_cls(
         model=model,
         api_key=api_key or None,
         base_url=effective_base_url,
         effort=effort,
-        provider_key=provider_key,
+        provider_key=wire_provider_key,
         **request_policy_kwargs,
     )
 
@@ -186,6 +219,29 @@ def _get_positive_int_provider_config_value(provider_cfg: dict[str, Any], model:
     return _positive_int_or_none(provider_cfg.get(key))
 
 
+def _get_bool_provider_config_value(provider_cfg: dict[str, Any], model: str, key: str) -> bool | None:
+    model_cfg = _get_model_provider_config(provider_cfg, model)
+    if key in model_cfg:
+        model_value = bool_or_none(model_cfg[key])
+        if model_value is not None:
+            return model_value
+    return bool_or_none(provider_cfg.get(key))
+
+
+def _wire_provider_key_for_openai_compatible_base(
+    provider_key: str,
+    base_url: str | None,
+) -> str:
+    if provider_key != "openai_compatible" or not isinstance(base_url, str):
+        return provider_key
+    lower_base_url = base_url.lower()
+    if "token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode" in lower_base_url:
+        return "dashscope_token_plan"
+    if "dashscope.aliyuncs.com/compatible-mode" in lower_base_url:
+        return "dashscope"
+    return provider_key
+
+
 def _positive_int_or_none(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -198,6 +254,12 @@ def _positive_int_or_none(value: Any) -> int | None:
         return None
     parsed = int(stripped)
     return parsed if parsed > 0 else None
+
+
+def _active_request_policy(policy: ProviderRequestPolicy | None) -> ProviderRequestPolicy | None:
+    if policy is None or not policy.has_values:
+        return None
+    return policy
 
 
 class ProviderManager:
@@ -216,6 +278,7 @@ class ProviderManager:
         stream_idle_timeout: float = 90.0,
         provider_key_override: str | None = None,
         base_url_override: str | None = None,
+        request_policy_override: ProviderRequestPolicy | None = None,
     ):
         self._model = model
         self._credentials = credentials
@@ -223,6 +286,7 @@ class ProviderManager:
         self._stream_idle_timeout = stream_idle_timeout
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
+        self._request_policy_override = _active_request_policy(request_policy_override)
         # Lazy: first startup may have no active provider yet. Defer errors
         # until the user actually tries to send a message, so /auth is reachable.
         self._provider: Provider | None = None
@@ -230,8 +294,7 @@ class ProviderManager:
             self._provider = create_provider(
                 model,
                 credentials,
-                base_url=base_url_override,
-                provider_key_override=provider_key_override,
+                **self._provider_create_kwargs(),
             )
         except ValueError as e:
             logger.warning(f"Provider not configured yet: {e}")
@@ -262,10 +325,18 @@ class ProviderManager:
             self._provider = create_provider(
                 self._model,
                 self._credentials,
-                base_url=self._base_url_override,
-                provider_key_override=self._provider_key_override,
+                **self._provider_create_kwargs(),
             )
         return self._provider
+
+    def _provider_create_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "base_url": self._base_url_override,
+            "provider_key_override": self._provider_key_override,
+        }
+        if self._request_policy_override is not None:
+            kwargs["request_policy_override"] = self._request_policy_override
+        return kwargs
 
     def reconfigure(
         self,
@@ -273,6 +344,7 @@ class ProviderManager:
         credentials: dict[str, str],
         provider_key_override: str | None = None,
         base_url_override: str | None = None,
+        request_policy_override: ProviderRequestPolicy | None = None,
     ) -> None:
         """Switch model and credentials in place.
 
@@ -285,13 +357,13 @@ class ProviderManager:
         self._credentials = credentials
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
+        self._request_policy_override = _active_request_policy(request_policy_override)
         self._provider = None
         try:
             self._provider = create_provider(
                 model,
                 credentials,
-                base_url=base_url_override,
-                provider_key_override=provider_key_override,
+                **self._provider_create_kwargs(),
             )
         except ValueError as e:
             logger.warning(f"Provider not configured after reconfigure: {e}")
@@ -590,11 +662,16 @@ class ProviderManager:
                         },
                     )
                     try:
+                        fallback_kwargs: dict[str, Any] = {
+                            "base_url": self._base_url_override,
+                            "provider_key_override": self._provider_key_override,
+                        }
+                        if self._request_policy_override is not None:
+                            fallback_kwargs["request_policy_override"] = self._request_policy_override
                         fallback_provider = create_provider(
                             fallback,
                             self._credentials,
-                            base_url=self._base_url_override,
-                            provider_key_override=self._provider_key_override,
+                            **fallback_kwargs,
                         )
                         return await self._complete_with_retry_result(
                             messages,

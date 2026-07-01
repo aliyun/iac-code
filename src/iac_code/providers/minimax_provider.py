@@ -20,6 +20,8 @@ class MiniMaxProvider(AnthropicProvider):
         base_url: str | None = None,
         effort: str | None = None,
         provider_key: str = "minimax_cn",
+        thinking_enabled: bool | None = None,
+        thinking_budget: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -27,6 +29,8 @@ class MiniMaxProvider(AnthropicProvider):
             api_key=api_key,
             base_url=base_url,
             effort=effort,
+            thinking_enabled=thinking_enabled,
+            thinking_budget=thinking_budget,
             provider_key=provider_key,
         )
         self._PROVIDER_KEY = provider_key
@@ -35,6 +39,8 @@ class MiniMaxProvider(AnthropicProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.MINIMAX:
             return {}
+        if self._thinking_disabled():
+            return {"thinking": {"type": "disabled"}}
         if self._model == "MiniMax-M3":
             return {"thinking": {"type": "adaptive"}}
         return {}

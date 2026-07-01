@@ -72,16 +72,19 @@ activeProvider: dashscope
 providers:
   dashscope:
     model: glm-5.2
+    thinkingEnabled: true
     thinkingBudget: 8192
     maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
+        thinkingEnabled: false
         thinkingBudget: 8192
         maxCompletionTokens: 16384
 ```
 
 | Field | Scope | Description |
 |---|---|---|
+| `thinkingEnabled` | Provider or model | Optional boolean thinking switch. `true` asks supported providers/models to enable thinking; `false` asks them to disable it; omitted preserves the provider/model default. |
 | `thinkingBudget` | Provider or model | Positive integer reasoning/thinking budget passed to providers that support it. |
 | `maxCompletionTokens` | Provider or model | Positive integer `max_completion_tokens` override for providers/models that use that request field. |
 | `effort` | Provider or model | Optional thinking effort override for models that support effort control. |
@@ -89,6 +92,8 @@ providers:
 Model-level values under `providers.<provider>.models.<model>` override provider-level values when they are valid. Invalid numeric values are ignored, so IaC Code falls back to the provider-level value or built-in model policy.
 
 For Alibaba Cloud DashScope and DashScope Token Plan, IaC Code has a built-in `thinkingBudget` of `8192` for `glm-5.2` and `kimi-k2.7-code`. When `maxCompletionTokens` is not set, the request limit is computed as the normal answer token limit plus the effective thinking budget.
+
+A2A requests may override these settings for a single message turn through `message.metadata.iac_code.thinking` or the `iac-code a2a-client call` flags `--thinking-enabled`, `--thinking-effort`, and `--thinking-budget`. If no explicit A2A thinking metadata is sent, the runtime uses the settings above and the provider's normal defaults. For generic `openai_compatible` providers with a DashScope compatible-mode base URL, iac-code switches to the DashScope native thinking wire format only when an explicit thinking policy is present.
 
 ## Tool Permission Configuration
 

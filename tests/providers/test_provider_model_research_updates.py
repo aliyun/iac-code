@@ -155,3 +155,32 @@ def test_provider_specific_thinking_wire_formats_do_not_use_openai_or_anthropic_
     for kwargs in (kimi._build_thinking_kwargs(), zhipu._build_thinking_kwargs(), minimax._build_thinking_kwargs()):
         assert "reasoning_effort" not in kwargs
         assert kwargs.get("thinking", {}).get("budget_tokens") is None
+
+
+def test_provider_specific_thinking_enabled_false_disables_native_wire_formats() -> None:
+    assert KimiProvider(model="kimi-k2.6", api_key="k", thinking_enabled=False)._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "disabled"}}
+    }
+    assert ZhiPuProvider(model="glm-5.1", api_key="k", thinking_enabled=False)._build_thinking_kwargs() == {
+        "extra_body": {"thinking": {"type": "disabled"}}
+    }
+    assert MiniMaxProvider(model="MiniMax-M3", api_key="k", thinking_enabled=False)._build_thinking_kwargs() == {
+        "thinking": {"type": "disabled"}
+    }
+
+
+def test_gemini_thinking_enabled_uses_default_effort_and_false_suppresses() -> None:
+    from iac_code.providers.gemini_provider import GeminiProvider
+
+    assert GeminiProvider(model="gemini-2.5-pro", api_key="k", thinking_enabled=True)._build_thinking_kwargs() == {
+        "reasoning_effort": "medium"
+    }
+    assert (
+        GeminiProvider(
+            model="gemini-2.5-pro",
+            api_key="k",
+            effort="high",
+            thinking_enabled=False,
+        )._build_thinking_kwargs()
+        == {}
+    )

@@ -141,6 +141,10 @@ require-card-signature: true
 cwd: /path/to/workspace
 iac-code-model: qwen-plus
 iac-code-api-key: provider-api-key
+# Optional per-message thinking policy metadata:
+# thinking-enabled: false
+# thinking-effort: low
+# thinking-budget: 2048
 ```
 
 Use `a2a-client call` for a direct Phase 1 client call:

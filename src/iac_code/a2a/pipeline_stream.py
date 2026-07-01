@@ -7,7 +7,7 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
+from a2a.types import TaskState, TaskStatus, TaskStatusUpdateEvent
 from google.protobuf.json_format import ParseDict
 
 from iac_code.a2a.events import (
@@ -15,7 +15,6 @@ from iac_code.a2a.events import (
     _emit_auto_permission_audit,
     _emit_resolver_permission_audit,
     _extract_artifact_metadata,
-    make_text_part,
 )
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.pipeline_events import PipelineEventTranslator, safe_permission_metadata
@@ -64,6 +63,7 @@ _DISPLAY_ONLY_EVENT_TYPES = {
     "candidate_detail_shown",
     "diagram_shown",
     "permission_requested",
+    "thinking_delta",
     "text_delta",
     "tool_result",
 }
@@ -116,7 +116,7 @@ class PipelineA2AEventPublisher:
         text_parts: list[str] = []
 
         for envelope in envelopes:
-            if _should_skip_envelope(envelope):
+            if _should_skip_envelope(envelope, exposure_types=self.exposure_types):
                 continue
 
             artifact_metadata = await self._maybe_externalize_artifact(envelope, tool_result)
@@ -499,7 +499,6 @@ class PipelineA2AEventPublisher:
             context_id=context_id,
             status=TaskStatus(
                 state=_a2a_task_state_name(envelope),
-                message=_message_for_envelope(envelope, task_id=task_id, context_id=context_id),
             ),
         )
         ParseDict({"iac_code": {"pipeline": envelope}}, update.metadata)
@@ -565,8 +564,13 @@ def is_recovery_semantic_event(envelope: dict[str, Any]) -> bool:
     return scope in _RECOVERY_STATE_SCOPES and status in _RECOVERY_STATE_STATUSES
 
 
-def _should_skip_envelope(envelope: dict[str, Any]) -> bool:
-    return envelope.get("eventType") == "text_delta" and _text_from_envelope(envelope) == ""
+def _should_skip_envelope(envelope: dict[str, Any], *, exposure_types: frozenset[A2AExposureType]) -> bool:
+    event_type = envelope.get("eventType")
+    if event_type == "text_delta":
+        return _text_from_envelope(envelope) == ""
+    if event_type == "thinking_delta":
+        return A2AExposureType.RAW_THINKING not in exposure_types
+    return False
 
 
 def _maybe_inject_test_fault(point: str) -> None:
@@ -578,25 +582,6 @@ def _maybe_inject_test_fault(point: str) -> None:
     if mode == "raise":
         raise RuntimeError(f"Injected test fault at {point}")
     os._exit(97)
-
-
-def _message_for_envelope(
-    envelope: dict[str, Any],
-    *,
-    task_id: str | None = None,
-    context_id: str | None = None,
-) -> Message | None:
-    if envelope.get("eventType") != "text_delta":
-        return None
-
-    message_task_id = task_id or str(envelope["taskId"])
-    return Message(
-        message_id=f"{message_task_id}-pipeline-{envelope['sequence']}",
-        task_id=message_task_id,
-        context_id=context_id or str(envelope["contextId"]),
-        role=Role.ROLE_AGENT,
-        parts=[make_text_part(_text_from_envelope(envelope))],
-    )
 
 
 def _text_from_envelope(envelope: dict[str, Any]) -> str:

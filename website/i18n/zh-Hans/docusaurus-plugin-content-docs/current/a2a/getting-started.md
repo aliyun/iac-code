@@ -141,6 +141,10 @@ require-card-signature: true
 cwd: /path/to/workspace
 iac-code-model: qwen-plus
 iac-code-api-key: provider-api-key
+# 可选：单次 message 的 thinking 策略 metadata：
+# thinking-enabled: false
+# thinking-effort: low
+# thinking-budget: 2048
 ```
 
 使用 `a2a-client call` 进行直接的 Phase 1 client 调用：

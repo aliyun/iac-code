@@ -66,6 +66,10 @@ class TestDashScopeBuildThinkingKwargs:
         p = DashScopeProvider(model="qwen3.6-plus", api_key="k")
         assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
 
+    def test_enabled_false_returns_disable_thinking(self):
+        p = DashScopeProvider(model="qwen3.6-plus", api_key="k", thinking_enabled=False)
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
+
     def test_qwen_with_effort_still_only_enable_thinking(self):
         # Bailian Qwen does not honor effort — provider ignores it gracefully.
         p = DashScopeProvider(model="qwen3.6-plus", api_key="k", effort="high")
@@ -114,6 +118,25 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         assert call_kwargs["max_completion_tokens"] == 16384
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True, "thinking_budget": 8192}
+        assert "reasoning_effort" not in call_kwargs
+
+    async def test_glm52_enabled_false_disables_budget_and_max_completion_tokens(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="glm-5.2", api_key="k", effort="high", thinking_enabled=False)
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["max_tokens"] == 8192
+        assert "max_completion_tokens" not in call_kwargs
+        assert call_kwargs["extra_body"] == {"enable_thinking": False}
         assert "reasoning_effort" not in call_kwargs
 
     async def test_kimi_k27_code_defaults_to_bounded_thinking_budget_and_max_completion_tokens(self):

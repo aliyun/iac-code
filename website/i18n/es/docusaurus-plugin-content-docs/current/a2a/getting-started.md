@@ -139,6 +139,12 @@ token: your-secret-token
 verify-card-secret: your-card-signing-secret
 require-card-signature: true
 cwd: /path/to/workspace
+iac-code-model: qwen-plus
+iac-code-api-key: provider-api-key
+# Opcional: metadatos de política de thinking por mensaje:
+# thinking-enabled: false
+# thinking-effort: low
+# thinking-budget: 2048
 ```
 
 Usa `a2a-client call` para una llamada directa de cliente de Fase 1:

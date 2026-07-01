@@ -28,6 +28,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
+from iac_code.utils.project_paths import sanitize_path
 
 
 class FakeProvider:
@@ -77,6 +78,10 @@ class FakeAliyunApi(AliyunApi):
 
 def _read_jsonl(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _session_audit_log_path(config_dir, cwd: str, session_id: str):
+    return config_dir / "projects" / sanitize_path(cwd) / session_id / "permission-audit.jsonl"
 
 
 def _tool_turn(
@@ -193,6 +198,7 @@ async def test_agent_loop_prompt_event_carries_internal_audit_context(tmp_path):
     [prompt] = _permission_requests(events)
     assert prompt.audit_context == {
         "session_id": "session-prompt",
+        "cwd": str(tmp_path),
         "settings": settings,
         "metadata": metadata,
     }
@@ -223,6 +229,7 @@ async def test_agent_loop_bash_ask_rule_prompt_carries_rule_audit_context(tmp_pa
     [prompt] = _permission_requests(events)
     metadata = prompt.audit_context["metadata"]
     assert prompt.audit_context["session_id"] == "session-bash-ask"
+    assert prompt.audit_context["cwd"] == str(tmp_path)
     assert prompt.audit_context["settings"] is settings
     assert metadata.scope == "settings_rule"
     assert metadata.rule_source == "project_settings"
@@ -302,7 +309,7 @@ async def test_agent_loop_aliyun_exact_allow_jsonl_includes_read_write_classific
     events = await _collect_events(loop, "run aliyun", permission_handler=Mock(return_value=False))
 
     assert not _permission_requests(events)
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_jsonl(_session_audit_log_path(tmp_path, str(tmp_path), "session-aliyun-allow"))
     assert row["tool_name"] == "aliyun_api"
     assert row["decision"] == "allow"
     assert row["scope"] == "settings_rule"
@@ -342,7 +349,7 @@ async def test_agent_loop_aliyun_bypass_mode_allows_write_with_audit(monkeypatch
 
     assert not _permission_requests(events)
     assert any(isinstance(event, ToolResultEvent) and not event.is_error for event in events)
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_jsonl(_session_audit_log_path(tmp_path, str(tmp_path), "session-aliyun-bypass"))
     assert row["tool_name"] == "aliyun_api"
     assert row["decision"] == "allow"
     assert row["scope"] == "mode"

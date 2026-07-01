@@ -72,16 +72,19 @@ activeProvider: dashscope
 providers:
   dashscope:
     model: glm-5.2
+    thinkingEnabled: true
     thinkingBudget: 8192
     maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
+        thinkingEnabled: false
         thinkingBudget: 8192
         maxCompletionTokens: 16384
 ```
 
 | Champ | Portée | Description |
 |---|---|---|
+| `thinkingEnabled` | Fournisseur ou modèle | Interrupteur booléen optionnel pour le thinking. `true` demande aux fournisseurs/modèles compatibles de l'activer ; `false` demande de le désactiver ; si le champ est omis, le défaut du fournisseur/modèle est conservé. |
 | `thinkingBudget` | Fournisseur ou modèle | Budget de reasoning/thinking sous forme d'entier positif, transmis aux fournisseurs qui le prennent en charge. |
 | `maxCompletionTokens` | Fournisseur ou modèle | Valeur positive entière qui remplace `max_completion_tokens` pour les fournisseurs/modèles utilisant ce champ de requête. |
 | `effort` | Fournisseur ou modèle | Surcharge optionnelle de l'effort de thinking, uniquement pour les modèles qui prennent en charge le contrôle d'effort. |
@@ -89,6 +92,8 @@ providers:
 Les valeurs valides définies au niveau du modèle sous `providers.<provider>.models.<model>` remplacent les valeurs définies au niveau du fournisseur. Les valeurs numériques invalides sont ignorées ; IaC Code revient alors à la valeur du fournisseur ou à la politique intégrée du modèle.
 
 Pour Alibaba Cloud DashScope et DashScope Token Plan, IaC Code définit une valeur intégrée `thinkingBudget=8192` pour `glm-5.2` et `kimi-k2.7-code`. Si `maxCompletionTokens` n'est pas défini, la limite de requête est calculée comme la limite normale de tokens de réponse plus le thinking budget effectif.
+
+Les requêtes A2A peuvent remplacer ces réglages pour un seul tour de message via `message.metadata.iac_code.thinking` ou les flags `--thinking-enabled`, `--thinking-effort` et `--thinking-budget` de `iac-code a2a-client call`. Si aucune métadonnée de thinking A2A explicite n'est envoyée, le runtime utilise les réglages ci-dessus et les valeurs par défaut normales du provider. Pour les providers génériques `openai_compatible` avec une base URL en mode compatible DashScope, iac-code ne bascule vers le format wire natif de thinking DashScope que lorsqu'une politique de thinking explicite est présente.
 
 ## Configuration des permissions d'outils
 

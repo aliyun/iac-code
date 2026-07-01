@@ -23,6 +23,10 @@
     "message": "ACP プロトコル",
     "description": "The label for category 'ACP Protocol' in sidebar 'docsSidebar'"
   },
+  "sidebar.docsSidebar.category.A2A Protocol": {
+    "message": "A2A プロトコル",
+    "description": "The label for category 'A2A Protocol' in sidebar 'docsSidebar'"
+  },
   "sidebar.docsSidebar.category.Automation": {
     "message": "自動化",
     "description": "The label for category 'Automation' in sidebar 'docsSidebar'"

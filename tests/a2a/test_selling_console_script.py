@@ -403,7 +403,11 @@ def test_message_stream_route_forwards_sse_and_cwd_metadata() -> None:
     payload = json.loads(SseTargetHandler.requests[0]["body"])
     assert payload["method"] == "SendStreamingMessage"
     assert payload["params"]["message"]["metadata"] == {
-        "iac_code": {"cwd": "/workspace/demo", "iac_code_model": "kimi-k2.7-code"}
+        "iac_code": {
+            "cwd": "/workspace/demo",
+            "iac_code_model": "kimi-k2.7-code",
+            "thinking": {"enabled": True},
+        }
     }
 
 

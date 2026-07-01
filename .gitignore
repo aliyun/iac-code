@@ -172,3 +172,4 @@ cython_debug/
 # Super Powers
 .superpowers/
 .worktrees/
+.agents/

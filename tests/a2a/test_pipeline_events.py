@@ -16,6 +16,7 @@ from iac_code.types.stream_events import (
     PermissionRequestEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
 )
@@ -573,6 +574,53 @@ def test_candidate_stream_text_has_parent_and_candidate_coordinates() -> None:
     assert envelopes[0]["candidate"]["runId"] == "candidate-evaluate_candidate_abcd-0-1"
     assert envelopes[0]["candidate"]["index"] == 0
     assert envelopes[0]["data"]["text"] == "hello"
+
+
+def test_top_level_thinking_delta_has_pipeline_envelope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = translator.translate(ThinkingDeltaEvent(text="thinking out loud"))
+
+    assert len(envelopes) == 1
+    envelope = envelopes[0]
+    assert envelope["eventType"] == "thinking_delta"
+    assert envelope["scope"] == "pipeline"
+    assert envelope["status"] == "working"
+    assert envelope["data"] == {"type": "raw_thinking", "text": "thinking out loud"}
+
+
+def test_candidate_stream_thinking_has_parent_and_candidate_coordinates() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "candidate_name": "low cost",
+                "sub_pipeline_name": "evaluate_candidate",
+                "total_steps": 3,
+                "parent_step_id": "evaluate_candidates",
+            },
+        )
+    )
+
+    envelopes = translator.translate(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="evaluate_candidate_abcd",
+            candidate_index=0,
+            inner=ThinkingDeltaEvent(text="candidate reasoning"),
+        )
+    )
+
+    assert envelopes[0]["eventType"] == "thinking_delta"
+    assert envelopes[0]["scope"] == "candidate"
+    assert envelopes[0]["step"]["id"] == "evaluate_candidates"
+    assert envelopes[0]["candidate"]["runId"] == "candidate-evaluate_candidate_abcd-0-1"
+    assert envelopes[0]["candidate"]["index"] == 0
+    assert envelopes[0]["data"] == {"type": "raw_thinking", "text": "candidate reasoning"}
 
 
 def test_nested_sub_pipeline_permission_request_uses_inner_candidate_scope() -> None:

@@ -178,12 +178,13 @@ def build_message_stream_payload(
     message_id: str,
     images: Any = None,
     iac_code_model: str | None = None,
+    thinking_enabled: bool = True,
 ) -> dict[str, Any]:
     parts = []
     if prompt:
         parts.append({"text": prompt})
     parts.extend(_normalize_image_parts(images))
-    iac_code_metadata = {"cwd": cwd}
+    iac_code_metadata = {"cwd": cwd, "thinking": {"enabled": bool(thinking_enabled)}}
     if iac_code_model:
         stripped_model = iac_code_model.strip()
         if stripped_model:
@@ -565,6 +566,26 @@ def render_index_html(config: DebuggerConfig) -> str:
       color: var(--danger);
     }
 
+    button.toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 112px;
+      font-weight: 700;
+    }
+
+    button.toggle[aria-pressed="true"] {
+      border-color: #0f8b8d;
+      background: #e6f6f5;
+      color: #0f766e;
+    }
+
+    button.toggle[aria-pressed="false"] {
+      background: #f8fafc;
+      color: #475569;
+    }
+
     input,
     textarea {
       width: 100%;
@@ -926,14 +947,22 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     .timeline-detail-body {
-      display: none;
       margin-top: 6px;
       border-top: 1px solid var(--line);
       padding-top: 6px;
     }
 
-    .timeline-detail-body.is-open {
-      display: block;
+    .timeline-detail-body summary {
+      margin-bottom: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      list-style: none;
+    }
+
+    .timeline-detail-body summary::-webkit-details-marker {
+      display: none;
     }
 
     .timeline-detail-body pre {
@@ -961,6 +990,11 @@ def render_index_html(config: DebuggerConfig) -> str:
     .timeline-text {
       border-color: #bae6fd;
       background: #f0f9ff;
+    }
+
+    .timeline-thinking {
+      border-color: #ddd6fe;
+      background: #faf5ff;
     }
 
     .timeline-tool {
@@ -1422,6 +1456,7 @@ def render_index_html(config: DebuggerConfig) -> str:
         </div>
         <div class="button-row" aria-label="Actions">
           <button id="health-button" type="button">Health</button>
+          <button id="thinking-toggle" class="toggle" type="button" aria-pressed="true">Thinking On</button>
           <button id="stream-button" class="primary" type="button">Stream</button>
           <button id="fetch-state-button" type="button">Fetch State</button>
           <button id="export-html-button" type="button">Export HTML</button>
@@ -1596,8 +1631,23 @@ def render_index_html(config: DebuggerConfig) -> str:
         contextId: byId("context-id").value.trim(),
         taskId: byId("task-id").value.trim(),
         activeTaskId: byId("active-task-id").value.trim(),
+        thinkingEnabled: byId("thinking-toggle").getAttribute("aria-pressed") === "true",
         prompt: byId("prompt").value
       };
+    }
+
+    function setThinkingToggle(enabled) {
+      const button = byId("thinking-toggle");
+      button.setAttribute("aria-pressed", enabled ? "true" : "false");
+      button.textContent = enabled ? "Thinking On" : "Thinking Off";
+      button.title = enabled
+        ? "Send metadata.iac_code.thinking.enabled=true on the next Stream request"
+        : "Send metadata.iac_code.thinking.enabled=false on the next Stream request";
+    }
+
+    function toggleThinking() {
+      const enabled = byId("thinking-toggle").getAttribute("aria-pressed") !== "true";
+      setThinkingToggle(enabled);
     }
 
     function selectedImageFiles() {
@@ -2058,7 +2108,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       }
       const envelope = extractPipelineEnvelope(payload);
       const eventType = envelope ? eventTypeOf(envelope) : "";
-      if (eventType !== "text_delta" || streamEventCount % 8 === 0) {
+      if (!["text_delta", "thinking_delta"].includes(eventType) || streamEventCount % 8 === 0) {
         await nextBrowserPaint();
       }
     }
@@ -2213,14 +2263,15 @@ def render_index_html(config: DebuggerConfig) -> str:
       let currentGroup = null;
       events.forEach((event) => {
         const eventType = eventTypeFromRawItem(event);
-        if (eventType === "text_delta") {
+        if (eventType === "text_delta" || eventType === "thinking_delta") {
           const envelope = pipelineEnvelopeFromRawItem(event) || {};
-          const key = textDeltaGroupKey(event);
+          const groupType = eventType === "thinking_delta" ? "thinking_delta_group" : "text_delta_group";
+          const key = `${eventType}|${textDeltaGroupKey(event)}`;
           const text = textDeltaText(event);
           if (!currentGroup || currentGroup.key !== key) {
             currentGroup = flushTextDeltaGroup(grouped, currentGroup);
             currentGroup = {
-              type: "text_delta_group",
+              type: groupType,
               key,
               count: 0,
               text: "",
@@ -2323,8 +2374,8 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function rawEventLabel(row) {
-      if (row.type === "text_delta_group") {
-        return `text_delta x${row.count}`;
+      if (row.type === "text_delta_group" || row.type === "thinking_delta_group") {
+        return `${row.type === "thinking_delta_group" ? "thinking_delta" : "text_delta"} x${row.count}`;
       }
       if (row.type === "a2a_message_group") {
         return `agent message x${row.count}`;
@@ -2337,7 +2388,7 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function rawEventSummary(row) {
-      if (row.type === "text_delta_group") {
+      if (row.type === "text_delta_group" || row.type === "thinking_delta_group") {
         return row.text || "(empty text delta)";
       }
       if (row.type === "a2a_message_group") {
@@ -2382,7 +2433,7 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function rawEventMeta(row) {
-      if (row.type === "text_delta_group") {
+      if (row.type === "text_delta_group" || row.type === "thinking_delta_group") {
         const range =
           row.firstSequence && row.lastSequence && row.firstSequence !== row.lastSequence
             ? `seq ${row.firstSequence}-${row.lastSequence}`
@@ -2759,7 +2810,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       if (type.startsWith("interrupt_") || envelope.scope === "interrupt") {
         return stepKey || pipeline.key;
       }
-      if (["text_delta", "tool_result", "permission_requested", "input_required"].includes(type)) {
+      if (["text_delta", "thinking_delta", "tool_result", "permission_requested", "input_required"].includes(type)) {
         return candidateStepKey || candidateKey || stepKey || pipeline.key;
       }
       if (type.startsWith("candidate_step_")) {
@@ -2789,6 +2840,9 @@ def render_index_html(config: DebuggerConfig) -> str:
       const data = eventData(envelope);
       if (type === "text_delta") {
         return {label: "text", text: data.text || "", className: "timeline-text"};
+      }
+      if (type === "thinking_delta") {
+        return {label: "thinking", text: data.text || "", className: "timeline-thinking"};
       }
       if (type === "tool_result") {
         return {
@@ -2842,20 +2896,23 @@ def render_index_html(config: DebuggerConfig) -> str:
       }
       const type = eventTypeOf(envelope);
       const summary = summarizeTimelineEvent(envelope);
-      const textKey = `text:${targetKey}`;
-      if (type === "text_delta") {
+      if (type === "text_delta" || type === "thinking_delta") {
+        const deltaKind = type === "thinking_delta" ? "thinking_delta" : "text_delta";
+        const otherDeltaKind = deltaKind === "thinking_delta" ? "text_delta" : "thinking_delta";
+        const textKey = `${deltaKind}:${targetKey}`;
+        delete state.executionTree.textGroups[`${otherDeltaKind}:${targetKey}`];
         let item = state.executionTree.textGroups[textKey];
         if (!item) {
           item = {
             key: `${textKey}:${envelope.sequence || node.timeline.length}`,
             type,
-            label: "text",
+            label: summary.label,
             text: "",
             meta: "",
-            className: "timeline-text",
+            className: summary.className,
             count: 0,
             raw: {
-              eventType: "text_delta_group",
+              eventType: `${deltaKind}_group`,
               targetKey,
               text: "",
               events: []
@@ -2866,12 +2923,14 @@ def render_index_html(config: DebuggerConfig) -> str:
         }
         item.count += 1;
         item.text += summary.text || "";
-        item.meta = `text_delta x${item.count}`;
+        item.meta = `${deltaKind} x${item.count}`;
         item.raw.count = item.count;
         item.raw.text = item.text;
         item.raw.events.push(envelope);
       } else {
+        const textKey = `text_delta:${targetKey}`;
         delete state.executionTree.textGroups[textKey];
+        delete state.executionTree.textGroups[`thinking_delta:${targetKey}`];
         node.timeline.push({
           key: envelope.eventId || envelope.event_id || `${type}:${envelope.sequence || node.timeline.length}`,
           type,
@@ -3317,21 +3376,44 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function renderTimelineDetails(item) {
-      const detail = document.createElement("div");
-      detail.className = "timeline-detail-body";
-      detail.addEventListener("click", stopNestedTimelineToggle);
-      detail.addEventListener("toggle", stopNestedTimelineToggle);
-      if (state.expandedTimelineKeys.has(item.key)) {
-        detail.classList.add("is-open");
-      }
+      const details = document.createElement("details");
+      details.className = "timeline-detail-body";
+      details.setAttribute("data-timeline-detail-key", item.key);
+      details.open = state.expandedTimelineKeys.has(item.key);
+      details.addEventListener("click", stopNestedTimelineToggle);
+      details.addEventListener("toggle", onTimelineDetailToggle);
+      const summary = document.createElement("summary");
+      summary.textContent = "Raw detail";
       const pre = document.createElement("pre");
       pre.textContent = detailTextForTimelineItem(item);
-      detail.appendChild(pre);
-      return detail;
+      details.appendChild(summary);
+      details.appendChild(pre);
+      return details;
     }
 
     function stopNestedTimelineToggle(event) {
       event.stopPropagation();
+    }
+
+    function onTimelineDetailToggle(event) {
+      event.stopPropagation();
+      const details = event.currentTarget;
+      const key = details.getAttribute("data-timeline-detail-key");
+      if (!key) {
+        return;
+      }
+      if (details.open) {
+        state.expandedTimelineKeys.add(key);
+      } else {
+        state.expandedTimelineKeys.delete(key);
+      }
+      const button = details.parentElement
+        ? details.parentElement.querySelector(":scope > .timeline-item-title .timeline-details-button")
+        : null;
+      if (button) {
+        button.textContent = details.open ? "Hide" : "Details";
+        button.setAttribute("aria-expanded", details.open ? "true" : "false");
+      }
     }
 
     function renderTimelineItem(item) {
@@ -3350,15 +3432,15 @@ def render_index_html(config: DebuggerConfig) -> str:
       button.type = "button";
       button.className = "timeline-details-button";
       button.textContent = state.expandedTimelineKeys.has(item.key) ? "Hide" : "Details";
+      button.setAttribute("aria-expanded", state.expandedTimelineKeys.has(item.key) ? "true" : "false");
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (state.expandedTimelineKeys.has(item.key)) {
-          state.expandedTimelineKeys.delete(item.key);
-        } else {
-          state.expandedTimelineKeys.add(item.key);
+        const details = element.querySelector(":scope > .timeline-detail-body");
+        if (!details) {
+          return;
         }
-        renderPipeline();
+        details.open = !details.open;
       });
       title.appendChild(label);
       actions.appendChild(meta);
@@ -3966,7 +4048,11 @@ def render_index_html(config: DebuggerConfig) -> str:
     function appendRawEventBody(container, row) {
       const body = document.createElement("div");
       body.className = "raw-event-body";
-      if (row.type === "text_delta_group" || row.type === "a2a_message_group") {
+      if (
+        row.type === "text_delta_group" ||
+        row.type === "thinking_delta_group" ||
+        row.type === "a2a_message_group"
+      ) {
         const textLabel = document.createElement("div");
         textLabel.className = "raw-event-body-label";
         textLabel.textContent = "merged text";
@@ -3995,7 +4081,7 @@ def render_index_html(config: DebuggerConfig) -> str:
         const value = row.value || {};
         return ["request", row.at || index, value.method || "", requestPath(value)].join("|");
       }
-      if (row.type === "text_delta_group") {
+      if (row.type === "text_delta_group" || row.type === "thinking_delta_group") {
         return ["sse_text", row.key || "", row.firstSequence || row.firstAt || index].join("|");
       }
       if (row.type === "a2a_message_group") {
@@ -4095,7 +4181,7 @@ def render_index_html(config: DebuggerConfig) -> str:
         details.setAttribute("data-raw-key", key);
         details.open = state.expandedRawEventKeys.has(key);
         details.addEventListener("toggle", onRawEventToggle);
-        if (row.type !== "text_delta_group") {
+        if (row.type !== "text_delta_group" && row.type !== "thinking_delta_group") {
           const envelope = pipelineEnvelopeFromRawItem(row.event);
           const eventType = eventTypeFromRawItem(row.event);
           if (permissionFromEnvelope(envelope)) {
@@ -4284,6 +4370,7 @@ def render_index_html(config: DebuggerConfig) -> str:
         iacCodeModel: controls.iacCodeModel,
         contextId: controls.contextId || state.contextId,
         taskId: streamTaskIdForControls(controls),
+        thinkingEnabled: controls.thinkingEnabled,
         prompt: controls.prompt
       };
       if (images.length) {
@@ -4563,7 +4650,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       if (imageInput) {
         imageInput.disabled = true;
       }
-      ["health-button", "stream-button", "fetch-state-button", "cancel-button"].forEach((id) => {
+      ["health-button", "thinking-toggle", "stream-button", "fetch-state-button", "cancel-button"].forEach((id) => {
         const button = byId(id);
         if (button) {
           button.disabled = true;
@@ -4610,7 +4697,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       if (imageInput) {
         imageInput.setAttribute("disabled", "disabled");
       }
-      ["health-button", "stream-button", "fetch-state-button", "cancel-button"].forEach((id) => {
+      ["health-button", "thinking-toggle", "stream-button", "fetch-state-button", "cancel-button"].forEach((id) => {
         const button = clone.querySelector(`#${cssEscape(id)}`);
         if (button) {
           button.setAttribute("disabled", "disabled");
@@ -4692,6 +4779,7 @@ ${clone.outerHTML}`;
     byId("health-button").addEventListener("click", (event) => withButtonState(event.currentTarget, healthCheck));
     byId("fetch-state-button").addEventListener("click", (event) => withButtonState(event.currentTarget, fetchState));
     byId("cancel-button").addEventListener("click", (event) => withButtonState(event.currentTarget, cancelTask));
+    byId("thinking-toggle").addEventListener("click", toggleThinking);
     byId("stream-button").addEventListener("click", (event) => withStreamAction(event.currentTarget, streamMessage));
     byId("export-html-button").addEventListener("click", exportCurrentHtmlSnapshot);
     byId("image-input").addEventListener("change", updateImageSummary);
@@ -4855,6 +4943,13 @@ def _message_stream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     prompt = str(body.get("prompt", ""))
     context_id = str(body.get("contextId", ""))
     task_id = str(body.get("taskId", ""))
+    thinking_value = body.get("thinkingEnabled", body.get("thinking_enabled", True))
+    if thinking_value is None:
+        thinking_enabled = True
+    elif isinstance(thinking_value, str):
+        thinking_enabled = thinking_value.strip().lower() not in {"0", "false", "no", "off"}
+    else:
+        thinking_enabled = bool(thinking_value)
     if not cwd:
         raise ValueError("cwd is required")
     if not prompt and not body.get("images"):
@@ -4868,6 +4963,7 @@ def _message_stream_body(body: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         message_id=str(uuid.uuid4()),
         images=body.get("images"),
         iac_code_model=iac_code_model,
+        thinking_enabled=thinking_enabled,
     )
     return server_url, payload
 

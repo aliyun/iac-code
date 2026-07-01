@@ -246,6 +246,7 @@ async def test_shell_escape_permission_allow_is_audited_without_raw_command(tmp_
     assert record.source == "permission_pipeline"
     assert record.scope == "settings_rule"
     assert record.decision == "allow"
+    assert record.cwd == str(tmp_path)
     assert record.operation == {"is_read_only": False}
     assert "echo secret-value" not in str(record.input_summary)
 
@@ -307,6 +308,7 @@ async def test_shell_escape_permission_denial_is_audited(tmp_path, monkeypatch):
     assert record.source == "permission_pipeline"
     assert record.scope == "settings_rule"
     assert record.decision == "deny"
+    assert record.cwd == str(tmp_path)
     assert record.tool_name == "bash"
 
 
@@ -369,6 +371,7 @@ async def test_shell_escape_bash_internal_allow_rule_emits_audit(tmp_path, monke
     assert len(audit_records) == 1
     record = audit_records[0]
     assert record.decision == "allow"
+    assert record.cwd == str(tmp_path)
     assert record.scope == "session_rule"
     assert record.source == "permission_pipeline"
     assert record.rule_source == "session"
@@ -402,6 +405,7 @@ async def test_shell_escape_bash_internal_deny_rule_emits_audit(tmp_path, monkey
     assert len(audit_records) == 1
     record = audit_records[0]
     assert record.decision == "deny"
+    assert record.cwd == str(tmp_path)
     assert record.scope == "session_rule"
     assert record.source == "permission_pipeline"
     assert record.rule_source == "session"
@@ -440,6 +444,7 @@ async def test_shell_escape_permission_prompt_rejection_does_not_execute(tmp_pat
     assert [event.tool_input for event in repl.renderer.permission_events] == [{"command": "mkdir maybe"}]
     assert repl.renderer.permission_events[0].audit_context == {
         "session_id": "",
+        "cwd": str(tmp_path),
         "settings": settings,
         "metadata": metadata,
     }

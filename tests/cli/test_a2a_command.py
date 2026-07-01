@@ -423,6 +423,9 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
             context_id: str | None = None,
             model: str | None = None,
             iac_code_api_key: str | None = None,
+            thinking_enabled: bool | None = None,
+            thinking_effort: str | None = None,
+            thinking_budget: int | None = None,
         ):
             called["send"] = {
                 "url": url,
@@ -431,6 +434,9 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
                 "context_id": context_id,
                 "model": model,
                 "iac_code_api_key": iac_code_api_key,
+                "thinking_enabled": thinking_enabled,
+                "thinking_effort": thinking_effort,
+                "thinking_budget": thinking_budget,
             }
             return SimpleNamespace(text="created stack", payload={"result": {"text": "created stack"}})
 
@@ -475,6 +481,11 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
             "metadata-model",
             "--iac-code-api-key",
             "metadata-api-key",
+            "--thinking-enabled",
+            "--thinking-effort",
+            "high",
+            "--thinking-budget",
+            "2048",
             "--token",
             "bearer",
             "--api-key",
@@ -504,6 +515,9 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
         "context_id": "ctx-1",
         "model": "metadata-model",
         "iac_code_api_key": "metadata-api-key",
+        "thinking_enabled": True,
+        "thinking_effort": "high",
+        "thinking_budget": 2048,
     }
     assert called["discover"] == "http://agent.example/rpc"
     assert called["fallback_url"] == "http://agent.example/rpc"
@@ -576,6 +590,9 @@ def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
             context_id: str | None = None,
             model: str | None = None,
             iac_code_api_key: str | None = None,
+            thinking_enabled: bool | None = None,
+            thinking_effort: str | None = None,
+            thinking_budget: int | None = None,
         ):
             called["stream"] = {
                 "url": url,
@@ -584,6 +601,9 @@ def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
                 "context_id": context_id,
                 "model": model,
                 "iac_code_api_key": iac_code_api_key,
+                "thinking_enabled": thinking_enabled,
+                "thinking_effort": thinking_effort,
+                "thinking_budget": thinking_budget,
             }
             yield {"result": {"status": {"state": "working", "message": {"parts": [{"text": "planning"}]}}}}
             yield {"result": {"text": "created stack"}}
@@ -623,6 +643,9 @@ def test_a2a_call_stream_prints_stream_events(monkeypatch, tmp_path) -> None:
         "context_id": "ctx-1",
         "model": None,
         "iac_code_api_key": None,
+        "thinking_enabled": None,
+        "thinking_effort": None,
+        "thinking_budget": None,
     }
     assert called["closed"] is True
 
@@ -675,6 +698,9 @@ def test_a2a_client_call_loads_config_and_allows_cli_overrides(monkeypatch, tmp_
                 "context-id: ctx-from-config",
                 "iac-code-model: config-model",
                 "iac-code-api-key: config-iac-code-api-key",
+                "thinking-enabled: false",
+                "thinking-effort: low",
+                "thinking-budget: 1024",
                 "token: config-token",
                 "basic-username: config-user",
                 "basic-password: config-pass",
@@ -713,6 +739,9 @@ def test_a2a_client_call_loads_config_and_allows_cli_overrides(monkeypatch, tmp_
         "context_id": "ctx-from-config",
         "model": "config-model",
         "iac_code_api_key": "config-iac-code-api-key",
+        "thinking_enabled": False,
+        "thinking_effort": "low",
+        "thinking_budget": 1024,
         "token": "config-token",
         "basic_username": "config-user",
         "basic_password": "config-pass",

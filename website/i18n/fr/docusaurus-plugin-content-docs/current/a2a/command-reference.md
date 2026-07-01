@@ -278,11 +278,26 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--prompt`, `-p` | obligatoire | Texte du prompt |
 | `--cwd` | `.` | Chemin d'espace de travail envoyé comme `message.metadata.iac_code.cwd` |
 | `--context-id` | vide | ID de contexte A2A existant pour un message de suivi |
+| `--iac-code-model` | vide | Modèle LLM envoyé comme `message.metadata.iac_code.iac_code_model` ; remplace la configuration de modèle du serveur pour ce tour de message uniquement |
+| `--iac-code-api-key` | vide | Clé API du provider LLM envoyée comme `message.metadata.iac_code.iac_code_api_key` ; remplace `IAC_CODE_API_KEY` et `.credentials.yml` pour ce tour de message uniquement |
+| `--thinking-enabled`, `--no-thinking-enabled` | vide | Politique booléenne de thinking envoyée comme `message.metadata.iac_code.thinking.enabled` ; si elle est omise, le défaut serveur/provider est conservé |
+| `--thinking-effort` | vide | Effort de thinking envoyé comme `message.metadata.iac_code.thinking.effort` pour ce tour de message uniquement |
+| `--thinking-budget` | vide | Budget de thinking entier positif envoyé comme `message.metadata.iac_code.thinking.budget` pour ce tour de message uniquement |
 | `--verify-card-secret`, `--signing-secret` | vide | Secret HMAC pour la vérification de l'Agent Card |
 | `--verify-card-jwks-url` | vide | URL JWKS distante utilisée pour la vérification de l'Agent Card |
 | `--require-card-signature`, `--require-signature` | `false` | Rejeter les Agent Cards non signées ou invalides |
 | `--timeout` | `30.0` | Délai d'appel en secondes |
 | `--stream` | `false` | Utiliser `SendStreamingMessage` et afficher les événements du flux |
+
+`--iac-code-api-key` est la clé utilisée par le runtime iac-code distant pour appeler son provider LLM. Elle est distincte de `--api-key`, qui authentifie la requête HTTP A2A elle-même.
+
+Les options de thinking sont des métadonnées de requête par message. Elles peuvent aussi être fournies dans le YAML du client A2A sous les clés `thinking-enabled`, `thinking-effort` et `thinking-budget` ; les flags de ligne de commande remplacent les valeurs de configuration. Si les trois sont omises, le client n'envoie aucune métadonnée de thinking et le runtime distant conserve les valeurs par défaut configurées du provider. Pour les endpoints `openai_compatible` adossés au mode compatible DashScope, une politique de thinking explicite utilise les paramètres wire natifs de DashScope, de sorte que `--no-thinking-enabled` peut envoyer `extra_body.enable_thinking=false`. Le renvoi du raw thinking au client A2A nécessite toujours que le serveur active `thinking-exposure: raw-thinking`.
+
+```yaml
+thinking-enabled: false
+thinking-effort: low
+thinking-budget: 2048
+```
 
 Suivi dans le même contexte :
 

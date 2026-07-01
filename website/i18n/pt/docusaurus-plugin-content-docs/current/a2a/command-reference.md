@@ -278,11 +278,26 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--prompt`, `-p` | obrigatório | Texto do prompt |
 | `--cwd` | `.` | Caminho do workspace enviado como `message.metadata.iac_code.cwd` |
 | `--context-id` | vazio | ID de contexto A2A existente para uma mensagem de acompanhamento |
+| `--iac-code-model` | vazio | Modelo LLM enviado como `message.metadata.iac_code.iac_code_model`; substitui a configuração de modelo do servidor somente neste turno de mensagem |
+| `--iac-code-api-key` | vazio | API key do provedor LLM enviada como `message.metadata.iac_code.iac_code_api_key`; substitui `IAC_CODE_API_KEY` e `.credentials.yml` somente neste turno de mensagem |
+| `--thinking-enabled`, `--no-thinking-enabled` | vazio | Política booleana de thinking enviada como `message.metadata.iac_code.thinking.enabled`; se omitida, preserva o padrão do servidor/provedor |
+| `--thinking-effort` | vazio | Effort de thinking enviado como `message.metadata.iac_code.thinking.effort` somente neste turno de mensagem |
+| `--thinking-budget` | vazio | Budget de thinking como inteiro positivo enviado como `message.metadata.iac_code.thinking.budget` somente neste turno de mensagem |
 | `--verify-card-secret`, `--signing-secret` | vazio | Segredo HMAC para verificação do Agent Card |
 | `--verify-card-jwks-url` | vazio | URL JWKS remota usada para verificação do Agent Card |
 | `--require-card-signature`, `--require-signature` | `false` | Rejeitar Agent Cards não assinados ou inválidos |
 | `--timeout` | `30.0` | Timeout da chamada em segundos |
 | `--stream` | `false` | Usar `SendStreamingMessage` e imprimir eventos do stream |
+
+`--iac-code-api-key` é a chave usada pelo runtime iac-code remoto para chamar seu provedor LLM. Ela é separada de `--api-key`, que autentica a própria requisição HTTP A2A.
+
+As opções de thinking são metadados de requisição por mensagem. Elas também podem ser fornecidas no YAML do cliente A2A como `thinking-enabled`, `thinking-effort` e `thinking-budget`; flags de linha de comando substituem valores de configuração. Se as três forem omitidas, o cliente não envia metadados de thinking e o runtime remoto mantém os padrões configurados do provedor. Para endpoints `openai_compatible` apoiados pelo modo compatível do DashScope, uma política de thinking explícita usa os parâmetros wire nativos do DashScope, então `--no-thinking-enabled` pode enviar `extra_body.enable_thinking=false`. Emitir raw thinking de volta ao cliente A2A ainda exige que o servidor habilite `thinking-exposure: raw-thinking`.
+
+```yaml
+thinking-enabled: false
+thinking-effort: low
+thinking-budget: 2048
+```
 
 Acompanhamento no mesmo contexto:
 

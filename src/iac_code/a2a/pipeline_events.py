@@ -20,6 +20,7 @@ from iac_code.types.stream_events import (
     PermissionRequestEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
 )
@@ -283,6 +284,8 @@ class PipelineEventTranslator:
             return self._translate_pipeline_event(event)
         if isinstance(event, TextDeltaEvent):
             return [self._translate_text_delta_event(event)]
+        if isinstance(event, ThinkingDeltaEvent):
+            return [self._translate_thinking_delta_event(event)]
         if isinstance(event, AskUserQuestionEvent):
             return [self._translate_ask_user_question_event(event)]
         if isinstance(event, PermissionRequestEvent):
@@ -528,6 +531,11 @@ class PipelineEventTranslator:
             data = {"text": inner.text}
             input_data = None
             permission = None
+        elif isinstance(inner, ThinkingDeltaEvent):
+            event_type = "thinking_delta"
+            data = _thinking_delta_data(inner)
+            input_data = None
+            permission = None
         elif isinstance(inner, AskUserQuestionEvent):
             event_type = "input_required"
             data = _ask_user_question_data(inner)
@@ -598,6 +606,9 @@ class PipelineEventTranslator:
 
     def _translate_text_delta_event(self, event: TextDeltaEvent) -> dict[str, Any]:
         return self._translate_parent_scoped_display_event("text_delta", {"text": event.text})
+
+    def _translate_thinking_delta_event(self, event: ThinkingDeltaEvent) -> dict[str, Any]:
+        return self._translate_parent_scoped_display_event("thinking_delta", _thinking_delta_data(event))
 
     def _translate_ask_user_question_event(self, event: AskUserQuestionEvent) -> dict[str, Any]:
         envelope = self._translate_parent_scoped_display_event("input_required", _ask_user_question_data(event))
@@ -1268,6 +1279,10 @@ def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
         "isError": event.is_error,
         "result": _tool_result_metadata(event.result, is_error=event.is_error),
     }
+
+
+def _thinking_delta_data(event: ThinkingDeltaEvent) -> dict[str, Any]:
+    return {"type": "raw_thinking", "text": _truncate(event.text)}
 
 
 def _mcp_progress_data(event: MCPProgressEvent) -> dict[str, Any]:

@@ -20,6 +20,9 @@ class KimiProvider(OpenAIProvider):
         base_url: str | None = None,
         effort: str | None = None,
         provider_key: str = "kimi_cn",
+        thinking_enabled: bool | None = None,
+        thinking_budget: int | None = None,
+        max_completion_tokens: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -27,6 +30,9 @@ class KimiProvider(OpenAIProvider):
             api_key=api_key,
             base_url=base_url,
             effort=effort,
+            thinking_enabled=thinking_enabled,
+            thinking_budget=thinking_budget,
+            max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
         )
         self._PROVIDER_KEY = provider_key
@@ -35,6 +41,8 @@ class KimiProvider(OpenAIProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.KIMI:
             return {}
+        if self._thinking_disabled():
+            return {"extra_body": {"thinking": {"type": "disabled"}}}
         if self._model == "kimi-k2.7-code":
             return {}
         return {"extra_body": {"thinking": {"type": "enabled"}}}

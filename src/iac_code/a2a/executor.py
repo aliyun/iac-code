@@ -47,6 +47,7 @@ from iac_code.a2a.runtime_overrides import (
     refresh_runtime_cloud_tools,
 )
 from iac_code.a2a.task_store import A2ATaskStore, _close_runtime
+from iac_code.a2a.thinking_metadata import A2AThinkingMetadata
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
     TASK_STATE_FAILED,
@@ -74,6 +75,7 @@ from iac_code.pipeline.engine.cleanup import (
     mark_cleanup_prompt_message_completed,
 )
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
+from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential
@@ -819,6 +821,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             user_id = self._resolve_user_id(metadata)
             metadata_model = self._resolve_model(metadata)
             metadata_api_key = self._resolve_api_key(metadata)
+            request_policy_override = self._resolve_request_policy(metadata)
             model = metadata_model or self._model
             aliyun_credential = self._resolve_aliyun_credential(metadata)
             pipeline_mode = get_run_mode() == RunMode.PIPELINE
@@ -922,6 +925,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 aliyun_credential=aliyun_credential,
                 model_from_metadata=metadata_model is not None,
                 metadata_api_key=metadata_api_key,
+                request_policy_override=request_policy_override,
             )
             await pipeline_executor.execute(
                 context=context,
@@ -1093,6 +1097,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         model,
                         from_metadata=metadata_model is not None,
                         metadata_api_key=metadata_api_key,
+                        request_policy_override=request_policy_override,
                     )
                     refresh_runtime_cloud_tools(runtime)
                     cleanup_ledger = _cleanup_ledger_for_a2a_normal_chat(cwd=cwd, session_id=ctx.session_id)
@@ -1304,6 +1309,9 @@ class IacCodeA2AExecutor(AgentExecutor):
         if isinstance(raw_api_key, str) and raw_api_key.strip():
             return raw_api_key.strip()
         return None
+
+    def _resolve_request_policy(self, metadata: Any | None) -> ProviderRequestPolicy | None:
+        return A2AThinkingMetadata.request_policy_from_metadata(metadata)
 
     def _resolve_aliyun_credential(self, metadata: Any | None) -> AliyunCredential | None:
         if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
@@ -1537,12 +1545,14 @@ class IacCodeA2AExecutor(AgentExecutor):
         *,
         from_metadata: bool,
         metadata_api_key: str | None = None,
+        request_policy_override: ProviderRequestPolicy | None = None,
     ) -> None:
         configure_runtime_model(
             runtime,
             model,
             from_metadata=from_metadata,
             metadata_api_key=metadata_api_key,
+            request_policy_override=request_policy_override,
         )
 
     def _credentials_with_metadata_api_key(

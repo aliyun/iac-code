@@ -278,11 +278,26 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--prompt`, `-p` | required | プロンプトテキスト |
 | `--cwd` | `.` | `message.metadata.iac_code.cwd` として送信されるワークスペースパス |
 | `--context-id` | empty | フォローアップメッセージ用の既存 A2A context ID |
+| `--iac-code-model` | empty | `message.metadata.iac_code.iac_code_model` として送信される LLM model。この message turn のみ server model 設定を上書きします |
+| `--iac-code-api-key` | empty | `message.metadata.iac_code.iac_code_api_key` として送信される LLM provider API key。この message turn のみ `IAC_CODE_API_KEY` と `.credentials.yml` を上書きします |
+| `--thinking-enabled`, `--no-thinking-enabled` | empty | `message.metadata.iac_code.thinking.enabled` として送信される boolean thinking ポリシー。省略時は server/provider のデフォルトを維持します |
+| `--thinking-effort` | empty | この message turn のみ `message.metadata.iac_code.thinking.effort` として送信される thinking effort |
+| `--thinking-budget` | empty | この message turn のみ `message.metadata.iac_code.thinking.budget` として送信される正の整数 thinking budget |
 | `--verify-card-secret`, `--signing-secret` | empty | Agent Card 検証用の HMAC secret |
 | `--verify-card-jwks-url` | empty | Agent Card 検証に使用されるリモート JWKS URL |
 | `--require-card-signature`, `--require-signature` | `false` | 署名なしまたは無効な Agent Card を拒否 |
 | `--timeout` | `30.0` | 呼び出しタイムアウト秒数 |
 | `--stream` | `false` | `SendStreamingMessage` を使用し、ストリームイベントを出力 |
+
+`--iac-code-api-key` は、リモート iac-code runtime が LLM provider を呼び出すために使用する key です。A2A HTTP リクエスト自体を認証する `--api-key` とは別のものです。
+
+Thinking オプションは message 単位の request metadata です。A2A client YAML では `thinking-enabled`、`thinking-effort`、`thinking-budget` として指定することもでき、コマンドラインフラグは設定値を上書きします。3 つすべてを省略すると、client は thinking metadata を送信せず、リモート runtime は設定済み provider default を維持します。DashScope compatible-mode を背後に持つ `openai_compatible` endpoint では、明示的な thinking ポリシーが DashScope のネイティブ wire parameter を使用するため、`--no-thinking-enabled` は `extra_body.enable_thinking=false` を送信できます。A2A client に raw thinking を返すには、server 側で引き続き `thinking-exposure: raw-thinking` を有効にする必要があります。
+
+```yaml
+thinking-enabled: false
+thinking-effort: low
+thinking-budget: 2048
+```
 
 同じコンテキスト内のフォローアップ:
 

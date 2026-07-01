@@ -1134,6 +1134,7 @@ class InlineREPL:
                 permission_result=permission,
                 audit_context={
                     "session_id": getattr(self, "_session_id", "") or "",
+                    "cwd": self._permission_audit_cwd(),
                     "settings": audit_settings,
                     "metadata": permission.audit,
                 },
@@ -1160,6 +1161,7 @@ class InlineREPL:
             emit_permission_audit(
                 PermissionAuditRecord(
                     session_id=getattr(self, "_session_id", "") or "",
+                    cwd=self._permission_audit_cwd(),
                     tool_name="bash",
                     tool_use_id="shell-escape",
                     decision=decision,
@@ -1177,6 +1179,11 @@ class InlineREPL:
             )
             is not False
         )
+
+    def _permission_audit_cwd(self) -> str:
+        from iac_code.pipeline.config import get_working_directory
+
+        return get_working_directory() or getattr(self, "_original_cwd", "") or ""
 
     def _is_pipeline_safe_command(self, user_input: str) -> bool:
         """Commands always allowed mid-pipeline regardless of allow_user_escapes.command."""
