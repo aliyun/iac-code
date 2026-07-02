@@ -1,0 +1,18 @@
+{"message_id":"msg_1","type":"message_start"}
+{"text":"hello","type":"text_delta"}
+{"text":"reasoning","type":"thinking_delta"}
+{"name":"bash","tool_use_id":"toolu_1","type":"tool_use_start"}
+{"partial_json":"{\"command\"","tool_use_id":"toolu_1","type":"tool_input_delta"}
+{"input":{"command":"ls","timeout":1},"name":"bash","tool_use_id":"toolu_1","type":"tool_use_end"}
+{"stop_reason":"end_turn","type":"message_end","usage":{"cache_creation_input_tokens":3,"cache_read_input_tokens":4,"input_tokens":10,"output_tokens":20}}
+{"message_id":"msg_old","type":"tombstone"}
+{"error":"network timeout","is_retryable":true,"type":"error"}
+{"is_error":false,"result":"ok","tool_name":"bash","tool_use_id":"toolu_1","type":"tool_result"}
+{"permission_result":null,"response_future":null,"tool_input":{"command":"rm -rf /tmp/example"},"tool_name":"bash","tool_use_id":"toolu_2","type":"permission_request"}
+{"compacted_tokens":250,"original_tokens":1000,"type":"compaction"}
+{"description":"background task","error":null,"result":"done","status":"completed","task_id":"task_1","type":"task_notification"}
+{"text":"queued prompt","type":"queued_input_submitted"}
+{"child_tool_input":{"path":"README.md"},"child_tool_name":"read_file","is_done":true,"is_error":false,"parent_tool_use_id":"parent_1","type":"subagent_tool"}
+{"elapsed_seconds":12,"progress_percentage":42.5,"resources":[{"logical_id":"Vpc","status":"CREATE_COMPLETE"}],"stack_id":"stack-1","stack_name":"demo","status":"CREATE_IN_PROGRESS","type":"stack_progress"}
+{"elapsed_seconds":30,"instances":[{"account":"123456789012","region":"cn-hangzhou","status":"CURRENT"}],"operation_id":"op-1","progress_percentage":60,"stack_group_name":"group","status":"RUNNING","type":"stack_instances_progress"}
+{"steps":[{"content":"inspect","priority":"high","status":"completed"},{"content":"implement","priority":"medium","status":"in_progress"}],"type":"plan"}

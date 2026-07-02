@@ -1,0 +1,12 @@
+{
+  "name": "resume_continue_conflict",
+  "argv": [
+    "--resume",
+    "abc123",
+    "--continue"
+  ],
+  "stdin": null,
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Error: --resume and --continue cannot be used together.\n"
+}

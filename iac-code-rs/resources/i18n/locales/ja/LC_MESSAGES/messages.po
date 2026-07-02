@@ -1,0 +1,3020 @@
+# Japanese translations for iac-code.
+# Copyright (C) 2026
+# This file is distributed under the same license as the iac-code package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: iac-code 0.4.1\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-06-04 15:58+0800\n"
+"PO-Revision-Date: 2026-05-13 00:00+0000\n"
+"Last-Translator: \n"
+"Language: ja\n"
+"Language-Team: Japanese\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: src/iac_code/config.py
+#, python-brace-format
+msgid "Invalid IAC_CODE_PROVIDER value: {!r}. Valid values (case-insensitive): {}"
+msgstr "無効な IAC_CODE_PROVIDER 値: {!r}。有効な値 (大文字と小文字を区別しません): {}"
+
+#: src/iac_code/a2a/transports/base.py
+msgid ""
+"Unix domain socket transport is not supported on Windows. Use --transport"
+" http or --transport stdio instead."
+msgstr ""
+"Unix ドメインソケットトランスポートは Windows ではサポートされていません。--transport http または "
+"--transport stdio を使用してください。"
+
+#: src/iac_code/acp/server.py
+msgid "Session not found"
+msgstr "セッションが見つかりません"
+
+#: src/iac_code/acp/server.py
+#, python-brace-format
+msgid "Session name is ambiguous. Candidates: {candidates}"
+msgstr "セッション名があいまいです。候補: {candidates}"
+
+#: src/iac_code/acp/server.py
+#, python-brace-format
+msgid "Session belongs to another project. Run: {hint}"
+msgstr "セッションは別のプロジェクトに属しています。実行: {hint}"
+
+#: src/iac_code/acp/slash_registry.py
+#, python-brace-format
+msgid ""
+"Command '/{cmd_name}' is not supported over ACP. Supported commands: "
+"{supported}"
+msgstr "コマンド '/{cmd_name}' は ACP 上ではサポートされていません。サポートされているコマンド：{supported}"
+
+#: src/iac_code/acp/slash_registry.py
+#, python-brace-format
+msgid "Command '/{cmd_name}' handler not implemented."
+msgstr "コマンド '/{cmd_name}' のハンドラーは未実装です。"
+
+#: src/iac_code/acp/slash_registry.py
+#, python-brace-format
+msgid "Compaction failed: {error}"
+msgstr "圧縮に失敗しました：{error}"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/compact.py
+msgid "Nothing to compact: conversation is empty."
+msgstr "圧縮できる内容がありません：会話が空です。"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/compact.py
+#, python-brace-format
+msgid ""
+"Conversation too short to compact: all messages are within the recent "
+"{turns}-turn preservation window."
+msgstr "会話が短すぎて圧縮できません：すべてのメッセージが直近 {turns} ターンの保持ウィンドウ内にあります。"
+
+#: iac-code-rs/crates/iac-code-cli/src/main.rs
+#, python-brace-format
+msgid ""
+"Conversation too small to compact: {tokens} tokens are below the {minimum}-"
+"token compaction threshold."
+msgstr "{tokens} tokens は {minimum} token の圧縮しきい値を下回っているため、会話が小さすぎて圧縮できません。"
+
+#: iac-code-rs/crates/iac-code-acp/src/slash_registry.rs
+msgid ""
+"Conversation too small to compact: current context is below the compaction "
+"threshold."
+msgstr "現在のコンテキストが圧縮しきい値を下回っているため、会話が小さすぎて圧縮できません。"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/compact.py
+msgid "Compaction failed. See logs for details."
+msgstr "圧縮に失敗しました。詳細はログをご確認ください。"
+
+#: src/iac_code/acp/slash_registry.py
+#, python-brace-format
+msgid ""
+"Context compacted: {original} → {compacted} tokens ({percent} reduction)."
+" Context usage: {usage}"
+msgstr ""
+"コンテキストを圧縮しました：{original} → {compacted} tokens（{percent} 削減）。 "
+"コンテキスト使用量：{usage}"
+
+#: iac-code-rs/crates/iac-code-acp/src/slash_registry.rs
+#, python-brace-format
+msgid ""
+"Context compacted: {original} → {compacted} tokens ({percent} increase). "
+"Context usage: {usage}"
+msgstr ""
+"コンテキストを圧縮しました：{original} → {compacted} tokens（{percent} 増加）。 "
+"コンテキスト使用量：{usage}"
+
+#: iac-code-rs/crates/iac-code-acp/src/slash_registry.rs
+#, python-brace-format
+msgid ""
+"Context compacted: {original} → {compacted} tokens (no token change). "
+"Context usage: {usage}"
+msgstr ""
+"コンテキストを圧縮しました：{original} → {compacted} tokens（tokens の変化なし）。 "
+"コンテキスト使用量：{usage}"
+
+#: src/iac_code/acp/slash_registry.py
+#, python-brace-format
+msgid "Clear failed: {error}"
+msgstr "クリアに失敗しました：{error}"
+
+#: src/iac_code/acp/slash_registry.py
+msgid "Conversation history cleared."
+msgstr "会話履歴をクリアしました。"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/debug.py
+#, python-brace-format
+msgid "Debug logging is on. Log file: {path}"
+msgstr "デバッグログはオンです。ログファイル：{path}"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/debug.py
+msgid "Debug logging is off."
+msgstr "デバッグログはオフです。"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/debug.py
+#, python-brace-format
+msgid "Debug logging enabled. Log file: {path}"
+msgstr "デバッグログを有効にしました。ログファイル：{path}"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/debug.py
+msgid "Debug logging disabled."
+msgstr "デバッグログを無効にしました。"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/debug.py
+msgid "Usage: /debug [on|off]"
+msgstr "使用方法：/debug [on|off]"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/memory.py
+msgid "Memory manager is unavailable."
+msgstr "メモリマネージャーを利用できません。"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/rename.py
+msgid "Usage: /rename <name>"
+msgstr "使用法: /rename <名前>"
+
+#: src/iac_code/acp/slash_registry.py
+msgid "Rename is only available after a session is created."
+msgstr "セッション作成後にのみ名前を変更できます。"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/rename.py
+#, python-brace-format
+msgid "Session is already named {name}"
+msgstr "セッション名はすでに {name} です"
+
+#: src/iac_code/acp/slash_registry.py src/iac_code/commands/rename.py
+#, python-brace-format
+msgid "Renamed session to {name}"
+msgstr "セッション名を {name} に変更しました"
+
+#: src/iac_code/acp/tools.py
+msgid "Bash command is required."
+msgstr "Bash コマンドが必要です。"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command timed out after {timeout} seconds"
+msgstr "コマンドが {timeout} 秒後にタイムアウトしました"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command terminated by signal: {signal}"
+msgstr "コマンドはシグナルで終了しました: {signal}"
+
+#: src/iac_code/acp/tools.py
+#, python-brace-format
+msgid "Command failed with exit code {exit_code}"
+msgstr "コマンドは終了コード {exit_code} で失敗しました"
+
+#: src/iac_code/agent/agent_loop.py src/iac_code/ui/repl.py
+msgid "Permission denied."
+msgstr "権限が拒否されました。"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: {agent_type}"
+msgstr "不明なエージェントタイプ: {agent_type}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running {agent_type} agent"
+msgstr "{agent_type} エージェントを実行中"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid ""
+"Launch a sub-agent to handle complex tasks.\n"
+"\n"
+"Available agent types:\n"
+"{agent_list}"
+msgstr ""
+"複雑なタスクを処理するサブエージェントを起動します。\n"
+"\n"
+"利用可能なエージェントタイプ:\n"
+"{agent_list}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The task for the sub-agent to perform."
+msgstr "サブエージェントが実行するタスク。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Short (3-5 word) description of the task."
+msgstr "タスクの短い（3-5 語）説明。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "The type of specialized agent to use."
+msgstr "使用する専用エージェントの種類。"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Run agent in background, parent continues."
+msgstr "エージェントをバックグラウンドで実行し、親は続行します。"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Unknown agent type: '{agent_type}'"
+msgstr "不明なエージェントタイプ: '{agent_type}'"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Sub-agent task"
+msgstr "サブエージェントタスク"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Background agent launched (task_id: {task_id}, type: {agent_type})"
+msgstr "バックグラウンドエージェントを起動しました (task_id: {task_id}, type: {agent_type})"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Sub-agent failed: {error}"
+msgstr "サブエージェント失敗: {error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent completed: {tool_count} tool call"
+msgid_plural "Agent completed: {tool_count} tool calls"
+msgstr[0] "エージェント完了: ツール呼び出し {tool_count} 回"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Agent stopped"
+msgstr "エージェントを停止しました"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent failed: {error}"
+msgstr "エージェント失敗: {error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Agent error: {error}"
+msgstr "エージェントエラー: {error}"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Done ({tool_count} tool uses · {token_display} tokens)"
+msgstr "完了（ツール使用 {tool_count} 回 · {token_display} tokens）"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Explore"
+msgstr "探索"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Plan"
+msgstr "計画"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "Agent"
+msgstr "エージェント"
+
+#: src/iac_code/agent/agent_tool.py
+#, python-brace-format
+msgid "Running agent: {description}"
+msgstr "エージェント実行中: {description}"
+
+#: src/iac_code/agent/agent_tool.py
+msgid "sub-agent"
+msgstr "サブエージェント"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use for complex, multi-step tasks that require research, code changes, or"
+" coordinating multiple operations."
+msgstr "調査、コード変更、または複数操作の調整が必要な複雑な複数ステップのタスクに使用します。"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to quickly find files, search code, or answer questions about the "
+"codebase. Read-only; cannot modify files."
+msgstr "ファイルの素早い検索、コード検索、またはコードベースに関する質問への回答に使用します。読み取り専用で、ファイルは変更できません。"
+
+#: src/iac_code/agent/agent_types.py
+msgid ""
+"Use to plan implementation strategy, review architecture, or design "
+"solutions. Read-only, no execution."
+msgstr "実装戦略の計画、アーキテクチャのレビュー、または解決策の設計に使用します。読み取り専用で、実行はしません。"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Tool started: {}"
+msgstr "ツール開始: {}"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Tool failed: {}"
+msgstr "ツール失敗: {}"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Tool finished: {}"
+msgstr "ツール完了: {}"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Child tool failed: {}"
+msgstr "子ツール失敗: {}"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Child tool finished: {}"
+msgstr "子ツール完了: {}"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Child tool started: {}"
+msgstr "子ツール開始: {}"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Stack {}: {} ({:.1f}%)"
+msgstr "スタック {}: {} ({:.1f}%)"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid "Stack group {}: {} ({}%)"
+msgstr "スタックグループ {}: {} ({}%)"
+
+#: src/iac_code/cli/headless.py
+#, python-brace-format
+msgid ""
+"\n"
+"  {error}\n"
+"\n"
+"  Fix: run  iac-code  then type /auth\n"
+"   or: set  IAC_CODE_API_KEY=<your-key>\n"
+"  Docs: https://aliyun.github.io/iac-"
+"code/docs/configuration/authentication\n"
+msgstr ""
+"\n"
+"  {error}\n"
+"\n"
+"  修正方法：iac-code を実行し、/auth と入力してください\n"
+"  または環境変数を設定：IAC_CODE_API_KEY=<あなたのキー>\n"
+"  ドキュメント：https://aliyun.github.io/iac-"
+"code/ja/docs/configuration/authentication\n"
+
+#: src/iac_code/cli/install_git_bash.py
+#, python-brace-format
+msgid "Git Bash is already installed at {}"
+msgstr "Git Bash は既に {} にインストールされています"
+
+#: src/iac_code/cli/install_git_bash.py
+msgid "Installing Git for Windows via npmmirror..."
+msgstr "npmmirror 経由で Git for Windows をインストール中..."
+
+#: src/iac_code/cli/install_git_bash.py
+msgid "powershell.exe was not found on PATH; cannot run installer."
+msgstr "PATH に powershell.exe が見つかりません。インストーラーを実行できません。"
+
+#: src/iac_code/cli/install_git_bash.py
+#, python-brace-format
+msgid "Installation failed (PowerShell exited with code {})"
+msgstr "インストールに失敗しました（PowerShell 終了コード {}）"
+
+#: src/iac_code/cli/install_git_bash.py
+msgid ""
+"Installer exited but bash.exe was not found in common locations; UAC may "
+"have been cancelled or the installer used a non-standard path."
+msgstr ""
+"インストーラーは終了しましたが、一般的な場所に bash.exe が見つかりませんでした。UAC "
+"がキャンセルされたか、インストーラーが標準外のパスを使用した可能性があります。"
+
+#: src/iac_code/cli/install_git_bash.py
+#, python-brace-format
+msgid "Git for Windows installed at {}"
+msgstr "Git for Windows を {} にインストールしました"
+
+#: src/iac_code/cli/main.py src/iac_code/commands/help.py
+msgid "AI-powered infrastructure orchestration tool"
+msgstr "AI 駆動のインフラストラクチャ・オーケストレーションツール"
+
+#: src/iac_code/cli/main.py
+msgid "Use iac-code as an A2A client."
+msgstr "iac-code を A2A クライアントとして使用します。"
+
+#: src/iac_code/cli/main.py
+msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
+msgstr "npmmirror ミラー経由で Git for Windows をインストールします（Windows 専用）。"
+
+#: src/iac_code/cli/main.py
+msgid "Update iac-code to the latest version."
+msgstr "iac-code を最新バージョンに更新します。"
+
+#: src/iac_code/cli/main.py
+msgid "YAML config file containing A2A client options"
+msgstr "A2A クライアントオプションを含む YAML 設定ファイル"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"A2A client dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
+msgstr "A2A クライアントの依存関係が不足しています。次のコマンドでインストールしてください: pip install 'iac-code[a2a]'"
+
+#: src/iac_code/cli/main.py
+msgid "LLM model to use"
+msgstr "使用する LLM モデル"
+
+#: src/iac_code/cli/main.py
+msgid "Non-interactive mode: run a single prompt and exit"
+msgstr "非対話モード：単一のプロンプトを実行して終了します"
+
+#: src/iac_code/cli/main.py
+msgid "Output format: text, json, stream-json"
+msgstr "出力形式：text、json、stream-json"
+
+#: src/iac_code/cli/main.py
+msgid "Maximum agent turns in headless mode"
+msgstr "ヘッドレスモードでの最大エージェンターン数"
+
+#: src/iac_code/cli/main.py
+msgid "Enable debug logging"
+msgstr "デバッグログを有効にする"
+
+#: src/iac_code/cli/main.py
+msgid "Show headless progress on stderr"
+msgstr "ヘッドレス進行状況を stderr に表示"
+
+#: src/iac_code/cli/main.py
+msgid "Show version and exit"
+msgstr "バージョンを表示して終了する"
+
+#: src/iac_code/cli/main.py
+msgid "Resume a session by ID or name"
+msgstr "ID または名前でセッションを再開"
+
+#: src/iac_code/cli/main.py
+msgid "Resume the most recent session"
+msgstr "直近のセッションを再開する"
+
+#: src/iac_code/cli/main.py src/iac_code/i18n/__init__.py
+msgid "Install completion for the current shell."
+msgstr "現在の shell に補完をインストールします。"
+
+#: src/iac_code/cli/main.py src/iac_code/i18n/__init__.py
+msgid ""
+"Show completion for the current shell, to copy it or customize the "
+"installation."
+msgstr "現在の shell 向けの補完スクリプトを表示します。コピーしたり、インストールをカスタマイズしたりできます。"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Comma-separated tool permission patterns to allow, e.g. 'bash(git "
+"*),write_file'"
+msgstr "許可するツール権限パターン（カンマ区切り）、例: 'bash(git *),write_file'*),write_file'"
+
+#: src/iac_code/cli/main.py
+msgid "Comma-separated tool permission patterns to deny"
+msgstr "拒否するツール権限パターン（カンマ区切り）"
+
+#: src/iac_code/cli/main.py
+msgid "Permission mode: default, accept_edits, bypass_permissions, dont_ask"
+msgstr "権限モード: default, accept_edits, bypass_permissions, dont_ask"
+
+#: src/iac_code/cli/main.py
+msgid "Error: --resume and --continue cannot be used together."
+msgstr "エラー：--resume と --continue は同時に使用できません。"
+
+#: src/iac_code/cli/main.py
+#, python-brace-format
+msgid "Invalid --output-format '{}'. Valid values: {}"
+msgstr "無効な --output-format '{}' です。有効な値: {}"
+
+#: src/iac_code/cli/main.py
+msgid "Run iac-code as an ACP server."
+msgstr "iac-code を ACP サーバーとして実行します。"
+
+#: src/iac_code/cli/main.py
+msgid "Transport type: stdio or http"
+msgstr "トランスポートの種類：stdio または http"
+
+#: src/iac_code/cli/main.py
+msgid "HTTP server port"
+msgstr "HTTP サーバーのポート"
+
+#: src/iac_code/cli/main.py
+msgid "HTTP server host"
+msgstr "HTTP サーバーのホスト"
+
+#: src/iac_code/cli/main.py
+msgid "Run iac-code as an A2A 1.0 server."
+msgstr "iac-code を A2A 1.0 サーバーとして実行します。"
+
+#: src/iac_code/cli/main.py
+msgid "YAML config file for A2A server options"
+msgstr "A2A サーバーオプション用の YAML 設定ファイル"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"HTTP server port. 41242 is the iac-code default inspired by Gemini CLI, "
+"not a registered A2A port."
+msgstr ""
+"HTTP サーバーポート。41242 は Gemini CLI に触発された iac-code のデフォルトで、登録済みの A2A "
+"ポートではありません。"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"A2A transport: http, stdio, unix, websocket, grpc, grpc-jsonrpc, or "
+"redis-streams"
+msgstr "A2A トランスポート: http、stdio、unix、websocket、grpc、grpc-jsonrpc、または redis-streams"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Expose A2A thinking signal types; repeat for multiple. Values: raw-"
+"thinking, tool-trace."
+msgstr "A2A thinking 信号タイプを公開します。複数指定するには繰り返します。値：raw-thinking、tool-trace。"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"A2A server dependencies are missing. Install with: pip install 'iac-"
+"code[a2a]'"
+msgstr "A2A サーバーの依存関係が不足しています。次のコマンドでインストールしてください: pip install 'iac-code[a2a]'"
+
+#: src/iac_code/cli/main.py
+msgid "Send a prompt to an A2A JSON-RPC endpoint."
+msgstr "A2A JSON-RPC エンドポイントにプロンプトを送信します。"
+
+#: src/iac_code/cli/main.py
+msgid "A2A JSON-RPC endpoint URL"
+msgstr "A2A JSON-RPC エンドポイント URL"
+
+#: src/iac_code/cli/main.py
+msgid "Route spec: name=url;skills=skill1,skill2;tags=tag1,tag2"
+msgstr "ルート仕様: name=url;skills=skill1,skill2;tags=tag1,tag2"
+
+#: src/iac_code/cli/main.py
+msgid "Named A2A route to call"
+msgstr "呼び出す名前付き A2A ルート"
+
+#: src/iac_code/cli/main.py
+msgid "Prompt to send"
+msgstr "送信するプロンプト"
+
+#: src/iac_code/cli/main.py
+msgid "Working directory metadata to send with the request"
+msgstr "リクエストと共に送信する作業ディレクトリのメタデータ"
+
+#: src/iac_code/cli/main.py
+msgid "A2A context ID to continue"
+msgstr "継続する A2A コンテキスト ID"
+
+#: src/iac_code/cli/main.py
+msgid "Bearer token for A2A HTTP requests"
+msgstr "A2A HTTP リクエスト用の Bearer トークン"
+
+#: src/iac_code/cli/main.py
+msgid "Basic auth username for A2A HTTP requests"
+msgstr "A2A HTTP リクエスト用の Basic 認証ユーザー名"
+
+#: src/iac_code/cli/main.py
+msgid "Basic auth password for A2A HTTP requests"
+msgstr "A2A HTTP リクエスト用の Basic 認証パスワード"
+
+#: src/iac_code/cli/main.py
+msgid "API key for A2A HTTP requests"
+msgstr "A2A HTTP リクエスト用の API キー"
+
+#: src/iac_code/cli/main.py
+msgid "HTTP header name for A2A API key"
+msgstr "A2A API キー用の HTTP ヘッダー名"
+
+#: src/iac_code/cli/main.py
+msgid "Secret used to verify the A2A Agent Card"
+msgstr "A2A Agent Card の検証に使用するシークレット"
+
+#: src/iac_code/cli/main.py
+msgid "Remote JWKS URL used to verify the A2A Agent Card"
+msgstr "A2A Agent Card の検証に使用するリモート JWKS URL"
+
+#: src/iac_code/cli/main.py
+msgid "Require a valid A2A Agent Card signature"
+msgstr "有効な A2A Agent Card 署名を要求します"
+
+#: src/iac_code/cli/main.py
+msgid "A2A call timeout in seconds"
+msgstr "A2A 呼び出しのタイムアウト（秒）"
+
+#: src/iac_code/cli/main.py
+msgid "Use A2A streaming message delivery"
+msgstr "A2A ストリーミングメッセージ配信を使用します"
+
+#: src/iac_code/cli/main.py
+msgid "Discover an A2A Agent Card."
+msgstr "A2A Agent Card を検出します。"
+
+#: src/iac_code/cli/main.py
+msgid "A2A agent base URL"
+msgstr "A2A エージェントのベース URL"
+
+#: src/iac_code/cli/main.py
+msgid "Get an A2A task."
+msgstr "A2A タスクを取得します。"
+
+#: src/iac_code/cli/main.py
+msgid "A2A task ID"
+msgstr "A2A タスク ID"
+
+#: src/iac_code/cli/main.py
+msgid "Maximum task history items to return"
+msgstr "返却するタスク履歴項目の最大数"
+
+#: src/iac_code/cli/main.py
+msgid "List A2A tasks."
+msgstr "A2A タスクを一覧表示します。"
+
+#: src/iac_code/cli/main.py
+msgid "Filter by A2A context ID"
+msgstr "A2A コンテキスト ID でフィルタリングします"
+
+#: src/iac_code/cli/main.py
+msgid "Filter by A2A task state"
+msgstr "A2A タスク状態でフィルタリングします"
+
+#: src/iac_code/cli/main.py
+msgid "Maximum tasks to return"
+msgstr "返却するタスクの最大数"
+
+#: src/iac_code/cli/main.py
+msgid "Pagination token"
+msgstr "ページネーショントークン"
+
+#: src/iac_code/cli/main.py
+msgid "Include task artifacts"
+msgstr "タスクアーティファクトを含めます"
+
+#: src/iac_code/cli/main.py
+msgid "Output format: table or json"
+msgstr "出力形式: table または json"
+
+#: src/iac_code/cli/main.py
+msgid "Cancel an A2A task."
+msgstr "A2A タスクをキャンセルします。"
+
+#: src/iac_code/cli/main.py
+msgid "Subscribe to an A2A task event stream."
+msgstr "A2A タスクのイベントストリームを購読します。"
+
+#: src/iac_code/cli/main.py
+msgid "Create an A2A task push notification config."
+msgstr "A2A タスクプッシュ通知設定を作成します。"
+
+#: src/iac_code/cli/main.py
+msgid "Push config ID"
+msgstr "プッシュ設定 ID"
+
+#: src/iac_code/cli/main.py
+msgid "Push callback URL"
+msgstr "プッシュコールバック URL"
+
+#: src/iac_code/cli/main.py
+msgid "Notification verification token"
+msgstr "通知検証トークン"
+
+#: src/iac_code/cli/main.py
+msgid "Callback authentication scheme"
+msgstr "コールバック認証方式"
+
+#: src/iac_code/cli/main.py
+msgid "Callback authentication credentials"
+msgstr "コールバック認証資格情報"
+
+#: src/iac_code/cli/main.py
+msgid "Get an A2A task push notification config."
+msgstr "A2A タスクプッシュ通知設定を取得します。"
+
+#: src/iac_code/cli/main.py
+msgid "List A2A task push notification configs."
+msgstr "A2A タスクプッシュ通知設定を一覧表示します。"
+
+#: src/iac_code/cli/main.py
+msgid "Maximum configs to return"
+msgstr "返却する設定の最大数"
+
+#: src/iac_code/cli/main.py
+msgid "Delete an A2A task push notification config."
+msgstr "A2A タスクプッシュ通知設定を削除します。"
+
+#: src/iac_code/cli/main.py
+msgid "Get an authenticated extended A2A Agent Card."
+msgstr "認証済みの拡張 A2A Agent Card を取得します。"
+
+#: src/iac_code/cli/main.py
+msgid "Preview A2A route resolution."
+msgstr "A2A ルート解決をプレビューします。"
+
+#: src/iac_code/cli/main.py
+msgid "Route name to resolve"
+msgstr "解決するルート名"
+
+#: src/iac_code/cli/main.py
+msgid "Skill ID to resolve"
+msgstr "解決するスキル ID"
+
+#: src/iac_code/cli/main.py
+msgid "Prompt text used for tag/name route matching"
+msgstr "タグ/名前ルートのマッチングに使用するプロンプトテキスト"
+
+#: src/iac_code/cli/main.py
+msgid "Directory for persisted A2A routes"
+msgstr "永続化された A2A ルート用のディレクトリ"
+
+#: src/iac_code/cli/main.py
+msgid "Save the provided routes as a route snapshot"
+msgstr "指定されたルートをルートスナップショットとして保存します"
+
+#: src/iac_code/cli/update.py
+msgid "Check for updates without installing."
+msgstr "インストールせずに更新を確認します。"
+
+#: src/iac_code/cli/update.py
+#, python-brace-format
+msgid "iac-code is already up to date (v{})."
+msgstr "iac-code はすでに最新です (v{})。"
+
+#: src/iac_code/cli/update.py
+#, python-brace-format
+msgid "Update available: v{} -> v{}"
+msgstr "更新があります: v{} -> v{}"
+
+#: src/iac_code/cli/update.py src/iac_code/ui/banner.py
+#, python-brace-format
+msgid "Run {} to update."
+msgstr "更新するには {} を実行してください。"
+
+#: src/iac_code/cli/update.py
+#, python-brace-format
+msgid "Updating iac-code from v{} to v{}..."
+msgstr "iac-code を v{} から v{} に更新しています..."
+
+#: src/iac_code/cli/update.py
+#, python-brace-format
+msgid "Update command failed: {}"
+msgstr "更新コマンドに失敗しました: {}"
+
+#: src/iac_code/cli/update.py
+#, python-brace-format
+msgid "Update command failed with exit code {}."
+msgstr "更新コマンドが終了コード {} で失敗しました。"
+
+#: src/iac_code/cli/update.py
+#, python-brace-format
+msgid "Successfully updated to v{}!"
+msgstr "v{} への更新に成功しました!"
+
+#: src/iac_code/commands/__init__.py
+msgid "Show available commands"
+msgstr "利用可能なコマンドを表示します"
+
+#: src/iac_code/commands/__init__.py
+msgid "Clear conversation history"
+msgstr "会話履歴をクリアします"
+
+#: src/iac_code/commands/__init__.py
+msgid "Show or switch model"
+msgstr "モデルを表示または切り替えます"
+
+#: src/iac_code/commands/__init__.py
+msgid "Show or switch thinking effort"
+msgstr "思考の負荷（effort）を表示または切り替えます"
+
+#: src/iac_code/commands/__init__.py
+msgid "Compact conversation context"
+msgstr "会話コンテキストを圧縮します"
+
+#: src/iac_code/commands/__init__.py
+msgid "Compacting conversation"
+msgstr "会話を圧縮しています"
+
+#: src/iac_code/commands/__init__.py
+msgid "Exit the application"
+msgstr "アプリケーションを終了します"
+
+#: src/iac_code/commands/__init__.py
+msgid "Authenticate with LLM provider"
+msgstr "LLM プロバイダーで認証を行います"
+
+#: src/iac_code/commands/__init__.py
+msgid "Toggle debug logging"
+msgstr "デバッグログのオン／オフを切り替えます"
+
+#: src/iac_code/commands/__init__.py
+msgid "View and manage persistent memories"
+msgstr "永続メモリを表示および管理"
+
+#: src/iac_code/commands/__init__.py
+msgid "[<name>|search <query>|delete <name>|help]"
+msgstr "[<名前>|search <検索語>|delete <名前>|help]"
+
+#: src/iac_code/commands/__init__.py
+msgid "Resume a previous session"
+msgstr "以前のセッションを再開します"
+
+#: src/iac_code/commands/__init__.py
+msgid "[conversation id or search term]"
+msgstr "[会話 ID または検索語]"
+
+#: src/iac_code/commands/__init__.py
+msgid "Rename the current session"
+msgstr "現在のセッション名を変更"
+
+#: src/iac_code/commands/__init__.py
+msgid "Manage skills"
+msgstr "スキルを管理"
+
+#: src/iac_code/commands/__init__.py
+msgid "Show current session status"
+msgstr "現在のセッション状態を表示"
+
+#: src/iac_code/commands/auth.py src/iac_code/ui/core/prompt_input.py
+msgid "Navigate"
+msgstr "移動"
+
+#: src/iac_code/commands/auth.py src/iac_code/ui/core/prompt_input.py
+msgid "Confirm"
+msgstr "確認"
+
+#: src/iac_code/commands/auth.py
+msgid "Back"
+msgstr "戻る"
+
+#: src/iac_code/commands/auth.py
+msgid "Keep"
+msgstr "維持"
+
+#: src/iac_code/commands/auth.py
+msgid "Re-enter"
+msgstr "再入力"
+
+#: src/iac_code/commands/auth.py
+msgid " (current)"
+msgstr " （現在）"
+
+#: src/iac_code/commands/auth.py
+msgid "Custom model..."
+msgstr "カスタムモデル…"
+
+#: src/iac_code/commands/auth.py
+#, python-brace-format
+msgid "Select model for {provider}"
+msgstr "{provider} のモデルを選択してください"
+
+#: src/iac_code/commands/auth.py
+msgid "Select model"
+msgstr "モデルを選択"
+
+#: src/iac_code/commands/auth.py
+msgid "Enter custom model name: "
+msgstr "カスタムモデル名を入力してください："
+
+#: src/iac_code/commands/auth.py
+msgid "Error: console not available"
+msgstr "エラー：コンソールを使用できません"
+
+#: src/iac_code/commands/auth.py
+msgid "Configure LLM Provider"
+msgstr "LLM プロバイダーを設定"
+
+#: src/iac_code/commands/auth.py
+msgid "Configure IaC Cloud Service"
+msgstr "IaC クラウドサービスを設定"
+
+#: src/iac_code/commands/auth.py
+msgid "Select configuration type"
+msgstr "設定の種類を選択"
+
+#: src/iac_code/commands/auth.py
+msgid "Auth cancelled"
+msgstr "認証をキャンセルしました"
+
+#: src/iac_code/commands/auth.py
+#, python-brace-format
+msgid "Select provider — {group}"
+msgstr "プロバイダーを選択 — {group}"
+
+#: src/iac_code/commands/auth.py
+msgid "Third-party"
+msgstr "サードパーティ"
+
+#: src/iac_code/commands/auth.py
+#, python-brace-format
+msgid "{status}: {provider}"
+msgstr "{status}：{provider}"
+
+#: src/iac_code/commands/auth.py
+msgid "Configured"
+msgstr "設定済み"
+
+#: src/iac_code/commands/auth.py
+msgid "Select provider"
+msgstr "プロバイダーを選択"
+
+#: src/iac_code/commands/auth.py
+#, python-brace-format
+msgid "Configure {provider}"
+msgstr "{provider} を設定"
+
+#: src/iac_code/commands/auth.py
+#, python-brace-format
+msgid "Enter API key for {provider}"
+msgstr "{provider} の API key を入力してください"
+
+#: src/iac_code/commands/auth.py
+#, python-brace-format
+msgid "{status}: {provider} / {model}"
+msgstr "{status}：{provider} / {model}"
+
+#: src/iac_code/commands/auth.py
+msgid "Alibaba Cloud"
+msgstr "Alibaba Cloud"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "ZhiPu AI"
+msgstr "ZhiPu AI"
+
+#: src/iac_code/commands/auth.py
+msgid "Kimi"
+msgstr "Kimi"
+
+#: src/iac_code/commands/auth.py
+msgid "MiniMax"
+msgstr "MiniMax"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "Volcengine"
+msgstr "Volcengine"
+
+#: src/iac_code/commands/auth.py
+msgid "SiliconFlow"
+msgstr "SiliconFlow"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "DeepSeek"
+msgstr "DeepSeek"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "OpenAI"
+msgstr "OpenAI"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "Anthropic"
+msgstr "Anthropic"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "Google Gemini"
+msgstr "Google Gemini"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "Azure OpenAI"
+msgstr "Azure OpenAI"
+
+#: src/iac_code/commands/auth.py src/iac_code/providers/registry.py
+msgid "OpenRouter"
+msgstr "OpenRouter"
+
+#: src/iac_code/commands/auth.py
+msgid "Local"
+msgstr "ローカル"
+
+#: src/iac_code/commands/auth.py
+msgid "Compatible"
+msgstr "互換モード"
+
+#: src/iac_code/commands/auth.py
+msgid "Select Cloud Provider"
+msgstr "クラウドプロバイダーを選択"
+
+#: src/iac_code/commands/auth.py
+msgid "Credential"
+msgstr "クレデンシャル"
+
+#: src/iac_code/commands/auth.py src/iac_code/commands/status.py
+#: src/iac_code/ui/renderer.py
+msgid "Region"
+msgstr "リージョン"
+
+#: src/iac_code/commands/auth.py
+msgid "Configure Alibaba Cloud"
+msgstr "Alibaba Cloud を設定"
+
+#: src/iac_code/commands/auth.py
+msgid "Current configuration"
+msgstr "現在の設定"
+
+#: src/iac_code/commands/auth.py
+msgid "Mode"
+msgstr "モード"
+
+#: src/iac_code/commands/auth.py
+msgid "(not set)"
+msgstr "（未設定）"
+
+#: src/iac_code/commands/auth.py
+msgid "AccessKey"
+msgstr "AccessKey"
+
+#: src/iac_code/commands/auth.py
+msgid "STS Token"
+msgstr "STS トークン"
+
+#: src/iac_code/commands/auth.py
+msgid "RAM Role"
+msgstr "RAM ロール"
+
+#: src/iac_code/commands/auth.py
+msgid "OAuth Login (Browser)"
+msgstr "OAuth ログイン（ブラウザー）"
+
+#: src/iac_code/commands/auth.py
+msgid "AccessKey ID"
+msgstr "AccessKey ID"
+
+#: src/iac_code/commands/auth.py
+msgid "AccessKey Secret"
+msgstr "AccessKey シークレット"
+
+#: src/iac_code/commands/auth.py
+msgid "RAM Role ARN"
+msgstr "RAM ロール ARN"
+
+#: src/iac_code/commands/auth.py
+msgid "Session Name"
+msgstr "セッション名"
+
+#: src/iac_code/commands/auth.py
+msgid "OAuth Site Type"
+msgstr "OAuth サイトタイプ"
+
+#: src/iac_code/commands/auth.py
+msgid "OAuth Access Token"
+msgstr "OAuth アクセストークン"
+
+#: src/iac_code/commands/auth.py
+msgid "OAuth Refresh Token"
+msgstr "OAuth リフレッシュトークン"
+
+#: src/iac_code/commands/auth.py
+msgid "OAuth Access Token Expire"
+msgstr "OAuth アクセストークンの有効期限"
+
+#: src/iac_code/commands/auth.py
+msgid "OAuth Refresh Token Expire"
+msgstr "OAuth リフレッシュトークンの有効期限"
+
+#: src/iac_code/commands/auth.py
+msgid "STS Expiration"
+msgstr "STS 有効期限"
+
+#: src/iac_code/commands/auth.py
+msgid "China"
+msgstr "中国"
+
+#: src/iac_code/commands/auth.py
+msgid "International"
+msgstr "国際"
+
+#: src/iac_code/commands/auth.py
+msgid "Choose site type"
+msgstr "サイトタイプを選択"
+
+#: src/iac_code/commands/auth.py
+#, python-brace-format
+msgid "Alibaba Cloud OAuth login failed: {error}"
+msgstr "Alibaba Cloud OAuth ログインに失敗しました: {error}"
+
+#: src/iac_code/commands/auth.py
+msgid "Configured: Alibaba Cloud OAuth credentials saved"
+msgstr "設定完了: Alibaba Cloud OAuth 認証情報を保存しました"
+
+#: src/iac_code/commands/auth.py
+msgid "Configure Alibaba Cloud credentials"
+msgstr "Alibaba Cloud のクレデンシャルを設定"
+
+#: src/iac_code/commands/auth.py
+msgid "Reconfigure credential"
+msgstr "クレデンシャルを再設定"
+
+#: src/iac_code/commands/auth.py
+msgid "Select credential type"
+msgstr "クレデンシャルの種類を選択"
+
+#: src/iac_code/commands/auth.py
+msgid "Configured: Alibaba Cloud credentials saved to ~/.iac-code"
+msgstr ""
+"Configured: Alibaba Cloud credentials saved to ~/.iac-code設定しました：Alibaba "
+"Cloud のクレデンシャルを ~/.iac-code に保存しました"
+
+#: src/iac_code/commands/auth.py
+msgid "Configure Alibaba Cloud region"
+msgstr "Alibaba Cloud のリージョンを設定"
+
+#: src/iac_code/commands/auth.py
+msgid "Configured: Alibaba Cloud region saved to ~/.iac-code"
+msgstr "設定しました：Alibaba Cloud のリージョンを ~/.iac-code に保存しました"
+
+#: src/iac_code/commands/compact.py
+msgid "Compact command requires a context."
+msgstr "compact コマンドにはコンテキストが必要です。"
+
+#: src/iac_code/commands/compact.py
+msgid "No active REPL."
+msgstr "アクティブな REPL がありません。"
+
+#: src/iac_code/commands/compact.py
+msgid "No active agent loop."
+msgstr "アクティブなエージェントループがありません。"
+
+#: src/iac_code/commands/compact.py
+#, python-brace-format
+msgid ""
+"Context compacted: {original} → {compacted} tokens ({percent_display} "
+"reduction). Context usage: {usage_display}"
+msgstr ""
+"コンテキストを圧縮しました：{original} → {compacted} tokens（{percent_display} 削減）。 "
+"コンテキスト使用量：{usage_display}"
+
+#: iac-code-rs/crates/iac-code-cli/src/main.rs
+#, python-brace-format
+msgid ""
+"Context compacted: {original} → {compacted} tokens ({percent_display} "
+"increase). Context usage: {usage_display}"
+msgstr ""
+"コンテキストを圧縮しました：{original} → {compacted} tokens（{percent_display} 増加）。 "
+"コンテキスト使用量：{usage_display}"
+
+#: iac-code-rs/crates/iac-code-cli/src/main.rs
+#, python-brace-format
+msgid ""
+"Context compacted: {original} → {compacted} tokens (no token change). "
+"Context usage: {usage_display}"
+msgstr ""
+"コンテキストを圧縮しました：{original} → {compacted} tokens（tokens の変化なし）。 "
+"コンテキスト使用量：{usage_display}"
+
+#: src/iac_code/commands/debug.py
+msgid "Debug command requires a context."
+msgstr "debug コマンドにはコンテキストが必要です。"
+
+#: src/iac_code/commands/debug.py
+msgid "No active session."
+msgstr "アクティブなセッションがありません。"
+
+#: src/iac_code/commands/effort.py src/iac_code/commands/model.py
+msgid "No configured providers. Run /auth first."
+msgstr "設定済みのプロバイダーがありません。先に /auth を実行してください。"
+
+#: src/iac_code/commands/effort.py
+msgid "No model selected. Run /model first."
+msgstr "モデルが選択されていません。先に /model を実行してください。"
+
+#: src/iac_code/commands/effort.py
+#, python-brace-format
+msgid "Model {model} does not support effort."
+msgstr "モデル {model} は effort（思考の負荷）をサポートしていません。"
+
+#: src/iac_code/commands/effort.py
+#, python-brace-format
+msgid "Invalid effort. Allowed: {labels}"
+msgstr "無効な effort です。許可される値：{labels}"
+
+#: src/iac_code/commands/effort.py
+#, python-brace-format
+msgid "Current effort: {effort}"
+msgstr "現在の effort：{effort}"
+
+#: src/iac_code/commands/effort.py
+#, python-brace-format
+msgid "Select effort for {model}"
+msgstr "{model} の effort を選択してください"
+
+#: src/iac_code/commands/effort.py
+#, python-brace-format
+msgid "Kept effort as {effort}"
+msgstr "effort を {effort} のままにしました"
+
+#: src/iac_code/commands/effort.py
+#, python-brace-format
+msgid "Effort switched to: {effort}"
+msgstr "effort を {effort} に切り替えました"
+
+#: src/iac_code/commands/help.py
+msgid "Commands:"
+msgstr "コマンド："
+
+#: src/iac_code/commands/help.py
+msgid "Shortcuts:"
+msgstr "ショートカット："
+
+#: src/iac_code/commands/help.py
+msgid "Send message"
+msgstr "メッセージを送信"
+
+#: src/iac_code/commands/help.py
+msgid "New line"
+msgstr "改行"
+
+#: src/iac_code/commands/help.py
+msgid "Show command suggestions"
+msgstr "コマンド候補を表示"
+
+#: src/iac_code/commands/help.py
+msgid "Exit"
+msgstr "終了"
+
+#: src/iac_code/commands/memory.py
+msgid "Usage: /memory [<name>|search <query>|delete <name>|help]"
+msgstr "使用法: /memory [<名前>|search <検索語>|delete <名前>|help]"
+
+#: src/iac_code/commands/memory.py
+msgid "Saved memories:"
+msgstr "保存済みメモリ:"
+
+#: src/iac_code/commands/memory.py
+msgid "No memories saved yet."
+msgstr "保存済みメモリはまだありません。"
+
+#: src/iac_code/commands/memory.py
+msgid "Matching memories:"
+msgstr "一致するメモリ:"
+
+#: src/iac_code/commands/memory.py
+msgid "No matching memories."
+msgstr "一致するメモリはありません。"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Memory '{name}' not found."
+msgstr "メモリ '{name}' が見つかりません。"
+
+#: src/iac_code/commands/memory.py
+#, python-brace-format
+msgid "Memory '{name}' deleted."
+msgstr "メモリ '{name}' を削除しました。"
+
+#: src/iac_code/commands/model.py
+#, python-brace-format
+msgid ""
+"Model is managed by '{source}'. To change model, modify it in {source} or"
+" switch provider via /auth."
+msgstr ""
+"モデルは '{source}' によって管理されています。モデルを変更するには {source} で調整するか、/auth "
+"で別のプロバイダーに切り替えてください。"
+
+#: src/iac_code/commands/model.py
+#, python-brace-format
+msgid "Model switched to: {model}"
+msgstr "モデルを {model} に切り替えました"
+
+#: src/iac_code/commands/model.py
+#, python-brace-format
+msgid "Current model: {model}"
+msgstr "現在のモデル：{model}"
+
+#: src/iac_code/commands/model.py
+#, python-brace-format
+msgid "Kept model as {model}"
+msgstr "モデルを {model} のままにしました"
+
+#: src/iac_code/commands/rename.py
+msgid "Rename is only available in interactive mode."
+msgstr "名前の変更は対話モードでのみ使用できます。"
+
+#: src/iac_code/commands/rename.py
+msgid "Rename cancelled"
+msgstr "名前の変更をキャンセルしました"
+
+#: src/iac_code/commands/resume.py
+msgid "Resume is only available in interactive mode."
+msgstr "resume は対話モードでのみ利用できます。"
+
+#: src/iac_code/commands/resume.py
+msgid "Resume is unavailable: session index not initialised."
+msgstr "resume を使用できません：セッション索引が初期化されていません。"
+
+#: src/iac_code/commands/resume.py
+#, python-brace-format
+msgid "Session not found: {arg}"
+msgstr "セッションが見つかりません：{arg}"
+
+#: src/iac_code/commands/resume.py
+msgid "Resume cancelled"
+msgstr "resume をキャンセルしました"
+
+#: src/iac_code/commands/resume.py
+#, python-brace-format
+msgid "Unable to resolve session: {arg}"
+msgstr "セッションを解決できません: {arg}"
+
+#: src/iac_code/commands/skills.py
+msgid "Skills management is only available in interactive mode."
+msgstr "スキル管理は対話モードでのみ使用できます。"
+
+#: src/iac_code/commands/skills.py
+msgid "Skills update cancelled"
+msgstr "スキル更新をキャンセルしました"
+
+#: src/iac_code/commands/skills.py
+msgid "Skills updated"
+msgstr "スキルを更新しました"
+
+#: src/iac_code/commands/status.py
+msgid "Status command requires a context."
+msgstr "status コマンドにはコンテキストが必要です。"
+
+#: src/iac_code/commands/status.py
+msgid "Status command requires a REPL context."
+msgstr "status コマンドには REPL コンテキストが必要です。"
+
+#: src/iac_code/commands/status.py
+msgid "Status is only available in interactive mode."
+msgstr "status は対話モードでのみ利用できます。"
+
+#: src/iac_code/commands/status.py src/iac_code/ui/banner.py
+msgid "Session"
+msgstr "セッション"
+
+#: src/iac_code/commands/status.py
+msgid "Provider"
+msgstr "プロバイダー"
+
+#: src/iac_code/commands/status.py
+msgid "not configured"
+msgstr "未設定"
+
+#: src/iac_code/commands/status.py
+msgid "Model"
+msgstr "モデル"
+
+#: src/iac_code/commands/status.py
+msgid "CWD"
+msgstr "現在のディレクトリ"
+
+#: src/iac_code/commands/status.py
+msgid "API Token Usage (recorded):"
+msgstr "API トークン使用量（記録済み）："
+
+#: src/iac_code/commands/status.py
+msgid "Input"
+msgstr "入力"
+
+#: src/iac_code/commands/status.py
+msgid "Output"
+msgstr "出力"
+
+#: src/iac_code/commands/status.py
+msgid "Cache read"
+msgstr "キャッシュ読み取り"
+
+#: src/iac_code/commands/status.py
+msgid "Cache creation"
+msgstr "キャッシュ作成"
+
+#: src/iac_code/commands/status.py
+msgid "Total"
+msgstr "合計"
+
+#: src/iac_code/commands/status.py
+msgid "No recorded API usage for this session yet."
+msgstr "このセッションにはまだ記録済みの API 使用量がありません。"
+
+#: src/iac_code/commands/status.py
+msgid "Turns"
+msgstr "ターン"
+
+#: src/iac_code/commands/status.py
+msgid "Context"
+msgstr "コンテキスト"
+
+#: src/iac_code/commands/status.py
+msgid "Session Status"
+msgstr "セッション状態"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{session_id} (resumed)"
+msgstr "{session_id}（再開済み）"
+
+#: src/iac_code/commands/status.py
+#, python-brace-format
+msgid "{percent} used ({total} / {window})"
+msgstr "{percent} 使用済み（{total} / {window}）"
+
+# Typer/Click built-in strings
+#: src/iac_code/i18n/__init__.py
+msgid "Options"
+msgstr "オプション"
+
+#: src/iac_code/i18n/__init__.py
+msgid "Commands"
+msgstr "コマンド"
+
+#: src/iac_code/i18n/__init__.py
+msgid "Arguments"
+msgstr "引数"
+
+#: src/iac_code/i18n/__init__.py
+msgid "Show this message and exit."
+msgstr "このメッセージを表示して終了します。"
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "default: {default}"
+msgstr "既定値：{default}"
+
+#: src/iac_code/i18n/__init__.py
+msgid "required"
+msgstr "必須"
+
+#: src/iac_code/i18n/__init__.py
+#, python-brace-format
+msgid "env var: {var}"
+msgstr "環境変数：{var}"
+
+#: src/iac_code/i18n/__init__.py
+msgid "(dynamic)"
+msgstr "（動的）"
+
+#: src/iac_code/i18n/__init__.py
+msgid "Aborted!"
+msgstr "中断しました。"
+
+#: src/iac_code/providers/manager.py
+#, python-brace-format
+msgid "Cannot determine provider for model: {model}. Run /auth to configure."
+msgstr ""
+"Cannot determine provider for model: {model}. Run /auth to configure.モデル "
+"{model} のプロバイダーを特定できません。/auth を実行して設定してください。"
+
+#: src/iac_code/providers/manager.py
+#, python-brace-format
+msgid "Unknown provider key: '{key}'. Run /auth to configure."
+msgstr "不明なプロバイダーキー：'{key}'。/auth を実行して設定してください。"
+
+#: src/iac_code/providers/manager.py
+#, python-brace-format
+msgid ""
+"No API key configured for provider '{provider}' (model: {model}). Run "
+"/auth to configure."
+msgstr "プロバイダー '{provider}' の API キーが設定されていません（モデル: {model}）。/auth を実行して設定してください。"
+
+#: src/iac_code/providers/openai_provider.py
+#, python-brace-format
+msgid ""
+"API returned no data. Please check that your API Base URL is correct "
+"(current: {base_url}). Many OpenAI-compatible endpoints require a /v1 "
+"suffix (e.g. {base_url}/v1)."
+msgstr ""
+"API からデータが返りませんでした。API Base URL が正しいか確認してください（現在：{base_url}）。 多くの OpenAI "
+"互換エンドポイントでは /v1 接尾辞が必要です（例：{base_url}/v1）。"
+
+#: src/iac_code/providers/openai_provider.py
+#, python-brace-format
+msgid ""
+"API returned an invalid response. Please check that your API Base URL is "
+"correct (current: {base_url}). Many OpenAI-compatible endpoints require a"
+" /v1 suffix (e.g. {base_url}/v1)."
+msgstr ""
+"API から無効な応答が返りました。API Base URL が正しいか確認してください（現在：{base_url}）。 多くの OpenAI "
+"互換エンドポイントでは /v1 接尾辞が必要です（例：{base_url}/v1）。"
+
+#: src/iac_code/providers/registry.py
+msgid "Alibaba Cloud Bailian"
+msgstr "Alibaba Cloud 百錬"
+
+#: src/iac_code/providers/registry.py
+msgid "Alibaba Cloud Bailian Token Plan"
+msgstr "Alibaba Cloud 百錬 Token Plan"
+
+#: src/iac_code/providers/registry.py
+msgid "OpenAPI Compatible"
+msgstr "OpenAPI 互換"
+
+#: src/iac_code/providers/registry.py
+msgid "Kimi (China)"
+msgstr "Kimi（中国版）"
+
+#: src/iac_code/providers/registry.py
+msgid "Kimi (International)"
+msgstr "Kimi（国際版）"
+
+#: src/iac_code/providers/registry.py
+msgid "MiniMax (China)"
+msgstr "MiniMax（中国版）"
+
+#: src/iac_code/providers/registry.py
+msgid "MiniMax (International)"
+msgstr "MiniMax（国際版）"
+
+#: src/iac_code/providers/registry.py
+msgid "ZhiPu AI (International)"
+msgstr "ZhiPu AI（国際版）"
+
+#: src/iac_code/providers/registry.py
+msgid "SiliconFlow (China)"
+msgstr "SiliconFlow（中国版）"
+
+#: src/iac_code/providers/registry.py
+msgid "SiliconFlow (International)"
+msgstr "SiliconFlow（国際版）"
+
+#: src/iac_code/providers/registry.py
+msgid "Ollama (Local)"
+msgstr "Ollama（ローカル）"
+
+#: src/iac_code/providers/registry.py
+msgid "LM Studio (Local)"
+msgstr "LM Studio（ローカル）"
+
+#: src/iac_code/providers/registry.py
+msgid "ModelScope"
+msgstr "ModelScope"
+
+#: src/iac_code/providers/registry.py
+msgid "Alibaba Cloud CodingPlan"
+msgstr "Alibaba Cloud CodingPlan"
+
+#: src/iac_code/providers/registry.py
+msgid "Alibaba Cloud CodingPlan (International)"
+msgstr "Alibaba Cloud CodingPlan（国際版）"
+
+#: src/iac_code/providers/registry.py
+msgid "ZhiPu AI CodingPlan"
+msgstr "ZhiPu AI CodingPlan"
+
+#: src/iac_code/providers/registry.py
+msgid "ZhiPu AI CodingPlan (International)"
+msgstr "ZhiPu AI CodingPlan（国際版）"
+
+#: src/iac_code/providers/registry.py
+msgid "Volcengine CodingPlan"
+msgstr "Volcengine CodingPlan"
+
+#: src/iac_code/providers/registry.py
+msgid "Anthropic Compatible"
+msgstr "Anthropic 互換"
+
+#: src/iac_code/services/qwenpaw_source.py
+#, python-brace-format
+msgid ""
+"[QwenPaw mode] Unknown provider '{provider_id}'. iac-code does not "
+"support this provider.\n"
+"Supported QwenPaw provider IDs: {supported_ids}\n"
+"To fix: switch to a supported provider in QwenPaw, or disable QwenPaw "
+"mode (remove 'llm_source: qwenpaw' from settings.yml)."
+msgstr ""
+"[QwenPaw モード] プロバイダー '{provider_id}' を認識できません。iac-code "
+"はこのプロバイダーをサポートしていません。\n"
+"サポートされている QwenPaw プロバイダー ID：{supported_ids}\n"
+"対処法：QwenPaw でサポートされているプロバイダーに切り替えるか、QwenPaw モードを無効にしてください（settings.yml から"
+" 'llm_source: qwenpaw' を削除）。"
+
+#: src/iac_code/services/session_metadata.py
+#, python-brace-format
+msgid "Session name must match {pattern}"
+msgstr "セッション名は {pattern} に一致する必要があります"
+
+#: src/iac_code/services/session_storage.py
+#, python-brace-format
+msgid "Session name already exists in this project: {name}"
+msgstr "このプロジェクトにはセッション名がすでに存在します: {name}"
+
+#: src/iac_code/services/permissions/loader.py
+#, python-brace-format
+msgid "Invalid --permission-mode {!r}. Valid values: {}"
+msgstr "無効な --permission-mode {!r} です。有効な値: {}"
+
+#: src/iac_code/services/permissions/pipeline.py
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched ask rule(s): {}"
+msgstr "一致した確認ルール: {}"
+
+#: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
+#: src/iac_code/tools/bash/bash_tool.py
+#, python-brace-format
+msgid "Allow {}?"
+msgstr "{} を許可しますか？"
+
+#: src/iac_code/services/providers/aliyun.py
+msgid "Alibaba Cloud OAuth site is missing."
+msgstr "Alibaba Cloud OAuth サイトがありません。"
+
+#: src/iac_code/services/providers/aliyun.py
+msgid "Alibaba Cloud OAuth refresh token is missing."
+msgstr "Alibaba Cloud OAuth リフレッシュトークンがありません。"
+
+#: src/iac_code/services/providers/aliyun.py
+msgid "Alibaba Cloud OAuth access token is missing."
+msgstr "Alibaba Cloud OAuth アクセストークンがありません。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Run /auth and choose OAuth Login (Browser)."
+msgstr "/auth を実行し、OAuth ログイン（ブラウザー）を選択してください。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+#, python-brace-format
+msgid "Unknown Aliyun OAuth site: {site_type}"
+msgstr "不明な Aliyun OAuth サイト: {site_type}"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Not found"
+msgstr "見つかりません"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "invalid state"
+msgstr "無効な状態"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Invalid state"
+msgstr "無効な状態"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "code not found"
+msgstr "認可コードが見つかりません"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Authorization code not found"
+msgstr "認可コードが見つかりません"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Authorization successful. You can close this window."
+msgstr "認可に成功しました。このウィンドウを閉じてもかまいません。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+#, python-brace-format
+msgid "No available callback port in range {start}-{end}"
+msgstr "{start}-{end} の範囲に利用可能なコールバックポートがありません"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "OAuth login cancelled."
+msgstr "OAuth ログインをキャンセルしました。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Open in your browser:"
+msgstr "ブラウザーで開く:"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Waiting for browser authorization"
+msgstr "ブラウザー認可を待機しています"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid ""
+"1. The browser may show official-cli; this is the Alibaba Cloud official "
+"CLI OAuth application."
+msgstr ""
+"1. ブラウザーに official-cli と表示される場合があります。これは Alibaba Cloud 公式 CLI OAuth "
+"アプリケーションです。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid ""
+"2. If assignment is required, assign the RAM user or RAM role that is "
+"signed in. User groups are not supported."
+msgstr "2. 割り当てが必要な場合は、サインイン中の RAM ユーザーまたは RAM ロールを割り当ててください。ユーザーグループはサポートされていません。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid ""
+"3. After assignment, close the old authorization page and run OAuth Login"
+" (Browser) again. If it still fails, sign out of Alibaba Cloud and sign "
+"in again."
+msgstr ""
+"3. 割り当て後、古い認可ページを閉じて OAuth ログイン（ブラウザー）を再実行してください。それでも失敗する場合は、Alibaba "
+"Cloud からサインアウトして再度サインインしてください。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid ""
+"4. STS credentials refresh when possible until Alibaba Cloud expires "
+"them. If refresh fails, run /auth again."
+msgstr ""
+"4. STS 認証情報は Alibaba Cloud が期限切れにするまで可能な場合に更新されます。更新に失敗した場合は、/auth "
+"を再実行してください。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid "Press Esc to cancel while waiting."
+msgstr "Esc を押すと待機をキャンセルできます。"
+
+#: src/iac_code/services/providers/aliyun_oauth.py
+msgid ""
+"Timed out waiting for OAuth callback. If Alibaba Cloud asked you to "
+"assign the official-cli application, assign it to the exact RAM user or "
+"RAM role currently signed in. User groups are not supported. Then close "
+"the old authorization page, sign out of Alibaba Cloud and sign in again "
+"if needed, and run /auth to choose OAuth Login (Browser) again."
+msgstr ""
+"OAuth コールバックの待機がタイムアウトしました。Alibaba Cloud から official-cli "
+"アプリケーションの割り当てを求められた場合は、現在サインインしている正確な RAM ユーザーまたは RAM "
+"ロールに割り当ててください。ユーザーグループはサポートされていません。その後、古い認可ページを閉じ、必要に応じて Alibaba Cloud "
+"からサインアウトしてサインインし直し、/auth を実行して OAuth ログイン（ブラウザー）を再度選択してください。"
+
+#: src/iac_code/skills/skill_tool.py src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Skill '{name}' is disabled. Run /skills to enable it."
+msgstr "スキル「{name}」は無効です。有効にするには /skills を実行してください。"
+
+#: src/iac_code/skills/skill_tool.py
+#, python-brace-format
+msgid "Skill '{name}' loaded (inline)."
+msgstr "スキル '{name}' を読み込みました（インライン）。"
+
+#: src/iac_code/skills/skill_tool.py
+msgid "Skill"
+msgstr "スキル"
+
+#: src/iac_code/skills/skill_tool.py
+#, python-brace-format
+msgid "Skill disabled: {name}"
+msgstr "スキルが無効です: {name}"
+
+#: src/iac_code/skills/bundled/simplify.py
+msgid ""
+"Review changed code for reuse, quality, and efficiency, then fix issues "
+"found."
+msgstr "変更されたコードの再利用性、品質、効率を確認し、見つかった問題を修正してください。"
+
+#: src/iac_code/tools/edit_file.py
+msgid "edit file path is required"
+msgstr "編集するファイルのパスが必要です"
+
+#: src/iac_code/tools/edit_file.py
+msgid "Edit"
+msgstr "編集"
+
+#: src/iac_code/tools/edit_file.py
+msgid "Create"
+msgstr "作成"
+
+#: src/iac_code/tools/edit_file.py
+msgid "Update"
+msgstr "更新"
+
+#: src/iac_code/tools/edit_file.py
+#, python-brace-format
+msgid "Editing {path}"
+msgstr "{path} を編集中"
+
+#: src/iac_code/tools/edit_file.py
+msgid "Editing file..."
+msgstr "ファイルを編集中…"
+
+#: src/iac_code/tools/glob.py
+msgid "glob pattern outside allowed directories"
+msgstr "glob パターンが許可されたディレクトリの外にあります"
+
+#: src/iac_code/tools/glob.py src/iac_code/tools/grep.py
+msgid "Found 0 files"
+msgstr "ファイルが 0 件見つかりました"
+
+#: src/iac_code/tools/glob.py src/iac_code/tools/grep.py
+#, python-brace-format
+msgid "Found {count} files"
+msgstr "{count} 件のファイルが見つかりました"
+
+#: src/iac_code/tools/glob.py src/iac_code/tools/grep.py
+msgid "Search"
+msgstr "検索"
+
+#: src/iac_code/tools/glob.py
+#, python-brace-format
+msgid "Searching {pattern}"
+msgstr "{pattern} を検索中"
+
+#: src/iac_code/tools/glob.py
+msgid "Searching files..."
+msgstr "ファイルを検索しています…"
+
+#: src/iac_code/tools/grep.py
+#, python-brace-format
+msgid "Searching for {pattern}"
+msgstr "{pattern} を検索中"
+
+#: src/iac_code/tools/grep.py
+msgid "Searching content..."
+msgstr "内容を検索しています…"
+
+#: src/iac_code/tools/list_files.py
+#, python-brace-format
+msgid "Found {count} items"
+msgstr "{count} 件見つかりました"
+
+#: src/iac_code/tools/list_files.py
+msgid "List"
+msgstr "一覧"
+
+#: src/iac_code/tools/list_files.py
+#, python-brace-format
+msgid "Listing {path}"
+msgstr "{path} を一覧表示中"
+
+#: src/iac_code/tools/list_files.py
+msgid "Listing files..."
+msgstr "ファイルを一覧表示しています…"
+
+#: src/iac_code/tools/read_file.py
+msgid "Read file path is required."
+msgstr "読み取るファイルのパスが必要です。"
+
+#: src/iac_code/tools/read_file.py
+#, python-brace-format
+msgid "Read {total} lines"
+msgstr "{total} 行読み取りました"
+
+#: src/iac_code/tools/read_file.py
+#, python-brace-format
+msgid "lines {range}"
+msgstr "{range} 行"
+
+#: src/iac_code/tools/read_file.py
+#, python-brace-format
+msgid "lines {range} of {total}"
+msgstr "{range} 行（全 {total} 行）"
+
+#: src/iac_code/tools/read_file.py
+msgid "Read"
+msgstr "読み取り"
+
+#: src/iac_code/tools/read_file.py
+#, python-brace-format
+msgid "Reading {path}"
+msgstr "{path} を読み取り中"
+
+#: src/iac_code/tools/read_file.py
+msgid "Reading file..."
+msgstr "ファイルを読み取り中…"
+
+#: src/iac_code/tools/web_fetch.py
+msgid "URL cannot be empty."
+msgstr "URL を空にすることはできません。"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "Invalid URL: missing scheme (e.g. http:// or https://). Got: {url}"
+msgstr ""
+"Invalid URL: missing scheme (e.g. http:// or https://). Got: {url}無効な "
+"URL：スキームがありません（例：http:// または https://）。値：{url}"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "Invalid URL: missing host/netloc. Got: {url}"
+msgstr "無効な URL：ホスト／ネットロケーションがありません。値：{url}"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "HTTP error {status}: {url}"
+msgstr "HTTP エラー {status}：{url}"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "Failed to fetch {url}: {error}"
+msgstr "{url} の取得に失敗しました：{error}"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "Unexpected error fetching {url}: {error}"
+msgstr "{url} の取得中に予期しないエラーが発生しました：{error}"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "Fetched {chars} chars, {lines} lines"
+msgstr "{chars} 文字、{lines} 行を取得しました"
+
+#: src/iac_code/tools/web_fetch.py
+msgid "Fetch"
+msgstr "取得"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "Fetching {url}"
+msgstr "{url} を取得中"
+
+#: src/iac_code/tools/web_fetch.py
+msgid "Fetching web page..."
+msgstr "ウェブページを取得しています…"
+
+#: src/iac_code/tools/write_file.py
+msgid "write file path is required"
+msgstr "書き込むファイルのパスが必要です"
+
+#: src/iac_code/tools/write_file.py
+#, python-brace-format
+msgid "Successfully wrote {lines} lines to {path}"
+msgstr "{path} へ {lines} 行の書き込みに成功しました"
+
+#: src/iac_code/tools/write_file.py
+msgid "Write"
+msgstr "書き込み"
+
+#: src/iac_code/tools/write_file.py
+#, python-brace-format
+msgid "Writing {path}"
+msgstr "{path} を書き込み中"
+
+#: src/iac_code/tools/write_file.py
+msgid "Writing file..."
+msgstr "ファイルを書き込み中…"
+
+#: src/iac_code/tools/bash/bash_tool.py
+#, python-brace-format
+msgid "Command timed out after {timeout} seconds: {command}"
+msgstr "コマンドが {timeout} 秒後にタイムアウトしました: {command}"
+
+#: src/iac_code/tools/bash/bash_tool.py
+#, python-brace-format
+msgid "Error executing command: {}"
+msgstr "コマンドの実行エラー: {}"
+
+#: src/iac_code/tools/bash/bash_tool.py
+#, python-brace-format
+msgid "{count} more lines"
+msgstr "あと {count} 行"
+
+#: src/iac_code/tools/bash/bash_tool.py
+msgid "Bash"
+msgstr "Bash"
+
+#: src/iac_code/tools/bash/bash_tool.py
+#, python-brace-format
+msgid "Running {cmd}"
+msgstr "{cmd} を実行中"
+
+#: src/iac_code/tools/bash/bash_tool.py
+msgid "Running command..."
+msgstr "コマンドを実行しています…"
+
+#: src/iac_code/tools/bash/command_parser.py
+msgid "parse error"
+msgstr "解析エラー"
+
+#: src/iac_code/tools/bash/command_parser.py
+msgid "unsupported shell construct"
+msgstr "サポートされていないシェル構文"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "path uses shell expansion: {}"
+msgstr "パスでシェル展開が使われています: {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "path outside allowed directories: {}"
+msgstr "許可されたディレクトリの外のパス: {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+msgid "read path after cd requires confirmation: current directory"
+msgstr "cd 後の読み取りパスには確認が必要です: 現在のディレクトリ"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path after cd requires confirmation: {}"
+msgstr "cd 後の読み取りパスには確認が必要です: {}"
+
+#: src/iac_code/tools/bash/path_validation.py
+#, python-brace-format
+msgid "read path uses shell expansion: {}"
+msgstr "読み取りパスでシェル展開が使われています: {}"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed in-place edit"
+msgstr "sed のインプレース編集"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed script file"
+msgstr "sed スクリプトファイル"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed shell execution"
+msgstr "sed によるシェル実行"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "sed file write"
+msgstr "sed によるファイル書き込み"
+
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched deny rule(s): {}"
+msgstr "一致した拒否ルール: {}"
+
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "dangerous readonly argument requires confirmation: {}"
+msgstr "危険な読み取り専用引数には確認が必要です: {}"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "complex command requires confirmation"
+msgstr "複雑なコマンドは確認が必要です"
+
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched allow rule(s): {}"
+msgstr "一致した許可ルール: {}"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "command failed basic safety checks"
+msgstr "コマンドが基本的な安全性チェックに失敗しました"
+
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "matched deny rule(s) on full command: {}"
+msgstr "完全なコマンドに一致した拒否ルール: {}"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "command too complex to analyze"
+msgstr "コマンドが複雑すぎて分析できません"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "could not parse command"
+msgstr "コマンドを解析できませんでした"
+
+#: src/iac_code/tools/bash/permissions.py
+#, python-brace-format
+msgid "too many subcommands (>{})"
+msgstr "サブコマンドが多すぎます (>{})"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "multiple cd commands in compound command"
+msgstr "複合コマンド内に複数の cd コマンドがあります"
+
+#: src/iac_code/tools/bash/permissions.py
+msgid "cd combined with git in compound command"
+msgstr "複合コマンド内で cd と git が組み合わされています"
+
+#: src/iac_code/tools/bash/safety_checks.py
+#, python-brace-format
+msgid "operation touches a sensitive path: {}"
+msgstr "操作が機密パスに影響します: {}"
+
+#: src/iac_code/tools/cloud/base_api.py
+msgid "CloudAPI"
+msgstr "CloudAPI"
+
+#: src/iac_code/tools/cloud/base_api.py
+#, python-brace-format
+msgid "Calling {action}..."
+msgstr "{action} を呼び出しています…"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#: src/iac_code/tools/cloud/base_api.py
+msgid "Call succeeded"
+msgstr "呼び出しに成功しました"
+
+#: src/iac_code/tools/cloud/base_api.py
+#, python-brace-format
+msgid "Received response ({count} lines)"
+msgstr "応答を受信しました（{count} 行）"
+
+#: src/iac_code/tools/cloud/base_stack.py
+msgid "CloudStack"
+msgstr "CloudStack"
+
+#: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py
+#: src/iac_code/tools/cloud/base_stack.py
+#, python-brace-format
+msgid "Running {action}..."
+msgstr "{action} を実行中…"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CREATE_IN_PROGRESS"
+msgstr "作成進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CREATE_FAILED"
+msgstr "作成失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CREATE_COMPLETE"
+msgstr "作成完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "UPDATE_IN_PROGRESS"
+msgstr "更新進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "UPDATE_FAILED"
+msgstr "更新失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "UPDATE_COMPLETE"
+msgstr "更新完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "DELETE_IN_PROGRESS"
+msgstr "削除進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "DELETE_FAILED"
+msgstr "削除失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "DELETE_COMPLETE"
+msgstr "削除完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CREATE_ROLLBACK_IN_PROGRESS"
+msgstr "作成ロールバック進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CREATE_ROLLBACK_FAILED"
+msgstr "作成ロールバック失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CREATE_ROLLBACK_COMPLETE"
+msgstr "作成ロールバック完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "ROLLBACK_IN_PROGRESS"
+msgstr "ロールバック進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "ROLLBACK_FAILED"
+msgstr "ロールバック失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "ROLLBACK_COMPLETE"
+msgstr "ロールバック完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CHECK_IN_PROGRESS"
+msgstr "チェック進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CHECK_FAILED"
+msgstr "チェック失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "CHECK_COMPLETE"
+msgstr "チェック完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "REVIEW_IN_PROGRESS"
+msgstr "レビュー進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_CREATE_IN_PROGRESS"
+msgstr "インポート作成進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_CREATE_FAILED"
+msgstr "インポート作成失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_CREATE_COMPLETE"
+msgstr "インポート作成完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_CREATE_ROLLBACK_IN_PROGRESS"
+msgstr "インポート作成ロールバック進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_CREATE_ROLLBACK_FAILED"
+msgstr "インポート作成ロールバック失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_CREATE_ROLLBACK_COMPLETE"
+msgstr "インポート作成ロールバック完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_UPDATE_IN_PROGRESS"
+msgstr "インポート更新進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_UPDATE_FAILED"
+msgstr "インポート更新失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_UPDATE_COMPLETE"
+msgstr "インポート更新完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_UPDATE_ROLLBACK_IN_PROGRESS"
+msgstr "インポート更新ロールバック進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_UPDATE_ROLLBACK_FAILED"
+msgstr "インポート更新ロールバック失敗"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_UPDATE_ROLLBACK_COMPLETE"
+msgstr "インポート更新ロールバック完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "INIT_COMPLETE"
+msgstr "初期化完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_IN_PROGRESS"
+msgstr "インポート進行中"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_COMPLETE"
+msgstr "インポート完了"
+
+#: src/iac_code/tools/cloud/types.py
+msgid "IMPORT_FAILED"
+msgstr "インポート失敗"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+msgid "Aliyun API"
+msgstr "Aliyun API"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
+msgid "Call succeeded (RequestId: {request_id})"
+msgstr "呼び出しに成功しました（RequestId: {request_id}）"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+msgid "DocSearch"
+msgstr "DocSearch"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "Searching docs for {keywords}..."
+msgstr "{keywords} に関するドキュメントを検索しています…"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+msgid "Searching docs..."
+msgstr "ドキュメントを検索しています…"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+msgid "keywords cannot be empty."
+msgstr "キーワードを空にすることはできません。"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "HTTP error {status} when searching docs."
+msgstr "ドキュメント検索中に HTTP エラー {status} が発生しました。"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "Failed to search docs: {error}"
+msgstr "ドキュメントの検索に失敗しました：{error}"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+msgid "Failed to parse search response as JSON."
+msgstr "検索結果の JSON 解析に失敗しました。"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+msgid "Search API returned failure."
+msgstr "Search API が失敗を返しました。"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+msgid "No documents found"
+msgstr "ドキュメントが見つかりません"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "No documents found for keywords: {keywords}"
+msgstr "キーワード {keywords} に一致するドキュメントが見つかりません"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "Found {count} documents (total {total})"
+msgstr "{count} 件のドキュメントが見つかりました（合計 {total} 件）"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+msgid "Use web_fetch tool to read full document content if needed."
+msgstr "必要に応じて web_fetch ツールで全文を取得してください。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_stack.py
+msgid "ROS Stack"
+msgstr "ROS スタック"
+
+#: src/iac_code/tools/cloud/aliyun/ros_stack_instances.py
+msgid "CloudStackInstances"
+msgstr "CloudStackInstances"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid "Template YAML syntax error: {}"
+msgstr "テンプレートの YAML 構文エラー: {}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Template YAML syntax error (line {line}, column {col}): {problem}\n"
+"Context:\n"
+"{context}"
+msgstr ""
+"テンプレートの YAML 構文エラー（{line} 行目、{col} 列目）: {problem}\n"
+"コンテキスト:\n"
+"{context}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid "Template JSON syntax error (line {line}, column {col}): {msg}"
+msgstr "テンプレートの JSON 構文エラー（{line} 行目、{col} 列目）: {msg}"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Template {fmt} parse result is not an object (dict), please check the "
+"template format"
+msgstr "テンプレートの {fmt} 解析結果がオブジェクト（dict）ではありません。テンプレートの形式を確認してください"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Template is missing ROSTemplateFormatVersion (ROS templates must include "
+"this field, e.g. '2015-09-01')"
+msgstr ""
+"テンプレートに ROSTemplateFormatVersion がありません（ROS テンプレートにはこのフィールドが必須です。例: "
+"'2015-09-01'）"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid "Template is missing Resources (ROS templates must include Resources)"
+msgstr "テンプレートに Resources がありません（ROS テンプレートには Resources が必須です）"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid "Resources must be an object (dict), current type is {}"
+msgstr "Resources はオブジェクト（dict）でなければなりません。現在の型は {} です"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Resource '{name}' definition must be an object (dict), current type is "
+"{type}"
+msgstr "リソース '{name}' の定義はオブジェクト（dict）でなければなりません。現在の型は {type} です"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid "Resource '{name}' is missing the Type field"
+msgstr "リソース '{name}' に Type フィールドがありません"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid "Resource '{name}' has incorrect type '{wrong}', should be '{correct}'"
+msgstr "リソース '{name}' の型 '{wrong}' が正しくありません。'{correct}' に変更してください"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+msgid ""
+"Template structure validation found the following issues, please fix and "
+"retry:"
+msgstr "テンプレート構造の検証で以下の問題が見つかりました。修正して再試行してください:"
+
+#: src/iac_code/ui/banner.py
+#, python-brace-format
+msgid "Update available! {} -> {}"
+msgstr "更新があります！{} -> {}"
+
+#: src/iac_code/ui/banner.py
+msgid "Update command"
+msgstr "更新コマンド"
+
+#: src/iac_code/ui/banner.py
+msgid "Release notes"
+msgstr "リリースノート"
+
+#: src/iac_code/ui/banner.py
+msgid "Your AI-powered Infrastructure as Code assistant"
+msgstr "あなたの AI 駆動の Infrastructure as Code アシスタントです"
+
+#: src/iac_code/ui/banner.py
+msgid "Welcome back"
+msgstr "おかえりなさい"
+
+#: src/iac_code/ui/banner.py
+msgid "Debug mode"
+msgstr "デバッグモード"
+
+#: src/iac_code/ui/banner.py
+msgid "Log file"
+msgstr "ログファイル"
+
+#: src/iac_code/ui/renderer.py
+msgid "Messages to be submitted after next tool call"
+msgstr "次のツール呼び出し後に送信されるメッセージ"
+
+#: src/iac_code/ui/renderer.py
+msgid "press esc to interrupt and send immediately"
+msgstr "esc で中断してすぐに送信"
+
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "Thought for {seconds:.1f}s"
+msgstr "{seconds:.1f} 秒考えました"
+
+#: src/iac_code/ui/renderer.py
+msgid "(ctrl+o to expand)"
+msgstr "（ctrl+o で展開）"
+
+#: src/iac_code/ui/renderer.py
+msgid "Resource"
+msgstr "リソース"
+
+#: src/iac_code/ui/renderer.py
+msgid "Type"
+msgstr "種類"
+
+#: src/iac_code/ui/renderer.py
+msgid "Status"
+msgstr "状態"
+
+#: src/iac_code/ui/renderer.py
+msgid "Account ID"
+msgstr "アカウント ID"
+
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "Done ({child_count} tool uses{token_info}{elapsed})"
+msgstr "完了（ツール使用 {child_count} 回{token_info}{elapsed}）"
+
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "+ {count} more tool uses (ctrl+o to expand)"
+msgstr "+ ツール使用がさらに {count} 回（ctrl+o で展開）"
+
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "Context auto-compacted: {original} → {compacted} tokens"
+msgstr "コンテキストを自動圧縮しました：{original} → {compacted} tokens"
+
+#: src/iac_code/ui/renderer.py
+msgid "Operation cancelled."
+msgstr "操作をキャンセルしました。"
+
+#: src/iac_code/ui/renderer.py
+msgid "No API key configured."
+msgstr "API key が設定されていません。"
+
+#: src/iac_code/ui/renderer.py
+msgid "Please run /auth to set up your LLM provider and API key."
+msgstr "/auth を実行して LLM プロバイダーと API key を設定してください。"
+
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "Error: {error}"
+msgstr "エラー：{error}"
+
+#: src/iac_code/ui/renderer.py
+msgid "Allow this action?"
+msgstr "この操作を許可しますか？"
+
+#: src/iac_code/ui/renderer.py
+msgid "Yes, allow once"
+msgstr "はい、今回のみ許可"
+
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "Yes, always allow \"{rule}\" (this session)"
+msgstr "はい、\"{rule}\" を常に許可（このセッション）"
+
+#: src/iac_code/ui/renderer.py
+msgid "Yes, allow always for this tool"
+msgstr "はい、このツールは常に許可"
+
+#: src/iac_code/ui/renderer.py
+msgid "No, reject once"
+msgstr "いいえ、今回は拒否"
+
+#: src/iac_code/ui/renderer.py
+msgid "default"
+msgstr "既定"
+
+#: src/iac_code/ui/renderer.py
+#, python-brace-format
+msgid "No, always deny \"{rule}\" (this session)"
+msgstr "いいえ、常に \"{rule}\" を拒否（このセッション）"
+
+#: src/iac_code/ui/renderer.py
+msgid "No, always reject this tool"
+msgstr "いいえ、このツールは常に拒否"
+
+#: src/iac_code/ui/repl.py
+msgid "Press Ctrl+C again to exit."
+msgstr "終了するには Ctrl+C をもう一度押してください。"
+
+#: src/iac_code/ui/repl.py
+msgid "Interrupted."
+msgstr "中断しました。"
+
+#: src/iac_code/ui/repl.py
+msgid "Update now"
+msgstr "今すぐ更新"
+
+#: src/iac_code/ui/repl.py
+msgid "Run the shown update command and exit when it succeeds."
+msgstr "表示された更新コマンドを実行し、成功したら終了します。"
+
+#: src/iac_code/ui/repl.py
+msgid "Skip"
+msgstr "スキップ"
+
+#: src/iac_code/ui/repl.py
+msgid "Continue with the current version for this session."
+msgstr "このセッションでは現在のバージョンを使い続けます。"
+
+#: src/iac_code/ui/repl.py
+msgid "Skip until next version"
+msgstr "次のバージョンまでスキップ"
+
+#: src/iac_code/ui/repl.py
+msgid "Hide this update until a newer version is available."
+msgstr "より新しいバージョンが利用可能になるまで、この更新を非表示にします。"
+
+#: src/iac_code/ui/repl.py
+msgid "Update command failed. Continuing with the current version."
+msgstr "更新コマンドに失敗しました。現在のバージョンで続行します。"
+
+#: src/iac_code/ui/repl.py
+msgid "Update completed. Restart iac-code to continue."
+msgstr "更新が完了しました。続行するには iac-code を再起動してください。"
+
+#: src/iac_code/ui/repl.py
+msgid "No image in clipboard."
+msgstr "クリップボードに画像がありません。"
+
+#: src/iac_code/ui/repl.py
+msgid "Usage: !<shell command>"
+msgstr "使用方法: !<shell command>"
+
+#: src/iac_code/ui/repl.py
+msgid "Shell command support is unavailable."
+msgstr "シェルコマンドのサポートは利用できません。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Unknown skill: ${name}. Type / to list commands and skills."
+msgstr "不明なスキル: ${name}。/ を入力するとコマンドとスキルを一覧表示します。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Unknown command: /{name}. Type /help for available commands."
+msgstr ""
+"Unknown command: /{name}. Type /help for available "
+"commands.不明なコマンドです：/{name}。利用可能なコマンドは /help を入力してください。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "$ only invokes skills. Use /{name} instead."
+msgstr "$ はスキルのみを呼び出します。代わりに /{name} を使用してください。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Command error: {error}"
+msgstr "コマンドエラー：{error}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Command has no handler: {name}"
+msgstr "ハンドラーがないコマンドです：{name}"
+
+#: src/iac_code/ui/repl.py
+msgid "Goodbye!"
+msgstr "さようなら。"
+
+#: src/iac_code/ui/repl.py
+msgid "Resume this session with:"
+msgstr "このセッションを再開するには次を実行してください："
+
+#: src/iac_code/ui/repl.py
+msgid "Session ID"
+msgstr "セッション ID"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Session not found: {session_id}"
+msgstr "セッションが見つかりません：{session_id}"
+
+#: src/iac_code/ui/repl.py
+msgid "Session name: "
+msgstr "セッション名: "
+
+#: src/iac_code/ui/repl.py
+msgid "Session name cannot be empty."
+msgstr "セッション名は空にできません。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"This session belongs to a different directory.\n"
+"To resume, run:\n"
+"  {cmd}"
+msgstr ""
+"このセッションは別のディレクトリに属しています。\n"
+"再開するには次を実行してください：\n"
+"  {cmd}"
+
+#: src/iac_code/ui/repl.py
+msgid "Multiple sessions match. Resume one by ID:"
+msgstr "複数のセッションが一致しました。ID でいずれかを再開してください:"
+
+#: src/iac_code/ui/repl.py
+msgid "This conversation is from a different directory."
+msgstr "この会話は別のディレクトリ由来です。"
+
+#: src/iac_code/ui/repl.py
+msgid "To resume, run:"
+msgstr "再開するには次を実行してください："
+
+#: src/iac_code/ui/repl.py
+msgid "(Command copied to clipboard)"
+msgstr "（コマンドをクリップボードにコピーしました）"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"Current model {model} does not support image input. Use /model to switch "
+"to a vision-capable model."
+msgstr "現在のモデル {model} は画像入力をサポートしていません。/model を使用してビジョン対応モデルに切り替えてください。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Image error: {err}"
+msgstr "画像エラー：{err}"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Failed to persist image to cache; it will only exist in memory for this "
+"turn."
+msgstr "画像をキャッシュに保存できませんでした。このターンの間、メモリ上にのみ存在します。"
+
+#: src/iac_code/ui/spinner.py
+msgid "Processing"
+msgstr "処理中"
+
+#: src/iac_code/ui/spinner.py
+msgid "Working"
+msgstr "作業中"
+
+#: iac-code-rs/crates/iac-code-cli/src/main.rs
+msgid "Compacting context"
+msgstr "コンテキストを圧縮中"
+
+#: src/iac_code/ui/spinner.py
+msgid "Thought"
+msgstr "思考しました"
+
+#: src/iac_code/ui/spinner.py
+msgid "Processed"
+msgstr "処理しました"
+
+#: src/iac_code/ui/spinner.py
+msgid "Worked"
+msgstr "作業しました"
+
+#: src/iac_code/ui/transcript_view.py
+msgid "Prompt:"
+msgstr "プロンプト："
+
+#: src/iac_code/ui/transcript_view.py
+msgid "Showing transcript · ctrl+o to toggle"
+msgstr "トランスクリプトを表示中 · ctrl+o で切り替え"
+
+#: src/iac_code/ui/components/fuzzy_picker.py
+msgid "No matches found"
+msgstr "一致する項目がありません"
+
+#: src/iac_code/ui/core/prompt_input.py
+msgid "Image in clipboard · ctrl+v to paste"
+msgstr "クリップボードに画像 · ctrl+v で貼り付け"
+
+#: src/iac_code/ui/core/prompt_input.py
+msgid "Fill"
+msgstr "入力"
+
+#: src/iac_code/ui/core/prompt_input.py
+msgid "Dismiss"
+msgstr "閉じる"
+
+#: src/iac_code/ui/dialogs/global_search.py
+msgid "No matching content"
+msgstr "一致する内容がありません"
+
+#: src/iac_code/ui/dialogs/global_search.py
+msgid "Search in Files"
+msgstr "ファイル内を検索"
+
+#: src/iac_code/ui/dialogs/global_search.py
+msgid "Type to search content..."
+msgstr "入力して内容を検索…"
+
+#: src/iac_code/ui/dialogs/global_search.py
+msgid "Enter search query"
+msgstr "検索クエリを入力"
+
+#: src/iac_code/ui/dialogs/history_search.py
+msgid "Search Conversation History"
+msgstr "会話履歴を検索"
+
+#: src/iac_code/ui/dialogs/history_search.py
+msgid "Type to search..."
+msgstr "入力して検索…"
+
+#: src/iac_code/ui/dialogs/history_search.py
+msgid "No conversation history"
+msgstr "会話履歴がありません"
+
+#: src/iac_code/ui/dialogs/history_search.py
+msgid "Message Preview"
+msgstr "メッセージのプレビュー"
+
+#: src/iac_code/ui/dialogs/quick_open.py
+msgid "Open File"
+msgstr "ファイルを開く"
+
+#: src/iac_code/ui/dialogs/quick_open.py
+msgid "Type to search files..."
+msgstr "入力してファイルを検索…"
+
+#: src/iac_code/ui/dialogs/quick_open.py
+msgid "No matching files"
+msgstr "一致するファイルがありません"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "Search..."
+msgstr "検索…"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "Resume Session"
+msgstr "セッションを再開"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "No sessions found"
+msgstr "セッションが見つかりません"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "show current dir"
+msgstr "現在のディレクトリのみ表示"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "show all projects"
+msgstr "すべてのプロジェクトを表示"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "show all branches"
+msgstr "すべてのブランチを表示"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "only show current branch"
+msgstr "現在のブランチのみ表示"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "preview"
+msgstr "プレビュー"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "Type to search"
+msgstr "入力して検索"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "cancel"
+msgstr "キャンセル"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+#, python-brace-format
+msgid "{n} more line"
+msgid_plural "{n} more lines"
+msgstr[0] "あと {n} 行"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+#, python-brace-format
+msgid "{n} message"
+msgid_plural "{n} messages"
+msgstr[0] "{n} 件のメッセージ"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "resume"
+msgstr "再開"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "back"
+msgstr "戻る"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "scroll"
+msgstr "スクロール"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "(empty session)"
+msgstr "（空のセッション）"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+msgid "just now"
+msgstr "たった今"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+#, python-brace-format
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "{n} 分前"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+#, python-brace-format
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "{n} 時間前"
+
+#: src/iac_code/ui/dialogs/resume_picker.py
+#, python-brace-format
+msgid "{n} day ago"
+msgid_plural "{n} days ago"
+msgstr[0] "{n} 日前"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "Search skills..."
+msgstr "スキルを検索..."
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "Skills"
+msgstr "スキル"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+#, python-brace-format
+msgid "{current} of {total}"
+msgstr "{total} 件中 {current}"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+#, python-brace-format
+msgid ""
+"{count} skills - Space to toggle, Enter to save, Tab to sort, Esc to "
+"cancel"
+msgstr "{count} 個のスキル - Space で切り替え、Enter で保存、Tab で並べ替え、Esc でキャンセル"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+#, python-brace-format
+msgid "Sort: {mode}"
+msgstr "並べ替え: {mode}"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "No skills found"
+msgstr "スキルが見つかりません"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "Bundled skills cannot be disabled."
+msgstr "バンドルスキルは無効にできません。"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "on"
+msgstr "有効"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "off"
+msgstr "無効"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "locked"
+msgstr "ロック済み"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "matched description"
+msgstr "説明に一致"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "source"
+msgstr "提供元"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "size"
+msgstr "サイズ"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "name"
+msgstr "名前"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "bundled"
+msgstr "バンドル"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "project"
+msgstr "プロジェクト"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "user"
+msgstr "ユーザー"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+#, python-brace-format
+msgid "~{count}k tokens"
+msgstr "約{count}kトークン"
+
+#: src/iac_code/ui/dialogs/skills_picker.py
+#, python-brace-format
+msgid "~{count} tokens"
+msgstr "約{count}トークン"
+
+#: src/iac_code/ui/suggestions/command_provider.py
+msgid "Search saved memories"
+msgstr "保存済みメモリを検索"
+
+#: src/iac_code/ui/suggestions/command_provider.py
+msgid "Delete a saved memory"
+msgstr "保存済みメモリを削除"
+
+#: src/iac_code/ui/suggestions/command_provider.py
+msgid "Show memory command help"
+msgstr "memory コマンドのヘルプを表示"
+
+#: src/iac_code/ui/suggestions/command_provider.py
+msgid "Saved memory"
+msgstr "保存済みメモリ"
+
+#: src/iac_code/utils/platform.py
+msgid "iac-code on Windows requires Git for Windows."
+msgstr "iac-code を Windows で使用するには Git for Windows が必要です。"
+
+#: src/iac_code/utils/platform.py
+msgid ""
+"If installed but not on PATH, set IAC_CODE_GIT_BASH_PATH environment "
+"variable."
+msgstr "インストール済みで PATH に含まれていない場合は、IAC_CODE_GIT_BASH_PATH 環境変数を設定してください。"
+
+#: src/iac_code/utils/platform.py
+msgid "To install:"
+msgstr "インストール方法："
+
+#: src/iac_code/utils/platform.py
+msgid "  Option 1 - winget (requires access to github.com):"
+msgstr "  方法 1 - winget（github.com へのアクセスが必要）："
+
+#: src/iac_code/utils/platform.py
+msgid ""
+"  Option 2 - if you cannot reach github.com, run this to install via "
+"npmmirror:"
+msgstr "  オプション 2 - github.com にアクセスできない場合は、npmmirror 経由でインストールするために以下を実行してください："
+
+#~ msgid "toggle preview"
+#~ msgstr "プレビューを切り替え"
+
+#~ msgid "Preview"
+#~ msgstr "プレビュー"
+
+#~ msgid "(empty)"
+#~ msgstr "（空）"
+
+#~ msgid "back to list"
+#~ msgstr "一覧に戻る"
+
+#~ msgid "Choose [1-4]: "
+#~ msgstr "[1-4] を選択してください："
+
+#~ msgid "DashScope Token Plan"
+#~ msgstr "DashScope Token Plan"
+
+#~ msgid "tree-sitter not available"
+#~ msgstr "tree-sitter not available"
+
+#~ msgid ""
+#~ "LLM provider is locked by '{source}'."
+#~ " To change, modify llm_source in "
+#~ "settings.yml."
+#~ msgstr ""
+#~ "LLM プロバイダーは '{source}' によりロックされています。変更するには "
+#~ "settings.yml の llm_source を修正してください。"
+
+#~ msgid "Provider switched: {status}"
+#~ msgstr "Provider が切り替わりました: {status}"
+
+#~ msgid "Thinking"
+#~ msgstr "考えています"
+
+#~ msgid "To install, open PowerShell and run:"
+#~ msgstr "インストールするには PowerShell を開いて実行してください："
+
+#~ msgid "  Option 2 - npmmirror (China-friendly mirror):"
+#~ msgstr "  方法 2 - npmmirror（中国向けミラー）："
+
+#~ msgid "Cache create"
+#~ msgstr "キャッシュ作成"
+
+#~ msgid ""
+#~ "{count} skills - Space to toggle, "
+#~ "Enter to save, / to search, t "
+#~ "to sort, Esc to cancel"
+#~ msgstr "{count} 個のスキル - Space で切り替え、Enter で保存、/ で検索、t で並べ替え、Esc でキャンセル"
+
+#~ msgid "Resume a session by ID"
+#~ msgstr "ID でセッションを再開する"
+
+#~ msgid "sed in-place edit requires confirmation"
+#~ msgstr "sed のインプレース編集には確認が必要です"
+
+#~ msgid "{n} more line{s}"
+#~ msgstr "あと {n} 行{s}"
+
+#~ msgid "{n} message{s}"
+#~ msgstr "{n} 件のメッセージ{s}"
+
+#~ msgid "{n} minute{s} ago"
+#~ msgstr "{n} 分{s}前"
+
+#~ msgid "{n} hour{s} ago"
+#~ msgstr "{n} 時間{s}前"
+
+#~ msgid "{n} day{s} ago"
+#~ msgstr "{n} 日{s}前"

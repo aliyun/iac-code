@@ -1,0 +1,10 @@
+[package]
+name = "iac-code-telemetry"
+version = "0.4.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+iac-code-protocol = { path = "../iac-code-protocol" }
