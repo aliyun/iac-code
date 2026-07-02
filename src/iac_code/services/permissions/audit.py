@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import stat
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +12,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from iac_code.config import get_config_dir
+from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import log_event
 from iac_code.services.telemetry.names import Events
 from iac_code.types.permissions import MAX_PERMISSION_AUDIT_FILES, PermissionAuditSettings
@@ -182,6 +181,7 @@ class PermissionAuditRecord:
     decision: Literal["allow", "deny"]
     scope: str
     source: str
+    cwd: str = ""
     rule_source: str | None = None
     reason_type: str | None = None
     reason_detail: str | None = None
@@ -546,6 +546,7 @@ def emit_permission_boundary_audit(
     result = emit_permission_audit(
         PermissionAuditRecord(
             session_id=_permission_audit_session_id(event, fallback=session_id),
+            cwd=_permission_audit_cwd(event),
             tool_name=event.tool_name,
             tool_use_id=event.tool_use_id,
             decision=decision,
@@ -597,6 +598,7 @@ def emit_auto_permission_audit(
     result = emit_permission_audit(
         PermissionAuditRecord(
             session_id=_permission_audit_session_id(event, fallback=session_id),
+            cwd=_permission_audit_cwd(event),
             tool_name=event.tool_name,
             tool_use_id=event.tool_use_id,
             decision=decision,
@@ -644,6 +646,11 @@ def _permission_audit_session_id(event: Any, *, fallback: str) -> str:
     return session_id if isinstance(session_id, str) else fallback
 
 
+def _permission_audit_cwd(event: Any) -> str:
+    cwd = _permission_audit_context(event).get("cwd")
+    return cwd if isinstance(cwd, str) else ""
+
+
 def emit_permission_audit(record: PermissionAuditRecord, settings: PermissionAuditSettings | None = None) -> bool:
     """Write a permission audit row and emit a telemetry event."""
 
@@ -653,7 +660,7 @@ def emit_permission_audit(record: PermissionAuditRecord, settings: PermissionAud
     log_written = False
 
     try:
-        log_path = _log_path()
+        log_path = _log_path(record)
         _ensure_existing_audit_log_files_private(log_path, max_files=max_files)
         append_jsonl_rotating_locked(
             log_path,
@@ -1041,34 +1048,24 @@ def _event_name(record: PermissionAuditRecord) -> str:
     return Events.TOOL_PERMISSION_REJECTED
 
 
-def _log_path() -> Path:
-    log_dir = ensure_private_dir(get_config_dir() / "logs")
-    return log_dir / "permission-audit.jsonl"
+def _log_path(record: PermissionAuditRecord) -> Path:
+    cwd = record.cwd.strip() or os.getcwd()
+    session_id = record.session_id.strip() or "unknown-session"
+    session_dir = ensure_private_dir(SessionStorage().session_dir(cwd, session_id))
+    return session_dir / "permission-audit.jsonl"
 
 
 def _ensure_audit_log_files_private(path: Path, *, max_files: int) -> None:
     ensure_private_file(path)
-    _assert_private_audit_file(path)
     for index in range(1, max_files + 1):
         rotated = path.with_name(f"{path.name}.{index}")
         ensure_private_file(rotated)
-        _assert_private_audit_file(rotated)
 
 
 def _ensure_existing_audit_log_files_private(path: Path, *, max_files: int) -> None:
     if path.exists():
         ensure_private_file(path)
-        _assert_private_audit_file(path)
     for index in range(1, max_files + 1):
         rotated = path.with_name(f"{path.name}.{index}")
         if rotated.exists():
             ensure_private_file(rotated)
-            _assert_private_audit_file(rotated)
-
-
-def _assert_private_audit_file(path: Path) -> None:
-    if os.name == "nt" or not path.exists():
-        return
-    mode = stat.S_IMODE(path.stat().st_mode)
-    if mode & 0o077:
-        raise PermissionError(f"Permission audit log file is not private: {path}")

@@ -60,6 +60,7 @@ async def test_stream_event_auto_approve_is_audited(monkeypatch: pytest.MonkeyPa
     )
     future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
     settings = PermissionAuditSettings(include_tool_input=True)
+    cwd = "/home/workspace/ctx-1"
 
     await publish_stream_event(
         queue,
@@ -72,6 +73,7 @@ async def test_stream_event_auto_approve_is_audited(monkeypatch: pytest.MonkeyPa
             response_future=future,
             audit_context={
                 "session_id": "session-a2a",
+                "cwd": cwd,
                 "settings": settings,
                 "metadata": PermissionAuditMetadata(
                     scope="settings_rule",
@@ -93,6 +95,7 @@ async def test_stream_event_auto_approve_is_audited(monkeypatch: pytest.MonkeyPa
     record, settings_seen = audit_records[0]
     assert settings_seen is settings
     assert record.session_id == "session-a2a"
+    assert record.cwd == cwd
     assert record.source == "a2a_auto_approve"
     assert record.scope == "auto_approve"
     assert record.decision == "allow"

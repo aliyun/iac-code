@@ -105,6 +105,7 @@ def _with_trusted_read_directories(permission_context: Any, directories: list[st
 def _emit_no_prompt_permission_audit(
     *,
     session_id: str,
+    cwd: str,
     request: ToolCallRequest,
     permission: PermissionResult,
     decision: Literal["allow", "deny"],
@@ -117,6 +118,7 @@ def _emit_no_prompt_permission_audit(
     result = emit_permission_audit(
         PermissionAuditRecord(
             session_id=session_id,
+            cwd=cwd,
             tool_name=request.name,
             tool_use_id=request.id,
             decision=decision,
@@ -1019,6 +1021,7 @@ class AgentLoop:
 
                     audit_context = {
                         "session_id": self._session_id,
+                        "cwd": context.cwd,
                         "settings": perm_ctx.audit_settings if perm_ctx is not None else None,
                         "metadata": permission.audit,
                     }
@@ -1026,6 +1029,7 @@ class AgentLoop:
                     if permission.behavior == "allow":
                         audit_ok = _emit_no_prompt_permission_audit(
                             session_id=self._session_id,
+                            cwd=context.cwd,
                             request=request,
                             permission=permission,
                             decision="allow",
@@ -1039,6 +1043,7 @@ class AgentLoop:
                     if permission.behavior == "deny":
                         _emit_no_prompt_permission_audit(
                             session_id=self._session_id,
+                            cwd=context.cwd,
                             request=request,
                             permission=permission,
                             decision="deny",

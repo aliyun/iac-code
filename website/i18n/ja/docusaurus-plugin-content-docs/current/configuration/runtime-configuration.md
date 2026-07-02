@@ -72,16 +72,19 @@ activeProvider: dashscope
 providers:
   dashscope:
     model: glm-5.2
+    thinkingEnabled: true
     thinkingBudget: 8192
     maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
+        thinkingEnabled: false
         thinkingBudget: 8192
         maxCompletionTokens: 16384
 ```
 
 | フィールド | スコープ | 説明 |
 |---|---|---|
+| `thinkingEnabled` | Provider またはモデル | 任意の boolean thinking スイッチ。`true` は対応する provider/model に thinking の有効化を要求し、`false` は無効化を要求します。省略時は provider/model のデフォルトを維持します。 |
 | `thinkingBudget` | Provider またはモデル | 正の整数の reasoning/thinking 予算。対応している provider に渡されます。 |
 | `maxCompletionTokens` | Provider またはモデル | `max_completion_tokens` を使う provider/model 向けの、正の整数の上書き値。 |
 | `effort` | Provider またはモデル | thinking effort の任意の上書き値。effort 制御に対応したモデルでのみ有効です。 |
@@ -89,6 +92,8 @@ providers:
 `providers.<provider>.models.<model>` 以下のモデル単位の有効な値は、provider 単位の値を上書きします。無効な数値は無視されるため、IaC Code は provider 単位の値または組み込みのモデルポリシーにフォールバックします。
 
 Alibaba Cloud DashScope と DashScope Token Plan では、IaC Code は `glm-5.2` と `kimi-k2.7-code` に組み込みで `thinkingBudget=8192` を設定しています。`maxCompletionTokens` が未設定の場合、リクエスト上限は通常の回答 token 上限に有効な thinking budget を加えて計算されます。
+
+A2A リクエストは、`message.metadata.iac_code.thinking` または `iac-code a2a-client call` の `--thinking-enabled`、`--thinking-effort`、`--thinking-budget` フラグを通じて、この設定を 1 回の message turn だけ上書きできます。明示的な A2A thinking metadata が送信されない場合、runtime は上記の設定と provider の通常のデフォルトを使用します。DashScope compatible-mode の base URL を持つ汎用 `openai_compatible` provider では、明示的な thinking ポリシーがある場合にのみ、iac-code は DashScope ネイティブの thinking wire format に切り替えます。
 
 ## ツール権限設定
 

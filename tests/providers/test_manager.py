@@ -5,6 +5,7 @@ import pytest
 
 from iac_code.providers.base import Message, NonStreamingResponse
 from iac_code.providers.manager import ProviderManager, _detect_provider_name, create_provider
+from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, TextDeltaEvent, Usage
 
 STREAM_IDLE_TEST_TIMEOUT = 0.2
@@ -44,11 +45,13 @@ class TestCreateProvider:
             "iac_code.config.get_provider_config",
             lambda name: {
                 "effort": "high",
+                "thinkingEnabled": False,
                 "thinkingBudget": 4096,
                 "maxCompletionTokens": 12288,
                 "models": {
                     "glm-5.2": {
                         "effort": "low",
+                        "thinkingEnabled": True,
                         "thinkingBudget": 2048,
                         "maxCompletionTokens": 10000,
                     }
@@ -59,8 +62,43 @@ class TestCreateProvider:
         p = create_provider("glm-5.2", credentials={"dashscope": "key"})
 
         assert getattr(p, "_effort", None) == "low"
+        assert getattr(p, "_thinking_enabled", None) is True
         assert getattr(p, "_thinking_budget", None) == 2048
         assert getattr(p, "_max_completion_tokens", None) == 10000
+
+    def test_request_policy_override_wins_over_settings(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {
+                "effort": "low",
+                "thinkingBudget": 4096,
+                "maxCompletionTokens": 12288,
+            },
+        )
+
+        p = create_provider(
+            "glm-5.2",
+            credentials={"dashscope": "key"},
+            request_policy_override=ProviderRequestPolicy(thinking_enabled=False, effort="high", thinking_budget=2048),
+        )
+
+        assert getattr(p, "_thinking_enabled", None) is False
+        assert getattr(p, "_effort", None) == "high"
+        assert getattr(p, "_thinking_budget", None) == 2048
+        assert getattr(p, "_max_completion_tokens", None) == 12288
+
+    def test_openai_compatible_qwen_request_policy_disabled_uses_model_thinking_wire_format(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai_compatible")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
+
+        p = create_provider(
+            "qwen3.6-plus",
+            credentials={"openai_compatible": "key"},
+            request_policy_override=ProviderRequestPolicy(thinking_enabled=False),
+        )
+
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
 
     def test_provider_request_policy_used_when_model_config_absent(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -144,6 +182,40 @@ class TestCreateProvider:
         p = create_provider("any-model", credentials={"openai_compatible": "sk-x"})
         assert p.get_model_name() == "any-model"
         assert p._base_url == "https://my.llm.local/v1"
+
+    def test_openai_compatible_dashscope_base_uses_dashscope_default_thinking_wire_format(self, monkeypatch):
+        from iac_code.providers.dashscope_provider import DashScopeProvider
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai_compatible")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+        )
+
+        p = create_provider("glm-5.2", credentials={"openai_compatible": "sk-x"})
+
+        assert isinstance(p, DashScopeProvider)
+        assert getattr(p, "_PROVIDER_KEY", None) == "dashscope"
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "thinking_budget": 8192}}
+
+    def test_openai_compatible_dashscope_base_uses_dashscope_thinking_wire_format(self, monkeypatch):
+        from iac_code.providers.dashscope_provider import DashScopeProvider
+
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "openai_compatible")
+        monkeypatch.setattr(
+            "iac_code.config.get_provider_config",
+            lambda name: {"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+        )
+
+        p = create_provider(
+            "glm-5.2",
+            credentials={"openai_compatible": "sk-x"},
+            request_policy_override=ProviderRequestPolicy(thinking_enabled=False, effort="low", thinking_budget=2048),
+        )
+
+        assert isinstance(p, DashScopeProvider)
+        assert getattr(p, "_PROVIDER_KEY", None) == "dashscope"
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
 
     def test_dashscope_token_plan(self, monkeypatch):
         from iac_code.providers.dashscope_provider import (

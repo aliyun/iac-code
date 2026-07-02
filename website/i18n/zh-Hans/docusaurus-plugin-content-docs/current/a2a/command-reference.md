@@ -284,6 +284,9 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--context-id` | 空 | 用于后续消息的现有 A2A context ID |
 | `--iac-code-model` | 空 | 作为 `message.metadata.iac_code.iac_code_model` 发送的 LLM model；只在本次 message turn 覆盖 server model 配置 |
 | `--iac-code-api-key` | 空 | 作为 `message.metadata.iac_code.iac_code_api_key` 发送的 LLM provider API key；只在本次 message turn 覆盖 `IAC_CODE_API_KEY` 和 `.credentials.yml` |
+| `--thinking-enabled`, `--no-thinking-enabled` | 空 | 作为 `message.metadata.iac_code.thinking.enabled` 发送的布尔 thinking 策略；省略时保留 server/provider 默认行为 |
+| `--thinking-effort` | 空 | 作为 `message.metadata.iac_code.thinking.effort` 发送的 thinking effort；只在本次 message turn 生效 |
+| `--thinking-budget` | 空 | 作为 `message.metadata.iac_code.thinking.budget` 发送的正整数 thinking budget；只在本次 message turn 生效 |
 | `--verify-card-secret`, `--signing-secret` | 空 | Agent Card verification 的 HMAC secret |
 | `--verify-card-jwks-url` | 空 | 用于 Agent Card verification 的远程 JWKS URL |
 | `--require-card-signature`, `--require-signature` | `false` | 拒绝未签名或无效的 Agent Cards |
@@ -291,6 +294,14 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--stream` | `false` | 使用 `SendStreamingMessage` 并打印 stream events |
 
 `--iac-code-api-key` 是远端 iac-code runtime 调用 LLM provider 使用的 key；它和用于认证 A2A HTTP 请求本身的 `--api-key` 不是同一个配置。
+
+Thinking 选项是单次 message 的 request metadata。它们也可以写在 A2A client YAML 中，配置键为 `thinking-enabled`、`thinking-effort`、`thinking-budget`；命令行 flag 会覆盖配置值。三者都省略时，client 不发送 thinking metadata，远端 runtime 会保持自身 provider 默认配置。对于 base URL 指向 DashScope compatible-mode 的 `openai_compatible` 端点，显式 thinking 策略会使用 DashScope 原生 wire 参数，因此 `--no-thinking-enabled` 可以下发 `extra_body.enable_thinking=false`。如果希望 A2A client 收到 raw thinking 事件，server 仍需启用 `thinking-exposure: raw-thinking`。
+
+```yaml
+thinking-enabled: false
+thinking-effort: low
+thinking-budget: 2048
+```
 
 在同一 context 中发送后续消息：
 

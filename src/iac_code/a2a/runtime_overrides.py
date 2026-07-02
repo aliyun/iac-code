@@ -4,6 +4,7 @@ import contextlib
 from collections.abc import Iterator
 from typing import Any
 
+from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
 from iac_code.services.telemetry import use_session_id, use_user_id
 
@@ -46,6 +47,7 @@ def configure_runtime_model(
     *,
     from_metadata: bool,
     metadata_api_key: str | None = None,
+    request_policy_override: ProviderRequestPolicy | None = None,
 ) -> None:
     provider_manager = getattr(runtime, "provider_manager", None)
     reconfigure = getattr(provider_manager, "reconfigure", None)
@@ -54,7 +56,16 @@ def configure_runtime_model(
     was_metadata_model = bool(getattr(runtime, "_iac_code_a2a_metadata_model_applied", False))
     has_metadata_api_key = metadata_api_key is not None
     was_metadata_api_key = bool(getattr(runtime, "_iac_code_a2a_metadata_api_key_applied", False))
-    if not from_metadata and not was_metadata_model and not has_metadata_api_key and not was_metadata_api_key:
+    has_metadata_policy = request_policy_override is not None and request_policy_override.has_values
+    was_metadata_policy = bool(getattr(runtime, "_iac_code_a2a_metadata_request_policy_applied", False))
+    if (
+        not from_metadata
+        and not was_metadata_model
+        and not has_metadata_api_key
+        and not was_metadata_api_key
+        and not has_metadata_policy
+        and not was_metadata_policy
+    ):
         return
 
     from iac_code.config import load_credentials
@@ -76,9 +87,19 @@ def configure_runtime_model(
             provider_key_override=provider_key_override,
             metadata_api_key=metadata_api_key,
         )
-    reconfigure(model, credentials, provider_key_override, base_url_override)
+    if has_metadata_policy or was_metadata_policy:
+        reconfigure(
+            model,
+            credentials,
+            provider_key_override,
+            base_url_override,
+            request_policy_override=request_policy_override if has_metadata_policy else None,
+        )
+    else:
+        reconfigure(model, credentials, provider_key_override, base_url_override)
     setattr(runtime, "_iac_code_a2a_metadata_model_applied", from_metadata)
     setattr(runtime, "_iac_code_a2a_metadata_api_key_applied", has_metadata_api_key)
+    setattr(runtime, "_iac_code_a2a_metadata_request_policy_applied", has_metadata_policy)
 
 
 def credentials_with_metadata_api_key(

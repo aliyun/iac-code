@@ -133,6 +133,9 @@ class A2AClient:
         context_id: str | None = None,
         model: str | None = None,
         iac_code_api_key: str | None = None,
+        thinking_enabled: bool | None = None,
+        thinking_effort: str | None = None,
+        thinking_budget: int | None = None,
     ) -> A2AClientResponse:
         payload = self._message_payload(
             method="SendMessage",
@@ -141,6 +144,9 @@ class A2AClient:
             context_id=context_id,
             model=model,
             iac_code_api_key=iac_code_api_key,
+            thinking_enabled=thinking_enabled,
+            thinking_effort=thinking_effort,
+            thinking_budget=thinking_budget,
         )
         transport = self._make_transport_client(url)
         response = await transport.send(payload)
@@ -155,6 +161,9 @@ class A2AClient:
         context_id: str | None = None,
         model: str | None = None,
         iac_code_api_key: str | None = None,
+        thinking_enabled: bool | None = None,
+        thinking_effort: str | None = None,
+        thinking_budget: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         payload = self._message_payload(
             method="SendStreamingMessage",
@@ -163,6 +172,9 @@ class A2AClient:
             context_id=context_id,
             model=model,
             iac_code_api_key=iac_code_api_key,
+            thinking_enabled=thinking_enabled,
+            thinking_effort=thinking_effort,
+            thinking_budget=thinking_budget,
         )
         transport = self._make_transport_client(url)
         async for event in transport.stream(payload):
@@ -359,8 +371,11 @@ class A2AClient:
         context_id: str | None,
         model: str | None,
         iac_code_api_key: str | None,
+        thinking_enabled: bool | None,
+        thinking_effort: str | None,
+        thinking_budget: int | None,
     ) -> dict[str, Any]:
-        iac_code_metadata = {"cwd": cwd}
+        iac_code_metadata: dict[str, Any] = {"cwd": cwd}
         if model:
             stripped_model = model.strip()
             if stripped_model:
@@ -369,6 +384,17 @@ class A2AClient:
             stripped_api_key = iac_code_api_key.strip()
             if stripped_api_key:
                 iac_code_metadata["iac_code_api_key"] = stripped_api_key
+        thinking: dict[str, Any] = {}
+        if thinking_enabled is not None:
+            thinking["enabled"] = thinking_enabled
+        if thinking_effort:
+            stripped_effort = thinking_effort.strip()
+            if stripped_effort:
+                thinking["effort"] = stripped_effort
+        if isinstance(thinking_budget, int) and not isinstance(thinking_budget, bool) and thinking_budget > 0:
+            thinking["budget"] = thinking_budget
+        if thinking:
+            iac_code_metadata["thinking"] = thinking
         message: dict[str, Any] = {
             "messageId": str(uuid.uuid4()),
             "role": "ROLE_USER",

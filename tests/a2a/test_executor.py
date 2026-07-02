@@ -514,6 +514,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
                     "user_id": "client-user",
                     "iac_code_model": "metadata-model",
                     "iac_code_api_key": "metadata-api-key",
+                    "thinking": {"enabled": True, "effort": "high", "budget": 2048},
                     "alibaba_cloud_access_key_id": "client-id",
                     "alibaba_cloud_access_key_secret": "client-secret",
                     "alibaba_cloud_region_id": "cn-beijing",
@@ -529,6 +530,9 @@ async def test_executor_delegates_pipeline_mode_after_validation(
     assert init_kwargs["user_id"] == "client-user"
     assert init_kwargs["model_from_metadata"] is True
     assert init_kwargs["metadata_api_key"] == "metadata-api-key"
+    assert init_kwargs["request_policy_override"].thinking_enabled is True
+    assert init_kwargs["request_policy_override"].effort == "high"
+    assert init_kwargs["request_policy_override"].thinking_budget == 2048
     assert init_kwargs["aliyun_credential"].access_key_id == "client-id"
     assert init_kwargs["aliyun_credential"].access_key_secret == "client-secret"
     assert init_kwargs["aliyun_credential"].region_id == "cn-beijing"
@@ -1961,6 +1965,61 @@ async def test_executor_reconfigures_cached_runtime_iac_code_api_key_per_call(
         ("qwen3.6-plus", {"dashscope": "metadata-key"}),
         ("qwen3.6-plus", {"dashscope": "fallback-key"}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_executor_reconfigures_cached_runtime_thinking_per_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object | None]] = []
+
+        def reconfigure(
+            self,
+            model,
+            credentials,
+            provider_key_override=None,
+            base_url_override=None,
+            request_policy_override=None,
+        ):
+            self.calls.append((model, request_policy_override))
+
+    provider_manager = FakeProviderManager()
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
+        session_id="session-1",
+        provider_manager=provider_manager,
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.config.load_credentials", lambda model=None: {})
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(
+            context_id="ctx-1",
+            metadata={
+                "iac_code": {
+                    "cwd": str(tmp_path),
+                    "thinking": {"enabled": False, "effort": "high", "budget": 2048},
+                }
+            },
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(context_id="ctx-1", task_id="task-2", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    first_policy = provider_manager.calls[0][1]
+    assert provider_manager.calls[0][0] == "qwen3.6-plus"
+    assert getattr(first_policy, "thinking_enabled", None) is False
+    assert getattr(first_policy, "effort", None) == "high"
+    assert getattr(first_policy, "thinking_budget", None) == 2048
+    assert provider_manager.calls[1] == ("qwen3.6-plus", None)
 
 
 @pytest.mark.asyncio

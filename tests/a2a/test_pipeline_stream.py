@@ -25,6 +25,7 @@ from iac_code.types.stream_events import (
     PermissionRequestEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
 )
@@ -103,7 +104,7 @@ def test_unknown_working_step_event_is_recovery_semantic() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_text_writes_a2a_metadata_journal_and_snapshot(tmp_path: Path) -> None:
+async def test_publish_text_writes_pipeline_metadata_without_duplicate_status_message(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path)
 
     returned = await publisher.publish(TextDeltaEvent(text="hello"))
@@ -112,8 +113,7 @@ async def test_publish_text_writes_a2a_metadata_journal_and_snapshot(tmp_path: P
     assert isinstance(queue.events[0], TaskStatusUpdateEvent)
     dumped = dump(queue.events[0])
     assert dumped["status"]["state"] == "TASK_STATE_WORKING"
-    assert dumped["status"]["message"]["role"] == "ROLE_AGENT"
-    assert dumped["status"]["message"]["parts"][0]["text"] == "hello"
+    assert "message" not in dumped["status"]
     envelope = dumped["metadata"]["iac_code"]["pipeline"]
     assert envelope["eventType"] == "text_delta"
     assert envelope["data"]["text"] == "hello"
@@ -181,6 +181,35 @@ async def test_publish_empty_text_delta_is_skipped(tmp_path: Path) -> None:
     assert queue.events == []
     assert publisher.journal.read_all() == []
     assert publisher.snapshot_store.load() is None
+
+
+@pytest.mark.asyncio
+async def test_publish_thinking_delta_requires_raw_thinking_exposure(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path, exposure_types=[])
+
+    returned = await publisher.publish(ThinkingDeltaEvent(text="hidden reasoning"))
+
+    assert returned is None
+    assert queue.events == []
+    assert publisher.journal.read_all() == []
+    assert publisher.snapshot_store.load() is None
+
+
+@pytest.mark.asyncio
+async def test_publish_thinking_delta_writes_pipeline_metadata_when_exposed(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.RAW_THINKING])
+
+    returned = await publisher.publish(ThinkingDeltaEvent(text="visible reasoning"))
+
+    assert returned is None
+    assert isinstance(queue.events[0], TaskStatusUpdateEvent)
+    dumped = dump(queue.events[0])
+    assert dumped["status"]["state"] == "TASK_STATE_WORKING"
+    assert "message" not in dumped["status"]
+    envelope = dumped["metadata"]["iac_code"]["pipeline"]
+    assert envelope["eventType"] == "thinking_delta"
+    assert envelope["data"] == {"type": "raw_thinking", "text": "visible reasoning"}
+    assert publisher.journal.read_all()[0]["data"] == {"type": "raw_thinking", "text": "visible reasoning"}
 
 
 @pytest.mark.asyncio

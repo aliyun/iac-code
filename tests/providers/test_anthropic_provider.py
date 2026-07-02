@@ -133,6 +133,34 @@ class TestAnthropicBuildThinkingKwargs:
         assert p._build_thinking_kwargs() == {}
         assert p._adjust_max_tokens(8192) == 8192
 
+    def test_enabled_true_uses_default_effort(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-opus-4-7", api_key="k", thinking_enabled=True)
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 16384}}
+        assert p._adjust_max_tokens(8192) >= 16384 + 4096
+
+    def test_enabled_false_suppresses_effort_and_budget(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(
+            model="claude-opus-4-7",
+            api_key="k",
+            effort="high",
+            thinking_budget=2048,
+            thinking_enabled=False,
+        )
+        assert p._build_thinking_kwargs() == {}
+        assert p._adjust_max_tokens(8192) == 8192
+
+    def test_explicit_thinking_budget_enables_thinking_and_bumps_max(self):
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+
+        p = AnthropicProvider(model="claude-opus-4-7", api_key="k", thinking_budget=2048)
+
+        assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 2048}}
+        assert p._adjust_max_tokens(8192) >= 2048 + 4096
+
 
 @pytest.mark.asyncio
 class TestAnthropicStream:

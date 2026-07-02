@@ -105,6 +105,21 @@ class TestOpenAIBuildThinkingKwargs:
         p = OpenAIProvider(model="gpt-5.5", api_key="k", effort=None)
         assert p._build_thinking_kwargs() == {}
 
+    def test_enabled_true_uses_default_effort(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(model="gpt-5.5", api_key="k", thinking_enabled=True)
+        assert p._build_thinking_kwargs() == {
+            "reasoning_effort": "high",
+            "extra_body": {"thinking": {"type": "enabled"}},
+        }
+
+    def test_enabled_false_suppresses_effort(self):
+        from iac_code.providers.openai_provider import OpenAIProvider
+
+        p = OpenAIProvider(model="gpt-5.5", api_key="k", effort="high", thinking_enabled=False)
+        assert p._build_thinking_kwargs() == {}
+
     def test_auto_returns_empty(self):
         from iac_code.providers.openai_provider import OpenAIProvider
 

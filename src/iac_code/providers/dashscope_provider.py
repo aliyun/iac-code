@@ -50,6 +50,7 @@ class DashScopeProvider(OpenAIProvider):
         effort: str | None = None,
         base_url: str = DASHSCOPE_BASE_URL,
         provider_key: str = "dashscope",
+        thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
         max_completion_tokens: int | None = None,
         **kwargs,
@@ -59,6 +60,7 @@ class DashScopeProvider(OpenAIProvider):
             api_key=api_key,
             base_url=base_url,
             effort=effort,
+            thinking_enabled=thinking_enabled,
             thinking_budget=thinking_budget,
             max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
@@ -128,6 +130,8 @@ class DashScopeProvider(OpenAIProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}
+        if self._thinking_disabled():
+            return {"extra_body": {"enable_thinking": False}}
         extra_body: dict[str, Any] = {"enable_thinking": True}
         thinking_budget = self._effective_thinking_budget()
         if thinking_budget is not None:

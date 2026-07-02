@@ -17,6 +17,8 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
+from iac_code.providers.request_logging import log_provider_request_policy
+from iac_code.providers.request_policy import bool_or_none, positive_int_or_none
 from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 from iac_code.types.stream_events import (
     MessageEndEvent,
@@ -30,20 +32,6 @@ from iac_code.types.stream_events import (
     Usage,
 )
 from iac_code.utils.tool_input_parser import parse_tool_input_events
-
-
-def _positive_int_or_none(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    if not stripped.isdigit():
-        return None
-    parsed = int(stripped)
-    return parsed if parsed > 0 else None
 
 
 class OpenAIProvider(Provider):
@@ -61,6 +49,7 @@ class OpenAIProvider(Provider):
         base_url: str | None = None,
         client: Any = None,
         effort: str | None = None,
+        thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
         max_completion_tokens: int | None = None,
         provider_key: str = "openai",
@@ -69,8 +58,9 @@ class OpenAIProvider(Provider):
         self._model = model
         self._base_url = base_url
         self._effort = effort
-        self._thinking_budget = _positive_int_or_none(thinking_budget)
-        self._max_completion_tokens = _positive_int_or_none(max_completion_tokens)
+        self._thinking_enabled = bool_or_none(thinking_enabled)
+        self._thinking_budget = positive_int_or_none(thinking_budget)
+        self._max_completion_tokens = positive_int_or_none(max_completion_tokens)
         # Subclasses may set this before calling super().stream/complete to
         # inject provider-specific kwargs (e.g. DeepSeek thinking mode).
         self._extra_request_kwargs: dict[str, Any] = {}
@@ -81,11 +71,17 @@ class OpenAIProvider(Provider):
         self._PROVIDER_KEY = provider_key
 
     def _build_thinking_kwargs(self) -> dict[str, Any]:
+        compatible_kwargs = self._build_openai_compatible_thinking_kwargs()
+        if compatible_kwargs:
+            return compatible_kwargs
+
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.OPENAI:
             return {}
-        effort = normalize_effort(self._effort)
-        if effort is None or effort == "auto":
+        if self._thinking_disabled():
+            return {}
+        effort = self._effective_effort(spec)
+        if effort is None:
             return {}
         allowed = {e.value for e in spec.allowed_efforts}
         if effort not in allowed:
@@ -101,13 +97,49 @@ class OpenAIProvider(Provider):
         # Backwards-compatible alias used by the streaming/non-streaming paths.
         return self._build_thinking_kwargs()
 
+    def _build_openai_compatible_thinking_kwargs(self) -> dict[str, Any]:
+        if self._PROVIDER_KEY != "openai_compatible":
+            return {}
+        spec = get_thinking_spec("dashscope", self._model)
+        if spec.family is not ThinkingFamily.DASHSCOPE:
+            return {}
+        if self._thinking_disabled():
+            return {"extra_body": {"enable_thinking": False}}
+        if (
+            not self._thinking_forced()
+            and self._thinking_budget is None
+            and normalize_effort(self._effort) in {None, "auto"}
+        ):
+            return {}
+
+        extra_body: dict[str, Any] = {"enable_thinking": True}
+        thinking_budget = self._effective_thinking_budget_for_spec(spec)
+        if thinking_budget is not None:
+            extra_body["thinking_budget"] = thinking_budget
+        kwargs: dict[str, Any] = {"extra_body": extra_body}
+        if spec.uses_reasoning_effort_param:
+            effort = normalize_effort(self._effort)
+            allowed = {e.value for e in spec.allowed_efforts}
+            if effort in allowed:
+                kwargs["reasoning_effort"] = effort
+            elif effort not in {None, "auto"} and spec.default_effort is not None:
+                kwargs["reasoning_effort"] = spec.default_effort.value
+        return kwargs
+
     def _effective_thinking_budget(self) -> int | None:
+        if self._thinking_disabled():
+            return None
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
+        return self._effective_thinking_budget_for_spec(spec)
+
+    def _effective_thinking_budget_for_spec(self, spec: Any) -> int | None:
         if not spec.supports_thinking_budget:
             return None
         return self._thinking_budget if self._thinking_budget is not None else spec.default_thinking_budget
 
     def _token_limit_kwargs(self, max_tokens: int) -> dict[str, int]:
+        if self._thinking_disabled():
+            return {"max_tokens": max_tokens}
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if not spec.use_max_completion_tokens:
             return {"max_tokens": max_tokens}
@@ -117,6 +149,18 @@ class OpenAIProvider(Provider):
         if thinking_budget is None:
             return {"max_tokens": max_tokens}
         return {"max_completion_tokens": max_tokens + thinking_budget}
+
+    def _thinking_disabled(self) -> bool:
+        return bool_or_none(getattr(self, "_thinking_enabled", None)) is False
+
+    def _thinking_forced(self) -> bool:
+        return bool_or_none(getattr(self, "_thinking_enabled", None)) is True
+
+    def _effective_effort(self, spec: Any) -> str | None:
+        effort = normalize_effort(self._effort)
+        if effort in {None, "auto"}:
+            return spec.default_effort.value if self._thinking_forced() and spec.default_effort is not None else None
+        return effort
 
     def get_model_name(self) -> str:
         return self._model
@@ -268,6 +312,12 @@ class OpenAIProvider(Provider):
         usage = Usage()
         has_content = False
 
+        log_provider_request_policy(
+            self._PROVIDER_KEY,
+            self._model,
+            "chat.completions.stream",
+            kwargs,
+        )
         response = await self._client.chat.completions.create(**kwargs)
         async for chunk in response:
             has_content = True
@@ -377,6 +427,12 @@ class OpenAIProvider(Provider):
         for k, v in self._extra_request_kwargs.items():
             kwargs[k] = v
 
+        log_provider_request_policy(
+            self._PROVIDER_KEY,
+            self._model,
+            "chat.completions.create",
+            kwargs,
+        )
         response = await self._client.chat.completions.create(**kwargs)
         if not hasattr(response, "choices"):
             base_url = str(self._base_url or self._client.base_url).rstrip("/")

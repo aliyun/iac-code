@@ -158,8 +158,16 @@ class CloseableEventStream:
         self.closed_event.set()
 
 
+class FakeToolRegistry:
+    def register(self, tool) -> None:
+        pass
+
+    def unregister(self, tool_name: str) -> None:
+        pass
+
+
 def _fake_runtime():
-    return SimpleNamespace(provider_manager=object(), tool_registry=object())
+    return SimpleNamespace(provider_manager=object(), tool_registry=FakeToolRegistry())
 
 
 def _status_events(queue: FakeEventQueue) -> list[dict]:
@@ -299,13 +307,21 @@ async def test_pipeline_executor_reconfigures_cached_runtime_model_and_api_key_p
     tmp_path: Path,
 ) -> None:
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.providers.request_policy import ProviderRequestPolicy
 
     class FakeProviderManager:
         def __init__(self) -> None:
-            self.calls: list[tuple[str, dict[str, str]]] = []
+            self.calls: list[tuple[str, dict[str, str], object | None]] = []
 
-        def reconfigure(self, model, credentials, provider_key_override=None, base_url_override=None):
-            self.calls.append((model, dict(credentials)))
+        def reconfigure(
+            self,
+            model,
+            credentials,
+            provider_key_override=None,
+            base_url_override=None,
+            request_policy_override=None,
+        ):
+            self.calls.append((model, dict(credentials), request_policy_override))
 
     provider_manager = FakeProviderManager()
     runtime = SimpleNamespace(provider_manager=provider_manager, tool_registry=object())
@@ -336,6 +352,7 @@ async def test_pipeline_executor_reconfigures_cached_runtime_model_and_api_key_p
         thinking_exposure_types=None,
         model_from_metadata=True,
         metadata_api_key="metadata-key",
+        request_policy_override=ProviderRequestPolicy(effort="high", thinking_budget=2048),
     )
     await metadata_executor.execute(
         context=FakeRequestContext(context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
@@ -368,10 +385,12 @@ async def test_pipeline_executor_reconfigures_cached_runtime_model_and_api_key_p
         prompt="继续",
     )
 
-    assert provider_manager.calls == [
-        ("qwen3.6-max", {"dashscope": "metadata-key"}),
-        ("qwen3.6-plus", {"dashscope": "fallback-key"}),
-    ]
+    first_policy = provider_manager.calls[0][2]
+    assert provider_manager.calls[0][0] == "qwen3.6-max"
+    assert provider_manager.calls[0][1] == {"dashscope": "metadata-key"}
+    assert getattr(first_policy, "effort", None) == "high"
+    assert getattr(first_policy, "thinking_budget", None) == 2048
+    assert provider_manager.calls[1] == ("qwen3.6-plus", {"dashscope": "fallback-key"}, None)
 
 
 async def _wait_for_output_text(task, expected: str) -> None:
@@ -2645,6 +2664,101 @@ async def test_pipeline_executor_routes_second_prompt_as_interrupt(tmp_path: Pat
     assert captured_interrupt_credentials == ["client-id"]
     event_types = [event["eventType"] for event in publisher.journal.read_all()]
     assert event_types == ["interrupt_received", "interrupt_classified"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_executor_reconfigures_active_interrupt_runtime_thinking_per_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+    from iac_code.a2a.pipeline_executor import A2APipelineRuntime, IacCodeA2APipelineExecutor
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+    from iac_code.providers.request_policy import ProviderRequestPolicy
+
+    class FakeProviderManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object | None]] = []
+
+        def reconfigure(
+            self,
+            model,
+            credentials,
+            provider_key_override=None,
+            base_url_override=None,
+            request_policy_override=None,
+        ):
+            self.calls.append((model, request_policy_override))
+
+    class InterruptiblePipeline(FakePipeline):
+        async def handle_user_interrupt(self, message: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                action="supplement",
+                reason="added context",
+                rollback_target=None,
+                candidate_scope=None,
+            )
+
+    provider_manager = FakeProviderManager()
+    agent_runtime = SimpleNamespace(provider_manager=provider_manager, tool_registry=object())
+    monkeypatch.setattr("iac_code.config.load_credentials", lambda model=None: {})
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: agent_runtime,
+    )
+    ctx.active_task_id = "task-1"
+
+    queue = FakeEventQueue()
+    pipeline = InterruptiblePipeline([TextDeltaEvent(text="running")], session_dir=tmp_path / "sidecar")
+    publisher = PipelineA2AEventPublisher(
+        event_queue=queue,
+        translator=PipelineEventTranslator(
+            PipelineA2AContext(
+                pipeline_run_id="ctx-1",
+                task_id="task-1",
+                context_id="ctx-1",
+                pipeline_name="selling",
+            )
+        ),
+        journal=A2APipelineJournal(tmp_path / "pipeline"),
+        snapshot_store=A2APipelineSnapshotStore(tmp_path / "pipeline"),
+    )
+    ctx.runtime = A2APipelineRuntime(agent_runtime=agent_runtime, pipeline=pipeline, publisher=publisher)
+    store.mirror_context(ctx)
+
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+        request_policy_override=ProviderRequestPolicy(thinking_enabled=False, effort="high", thinking_budget=2048),
+    )
+
+    await executor.execute(
+        context=FakeRequestContext(text="please change cpu", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=queue,
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        prompt="please change cpu",
+    )
+
+    policy = provider_manager.calls[0][1]
+    assert provider_manager.calls[0][0] == "qwen3.6-plus"
+    assert getattr(policy, "thinking_enabled", None) is False
+    assert getattr(policy, "effort", None) == "high"
+    assert getattr(policy, "thinking_budget", None) == 2048
 
 
 @pytest.mark.asyncio

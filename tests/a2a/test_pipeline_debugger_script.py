@@ -231,7 +231,7 @@ def test_build_message_stream_payload_uses_a2a_v1_method_and_cwd_metadata() -> N
     assert message["messageId"] == "msg-1"
     assert message["role"] == "ROLE_USER"
     assert message["parts"] == [{"text": "帮我生成售卖 pipeline 方案"}]
-    assert message["metadata"] == {"iac_code": {"cwd": "/workspace/demo"}}
+    assert message["metadata"] == {"iac_code": {"cwd": "/workspace/demo", "thinking": {"enabled": True}}}
     assert message["contextId"] == "ctx-demo"
     assert message["taskId"] == "task-demo"
     assert payload["params"]["configuration"] == {"acceptedOutputModes": ["text/plain"]}
@@ -254,7 +254,26 @@ def test_build_message_stream_payload_includes_iac_code_model_metadata() -> None
         "iac_code": {
             "cwd": "/workspace/demo",
             "iac_code_model": "kimi-k2.7-code",
+            "thinking": {"enabled": True},
         }
+    }
+
+
+def test_build_message_stream_payload_allows_disabling_thinking_metadata() -> None:
+    debugger = load_debugger_module()
+
+    payload = debugger.build_message_stream_payload(
+        cwd="/workspace/demo",
+        prompt="start pipeline",
+        context_id="ctx-demo",
+        task_id="task-demo",
+        request_id="req-1",
+        message_id="msg-1",
+        thinking_enabled=False,
+    )
+
+    assert payload["params"]["message"]["metadata"] == {
+        "iac_code": {"cwd": "/workspace/demo", "thinking": {"enabled": False}}
     }
 
 
@@ -661,6 +680,28 @@ def test_index_html_groups_text_delta_events() -> None:
         assert expected in html
 
 
+def test_index_html_groups_thinking_delta_events() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+
+    for expected in [
+        '"thinking_delta_group"',
+        'eventType === "text_delta" || eventType === "thinking_delta"',
+        'row.type === "text_delta_group" || row.type === "thinking_delta_group"',
+        'if (type === "text_delta" || type === "thinking_delta")',
+        'type === "thinking_delta" ? "thinking_delta" : "text_delta"',
+    ]:
+        assert expected in html
+
+
 def test_index_html_surfaces_permission_guidance() -> None:
     debugger = load_debugger_module()
 
@@ -842,6 +883,7 @@ def test_index_html_models_parallel_candidates_and_rollback_history() -> None:
         "tool_result",
         "permission_requested",
         "text_delta",
+        "thinking_delta",
     ]:
         assert expected in html
 
@@ -864,7 +906,7 @@ def test_index_html_assigns_timeline_events_to_business_nodes() -> None:
         "state.executionTree.lastCandidateKey",
         "state.executionTree.lastCandidateStepKey",
         "candidateStepKey || candidateKey || stepKey || pipeline.key",
-        'if (["text_delta", "tool_result", "permission_requested", "input_required"].includes(type))',
+        'if (["text_delta", "thinking_delta", "tool_result", "permission_requested", "input_required"].includes(type))',
         "delete state.executionTree.textGroups[textKey]",
     ]:
         assert expected in html
@@ -885,8 +927,12 @@ def test_index_html_renders_timeline_details_with_pretty_json() -> None:
     for expected in [
         "function detailTextForTimelineItem",
         "function renderTimelineDetails",
+        'document.createElement("details")',
+        'document.createElement("summary")',
         "timeline-details-button",
         "timeline-detail-body",
+        "data-timeline-detail-key",
+        "details.open = state.expandedTimelineKeys.has(item.key);",
         "JSON.stringify(item.raw, null, 2)",
         'button.type = "button"',
     ]:
@@ -930,7 +976,10 @@ def test_index_html_timeline_details_button_does_not_toggle_parent_details() -> 
     assert 'button.addEventListener("click", (event) => {' in html
     assert "event.preventDefault();" in html
     assert "event.stopPropagation();" in html
-    assert 'detail.addEventListener("toggle", stopNestedTimelineToggle);' in html
+    assert 'button.setAttribute("aria-expanded", state.expandedTimelineKeys.has(item.key) ? "true" : "false");' in html
+    assert "details.open = !details.open;" in html
+    assert 'details.addEventListener("toggle", onTimelineDetailToggle);' in html
+    assert "function onTimelineDetailToggle" in html
 
 
 def test_index_html_groups_normal_a2a_message_deltas_outside_pipeline_steps() -> None:
@@ -1081,6 +1130,29 @@ def test_index_html_uses_captured_context_and_task_ids_for_requests() -> None:
     assert "controls.contextId || state.contextId" in html
     assert "contextId: controls.contextId || state.contextId," in html
     assert "taskId: streamTaskIdForControls(controls)," in html
+    assert "thinkingEnabled: controls.thinkingEnabled," in html
+
+
+def test_index_html_exposes_thinking_toggle_for_stream_requests() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+
+    for expected in [
+        'id="thinking-toggle"',
+        'aria-pressed="true"',
+        "function toggleThinking",
+        'byId("thinking-toggle").addEventListener("click", toggleThinking);',
+        'thinkingEnabled: byId("thinking-toggle").getAttribute("aria-pressed") === "true"',
+    ]:
+        assert expected in html
 
 
 def test_index_html_distinguishes_pipeline_and_active_task_ids() -> None:
@@ -1163,7 +1235,8 @@ def test_index_html_yields_between_batched_sse_events() -> None:
         "async function yieldToBrowserAfterStreamEvent",
         "for (const chunk of chunks)",
         "await yieldToBrowserAfterStreamEvent(parsed, ++streamEventCount);",
-        'eventType !== "text_delta" || streamEventCount % 8 === 0',
+        '["text_delta", "thinking_delta"].includes(eventType)',
+        "streamEventCount % 8 === 0",
     ]:
         assert expected in html
     assert "chunks.forEach((chunk) => {" not in html
@@ -2101,7 +2174,38 @@ def test_message_stream_route_forwards_sse_and_uses_stream_payload() -> None:
     assert sent["method"] == "SendStreamingMessage"
     assert sent["params"]["message"]["contextId"] == "ctx-1"
     assert sent["params"]["message"]["taskId"] == "task-1"
-    assert sent["params"]["message"]["metadata"] == {"iac_code": {"cwd": "/workspace/demo"}}
+    assert sent["params"]["message"]["metadata"] == {
+        "iac_code": {"cwd": "/workspace/demo", "thinking": {"enabled": True}}
+    }
+
+
+def test_message_stream_route_forwards_disabled_thinking_metadata() -> None:
+    debugger = load_debugger_module()
+    SseTargetHandler.requests = []
+
+    with serve_handler(SseTargetHandler) as target_url:
+        running = start_debugger_server(debugger)
+        try:
+            status, body = post_raw(
+                f"{running.url}/api/message/stream",
+                {
+                    "serverUrl": target_url,
+                    "cwd": "/workspace/demo",
+                    "contextId": "ctx-1",
+                    "taskId": "task-1",
+                    "thinkingEnabled": False,
+                    "prompt": "start pipeline",
+                },
+            )
+        finally:
+            running.close()
+
+    assert status == 200
+    assert "data: " in body
+    sent = json.loads(SseTargetHandler.requests[0]["body"])
+    assert sent["params"]["message"]["metadata"] == {
+        "iac_code": {"cwd": "/workspace/demo", "thinking": {"enabled": False}}
+    }
 
 
 def test_message_stream_route_forwards_image_parts() -> None:

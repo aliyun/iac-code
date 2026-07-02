@@ -6,7 +6,8 @@ Short local guide for `scripts/a2a/debugger.py`.
 
 ```bash
 PATH="$HOME/.local/bin:$PATH" IAC_CODE_MODE=pipeline \
-uv run iac-code a2a --transport http --host 127.0.0.1 --port 41299
+uv run iac-code a2a --transport http --host 127.0.0.1 --port 41299 \
+  --thinking-exposure raw-thinking --thinking-exposure tool-trace
 ```
 
 For local smoke tests that should not stop on tool permissions:
@@ -14,12 +15,20 @@ For local smoke tests that should not stop on tool permissions:
 ```bash
 cat >/tmp/iac-code-a2a-auto-approve.yml <<'EOF'
 auto_approve_permissions: true
+thinking_exposure:
+  - raw-thinking
+  - tool-trace
 EOF
 
 PATH="$HOME/.local/bin:$PATH" IAC_CODE_MODE=pipeline \
 uv run iac-code a2a --transport http --host 127.0.0.1 --port 41299 \
   --config /tmp/iac-code-a2a-auto-approve.yml
 ```
+
+The debugger's `Stream` button sends each message with
+`metadata.iac_code.thinking.enabled=true`. The server still needs
+`raw-thinking` in `thinking_exposure` to push `thinking_delta` events back to the
+debugger.
 
 ## Start the Debugger
 

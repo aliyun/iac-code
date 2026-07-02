@@ -72,16 +72,19 @@ activeProvider: dashscope
 providers:
   dashscope:
     model: glm-5.2
+    thinkingEnabled: true
     thinkingBudget: 8192
     maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
+        thinkingEnabled: false
         thinkingBudget: 8192
         maxCompletionTokens: 16384
 ```
 
 | 字段 | 作用范围 | 说明 |
 |---|---|---|
+| `thinkingEnabled` | Provider 或模型 | 可选的布尔 thinking 开关。`true` 表示请求支持的 provider/model 开启 thinking；`false` 表示请求关闭；省略时保留 provider/model 默认行为。 |
 | `thinkingBudget` | Provider 或模型 | 正整数 reasoning/thinking 预算，会传给支持该参数的 provider。 |
 | `maxCompletionTokens` | Provider 或模型 | 正整数 `max_completion_tokens` 覆盖值，用于采用该请求字段的 provider/model。 |
 | `effort` | Provider 或模型 | 可选 thinking effort 覆盖值，仅对支持 effort 控制的模型生效。 |
@@ -89,6 +92,8 @@ providers:
 `providers.<provider>.models.<model>` 下的模型级有效值会覆盖 provider 级值。无效数值会被忽略，IaC Code 会回退到 provider 级值或内置模型策略。
 
 对阿里云百炼 DashScope 和 DashScope Token Plan，IaC Code 为 `glm-5.2` 和 `kimi-k2.7-code` 内置了 `thinkingBudget=8192`。未设置 `maxCompletionTokens` 时，请求上限会按普通回答 token 上限加上有效 thinking budget 计算。
+
+A2A 请求可以通过 `message.metadata.iac_code.thinking` 或 `iac-code a2a-client call` 的 `--thinking-enabled`、`--thinking-effort`、`--thinking-budget` flag 在单次 message turn 覆盖这些设置。如果没有发送显式 A2A thinking metadata，runtime 会使用上述配置和 provider 自身默认行为。对于 base URL 指向 DashScope compatible-mode 的通用 `openai_compatible` provider，只有存在显式 thinking 策略时，iac-code 才会切换到 DashScope 原生 thinking wire format。
 
 ## 工具权限配置
 

@@ -850,6 +850,21 @@ def a2a_call(
         "--iac-code-api-key",
         help=_("API key metadata to send with this A2A request"),
     ),
+    thinking_enabled: bool | None = typer.Option(
+        None,
+        "--thinking-enabled/--no-thinking-enabled",
+        help="Whether to enable thinking metadata for this A2A request",
+    ),
+    thinking_effort: str = typer.Option(
+        "",
+        "--thinking-effort",
+        help="Thinking effort metadata to send with this A2A request",
+    ),
+    thinking_budget: int | None = typer.Option(
+        None,
+        "--thinking-budget",
+        help="Thinking budget metadata to send with this A2A request",
+    ),
     token: str = typer.Option("", "--token", help=_("Bearer token for A2A HTTP requests")),
     basic_username: str = typer.Option("", "--basic-username", help=_("Basic auth username for A2A HTTP requests")),
     basic_password: str = typer.Option("", "--basic-password", help=_("Basic auth password for A2A HTTP requests")),
@@ -887,6 +902,9 @@ def a2a_call(
         context_id = _a2a_config_value(ctx, config, "context_id", context_id)
         iac_code_model = _a2a_config_value(ctx, config, "iac_code_model", iac_code_model)
         iac_code_api_key = _a2a_config_value(ctx, config, "iac_code_api_key", iac_code_api_key)
+        thinking_enabled = _a2a_config_value(ctx, config, "thinking_enabled", thinking_enabled)
+        thinking_effort = _a2a_config_value(ctx, config, "thinking_effort", thinking_effort)
+        thinking_budget = _a2a_config_value(ctx, config, "thinking_budget", thinking_budget)
         timeout = _a2a_config_value(ctx, config, "timeout", timeout)
         stream = _a2a_config_value(ctx, config, "stream", stream)
         auth_options = _a2a_client_auth_options(
@@ -925,6 +943,9 @@ def a2a_call(
                 context_id=context_id or None,
                 model=iac_code_model or None,
                 iac_code_api_key=iac_code_api_key or None,
+                thinking_enabled=thinking_enabled,
+                thinking_effort=thinking_effort or None,
+                thinking_budget=thinking_budget,
                 token=auth_options["token"] or None,
                 basic_username=auth_options["basic_username"] or None,
                 basic_password=auth_options["basic_password"] or None,
@@ -1590,6 +1611,9 @@ async def _run_a2a_call(
     context_id: str | None,
     model: str | None,
     iac_code_api_key: str | None,
+    thinking_enabled: bool | None,
+    thinking_effort: str | None,
+    thinking_budget: int | None,
     token: str | None,
     basic_username: str | None,
     basic_password: str | None,
@@ -1629,6 +1653,9 @@ async def _run_a2a_call(
                 context_id=context_id,
                 model=model,
                 iac_code_api_key=iac_code_api_key,
+                thinking_enabled=thinking_enabled,
+                thinking_effort=thinking_effort,
+                thinking_budget=thinking_budget,
             ):
                 line = _format_a2a_stream_event(event)
                 if stream_callback is not None:
@@ -1643,6 +1670,9 @@ async def _run_a2a_call(
             context_id=context_id,
             model=model,
             iac_code_api_key=iac_code_api_key,
+            thinking_enabled=thinking_enabled,
+            thinking_effort=thinking_effort,
+            thinking_budget=thinking_budget,
         )
         return response.text or json.dumps(response.payload, ensure_ascii=False, indent=2, sort_keys=True)
     finally:

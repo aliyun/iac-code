@@ -210,17 +210,27 @@ async def test_token_refresh_waiter_cancellation_does_not_cancel_shared_refresh(
     assert calls == 1
 
 
-def test_token_refresh_coordinator_deduplicates_across_event_loops() -> None:
+def test_token_refresh_coordinator_deduplicates_across_event_loops(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
     calls_lock = threading.Lock()
+    owner_started = threading.Event()
     release = threading.Event()
+    waiter_registered = threading.Event()
     coordinator = TokenRefreshCoordinator()
+    wrap_future = asyncio.wrap_future
+
+    def observed_wrap_future(future, *, loop=None):
+        waiter_registered.set()
+        return wrap_future(future, loop=loop)
+
+    monkeypatch.setattr(oauth_module.asyncio, "wrap_future", observed_wrap_future)
 
     async def refresh():
         nonlocal calls
         with calls_lock:
             calls += 1
-        await asyncio.to_thread(release.wait, 2)
+        owner_started.set()
+        await asyncio.to_thread(release.wait)
         return "new-token"
 
     def run_refresh() -> str:
@@ -229,12 +239,11 @@ def test_token_refresh_coordinator_deduplicates_across_event_loops() -> None:
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(run_refresh)
         second = executor.submit(run_refresh)
-        while True:
-            with calls_lock:
-                if calls:
-                    break
-            release.wait(0.01)
-        release.set()
+        try:
+            assert owner_started.wait(1)
+            assert waiter_registered.wait(1)
+        finally:
+            release.set()
 
     assert first.result(timeout=1) == "new-token"
     assert second.result(timeout=1) == "new-token"

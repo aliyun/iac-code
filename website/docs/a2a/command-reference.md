@@ -286,6 +286,9 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--context-id` | empty | Existing A2A context ID for a follow-up message |
 | `--iac-code-model` | empty | LLM model sent as `message.metadata.iac_code.iac_code_model`; overrides server model config for this message turn only |
 | `--iac-code-api-key` | empty | LLM provider API key sent as `message.metadata.iac_code.iac_code_api_key`; overrides `IAC_CODE_API_KEY` and `.credentials.yml` for this message turn only |
+| `--thinking-enabled`, `--no-thinking-enabled` | empty | Boolean thinking policy sent as `message.metadata.iac_code.thinking.enabled`; omitted preserves the server/provider default |
+| `--thinking-effort` | empty | Thinking effort sent as `message.metadata.iac_code.thinking.effort` for this message turn only |
+| `--thinking-budget` | empty | Positive integer thinking budget sent as `message.metadata.iac_code.thinking.budget` for this message turn only |
 | `--verify-card-secret`, `--signing-secret` | empty | HMAC secret for Agent Card verification |
 | `--verify-card-jwks-url` | empty | Remote JWKS URL used for Agent Card verification |
 | `--require-card-signature`, `--require-signature` | `false` | Reject unsigned or invalid Agent Cards |
@@ -293,6 +296,14 @@ iac-code a2a-client --config a2a-client.yml call \
 | `--stream` | `false` | Use `SendStreamingMessage` and print stream events |
 
 `--iac-code-api-key` is the key used by the remote iac-code runtime to call its LLM provider. It is separate from `--api-key`, which authenticates the A2A HTTP request itself.
+
+Thinking options are per-message request metadata. They can also be supplied in the A2A client YAML as `thinking-enabled`, `thinking-effort`, and `thinking-budget`; command-line flags override config values. If all three are omitted, the client sends no thinking metadata and the remote runtime keeps its configured provider defaults. For `openai_compatible` endpoints backed by DashScope compatible-mode, an explicit thinking policy uses DashScope's native wire parameters so `--no-thinking-enabled` can send `extra_body.enable_thinking=false`. Emitting raw thinking back to the A2A client still requires the server to enable `thinking-exposure: raw-thinking`.
+
+```yaml
+thinking-enabled: false
+thinking-effort: low
+thinking-budget: 2048
+```
 
 Follow-up in the same context:
 

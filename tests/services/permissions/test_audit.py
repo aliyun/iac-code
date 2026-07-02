@@ -19,10 +19,25 @@ from iac_code.services.permissions.audit import (
     sanitize_free_text,
 )
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings
+from iac_code.utils.project_paths import sanitize_path
 
 
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _session_audit_log_path(config_dir: Path, cwd: str, session_id: str) -> Path:
+    return config_dir / "projects" / sanitize_path(cwd) / session_id / "permission-audit.jsonl"
+
+
+def _audit_log_path_for_record(config_dir: Path, record: PermissionAuditRecord) -> Path:
+    cwd = record.cwd.strip() or os.getcwd()
+    session_id = record.session_id.strip() or "unknown-session"
+    return _session_audit_log_path(config_dir, cwd, session_id)
+
+
+def _read_audit_rows(config_dir: Path, record: PermissionAuditRecord) -> list[dict]:
+    return _read_jsonl(_audit_log_path_for_record(config_dir, record))
 
 
 def _has_truncated_object(value: object) -> bool:
@@ -150,7 +165,7 @@ def test_emit_permission_audit_preserves_field_shape_fingerprint_keys(
 
     assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     field_key = fingerprint_text("StackName")
     assert row["input_summary"]["params_fields"] == [field_key]
     assert field_key in row["input_summary"]["params_field_shapes"]
@@ -178,7 +193,7 @@ def test_emit_permission_audit_sanitizes_raw_field_shape_keys(
 
     assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     field_key = fingerprint_text("StackName")
     serialized = json.dumps(row)
     assert "StackName" not in serialized
@@ -312,7 +327,7 @@ def test_emit_permission_audit_truncates_deep_input_summary_before_serializing(
 
     assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024 * 1024, max_files=2))
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     assert _has_truncated_object(row["input_summary"])
 
 
@@ -411,8 +426,10 @@ def test_emit_permission_audit_writes_jsonl_and_telemetry(tmp_path: Path, monkey
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
     telemetry = Mock()
     monkeypatch.setattr("iac_code.services.permissions.audit.log_event", telemetry)
+    cwd = "/home/workspace/context-1"
     record = PermissionAuditRecord(
         session_id="s1",
+        cwd=cwd,
         tool_name="aliyun_api",
         tool_use_id="tu1",
         decision="allow",
@@ -427,10 +444,11 @@ def test_emit_permission_audit_writes_jsonl_and_telemetry(tmp_path: Path, monkey
 
     emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
-    log_path = tmp_path / "logs" / "permission-audit.jsonl"
+    log_path = _session_audit_log_path(tmp_path, cwd, "s1")
     rows = _read_jsonl(log_path)
     assert rows[0]["decision"] == "allow"
     assert rows[0]["rule_source"] == "user_settings"
+    assert not (tmp_path / "logs" / "permission-audit.jsonl").exists()
     telemetry.assert_called_once()
     assert telemetry.call_args.args[0] == "iac.tool.permission.granted"
 
@@ -491,7 +509,10 @@ def test_emit_permission_audit_clamps_excessive_max_files_before_rotation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("iac_code.services.permissions.audit._log_path", lambda: tmp_path / "permission-audit.jsonl")
+    monkeypatch.setattr(
+        "iac_code.services.permissions.audit._log_path",
+        lambda _record: tmp_path / "permission-audit.jsonl",
+    )
     monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
     captured: dict[str, int] = {}
 
@@ -532,16 +553,51 @@ def test_emit_permission_audit_restricts_jsonl_file_permissions(tmp_path: Path, 
     emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
     if os.name != "nt":
-        mode = stat.S_IMODE((tmp_path / "logs" / "permission-audit.jsonl").stat().st_mode)
+        mode = stat.S_IMODE(_audit_log_path_for_record(tmp_path, record).stat().st_mode)
         assert mode == 0o600
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not meaningful on Windows")
-def test_emit_permission_audit_fails_when_jsonl_permissions_remain_too_broad(
+def test_emit_permission_audit_allows_append_when_chmod_cannot_restrict_session_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("iac_code.services.permissions.audit._log_path", lambda: tmp_path / "permission-audit.jsonl")
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
+    monkeypatch.setattr("iac_code.services.permissions.audit.ensure_private_file", lambda path: path)
+    cwd = "/home/workspace/context-chmod"
+
+    def fake_append(path, records, **kwargs):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(list(records)[0]) + "\n", encoding="utf-8")
+        path.chmod(0o666)
+
+    monkeypatch.setattr("iac_code.services.permissions.audit.append_jsonl_rotating_locked", fake_append)
+    record = PermissionAuditRecord(
+        session_id="s-broad-session",
+        cwd=cwd,
+        tool_name="bash",
+        tool_use_id="tu-broad-session",
+        decision="allow",
+        scope="settings_rule",
+        source="permission_pipeline",
+    )
+
+    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is True
+    [row] = _read_jsonl(_session_audit_log_path(tmp_path, cwd, "s-broad-session"))
+    assert row["decision"] == "allow"
+    assert not (tmp_path / "logs" / "permission-audit.jsonl").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not meaningful on Windows")
+def test_emit_permission_audit_succeeds_when_jsonl_permissions_remain_too_broad(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "iac_code.services.permissions.audit._log_path",
+        lambda _record: tmp_path / "permission-audit.jsonl",
+    )
     monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
     monkeypatch.setattr("iac_code.services.permissions.audit.ensure_private_file", lambda path: path)
 
@@ -559,21 +615,26 @@ def test_emit_permission_audit_fails_when_jsonl_permissions_remain_too_broad(
         source="permission_pipeline",
     )
 
-    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is False
+    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is True
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not meaningful on Windows")
-def test_emit_permission_audit_refuses_existing_broad_jsonl_before_append(
+def test_emit_permission_audit_appends_existing_broad_jsonl(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     log_path = tmp_path / "permission-audit.jsonl"
     log_path.write_text("", encoding="utf-8")
     log_path.chmod(0o666)
-    monkeypatch.setattr("iac_code.services.permissions.audit._log_path", lambda: log_path)
+    monkeypatch.setattr("iac_code.services.permissions.audit._log_path", lambda _record: log_path)
     monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
     monkeypatch.setattr("iac_code.services.permissions.audit.ensure_private_file", lambda path: path)
-    append = Mock()
+    append = Mock(
+        side_effect=lambda path, records, **kwargs: path.write_text(
+            json.dumps(list(records)[0]) + "\n",
+            encoding="utf-8",
+        )
+    )
     monkeypatch.setattr("iac_code.services.permissions.audit.append_jsonl_rotating_locked", append)
     record = PermissionAuditRecord(
         session_id="s-existing-broad",
@@ -584,8 +645,8 @@ def test_emit_permission_audit_refuses_existing_broad_jsonl_before_append(
         source="permission_pipeline",
     )
 
-    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is False
-    append.assert_not_called()
+    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is True
+    append.assert_called_once()
 
 
 def test_emit_permission_audit_omits_unsafe_rule_text_from_jsonl(tmp_path: Path, monkeypatch) -> None:
@@ -608,7 +669,7 @@ def test_emit_permission_audit_omits_unsafe_rule_text_from_jsonl(tmp_path: Path,
 
     emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     assert row["reason_detail"] == "matched permission rule"
     assert "rule" not in row
     assert row["rule_fingerprint"] == fingerprint_text("bash(echo secret-value)")
@@ -636,7 +697,7 @@ def test_emit_permission_audit_preserves_safe_multi_rule_text(tmp_path: Path, mo
 
     emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     assert row["rule"] == rule
     assert row["rule_fingerprint"] == fingerprint_text(rule)
 
@@ -658,7 +719,7 @@ def test_emit_permission_audit_excludes_tool_input_redacted_by_default(tmp_path:
 
     emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
-    rows = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    rows = _read_audit_rows(tmp_path, record)
     assert "tool_input_redacted" not in rows[0]
     assert "secret-value" not in json.dumps(rows[0])
 
@@ -728,7 +789,7 @@ def test_emit_permission_audit_truncates_redacted_tool_input_when_enabled(
         settings=PermissionAuditSettings(include_tool_input=True, max_file_bytes=1024 * 1024, max_files=2),
     )
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     nested_key = fingerprint_text("nested")
     wide_key = fingerprint_text("wide")
     assert _has_truncated_object(row["tool_input_redacted"][nested_key])
@@ -770,7 +831,7 @@ def test_emit_permission_audit_includes_redacted_tool_input_when_enabled(tmp_pat
         settings=PermissionAuditSettings(include_tool_input=True, max_file_bytes=1024, max_files=2),
     )
 
-    rows = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    rows = _read_audit_rows(tmp_path, record)
     assert rows[0]["tool_input_redacted"] == {
         fingerprint_text("accessKeyId"): {"redacted": True},
         fingerprint_text("apiKey"): {"redacted": True},
@@ -831,7 +892,7 @@ def test_emit_permission_audit_redacts_embedded_json_and_pem_strings(tmp_path: P
         settings=PermissionAuditSettings(include_tool_input=True, max_file_bytes=1024, max_files=2),
     )
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     rendered = json.dumps(row, ensure_ascii=False)
     assert "super-secret" not in rendered
     assert "private-body" not in rendered
@@ -870,7 +931,7 @@ def test_emit_permission_audit_tool_input_redaction_omits_business_payloads(tmp_
         settings=PermissionAuditSettings(include_tool_input=True, max_file_bytes=1024, max_files=2),
     )
 
-    [row] = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    [row] = _read_audit_rows(tmp_path, record)
     serialized = json.dumps(row, ensure_ascii=False)
     assert row["tool_input_redacted"]["product"] == {
         "type": "str",
@@ -919,7 +980,7 @@ def test_emit_permission_audit_uses_minimal_private_telemetry_metadata(tmp_path:
         settings=PermissionAuditSettings(include_tool_input=True, max_file_bytes=1024, max_files=2),
     )
 
-    rows = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    rows = _read_audit_rows(tmp_path, record)
     assert rows[0]["reason_detail"] == "matched permission rule"
     assert rows[0]["tool_input_redacted"] == {"params": {fingerprint_text("StackName"): {"redacted": True}}}
     assert rows[0]["operation"] == {
@@ -1017,6 +1078,6 @@ def test_emit_permission_audit_telemetry_failure_does_not_prevent_jsonl(tmp_path
 
     emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
 
-    rows = _read_jsonl(tmp_path / "logs" / "permission-audit.jsonl")
+    rows = _read_audit_rows(tmp_path, record)
     assert rows[0]["decision"] == "allow"
     telemetry.assert_called_once()

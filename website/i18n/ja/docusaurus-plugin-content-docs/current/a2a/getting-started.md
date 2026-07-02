@@ -139,6 +139,12 @@ token: your-secret-token
 verify-card-secret: your-card-signing-secret
 require-card-signature: true
 cwd: /path/to/workspace
+iac-code-model: qwen-plus
+iac-code-api-key: provider-api-key
+# 任意: message 単位の thinking ポリシー metadata:
+# thinking-enabled: false
+# thinking-effort: low
+# thinking-budget: 2048
 ```
 
 直接の Phase 1 クライアント呼び出しには `a2a-client call` を使用します。

@@ -14,6 +14,8 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
+from iac_code.providers.request_logging import log_provider_request_policy
+from iac_code.providers.request_policy import bool_or_none, positive_int_or_none
 from iac_code.providers.thinking import (
     ANTHROPIC_BUDGET,
     ThinkingFamily,
@@ -50,12 +52,18 @@ class AnthropicProvider(Provider):
         max_tokens: int = 8192,
         client: Any = None,
         effort: str | None = None,
+        thinking_enabled: bool | None = None,
+        thinking_budget: int | None = None,
         provider_key: str = "anthropic",
         **kwargs: Any,
     ) -> None:
         self._model = model
         self._max_tokens = max_tokens
         self._effort = effort
+        self._thinking_enabled = bool_or_none(thinking_enabled)
+        normalized_thinking_budget = positive_int_or_none(thinking_budget)
+        if normalized_thinking_budget is not None:
+            self._thinking_budget = normalized_thinking_budget
         if client is not None:
             self._client = client
         else:
@@ -76,29 +84,42 @@ class AnthropicProvider(Provider):
         return self._model
 
     def _build_thinking_kwargs(self) -> dict[str, Any]:
-        spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
-        if spec.family is not ThinkingFamily.ANTHROPIC:
-            return {}
-        effort = normalize_effort(self._effort)
-        if effort is None or effort == "auto":
-            return {}
-        budget = ANTHROPIC_BUDGET.get(effort)
+        budget = self._effective_thinking_budget()
         if budget is None:
             return {}
         return {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
-    def _adjust_max_tokens(self, max_tokens: int) -> int:
+    def _effective_thinking_budget(self) -> int | None:
+        if self._thinking_disabled():
+            return None
+        explicit_budget = getattr(self, "_thinking_budget", None)
+        if isinstance(explicit_budget, int) and explicit_budget > 0:
+            return explicit_budget
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.ANTHROPIC:
-            return max_tokens
+            return None
         effort = normalize_effort(self._effort)
         if effort is None or effort == "auto":
-            return max_tokens
+            effort = spec.default_effort.value if self._thinking_forced() and spec.default_effort is not None else None
+        if effort is None:
+            return None
         budget = ANTHROPIC_BUDGET.get(effort)
+        if budget is None:
+            return None
+        return budget
+
+    def _adjust_max_tokens(self, max_tokens: int) -> int:
+        budget = self._effective_thinking_budget()
         if budget is None:
             return max_tokens
         min_max = budget + 4096
         return max(max_tokens, min_max)
+
+    def _thinking_disabled(self) -> bool:
+        return bool_or_none(getattr(self, "_thinking_enabled", None)) is False
+
+    def _thinking_forced(self) -> bool:
+        return bool_or_none(getattr(self, "_thinking_enabled", None)) is True
 
     async def stream(
         self,
@@ -109,6 +130,12 @@ class AnthropicProvider(Provider):
     ) -> AsyncGenerator[StreamEvent, None]:
         kwargs = self._build_kwargs(messages, system, tools, max_tokens)
 
+        log_provider_request_policy(
+            self._PROVIDER_KEY,
+            self._model,
+            "messages.stream",
+            kwargs,
+        )
         async with self._client.messages.stream(**kwargs) as stream:
             # Track current content block state
             current_tool_use_id: str | None = None
@@ -182,6 +209,12 @@ class AnthropicProvider(Provider):
         cache_policy: str = "default",
     ) -> NonStreamingResponse:
         kwargs = self._build_kwargs(messages, system, tools, max_tokens)
+        log_provider_request_policy(
+            self._PROVIDER_KEY,
+            self._model,
+            "messages.create",
+            kwargs,
+        )
         response = await self._client.messages.create(**kwargs)
 
         text_parts: list[str] = []

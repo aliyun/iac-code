@@ -72,16 +72,19 @@ activeProvider: dashscope
 providers:
   dashscope:
     model: glm-5.2
+    thinkingEnabled: true
     thinkingBudget: 8192
     maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
+        thinkingEnabled: false
         thinkingBudget: 8192
         maxCompletionTokens: 16384
 ```
 
 | Campo | Escopo | Descrição |
 |---|---|---|
+| `thinkingEnabled` | Provedor ou modelo | Chave booleana opcional de thinking. `true` solicita que provedores/modelos compatíveis habilitem thinking; `false` solicita a desativação; se omitida, preserva o padrão do provedor/modelo. |
 | `thinkingBudget` | Provedor ou modelo | Orçamento de reasoning/thinking como inteiro positivo, enviado aos provedores que oferecem suporte a ele. |
 | `maxCompletionTokens` | Provedor ou modelo | Valor inteiro positivo que substitui `max_completion_tokens` para provedores/modelos que usam esse campo de requisição. |
 | `effort` | Provedor ou modelo | Substituição opcional do effort de thinking, válida apenas para modelos que oferecem controle de effort. |
@@ -89,6 +92,8 @@ providers:
 Valores válidos no nível do modelo em `providers.<provider>.models.<model>` substituem os valores no nível do provedor. Valores numéricos inválidos são ignorados, então o IaC Code volta ao valor do provedor ou à política integrada do modelo.
 
 Para Alibaba Cloud DashScope e DashScope Token Plan, o IaC Code tem um `thinkingBudget=8192` integrado para `glm-5.2` e `kimi-k2.7-code`. Quando `maxCompletionTokens` não é definido, o limite da requisição é calculado como o limite normal de tokens de resposta mais o thinking budget efetivo.
+
+Requisições A2A podem substituir essas configurações por um único turno de mensagem por meio de `message.metadata.iac_code.thinking` ou dos flags `--thinking-enabled`, `--thinking-effort` e `--thinking-budget` de `iac-code a2a-client call`. Se nenhum metadado explícito de thinking A2A for enviado, o runtime usa as configurações acima e os padrões normais do provedor. Para provedores genéricos `openai_compatible` com base URL em modo compatível do DashScope, o iac-code muda para o formato wire nativo de thinking do DashScope somente quando uma política explícita de thinking está presente.
 
 ## Configuração de permissões de ferramentas
 

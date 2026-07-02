@@ -72,16 +72,19 @@ activeProvider: dashscope
 providers:
   dashscope:
     model: glm-5.2
+    thinkingEnabled: true
     thinkingBudget: 8192
     maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
+        thinkingEnabled: false
         thinkingBudget: 8192
         maxCompletionTokens: 16384
 ```
 
 | Campo | Alcance | Descripción |
 |---|---|---|
+| `thinkingEnabled` | Proveedor o modelo | Interruptor booleano opcional de thinking. `true` pide a proveedores/modelos compatibles que lo habiliten; `false` pide deshabilitarlo; si se omite, conserva el valor predeterminado del proveedor/modelo. |
 | `thinkingBudget` | Proveedor o modelo | Presupuesto de reasoning/thinking como entero positivo, enviado a los proveedores que lo admiten. |
 | `maxCompletionTokens` | Proveedor o modelo | Valor entero positivo que anula `max_completion_tokens` para proveedores/modelos que usan ese campo de solicitud. |
 | `effort` | Proveedor o modelo | Anulación opcional del effort de thinking, solo para modelos que admiten control de effort. |
@@ -89,6 +92,8 @@ providers:
 Los valores válidos a nivel de modelo bajo `providers.<provider>.models.<model>` anulan los valores a nivel de proveedor. Los valores numéricos no válidos se ignoran, por lo que IaC Code recurre al valor del proveedor o a la política integrada del modelo.
 
 Para Alibaba Cloud DashScope y DashScope Token Plan, IaC Code incluye un `thinkingBudget=8192` integrado para `glm-5.2` y `kimi-k2.7-code`. Si `maxCompletionTokens` no está configurado, el límite de la solicitud se calcula como el límite normal de tokens de respuesta más el thinking budget efectivo.
+
+Las solicitudes A2A pueden anular estos ajustes para un solo turno de mensaje mediante `message.metadata.iac_code.thinking` o los flags `--thinking-enabled`, `--thinking-effort` y `--thinking-budget` de `iac-code a2a-client call`. Si no se envían metadatos de thinking A2A explícitos, el runtime usa los ajustes anteriores y los valores predeterminados normales del proveedor. Para proveedores genéricos `openai_compatible` con una base URL en modo compatible de DashScope, iac-code cambia al formato wire nativo de thinking de DashScope solo cuando hay una política de thinking explícita.
 
 ## Configuración de permisos de herramientas
 

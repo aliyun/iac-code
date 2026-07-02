@@ -190,6 +190,44 @@ async def test_message_payload_includes_metadata_iac_code_api_key() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_message_payload_includes_metadata_thinking_override() -> None:
+    http = FakeHTTPClient()
+    client = A2AClient(http_client=http)
+
+    await client.send_message(
+        "http://remote/",
+        "hello",
+        cwd="/tmp/work",
+        thinking_enabled=True,
+        thinking_effort="high",
+        thinking_budget=2048,
+    )
+    events = [
+        event
+        async for event in client.stream_message(
+            "http://remote/",
+            "hello",
+            cwd="/tmp/work",
+            thinking_enabled=False,
+            thinking_effort="low",
+            thinking_budget=1024,
+        )
+    ]
+
+    assert events
+    send_payload = http.requests[-2][2]
+    stream_payload = http.requests[-1][2]
+    assert send_payload["params"]["message"]["metadata"]["iac_code"] == {
+        "cwd": "/tmp/work",
+        "thinking": {"enabled": True, "effort": "high", "budget": 2048},
+    }
+    assert stream_payload["params"]["message"]["metadata"]["iac_code"] == {
+        "cwd": "/tmp/work",
+        "thinking": {"enabled": False, "effort": "low", "budget": 1024},
+    }
+
+
 def test_response_text_extracts_from_task_history_agent_message() -> None:
     response = A2AClientResponse(
         payload={

@@ -46,6 +46,7 @@ from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.public_errors import public_error
 from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
+from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.session_storage import SessionStorage
@@ -174,6 +175,7 @@ class IacCodeA2APipelineExecutor:
         aliyun_credential: AliyunCredential | None = None,
         model_from_metadata: bool = False,
         metadata_api_key: str | None = None,
+        request_policy_override: ProviderRequestPolicy | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -187,6 +189,7 @@ class IacCodeA2APipelineExecutor:
         self._aliyun_credential = aliyun_credential
         self._model_from_metadata = model_from_metadata
         self._metadata_api_key = metadata_api_key
+        self._request_policy_override = request_policy_override
 
     async def execute(
         self,
@@ -233,6 +236,7 @@ class IacCodeA2APipelineExecutor:
             preserve_active_task = _is_active_task_record(task, ctx.active_task_id)
             if _is_active_task_request(task, task_id, ctx.active_task_id):
                 with self._request_context(session_id=ctx.session_id):
+                    self._configure_runtime_for_request(ctx.runtime)
                     routed = await self._route_active_pipeline_interrupt(
                         event_queue,
                         task=task,
@@ -282,14 +286,7 @@ class IacCodeA2APipelineExecutor:
                         runtime=agent_runtime,
                         iac_code_session_id=ctx.session_id,
                     )
-                    configure_runtime_model(
-                        agent_runtime,
-                        self._model,
-                        from_metadata=self._model_from_metadata,
-                        metadata_api_key=self._metadata_api_key,
-                    )
-                    if self._aliyun_credential is not None:
-                        refresh_runtime_cloud_tools(agent_runtime)
+                    self._configure_agent_runtime_for_request(agent_runtime)
                     pipeline = self._create_pipeline(
                         session_id=ctx.session_id,
                         cwd=cwd,
@@ -455,6 +452,22 @@ class IacCodeA2APipelineExecutor:
             user_id=self._user_id,
             aliyun_credential=self._aliyun_credential,
         )
+
+    def _configure_runtime_for_request(self, runtime: Any) -> None:
+        agent_runtime = getattr(runtime, "agent_runtime", None)
+        if agent_runtime is not None:
+            self._configure_agent_runtime_for_request(agent_runtime)
+
+    def _configure_agent_runtime_for_request(self, agent_runtime: Any) -> None:
+        configure_runtime_model(
+            agent_runtime,
+            self._model,
+            from_metadata=self._model_from_metadata,
+            metadata_api_key=self._metadata_api_key,
+            request_policy_override=self._request_policy_override,
+        )
+        if self._aliyun_credential is not None:
+            refresh_runtime_cloud_tools(agent_runtime)
 
     def _pipeline_runtime_from_context(self, runtime: Any, *, session_id: str, cwd: str) -> A2APipelineRuntime:
         if isinstance(runtime, A2APipelineRuntime):
