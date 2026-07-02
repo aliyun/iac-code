@@ -1,0 +1,23 @@
+[package]
+name = "iac-code-a2a"
+version = "0.4.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64 = "0.22.1"
+futures-util = "0.3.32"
+iac-code-protocol = { path = "../iac-code-protocol" }
+prost = "0.13.5"
+prost-types = "0.13.5"
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }
+ring = "0.17.14"
+tokio = { version = "1.50.0", features = ["rt", "time"] }
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tonic = { version = "0.12.3", features = ["transport"] }
+
+[build-dependencies]
+protoc-bin-vendored = "3.2.0"
+tonic-build = "0.12.3"

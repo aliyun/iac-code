@@ -1,0 +1,11 @@
+[package]
+name = "iac-code-acp"
+version = "0.4.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+iac-code-config = { path = "../iac-code-config" }
+iac-code-protocol = { path = "../iac-code-protocol" }

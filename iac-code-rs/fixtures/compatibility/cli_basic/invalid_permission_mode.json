@@ -1,0 +1,13 @@
+{
+  "name": "invalid_permission_mode",
+  "argv": [
+    "--prompt",
+    "hello",
+    "--permission-mode",
+    "nope"
+  ],
+  "stdin": null,
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Invalid --permission-mode 'nope'. Valid values: default, accept_edits, bypass_permissions, dont_ask\n"
+}
