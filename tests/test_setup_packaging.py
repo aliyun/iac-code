@@ -71,7 +71,7 @@ def test_legacy_setup_declares_package_metadata(monkeypatch):
     kwargs = setup_module._TEST_SETUP_KWARGS
 
     assert kwargs["name"] == "iac_code"
-    assert kwargs["version"] == "0.7.0"
+    assert kwargs["version"] == "0.8.0"
     assert kwargs["package_dir"] == {"": "src"}
     assert "iac_code.pipeline.selling.tools" in kwargs["packages"]
     assert "iac_code.pipeline.selling.hooks" in kwargs["packages"]
