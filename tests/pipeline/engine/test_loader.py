@@ -417,7 +417,14 @@ class TestBasePromptSectionsParsing:
         """)
         _write_pipeline(tmp_path, yaml_content, {"parse.md": "P"})
         loaded = load_pipeline_dir(tmp_path)
-        assert loaded.base_prompt_sections.include == ["identity", "system", "env", "cloud_config", "tools"]
+        assert loaded.base_prompt_sections.include == [
+            "identity",
+            "system",
+            "env",
+            "cloud_config",
+            "tools",
+            "runtime_context",
+        ]
         assert loaded.base_prompt_sections.exclude == []
 
     def test_step_level_sections_override(self, tmp_path):

@@ -230,6 +230,8 @@ class InlineREPL:
                     cwd=os.getcwd(),
                     memory_context=memory_context,
                     current_time=self._runtime_current_time,
+                    provider_display=self._status_provider_display(),
+                    model=self._status_model(self._current_model),
                 ),
                 notification_queue=self._notification_queue,
             )
@@ -281,6 +283,8 @@ class InlineREPL:
                 memory_context=memory_context,
                 skill_listing=self._skill_listing,
                 current_time=self._runtime_current_time,
+                provider_display=self._status_provider_display(),
+                model=self._status_model(self._current_model),
             ),
             tool_registry=self.tool_registry,
             session_storage=self._session_storage,
@@ -612,6 +616,8 @@ class InlineREPL:
             memory_context=self._refresh_memory_context(),
             skill_listing=getattr(self, "_skill_listing", ""),
             current_time=getattr(self, "_runtime_current_time", None),
+            provider_display=self._status_provider_display(),
+            model=self._status_model(getattr(self, "_current_model", "")),
         )
 
     def _refresh_system_prompt(self) -> str:
@@ -662,6 +668,8 @@ class InlineREPL:
                     cwd=cwd,
                     memory_context=memory_context,
                     current_time=self._runtime_current_time,
+                    provider_display=self._status_provider_display(),
+                    model=self._status_model(self._current_model),
                 ),
             )
         )

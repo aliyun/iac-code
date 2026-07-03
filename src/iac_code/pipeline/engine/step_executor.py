@@ -477,6 +477,8 @@ class StepExecutor:
             resolved_sections,
             cwd=self._cwd or "",
             memory_content=memory_content,
+            provider_display=self._runtime_provider_display(),
+            model=self._runtime_model(),
         )
 
         prompt_file = step.prompt_file_for_surface(self._surface)
@@ -490,6 +492,26 @@ class StepExecutor:
 
         parts = [p for p in [base_prompt, skill_content, rendered_step_prompt] if p]
         return "\n\n---\n\n".join(parts)
+
+    def _runtime_provider_display(self) -> str:
+        getter = getattr(self._provider_manager, "get_provider_display", None)
+        if not callable(getter):
+            return ""
+        try:
+            display = getter()
+        except Exception:
+            return ""
+        return display if isinstance(display, str) else ""
+
+    def _runtime_model(self) -> str:
+        getter = getattr(self._provider_manager, "get_model_name", None)
+        if not callable(getter):
+            return ""
+        try:
+            model = getter()
+        except Exception:
+            return ""
+        return model if isinstance(model, str) else ""
 
     def _resolve_auto_trigger_skills(self, step: StepSpec) -> list[Any] | None:
         """问题 2：step 自带 skill 时，禁用 auto_trigger（避免重复加载）。"""

@@ -111,7 +111,7 @@ class SystemPromptBuilder:
 
 def _build_identity_section() -> str:
     return (
-        "You are an expert AI coding assistant specialized in Infrastructure as Code. "
+        "You are IaC Code (iac-code), an AI-powered Infrastructure as Code assistant. "
         "You help users with software engineering tasks including writing, debugging, "
         "and refactoring code. You are precise, careful, and focused on delivering "
         "correct solutions.\n\n"
@@ -161,9 +161,20 @@ def _build_environment_section(cwd: str) -> str:
     return "\n".join(lines)
 
 
-def _build_current_time_section(current_time: str | None = None) -> str:
+def _build_runtime_context_section(
+    current_time: str | None = None,
+    provider_display: str = "",
+    model: str = "",
+) -> str:
     now = current_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return "# Current Time\n" + f"- Current time: {now}"
+    lines = ["# Runtime Context", f"- Current time: {now}"]
+    provider_display = provider_display.strip()
+    model = model.strip()
+    if provider_display and model:
+        lines.append(f"- Provider & Model: {provider_display} / {model}")
+    elif model:
+        lines.append(f"- Provider & Model: {model}")
+    return "\n".join(lines)
 
 
 def _build_tools_section() -> str:
@@ -299,6 +310,7 @@ SECTION_BUILDERS: dict[str, Callable[..., str]] = {
     "system": _build_system_section,
     "env": _build_environment_section,
     "cloud_config": _build_cloud_config_section,
+    "runtime_context": _build_runtime_context_section,
     "tools": _build_tools_section,
     "doing_tasks": _build_doing_tasks_section,
     "actions": _build_actions_section,
@@ -313,13 +325,21 @@ SECTION_PRIORITIES: dict[str, int] = {
     "tools": 85,
     "doing_tasks": 80,
     "actions": 75,
+    "runtime_context": 72,
     "output_style": 50,
 }
 
-DEFAULT_PIPELINE_SECTIONS: list[str] = ["identity", "system", "env", "cloud_config", "tools"]
+DEFAULT_PIPELINE_SECTIONS: list[str] = ["identity", "system", "env", "cloud_config", "tools", "runtime_context"]
 
 
-def build_base_sections(section_names: list[str], cwd: str, memory_content: str = "") -> str:
+def build_base_sections(
+    section_names: list[str],
+    cwd: str,
+    memory_content: str = "",
+    current_time: str | None = None,
+    provider_display: str = "",
+    model: str = "",
+) -> str:
     """Build system prompt from a subset of section names, ordered by priority.
 
     Args:
@@ -328,6 +348,9 @@ def build_base_sections(section_names: list[str], cwd: str, memory_content: str 
         memory_content: if non-empty, inserted as a "# Memory\\n<content>" section
             at priority 60 (matching build_system_prompt's placement so both
             implementations produce identical ordering relative to other sections).
+        current_time: optional stable timestamp for the runtime context section
+        provider_display: provider display name for the runtime context section
+        model: model name for the runtime context section
     """
     parts: list[tuple[int, str]] = []
     if section_names:
@@ -336,7 +359,9 @@ def build_base_sections(section_names: list[str], cwd: str, memory_content: str 
             if builder is None:
                 continue
             priority = SECTION_PRIORITIES.get(name, 0)
-            if "cwd" in inspect.signature(builder).parameters:
+            if name == "runtime_context":
+                content = _build_runtime_context_section(current_time, provider_display, model)
+            elif "cwd" in inspect.signature(builder).parameters:
                 content = builder(cwd)
             else:
                 content = builder()
@@ -360,6 +385,8 @@ def build_system_prompt(
     skill_listing: str = "",
     memory_context: object | None = None,
     current_time: str | None = None,
+    provider_display: str = "",
+    model: str = "",
 ) -> str:
     """Build complete system prompt from all sections."""
     cwd = cwd or os.getcwd()
@@ -373,8 +400,8 @@ def build_system_prompt(
     builder.add_cached_section("doing_tasks", _build_doing_tasks_section, priority=80, is_static=True)
     builder.add_cached_section("actions", _build_actions_section, priority=75, is_static=True)
     builder.add_uncached_section(
-        "current_time",
-        lambda: _build_current_time_section(current_time),
+        "runtime_context",
+        lambda: _build_runtime_context_section(current_time, provider_display, model),
         priority=72,
         is_static=False,
     )
