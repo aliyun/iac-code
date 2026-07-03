@@ -169,6 +169,32 @@ class TestReadFileTool:
         assert f"File: {reference}" in result.content
 
     @pytest.mark.asyncio
+    async def test_relative_path_follows_reference_directory_symlink(self, tmp_path, read_file_tool):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        package_root = tmp_path / "iac_code"
+        skill_root = package_root / "pipeline" / "selling" / "skills" / "iac-aliyun-cost"
+        selling_refs = package_root / "pipeline" / "selling" / "references"
+        skill_root.mkdir(parents=True)
+        selling_refs.mkdir(parents=True)
+        reference = selling_refs / "template-parameter-recommendation.md"
+        reference.write_text("Pipeline recommendation content", encoding="utf-8")
+        try:
+            (skill_root / "references").symlink_to("../../references", target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        context = ToolContext(cwd=str(workspace), relative_read_directories=[str(skill_root)])
+        result = await read_file_tool.execute(
+            tool_input={"path": "references/template-parameter-recommendation.md"},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert "Pipeline recommendation content" in result.content
+        assert f"File: {reference}" in result.content
+
+    @pytest.mark.asyncio
     async def test_relative_path_does_not_fall_back_to_trusted_read_directory(self, tmp_path, read_file_tool):
         """Trusted read roots should allow explicit reads without changing relative lookup semantics."""
         workspace = tmp_path / "workspace"
@@ -414,6 +440,33 @@ class TestReadFilePermissions:
         )
 
         assert result.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_relative_read_directory_symlink_escape_asks(self, tmp_path, read_file_tool):
+        project = tmp_path / "project"
+        skill_root = tmp_path / "skill"
+        outside = tmp_path / "outside"
+        project.mkdir()
+        skill_root.mkdir()
+        outside.mkdir()
+        (outside / "secret.txt").write_text("secret", encoding="utf-8")
+        try:
+            (skill_root / "references").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        result = await read_file_tool.check_permissions(
+            {"path": "references/secret.txt"},
+            ToolPermissionContext(
+                cwd=str(project),
+                trusted_read_directories=[str(skill_root)],
+                relative_read_directories=[str(skill_root)],
+            ),
+        )
+
+        assert result.behavior == "ask"
+        assert result.reason is not None
+        assert result.reason.type == "path_constraint"
 
     @pytest.mark.asyncio
     async def test_file_path_alias_allowed(self, tmp_path, read_file_tool):

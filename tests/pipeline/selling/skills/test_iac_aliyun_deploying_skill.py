@@ -138,6 +138,14 @@ class TestSkillContentRosOnly:
         assert "CreateStack" in body
         assert "DisableRollback" in body
 
+    def test_template_url_source_is_not_duplicated_from_prompt(self, body):
+        assert "模板来源硬约束" not in body
+        assert "prompt 中已渲染" not in body
+        assert "不要传 `params.TemplateBody`" not in body
+        assert "<选中方案模板文件路径>" not in body
+        assert "template_url=<模板文件路径>" not in body
+        assert "region_id=<地域>" not in body
+
     def test_contains_continue_create(self, body):
         assert "ContinueCreateStack" in body
 
@@ -208,6 +216,17 @@ class TestDeployingPrompt:
         assert "删除请求本身不等于删除确认" in body
         assert "`delete_confirmed: true`" in body
         assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" in body
+
+    def test_prompt_names_template_url_value_for_deploy_tools(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert 'template_url = "{selected_plan.template_url}"' in body
+        assert 'params.TemplateURL = "{selected_plan.template_url}"' in body
+        assert "selected_plan.template_url" in body
+        assert "ros_validate_template" in body
+        assert "ValidateTemplate" in body
+        assert "CreateStack" in body
+        assert "不要传 `params.TemplateBody`" in body
+        assert "<选中方案模板文件路径>" not in body
 
 
 class TestSkillDiscovery:
@@ -298,3 +317,12 @@ class TestEvalsJson:
         confirmed_assertions = {assertion["name"] for assertion in confirmed_eval["assertions"]}
         assert "确认" in confirmed_eval["prompt"]
         assert "uses_delete_stack" in confirmed_assertions
+
+    def test_template_validation_eval_uses_dedicated_tool(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        evals_by_name = {ev["name"]: ev for ev in data["evals"]}
+        validation_eval = evals_by_name["template-validation-fix-before-deploy"]
+        eval_text = json.dumps(validation_eval, ensure_ascii=False)
+
+        assert "ros_validate_template" in eval_text
+        assert "aliyun_api ValidateTemplate" not in eval_text

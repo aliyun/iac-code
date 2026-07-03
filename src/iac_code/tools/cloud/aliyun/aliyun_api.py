@@ -25,7 +25,11 @@ from iac_code.services.telemetry import add_metric, log_event
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.services.telemetry.sanitize import sanitize_error_message
 from iac_code.tools.base import ToolContext, ToolResult
-from iac_code.tools.cloud.aliyun.template_source import reject_template_body_param
+from iac_code.tools.cloud.aliyun.template_source import (
+    is_remote_template_url,
+    reject_pipeline_dedicated_ros_template_action,
+    reject_pipeline_template_source_params,
+)
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
 from iac_code.types.permissions import (
@@ -711,10 +715,12 @@ class AliyunApi(BaseCloudApi):
 
         # ROS: TemplateURL as local file path → read into TemplateBody
         if product == "ros":
-            if error := reject_template_body_param(params, pipeline_mode=context.pipeline_mode):
+            if error := reject_pipeline_dedicated_ros_template_action(action, pipeline_mode=context.pipeline_mode):
+                return ToolResult.error(error)
+            if error := reject_pipeline_template_source_params(action, params, pipeline_mode=context.pipeline_mode):
                 return ToolResult.error(error)
             template_url = params.get("TemplateURL", "")
-            if template_url and not template_url.startswith(("http://", "https://", "oss://")):
+            if template_url and not is_remote_template_url(template_url):
                 params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
                 del params["TemplateURL"]
 

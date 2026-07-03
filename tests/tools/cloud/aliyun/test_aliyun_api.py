@@ -152,6 +152,38 @@ class TestAliyunApiProperties:
         )
 
 
+class TestAliyunApiPipelineRosTemplateActions:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("action", "expected_tool"),
+        [
+            ("ValidateTemplate", "ros_validate_template"),
+            ("GetTemplateParameterConstraints", "ros_get_template_parameter_constraints"),
+            ("PreviewStack", "ros_preview_template"),
+            ("GetTemplateEstimateCost", "ros_estimate_template_cost"),
+        ],
+    )
+    async def test_pipeline_rejects_raw_ros_template_api_actions(
+        self,
+        api: AliyunApi,
+        action: str,
+        expected_tool: str,
+    ) -> None:
+        result = await api.execute(
+            tool_input={
+                "product": "ros",
+                "action": action,
+                "params": {"TemplateURL": "templates/app.yml"},
+                "region_id": "cn-hangzhou",
+            },
+            context=ToolContext(pipeline_mode=True),
+        )
+
+        assert result.is_error
+        assert expected_tool in result.content
+        assert "aliyun_api" in result.content
+
+
 class TestAliyunApiVersionResolution:
     def test_known_product_resolves_version(self, api: AliyunApi) -> None:
         version = api._resolve_version({"product": "ecs"})
@@ -721,7 +753,7 @@ class TestAliyunApiHooks:
             result = await api.execute(
                 tool_input={
                     "product": "ros",
-                    "action": "ValidateTemplate",
+                    "action": "CreateStack",
                     "params": {"TemplateBody": "{}"},
                     "region_id": "cn-hangzhou",
                 },
@@ -761,6 +793,116 @@ class TestAliyunApiHooks:
 
         assert result.is_error is False
         mock_client.call_api.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ros_template_url_is_required_for_pipeline_template_action(
+        self, api: AliyunApi, context: ToolContext, mock_credentials
+    ) -> None:
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient") as mock_open_api_client:
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "CreateStack",
+                    "params": {"Parameters": {"ZoneId": "cn-hangzhou-k"}},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(pipeline_mode=True),
+            )
+
+        assert result.is_error is True
+        assert "TemplateURL" in result.content
+        assert "CreateStack" in result.content
+        mock_open_api_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("template_source", [{"TemplateId": "tpl-123"}, {"TemplateScratchId": "ts-123"}])
+    async def test_ros_pipeline_template_action_accepts_only_template_url(
+        self, api: AliyunApi, context: ToolContext, mock_credentials, template_source: dict[str, str]
+    ) -> None:
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient") as mock_open_api_client:
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "CreateStack",
+                    "params": template_source,
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(pipeline_mode=True),
+            )
+
+        assert result.is_error is True
+        assert "TemplateURL" in result.content
+        mock_open_api_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ros_pipeline_non_template_action_does_not_require_template_url(
+        self, api: AliyunApi, context: ToolContext, mock_credentials
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.call_api.return_value = {"body": {"Stacks": []}}
+
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client):
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "ListStacks",
+                    "params": {},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(pipeline_mode=True),
+            )
+
+        assert result.is_error is False
+        mock_client.call_api.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ros_missing_template_url_is_allowed_outside_pipeline(
+        self, api: AliyunApi, context: ToolContext, mock_credentials
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.call_api.return_value = {"body": {"RequestId": "req-1"}}
+
+        with patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client):
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "GetTemplateEstimateCost",
+                    "params": {"Parameters": {"ZoneId": "cn-hangzhou-k"}},
+                    "region_id": "cn-hangzhou",
+                },
+                context=context,
+            )
+
+        assert result.is_error is False
+        mock_client.call_api.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ros_remote_template_url_scheme_is_case_insensitive(
+        self, api: AliyunApi, context: ToolContext, mock_credentials
+    ) -> None:
+        mock_client = MagicMock()
+        mock_client.call_api.return_value = {"body": {"Description": "Valid"}}
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client),
+            patch("iac_code.tools.cloud.aliyun.aliyun_api.Path.read_text") as read_text,
+        ):
+            read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
+            result = await api.execute(
+                tool_input={
+                    "product": "ros",
+                    "action": "ValidateTemplate",
+                    "params": {"TemplateURL": "HTTPS://example.com/template.yml"},
+                    "region_id": "cn-hangzhou",
+                },
+                context=context,
+            )
+
+        assert result.is_error is False
+        mock_client.call_api.assert_called_once()
+        request = mock_client.call_api.call_args[0][1]
+        assert request.query["TemplateURL"] == "HTTPS://example.com/template.yml"
+        assert "TemplateBody" not in request.query
 
     @pytest.mark.asyncio
     async def test_hook_blocks_validate_with_wrong_resource_types(

@@ -2813,6 +2813,26 @@ msgstr "アーキテクチャ図を表示"
 msgid "Show candidate details"
 msgstr "候補の詳細を表示"
 
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Validate Template"
+msgstr "ROS テンプレート検証"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Template Parameters"
+msgstr "ROS テンプレートパラメーター"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Preview Stack"
+msgstr "ROS スタックプレビュー"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Estimate Cost"
+msgstr "ROS コスト見積もり"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -4260,6 +4280,20 @@ msgstr "ROS スタック"
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid "Calling ROS template tool for {template_url}..."
+msgstr "{template_url} の ROS テンプレートツールを呼び出しています..."
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must use the dedicated {tool_name} tool "
+"instead of aliyun_api. Do not call the raw ROS template API directly."
+msgstr ""
+"{action} の ROS パイプライン呼び出しでは、aliyun_api ではなく専用ツール {tool_name} "
+"を使用する必要があります。生の ROS テンプレート API を直接呼び出さないでください。"
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 msgid ""
 "ROS template calls must use TemplateURL instead of TemplateBody. Save the"
@@ -4268,6 +4302,17 @@ msgid ""
 msgstr ""
 "ROS テンプレート呼び出しでは TemplateBody ではなく TemplateURL "
 "を使用する必要があります。テンプレートをファイルに保存し、ローカルファイルパスまたは OSS/HTTP URL などを "
+"params.TemplateURL として渡してください。"
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must pass params.TemplateURL. Save the "
+"template to a file and pass params.TemplateURL, for example a local file "
+"path or OSS/HTTP URL."
+msgstr ""
+"ROS パイプラインで {action} を呼び出す場合は、params.TemplateURL "
+"を渡す必要があります。テンプレートをファイルに保存し、ローカルファイルパスまたは OSS/HTTP URL などを "
 "params.TemplateURL として渡してください。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py

@@ -3,6 +3,7 @@ from pathlib import Path
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.step_spec import render_prompt
+from iac_code.pipeline.engine.ui_contract import encode_selected_candidate
 
 
 def _selling_dir() -> Path:
@@ -47,3 +48,29 @@ def test_deploying_prompt_preserves_explicit_stack_name_without_e2e_controls() -
     assert "vswitch-in-existing-vpc" not in prompt
     assert "部署后是否等待用户继续" not in prompt
     assert "如果无法确定应使用的 StackName，不要调用 `CreateStack`" not in prompt
+
+
+def test_deploying_prompt_renders_concrete_template_url() -> None:
+    selling_dir = _selling_dir()
+    loaded = load_pipeline_dir(selling_dir)
+    deploying_step = next(step for step in loaded.steps if step.step_id == "deploying")
+
+    ctx = PipelineContext(loaded.context_dependencies)
+    ctx.set_conclusion("intent", {"requirement": "创建一个 VSwitch"})
+    ctx.set_conclusion("selected_plan", {"user_input": encode_selected_candidate("existing-vpc-vswitch", 0)})
+    ctx.set_conclusion(
+        "evaluated_candidates",
+        [{"candidate": {"name": "existing-vpc-vswitch", "output_path": "templates/vswitch.yml"}}],
+    )
+
+    assert deploying_step.on_enter is not None
+    deploying_step.on_enter(ctx)
+    prompt = render_prompt(
+        (selling_dir / deploying_step.prompt_file).read_text(encoding="utf-8"),
+        ctx,
+        deploying_step.context_fields,
+    )
+
+    assert 'params.TemplateURL = "templates/vswitch.yml"' in prompt
+    assert "<选中方案模板文件路径>" not in prompt
+    assert "{selected_plan.template_url}" not in prompt

@@ -18,6 +18,9 @@
 2. 如果 `templates/` 目录不存在，先创建它。
 3. **必须先写文件，再调用 `complete_step`。**
 
+## ROS 模板来源
+生成后的模板文件路径就是 `{candidate.output_path}`。调用 `ros_validate_template` 校验时，必须传 `template_url = "{candidate.output_path}"`。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口，不要传 `TemplateBody`、`TemplateId` 或 `TemplateScratchId`。
+
 ## 输出
 文件写入完成后调用 `complete_step` 提交结论。
 

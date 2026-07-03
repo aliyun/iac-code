@@ -2789,6 +2789,26 @@ msgstr "展示架构图"
 msgid "Show candidate details"
 msgstr "展示方案详情"
 
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Validate Template"
+msgstr "ROS 模板校验"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Template Parameters"
+msgstr "ROS 模板参数推荐"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Preview Stack"
+msgstr "ROS 资源栈预览"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Estimate Cost"
+msgstr "ROS 费用估算"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -4208,6 +4228,20 @@ msgstr "ROS 资源栈"
 msgid "CloudStackInstances"
 msgstr "云资源栈实例"
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid "Calling ROS template tool for {template_url}..."
+msgstr "正在为 {template_url} 调用 ROS 模板工具..."
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must use the dedicated {tool_name} tool "
+"instead of aliyun_api. Do not call the raw ROS template API directly."
+msgstr ""
+"ROS pipeline 调用 {action} 时必须使用专用的 {tool_name} 工具，而不是 aliyun_api。不要直接调用原始 "
+"ROS 模板 API。"
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 msgid ""
 "ROS template calls must use TemplateURL instead of TemplateBody. Save the"
@@ -4215,6 +4249,16 @@ msgid ""
 " path or OSS/HTTP URL."
 msgstr ""
 "ROS 模板调用必须使用 TemplateURL，而不能使用 TemplateBody。请将模板保存到文件，并传入 "
+"params.TemplateURL，例如本地文件路径或 OSS/HTTP URL。"
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must pass params.TemplateURL. Save the "
+"template to a file and pass params.TemplateURL, for example a local file "
+"path or OSS/HTTP URL."
+msgstr ""
+"ROS pipeline 调用 {action} 必须传入 params.TemplateURL。请将模板保存到文件，并传入 "
 "params.TemplateURL，例如本地文件路径或 OSS/HTTP URL。"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py

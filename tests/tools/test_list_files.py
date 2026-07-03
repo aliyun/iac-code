@@ -116,6 +116,27 @@ class TestListFilesTool:
         assert "nested_file.txt" in result.content
 
     @pytest.mark.asyncio
+    async def test_relative_path_falls_back_to_symlinked_relative_read_directory(self, tmp_path, list_files_tool):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        package_root = tmp_path / "iac_code"
+        skill_root = package_root / "pipeline" / "selling" / "skills" / "iac-aliyun-cost"
+        selling_refs = package_root / "pipeline" / "selling" / "references"
+        skill_root.mkdir(parents=True)
+        selling_refs.mkdir(parents=True)
+        (selling_refs / "template-parameter-recommendation.md").write_text("pipeline", encoding="utf-8")
+        try:
+            (skill_root / "references").symlink_to("../../references", target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        context = ToolContext(cwd=str(workspace), relative_read_directories=[str(skill_root)])
+        result = await list_files_tool.execute(tool_input={"path": "references"}, context=context)
+
+        assert result.is_error is False
+        assert "template-parameter-recommendation.md" in result.content
+
+    @pytest.mark.asyncio
     async def test_path_is_file_not_directory(self, tmp_path, list_files_tool):
         """Test error when path is a file, not a directory."""
         file_path = tmp_path / "just_a_file.txt"

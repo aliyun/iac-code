@@ -41,11 +41,11 @@ conclusion_schema:
 2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
 3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板
 4. 生成 ROS YAML 模板（库存相关属性按 [references/cloud-products/](references/cloud-products/) 与 [references/template-parameters.md](references/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
-5. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
+5. 调用 `ros_validate_template` 校验；`template_url` 使用刚写入的模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
 6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
 7. 校验通过 → 完成
 
-> **TemplateURL 支持本地文件路径**：aliyun_api（product=ros）中，TemplateURL 可传本地文件路径（如 `/tmp/template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
+> **模板路径支持本地文件**：`ros_validate_template` 的 `template_url` 可传本地文件路径（如 `/tmp/template.yml`）。避免将大模板内容直接作为参数传递。
 
 ## 资源生命周期约束
 

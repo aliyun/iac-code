@@ -48,6 +48,16 @@ class TestIacSkill:
         assert "references/template-parameter-recommendation.md" in iac_skill.content
         assert "已有模板参数推荐" in iac_skill.content
 
+    def test_iac_skill_uses_normal_ros_api_tools(self):
+        init_bundled_skills()
+        skills = get_bundled_skills()
+        iac_skill = next(s for s in skills if s.name == "iac-aliyun")
+
+        assert 'aliyun_api(product="ros", action="ValidateTemplate"' in iac_skill.content
+        assert 'aliyun_api(product="ros", action="GetTemplateEstimateCost"' in iac_skill.content
+        assert "ros_validate_template" not in iac_skill.content
+        assert "ros_estimate_template_cost" not in iac_skill.content
+
     def test_iac_skill_delegates_infraguard_work_to_pac_skill(self):
         init_bundled_skills()
         skills = get_bundled_skills()
@@ -72,7 +82,12 @@ class TestIacSkill:
         reference = IAC_SKILL_ROOT / "references" / "template-parameter-recommendation.md"
         assert reference.exists()
         content = reference.read_text(encoding="utf-8")
-        assert "GetTemplateParameterConstraints" in content
+        assert 'action="GetTemplateParameterConstraints"' in content
+        assert 'action="PreviewStack"' in content
+        assert "调用 `GetTemplateEstimateCost`" in content
+        assert "ros_get_template_parameter_constraints" not in content
+        assert "ros_preview_template" not in content
+        assert "ros_estimate_template_cost" not in content
         assert "PreviewStack" in content
         assert "Preview-Validated Parameter Set" in content
         assert "ParametersOrder" in content

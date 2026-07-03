@@ -162,11 +162,11 @@
         },
         "validation_error": "Property VpcName is invalid: the value length must be 2~128"
       },
-      "expected_behavior": "先调用 ValidateTemplate 校验模板，发现错误后修复模板文件并重新校验，通过后再继续部署流程",
+      "expected_behavior": "先调用 ros_validate_template 校验模板，发现错误后修复模板文件并重新校验，通过后再继续部署流程",
       "assertions": [
-        {"name": "calls_validate_template", "check": "调用了 aliyun_api ValidateTemplate 校验模板"},
+        {"name": "calls_validate_template", "check": "调用了 ros_validate_template 校验模板"},
         {"name": "fixes_template_file", "check": "发现校验错误后修复了模板文件内容"},
-        {"name": "re_validates_after_fix", "check": "修复后重新调用 ValidateTemplate 确认通过"},
+        {"name": "re_validates_after_fix", "check": "修复后重新调用 ros_validate_template 确认通过"},
         {"name": "deploys_after_validation", "check": "校验通过后才继续执行部署流程"}
       ]
     },

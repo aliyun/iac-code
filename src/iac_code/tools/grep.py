@@ -13,7 +13,7 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_read_path
+from iac_code.tools.path_safety import check_read_path, get_iac_code_application_root, resolve_read_path_with_source
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -111,6 +111,10 @@ def _path_is_under_real_root(path: str, root: str) -> bool:
     return path_r.startswith(root_r.rstrip("/") + "/")
 
 
+def _path_is_under_any_real_root(path: str, roots: list[str]) -> bool:
+    return any(_path_is_under_real_root(path, root) for root in roots if root)
+
+
 async def _run_rg(
     pattern: str,
     path: str,
@@ -177,6 +181,7 @@ def _python_grep(
     case_insensitive: bool = False,
     output_mode: str = "files_with_matches",
     max_results: int = 100,
+    allowed_roots: list[str] | None = None,
 ) -> str:
     """Pure-Python fallback for grep using re + os.walk."""
     flags = re.IGNORECASE if case_insensitive else 0
@@ -188,10 +193,20 @@ def _python_grep(
     results: list[str] = []
     files_matched = 0
     search_root = os.path.realpath(path)
+    safe_roots = [search_root, *(allowed_roots or [])]
+    visited_dirs: set[str] = set()
 
-    for dirpath, _dirnames, filenames in os.walk(path):
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=True):
         if files_matched >= max_results:
             break
+        dir_real = os.path.realpath(dirpath)
+        if dir_real in visited_dirs:
+            dirnames[:] = []
+            continue
+        visited_dirs.add(dir_real)
+        dirnames[:] = [
+            dirname for dirname in dirnames if _path_is_under_any_real_root(os.path.join(dirpath, dirname), safe_roots)
+        ]
         for filename in sorted(filenames):
             if files_matched >= max_results:
                 break
@@ -199,7 +214,7 @@ def _python_grep(
             relative_path = os.path.relpath(filepath, path)
             if glob and not _matches_path_glob(relative_path, glob):
                 continue
-            if not _path_is_under_real_root(filepath, search_root):
+            if not _path_is_under_any_real_root(filepath, safe_roots):
                 continue
             try:
                 with open(filepath, encoding="utf-8", errors="replace") as fh:
@@ -282,20 +297,29 @@ class GrepTool(Tool):
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         pattern: str = tool_input["pattern"]
-        path: str = normalize_user_path(tool_input.get("path", context.cwd))
+        raw_path: str = normalize_user_path(tool_input.get("path", context.cwd))
         glob: str | None = tool_input.get("glob")
         case_insensitive: bool = bool(tool_input.get("case_insensitive", False))
         output_mode: str = tool_input.get("output_mode", "files_with_matches")
         max_results: int = int(tool_input.get("max_results", 100))
 
-        # Resolve relative paths against cwd
-        if not os.path.isabs(path):
-            path = os.path.join(context.cwd, path)
+        resolution = resolve_read_path_with_source(
+            raw_path,
+            context.cwd,
+            relative_read_directories=context.relative_read_directories,
+        )
+        path = resolution.path
 
         if not os.path.exists(path):
             return ToolResult.error(f"Path not found: {path}")
 
-        if _is_rg_available():
+        allowed_roots = [
+            path,
+            *context.additional_directories,
+            *context.trusted_read_directories,
+            str(get_iac_code_application_root()),
+        ]
+        if _is_rg_available() and not resolution.used_relative_root:
             returncode, stdout, stderr = await _run_rg(
                 pattern,
                 path,
@@ -316,6 +340,7 @@ class GrepTool(Tool):
                 case_insensitive=case_insensitive,
                 output_mode=output_mode,
                 max_results=max_results,
+                allowed_roots=allowed_roots,
             ).strip()
 
         if not output:
@@ -337,6 +362,7 @@ class GrepTool(Tool):
             cwd=context.cwd,
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
         )
         if decision.behavior == "allow":
             return PermissionResult(behavior="allow")

@@ -98,6 +98,7 @@ class ToolPermissionContext:
     ask_rules: dict[str, list[str]] = field(default_factory=dict)
     additional_directories: list[str] = field(default_factory=list)
     trusted_read_directories: list[str] = field(default_factory=list)
+    relative_read_directories: list[str] = field(default_factory=list)
     audit_settings: PermissionAuditSettings = field(default_factory=PermissionAuditSettings)
 
 

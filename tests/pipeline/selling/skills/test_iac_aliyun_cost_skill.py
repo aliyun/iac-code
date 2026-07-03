@@ -19,6 +19,20 @@ def _direct_references_dir_or_skip() -> Path:
     return references
 
 
+def _is_reference_link_or_placeholder(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    if not path.is_file():
+        return False
+    try:
+        raw_target = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not raw_target or "\n" in raw_target or "\r" in raw_target:
+        return False
+    return (path.parent / raw_target).exists()
+
+
 def _parse_frontmatter(text: str) -> dict:
     """Parse YAML frontmatter from SKILL.md."""
     assert text.startswith("---"), "SKILL.md must start with YAML frontmatter"
@@ -84,21 +98,22 @@ class TestSkillContentRosOnly:
         assert ".tf" not in lower
         assert "tf2ros" not in lower
 
-    def test_contains_estimate_cost_api(self, body):
-        assert "GetTemplateEstimateCost" in body
+    def test_uses_estimate_cost_tool_not_raw_call_instruction(self, body):
+        assert "ros_estimate_template_cost" in body
+        assert "则可以调用 `GetTemplateEstimateCost`" not in body
 
     def test_contains_validate_template(self, body):
-        assert "ValidateTemplate" in body
+        assert "ros_validate_template" in body
 
     def test_skips_validate_template_when_template_unchanged(self, body):
         assert "避免在成本预估前重复校验" in body
 
     def test_validate_template_only_after_template_changes(self, body):
-        assert "只有在修复或改写模板后，才调用 `ValidateTemplate`" in body
+        assert "只有在修复或改写模板后，才调用 `ros_validate_template`" in body
 
     def test_modified_template_flow_names_validation_and_pricing_apis(self, body):
-        assert "调用 `ValidateTemplate` 校验改动" in body
-        assert "通过后调用 `GetTemplateEstimateCost` 重新询价" in body
+        assert "调用 `ros_validate_template` 校验改动" in body
+        assert "通过后调用 `ros_estimate_template_cost` 重新询价" in body
 
     def test_modified_template_retry_limit_is_seven(self, body):
         assert "最多 7 轮" in body
@@ -107,9 +122,8 @@ class TestSkillContentRosOnly:
         assert body.count("只有在修复或改写模板后") == 1
 
     def test_uses_parameters_dictionary_auto_expansion(self, body):
-        assert '"Parameters": {' in body
+        assert "parameters={" in body
         assert "直接传字典格式" in body
-        assert "工具会自动展开" in body
         assert "Parameters.1.ParameterKey" not in body
 
     def test_outputs_pricing_parameters_for_deployment(self, body):
@@ -122,7 +136,7 @@ class TestSkillContentRosOnly:
         assert "Pricing Parameter Set" in body
         assert "Preview-Validated Pricing Parameter Set" in body
         assert "references/template-parameter-recommendation.md" in body
-        assert "GetTemplateParameterConstraints" in body
+        assert "ros_get_template_parameter_constraints" in body
         assert "PreviewStack" in body
         assert "AllowedValues" in body
         assert "不得编造" in body
@@ -136,12 +150,13 @@ class TestSkillContentRosOnly:
         assert "先查询约束或只读资源候选" in body
         assert "不要仅因参数名是 VpcId" in body
 
-    def test_preview_stack_uses_aliyun_api_not_ros_stack(self, body):
-        assert 'aliyun_api(product="ros", action="PreviewStack")' in body
+    def test_preview_stack_uses_dedicated_tool_not_ros_stack(self, body):
+        assert "ros_preview_template" in body
         assert "不要使用 `ros_stack` 执行 `PreviewStack`" in body
 
     def test_preview_stack_must_pass_stack_name_with_random_suffix(self, body):
         assert "PreviewStack 必须传 StackName" in body
+        assert "stack_name" in body
         assert "随机串后缀" in body
         assert "避免重名" in body
 
@@ -158,12 +173,19 @@ class TestSkillContentRosOnly:
     def test_preview_stack_is_not_hard_gate_for_pricing(self, body):
         assert "PreviewStack 不是硬门禁" in body
         assert "完整部署参数" in body
-        assert "GetTemplateEstimateCost" in body
+        assert "ros_estimate_template_cost" in body
         assert "missing_deployment_parameters" in body
         assert "选择阶段" in body and "parameter_overrides" in body
 
     def test_contains_template_url(self, body):
-        assert "TemplateURL" in body
+        assert "template_url" in body
+
+    def test_template_url_source_is_not_duplicated_from_prompt(self, body):
+        assert "模板来源硬约束" not in body
+        assert "params.TemplateURL = <当前模板文件路径>" not in body
+        assert "不要传 `params.TemplateBody`" not in body
+        assert 'template_url="<模板文件路径>"' not in body
+        assert 'region_id="<地域>"' not in body
 
     def test_contains_fix_workflow(self, body):
         assert "修复" in body or "fix" in body.lower()
@@ -221,15 +243,24 @@ class TestReferencesExist:
             return
         assert ref.is_file(), "Windows checkouts may materialize references as a regular symlink placeholder file"
 
-    def test_references_points_to_bundled_iac_aliyun(self):
+    def test_references_points_to_selling_references(self):
         ref = SKILL_DIR / "references"
         if not ref.is_symlink():
             pytest.skip("references is not a symlink in this checkout")
         target = str(ref.readlink()).replace("\\", "/")
-        assert "skills/bundled/iac_aliyun/references" in target
+        assert target == "../../references"
 
     def test_references_resolves_to_dir(self):
         assert _direct_references_dir_or_skip().resolve().is_dir()
+
+    def test_selling_reference_overrides_only_template_parameter_recommendation(self):
+        selling_refs = SKILL_DIR.parents[1] / "references"
+        assert selling_refs.is_dir()
+        assert (selling_refs / "template-parameter-recommendation.md").is_file()
+        assert not (selling_refs / "template-parameter-recommendation.md").is_symlink()
+        assert _is_reference_link_or_placeholder(selling_refs / "ros-template.md")
+        assert _is_reference_link_or_placeholder(selling_refs / "template-parameters.md")
+        assert _is_reference_link_or_placeholder(selling_refs / "cloud-products")
 
     def test_cloud_products_accessible(self):
         cloud_dir = _direct_references_dir_or_skip() / "cloud-products"
@@ -243,6 +274,17 @@ class TestReferencesExist:
     def test_template_parameters_accessible(self):
         assert (_direct_references_dir_or_skip() / "template-parameters.md").is_file()
 
+    def test_template_parameter_recommendation_uses_dedicated_template_tools(self):
+        reference = _direct_references_dir_or_skip() / "template-parameter-recommendation.md"
+        content = reference.read_text(encoding="utf-8")
+
+        assert "ros_get_template_parameter_constraints" in content
+        assert "ros_preview_template" in content
+        assert "ros_estimate_template_cost" in content
+        assert 'action="GetTemplateParameterConstraints"' not in content
+        assert 'action="PreviewStack"' not in content
+        assert "调用 `GetTemplateEstimateCost`" not in content
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -252,6 +294,7 @@ class TestSkillDiscovery:
         loaded = load_pipeline_dir(pipeline_dir)
         assert "iac-aliyun-cost" in loaded.skills
         skill_root = Path(loaded.skill_roots["iac-aliyun-cost"])
+        assert skill_root == SKILL_DIR.resolve()
         assert (skill_root / "references" / "ros-template.md").is_file()
         assert (skill_root / "references" / "template-parameters.md").is_file()
 
@@ -274,14 +317,22 @@ class TestCostPrompt:
 
     def test_prompt_names_preview_stack_tool_contract(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
-        assert 'aliyun_api(product="ros", action="PreviewStack")' in body
-        assert "不要使用 `ros_stack` 执行 `PreviewStack`" in body
+        assert "ros_preview_template" in body
+        assert "不要使用 `ros_stack` 执行预览" in body
 
     def test_prompt_treats_preview_stack_as_soft_gate(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
         assert "优先通过" in body
         assert "不是硬门禁" in body
         assert "参数缺口" in body
+
+    def test_prompt_names_template_url_value_for_pricing_tools(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert 'template_url = "{template.file_path}"' in body
+        assert "ros_get_template_parameter_constraints" in body
+        assert "ros_preview_template" in body
+        assert "ros_estimate_template_cost" in body
+        assert "不要传 `TemplateBody`" in body
 
 
 class TestEvalsJson:
@@ -310,7 +361,7 @@ class TestEvalsJson:
     def test_evals_assert_preview_stack_api_tool_contract(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
         checks = "\n".join(assertion["check"] for ev in data["evals"] for assertion in ev["assertions"])
-        assert 'aliyun_api(product="ros", action="PreviewStack")' in checks
+        assert "ros_preview_template" in checks
         assert "不使用 ros_stack" in checks
 
     def test_evals_cover_existing_vpc_parameter_recommendation(self):

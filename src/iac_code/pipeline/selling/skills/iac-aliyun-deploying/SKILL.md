@@ -65,7 +65,7 @@ conclusion_schema:
 
 ## 模板校验
 
-部署前必须校验模板文件。调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验。校验失败时分析错误原因，查 GetResourceType Schema（如需），修复模板文件后重试（最多 5 轮）。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
+部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），修复模板文件后重试（最多 5 轮）。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
 
 ## 可用性查询
 

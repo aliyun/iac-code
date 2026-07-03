@@ -24,11 +24,10 @@ from iac_code.services.telemetry.sanitize import (
 )
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
-from iac_code.tools.cloud.aliyun.template_source import reject_template_body_param
+from iac_code.tools.cloud.aliyun.template_source import is_remote_template_url, reject_pipeline_template_source_params
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
-
-_URL_SCHEMES = ("http://", "https://", "oss://")
+from iac_code.tools.path_safety import resolve_candidate
 
 # Telemetry helpers
 _TERRAFORM_TRANSFORM_PREFIXES = ("Aliyun::Terraform-", "Aliyun::OpenTofu-")
@@ -475,10 +474,18 @@ class RosStack(BaseCloudStack):
         return RosClientFactory.create(cred, region_id=region)
 
     def _call_action_kwargs(self, context: ToolContext) -> dict[str, Any]:
-        return {"pipeline_mode": context.pipeline_mode}
+        return {"pipeline_mode": context.pipeline_mode, "cwd": context.cwd}
 
-    async def call_action(self, action: str, params: dict, region: str, *, pipeline_mode: bool = False) -> str:
-        if error := reject_template_body_param(params, pipeline_mode=pipeline_mode):
+    async def call_action(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        *,
+        pipeline_mode: bool = False,
+        cwd: str | None = None,
+    ) -> str:
+        if error := reject_pipeline_template_source_params(action, params, pipeline_mode=pipeline_mode):
             raise ValueError(error)
         client = self._get_client(region)
         # Ensure RegionId is always in params for the API request
@@ -486,8 +493,8 @@ class RosStack(BaseCloudStack):
             params.setdefault("RegionId", region)
         # TemplateURL as local file path → read into TemplateBody
         template_url = params.get("TemplateURL", "")
-        if template_url and not template_url.startswith(_URL_SCHEMES):
-            params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
+        if template_url and not is_remote_template_url(template_url):
+            params["TemplateBody"] = Path(resolve_candidate(template_url, cwd or ".")).read_text(encoding="utf-8")
             del params["TemplateURL"]
         # TemplateBody must be a JSON string; non-pipeline callers may still pass a dict.
         if isinstance(params.get("TemplateBody"), dict):

@@ -2922,6 +2922,26 @@ msgstr "Architekturdiagramm anzeigen"
 msgid "Show candidate details"
 msgstr "Kandidatendetails anzeigen"
 
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Validate Template"
+msgstr "ROS-Vorlage validieren"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Template Parameters"
+msgstr "ROS-Vorlagenparameter"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Preview Stack"
+msgstr "ROS-Stack-Vorschau"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Estimate Cost"
+msgstr "ROS-Kostenschätzung"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -4465,6 +4485,21 @@ msgstr "ROS Stack"
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid "Calling ROS template tool for {template_url}..."
+msgstr "Rufe das ROS-Vorlagenwerkzeug für {template_url} auf..."
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must use the dedicated {tool_name} tool "
+"instead of aliyun_api. Do not call the raw ROS template API directly."
+msgstr ""
+"ROS-Pipeline-Aufrufe für {action} müssen das dedizierte Tool {tool_name} "
+"statt aliyun_api verwenden. Rufe die rohe ROS-Vorlagen-API nicht direkt "
+"auf."
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 msgid ""
 "ROS template calls must use TemplateURL instead of TemplateBody. Save the"
@@ -4472,6 +4507,18 @@ msgid ""
 " path or OSS/HTTP URL."
 msgstr ""
 "ROS-Vorlagenaufrufe müssen TemplateURL statt TemplateBody verwenden. "
+"Speichern Sie die Vorlage in einer Datei und übergeben Sie "
+"params.TemplateURL, zum Beispiel einen lokalen Dateipfad oder eine OSS"
+"/HTTP-URL."
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must pass params.TemplateURL. Save the "
+"template to a file and pass params.TemplateURL, for example a local file "
+"path or OSS/HTTP URL."
+msgstr ""
+"ROS-Pipeline-Aufrufe für {action} müssen params.TemplateURL übergeben. "
 "Speichern Sie die Vorlage in einer Datei und übergeben Sie "
 "params.TemplateURL, zum Beispiel einen lokalen Dateipfad oder eine OSS"
 "/HTTP-URL."

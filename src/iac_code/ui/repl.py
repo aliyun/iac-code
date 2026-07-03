@@ -5055,9 +5055,10 @@ class InlineREPL:
         return totals
 
     def _status_provider_display(self) -> str:
-        if hasattr(self._provider_manager, "get_provider_display"):
+        provider_manager = getattr(self, "_provider_manager", None)
+        if hasattr(provider_manager, "get_provider_display"):
             try:
-                display = self._provider_manager.get_provider_display()
+                display = provider_manager.get_provider_display()
             except Exception:
                 display = ""
             if isinstance(display, str) and display:
@@ -5071,9 +5072,10 @@ class InlineREPL:
         return key
 
     def _status_model(self, fallback: str) -> str:
-        if hasattr(self._provider_manager, "get_model_name"):
+        provider_manager = getattr(self, "_provider_manager", None)
+        if hasattr(provider_manager, "get_model_name"):
             try:
-                model = self._provider_manager.get_model_name()
+                model = provider_manager.get_model_name()
             except Exception:
                 model = ""
             if isinstance(model, str) and model:

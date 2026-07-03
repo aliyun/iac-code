@@ -33,6 +33,23 @@ def test_normalize_selected_plan_adds_resolution_metadata():
     assert normalized["selection_valid"] is True
     assert normalized["selected_candidate"]["output_path"] == "templates/a.yml"
     assert normalized["selection"]["selected_candidate_index"] == 0
+    assert normalized["template_url"] == "templates/a.yml"
+
+
+def test_normalize_selected_plan_falls_back_to_result_template_file_path():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Generated"},
+            "template": {"file_path": "templates/generated.yml"},
+            "failed": False,
+        }
+    ]
+    selected_plan = {"user_input": encode_selected_candidate("Generated", 0), "options": []}
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["template_url"] == "templates/generated.yml"
 
 
 def test_normalize_selected_plan_preserves_cost_deployment_parameters():

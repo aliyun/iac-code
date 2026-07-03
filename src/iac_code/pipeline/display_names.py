@@ -57,6 +57,10 @@ def _known_tool_names() -> dict[str, str]:
         "ask_user_question": _("Ask user question"),
         "show_architecture_diagram": _("Show architecture diagram"),
         "show_candidate_detail": _("Show candidate details"),
+        "ros_validate_template": _("ROS Validate Template"),
+        "ros_get_template_parameter_constraints": _("ROS Template Parameters"),
+        "ros_preview_template": _("ROS Preview Stack"),
+        "ros_estimate_template_cost": _("ROS Estimate Cost"),
     }
 
 

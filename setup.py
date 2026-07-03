@@ -15,7 +15,7 @@ from setuptools.command.sdist import sdist
 INIT_PATH = Path("src/iac_code/__init__.py")
 LOCALES_DIR = Path("src/iac_code/i18n/locales")
 PROJECT_ROOT = Path(__file__).resolve().parent
-IAC_ALIYUN_REFERENCES_DIR = PROJECT_ROOT / "src/iac_code/skills/bundled/iac_aliyun/references"
+SELLING_REFERENCES_DIR = PROJECT_ROOT / "src/iac_code/pipeline/selling/references"
 SELLING_IAC_ALIYUN_SKILLS = (
     "iac-aliyun-template-generating",
     "iac-aliyun-cost",
@@ -207,10 +207,54 @@ def _replace_release_date():
     INIT_PATH.write_text(content, encoding="utf-8")
 
 
+def _git_symlink_placeholder_target(path: Path) -> Path | None:
+    """Return the target for a Windows core.symlinks=false placeholder file."""
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        if path.stat().st_size > 4096:
+            return None
+        raw_target = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not raw_target or "\n" in raw_target or "\r" in raw_target:
+        return None
+    target = Path(raw_target)
+    if not target.is_absolute():
+        target = path.parent / target
+    try:
+        return target.resolve(strict=True)
+    except OSError:
+        return None
+
+
+def _copy_reference_entry(source: Path, target: Path) -> None:
+    placeholder_target = _git_symlink_placeholder_target(source)
+    if placeholder_target is not None:
+        source = placeholder_target
+    elif source.is_symlink():
+        source = source.resolve(strict=True)
+
+    if source.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        for child in source.iterdir():
+            _copy_reference_entry(child, target / child.name)
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
+def _copy_reference_tree(source: Path, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    for child in source.iterdir():
+        _copy_reference_entry(child, target / child.name)
+
+
 def _copy_selling_skill_references_to_package_root(package_root) -> None:
     """Expand selling-skill reference symlinks into real dirs under an iac_code package root."""
-    if not IAC_ALIYUN_REFERENCES_DIR.is_dir():
-        raise RuntimeError("references directory not found: %s" % IAC_ALIYUN_REFERENCES_DIR)
+    if not SELLING_REFERENCES_DIR.is_dir():
+        raise RuntimeError("references directory not found: %s" % SELLING_REFERENCES_DIR)
 
     package_root = Path(package_root)
     for skill_name in SELLING_IAC_ALIYUN_SKILLS:
@@ -220,7 +264,7 @@ def _copy_selling_skill_references_to_package_root(package_root) -> None:
         elif target.exists():
             shutil.rmtree(target)
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(IAC_ALIYUN_REFERENCES_DIR, target)
+        _copy_reference_tree(SELLING_REFERENCES_DIR, target)
 
 
 def _copy_selling_skill_references(build_lib: str) -> None:

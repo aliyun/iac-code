@@ -91,16 +91,31 @@ def _extend_unique(target: list[str], values: list[str]) -> None:
             seen.add(value)
 
 
-def _with_trusted_read_directories(permission_context: Any, directories: list[str]) -> Any:
-    if not directories:
+def _with_tool_read_directories(
+    permission_context: Any,
+    *,
+    trusted_directories: list[str],
+    relative_directories: list[str],
+) -> Any:
+    if not trusted_directories and not relative_directories:
         return permission_context
 
     trusted_read_directories = list(getattr(permission_context, "trusted_read_directories", []))
-    original_count = len(trusted_read_directories)
-    _extend_unique(trusted_read_directories, directories)
-    if len(trusted_read_directories) == original_count:
+    relative_read_directories = list(getattr(permission_context, "relative_read_directories", []))
+    original_trusted_count = len(trusted_read_directories)
+    original_relative_count = len(relative_read_directories)
+    _extend_unique(trusted_read_directories, trusted_directories)
+    _extend_unique(relative_read_directories, relative_directories)
+    if (
+        len(trusted_read_directories) == original_trusted_count
+        and len(relative_read_directories) == original_relative_count
+    ):
         return permission_context
-    return replace(permission_context, trusted_read_directories=trusted_read_directories)
+    return replace(
+        permission_context,
+        trusted_read_directories=trusted_read_directories,
+        relative_read_directories=relative_read_directories,
+    )
 
 
 def _emit_no_prompt_permission_audit(
@@ -1022,12 +1037,18 @@ class AgentLoop:
                     if perm_ctx is not None:
                         from iac_code.services.permissions.pipeline import check_tool_permission
 
-                        effective_perm_ctx = _with_trusted_read_directories(
-                            perm_ctx, self._tool_context_trusted_read_directories
+                        effective_perm_ctx = _with_tool_read_directories(
+                            perm_ctx,
+                            trusted_directories=self._tool_context_trusted_read_directories,
+                            relative_directories=self._tool_context_relative_read_directories,
                         )
                         _extend_unique(context.additional_directories, list(effective_perm_ctx.additional_directories))
                         _extend_unique(
                             context.trusted_read_directories, list(effective_perm_ctx.trusted_read_directories)
+                        )
+                        _extend_unique(
+                            context.relative_read_directories,
+                            list(effective_perm_ctx.relative_read_directories),
                         )
                         permission = await check_tool_permission(tool, request.input, effective_perm_ctx)
                     else:

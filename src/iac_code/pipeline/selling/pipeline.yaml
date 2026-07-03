@@ -74,6 +74,7 @@ sub_pipelines:
         tools:
           include: []
           exclude: [write_memory]
+        inject_tools: [ros_validate_template]
 
       - id: reviewing
         description: "审查模板的安全性和最佳实践"
@@ -84,8 +85,9 @@ sub_pipelines:
         prompt: prompts/reviewing.md
         context_fields: [template]
         tools:
-          include: [-]
+          include: [ros_validate_template]
           exclude: []
+        inject_tools: [ros_validate_template]
 
       - id: cost_estimating
         description: "评估模板的资源成本"
@@ -101,6 +103,11 @@ sub_pipelines:
         tools:
           include: []
           exclude: [bash, write_memory]
+        inject_tools:
+          - ros_validate_template
+          - ros_get_template_parameter_constraints
+          - ros_preview_template
+          - ros_estimate_template_cost
 
 steps:
   - id: intent_parsing
@@ -266,3 +273,4 @@ steps:
     tools:
       include: []
       exclude: [write_memory]
+    inject_tools: [ros_validate_template]

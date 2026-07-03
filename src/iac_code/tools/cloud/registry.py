@@ -9,6 +9,10 @@ if TYPE_CHECKING:
 ALIYUN_TOOL_NAMES = (
     "aliyun_api",
     "aliyun_doc_search",
+    "ros_validate_template",
+    "ros_get_template_parameter_constraints",
+    "ros_preview_template",
+    "ros_estimate_template_cost",
     "ros_stack",
     "ros_stack_instances",
 )

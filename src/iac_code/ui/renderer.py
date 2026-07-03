@@ -88,6 +88,18 @@ def _display_tool_name(tool_name: str, candidate: str | None = None) -> str:
     return known_tool_display_name(tool_name) or candidate or tool_name
 
 
+def _known_tool_result_message(
+    tool_name: str,
+    output: str,
+    *,
+    is_error: bool = False,
+    verbose: bool = False,
+) -> str | None:
+    from iac_code.tools.cloud.aliyun.ros_template_tools import render_ros_template_tool_result_message
+
+    return render_ros_template_tool_result_message(tool_name, output, is_error=is_error, verbose=verbose)
+
+
 def _permission_detail_text(tool_name: str, tool_input: dict[str, Any], tool: Any | None) -> str | None:
     if tool_name == "aliyun_api":
         summary = json.dumps(build_input_summary(tool_name, tool_input), ensure_ascii=False, sort_keys=True)
@@ -763,6 +775,13 @@ class Renderer:
         if tool:
             result_text = tool.render_tool_result_message(
                 rec.result or "", is_error=rec.is_error, verbose=self._verbose
+            )
+        if result_text is None and rec.result:
+            result_text = _known_tool_result_message(
+                rec.tool_name,
+                rec.result,
+                is_error=rec.is_error,
+                verbose=self._verbose,
             )
         if result_text is None and rec.result:
             result_text = rec.result

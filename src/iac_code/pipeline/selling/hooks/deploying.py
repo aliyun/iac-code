@@ -90,12 +90,33 @@ def normalize_selected_plan(
     plan["selection_valid"] = True
     plan["selected_candidate"] = resolution.candidate
     plan["selected_candidate_result"] = resolution.result
+    template_url = _template_url_from_resolution(resolution.candidate, resolution.result)
+    if template_url:
+        plan["template_url"] = template_url
     plan["parameter_overrides"] = dict(selected.parameter_overrides)
     effective_parameters = _effective_deployment_parameters(resolution.result, selected.parameter_overrides)
     if effective_parameters:
         plan["effective_deployment_parameters"] = effective_parameters
     plan["cost_estimate_parameter_overridden"] = bool(selected.parameter_overrides)
     return plan
+
+
+def _template_url_from_resolution(
+    selected_candidate: dict[str, Any] | None,
+    selected_candidate_result: dict[str, Any] | None,
+) -> str:
+    if isinstance(selected_candidate, dict):
+        output_path = selected_candidate.get("output_path")
+        if isinstance(output_path, str) and output_path:
+            return output_path
+
+    if isinstance(selected_candidate_result, dict):
+        template = selected_candidate_result.get("template")
+        if isinstance(template, dict):
+            file_path = template.get("file_path")
+            if isinstance(file_path, str) and file_path:
+                return file_path
+    return ""
 
 
 def _selection_payload(plan: dict[str, Any]) -> Any:

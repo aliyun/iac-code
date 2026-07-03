@@ -497,6 +497,7 @@ class TestRosStackExecute:
         self, tool: RosStack, mock_credentials
     ) -> None:
         mock_client = MagicMock()
+        remote_template_url = "OSS://iac-code-test/template.json"
 
         create_response = MagicMock()
         create_response.body.stack_id = "stack-123"
@@ -518,12 +519,14 @@ class TestRosStackExecute:
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
             patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+            patch("iac_code.tools.cloud.aliyun.ros_stack.Path.read_text") as read_text,
         ):
+            read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
             mock_factory.create.return_value = mock_client
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "params": {"StackName": "test", "TemplateURL": remote_template_url},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -532,7 +535,58 @@ class TestRosStackExecute:
         assert result.is_error is False
         mock_client.create_stack.assert_called_once()
         request = mock_client.create_stack.call_args.args[0]
-        assert request.to_map()["TemplateURL"] == _REMOTE_TEMPLATE_URL
+        assert request.to_map()["TemplateURL"] == remote_template_url
+        data = json.loads(result.content)
+        assert data["status"] == "CREATE_COMPLETE"
+
+    @pytest.mark.asyncio
+    async def test_create_stack_relative_template_url_resolves_from_context_cwd(
+        self, tool: RosStack, mock_credentials, tmp_path, monkeypatch
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        other_cwd = tmp_path / "other"
+        template_dir = workspace / "templates"
+        template_dir.mkdir(parents=True)
+        other_cwd.mkdir()
+        template_body = json.dumps({"ROSTemplateFormatVersion": "2015-09-01", "Resources": {}})
+        (template_dir / "stack.json").write_text(template_body, encoding="utf-8")
+        monkeypatch.chdir(other_cwd)
+
+        mock_client = MagicMock()
+        create_response = MagicMock()
+        create_response.body.stack_id = "stack-123"
+        mock_client.create_stack.return_value = create_response
+        get_stack_response = MagicMock()
+        get_stack_response.body.to_map.return_value = {
+            "StackId": "stack-123",
+            "StackName": "test",
+            "Status": "CREATE_COMPLETE",
+            "StatusReason": "",
+        }
+        mock_client.get_stack.return_value = get_stack_response
+        list_resources_response = MagicMock()
+        list_resources_response.body.to_map.return_value = {"Resources": []}
+        mock_client.list_stack_resources.return_value = list_resources_response
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
+            patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+        ):
+            mock_factory.create.return_value = mock_client
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": "templates/stack.json"},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(cwd=str(workspace)),
+            )
+
+        assert result.is_error is False
+        request = mock_client.create_stack.call_args.args[0]
+        request_map = request.to_map()
+        assert request_map["TemplateBody"] == template_body
+        assert "TemplateURL" not in request_map
         data = json.loads(result.content)
         assert data["status"] == "CREATE_COMPLETE"
 
@@ -910,6 +964,7 @@ class TestRosStackExecute:
         self, tool: RosStack, mock_credentials
     ) -> None:
         mock_client = MagicMock()
+        remote_template_url = "HTTPS://example.com/template.json"
 
         update_response = MagicMock()
         update_response.body.stack_id = "stack-123"
@@ -931,12 +986,14 @@ class TestRosStackExecute:
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
             patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+            patch("iac_code.tools.cloud.aliyun.ros_stack.Path.read_text") as read_text,
         ):
+            read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
             mock_factory.create.return_value = mock_client
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "params": {"StackId": "stack-123", "TemplateURL": remote_template_url},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -945,7 +1002,7 @@ class TestRosStackExecute:
         assert result.is_error is False
         mock_client.update_stack.assert_called_once()
         request = mock_client.update_stack.call_args.args[0]
-        assert request.to_map()["TemplateURL"] == _REMOTE_TEMPLATE_URL
+        assert request.to_map()["TemplateURL"] == remote_template_url
         data = json.loads(result.content)
         assert data["status"] == "UPDATE_COMPLETE"
 

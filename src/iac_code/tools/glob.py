@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from pathlib import Path
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_read_path
+from iac_code.tools.path_safety import check_read_path, get_iac_code_application_root, resolve_read_path
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -18,11 +19,111 @@ def _glob_pattern_may_escape_root(pattern: str) -> bool:
     return os.path.isabs(normalized) or any(part == ".." for part in normalized.split("/"))
 
 
-def _search_root(path: str, cwd: str) -> Path:
+def _search_root(path: str, cwd: str, *, relative_read_directories: list[str] | None = None) -> Path:
     root = Path(normalize_user_path(path))
     if not root.is_absolute():
-        root = Path(cwd) / root
+        root = Path(resolve_read_path(str(root), cwd, relative_read_directories=relative_read_directories))
     return root
+
+
+def _glob_pattern_parts(pattern: str) -> tuple[str, ...]:
+    normalized = normalize_user_path(pattern).replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return tuple(part for part in normalized.split("/") if part and part != ".")
+
+
+def _pattern_contains_recursive_glob(pattern: str) -> bool:
+    return "**" in _glob_pattern_parts(pattern)
+
+
+def _path_is_under_real_root(path: str, root: str) -> bool:
+    path_r = os.path.realpath(path)
+    root_r = os.path.realpath(root)
+    if path_r == root_r:
+        return True
+    return path_r.startswith(root_r.rstrip(os.sep) + os.sep)
+
+
+def _path_is_under_any_real_root(path: str, roots: list[str]) -> bool:
+    return any(_path_is_under_real_root(path, root) for root in roots if root)
+
+
+def _matches_glob_pattern(relative_path: str, pattern: str) -> bool:
+    path_parts = tuple(part for part in relative_path.replace("\\", "/").split("/") if part and part != ".")
+    pattern_parts = _glob_pattern_parts(pattern)
+    if not pattern_parts:
+        return False
+
+    def match(pattern_index: int, path_index: int) -> bool:
+        if pattern_index == len(pattern_parts):
+            return path_index == len(path_parts)
+
+        pattern_part = pattern_parts[pattern_index]
+        if pattern_part == "**":
+            return match(pattern_index + 1, path_index) or (
+                path_index < len(path_parts) and match(pattern_index, path_index + 1)
+            )
+
+        return (
+            path_index < len(path_parts)
+            and fnmatch.fnmatchcase(path_parts[path_index], pattern_part)
+            and match(pattern_index + 1, path_index + 1)
+        )
+
+    return match(0, 0)
+
+
+def _allowed_roots(
+    search_root: Path, *, additional_directories: list[str], trusted_read_directories: list[str]
+) -> list[str]:
+    return [
+        str(search_root),
+        *additional_directories,
+        *trusted_read_directories,
+        str(get_iac_code_application_root()),
+    ]
+
+
+def _glob_matches(
+    search_root: Path,
+    pattern: str,
+    *,
+    allowed_roots: list[str] | None = None,
+) -> tuple[list[Path], list[Path]]:
+    if not _pattern_contains_recursive_glob(pattern):
+        return [p for p in search_root.glob(pattern) if p.is_file()], []
+
+    matches: list[Path] = []
+    unsafe_directories: list[Path] = []
+    visited_dirs: set[str] = set()
+
+    for dirpath, dirnames, filenames in os.walk(search_root, followlinks=True):
+        dir_real = os.path.realpath(dirpath)
+        if dir_real in visited_dirs:
+            dirnames[:] = []
+            continue
+        visited_dirs.add(dir_real)
+
+        safe_dirnames: list[str] = []
+        for dirname in sorted(dirnames):
+            child = Path(dirpath) / dirname
+            if allowed_roots is not None and not _path_is_under_any_real_root(str(child), allowed_roots):
+                unsafe_directories.append(child)
+                continue
+            safe_dirnames.append(dirname)
+        dirnames[:] = safe_dirnames
+
+        for filename in sorted(filenames):
+            path = Path(dirpath) / filename
+            try:
+                relative_path = path.relative_to(search_root)
+            except ValueError:
+                continue
+            if _matches_glob_pattern(str(relative_path), pattern) and path.is_file():
+                matches.append(path)
+
+    return matches, unsafe_directories
 
 
 class GlobTool(Tool):
@@ -57,11 +158,9 @@ class GlobTool(Tool):
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         pattern = tool_input["pattern"]
-        path = normalize_user_path(tool_input.get("path", context.cwd))
+        path = tool_input.get("path", context.cwd)
 
-        search_root = Path(path)
-        if not search_root.is_absolute():
-            search_root = Path(context.cwd) / path
+        search_root = _search_root(path, context.cwd, relative_read_directories=context.relative_read_directories)
 
         if not search_root.exists():
             return ToolResult.error(f"Path not found: {path}")
@@ -70,7 +169,12 @@ class GlobTool(Tool):
             return ToolResult.error(f"Not a directory: {path}")
 
         try:
-            matches = [p for p in search_root.glob(pattern) if p.is_file()]
+            allowed_roots = _allowed_roots(
+                search_root,
+                additional_directories=context.additional_directories,
+                trusted_read_directories=context.trusted_read_directories,
+            )
+            matches, _ = _glob_matches(search_root, pattern, allowed_roots=allowed_roots)
         except Exception as e:
             return ToolResult.error(f"Error during glob: {e}")
 
@@ -94,6 +198,7 @@ class GlobTool(Tool):
             cwd=context.cwd,
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
         )
         if decision.behavior == "allow":
             pattern = input.get("pattern", "")
@@ -105,8 +210,28 @@ class GlobTool(Tool):
                     reason=PermissionDecisionReason(type="path_constraint", detail=detail),
                 )
             try:
-                matches = [p for p in _search_root(path, context.cwd).glob(pattern) if p.is_file()]
+                search_root = _search_root(
+                    path,
+                    context.cwd,
+                    relative_read_directories=context.relative_read_directories,
+                )
+                matches, unsafe_directories = _glob_matches(
+                    search_root,
+                    pattern,
+                    allowed_roots=_allowed_roots(
+                        search_root,
+                        additional_directories=context.additional_directories,
+                        trusted_read_directories=context.trusted_read_directories,
+                    ),
+                )
             except Exception:
+                detail = _("glob pattern outside allowed directories")
+                return PermissionResult(
+                    behavior="ask",
+                    message=detail,
+                    reason=PermissionDecisionReason(type="path_constraint", detail=detail),
+                )
+            if unsafe_directories:
                 detail = _("glob pattern outside allowed directories")
                 return PermissionResult(
                     behavior="ask",
@@ -119,6 +244,7 @@ class GlobTool(Tool):
                     cwd=context.cwd,
                     additional_directories=context.additional_directories,
                     trusted_read_directories=context.trusted_read_directories,
+                    relative_read_directories=context.relative_read_directories,
                 )
                 if match_decision.behavior == "ask":
                     return match_decision.to_permission_result()

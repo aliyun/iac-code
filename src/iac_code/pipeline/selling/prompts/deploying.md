@@ -24,6 +24,11 @@
 {selected_plan}
 ```
 
+## ROS 模板来源
+本步骤已选定模板文件路径：`{selected_plan.template_url}`。
+
+调用 `ros_validate_template` 校验时，必须传 `template_url = "{selected_plan.template_url}"`。调用 `ros_stack` 的 `CreateStack` / `UpdateStack` 时，必须传 `params.TemplateURL = "{selected_plan.template_url}"`。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口；不要传 `params.TemplateBody`、`TemplateId` 或 `TemplateScratchId`；不要省略 `params.TemplateURL`。
+
 ## 所有候选方案的评估数据
 `selected_plan.selection_valid` 为 `true` 时，使用 `selected_plan.selected_candidate` 和
 `selected_plan.selected_candidate_result` 中的模板、费用、审查信息进行部署。
