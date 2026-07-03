@@ -1,0 +1,13 @@
+{
+  "name": "json",
+  "argv": [
+    "--prompt",
+    "hello",
+    "--output-format",
+    "json"
+  ],
+  "stdin": null,
+  "exit_code": 0,
+  "stdout": "{\"text\": \"fixture response: hello\", \"tool_uses\": [], \"usage\": {\"input_tokens\": 1, \"output_tokens\": 2, \"cache_creation_input_tokens\": 3, \"cache_read_input_tokens\": 4}}\n",
+  "stderr": ""
+}

@@ -1,0 +1,13 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+fmt:
+    cargo fmt --all
+
+clippy:
+    cargo clippy --tests -- -D warnings
+
+test:
+    cargo test
+
+run *args:
+    cargo run -p iac-code-cli -- {{args}}

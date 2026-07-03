@@ -1,0 +1,13 @@
+{
+  "name": "permission_auto_approve",
+  "argv": [
+    "--prompt",
+    "write status",
+    "--output-format",
+    "json"
+  ],
+  "stdin": null,
+  "exit_code": 0,
+  "stdout": "{\"text\": \"permission auto approve complete\", \"tool_uses\": [{\"name\": \"write_file\", \"input\": {\"content\": \"beta\\n\", \"path\": \"auto-approved.txt\"}, \"result\": \"Successfully wrote 1 lines to $WORKSPACE/auto-approved.txt\", \"is_error\": false}], \"usage\": {\"input_tokens\": 5, \"output_tokens\": 6, \"cache_creation_input_tokens\": 0, \"cache_read_input_tokens\": 0}}\n",
+  "stderr": ""
+}

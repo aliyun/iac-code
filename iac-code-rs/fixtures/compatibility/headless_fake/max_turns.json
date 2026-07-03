@@ -1,0 +1,15 @@
+{
+  "name": "max_turns",
+  "argv": [
+    "--prompt",
+    "hello",
+    "--output-format",
+    "text",
+    "--max-turns",
+    "0"
+  ],
+  "stdin": null,
+  "exit_code": 2,
+  "stdout": "",
+  "stderr": ""
+}

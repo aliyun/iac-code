@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package iac_code.a2a.transports.proto;
+
+message JsonRpcEnvelope {
+  bytes payload = 1;
+  bool final = 2;
+}
+
+service A2AJsonRpc {
+  rpc Send(JsonRpcEnvelope) returns (JsonRpcEnvelope);
+  rpc Stream(JsonRpcEnvelope) returns (stream JsonRpcEnvelope);
+}

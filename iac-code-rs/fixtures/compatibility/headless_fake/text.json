@@ -1,0 +1,13 @@
+{
+  "name": "text",
+  "argv": [
+    "--prompt",
+    "hello",
+    "--output-format",
+    "text"
+  ],
+  "stdin": null,
+  "exit_code": 0,
+  "stdout": "fixture response: hello\n",
+  "stderr": ""
+}

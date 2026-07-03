@@ -1,0 +1,21 @@
+{"name":"agent_text_block","value":{"text":"hello","type":"text"}}
+{"name":"agent_tool_use_block","value":{"id":"toolu_1","input":{"path":"README.md"},"name":"read_file","type":"tool_use"}}
+{"name":"agent_tool_result_block","value":{"content":"ok","is_error":false,"tool_use_id":"toolu_1","type":"tool_result"}}
+{"name":"agent_thinking_block","value":{"thinking":"reasoning","type":"thinking"}}
+{"name":"agent_image_block","value":{"data":"ZmFrZQ==","media_type":"image/png","type":"image"}}
+{"name":"agent_string_message","value":{"content":"hello","elapsed_seconds":0.0,"role":"user","token_count":0}}
+{"name":"agent_structured_message","value":{"content":[{"text":"hello","type":"text"},{"id":"toolu_1","input":{"path":"README.md"},"name":"read_file","type":"tool_use"},{"content":"ok","is_error":false,"tool_use_id":"toolu_1","type":"tool_result"},{"thinking":"reasoning","type":"thinking"},{"data":"ZmFrZQ==","media_type":"image/png","type":"image"}],"elapsed_seconds":1.5,"role":"assistant","token_count":12}}
+{"name":"agent_structured_message_api","value":{"content":[{"text":"hello","type":"text"},{"id":"toolu_1","input":{"path":"README.md"},"name":"read_file","type":"tool_use"},{"content":"ok","is_error":false,"tool_use_id":"toolu_1","type":"tool_result"},{"thinking":"reasoning","type":"thinking"},{"data":"ZmFrZQ==","media_type":"image/png","type":"image"}],"role":"assistant"}}
+{"name":"agent_conversation_api","value":{"messages":[{"content":"hello","role":"user"},{"content":[{"text":"world","type":"text"}],"role":"assistant"}]}}
+{"name":"provider_tool_definition","value":{"description":"Read a file","input_schema":{"properties":{"path":{"type":"string"}},"required":["path"],"type":"object"},"name":"read_file"}}
+{"name":"provider_content_block_text","value":{"content":null,"data":null,"input":null,"is_error":false,"media_type":null,"name":null,"text":"hello","tool_use_id":null,"type":"text"}}
+{"name":"provider_user_message","value":{"content":"hello","role":"user"}}
+{"name":"provider_assistant_tool_use","value":{"content":[{"content":null,"data":null,"input":{"path":"README.md"},"is_error":false,"media_type":null,"name":"read_file","text":null,"tool_use_id":"toolu_1","type":"tool_use"}],"role":"assistant"}}
+{"name":"provider_tool_result_message","value":{"content":[{"content":"ok","data":null,"input":null,"is_error":false,"media_type":null,"name":null,"text":null,"tool_use_id":"toolu_1","type":"tool_result"}],"role":"user"}}
+{"name":"provider_non_streaming_response","value":{"message_id":"msg_1","stop_reason":"end_turn","text":"hello","thinking":"reasoning","tool_uses":[{"id":"toolu_1","input":{"path":"README.md"},"name":"read_file"}],"usage":{"cache_creation_input_tokens":3,"cache_read_input_tokens":4,"input_tokens":1,"output_tokens":2}}}
+{"name":"permission_rule_value","value":{"rule_content":"ls *","tool_name":"bash"}}
+{"name":"permission_rule","value":{"behavior":"allow","source":"cli_arg","value":{"rule_content":"ls *","tool_name":"bash"}}}
+{"name":"permission_result","value":{"behavior":"ask","message":"Allow Bash?","reason":{"detail":"matched ask rule","type":"rule"},"suggestions":[{"rule_content":"ls *","tool_name":"bash"}]}}
+{"name":"permission_context","value":{"additional_directories":["/tmp/project"],"allow_rules":{"bash":["ls *"]},"ask_rules":{"write_file":["*"]},"cwd":"/workspace","deny_rules":{"bash":["rm *"]},"mode":"accept_edits","trusted_read_directories":["/tmp/project/read"]}}
+{"name":"tool_result_success","value":{"content":"ok","context_modifier":null,"is_error":false,"new_messages":[]}}
+{"name":"tool_result_with_new_messages","value":{"content":"updated","context_modifier":null,"is_error":false,"new_messages":[{"content":"extra","role":"user"}]}}

@@ -1,0 +1,13 @@
+{
+  "name": "stream_json",
+  "argv": [
+    "--prompt",
+    "hello",
+    "--output-format",
+    "stream-json"
+  ],
+  "stdin": null,
+  "exit_code": 0,
+  "stdout": "{\"message_id\": \"msg_1\", \"type\": \"message_start\"}\n{\"text\": \"fixture response: hello\", \"type\": \"text_delta\"}\n{\"stop_reason\": \"end_turn\", \"usage\": {\"input_tokens\": 1, \"output_tokens\": 2, \"cache_creation_input_tokens\": 3, \"cache_read_input_tokens\": 4}, \"type\": \"message_end\"}\n",
+  "stderr": ""
+}

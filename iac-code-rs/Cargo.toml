@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/iac-code-cli",
+    "crates/iac-code-core",
+    "crates/iac-code-exec",
+    "crates/iac-code-protocol",
+    "crates/iac-code-providers",
+    "crates/iac-code-tools",
+    "crates/iac-code-config",
+    "crates/iac-code-crypto",
+    "crates/iac-code-telemetry",
+    "crates/iac-code-acp",
+    "crates/iac-code-a2a",
+    "crates/iac-code-tui",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.95"
+license = "Apache-2.0"
+repository = "https://github.com/aliyun/iac-code"

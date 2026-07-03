@@ -1,0 +1,13 @@
+{
+  "name": "invalid_output_format",
+  "argv": [
+    "--prompt",
+    "hello",
+    "--output-format",
+    "nope"
+  ],
+  "stdin": null,
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "Invalid --output-format 'nope'. Valid values: text, json, stream-json\n"
+}

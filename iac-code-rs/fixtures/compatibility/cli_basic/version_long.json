@@ -1,0 +1,10 @@
+{
+  "name": "version_long",
+  "argv": [
+    "--version"
+  ],
+  "stdin": null,
+  "exit_code": 0,
+  "stdout": "iac-code v0.4.1\n",
+  "stderr": ""
+}
