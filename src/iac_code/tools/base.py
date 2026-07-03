@@ -34,6 +34,7 @@ class ToolContext:
     relative_read_directories: list[str] = field(default_factory=list)
     # True when this tool call is being executed as part of a pipeline step.
     pipeline_mode: bool = False
+    env_overrides: dict[str, str] = field(default_factory=dict)
 
     def __init__(
         self,
@@ -44,6 +45,7 @@ class ToolContext:
         trusted_read_directories: list[str] | str | None = None,
         relative_read_directories: list[str] | None = None,
         pipeline_mode: bool = False,
+        env_overrides: dict[str, str] | None = None,
     ) -> None:
         if isinstance(tool_use_id, list) and isinstance(additional_directories, list):
             old_additional_directories = tool_use_id
@@ -63,6 +65,7 @@ class ToolContext:
         )
         self.relative_read_directories = list(relative_read_directories or [])
         self.pipeline_mode = pipeline_mode
+        self.env_overrides = {str(key): str(value) for key, value in (env_overrides or {}).items() if value is not None}
 
 
 @dataclass
@@ -181,6 +184,16 @@ class Tool(ABC):
         "Found 5 files").  In verbose mode, include more detail.
         """
         return None
+
+    @property
+    def render_verbose_result_in_transcript(self) -> bool:
+        """Whether Ctrl+O transcript view may render this result verbosely.
+
+        Normal tools keep transcript results compact to avoid dumping large file
+        contents. Curated pipeline tools can opt in when their verbose renderer
+        is intentionally bounded and formatted for transcript review.
+        """
+        return False
 
     def render_tool_use_error_message(self, error: str) -> str | None:
         """Return error text for display."""

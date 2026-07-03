@@ -97,7 +97,7 @@ class InPlaceRenderer:
         out.flush()
         self._last_height = new_height
 
-    def clear(self) -> None:
+    def clear(self, *, clear_to_screen_end: bool = False) -> None:
         """Erase the last rendered frame.
 
         Idempotent — calling :meth:`clear` twice is a no-op.
@@ -107,6 +107,8 @@ class InPlaceRenderer:
         out = self._console.file
         try:
             self._erase_previous(out)
+            if clear_to_screen_end:
+                out.write("\x1b[J")
             out.flush()
         except OSError:
             pass

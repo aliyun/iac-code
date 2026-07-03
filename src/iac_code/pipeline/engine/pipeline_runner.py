@@ -11,7 +11,7 @@ import os
 import stat
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock
@@ -385,6 +385,7 @@ class RestartInfo:
 
     start_from_step: str | None
     preserved_conclusions: dict[str, Any]
+    preserved_step_conclusions: dict[str, Any] = field(default_factory=dict)
     rollback_context: str | None = None
     rollback_input: PipelineInputContent | None = None
 
@@ -421,6 +422,7 @@ class PipelineRunner:
         resume_from_sidecar: bool = False,
         surface: str = "repl",
         backup_service: Any | None = None,
+        prerequisite_resolution: dict[str, Any] | None = None,
     ) -> None:
         self._session_storage = session_storage
         self._session_id = session_id
@@ -432,7 +434,40 @@ class PipelineRunner:
         self._surface = surface
 
         self._pipeline_dir = pipeline_dir
-        self._loaded: LoadedPipeline = load_pipeline_dir(pipeline_dir)
+
+        # Sidecar lives at <projects>/<cwd>/<session_id>/pipeline/ — nested
+        # under the session directory (main's directory-format session layout)
+        # rather than the legacy sibling <session_id>.pipeline/ that pre-dated
+        # the directory format. SessionStorage.session_dir is the canonical
+        # accessor for <projects>/<cwd>/<session_id>/.
+        v2_session_dir = _storage_method(session_storage, "v2_session_dir")
+        session_dir = _storage_method(session_storage, "session_dir")
+        raw_session_dir = None
+        ensure_v2_session_dir = _storage_method(session_storage, "ensure_v2_session_dir_for_new_session")
+        if callable(ensure_v2_session_dir):
+            raw_session_dir = ensure_v2_session_dir(self._cwd, session_id)
+        if raw_session_dir is None:
+            if callable(v2_session_dir):
+                raw_session_dir = v2_session_dir(self._cwd, session_id)
+                if raw_session_dir is None and callable(session_dir):
+                    raw_session_dir = self._writable_pipeline_sidecar_session_dir(session_dir(self._cwd, session_id))
+            elif callable(session_dir):
+                raw_session_dir = session_dir(self._cwd, session_id)
+        self.session = (
+            PipelineSession(Path(raw_session_dir) / "pipeline") if isinstance(raw_session_dir, (str, Path)) else None
+        )
+
+        resolved_prerequisites = prerequisite_resolution
+        if resolved_prerequisites is None and resume_from_sidecar and self.session is not None:
+            resolved_prerequisites = self.session.peek_prerequisites_sync()
+        self._prerequisite_resolution = dict(resolved_prerequisites) if isinstance(resolved_prerequisites, dict) else {}
+        feature_flag_overrides = self._feature_flag_overrides_from_prerequisites(self._prerequisite_resolution)
+        self._tool_context_env_overrides = self._env_overrides_from_prerequisites(self._prerequisite_resolution)
+        self._loaded: LoadedPipeline = load_pipeline_dir(
+            pipeline_dir,
+            feature_flag_overrides=feature_flag_overrides,
+            prerequisite_resolution=self._prerequisite_resolution,
+        )
         self._pipeline_identity = self._build_pipeline_identity(pipeline_dir)
         self._observability = PipelineObservability(
             pipeline_name=self._loaded.name,
@@ -458,28 +493,6 @@ class PipelineRunner:
         self._agent_pause_event = asyncio.Event()
         self._agent_pause_event.set()
 
-        # Sidecar lives at <projects>/<cwd>/<session_id>/pipeline/ — nested
-        # under the session directory (main's directory-format session layout)
-        # rather than the legacy sibling <session_id>.pipeline/ that pre-dated
-        # the directory format. SessionStorage.session_dir is the canonical
-        # accessor for <projects>/<cwd>/<session_id>/.
-        v2_session_dir = _storage_method(session_storage, "v2_session_dir")
-        session_dir = _storage_method(session_storage, "session_dir")
-        raw_session_dir = None
-        ensure_v2_session_dir = _storage_method(session_storage, "ensure_v2_session_dir_for_new_session")
-        if callable(ensure_v2_session_dir):
-            raw_session_dir = ensure_v2_session_dir(self._cwd, session_id)
-        if raw_session_dir is None:
-            if callable(v2_session_dir):
-                raw_session_dir = v2_session_dir(self._cwd, session_id)
-                if raw_session_dir is None and callable(session_dir):
-                    raw_session_dir = self._writable_pipeline_sidecar_session_dir(session_dir(self._cwd, session_id))
-            elif callable(session_dir):
-                raw_session_dir = session_dir(self._cwd, session_id)
-        self.session = (
-            PipelineSession(Path(raw_session_dir) / "pipeline") if isinstance(raw_session_dir, (str, Path)) else None
-        )
-
         self._attempts: dict[str, Any] = {"next_attempt_number": 1, "items": {}}
         self._execution: dict[str, Any] = {}
         self._transcript_storage = None
@@ -502,6 +515,7 @@ class PipelineRunner:
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
+            tool_context_env_overrides=self._tool_context_env_overrides,
         )
         self._apply_telemetry_correlation(self._step_executor)
 
@@ -762,6 +776,31 @@ class PipelineRunner:
             return [item for item in result if isinstance(item, CleanupResource)]
         return []
 
+    @staticmethod
+    def _feature_flag_overrides_from_prerequisites(
+        prerequisite_resolution: dict[str, Any],
+    ) -> dict[str, bool] | None:
+        feature_flags = prerequisite_resolution.get("feature_flags")
+        if not isinstance(feature_flags, dict):
+            return None
+        overrides = {
+            name: enabled
+            for name, enabled in feature_flags.items()
+            if isinstance(name, str) and isinstance(enabled, bool)
+        }
+        return overrides or None
+
+    @staticmethod
+    def _env_overrides_from_prerequisites(prerequisite_resolution: dict[str, Any]) -> dict[str, str]:
+        raw_overrides = prerequisite_resolution.get("env_overrides")
+        if not isinstance(raw_overrides, dict):
+            return {}
+        return {str(key): str(value) for key, value in raw_overrides.items() if value is not None}
+
+    def _sidecar_prerequisites_metadata(self) -> dict[str, Any]:
+        raw_resolution = getattr(self, "_prerequisite_resolution", {})
+        return dict(raw_resolution) if isinstance(raw_resolution, dict) else {}
+
     def _build_pipeline_identity(self, pipeline_dir: Path) -> PipelineIdentity:
         yaml_path = pipeline_dir / "pipeline.yaml"
         digest = hashlib.sha256(yaml_path.read_bytes()).hexdigest()
@@ -845,6 +884,7 @@ class PipelineRunner:
         metadata_kwargs: dict[str, Any] = {
             "attempts": dict(self._attempts),
             "normal_handoff": normal_handoff,
+            "prerequisites": self._sidecar_prerequisites_metadata(),
         }
         if self._execution:
             metadata_kwargs["execution"] = dict(self._execution)
@@ -1189,10 +1229,14 @@ class PipelineRunner:
         preserved_conclusions = restart.get("preserved_conclusions")
         if not isinstance(preserved_conclusions, dict):
             preserved_conclusions = {}
+        preserved_step_conclusions = restart.get("preserved_step_conclusions")
+        if not isinstance(preserved_step_conclusions, dict):
+            preserved_step_conclusions = {}
         rollback_input = _deserialize_pipeline_input_content(restart.get("rollback_input"))
         return RestartInfo(
             start_from_step=start_from_step,
             preserved_conclusions=preserved_conclusions,
+            preserved_step_conclusions=preserved_step_conclusions,
             rollback_context=rollback_context,
             rollback_input=rollback_input,
         )
@@ -1747,6 +1791,7 @@ class PipelineRunner:
                 reason=reason,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         await self._try_save_sidecar("running", "save_running", save, step_id=current_step)
@@ -1769,6 +1814,7 @@ class PipelineRunner:
                 reason=reason,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         self._try_save_sidecar_sync("running", "save_running_sync", save, step_id=current_step)
@@ -1791,6 +1837,7 @@ class PipelineRunner:
                 reason="waiting for user input",
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         await self._try_save_sidecar("waiting_input", "save_waiting_input", save, step_id=current_step)
@@ -1813,6 +1860,7 @@ class PipelineRunner:
                 reason=reason,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         await self._try_save_sidecar("completed", "save_completed", save, step_id=current_step)
@@ -1836,6 +1884,7 @@ class PipelineRunner:
                 reason=reason,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         await self._try_save_sidecar("failed", "save_failed", save, step_id=current_step)
@@ -1859,6 +1908,7 @@ class PipelineRunner:
                 reason=reason,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         self._try_save_sidecar_sync("failed", "save_failed_sync", save, step_id=current_step)
@@ -1895,6 +1945,7 @@ class PipelineRunner:
                 reason=reason,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         self._try_save_sidecar_sync("user_aborted", "save_user_aborted_sync", save, step_id=current_step or None)
@@ -1918,6 +1969,7 @@ class PipelineRunner:
                 self._pipeline_identity,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         await self._try_save_sidecar("running", "save_rollback", save, step_id=from_step)
@@ -1941,6 +1993,7 @@ class PipelineRunner:
                 self._pipeline_identity,
                 execution=dict(self._execution) if self._execution else None,
                 attempts=dict(self._attempts),
+                prerequisites=self._sidecar_prerequisites_metadata(),
             )
 
         self._try_save_sidecar_sync("running", "save_rollback_sync", save, step_id=from_step)
@@ -2071,6 +2124,7 @@ class PipelineRunner:
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
+            tool_context_env_overrides=self._tool_context_env_overrides,
         )
         self._apply_telemetry_correlation(sub_context_executor)
         sub_context_dependencies = sub_context_executor._sub_context_dependencies(sub_spec)
@@ -2115,6 +2169,7 @@ class PipelineRunner:
                 memory_content_getter=self._memory_content_getter,
                 auto_trigger_skills=self._auto_trigger_skills,
                 surface=self._surface,
+                tool_context_env_overrides=self._tool_context_env_overrides,
             )
             self._apply_telemetry_correlation(step_executor)
             agent_context = step_executor.build_agent_loop_context(
@@ -3106,12 +3161,15 @@ class PipelineRunner:
                 state = self._persisted_parallel_candidate_state(idx)
             if state is None:
                 continue
-            preserved = {
-                k: v for k, v in state.get("conclusions", {}).items() if self._conclusion_is_before_step(k, target_step)
-            }
+            preserved, preserved_step_conclusions = self._preserved_candidate_conclusions(
+                sub_spec,
+                state,
+                target_step,
+            )
             self._pending_candidate_restarts[idx] = RestartInfo(
                 start_from_step=target_step,
                 preserved_conclusions=preserved,
+                preserved_step_conclusions=preserved_step_conclusions,
                 rollback_context=rollback_input.display_text
                 if rollback_input is not None
                 else verdict.rollback_context,
@@ -3152,6 +3210,9 @@ class PipelineRunner:
                         context_snapshot,
                         {name: [] for name in field_names},
                     )
+                    for field_name, value in preserved.items():
+                        if field_name in field_names:
+                            sub_context.set_conclusion(field_name, value)
                     for stale_step in sub_spec.steps[target_index:]:
                         sub_context.mark_stale(stale_step.conclusion_field)
                     context_snapshot = sub_context.to_snapshot()
@@ -3162,6 +3223,8 @@ class PipelineRunner:
                     if rollback_input is not None
                     else verdict.rollback_context,
                 }
+                if preserved_step_conclusions:
+                    pending_restart["preserved_step_conclusions"] = preserved_step_conclusions
                 if rollback_input is not None and rollback_input.has_images:
                     pending_restart["rollback_input"] = _serialize_pipeline_input_content(rollback_input.content)
                 entry = {
@@ -3175,6 +3238,7 @@ class PipelineRunner:
                     "active_attempt_id": new_attempt["attempt_id"],
                     "transcript_id": new_attempt["transcript_id"],
                     "conclusions": preserved,
+                    "step_conclusions": preserved_step_conclusions,
                     "pending_restart": pending_restart,
                 }
                 existing_candidate = self._execution.get("candidates", {}).get(str(idx), {}).get("candidate")
@@ -3197,11 +3261,74 @@ class PipelineRunner:
         if not sub_spec:
             return False
         step_ids = [s.step_id for s in sub_spec.steps]
-        field_to_step = {s.conclusion_field: s.step_id for s in sub_spec.steps}
-        owning_step = field_to_step.get(conclusion_field)
-        if not owning_step or step_id not in step_ids:
+        if step_id not in step_ids:
             return False
-        return step_ids.index(owning_step) < step_ids.index(step_id)
+        target_index = step_ids.index(step_id)
+        writer_indices = [idx for idx, step in enumerate(sub_spec.steps) if step.conclusion_field == conclusion_field]
+        return bool(writer_indices) and max(writer_indices) < target_index
+
+    def _preserved_candidate_conclusions(
+        self,
+        sub_spec: Any,
+        state: dict[str, Any],
+        target_step: str | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if sub_spec is None or target_step is None:
+            return {}, {}
+        step_conclusions = state.get("step_conclusions")
+        if isinstance(step_conclusions, dict):
+            preserved_step_conclusions = self._step_conclusions_before_step(
+                sub_spec,
+                target_step,
+                step_conclusions,
+            )
+            return (
+                self._field_conclusions_from_step_conclusions(sub_spec, preserved_step_conclusions),
+                preserved_step_conclusions,
+            )
+        conclusions = state.get("conclusions")
+        if not isinstance(conclusions, dict):
+            return {}, {}
+        preserved = {
+            field: value for field, value in conclusions.items() if self._conclusion_is_before_step(field, target_step)
+        }
+        return preserved, self._infer_legacy_step_conclusions(sub_spec, preserved)
+
+    def _step_conclusions_before_step(
+        self,
+        sub_spec: Any,
+        target_step: str,
+        step_conclusions: dict[str, Any],
+    ) -> dict[str, Any]:
+        step_ids = [step.step_id for step in sub_spec.steps]
+        if target_step not in step_ids:
+            return {}
+        target_index = step_ids.index(target_step)
+        return {
+            step.step_id: step_conclusions[step.step_id]
+            for step in sub_spec.steps[:target_index]
+            if step.step_id in step_conclusions
+        }
+
+    @staticmethod
+    def _field_conclusions_from_step_conclusions(
+        sub_spec: Any,
+        step_conclusions: dict[str, Any],
+    ) -> dict[str, Any]:
+        conclusions: dict[str, Any] = {}
+        for step in sub_spec.steps:
+            if step.step_id in step_conclusions:
+                conclusions[step.conclusion_field] = step_conclusions[step.step_id]
+        return conclusions
+
+    @staticmethod
+    def _infer_legacy_step_conclusions(sub_spec: Any, conclusions: dict[str, Any]) -> dict[str, Any]:
+        step_conclusions: dict[str, Any] = {}
+        for conclusion_field, value in conclusions.items():
+            writers = [step for step in sub_spec.steps if step.conclusion_field == conclusion_field]
+            if len(writers) == 1:
+                step_conclusions[writers[0].step_id] = value
+        return step_conclusions
 
     async def _continue_from_current(
         self,
@@ -3986,6 +4113,7 @@ class PipelineRunner:
                 auto_trigger_skills=self._auto_trigger_skills,
                 surface=self._surface,
                 backup_service=self._backup_service,
+                tool_context_env_overrides=self._tool_context_env_overrides,
             )
             for _ in candidates
         ]
@@ -4043,6 +4171,9 @@ class PipelineRunner:
             conclusions = payload.get("conclusions")
             if conclusions is not None:
                 entry["conclusions"] = conclusions
+            step_conclusions = payload.get("step_conclusions")
+            if step_conclusions is not None:
+                entry["step_conclusions"] = step_conclusions
             active_state = self._active_candidates.get(i)
             pending_ask_resume = (
                 active_state.get(_PENDING_ASK_USER_QUESTION_RESUME_KEY) if isinstance(active_state, dict) else None
@@ -4064,6 +4195,7 @@ class PipelineRunner:
                 "active_attempt_id": state.get("active_attempt_id"),
                 "transcript_id": state.get("transcript_id"),
                 "conclusions": conclusions,
+                "step_conclusions": state.get("step_conclusions", {}),
             }
             self._execution.setdefault("candidates", {})[str(i)] = entry
             await self._save_running(step.step_id, reason="parallel candidate completed")
@@ -4083,6 +4215,7 @@ class PipelineRunner:
                 "active_attempt_id": active_attempt_id,
                 "transcript_id": state.get("transcript_id"),
                 "conclusions": state.get("conclusions", {}),
+                "step_conclusions": state.get("step_conclusions", {}),
             }
             if state.get("error") is not None:
                 entry["error"] = state["error"]
@@ -4104,6 +4237,9 @@ class PipelineRunner:
                 "task": asyncio.current_task(),
                 "current_sub_step": "",
                 "conclusions": restart_info.preserved_conclusions if restart_info else {},
+                "step_conclusions": restart_info.preserved_step_conclusions
+                if restart_info
+                else (resume_state or {}).get("step_conclusions", {}),
                 "name": candidate.get("name", _("Candidate {index}").format(index=i + 1)),
                 "agent_loop": None,
                 "sub_pipeline_id": (resume_state or {}).get("sub_pipeline_id") or default_sub_pipeline_id,
@@ -4148,6 +4284,7 @@ class PipelineRunner:
                     state["active_attempt_id"] = None
                     state["transcript_id"] = None
                 state["conclusions"] = payload.get("conclusions", state.get("conclusions", {}))
+                state["step_conclusions"] = payload.get("step_conclusions", state.get("step_conclusions", {}))
                 await save_candidate_execution_state(
                     i,
                     payload,
@@ -4158,6 +4295,7 @@ class PipelineRunner:
                 execute_streaming = sub_executors[i].execute_streaming
                 start_from_step = restart_info.start_from_step if restart_info else None
                 preserved_conclusions = restart_info.preserved_conclusions if restart_info else None
+                preserved_step_conclusions = restart_info.preserved_step_conclusions if restart_info else None
                 candidate_user_message = (
                     restart_info.rollback_input
                     if restart_info and restart_info.rollback_input is not None
@@ -4174,6 +4312,19 @@ class PipelineRunner:
                 has_var_keyword = any(
                     parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
                 )
+                stream_kwargs: dict[str, Any] = {
+                    "sub_spec": sub_spec,
+                    "candidate": candidate,
+                    "candidate_index": i,
+                    "parent_context": self.context,
+                    "session_id": self._session_id,
+                    "start_from_step": start_from_step,
+                    "preserved_conclusions": preserved_conclusions,
+                    "user_message": candidate_user_message,
+                    "parent_step_id": step.step_id,
+                }
+                if "preserved_step_conclusions" in parameters or has_var_keyword:
+                    stream_kwargs["preserved_step_conclusions"] = preserved_step_conclusions
                 supports_recovery_kwargs = "resume_state" in parameters or has_var_keyword
                 if supports_recovery_kwargs:
                     recovery_kwargs: dict[str, Any] = {
@@ -4185,30 +4336,9 @@ class PipelineRunner:
                         recovery_kwargs["precompleted_tools"] = candidate_precompleted_tools
                     if "resume_messages" in parameters or has_var_keyword:
                         recovery_kwargs["resume_messages"] = candidate_resume_messages
-                    event_stream = execute_streaming(
-                        sub_spec=sub_spec,
-                        candidate=candidate,
-                        candidate_index=i,
-                        parent_context=self.context,
-                        session_id=self._session_id,
-                        start_from_step=start_from_step,
-                        preserved_conclusions=preserved_conclusions,
-                        user_message=candidate_user_message,
-                        parent_step_id=step.step_id,
-                        **recovery_kwargs,
-                    )
+                    event_stream = execute_streaming(**stream_kwargs, **recovery_kwargs)
                 else:
-                    event_stream = execute_streaming(
-                        sub_spec=sub_spec,
-                        candidate=candidate,
-                        candidate_index=i,
-                        parent_context=self.context,
-                        session_id=self._session_id,
-                        start_from_step=start_from_step,
-                        preserved_conclusions=preserved_conclusions,
-                        user_message=candidate_user_message,
-                        parent_step_id=step.step_id,
-                    )
+                    event_stream = execute_streaming(**stream_kwargs)
                 async for event in event_stream:
                     if isinstance(event, PipelineEvent) and event.type == PipelineEventType.SUB_PIPELINE_STARTED:
                         state["sub_pipeline_id"] = event.data.get("sub_pipeline_id") or default_sub_pipeline_id
@@ -4224,6 +4354,10 @@ class PipelineRunner:
                     ):
                         conclusions_by_index[i] = event.data.get("conclusions", {})
                         state["conclusions"] = conclusions_by_index[i]
+                        state["step_conclusions"] = event.data.get(
+                            "step_conclusions",
+                            state.get("step_conclusions", {}),
+                        )
                         await save_candidate_completed(i, state, conclusions_by_index[i])
                     if (
                         isinstance(event, PipelineEvent)

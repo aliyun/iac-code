@@ -662,7 +662,7 @@ class Renderer:
         # Agent tools show their child tool tree in verbose only.
         if rec.children:
             return True
-        tool = self._tool_registry.get(rec.tool_name)
+        tool = self._tool_for_record(rec)
         if tool is None:
             return False
         if tool.render_tool_use_message(rec.tool_input, verbose=False) != tool.render_tool_use_message(
@@ -678,9 +678,12 @@ class Renderer:
         """True if any tool segment has content that differs between modes."""
         return any(s.kind == "tool" and s.tool and self._has_verbose_content(s.tool) for s in segments)
 
+    def _tool_for_record(self, rec: _ToolCallRecord):
+        return rec.renderer_tool or self._tool_registry.get(rec.tool_name)
+
     def _render_tool_header(self, rec: _ToolCallRecord) -> Text:
         """Render ``● ToolName(detail)`` line with optional child tool tree."""
-        tool = self._tool_registry.get(rec.tool_name)
+        tool = self._tool_for_record(rec)
 
         # Streaming preview: if the real tool input has not arrived yet but we
         # already accumulated some partial JSON, try to extract opt-in fields
@@ -775,7 +778,7 @@ class Renderer:
         if rec.children and not self._verbose:
             return None
 
-        tool = self._tool_registry.get(rec.tool_name)
+        tool = self._tool_for_record(rec)
         result_text = None
         if tool:
             result_text = tool.render_tool_result_message(
@@ -1241,6 +1244,7 @@ class Renderer:
                         tool_name=event.name,
                         tool_input={},
                         start_time=time.monotonic(),
+                        renderer_tool=event.renderer_tool,
                     )
                     tool_records[event.tool_use_id] = rec
                     segments.append(_Segment(kind="tool", tool=rec))

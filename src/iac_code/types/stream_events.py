@@ -58,6 +58,7 @@ class ToolUseStartEvent:
 
     tool_use_id: str
     name: str
+    renderer_tool: Any | None = field(default=None, repr=False, compare=False)
     type: Literal["tool_use_start"] = "tool_use_start"
 
 

@@ -31,6 +31,7 @@ class ToolResultBlock(BaseModel):
     tool_use_id: str
     content: str
     is_error: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ThinkingBlock(BaseModel):

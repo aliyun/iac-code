@@ -1,3 +1,6 @@
+import hashlib
+from pathlib import Path
+
 import pytest
 
 from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
@@ -28,6 +31,26 @@ class TestCompleteStepToolMeta:
         assert schema["type"] == "object"
         assert "conclusion" in schema["properties"]
         assert "conclusion" in schema["required"]
+
+    @pytest.mark.asyncio
+    async def test_completion_guard_message_key_renders_translated_message(self, step_config):
+        tool = CompleteStepTool(
+            step_config,
+            completion_guards=[
+                {
+                    "require_tool": "ask_user_question",
+                    "when_conclusion_field_equals": {"category": "chat"},
+                    "message_key": "intent_not_deployment_request",
+                }
+            ],
+            completion_guard_state={"successful_tools": set()},
+        )
+
+        result = await tool.execute(tool_input={"conclusion": {"category": "chat"}}, context=ToolContext())
+
+        assert result.is_error
+        assert "deployment or cloud resource request" in result.content
+        assert "intent_not_deployment_request" not in result.content
 
 
 class TestDynamicInputSchema:
@@ -218,6 +241,10 @@ class TestCompleteStepToolExecute:
 
 class TestCompletionGuards:
     @staticmethod
+    def _sha256(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def _deploying_success_guard() -> dict:
         return {
             "when_conclusion_field_equals": {"status": "success"},
@@ -258,6 +285,128 @@ class TestCompletionGuards:
                 "tool_result_records": list(result_records or []),
             },
         )
+
+    @staticmethod
+    def _review_guards() -> list[dict]:
+        return [
+            {
+                "when_conclusion_field_equals": {"validated": True},
+                "require_tool_result": {
+                    "tool": "ros_validate_template",
+                    "match_conclusion_field": "file_path",
+                    "match_result_field": "input.template_url",
+                },
+            },
+            {
+                "when_conclusion_field_equals": {"review_passed": True},
+                "require_tool_result": {
+                    "tool": "infraguard_scan",
+                    "latest_match": True,
+                    "after_tool_result": {
+                        "tool": "ros_validate_template",
+                        "match_conclusion_field": "file_path",
+                        "match_result_field": "input.template_url",
+                    },
+                    "match_conclusion_field": "file_path",
+                    "match_result_field": "file_path",
+                    "result_field_equals": {"passed": True, "blocking_findings": 0},
+                },
+            },
+        ]
+
+    @staticmethod
+    def _review_tool(result_records: list[dict] | None = None) -> CompleteStepTool:
+        config = StepConfig(
+            step_id="reviewing",
+            conclusion_field="review",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["file_path", "validated", "review_passed"],
+                "additionalProperties": False,
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "validated": {"type": "boolean"},
+                    "review_passed": {"type": "boolean"},
+                },
+            },
+        )
+        return CompleteStepTool(
+            config,
+            completion_guards=TestCompletionGuards._review_guards(),
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": list(result_records or []),
+            },
+        )
+
+    @staticmethod
+    def _selling_review_tool(result_records: list[dict] | None = None) -> CompleteStepTool:
+        from iac_code.pipeline.engine.loader import load_pipeline_dir
+
+        selling_dir = Path(__file__).resolve().parents[3] / "src" / "iac_code" / "pipeline" / "selling"
+        loaded = load_pipeline_dir(selling_dir, feature_flag_overrides={"enable_reviewing": True})
+        review_step = next(
+            step for step in loaded.sub_pipelines["evaluate_candidate"].steps if step.step_id == "reviewing"
+        )
+        config = StepConfig(
+            step_id=review_step.step_id,
+            conclusion_field=review_step.conclusion_field,
+            forward=review_step.forward,
+            conclusion_schema=review_step.conclusion_schema,
+        )
+        return CompleteStepTool(
+            config,
+            completion_guards=review_step.completion_guards,
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": list(result_records or []),
+            },
+        )
+
+    @staticmethod
+    def _validate_template_record(
+        file_path: str = "oss://bucket/template.yaml",
+        *,
+        result: dict | None = None,
+    ) -> dict:
+        return {
+            "tool_name": "ros_validate_template",
+            "input": {"template_url": file_path},
+            "result": {"Description": "Valid"} if result is None else result,
+            "is_error": False,
+        }
+
+    @staticmethod
+    def _infraguard_scan_record(
+        file_path: str = "oss://bucket/template.yaml",
+        *,
+        passed: bool = True,
+        blocking_findings: int = 0,
+        file_sha256: str | None = None,
+        file_content: str | None = None,
+    ) -> dict:
+        result = {
+            "file_path": file_path,
+            "passed": passed,
+            "blocking_findings": blocking_findings,
+            "findings": [],
+            "summary": {},
+            "selected_aspects": ["security"],
+            "expanded_policies": ["pack:aliyun:security"],
+        }
+        if file_sha256 is not None:
+            result["file_sha256"] = file_sha256
+        if file_content is not None:
+            result["file_content"] = file_content
+        return {
+            "tool_name": "infraguard_scan",
+            "input": {"file_path": file_path},
+            "result": result,
+            "is_error": False,
+        }
 
     @pytest.mark.asyncio
     async def test_required_tool_result_rejects_deploying_success_without_create_stack_result(self):
@@ -448,6 +597,596 @@ class TestCompletionGuards:
         assert result.is_error
         assert "clarification_choice" in result.content
         assert "clarification_text" in result.content
+
+    @pytest.mark.asyncio
+    async def test_review_guard_rejects_validated_conclusion_without_validate_template(self):
+        tool = self._review_tool([self._infraguard_scan_record()])
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": False,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "ros_validate_template" in result.content
+
+    @pytest.mark.asyncio
+    async def test_review_guard_rejects_review_passed_without_final_scan(self):
+        tool = self._review_tool([self._validate_template_record()])
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "infraguard_scan" in result.content
+
+    @pytest.mark.asyncio
+    async def test_review_guard_rejects_failed_scan_with_field_mismatch_message(self):
+        tool = self._review_tool(
+            [
+                self._validate_template_record(),
+                self._infraguard_scan_record(passed=False, blocking_findings=1),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "passed" in result.content
+        assert "True" in result.content
+        assert "False" in result.content
+        assert "Call infraguard_scan first" not in result.content
+
+    @pytest.mark.asyncio
+    async def test_review_guard_rejects_when_latest_scan_for_same_file_fails(self):
+        tool = self._review_tool(
+            [
+                self._validate_template_record(),
+                self._infraguard_scan_record(passed=True, blocking_findings=0),
+                self._infraguard_scan_record(passed=False, blocking_findings=1),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "passed" in result.content
+        assert "False" in result.content
+
+    @pytest.mark.asyncio
+    async def test_review_guard_rejects_scan_that_precedes_validate_template(self):
+        tool = self._review_tool(
+            [
+                self._infraguard_scan_record(passed=True, blocking_findings=0),
+                self._validate_template_record(),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "infraguard_scan" in result.content
+
+    @pytest.mark.asyncio
+    async def test_review_guard_rejects_wrong_scan_file_path(self):
+        tool = self._review_tool(
+            [
+                self._validate_template_record(),
+                self._infraguard_scan_record("oss://bucket/other.yaml"),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "file_path" in result.content
+
+    @pytest.mark.asyncio
+    async def test_review_guard_accepts_ros_validate_template_for_same_file(self):
+        tool = self._review_tool(
+            [
+                self._validate_template_record(),
+                self._infraguard_scan_record(),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_review_guard_accepts_validate_template_and_final_scan(self):
+        tool = self._review_tool(
+            [
+                self._validate_template_record(),
+                self._infraguard_scan_record(),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "oss://bucket/template.yaml",
+                    "validated": True,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_selling_review_guard_accepts_validate_template_response_without_is_success(self):
+        template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+        template_sha256 = self._sha256(template)
+        tool = self._selling_review_tool(
+            [
+                self._validate_template_record(result={"Description": "Valid"}),
+                self._infraguard_scan_record(file_sha256=template_sha256, file_content=template),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": template,
+                    "template_sha256": template_sha256,
+                    "file_path": "oss://bucket/template.yaml",
+                    "region": "cn-hangzhou",
+                    "description": "valid template",
+                    "validated": True,
+                    "review_passed": True,
+                    "review_issues": [],
+                    "selected_review_aspects": [{"key": "security", "reason": "baseline"}],
+                    "skipped_review_aspects": [],
+                    "resolved_infraguard_policies": ["pack:aliyun:security"],
+                    "infraguard_summary": {},
+                    "fix_summary": "validated",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_selling_review_guard_accepts_clean_initial_scan_without_validate_or_rescan(self):
+        template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+        template_sha256 = self._sha256(template)
+        tool = self._selling_review_tool(
+            [
+                self._infraguard_scan_record(
+                    "/tmp/template.yaml",
+                    passed=True,
+                    blocking_findings=0,
+                    file_sha256=template_sha256,
+                    file_content=template,
+                ),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": template,
+                    "template_sha256": template_sha256,
+                    "file_path": "/tmp/template.yaml",
+                    "region": "cn-hangzhou",
+                    "description": "clean template",
+                    "validated": True,
+                    "review_passed": True,
+                    "review_issues": [],
+                    "selected_review_aspects": [{"key": "security", "reason": "baseline"}],
+                    "skipped_review_aspects": [],
+                    "resolved_infraguard_policies": ["pack:aliyun:security"],
+                    "infraguard_summary": {"passed": True, "blocking_findings": 0},
+                    "fix_summary": "initial InfraGuard scan passed; no template edits were required",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
+    async def test_selling_review_guard_still_requires_validate_after_same_file_edit(self):
+        template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+        template_sha256 = self._sha256(template)
+        tool = self._selling_review_tool(
+            [
+                {
+                    "tool_name": "edit_file",
+                    "input": {"path": "/tmp/template.yaml"},
+                    "result": {"file_path": "/tmp/template.yaml"},
+                    "is_error": False,
+                },
+                self._infraguard_scan_record(
+                    "/tmp/template.yaml",
+                    passed=True,
+                    blocking_findings=0,
+                    file_sha256=template_sha256,
+                    file_content=template,
+                ),
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": template,
+                    "template_sha256": template_sha256,
+                    "file_path": "/tmp/template.yaml",
+                    "region": "cn-hangzhou",
+                    "description": "reviewed",
+                    "validated": True,
+                    "review_passed": True,
+                    "review_issues": [],
+                    "selected_review_aspects": [],
+                    "skipped_review_aspects": [],
+                    "resolved_infraguard_policies": [],
+                    "infraguard_summary": {},
+                    "fix_summary": "done",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "ros_validate_template" in result.content
+
+    @pytest.mark.asyncio
+    async def test_selling_review_guard_rejects_same_file_edit_after_final_scan(self):
+        template = "ROSTemplateFormatVersion: '2015-09-01'\n"
+        template_sha256 = self._sha256(template)
+        tool = self._selling_review_tool(
+            [
+                self._validate_template_record("/tmp/template.yaml"),
+                self._infraguard_scan_record(
+                    "/tmp/template.yaml",
+                    passed=True,
+                    blocking_findings=0,
+                    file_sha256=template_sha256,
+                    file_content=template,
+                ),
+                {
+                    "tool_name": "edit_file",
+                    "input": {"path": "/tmp/template.yaml"},
+                    "result": {"file_path": "/tmp/template.yaml"},
+                    "is_error": False,
+                },
+            ]
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": template,
+                    "template_sha256": template_sha256,
+                    "file_path": "/tmp/template.yaml",
+                    "region": "cn-hangzhou",
+                    "description": "reviewed",
+                    "validated": True,
+                    "review_passed": True,
+                    "review_issues": [],
+                    "selected_review_aspects": [],
+                    "skipped_review_aspects": [],
+                    "resolved_infraguard_policies": [],
+                    "infraguard_summary": {},
+                    "fix_summary": "done",
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "edit_file" in result.content
+        assert "infraguard_scan" in result.content
+
+    @pytest.mark.asyncio
+    async def test_conclusion_sha256_guard_rejects_template_hash_mismatch(self):
+        config = StepConfig(
+            step_id="reviewing",
+            conclusion_field="template",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["template", "template_sha256", "review_passed"],
+                "additionalProperties": False,
+                "properties": {
+                    "template": {"type": "string"},
+                    "template_sha256": {"type": "string"},
+                    "review_passed": {"type": "boolean"},
+                },
+            },
+        )
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"review_passed": True},
+                    "require_conclusion_sha256": {
+                        "content_field": "template",
+                        "sha256_field": "template_sha256",
+                    },
+                }
+            ],
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "template": "actual template\n",
+                    "template_sha256": self._sha256("stale template\n"),
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "template_sha256" in result.content
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_rejects_template_hash_mismatch_with_scan(self):
+        template = "ROSTemplateFormatVersion: '2015-09-01'\n"
+        config = StepConfig(
+            step_id="reviewing",
+            conclusion_field="template",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["file_path", "template_sha256", "review_passed"],
+                "additionalProperties": False,
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "template_sha256": {"type": "string"},
+                    "review_passed": {"type": "boolean"},
+                },
+            },
+        )
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"review_passed": True},
+                    "require_tool_result": {
+                        "tool": "infraguard_scan",
+                        "match_fields": [
+                            {"conclusion_field": "file_path", "result_field": "file_path"},
+                            {"conclusion_field": "template_sha256", "result_field": "file_sha256"},
+                        ],
+                        "result_field_equals": {"passed": True, "blocking_findings": 0},
+                    },
+                }
+            ],
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": [
+                    {
+                        "tool_name": "infraguard_scan",
+                        "input": {"file_path": "template.yaml"},
+                        "result": {
+                            "file_path": "template.yaml",
+                            "file_sha256": self._sha256(template),
+                            "passed": True,
+                            "blocking_findings": 0,
+                        },
+                        "is_error": False,
+                    }
+                ],
+            },
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "template.yaml",
+                    "template_sha256": self._sha256("different template\n"),
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "template_sha256" in result.content
+
+    @pytest.mark.asyncio
+    async def test_required_tool_result_rejects_missing_required_result_fields(self):
+        template = "ROSTemplateFormatVersion: '2015-09-01'\n"
+        template_sha256 = self._sha256(template)
+        config = StepConfig(
+            step_id="reviewing",
+            conclusion_field="template",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["file_path", "template_sha256", "review_passed"],
+                "additionalProperties": False,
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "template_sha256": {"type": "string"},
+                    "review_passed": {"type": "boolean"},
+                },
+            },
+        )
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"review_passed": True},
+                    "require_tool_result": {
+                        "tool": "infraguard_scan",
+                        "match_fields": [
+                            {"conclusion_field": "file_path", "result_field": "file_path"},
+                            {"conclusion_field": "template_sha256", "result_field": "file_sha256"},
+                        ],
+                        "result_field_equals": {"passed": True, "blocking_findings": 0},
+                        "required_result_fields": ["selected_aspects", "expanded_policies"],
+                    },
+                }
+            ],
+            completion_guard_state={
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": [
+                    {
+                        "tool_name": "infraguard_scan",
+                        "input": {"file_path": "template.yaml"},
+                        "result": {
+                            "file_path": "template.yaml",
+                            "file_sha256": template_sha256,
+                            "passed": True,
+                            "blocking_findings": 0,
+                        },
+                        "is_error": False,
+                    }
+                ],
+            },
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "conclusion": {
+                    "file_path": "template.yaml",
+                    "template_sha256": template_sha256,
+                    "review_passed": True,
+                }
+            },
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "selected_aspects" in result.content
+
+    @pytest.mark.asyncio
+    async def test_disallowed_file_mutation_matches_relative_and_absolute_paths(self, tmp_path):
+        config = StepConfig(
+            step_id="reviewing",
+            conclusion_field="template",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["file_path", "review_passed"],
+                "additionalProperties": False,
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "review_passed": {"type": "boolean"},
+                },
+            },
+        )
+        absolute_template = tmp_path / "template.yaml"
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"review_passed": True},
+                    "require_tool_result": {
+                        "tool": "infraguard_scan",
+                        "latest_match": True,
+                        "match_conclusion_field": "file_path",
+                        "match_result_field": "file_path",
+                        "result_field_equals": {"passed": True, "blocking_findings": 0},
+                        "disallow_tool_results_after_match": [
+                            {
+                                "tools": ["write_file"],
+                                "match_conclusion_field": "file_path",
+                                "match_result_field": "result.file_path",
+                                "message": "rerun validation",
+                            }
+                        ],
+                    },
+                }
+            ],
+            completion_guard_state={
+                "cwd": str(tmp_path),
+                "successful_tools": set(),
+                "tool_results": {},
+                "tool_result_records": [
+                    {
+                        "tool_name": "infraguard_scan",
+                        "input": {"file_path": "template.yaml"},
+                        "result": {"file_path": "template.yaml", "passed": True, "blocking_findings": 0},
+                        "is_error": False,
+                    },
+                    {
+                        "tool_name": "write_file",
+                        "input": {"path": str(absolute_template)},
+                        "result": {"file_path": str(absolute_template)},
+                        "is_error": False,
+                    },
+                ],
+            },
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"file_path": "template.yaml", "review_passed": True}},
+            context=ToolContext(),
+        )
+
+        assert result.is_error
+        assert "rerun validation" in result.content
 
 
 class TestSchemaValidation:

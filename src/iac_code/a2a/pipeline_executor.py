@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import yaml
 from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 
@@ -51,7 +52,8 @@ from iac_code.pipeline.config import get_pipeline_name
 from iac_code.pipeline.engine.cleanup import CleanupLedger
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
-from iac_code.pipeline.engine.loader import load_pipeline_dir
+from iac_code.pipeline.engine.loader import _resolve_feature_flags, load_pipeline_dir
+from iac_code.pipeline.engine.prerequisites import inspect_prerequisites
 from iac_code.pipeline.engine.public_errors import public_error
 from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
@@ -398,7 +400,16 @@ class IacCodeA2APipelineExecutor:
                     )
                 if selected.pipeline is not pipeline:
                     pipeline = selected.pipeline
+                    publisher = self._publisher(
+                        event_queue=event_queue,
+                        pipeline=pipeline,
+                        task_id=task_id,
+                        context_id=context_id,
+                        session_id=ctx.session_id,
+                        cwd=cwd,
+                    )
                     pipeline_runtime.pipeline = pipeline
+                    pipeline_runtime.publisher = publisher
                     self._task_store.mirror_context(ctx)
                 stream = selected.stream
                 ctx.active_task_id = task.task_id
@@ -947,8 +958,19 @@ class IacCodeA2APipelineExecutor:
         session_storage: SessionStorage,
         resume_from_sidecar: bool = True,
     ) -> Any:
+        pipeline_name = get_pipeline_name()
+        prerequisite_resolution = self._inspect_pipeline_prerequisite_metadata(
+            pipeline_name=pipeline_name,
+            cwd=cwd,
+            session_id=session_id,
+            session_storage=session_storage,
+            resume_from_sidecar=resume_from_sidecar,
+        )
+        create_kwargs: dict[str, Any] = {}
+        if prerequisite_resolution is not None:
+            create_kwargs["prerequisite_resolution"] = prerequisite_resolution
         return create_pipeline(
-            get_pipeline_name(),
+            pipeline_name,
             provider_manager=runtime.provider_manager,
             base_tool_registry=runtime.tool_registry,
             session_storage=session_storage,
@@ -957,7 +979,63 @@ class IacCodeA2APipelineExecutor:
             resume_from_sidecar=resume_from_sidecar,
             surface="a2a",
             backup_service=self._backup_service,
+            **create_kwargs,
         )
+
+    def _inspect_pipeline_prerequisite_metadata(
+        self,
+        *,
+        pipeline_name: str,
+        cwd: str,
+        session_id: str,
+        session_storage: SessionStorage,
+        resume_from_sidecar: bool,
+    ) -> dict[str, Any] | None:
+        if resume_from_sidecar:
+            sidecar_metadata = self._sidecar_prerequisite_metadata(
+                cwd=cwd,
+                session_id=session_id,
+                session_storage=session_storage,
+            )
+            if sidecar_metadata is not None:
+                return sidecar_metadata
+
+        raw = self._load_pipeline_raw_config(pipeline_name)
+        raw_prerequisites = raw.get("prerequisites") or {}
+        if not isinstance(raw_prerequisites, dict):
+            raw_prerequisites = {}
+        raw_feature_flags = raw.get("feature_flags")
+        feature_flags = _resolve_feature_flags(raw_feature_flags if isinstance(raw_feature_flags, dict) else None)
+        resolution = inspect_prerequisites(raw_prerequisites, feature_flags=feature_flags)
+        return resolution.to_metadata()
+
+    def _sidecar_prerequisite_metadata(
+        self,
+        *,
+        cwd: str,
+        session_id: str,
+        session_storage: SessionStorage,
+    ) -> dict[str, Any] | None:
+        try:
+            raw_session_dir = session_storage.session_dir(cwd, session_id)
+            meta_path = Path(raw_session_dir) / "pipeline" / "meta.yaml"
+            if not meta_path.exists():
+                return None
+            raw = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            logger.debug("Failed to peek A2A pipeline sidecar prerequisites", exc_info=True)
+            return None
+        if not isinstance(raw, dict):
+            return None
+        metadata = raw.get("prerequisites")
+        return dict(metadata) if isinstance(metadata, dict) else None
+
+    def _load_pipeline_raw_config(self, pipeline_name: str) -> dict[str, Any]:
+        pipeline_dir = discover_pipelines().get(pipeline_name)
+        if pipeline_dir is None:
+            return {}
+        raw = yaml.safe_load((pipeline_dir / "pipeline.yaml").read_text(encoding="utf-8")) or {}
+        return raw if isinstance(raw, dict) else {}
 
     def _set_pipeline_telemetry_correlation(self, pipeline: Any, *, task_id: str, context_id: str) -> None:
         set_correlation = getattr(pipeline, "set_telemetry_correlation", None)

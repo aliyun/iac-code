@@ -264,6 +264,29 @@ def test_sanitize_public_artifact_payload_keys_are_case_insensitive() -> None:
     assert artifact == {"filename": "result.txt", "metadata": {"label": "safe"}}
 
 
+def test_sanitize_public_artifact_data_redacts_file_content_metadata() -> None:
+    artifact = sanitize_public_artifact_data(
+        {
+            "filename": "template.yaml",
+            "metadata": {
+                "file_content": "SECRET_TEMPLATE",
+                "fileContent": "SECRET_TEMPLATE_CAMEL",
+                "nested": {"file_content": "NESTED_SECRET_TEMPLATE"},
+            },
+        }
+    )
+
+    assert artifact == {
+        "filename": "template.yaml",
+        "metadata": {
+            "file_content": "[REDACTED]",
+            "fileContent": "[REDACTED]",
+            "nested": {"file_content": "[REDACTED]"},
+        },
+    }
+    assert "SECRET_TEMPLATE" not in str(artifact)
+
+
 def test_sanitize_public_tool_output_handles_artifacts_containers_and_sensitive_keys() -> None:
     output = sanitize_public_tool_output_data(
         {
@@ -286,6 +309,26 @@ def test_sanitize_public_tool_output_handles_artifacts_containers_and_sensitive_
         "api_key": "[REDACTED]",
         "note": "stored at [PATH]\nnext",
     }
+
+
+def test_sanitize_public_tool_output_redacts_artifact_file_content_metadata() -> None:
+    output = sanitize_public_tool_output_data(
+        {
+            "artifact": {
+                "filename": "template.yaml",
+                "content": "artifact payload should be omitted",
+                "metadata": {"file_content": "SECRET_TEMPLATE"},
+            }
+        }
+    )
+
+    assert output == {
+        "artifact": {
+            "filename": "template.yaml",
+            "metadata": {"file_content": "[REDACTED]"},
+        }
+    }
+    assert "SECRET_TEMPLATE" not in str(output)
 
 
 def test_sanitize_public_tool_output_relativizes_paths_under_public_roots() -> None:

@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from iac_code.utils.tool_result_redaction import redact_tool_result_file_content
+
 _MAX_CONTENT_BYTES = 4096
 
 
@@ -22,6 +24,13 @@ def _truncate(s: str, max_bytes: int = _MAX_CONTENT_BYTES) -> str:
 
 def _json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, default=str)
+
+
+def _redacted_tool_result_string(value: Any) -> str:
+    redacted = redact_tool_result_file_content(value)
+    if isinstance(redacted, str):
+        return redacted
+    return _json_dumps(redacted)
 
 
 def serialize_user_input(user_input: str) -> str:
@@ -55,11 +64,14 @@ def serialize_input_messages(messages: list) -> str:
                         }
                     )
                 elif btype == "tool_result":
+                    response = getattr(block, "text", None)
+                    if response is None or response == "":
+                        response = getattr(block, "content", "") or ""
                     parts.append(
                         {
                             "type": "tool_call_response",
                             "id": getattr(block, "tool_use_id", ""),
-                            "response": _truncate(getattr(block, "text", "") or ""),
+                            "response": _truncate(_redacted_tool_result_string(response)),
                         }
                     )
                 else:
@@ -117,8 +129,8 @@ def serialize_tool_arguments(arguments: dict | Any) -> str:
 def serialize_tool_result(result: Any) -> str:
     """Serialize tool call result to JSON string (truncated)."""
     if isinstance(result, str):
-        return _truncate(result)
+        return _truncate(_redacted_tool_result_string(result))
     content = getattr(result, "content", None)
     if content is not None:
-        return _truncate(str(content))
-    return _truncate(_json_dumps(result))
+        return _truncate(_redacted_tool_result_string(content))
+    return _truncate(_redacted_tool_result_string(result))

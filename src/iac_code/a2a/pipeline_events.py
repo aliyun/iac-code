@@ -1366,13 +1366,29 @@ def _artifact_from_spec(spec: Any, root: dict[str, Any]) -> dict[str, Any] | Non
     media_type = _artifact_spec_field(spec, "media_type") or _artifact_spec_field(spec, "mediaType") or "auto"
     if media_type == "auto":
         media_type = _media_type_for_filename(path)
+    role = _artifact_spec_field(spec, "role") or "final"
+    supersedes_path = path
+    supersedes_expression = _artifact_spec_field(spec, "supersedes_path") or _artifact_spec_field(
+        spec, "supersedesPath"
+    )
+    if supersedes_expression is not None:
+        resolved_supersedes_path = _resolve_artifact_expression(root, supersedes_expression)
+        if isinstance(resolved_supersedes_path, str):
+            supersedes_path = resolved_supersedes_path
 
     try:
         filename = artifact_filename_from_path(path)
     except UnsafeArtifactNameError:
         filename = "artifact.txt"
 
-    return {"filename": filename, "mediaType": media_type, "content": content}
+    return {
+        "filename": filename,
+        "mediaType": media_type,
+        "content": content,
+        "role": role,
+        "supersedesPath": sanitize_public_artifact_text(supersedes_path),
+        "supersedesKey": fingerprint_text(supersedes_path),
+    }
 
 
 def _artifact_spec_field(spec: Any, field_name: str) -> str | None:

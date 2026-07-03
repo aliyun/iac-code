@@ -48,6 +48,7 @@ class ToolCallRecord:
     children: list[SubAgentChild] | None = None
     start_time: float = 0.0
     progress_renderable: Any = None
+    renderer_tool: Any = None
 
 
 @dataclass
@@ -115,6 +116,7 @@ class StreamAccumulator:
                 tool_name=event.name,
                 tool_input={},
                 start_time=time.monotonic(),
+                renderer_tool=event.renderer_tool,
             )
             self.tool_records[event.tool_use_id] = rec
             self.segments.append(RenderSegment(kind="tool", tool=rec))

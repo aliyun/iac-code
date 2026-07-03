@@ -14,6 +14,7 @@ from iac_code.utils.state_io import write_text_no_follow
 
 DEFAULT_MAX_INLINE_CHARS = 50_000
 DEFAULT_PREVIEW_CHARS = 2_000
+EXTERNALIZED_RESULT_PATH_METADATA_KEY = "_iac_code_externalized_result_path"
 _SAFE_TOOL_USE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 

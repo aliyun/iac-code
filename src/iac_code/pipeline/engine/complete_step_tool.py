@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +28,75 @@ _SENSITIVE_VALIDATION_FIELD_PATTERN = re.compile(
     r"(?i)(auth|authorization|cookie|credential|credentials|passphrase|password|passwd|private[_-]?key|pwd|secret|"
     r"session|signature|token|api[_-]?key|access[_-]?key)"
 )
+
+_COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY = {
+    "reviewing_rerun_after_validate_template_write": (
+        "reviewing ran write_file/edit_file after ros_validate_template; "
+        "rerun ros_validate_template and infraguard_scan for the same file_path."
+    ),
+    "reviewing_validate_template_required": (
+        "reviewing must validate the repaired template with ros_validate_template for the same file_path."
+    ),
+    "reviewing_rerun_after_final_infraguard_write": (
+        "reviewing ran write_file/edit_file after the final InfraGuard scan; "
+        "rerun ros_validate_template and infraguard_scan for the same file_path."
+    ),
+    "reviewing_final_infraguard_required": (
+        "reviewing must finish with a passing InfraGuard scan for the same file_path."
+    ),
+    "intent_cloud_resource_clarification_required": (
+        "This input still lacks a clear cloud resource, deployment target, or operations constraint; "
+        "clarify with the user first."
+    ),
+    "intent_alibaba_cloud_only": (
+        "The current flow only supports Alibaba Cloud deployment requests; ask the user to change the target "
+        "to Alibaba Cloud or confirm that it should not be handled for now."
+    ),
+    "intent_low_confidence_clarification_required": (
+        "Low-confidence intent cannot be completed directly; clarify with the user first."
+    ),
+    "intent_not_deployment_request": (
+        "This input is not a deployment or cloud resource request; ask the user to provide a deployment target "
+        "or confirm that it should not be handled for now."
+    ),
+    "deploy_wait_create_complete": ("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+}
+_COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT = {text: key for key, text in _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.items()}
+
+
+def _completion_guard_message_from_key(key: str) -> str | None:
+    text = _COMPLETION_GUARD_MESSAGE_TEXT_BY_KEY.get(key)
+    return _(text) if text is not None else None
+
+
+def _completion_guard_message_i18n_markers() -> tuple[str, ...]:
+    """Keep YAML-selected completion guard messages visible to Babel."""
+    return (
+        _(
+            "reviewing ran write_file/edit_file after ros_validate_template; "
+            "rerun ros_validate_template and infraguard_scan for the same file_path."
+        ),
+        _("reviewing must validate the repaired template with ros_validate_template for the same file_path."),
+        _(
+            "reviewing ran write_file/edit_file after the final InfraGuard scan; "
+            "rerun ros_validate_template and infraguard_scan for the same file_path."
+        ),
+        _("reviewing must finish with a passing InfraGuard scan for the same file_path."),
+        _(
+            "This input still lacks a clear cloud resource, deployment target, or operations constraint; "
+            "clarify with the user first."
+        ),
+        _(
+            "The current flow only supports Alibaba Cloud deployment requests; ask the user to change the target "
+            "to Alibaba Cloud or confirm that it should not be handled for now."
+        ),
+        _("Low-confidence intent cannot be completed directly; clarify with the user first."),
+        _(
+            "This input is not a deployment or cloud resource request; ask the user to provide a deployment target "
+            "or confirm that it should not be handled for now."
+        ),
+        _("A successful deployment must wait until ros_deploy returns CREATE_COMPLETE."),
+    )
 
 
 class CompleteStepTool(Tool):
@@ -250,11 +321,15 @@ class CompleteStepTool(Tool):
 
             required_tool = guard.get("require_tool")
             required_tool_result = guard.get("require_tool_result")
+            required_conclusion_sha256 = guard.get("require_conclusion_sha256")
             required_field = guard.get("required_conclusion_field")
             required_any_of = guard.get("required_conclusion_any_of") or []
             successful_tools = self._completion_guard_state.get("successful_tools", set())
             if required_tool and required_tool not in successful_tools:
-                message = guard.get("message") or _("Clarification is required before completing the current step.")
+                message = self._completion_guard_message(
+                    guard,
+                    _("Clarification is required before completing the current step."),
+                )
                 return _(
                     "{message} Call {required_tool} first, then call complete_step after receiving the tool result."
                 ).format(
@@ -262,8 +337,9 @@ class CompleteStepTool(Tool):
                     required_tool=required_tool,
                 )
             if required_field and self._resolve_dotted(conclusion, required_field) in (None, "", [], {}):
-                message = guard.get("message") or _(
-                    "Clarification output is required before completing the current step."
+                message = self._completion_guard_message(
+                    guard,
+                    _("Clarification output is required before completing the current step."),
                 )
                 return _("{message} complete_step.conclusion must include {required_field}.").format(
                     message=message,
@@ -272,8 +348,9 @@ class CompleteStepTool(Tool):
             if required_any_of and all(
                 self._resolve_dotted(conclusion, field) in (None, "", [], {}) for field in required_any_of
             ):
-                message = guard.get("message") or _(
-                    "Clarification output is required before completing the current step."
+                message = self._completion_guard_message(
+                    guard,
+                    _("Clarification output is required before completing the current step."),
                 )
                 fields = _(" or ").join(str(field) for field in required_any_of)
                 return _("{message} complete_step.conclusion must include one of these fields: {fields}.").format(
@@ -284,10 +361,69 @@ class CompleteStepTool(Tool):
                 validation_error = self._validate_required_tool_result(
                     required_tool_result,
                     conclusion,
-                    guard.get("message"),
+                    self._completion_guard_message(guard, None),
                 )
                 if validation_error is not None:
                     return validation_error
+            if isinstance(required_conclusion_sha256, dict):
+                validation_error = self._validate_conclusion_sha256(
+                    required_conclusion_sha256,
+                    conclusion,
+                    self._completion_guard_message(guard, None),
+                )
+                if validation_error is not None:
+                    return validation_error
+        return None
+
+    @staticmethod
+    def _completion_guard_message(config: dict[str, Any], default: str | None) -> str | None:
+        message_key = config.get("message_key")
+        if isinstance(message_key, str) and message_key:
+            return _completion_guard_message_from_key(message_key) or message_key
+        message = config.get("message")
+        if isinstance(message, str) and message:
+            known_key = _COMPLETION_GUARD_MESSAGE_KEY_BY_TEXT.get(message)
+            if known_key is not None:
+                return _completion_guard_message_from_key(known_key)
+            return message
+        return default
+
+    def _validate_conclusion_sha256(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        message: str | None,
+    ) -> str | None:
+        content_field = str(requirement.get("content_field") or requirement.get("field") or "")
+        sha256_field = str(requirement.get("sha256_field") or "")
+        base_message = message or _("A conclusion content hash is required before completing the current step.")
+        if not content_field or not sha256_field:
+            return _("{message} Completion guard is missing content_field or sha256_field.").format(
+                message=base_message
+            )
+        content = self._resolve_dotted(conclusion, content_field)
+        expected = self._resolve_dotted(conclusion, sha256_field)
+        if not isinstance(content, str) or content == "":
+            return _("{message} complete_step.conclusion.{field} must be a non-empty string.").format(
+                message=base_message,
+                field=content_field,
+            )
+        if not isinstance(expected, str) or expected == "":
+            return _("{message} complete_step.conclusion.{field} must include the sha256 hash.").format(
+                message=base_message,
+                field=sha256_field,
+            )
+        actual = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if actual != expected.strip().lower():
+            return _(
+                "{message} complete_step.conclusion.{sha256_field} must equal the sha256 of "
+                "complete_step.conclusion.{content_field}; actual hash was {actual}."
+            ).format(
+                message=base_message,
+                sha256_field=sha256_field,
+                content_field=content_field,
+                actual=actual,
+            )
         return None
 
     def _validate_required_tool_result(
@@ -298,20 +434,52 @@ class CompleteStepTool(Tool):
     ) -> str | None:
         tool_name = str(requirement.get("tool") or "")
         actions = self._expected_actions(requirement)
+        expected_product = requirement.get("product")
         expected_success = requirement.get("is_success")
         status_in = {str(status) for status in requirement.get("status_in") or [] if status is not None}
-        match_conclusion_field = requirement.get("match_conclusion_field")
-        match_result_field = str(requirement.get("match_result_field") or "stack_id")
+        result_field_equals = requirement.get("result_field_equals") or {}
+        required_result_fields = requirement.get("required_result_fields") or []
         base_message = message or _("A successful tool result is required before completing the current step.")
 
         records = self._completion_guard_state.get("tool_result_records") or []
+        after_index = -1
+        after_requirement = requirement.get("after_tool_result")
+        if isinstance(after_requirement, dict):
+            after_match_index = self._latest_satisfied_tool_result_index(records, after_requirement, conclusion)
+            if after_match_index is None:
+                after_tool = str(after_requirement.get("tool") or _("the required tool"))
+                return _(
+                    "{message} Call {after_tool} first and wait for a successful result before calling {tool}."
+                ).format(
+                    message=base_message,
+                    after_tool=after_tool,
+                    tool=tool_name or _("the required tool"),
+                )
+            after_index = after_match_index
+        if bool(requirement.get("latest_match")):
+            return self._validate_latest_required_tool_result(
+                records,
+                requirement,
+                conclusion,
+                base_message,
+                after_index=after_index,
+            )
+
         mismatch_message: str | None = None
-        for record in records:
+        field_mismatch_message: str | None = None
+        for index, record in enumerate(records):
+            if index <= after_index:
+                continue
             if not isinstance(record, dict):
                 continue
             if tool_name and record.get("tool_name") != tool_name:
                 continue
             tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
+            if expected_product and not self._strings_equal_ignore_case(
+                self._first_string(tool_input, ("product", "Product")),
+                str(expected_product),
+            ):
+                continue
             if actions and self._first_string(tool_input, ("action", "Action")) not in actions:
                 continue
             if record.get("is_error"):
@@ -325,25 +493,46 @@ class CompleteStepTool(Tool):
                 status = self._status_from_result(result)
                 if status not in status_in:
                     continue
-            if isinstance(match_conclusion_field, str) and match_conclusion_field:
-                conclusion_value = self._resolve_dotted(conclusion, match_conclusion_field)
-                result_value = (
-                    self._stack_id_from_result(result)
-                    if match_result_field == "stack_id"
-                    else self._resolve_dotted(result, match_result_field)
-                )
-                if conclusion_value != result_value:
-                    mismatch_message = _(
-                        "{message} complete_step.conclusion.{field} must match the {tool} result value {value}."
+            field_mismatch = self._first_match_field_mismatch(requirement, conclusion, tool_input, result, tool_name)
+            if field_mismatch is not None:
+                mismatch_message = self._format_match_field_mismatch(base_message, field_mismatch)
+                continue
+            if isinstance(result_field_equals, dict):
+                failed_field = self._first_failed_result_field(result, result_field_equals)
+                if failed_field is not None:
+                    field, expected, actual = failed_field
+                    field_mismatch_message = _(
+                        "{message} The {tool} result field {field} must equal {expected}; actual value was {actual}."
                     ).format(
                         message=base_message,
-                        field=match_conclusion_field,
                         tool=tool_name or _("tool"),
-                        value=result_value or _("<missing>"),
+                        field=field,
+                        expected=expected,
+                        actual=actual,
                     )
                     continue
+            missing_required_field = self._first_missing_result_field(result, required_result_fields)
+            if missing_required_field is not None:
+                field_mismatch_message = _("{message} The {tool} result must include non-empty field {field}.").format(
+                    message=base_message,
+                    tool=tool_name or _("tool"),
+                    field=missing_required_field,
+                )
+                continue
+            disallowed_message = self._validate_no_disallowed_tool_results_after_match(
+                records,
+                requirement,
+                conclusion,
+                base_message,
+                matched_index=index,
+            )
+            if disallowed_message is not None:
+                field_mismatch_message = disallowed_message
+                continue
             return None
 
+        if field_mismatch_message is not None:
+            return field_mismatch_message
         if mismatch_message is not None:
             return mismatch_message
         status_hint = ""
@@ -366,6 +555,333 @@ class CompleteStepTool(Tool):
             status_hint=status_hint,
             success_hint=success_hint,
         )
+
+    def _latest_satisfied_tool_result_index(
+        self,
+        records: list[Any],
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+    ) -> int | None:
+        for index in range(len(records) - 1, -1, -1):
+            record = records[index]
+            if isinstance(record, dict) and self._tool_result_record_satisfies(record, requirement, conclusion):
+                return index
+        return None
+
+    def _tool_result_record_satisfies(
+        self,
+        record: dict[str, Any],
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+    ) -> bool:
+        tool_name = str(requirement.get("tool") or "")
+        actions = self._expected_actions(requirement)
+        expected_product = requirement.get("product")
+        expected_success = requirement.get("is_success")
+        status_in = {str(status) for status in requirement.get("status_in") or [] if status is not None}
+        result_field_equals = requirement.get("result_field_equals") or {}
+        required_result_fields = requirement.get("required_result_fields") or []
+
+        if tool_name and record.get("tool_name") != tool_name:
+            return False
+        tool_input = self._dict_value(record.get("input"))
+        if expected_product and not self._strings_equal_ignore_case(
+            self._first_string(tool_input, ("product", "Product")),
+            str(expected_product),
+        ):
+            return False
+        if actions and self._first_string(tool_input, ("action", "Action")) not in actions:
+            return False
+        if record.get("is_error"):
+            return False
+        result = record.get("result")
+        if not isinstance(result, dict):
+            return False
+        if expected_success is not None and self._bool_from_result(result) is not bool(expected_success):
+            return False
+        if status_in:
+            status = self._status_from_result(result)
+            if status not in status_in:
+                return False
+        if self._first_match_field_mismatch(requirement, conclusion, tool_input, result, tool_name) is not None:
+            return False
+        if isinstance(result_field_equals, dict) and self._first_failed_result_field(result, result_field_equals):
+            return False
+        if self._first_missing_result_field(result, required_result_fields) is not None:
+            return False
+        return True
+
+    def _validate_latest_required_tool_result(
+        self,
+        records: list[Any],
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        base_message: str,
+        *,
+        after_index: int,
+    ) -> str | None:
+        tool_name = str(requirement.get("tool") or "")
+        actions = self._expected_actions(requirement)
+        expected_product = requirement.get("product")
+        expected_success = requirement.get("is_success")
+        status_in = {str(status) for status in requirement.get("status_in") or [] if status is not None}
+        result_field_equals = requirement.get("result_field_equals") or {}
+        required_result_fields = requirement.get("required_result_fields") or []
+        mismatch_message: str | None = None
+
+        for index in range(len(records) - 1, after_index, -1):
+            record = records[index]
+            if not isinstance(record, dict):
+                continue
+            if tool_name and record.get("tool_name") != tool_name:
+                continue
+            tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
+            if expected_product and not self._strings_equal_ignore_case(
+                self._first_string(tool_input, ("product", "Product")),
+                str(expected_product),
+            ):
+                continue
+            if actions and self._first_string(tool_input, ("action", "Action")) not in actions:
+                continue
+            raw_result = record.get("result")
+            result = raw_result if isinstance(raw_result, dict) else {}
+            field_mismatch = self._first_match_field_mismatch(requirement, conclusion, tool_input, result, tool_name)
+            if field_mismatch is not None:
+                mismatch_message = self._format_match_field_mismatch(base_message, field_mismatch)
+                continue
+            if record.get("is_error") or not isinstance(raw_result, dict):
+                break
+            if expected_success is not None and self._bool_from_result(result) is not bool(expected_success):
+                break
+            if status_in:
+                status = self._status_from_result(result)
+                if status not in status_in:
+                    break
+            if isinstance(result_field_equals, dict):
+                failed_field = self._first_failed_result_field(result, result_field_equals)
+                if failed_field is not None:
+                    field, expected, actual = failed_field
+                    return _(
+                        "{message} The latest matching {tool} result field {field} must equal {expected}; "
+                        "actual value was {actual}."
+                    ).format(
+                        message=base_message,
+                        tool=tool_name or _("tool"),
+                        field=field,
+                        expected=expected,
+                        actual=actual,
+                    )
+            missing_required_field = self._first_missing_result_field(result, required_result_fields)
+            if missing_required_field is not None:
+                return _("{message} The latest matching {tool} result must include non-empty field {field}.").format(
+                    message=base_message,
+                    tool=tool_name or _("tool"),
+                    field=missing_required_field,
+                )
+            disallowed_message = self._validate_no_disallowed_tool_results_after_match(
+                records,
+                requirement,
+                conclusion,
+                base_message,
+                matched_index=index,
+            )
+            if disallowed_message is not None:
+                return disallowed_message
+            return None
+
+        if mismatch_message is not None:
+            return mismatch_message
+        return _("{message} Call {tool} first and wait for a successful result.").format(
+            message=base_message,
+            tool=tool_name or _("the required tool"),
+        )
+
+    def _validate_no_disallowed_tool_results_after_match(
+        self,
+        records: list[Any],
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        base_message: str,
+        *,
+        matched_index: int,
+    ) -> str | None:
+        raw_rules = requirement.get("disallow_tool_results_after_match") or []
+        if isinstance(raw_rules, dict):
+            rules = [raw_rules]
+        elif isinstance(raw_rules, list):
+            rules = [rule for rule in raw_rules if isinstance(rule, dict)]
+        else:
+            rules = []
+        if not rules:
+            return None
+
+        for record in records[matched_index + 1 :]:
+            if not isinstance(record, dict) or record.get("is_error"):
+                continue
+            record_tool_name = str(record.get("tool_name") or "")
+            tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
+            result = record.get("result") if isinstance(record.get("result"), dict) else {}
+            for rule in rules:
+                tool_names = self._string_set(rule.get("tool")) | self._string_set(rule.get("tools"))
+                if tool_names and record_tool_name not in tool_names:
+                    continue
+                match_conclusion_field = rule.get("match_conclusion_field")
+                match_result_field = str(rule.get("match_result_field") or "file_path")
+                if isinstance(match_conclusion_field, str) and match_conclusion_field:
+                    conclusion_value = self._resolve_dotted(conclusion, match_conclusion_field)
+                    result_value = self._resolve_match_result_field(tool_input, result, match_result_field)
+                    if not self._field_values_match(
+                        conclusion_value,
+                        result_value,
+                        conclusion_field=match_conclusion_field,
+                        result_field=match_result_field,
+                    ):
+                        continue
+                rule_message = self._completion_guard_message(rule, None)
+                if rule_message is not None:
+                    return rule_message.format(message=base_message, tool=record_tool_name or _("A write tool"))
+                return _(
+                    "{message} {tool} ran after the required validation result for the same target; "
+                    "rerun the required validation before completing the step."
+                ).format(message=base_message, tool=record_tool_name or _("A write tool"))
+        return None
+
+    @classmethod
+    def _resolve_match_result_field(
+        cls,
+        tool_input: dict[str, Any],
+        result: dict[str, Any],
+        match_result_field: str,
+    ) -> Any:
+        if match_result_field == "stack_id":
+            return cls._stack_id_from_result(result)
+        source = {"input": tool_input, "result": result}
+        value = cls._resolve_dotted(source, match_result_field)
+        if value is not None:
+            return value
+        return cls._resolve_dotted(result, match_result_field)
+
+    def _first_match_field_mismatch(
+        self,
+        requirement: dict[str, Any],
+        conclusion: dict[str, Any],
+        tool_input: dict[str, Any],
+        result: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any] | None:
+        for field_spec in self._match_field_specs(requirement):
+            conclusion_field = field_spec["conclusion_field"]
+            result_field = field_spec["result_field"]
+            conclusion_value = self._resolve_dotted(conclusion, conclusion_field)
+            result_value = self._resolve_match_result_field(tool_input, result, result_field)
+            if self._field_values_match(
+                conclusion_value,
+                result_value,
+                conclusion_field=conclusion_field,
+                result_field=result_field,
+            ):
+                continue
+            return {
+                "conclusion_field": conclusion_field,
+                "result_field": result_field,
+                "result_value": result_value,
+                "tool_name": tool_name,
+            }
+        return None
+
+    @staticmethod
+    def _match_field_specs(requirement: dict[str, Any]) -> list[dict[str, str]]:
+        specs: list[dict[str, str]] = []
+        match_conclusion_field = requirement.get("match_conclusion_field")
+        if isinstance(match_conclusion_field, str) and match_conclusion_field:
+            specs.append(
+                {
+                    "conclusion_field": match_conclusion_field,
+                    "result_field": str(requirement.get("match_result_field") or "stack_id"),
+                }
+            )
+        raw_specs = requirement.get("match_fields") or []
+        if isinstance(raw_specs, dict):
+            raw_specs = [raw_specs]
+        if isinstance(raw_specs, list):
+            for raw_spec in raw_specs:
+                if not isinstance(raw_spec, dict):
+                    continue
+                conclusion_field = raw_spec.get("conclusion_field") or raw_spec.get("match_conclusion_field")
+                result_field = raw_spec.get("result_field") or raw_spec.get("match_result_field")
+                if isinstance(conclusion_field, str) and conclusion_field:
+                    specs.append(
+                        {
+                            "conclusion_field": conclusion_field,
+                            "result_field": str(result_field or "stack_id"),
+                        }
+                    )
+        return specs
+
+    @staticmethod
+    def _format_match_field_mismatch(base_message: str, mismatch: dict[str, Any]) -> str:
+        return _("{message} complete_step.conclusion.{field} must match the {tool} result value {value}.").format(
+            message=base_message,
+            field=mismatch["conclusion_field"],
+            tool=mismatch["tool_name"] or _("tool"),
+            value=mismatch["result_value"] or _("<missing>"),
+        )
+
+    def _field_values_match(
+        self,
+        conclusion_value: Any,
+        result_value: Any,
+        *,
+        conclusion_field: str,
+        result_field: str,
+    ) -> bool:
+        if conclusion_value == result_value:
+            return True
+        if not isinstance(conclusion_value, str) or not isinstance(result_value, str):
+            return False
+        if not self._path_field(conclusion_field) and not self._path_field(result_field):
+            return False
+        cwd = self._completion_guard_state.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            return False
+        return self._canonical_local_path(conclusion_value, cwd) == self._canonical_local_path(result_value, cwd)
+
+    @staticmethod
+    def _path_field(field: str) -> bool:
+        normalized = field.lower()
+        return "path" in normalized or "templateurl" in normalized
+
+    @staticmethod
+    def _canonical_local_path(value: str, cwd: str) -> str:
+        if "://" in value:
+            return value
+        expanded = os.path.expandvars(os.path.expanduser(value))
+        if not os.path.isabs(expanded):
+            expanded = os.path.join(cwd, expanded)
+        return os.path.normcase(os.path.realpath(os.path.abspath(expanded)))
+
+    @classmethod
+    def _first_failed_result_field(
+        cls,
+        result: dict[str, Any],
+        result_field_equals: dict[str, Any],
+    ) -> tuple[str, Any, Any] | None:
+        for field, expected in result_field_equals.items():
+            actual = cls._resolve_dotted(result, field)
+            if actual != expected:
+                return field, expected, actual
+        return None
+
+    @classmethod
+    def _first_missing_result_field(cls, result: dict[str, Any], required_fields: Any) -> str | None:
+        if not isinstance(required_fields, list):
+            return None
+        for field in required_fields:
+            if not isinstance(field, str) or not field:
+                continue
+            if cls._resolve_dotted(result, field) in (None, "", [], {}):
+                return field
+        return None
 
     def validate_completion_input(self, tool_input: dict[str, Any]) -> str | None:
         """Validate a complete_step input without mutating retry counters."""
@@ -397,11 +913,47 @@ class CompleteStepTool(Tool):
             return False
 
         user_patterns = guard.get("when_user_message_matches_any") or []
-        if user_patterns and any(self._matches(pattern, self._user_message) for pattern in user_patterns):
-            return True
-
         conclusion_equals = guard.get("when_conclusion_field_equals") or {}
-        return any(self._resolve_dotted(conclusion, field) == value for field, value in conclusion_equals.items())
+        applies = bool(user_patterns and any(self._matches(pattern, self._user_message) for pattern in user_patterns))
+        applies = applies or any(
+            self._resolve_dotted(conclusion, field) == value for field, value in conclusion_equals.items()
+        )
+        if not applies:
+            return False
+
+        when_tool_result_exists = guard.get("when_tool_result_exists")
+        if isinstance(when_tool_result_exists, dict) and not self._matching_tool_result_exists(
+            when_tool_result_exists,
+            conclusion,
+        ):
+            return False
+        return True
+
+    def _matching_tool_result_exists(self, requirement: dict[str, Any], conclusion: dict[str, Any]) -> bool:
+        tool_names = self._string_set(requirement.get("tool")) | self._string_set(requirement.get("tools"))
+        match_conclusion_field = requirement.get("match_conclusion_field")
+        match_result_field = str(requirement.get("match_result_field") or "file_path")
+        records = self._completion_guard_state.get("tool_result_records") or []
+        for record in records:
+            if not isinstance(record, dict) or record.get("is_error"):
+                continue
+            record_tool_name = str(record.get("tool_name") or "")
+            if tool_names and record_tool_name not in tool_names:
+                continue
+            if isinstance(match_conclusion_field, str) and match_conclusion_field:
+                tool_input = record.get("input") if isinstance(record.get("input"), dict) else {}
+                result = record.get("result") if isinstance(record.get("result"), dict) else {}
+                conclusion_value = self._resolve_dotted(conclusion, match_conclusion_field)
+                result_value = self._resolve_match_result_field(tool_input, result, match_result_field)
+                if not self._field_values_match(
+                    conclusion_value,
+                    result_value,
+                    conclusion_field=match_conclusion_field,
+                    result_field=match_result_field,
+                ):
+                    continue
+            return True
+        return False
 
     @staticmethod
     def _validate_candidate_limit(conclusion: dict) -> str | None:
@@ -482,6 +1034,12 @@ class CompleteStepTool(Tool):
             if isinstance(value, str) and value:
                 return value
         return None
+
+    @staticmethod
+    def _strings_equal_ignore_case(left: str | None, right: str | None) -> bool:
+        if left is None or right is None:
+            return left == right
+        return left.lower() == right.lower()
 
     @classmethod
     def _expected_actions(cls, requirement: dict[str, Any]) -> set[str]:

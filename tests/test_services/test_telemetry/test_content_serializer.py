@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from iac_code.providers.base import ContentBlock, Message
 from iac_code.services.telemetry.content_serializer import (
     serialize_input_messages,
     serialize_output_messages,
@@ -12,6 +13,7 @@ from iac_code.services.telemetry.content_serializer import (
     serialize_tool_definitions,
     serialize_tool_result,
 )
+from iac_code.tools.result_storage import ResultStorage
 
 
 @dataclass
@@ -37,7 +39,7 @@ class FakeToolDef:
 
 @dataclass
 class FakeToolResult:
-    content: str
+    content: Any
 
 
 def test_serialize_input_messages_text():
@@ -72,6 +74,86 @@ def test_serialize_input_messages_tool_result():
     assert part["type"] == "tool_call_response"
     assert part["id"] == "t1"
     assert part["response"] == "result output"
+
+
+def test_serialize_input_messages_tool_result_redacts_embedded_file_content():
+    blocks = [
+        FakeContentBlock(
+            type="tool_result",
+            tool_use_id="t1",
+            text=json.dumps(
+                {
+                    "file_content": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n",
+                    "file_sha256": "sha256-value",
+                },
+                ensure_ascii=False,
+            ),
+        ),
+    ]
+    result = json.loads(serialize_input_messages([FakeMessage(role="tool", content=blocks)]))
+
+    response = result[0]["parts"][0]["response"]
+    assert "ROSTemplateFormatVersion" not in response
+    assert "file_content" in response
+    assert "sha256-value" in response
+
+
+def test_serialize_input_messages_tool_result_uses_provider_content_field():
+    result = json.loads(
+        serialize_input_messages(
+            [
+                Message(
+                    role="user",
+                    content=[
+                        ContentBlock(
+                            type="tool_result",
+                            tool_use_id="t1",
+                            content=json.dumps(
+                                {
+                                    "file_content": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n",
+                                    "file_sha256": "sha256-value",
+                                },
+                                ensure_ascii=False,
+                            ),
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    response = result[0]["parts"][0]["response"]
+    assert response
+    assert "ROSTemplateFormatVersion" not in response
+    assert "file_content" in response
+    assert "sha256-value" in response
+
+
+def test_serialize_input_messages_tool_result_redacts_externalized_file_content_preview(tmp_path):
+    raw_result = json.dumps(
+        {
+            "file_sha256": "sha256-value",
+            "file_content": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n" + ("X" * 500),
+        },
+        ensure_ascii=False,
+    )
+    preview = (
+        ResultStorage(
+            storage_dir=str(tmp_path / "tool-results"),
+            max_inline_chars=10,
+            preview_chars=180,
+        )
+        .process("t1", raw_result)
+        .content
+    )
+    assert "ROSTemplateFormatVersion" in preview
+    blocks = [FakeContentBlock(type="tool_result", tool_use_id="t1", text=preview)]
+    result = json.loads(serialize_input_messages([FakeMessage(role="tool", content=blocks)]))
+
+    response = result[0]["parts"][0]["response"]
+    assert "ROSTemplateFormatVersion" not in response
+    assert "file_content" in response
+    assert "sha256-value" in response
 
 
 def test_serialize_output_messages():
@@ -109,6 +191,41 @@ def test_serialize_tool_arguments_dict():
 def test_serialize_tool_result_object():
     result = serialize_tool_result(FakeToolResult(content="output"))
     assert "output" in result
+
+
+def test_serialize_tool_result_redacts_embedded_file_content():
+    result = serialize_tool_result(
+        FakeToolResult(
+            content=json.dumps(
+                {
+                    "file_path": "templates/demo.yml",
+                    "file_sha256": "sha256-value",
+                    "file_content": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n",
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+
+    assert "ROSTemplateFormatVersion" not in result
+    assert "file_content" in result
+    assert "sha256-value" in result
+
+
+def test_serialize_tool_result_redacts_non_string_content():
+    result = serialize_tool_result(
+        FakeToolResult(
+            content={
+                "file_path": "templates/demo.yml",
+                "file_sha256": "sha256-value",
+                "file_content": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n",
+            }
+        )
+    )
+
+    assert "ROSTemplateFormatVersion" not in result
+    assert "file_content" in result
+    assert "sha256-value" in result
 
 
 def test_truncation_for_large_content():

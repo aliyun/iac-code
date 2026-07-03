@@ -614,11 +614,12 @@ msgstr ""
 "  Documentación: https://aliyun.github.io/iac-"
 "code/es/docs/configuration/authentication\n"
 
-#: src/iac_code/cli/headless.py src/iac_code/ui/renderer.py
-#: src/iac_code/ui/repl.py
+#: src/iac_code/cli/headless.py
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#: src/iac_code/ui/renderer.py src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Error: {error}"
-msgstr "Error: {error}"
+msgstr "Se produjo un error: {error}"
 
 #: src/iac_code/cli/headless.py src/iac_code/ui/repl.py
 #, python-brace-format
@@ -2954,6 +2955,10 @@ msgstr "Estimación de costo ROS"
 msgid "ROS Deploy"
 msgstr "Despliegue de ROS"
 
+#: src/iac_code/pipeline/display_names.py
+msgid "InfraGuard scan"
+msgstr "Escaneo de InfraGuard"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -3113,6 +3118,85 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
+"reviewing ran write_file/edit_file after ros_validate_template; rerun "
+"ros_validate_template and infraguard_scan for the same file_path."
+msgstr ""
+"reviewing ejecutó write_file/edit_file después de ros_validate_template; "
+"vuelve a ejecutar ros_validate_template e infraguard_scan para el mismo "
+"file_path."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"reviewing must validate the repaired template with ros_validate_template "
+"for the same file_path."
+msgstr ""
+"reviewing debe validar la plantilla reparada con ros_validate_template "
+"para el mismo file_path."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"reviewing ran write_file/edit_file after the final InfraGuard scan; rerun"
+" ros_validate_template and infraguard_scan for the same file_path."
+msgstr ""
+"reviewing ejecutó write_file/edit_file después del escaneo final de "
+"InfraGuard; vuelve a ejecutar ros_validate_template e infraguard_scan "
+"para el mismo file_path."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"reviewing must finish with a passing InfraGuard scan for the same "
+"file_path."
+msgstr ""
+"reviewing debe finalizar con un escaneo InfraGuard aprobado para el mismo"
+" file_path."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"This input still lacks a clear cloud resource, deployment target, or "
+"operations constraint; clarify with the user first."
+msgstr ""
+"A esta entrada todavía le falta un recurso de nube, un destino de "
+"despliegue o una restricción operativa claros; aclara esto primero con el"
+" usuario."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"The current flow only supports Alibaba Cloud deployment requests; ask the"
+" user to change the target to Alibaba Cloud or confirm that it should not"
+" be handled for now."
+msgstr ""
+"El flujo actual solo admite solicitudes de despliegue en Alibaba Cloud; "
+"pide al usuario que cambie el destino a Alibaba Cloud o confirme que no "
+"debe gestionarse por ahora."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"Low-confidence intent cannot be completed directly; clarify with the user"
+" first."
+msgstr ""
+"Una intención de baja confianza no puede completarse directamente; aclara"
+" esto primero con el usuario."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"This input is not a deployment or cloud resource request; ask the user to"
+" provide a deployment target or confirm that it should not be handled for"
+" now."
+msgstr ""
+"Esta entrada no es una solicitud de despliegue ni de recursos de nube; "
+"pide al usuario que proporcione un destino de despliegue o confirme que "
+"no debe gestionarse por ahora."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
+"A successful deployment must wait until ros_deploy returns "
+"CREATE_COMPLETE."
+msgstr ""
+"Un despliegue correcto debe esperar hasta que ros_deploy devuelva "
+"CREATE_COMPLETE."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid ""
 "Complete the current step by calling this tool to submit the conclusion. "
 "If you need to roll back to an earlier step, set rollback_request."
 msgstr ""
@@ -3212,23 +3296,68 @@ msgstr ""
 "{fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A conclusion content hash is required before completing the current step."
+msgstr ""
+"Se requiere el hash del contenido de la conclusión antes de completar el "
+"paso actual."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} Completion guard is missing content_field or sha256_field."
+msgstr "{message} La guarda de finalización no tiene content_field o sha256_field."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} complete_step.conclusion.{field} must be a non-empty string."
+msgstr "{message} complete_step.conclusion.{field} debe ser una cadena no vacía."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} complete_step.conclusion.{field} must include the sha256 hash."
+msgstr "{message} complete_step.conclusion.{field} debe incluir el hash sha256."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{sha256_field} must equal the sha256 "
+"of complete_step.conclusion.{content_field}; actual hash was {actual}."
+msgstr ""
+"{message} complete_step.conclusion.{sha256_field} debe ser igual al "
+"sha256 de complete_step.conclusion.{content_field}; el hash real fue "
+"{actual}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "A successful tool result is required before completing the current step."
 msgstr ""
 "Se requiere un resultado de herramienta correcto antes de completar el "
 "paso actual."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-#, python-brace-format
-msgid ""
-"{message} complete_step.conclusion.{field} must match the {tool} result "
-"value {value}."
-msgstr ""
-"{message} complete_step.conclusion.{field} debe coincidir con el valor "
-"{value} del resultado de {tool}."
+msgid "the required tool"
+msgstr "la herramienta requerida"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "<missing>"
-msgstr "<faltante>"
+#, python-brace-format
+msgid ""
+"{message} Call {after_tool} first and wait for a successful result before"
+" calling {tool}."
+msgstr ""
+"{message} Llama primero a {after_tool} y espera un resultado correcto "
+"antes de llamar a {tool}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} The {tool} result field {field} must equal {expected}; actual "
+"value was {actual}."
+msgstr ""
+"{message} El campo {field} del resultado de {tool} debe ser igual a "
+"{expected}; el valor real fue {actual}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} The {tool} result must include non-empty field {field}."
+msgstr "{message} El resultado de {tool} debe incluir el campo no vacío {field}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -3255,8 +3384,54 @@ msgstr ""
 "correcto{status_hint}{success_hint}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
-msgid "the required tool"
-msgstr "la herramienta requerida"
+#, python-brace-format
+msgid ""
+"{message} The latest matching {tool} result field {field} must equal "
+"{expected}; actual value was {actual}."
+msgstr ""
+"{message} El campo {field} del último resultado coincidente de {tool} "
+"debe ser igual a {expected}; el valor real fue {actual}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} The latest matching {tool} result must include non-empty field "
+"{field}."
+msgstr ""
+"{message} El último resultado coincidente de {tool} debe incluir el campo"
+" no vacío {field}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "{message} Call {tool} first and wait for a successful result."
+msgstr "{message} Llama primero a {tool} y espera un resultado correcto."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "A write tool"
+msgstr "Una herramienta de escritura"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} {tool} ran after the required validation result for the same "
+"target; rerun the required validation before completing the step."
+msgstr ""
+"{message} {tool} se ejecutó después del resultado de validación requerido"
+" para el mismo destino; vuelve a ejecutar la validación requerida antes "
+"de completar el paso."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid ""
+"{message} complete_step.conclusion.{field} must match the {tool} result "
+"value {value}."
+msgstr ""
+"{message} complete_step.conclusion.{field} debe coincidir con el valor "
+"{value} del resultado de {tool}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "<missing>"
+msgstr "<faltante>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -3323,6 +3498,116 @@ msgstr "Error en la copia de seguridad de la sesión."
 #, python-brace-format
 msgid "Candidate {index}"
 msgstr "Candidato {index}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "command timed out after {seconds} seconds"
+msgstr "El comando agotó el tiempo de espera tras {seconds} segundos"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Running {command}"
+msgstr "Ejecutando {command}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Finished {command}"
+msgstr "Finalizado {command}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Version check failed for {name}: {reason}"
+msgstr "La comprobación de versión de {name} falló: {reason}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Could not determine {name} version from output."
+msgstr "No se pudo determinar la versión de {name} a partir de la salida."
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "{name} version {version} is lower than required {minimum}."
+msgstr "La versión {version} de {name} es inferior a la requerida {minimum}."
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid ""
+"No download asset configured for platform {platform}/{architecture} in "
+"installer {installer}."
+msgstr ""
+"No hay ningún activo de descarga configurado para la plataforma "
+"{platform}/{architecture} en el instalador {installer}."
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "No usable download URL configured for installer {installer}."
+msgstr ""
+"No hay ninguna URL de descarga utilizable configurada para el instalador "
+"{installer}."
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "download asset {filename} is missing sha256"
+msgstr "al activo de descarga {filename} le falta sha256"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "failed to create install directory {path}: {error}"
+msgstr "no se pudo crear el directorio de instalación {path}: {error}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "failed to install {filename} to {path}: {error}"
+msgstr "no se pudo instalar {filename} en {path}: {error}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Downloading {filename}"
+msgstr "Descargando {filename}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "incomplete download for {filename}: expected {expected}, got {actual}"
+msgstr ""
+"descarga incompleta de {filename}: se esperaba {expected}, se obtuvo "
+"{actual}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "sha256 mismatch for {filename}: expected {expected}, got {actual}"
+msgstr ""
+"sha256 no coincide para {filename}: se esperaba {expected}, se obtuvo "
+"{actual}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Downloaded {filename}"
+msgstr "Descargado {filename}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Downloading {filename}: {percent} ({downloaded} / {total})"
+msgstr "Descargando {filename}: {percent} ({downloaded} / {total})"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "Downloading {filename}: {downloaded} downloaded"
+msgstr "Descargando {filename}: {downloaded} descargados"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "download failed: {error_type}"
+msgstr "descarga fallida: {error_type}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "exit code {returncode}"
+msgstr "código de salida {returncode}"
+
+#: src/iac_code/pipeline/engine/prerequisites.py
+#, python-brace-format
+msgid "{command} exited with {returncode}: {body}"
+msgstr "{command} terminó con {returncode}: {body}"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid "ECS instance"
@@ -3422,6 +3707,140 @@ msgstr "La ruta del archivo de plantilla no puede salir del directorio de trabaj
 #: src/iac_code/pipeline/engine/user_input.py
 msgid "[Image input]"
 msgstr "[Entrada de imagen]"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "error"
+msgstr "con error"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "passed"
+msgstr "aprobado"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#: src/iac_code/ui/repl.py
+msgid "failed"
+msgstr "fallido"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#: src/iac_code/ui/repl.py
+msgid "completed"
+msgstr "completado"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "InfraGuard CLI does not support --no-waivers"
+msgstr "La CLI de InfraGuard no admite --no-waivers"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "1 finding"
+msgstr "1 hallazgo"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "{count} findings"
+msgstr "{count} hallazgos"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "line {line}"
+msgstr "línea {line}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Reason: {reason}"
+msgstr "Motivo: {reason}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Recommendation: {recommendation}"
+msgstr "Recomendación: {recommendation}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Snippet: {snippet}"
+msgstr "Fragmento: {snippet}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "blocking {count}"
+msgstr "{count} bloqueantes"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Command: {command}"
+msgstr "Comando: {command}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Status: {status}"
+msgstr "Estado: {status}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "File: {file_path}"
+msgstr "Archivo: {file_path}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Mode: {mode}"
+msgstr "Modo: {mode}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Exit code: {exit_code}"
+msgstr "Código de salida: {exit_code}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Ignore waivers: {value}"
+msgstr "Ignorar exenciones: {value}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Blocking severities: {severities}"
+msgstr "Severidades bloqueantes: {severities}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Blocking findings: {count}"
+msgstr "Hallazgos bloqueantes: {count}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Aspects: {aspects}"
+msgstr "Aspectos: {aspects}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "Policies:"
+msgstr "Políticas:"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "Summary:"
+msgstr "Resumen:"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Severity counts: {counts}"
+msgstr "Conteo por severidad: {counts}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+#, python-brace-format
+msgid "Stderr: {stderr}"
+msgstr "Error estándar: {stderr}"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "Findings:"
+msgstr "Hallazgos:"
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "No findings."
+msgstr "Sin hallazgos."
+
+#: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
+msgid "Run InfraGuard static scan and return structured JSON results."
+msgstr ""
+"Ejecuta un escaneo estático de InfraGuard y devuelve resultados JSON "
+"estructurados."
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 msgid "CIDR block overlapped"
@@ -4937,6 +5356,64 @@ msgid "No, always reject this tool"
 msgstr "No, rechazar siempre esta herramienta"
 
 #: src/iac_code/ui/repl.py
+msgid "Installing prerequisites..."
+msgstr "Instalando requisitos previos..."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Running: {command}"
+msgstr "Ejecutando: {command}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Done: {command}"
+msgstr "Completado: {command}"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Failed: {command}"
+msgstr "Falló: {command}"
+
+#: src/iac_code/ui/repl.py
+msgid "Downloading prerequisites..."
+msgstr "Descargando requisitos previos..."
+
+#: src/iac_code/ui/repl.py
+msgid "Initializing prerequisites..."
+msgstr "Inicializando requisitos previos..."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Installing prerequisites with {installer}..."
+msgstr "Instalando requisitos previos con {installer}..."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Download: {percent} ({downloaded} / {total})"
+msgstr "Descarga: {percent} ({downloaded} / {total})"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Download: {downloaded} downloaded"
+msgstr "Descarga: {downloaded} descargados"
+
+#: src/iac_code/ui/repl.py
+msgid "review step"
+msgstr "paso de revisión"
+
+#: src/iac_code/ui/repl.py
+msgid "Direct binary download"
+msgstr "Descarga binaria directa"
+
+#: src/iac_code/ui/repl.py
+msgid "Go install"
+msgstr "Instalación con Go"
+
+#: src/iac_code/ui/repl.py
+msgid "Homebrew"
+msgstr "Homebrew (gestor de paquetes)"
+
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Approve project MCP server {server!r} from {source}? [y/N] "
 msgstr "¿Aprobar el servidor MCP de proyecto {server!r} desde {source}? [y/N] "
@@ -5125,16 +5602,8 @@ msgstr ""
 "completados."
 
 #: src/iac_code/ui/repl.py
-msgid "failed"
-msgstr "fallido"
-
-#: src/iac_code/ui/repl.py
 msgid "in progress"
 msgstr "en curso"
-
-#: src/iac_code/ui/repl.py
-msgid "completed"
-msgstr "completado"
 
 #: src/iac_code/ui/repl.py
 msgid "skipped"
@@ -5165,6 +5634,45 @@ msgid "Detected rollback cleanup resources, but cleanup prompt injection failed.
 msgstr ""
 "Se detectaron recursos de limpieza de rollback, pero falló la inyección "
 "del prompt de limpieza."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"Pipeline prerequisite {name} is missing and no configured installer is "
+"usable; {feature} will be skipped for this run."
+msgstr ""
+"Falta el prerrequisito de pipeline {name} y no hay ningún instalador "
+"configurado utilizable; se omitirá {feature} en esta ejecución."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"Pipeline prerequisite {name} is missing; it is required for {feature}. "
+"Choose an installer or skip this feature for this run."
+msgstr ""
+"Falta el prerrequisito de pipeline {name}; es necesario para {feature}. "
+"Elige un instalador u omite esta función en esta ejecución."
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Skip {feature} for this run"
+msgstr "Omitir {feature} en esta ejecución"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"{feature} skipped\n"
+"Prerequisite {name} failed, so {feature} is disabled for this run.\n"
+"Reason: {reason}"
+msgstr ""
+"{feature} omitido\n"
+"El prerrequisito {name} falló, por lo que {feature} está deshabilitado en"
+" esta ejecución.\n"
+"Motivo: {reason}"
+
+#: src/iac_code/ui/repl.py
+msgid "configured feature"
+msgstr "función configurada"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -5260,11 +5768,6 @@ msgid ""
 msgstr ""
 "✎ Añadido a {target}\n"
 "  Dijiste: {user_msg}"
-
-#: src/iac_code/ui/repl.py
-#, python-brace-format
-msgid "Reason: {reason}"
-msgstr "Motivo: {reason}"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -6025,24 +6528,6 @@ msgstr "Se rechazó abrir un archivo no regular: {path}"
 #~ msgid "Resume a session by ID"
 #~ msgstr "Reanudar una sesión por ID"
 
-#~ msgid "sed in-place edit requires confirmation"
-#~ msgstr "La edición sed in situ requiere confirmación"
-
-#~ msgid "{n} more line{s}"
-#~ msgstr "{n} línea{s} más"
-
-#~ msgid "{n} message{s}"
-#~ msgstr "{n} mensaje{s}"
-
-#~ msgid "{n} minute{s} ago"
-#~ msgstr "hace {n} minuto{s}"
-
-#~ msgid "{n} hour{s} ago"
-#~ msgstr "hace {n} hora{s}"
-
-#~ msgid "{n} day{s} ago"
-#~ msgstr "hace {n} día{s}"
-
 #~ msgid "Project Memory Index"
 #~ msgstr "Índice de memoria del proyecto"
 
@@ -6240,4 +6725,10 @@ msgstr "Se rechazó abrir un archivo no regular: {path}"
 #~ "Nota: las imágenes no son compatibles"
 #~ " con el modo pipeline y se "
 #~ "ignorarán."
+
+#~ msgid "review"
+#~ msgstr "revisión"
+
+#~ msgid "feature"
+#~ msgstr "función"
 

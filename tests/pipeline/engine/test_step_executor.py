@@ -94,6 +94,26 @@ def _make_fake_agent_loop_class(events_to_yield):
     return FakeAgentLoop
 
 
+class _NamedTool(Tool):
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return self._name
+
+    @property
+    def input_schema(self) -> dict:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
+        return ToolResult.success("{}")
+
+
 class TestStepExecutorToolSetup:
     def test_complete_step_tool_registered(self, tmp_path):
         executor = _make_executor(tmp_path)
@@ -150,6 +170,37 @@ class TestStepExecutorToolSetup:
         tool_reg = executor._build_step_tools(step, ctx)
         assert tool_reg.get("dummy") is not None
         assert tool_reg.get("complete_step") is not None
+
+    def test_tools_include_can_register_pipeline_local_tools(self, tmp_path):
+        from iac_code.pipeline.engine.loader import load_pipeline_dir
+
+        selling_dir = Path(__file__).resolve().parents[3] / "src" / "iac_code" / "pipeline" / "selling"
+        loaded = load_pipeline_dir(selling_dir, feature_flag_overrides={"enable_reviewing": True})
+        review_step = next(
+            step for step in loaded.sub_pipelines["evaluate_candidate"].steps if step.step_id == "reviewing"
+        )
+
+        registry = ToolRegistry()
+        registry.register_default_tools()
+        registry.register(_NamedTool("aliyun_doc_search"))
+        registry.register(_NamedTool("write_memory"))
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=registry,
+            pipeline=loaded,
+            pipeline_dir=selling_dir,
+            cwd=str(tmp_path),
+        )
+
+        tool_reg = executor._build_step_tools(review_step, PipelineContext({"template": []}))
+
+        assert tool_reg.get("read_file") is not None
+        assert tool_reg.get("edit_file") is not None
+        assert tool_reg.get("ros_validate_template") is not None
+        assert tool_reg.get("aliyun_api") is None
+        assert tool_reg.get("infraguard_scan") is not None
+        assert tool_reg.get("write_memory") is None
+        assert tool_reg.get("bash") is None
 
 
 class TestStepExecutor:
@@ -209,6 +260,194 @@ class TestStepExecutor:
 
         results = [e for e in collected if isinstance(e, StepResult)]
         assert results[0].rollback_request == ("spec_recommending", "cost_too_high")
+
+    @pytest.mark.asyncio
+    async def test_completion_guard_records_deep_copy_of_nested_tool_input(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "reviewing.md").write_text("Review.", encoding="utf-8")
+        step = StepSpec(
+            step_id="reviewing",
+            conclusion_field="template",
+            forward=None,
+            prompt_file="prompts/reviewing.md",
+            conclusion_schema={
+                "type": "object",
+                "required": ["file_path", "validated"],
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "validated": {"type": "boolean"},
+                },
+            },
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"validated": True},
+                    "require_tool_result": {
+                        "tool": "generic_validator",
+                        "match_conclusion_field": "file_path",
+                        "match_result_field": "input.params.target",
+                    },
+                }
+            ],
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"template": []},
+            max_rollbacks=3,
+            skills={},
+        )
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.tool_registry = kwargs["tool_registry"]
+                self.calls = 0
+
+            async def run_streaming(self, user_input):
+                self.calls += 1
+                if self.calls > 1:
+                    return
+
+                validate_input = {"params": {"target": "template.yaml"}}
+                yield ToolUseStartEvent(tool_use_id="validate_1", name="generic_validator")
+                yield ToolUseEndEvent(tool_use_id="validate_1", name="generic_validator", input=validate_input)
+                validate_input["params"].pop("target")
+                validate_input["params"]["body"] = "ROSTemplateFormatVersion: '2015-09-01'"
+                yield ToolResultEvent(
+                    tool_use_id="validate_1",
+                    tool_name="generic_validator",
+                    result=json.dumps({"Description": "Valid"}),
+                )
+
+                complete_input = {"conclusion": {"file_path": "template.yaml", "validated": True}}
+                yield ToolUseStartEvent(tool_use_id="done_1", name="complete_step")
+                yield ToolUseEndEvent(tool_use_id="done_1", name="complete_step", input=complete_input)
+                complete_tool = self.tool_registry.get("complete_step")
+                assert complete_tool is not None
+                complete_result = await complete_tool.execute(tool_input=complete_input, context=ToolContext())
+                yield ToolResultEvent(
+                    tool_use_id="done_1",
+                    tool_name="complete_step",
+                    result=complete_result.content,
+                    is_error=complete_result.is_error,
+                    metadata=complete_result.metadata,
+                )
+
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for event in executor.execute(step, PipelineContext({"template": []}), "session"):
+                collected.append(event)
+
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert len(results) == 1
+        assert results[0].status == StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_completion_guard_reads_externalized_tool_result_metadata(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "reviewing.md").write_text("Review.", encoding="utf-8")
+        stored_result_path = tmp_path / "externalized-scan.json"
+        payload = {
+            "passed": True,
+            "file_path": "templates/main.yaml",
+            "file_sha256": "abc123",
+            "file_content": "x" * 60_000,
+        }
+        stored_result = json.dumps(payload)
+        stored_result_path.write_text(stored_result, encoding="utf-8")
+        preview = stored_result[:2000] + "\n\n... [truncated - full output saved externally]"
+        step = StepSpec(
+            step_id="reviewing",
+            conclusion_field="template",
+            forward=None,
+            prompt_file="prompts/reviewing.md",
+            conclusion_schema={
+                "type": "object",
+                "required": ["file_path", "review_passed"],
+                "properties": {
+                    "file_path": {"type": "string"},
+                    "review_passed": {"type": "boolean"},
+                },
+            },
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"review_passed": True},
+                    "require_tool_result": {
+                        "tool": "infraguard_scan",
+                        "result_field_equals": {"passed": True},
+                        "required_result_fields": ["file_sha256"],
+                        "match_conclusion_field": "file_path",
+                        "match_result_field": "file_path",
+                    },
+                }
+            ],
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"template": []},
+            max_rollbacks=3,
+            skills={},
+        )
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.tool_registry = kwargs["tool_registry"]
+                self.calls = 0
+
+            async def run_streaming(self, user_input):
+                self.calls += 1
+                if self.calls > 1:
+                    return
+
+                scan_input = {"file_path": "templates/main.yaml"}
+                yield ToolUseStartEvent(tool_use_id="scan_1", name="infraguard_scan")
+                yield ToolUseEndEvent(tool_use_id="scan_1", name="infraguard_scan", input=scan_input)
+                yield ToolResultEvent(
+                    tool_use_id="scan_1",
+                    tool_name="infraguard_scan",
+                    result=preview,
+                    metadata={"_iac_code_externalized_result_path": str(stored_result_path)},
+                )
+
+                complete_input = {
+                    "conclusion": {
+                        "file_path": "templates/main.yaml",
+                        "review_passed": True,
+                    }
+                }
+                yield ToolUseStartEvent(tool_use_id="done_1", name="complete_step")
+                yield ToolUseEndEvent(tool_use_id="done_1", name="complete_step", input=complete_input)
+                complete_tool = self.tool_registry.get("complete_step")
+                assert complete_tool is not None
+                complete_result = await complete_tool.execute(tool_input=complete_input, context=ToolContext())
+                yield ToolResultEvent(
+                    tool_use_id="done_1",
+                    tool_name="complete_step",
+                    result=complete_result.content,
+                    is_error=complete_result.is_error,
+                    metadata=complete_result.metadata,
+                )
+
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for event in executor.execute(step, PipelineContext({"template": []}), "session"):
+                collected.append(event)
+
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert len(results) == 1
+        assert results[0].status == StepStatus.COMPLETED
 
     @pytest.mark.asyncio
     async def test_failed_when_no_complete_step(self, tmp_path):

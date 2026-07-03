@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from rich.console import Group, RenderableType
+from rich.console import Console, Group, RenderableType
 from rich.text import Text
 
 from iac_code.ui.components.search_box import SearchBox
@@ -102,14 +102,12 @@ class Select:
     # Public API
     # ------------------------------------------------------------------
 
-    def run(self) -> Any | None:
+    def run(self, *, console: Console | None = None) -> Any | None:
         """Blocking mode: enter raw input and loop until selection or cancel."""
-        from rich.console import Console
-
         from iac_code.ui.core.in_place_render import InPlaceRenderer
         from iac_code.ui.core.raw_input import RawInputCapture
 
-        renderer = InPlaceRenderer(Console())
+        renderer = InPlaceRenderer(console or Console())
         result_holder: list[Any] = []
         cancelled = [False]
 
@@ -133,7 +131,7 @@ class Select:
                     if key_event is not None:
                         self.handle_key(key_event)
         finally:
-            renderer.clear()
+            renderer.clear(clear_to_screen_end=True)
 
         if self._interrupted:
             raise KeyboardInterrupt

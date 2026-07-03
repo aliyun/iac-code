@@ -366,6 +366,38 @@ async def _idle_key_listener(*_args, **_kwargs):
 
 class TestRendererToolResultFallback:
     @pytest.mark.asyncio
+    async def test_uses_renderer_tool_when_tool_registry_missing(self, monkeypatch):
+        monkeypatch.setattr(Renderer, "_key_listener", _idle_key_listener)
+        renderer = _make_renderer_for_tool_result_fallback_test()
+        renderer_tool = MagicMock()
+        renderer_tool.user_facing_name.return_value = "InfraGuard scan"
+        renderer_tool.render_tool_use_message.return_value = None
+        renderer_tool.render_tool_result_message.side_effect = lambda output, *, is_error=False, verbose=False: (
+            "Command: infraguard scan\nStatus: passed" if verbose else "passed · 0 findings"
+        )
+
+        await renderer.run_streaming_output(
+            _tool_result_events(
+                ToolUseStartEvent(
+                    tool_use_id="tool-a",
+                    name="infraguard_scan",
+                    renderer_tool=renderer_tool,
+                ),
+                ToolUseEndEvent(tool_use_id="tool-a", name="infraguard_scan", input={}),
+                ToolResultEvent(
+                    tool_use_id="tool-a",
+                    tool_name="infraguard_scan",
+                    result='{"command": ["infraguard", "scan"]}',
+                ),
+            ),
+            _allow_permission,
+        )
+
+        output = renderer.console.file.getvalue()
+        assert "passed · 0 findings" in output
+        assert '{"command"' not in output
+
+    @pytest.mark.asyncio
     async def test_does_not_fallback_stale_tool_result_id_to_same_named_tool(self, monkeypatch):
         monkeypatch.setattr(Renderer, "_key_listener", _idle_key_listener)
         renderer = _make_renderer_for_tool_result_fallback_test()

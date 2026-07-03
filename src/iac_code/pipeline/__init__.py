@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -35,6 +36,7 @@ def create_pipeline(
     resume_from_sidecar: bool = False,
     surface: str = "repl",
     backup_service: Any | None = None,
+    prerequisite_resolution: dict[str, Any] | None = None,
 ) -> PipelineRunner:
     """Factory: create a pipeline runner by name.
 
@@ -51,6 +53,24 @@ def create_pipeline(
     if name not in pipelines:
         available = list(pipelines.keys())
         raise ValueError(f"Unknown pipeline: {name!r}. Available: {available}")
+    resolved_prerequisites = prerequisite_resolution
+    if resolved_prerequisites is None and resume_from_sidecar:
+        from iac_code.pipeline.engine.session import PipelineSession
+
+        raw_session_dir = None
+        for method_name in ("v2_session_dir", "session_dir"):
+            session_dir_method = getattr(session_storage, method_name, None)
+            if not callable(session_dir_method):
+                continue
+            try:
+                candidate = session_dir_method(cwd or os.getcwd(), session_id)
+            except (AttributeError, TypeError):
+                continue
+            if isinstance(candidate, (str, Path)):
+                raw_session_dir = candidate
+                break
+        if raw_session_dir is not None:
+            resolved_prerequisites = PipelineSession(Path(raw_session_dir) / "pipeline").peek_prerequisites_sync()
     return PipelineRunner(
         pipeline_dir=pipelines[name],
         provider_manager=provider_manager,
@@ -64,6 +84,7 @@ def create_pipeline(
         resume_from_sidecar=resume_from_sidecar,
         surface=surface,
         backup_service=backup_service,
+        prerequisite_resolution=resolved_prerequisites,
     )
 
 

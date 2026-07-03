@@ -181,6 +181,88 @@ class TestLoadPipelineDir:
             loaded = load_pipeline_dir(tmp_path)
         assert loaded.feature_flags == {"cost_estimation": False}
 
+    def test_load_pipeline_dir_applies_feature_flag_overrides(self, tmp_path):
+        yaml_content = dedent("""\
+            name: test
+            context_dependencies:
+              template: []
+              review: [template]
+              cost: [template]
+            feature_flags:
+              infraguard_review:
+                default: false
+                env: IAC_CODE_INFRAGUARD_REVIEW
+            max_rollbacks: 1
+            steps:
+              - id: template_generating
+                conclusion_field: template
+                forward: review
+                prompt: prompts/template.md
+              - id: review
+                conclusion_field: review
+                forward: cost_estimating
+                prompt: prompts/review.md
+                enabled_when: infraguard_review
+              - id: cost_estimating
+                conclusion_field: cost
+                forward: null
+                prompt: prompts/cost.md
+        """)
+        _write_pipeline(
+            tmp_path,
+            yaml_content,
+            {"template.md": "T", "review.md": "R", "cost.md": "C"},
+        )
+
+        with patch.dict("os.environ", {"IAC_CODE_INFRAGUARD_REVIEW": "true"}):
+            loaded = load_pipeline_dir(tmp_path, feature_flag_overrides={"infraguard_review": False})
+
+        assert loaded.feature_flags == {"infraguard_review": False}
+        assert [step.step_id for step in loaded.steps] == ["template_generating", "cost_estimating"]
+        assert loaded.steps[0].forward == "cost_estimating"
+
+    def test_load_pipeline_dir_retains_prerequisites_and_resolution(self, tmp_path):
+        yaml_content = dedent("""\
+            name: test
+            context_dependencies:
+              intent: []
+            prerequisites:
+              cloud_account:
+                required: true
+            max_rollbacks: 1
+            steps:
+              - id: parse
+                conclusion_field: intent
+                forward: null
+                prompt: prompts/parse.md
+        """)
+        _write_pipeline(tmp_path, yaml_content, {"parse.md": "P"})
+        prerequisite_resolution = {"cloud_account": {"status": "satisfied"}}
+
+        loaded = load_pipeline_dir(tmp_path, prerequisite_resolution=prerequisite_resolution)
+
+        assert loaded.prerequisites == {"cloud_account": {"required": True}}
+        assert loaded.prerequisite_resolution is prerequisite_resolution
+
+    @pytest.mark.parametrize("raw_prerequisites", ["[cloud_account]", "cloud_account"])
+    def test_load_pipeline_dir_rejects_invalid_prerequisites(self, tmp_path, raw_prerequisites):
+        yaml_content = dedent(f"""\
+            name: test
+            context_dependencies:
+              intent: []
+            prerequisites: {raw_prerequisites}
+            max_rollbacks: 1
+            steps:
+              - id: parse
+                conclusion_field: intent
+                forward: null
+                prompt: prompts/parse.md
+        """)
+        _write_pipeline(tmp_path, yaml_content, {"parse.md": "P"})
+
+        with pytest.raises(ValueError, match="prerequisites"):
+            load_pipeline_dir(tmp_path)
+
     def test_discovers_skills(self, tmp_path):
         _write_pipeline(tmp_path, MINIMAL_YAML, {"step_a.md": "A", "step_b.md": "B"})
         skills_dir = tmp_path / "skills" / "skill-x"

@@ -67,6 +67,7 @@ class RestoreResult:
     execution: dict[str, Any] | None = None
     attempts: dict[str, Any] | None = None
     normal_handoff: dict[str, Any] | None = None
+    prerequisites: dict[str, Any] | None = None
 
 
 class PipelineSession:
@@ -97,6 +98,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self._save_snapshot_sync(
             "running",
@@ -108,6 +110,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     async def save_running(
@@ -121,6 +124,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_running_sync(
             step_id,
@@ -131,6 +135,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     def save_waiting_input_sync(
@@ -144,6 +149,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self._save_snapshot_sync(
             "waiting_input",
@@ -155,6 +161,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     async def save_waiting_input(
@@ -168,6 +175,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_waiting_input_sync(
             step_id,
@@ -178,6 +186,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     def save_completed_sync(
@@ -191,6 +200,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self._save_snapshot_sync(
             "completed",
@@ -202,6 +212,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     async def save_completed(
@@ -215,6 +226,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_completed_sync(
             step_id,
@@ -225,6 +237,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     def save_failed_sync(
@@ -238,6 +251,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self._save_snapshot_sync(
             "failed",
@@ -249,6 +263,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     async def save_failed(
@@ -262,6 +277,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_failed_sync(
             step_id,
@@ -272,6 +288,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     def save_backup_blocked_sync(
@@ -332,6 +349,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self._save_snapshot_sync(
             "user_aborted",
@@ -343,6 +361,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     async def save_user_aborted(
@@ -356,6 +375,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_user_aborted_sync(
             step_id,
@@ -366,6 +386,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     async def save_step_completion(
@@ -377,6 +398,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_running_sync(
             step_id,
@@ -386,6 +408,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     async def save_rollback(
@@ -400,6 +423,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_rollback_sync(
             from_step,
@@ -411,6 +435,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     def save_rollback_sync(
@@ -425,6 +450,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.save_running_sync(
@@ -436,6 +462,7 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
         self._append_event(
             {"type": "rollback", "from": from_step, "to": to_step, "reason": reason, "timestamp": time.time()}
@@ -532,6 +559,14 @@ class PipelineSession:
         attempts = self._load_existing_meta().get("attempts")
         return attempts if isinstance(attempts, dict) else None
 
+    def peek_prerequisites_sync(self) -> dict[str, Any]:
+        prerequisites = self._load_existing_meta().get("prerequisites")
+        if not isinstance(prerequisites, dict):
+            return {}
+        if not all(isinstance(key, str) for key in prerequisites):
+            return {}
+        return dict(prerequisites)
+
     def _append_event(self, event: dict) -> None:
         with open(self.events_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -557,6 +592,7 @@ class PipelineSession:
         execution: _MetadataValue = _PRESERVE_METADATA,
         attempts: _MetadataValue = _PRESERVE_METADATA,
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+        prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.session_dir.mkdir(parents=True, exist_ok=True)
         existing_meta = self._load_existing_meta()
@@ -575,6 +611,7 @@ class PipelineSession:
         self._preserve_metadata_field(meta, existing_meta, "execution", execution)
         self._preserve_metadata_field(meta, existing_meta, "attempts", attempts)
         self._preserve_metadata_field(meta, existing_meta, "normal_handoff", normal_handoff)
+        self._preserve_metadata_field(meta, existing_meta, "prerequisites", prerequisites)
         self._atomic_write_yaml(self.context_path, context_snapshot)
         self._atomic_write_yaml(self.meta_path, meta)
 
@@ -613,7 +650,7 @@ class PipelineSession:
             return self._restore_failure("unknown_status", status=status)
         if not self._valid_metadata_fields(meta):
             return self._restore_failure("invalid_meta", status=status)
-        execution, attempts, normal_handoff = self._restore_metadata_fields(meta)
+        execution, attempts, normal_handoff, prerequisites = self._restore_metadata_fields(meta)
         if status in SKIP_RESTORE_STATUSES:
             return RestoreResult(
                 ok=False,
@@ -622,6 +659,7 @@ class PipelineSession:
                 execution=execution,
                 attempts=attempts,
                 normal_handoff=normal_handoff,
+                prerequisites=prerequisites,
             )
 
         identity_data = self._identity_from(identity) if identity is not None else None
@@ -663,18 +701,21 @@ class PipelineSession:
             execution=execution,
             attempts=attempts,
             normal_handoff=normal_handoff,
+            prerequisites=prerequisites,
         )
 
     def _restore_metadata_fields(
         self, meta: dict[str, Any]
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
         execution = meta.get("execution")
         attempts = meta.get("attempts")
         normal_handoff = meta.get("normal_handoff")
+        prerequisites = meta.get("prerequisites")
         return (
             execution if isinstance(execution, dict) else None,
             attempts if isinstance(attempts, dict) else None,
             normal_handoff if isinstance(normal_handoff, dict) else None,
+            prerequisites if isinstance(prerequisites, dict) else None,
         )
 
     def _restore_failure(self, reason: str | None, status: str | None = None) -> RestoreResult:
@@ -766,6 +807,7 @@ class PipelineSession:
             self._valid_execution_metadata(meta.get("execution"))
             and self._valid_attempts_metadata(meta.get("attempts"))
             and self._valid_optional_dict_metadata(meta.get("normal_handoff"))
+            and self._valid_optional_dict_metadata(meta.get("prerequisites"))
         )
 
     def _valid_optional_dict_metadata(self, value: Any) -> bool:

@@ -25,6 +25,7 @@ from iac_code.agent.message import ImageBlock
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.interrupt import InterruptVerdict
+from iac_code.pipeline.engine.prerequisites import PrerequisiteDecision, PrerequisiteResolution
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
@@ -37,6 +38,41 @@ from .fakes import FakeEventQueue, FakeRequestContext
 RETRY_TEXT = "A temporary error occurred. Please retry."
 AUTH_TEXT = "Authentication required. Configure credentials and retry."
 _A2A_ASYNC_TEST_TIMEOUT = 5
+
+
+def _write_pipeline_yaml(pipeline_dir: Path) -> None:
+    pipeline_dir.mkdir(parents=True)
+    (pipeline_dir / "pipeline.yaml").write_text(
+        json.dumps(
+            {
+                "name": "test-pipeline",
+                "feature_flags": {"reviewing": {"default": True}},
+                "prerequisites": {
+                    "infraguard": {
+                        "command": "infraguard",
+                        "required_by_flags": ["reviewing"],
+                        "on_missing": {"non_interactive": "disable_feature"},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _pipeline_executor():
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    return IacCodeA2APipelineExecutor(
+        task_store=MagicMock(),
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
 
 
 def test_active_sidecar_mismatch_error_exposes_jsonrpc_data() -> None:
@@ -55,6 +91,162 @@ def test_active_sidecar_mismatch_error_exposes_jsonrpc_data() -> None:
         "sidecarStatus": "running",
     }
     assert "task-owner" in error.message
+
+
+def test_create_pipeline_inspects_prerequisites_for_fresh_a2a_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    pipeline_dir = tmp_path / "pipeline-def"
+    _write_pipeline_yaml(pipeline_dir)
+    resolution = PrerequisiteResolution(
+        feature_flags={"reviewing": False},
+        decisions={
+            "infraguard": PrerequisiteDecision(
+                name="infraguard",
+                command="infraguard",
+                status="disabled_feature",
+                required_flags=["reviewing"],
+            )
+        },
+    )
+    inspect_calls = []
+    create_kwargs = {}
+
+    def fake_inspect(raw_prerequisites, *, feature_flags):
+        inspect_calls.append({"raw_prerequisites": raw_prerequisites, "feature_flags": feature_flags})
+        return resolution
+
+    def fake_create_pipeline(*args, **kwargs):
+        create_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(pipeline_executor_module, "discover_pipelines", lambda: {"test-pipeline": pipeline_dir})
+    monkeypatch.setattr(pipeline_executor_module, "get_pipeline_name", lambda: "test-pipeline")
+    monkeypatch.setattr(pipeline_executor_module, "inspect_prerequisites", fake_inspect, raising=False)
+    monkeypatch.setattr(pipeline_executor_module, "create_pipeline", fake_create_pipeline)
+
+    _pipeline_executor()._create_pipeline(
+        session_id="session-1",
+        cwd=str(tmp_path),
+        runtime=_fake_runtime(),
+        session_storage=MagicMock(),
+        resume_from_sidecar=False,
+    )
+
+    assert inspect_calls == [
+        {
+            "raw_prerequisites": {
+                "infraguard": {
+                    "command": "infraguard",
+                    "required_by_flags": ["reviewing"],
+                    "on_missing": {"non_interactive": "disable_feature"},
+                }
+            },
+            "feature_flags": {"reviewing": True},
+        }
+    ]
+    assert create_kwargs["surface"] == "a2a"
+    assert create_kwargs["prerequisite_resolution"] == resolution.to_metadata()
+
+
+def test_create_pipeline_resume_sidecar_prerequisites_skip_a2a_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    pipeline_dir = tmp_path / "pipeline-def"
+    _write_pipeline_yaml(pipeline_dir)
+    session_root = tmp_path / "session-1"
+    sidecar = session_root / "pipeline"
+    sidecar.mkdir(parents=True)
+    stored_prerequisites = {
+        "feature_flags": {"reviewing": False},
+        "decisions": {},
+        "env_overrides": {"PATH": "/tmp/iac-code-infraguard/bin"},
+    }
+    (sidecar / "meta.yaml").write_text(
+        json.dumps(
+            {
+                "status": "running",
+                "updated_at": 0.0,
+                "prerequisites": stored_prerequisites,
+            }
+        ),
+        encoding="utf-8",
+    )
+    create_kwargs = {}
+    session_storage = MagicMock()
+    session_storage.session_dir.return_value = session_root
+
+    def fail_inspect(*args, **kwargs):
+        raise AssertionError("resume with stored prerequisites must not inspect again")
+
+    def fake_create_pipeline(*args, **kwargs):
+        create_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(pipeline_executor_module, "discover_pipelines", lambda: {"test-pipeline": pipeline_dir})
+    monkeypatch.setattr(pipeline_executor_module, "get_pipeline_name", lambda: "test-pipeline")
+    monkeypatch.setattr(pipeline_executor_module, "inspect_prerequisites", fail_inspect, raising=False)
+    monkeypatch.setattr(pipeline_executor_module, "create_pipeline", fake_create_pipeline)
+
+    _pipeline_executor()._create_pipeline(
+        session_id="session-1",
+        cwd=str(tmp_path),
+        runtime=_fake_runtime(),
+        session_storage=session_storage,
+        resume_from_sidecar=True,
+    )
+
+    assert create_kwargs["resume_from_sidecar"] is True
+    assert create_kwargs["prerequisite_resolution"] == stored_prerequisites
+
+
+def test_create_pipeline_resume_empty_sidecar_prerequisites_skip_a2a_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    pipeline_dir = tmp_path / "pipeline-def"
+    _write_pipeline_yaml(pipeline_dir)
+    session_root = tmp_path / "session-1"
+    sidecar = session_root / "pipeline"
+    sidecar.mkdir(parents=True)
+    (sidecar / "meta.yaml").write_text(
+        json.dumps({"status": "running", "updated_at": 0.0, "prerequisites": {}}),
+        encoding="utf-8",
+    )
+    create_kwargs = {}
+    session_storage = MagicMock()
+    session_storage.session_dir.return_value = session_root
+
+    def fail_inspect(*args, **kwargs):
+        raise AssertionError("empty sidecar prerequisites should still win")
+
+    def fake_create_pipeline(*args, **kwargs):
+        create_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(pipeline_executor_module, "discover_pipelines", lambda: {"test-pipeline": pipeline_dir})
+    monkeypatch.setattr(pipeline_executor_module, "get_pipeline_name", lambda: "test-pipeline")
+    monkeypatch.setattr(pipeline_executor_module, "inspect_prerequisites", fail_inspect, raising=False)
+    monkeypatch.setattr(pipeline_executor_module, "create_pipeline", fake_create_pipeline)
+
+    _pipeline_executor()._create_pipeline(
+        session_id="session-1",
+        cwd=str(tmp_path),
+        runtime=_fake_runtime(),
+        session_storage=session_storage,
+        resume_from_sidecar=True,
+    )
+
+    assert create_kwargs["resume_from_sidecar"] is True
+    assert create_kwargs["prerequisite_resolution"] == {}
 
 
 def test_active_sidecar_mismatch_error_serializes_raw_jsonrpc_data() -> None:
@@ -2722,6 +2914,8 @@ async def test_executor_replaces_terminal_restored_pipeline_when_sidecar_owner_m
     event_type: str,
     event_status: str,
 ) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     session_dir = tmp_path / "sidecar"
     old_event = {
@@ -2755,6 +2949,20 @@ async def test_executor_replaces_terminal_restored_pipeline_when_sidecar_owner_m
 
     restored_pipeline = RestoredMemoryPipeline([], session_dir=session_dir)
     restored_pipeline.sidecar_status = sidecar_status
+    restored_pipeline._loaded = SimpleNamespace(
+        steps=[],
+        sub_pipelines={
+            "evaluate_candidate": SimpleNamespace(
+                steps=[
+                    SimpleNamespace(
+                        step_id="template_generating",
+                        a2a_artifacts=[{"role": "final", "supersedesPath": "conclusion.file_path"}],
+                    ),
+                    SimpleNamespace(step_id="cost_estimating", a2a_artifacts=[]),
+                ]
+            )
+        },
+    )
     fresh_pipeline = FakePipeline(
         [
             TextDeltaEvent(text="fresh output"),
@@ -2762,14 +2970,41 @@ async def test_executor_replaces_terminal_restored_pipeline_when_sidecar_owner_m
         ],
         session_dir=session_dir,
     )
+    fresh_pipeline._loaded = SimpleNamespace(
+        steps=[],
+        sub_pipelines={
+            "evaluate_candidate": SimpleNamespace(
+                steps=[
+                    SimpleNamespace(
+                        step_id="template_generating",
+                        a2a_artifacts=[{"role": "intermediate", "supersedesPath": "conclusion.file_path"}],
+                    ),
+                    SimpleNamespace(
+                        step_id="reviewing",
+                        a2a_artifacts=[{"role": "final", "supersedesPath": "conclusion.file_path"}],
+                    ),
+                    SimpleNamespace(step_id="cost_estimating", a2a_artifacts=[]),
+                ]
+            )
+        },
+    )
     create_resume_flags: list[bool | None] = []
+    publisher_contexts = []
 
     def fake_create_pipeline(*args, **kwargs):
         create_resume_flags.append(kwargs.get("resume_from_sidecar"))
         return restored_pipeline if len(create_resume_flags) == 1 else fresh_pipeline
 
+    original_publisher = IacCodeA2APipelineExecutor._publisher
+
+    def spy_publisher(self, *args, **kwargs):
+        publisher = original_publisher(self, *args, **kwargs)
+        publisher_contexts.append(publisher.translator.context)
+        return publisher
+
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    monkeypatch.setattr(IacCodeA2APipelineExecutor, "_publisher", spy_publisher)
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
@@ -2790,6 +3025,12 @@ async def test_executor_replaces_terminal_restored_pipeline_when_sidecar_owner_m
     assert fresh_pipeline.run_prompts == ["new request"]
     record = await store.get_task_record("task-new")
     assert "".join(record.output_text) == "fresh output"
+    assert publisher_contexts[-1].candidate_step_order == [
+        "template_generating",
+        "reviewing",
+        "cost_estimating",
+    ]
+    assert "reviewing" in publisher_contexts[-1].a2a_artifacts_by_step_id
 
 
 @pytest.mark.asyncio

@@ -218,7 +218,7 @@ class _PipelineSnapshotReducer:
         self._hydrate_messages()
         self._hydrate_display_indexes("candidateDetails", self._candidate_detail_indexes, ("detailId", "id"))
         self._hydrate_display_indexes("diagrams", self._diagram_indexes, ("diagramId", "id"))
-        self._hydrate_display_indexes("artifacts", self._artifact_indexes, ("artifactId", "artifact_id", "id"))
+        self._hydrate_artifact_indexes()
         self._hydrate_display_indexes("permissions", self._permission_indexes, ("permissionId", "toolUseId", "id"))
         self._hydrate_display_indexes("toolResults", self._tool_result_indexes, ("toolUseId", "resultId", "id"))
         self._hydrate_control_history("inputHistory", self._input_history_keys)
@@ -293,6 +293,26 @@ class _PipelineSnapshotReducer:
                 self._messages_by_scope_run_id[key] = message
                 valid_messages.append(message)
         self._snapshot["display"]["messages"] = valid_messages
+
+    def _hydrate_artifact_indexes(self) -> None:
+        unique_items: list[dict[str, Any]] = []
+        seen_item_keys: set[str] = set()
+        for item in self._snapshot["display"]["artifacts"]:
+            if not isinstance(item, dict):
+                continue
+            event_id = _string_or_none(item.get("eventId"))
+            if event_id is not None:
+                self._seen_event_ids.add(event_id)
+            item_id = _first_string_value(item, ("artifactId", "artifact_id", "id", "eventId"))
+            if item_id is None:
+                continue
+            item_key = _artifact_replacement_key(item_id, item, None)
+            if item_key in seen_item_keys:
+                continue
+            seen_item_keys.add(item_key)
+            self._artifact_indexes[item_key] = len(unique_items)
+            unique_items.append(item)
+        self._snapshot["display"]["artifacts"] = unique_items
 
     def _hydrate_display_indexes(
         self,
@@ -788,9 +808,10 @@ class _PipelineSnapshotReducer:
         _merge_event_coordinates(item, event)
 
         items = self._snapshot["display"]["artifacts"]
-        index = self._artifact_indexes.get(item_id)
+        item_key = _artifact_replacement_key(item_id, item, event)
+        index = self._artifact_indexes.get(item_key)
         if index is None:
-            self._artifact_indexes[item_id] = len(items)
+            self._artifact_indexes[item_key] = len(items)
             items.append(item)
         else:
             existing = copy.deepcopy(items[index])
@@ -1458,6 +1479,43 @@ def _artifact_item_id(artifact: dict[str, Any] | None, data: dict[str, Any], eve
     if event_id is not None:
         return event_id
     return f"artifact-{_sequence_value(event)}"
+
+
+def _artifact_replacement_key(
+    item_id: str,
+    item: dict[str, Any],
+    event: dict[str, Any] | None,
+) -> str:
+    supersedes_key = (
+        _string_or_none(item.get("supersedesKey"))
+        or _string_or_none(item.get("supersedes_key"))
+        or _string_or_none(item.get("supersedesFingerprint"))
+        or _string_or_none(item.get("supersedes_fingerprint"))
+    )
+    if supersedes_key is not None:
+        return f"supersedes-key:{_artifact_replacement_scope(item, event)}:{supersedes_key}"
+    supersedes_path = _public_supersedes_path_for_replacement(item)
+    if supersedes_path is None:
+        return f"id:{item_id}"
+    return f"supersedes:{_artifact_replacement_scope(item, event)}:{supersedes_path}"
+
+
+def _public_supersedes_path_for_replacement(item: dict[str, Any]) -> str | None:
+    supersedes_path = _string_or_none(item.get("supersedesPath")) or _string_or_none(item.get("supersedes_path"))
+    if supersedes_path in {None, "[PATH]"}:
+        return None
+    return supersedes_path
+
+
+def _artifact_replacement_scope(item: dict[str, Any], event: dict[str, Any] | None) -> str:
+    for source in (event, item):
+        if not isinstance(source, dict):
+            continue
+        candidate = _dict_or_none(source.get("candidate"))
+        run_id = _run_id(candidate)
+        if run_id is not None:
+            return f"candidate:{run_id}"
+    return "pipeline"
 
 
 def _drop_legacy_artifact_uri(data: dict[str, Any] | None) -> None:

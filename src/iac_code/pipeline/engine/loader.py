@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
@@ -37,7 +38,12 @@ _SUPPORTED_ON_COMPLETE_OUTCOMES = {"completed", "early_exit", "failed", "cancele
 _SUPPORTED_INTERRUPT_JUDGE_FAILURE_POLICIES = {"continue", "pause", "hard_interrupt"}
 
 
-def load_pipeline_dir(pipeline_dir: Path) -> LoadedPipeline:
+def load_pipeline_dir(
+    pipeline_dir: Path,
+    *,
+    feature_flag_overrides: dict[str, bool] | None = None,
+    prerequisite_resolution: dict[str, Any] | None = None,
+) -> LoadedPipeline:
     """Load a complete pipeline from a directory containing pipeline.yaml."""
     yaml_path = pipeline_dir / "pipeline.yaml"
     raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
@@ -57,12 +63,15 @@ def load_pipeline_dir(pipeline_dir: Path) -> LoadedPipeline:
         base_prompt_sections = IncludeExcludeConfig(include=list(DEFAULT_PIPELINE_SECTIONS))
 
     feature_flags = _resolve_feature_flags(raw.get("feature_flags"))
+    if feature_flag_overrides:
+        feature_flags.update(feature_flag_overrides)
     on_complete = _parse_on_complete(raw.get("on_complete"))
 
     sub_pipelines = _parse_sub_pipelines(raw.get("sub_pipelines", {}), feature_flags, pipeline_dir)
 
     steps = _parse_steps(raw["steps"])
     steps = _filter_and_relink(steps, feature_flags)
+    _resolve_artifact_roles_after_filtering(steps)
     _bind_hooks(steps, pipeline_dir)
     _validate_prompts_exist(steps, pipeline_dir)
 
@@ -93,7 +102,20 @@ def load_pipeline_dir(pipeline_dir: Path) -> LoadedPipeline:
         on_complete=on_complete,
         skill_roots=skill_roots,
         emit_stack_events=bool(raw.get("emit_stack_events", False)),
+        prerequisites=_parse_mapping(raw.get("prerequisites"), "prerequisites"),
+        prerequisite_resolution={} if prerequisite_resolution is None else prerequisite_resolution,
     )
+
+
+def _parse_mapping(raw: object, field_name: str, step_id: str | None = None) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    label = f"Step '{step_id}': {field_name}" if step_id is not None else field_name
+    if not isinstance(raw, dict):
+        raise ValueError(f"{label} must be a mapping, got {raw!r}")
+    if not all(isinstance(key, str) for key in raw):
+        raise ValueError(f"{label} keys must be strings, got {raw!r}")
+    return cast(dict[str, Any], raw)
 
 
 def _resolve_feature_flags(raw_flags: dict | None) -> dict[str, bool]:
@@ -181,6 +203,7 @@ def _parse_sub_pipelines(
     for sub_name, sub_raw in raw_subs.items():
         steps = _parse_steps(sub_raw.get("steps", []))
         steps = _filter_and_relink(steps, feature_flags)
+        _resolve_artifact_roles_after_filtering(steps)
         _validate_prompts_exist(steps, pipeline_dir)
         result[sub_name] = SubPipelineSpec(
             name=sub_name,
@@ -243,6 +266,7 @@ def _parse_steps(raw_steps: list[dict]) -> list[StepSpec]:
                 exit_condition=_parse_exit_condition(raw.get("exit_condition"), step_id),
                 a2a_artifacts=_parse_a2a_artifacts(raw.get("a2a_artifacts"), step_id),
                 surface_overrides=_parse_surface_overrides(raw.get("surface_overrides"), step_id),
+                config=_parse_mapping(raw.get("config"), "config", step_id),
             )
         )
     return steps
@@ -303,13 +327,29 @@ def _parse_a2a_artifacts(raw: object, step_id: str) -> list[A2AArtifactSpec]:
         path = item.get("path") or item.get("source")
         content = item.get("content")
         media_type = item.get("media_type") or item.get("mediaType") or "auto"
+        role = item.get("role", "final")
+        supersedes_path = item.get("supersedes_path")
+        if supersedes_path is None:
+            supersedes_path = item.get("supersedesPath")
         if not isinstance(path, str) or not path:
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].path must be a non-empty string")
         if not isinstance(content, str) or not content:
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].content must be a non-empty string")
         if not isinstance(media_type, str) or not media_type:
             raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].media_type must be a non-empty string")
-        specs.append(A2AArtifactSpec(path=path, content=content, media_type=media_type))
+        if role not in {"intermediate", "final"}:
+            raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].role must be one of: final, intermediate")
+        if supersedes_path is not None and (not isinstance(supersedes_path, str) or not supersedes_path):
+            raise ValueError(f"Step '{step_id}': a2a_artifacts[{index}].supersedes_path must be a non-empty string")
+        specs.append(
+            A2AArtifactSpec(
+                path=path,
+                content=content,
+                media_type=media_type,
+                role=cast(str, role),
+                supersedes_path=cast(str | None, supersedes_path),
+            )
+        )
     return specs
 
 
@@ -338,6 +378,45 @@ def _filter_and_relink(steps: list[StepSpec], feature_flags: dict[str, bool]) ->
             step.forward = _find_next_enabled(steps, step.forward, enabled_ids)
 
     return enabled
+
+
+def _resolve_artifact_roles_after_filtering(steps: list[StepSpec]) -> None:
+    parents: dict[str, str] = {}
+
+    def find(key: str) -> str:
+        parent = parents.setdefault(key, key)
+        if parent != key:
+            parents[key] = find(parent)
+        return parents[key]
+
+    def union(left: str, right: str) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parents[right_root] = left_root
+
+    for step in steps:
+        for artifact in step.a2a_artifacts:
+            find(artifact.path)
+            if artifact.supersedes_path is not None:
+                union(artifact.supersedes_path, artifact.path)
+
+    artifacts_by_replacement_key: dict[str, list[tuple[int, int]]] = {}
+    for step_index, step in enumerate(steps):
+        for artifact_index, artifact in enumerate(step.a2a_artifacts):
+            replacement_key = find(artifact.path)
+            artifacts_by_replacement_key.setdefault(replacement_key, []).append((step_index, artifact_index))
+
+    for artifacts in artifacts_by_replacement_key.values():
+        if len(artifacts) < 2:
+            continue
+        latest = artifacts[-1]
+        for step_index, artifact_index in artifacts:
+            artifact = steps[step_index].a2a_artifacts[artifact_index]
+            role = "final" if (step_index, artifact_index) == latest else "intermediate"
+            if artifact.role == role:
+                continue
+            steps[step_index].a2a_artifacts[artifact_index] = replace(artifact, role=role)
 
 
 def _is_enabled(step: StepSpec, flags: dict[str, bool]) -> bool:

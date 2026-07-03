@@ -236,6 +236,65 @@ def _seed_restored_parallel_judge_state(pipeline_runner):
     }
 
 
+def _duplicate_template_pipeline_runner(tmp_path):
+    (tmp_path / "prompts").mkdir(exist_ok=True)
+    (tmp_path / "prompts" / "a.md").write_text("do A", encoding="utf-8")
+    (tmp_path / "prompts" / "b.md").write_text("do B", encoding="utf-8")
+    (tmp_path / "prompts" / "template.md").write_text("template", encoding="utf-8")
+    (tmp_path / "prompts" / "review.md").write_text("review", encoding="utf-8")
+    (tmp_path / "prompts" / "cost.md").write_text("cost", encoding="utf-8")
+    (tmp_path / "pipeline.yaml").write_text(
+        dedent("""\
+        name: test
+        context_dependencies:
+          a_out: []
+          b_out: [a_out]
+        max_rollbacks: 3
+        sub_pipelines:
+          evaluate_candidate:
+            max_rollbacks: 2
+            iterate_over: a_out.candidates
+            context_fields_from_parent: []
+            steps:
+              - id: template_generating
+                conclusion_field: template
+                forward: reviewing
+                prompt: prompts/template.md
+              - id: reviewing
+                conclusion_field: template
+                forward: cost_estimating
+                prompt: prompts/review.md
+              - id: cost_estimating
+                conclusion_field: cost
+                forward: null
+                prompt: prompts/cost.md
+        steps:
+          - id: a
+            conclusion_field: a_out
+            forward: b
+            prompt: prompts/a.md
+          - id: b
+            type: parallel_sub_pipeline
+            sub_pipeline: evaluate_candidate
+            conclusion_field: b_out
+            forward: null
+            prompt: prompts/b.md
+    """),
+        encoding="utf-8",
+    )
+    runner = PipelineRunner(
+        pipeline_dir=tmp_path,
+        provider_manager=MagicMock(),
+        base_tool_registry=MagicMock(),
+        session_storage=FakeSessionStorage(),
+        session_id="test-session",
+        cwd=str(tmp_path),
+    )
+    runner.state_machine.advance()  # a -> b
+    runner._parallel_candidates_total = 1
+    return runner
+
+
 class TestHandleUserInterrupt:
     @pytest.mark.asyncio
     async def test_supplement_injects_message(self, pipeline_runner):
@@ -807,6 +866,110 @@ class TestCandidateRestart:
 
         assert result is False
         pipeline_runner._schedule_candidate_restart.assert_called_once_with(verdict)
+
+    def test_candidate_restart_to_second_duplicate_writer_restores_first_template(self, tmp_path):
+        runner = _duplicate_template_pipeline_runner(tmp_path)
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        mock_task.cancel = MagicMock()
+        runner._active_candidates[0] = {
+            "task": mock_task,
+            "current_sub_step": "cost_estimating",
+            "conclusions": {"template": {"body": "reviewed"}, "cost": {"total": 1}},
+            "step_conclusions": {
+                "template_generating": {"body": "generated"},
+                "reviewing": {"body": "reviewed"},
+                "cost_estimating": {"total": 1},
+            },
+            "name": "Plan A",
+            "agent_loop": None,
+        }
+
+        result = runner.apply_hard_interrupt(
+            InterruptVerdict(
+                action="hard_interrupt",
+                reason="review again",
+                rollback_target="reviewing",
+                candidate_scope="candidate:0",
+            )
+        )
+
+        assert result is False
+        mock_task.cancel.assert_called_once()
+        assert runner._pending_candidate_restarts[0].preserved_conclusions == {"template": {"body": "generated"}}
+        assert runner._execution["candidates"]["0"]["conclusions"] == {"template": {"body": "generated"}}
+        assert runner._execution["candidates"]["0"]["step_conclusions"] == {
+            "template_generating": {"body": "generated"}
+        }
+
+    def test_candidate_restart_to_first_duplicate_writer_drops_reviewed_template(self, tmp_path):
+        runner = _duplicate_template_pipeline_runner(tmp_path)
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        mock_task.cancel = MagicMock()
+        runner._active_candidates[0] = {
+            "task": mock_task,
+            "current_sub_step": "cost_estimating",
+            "conclusions": {"template": {"body": "reviewed"}, "cost": {"total": 1}},
+            "step_conclusions": {
+                "template_generating": {"body": "generated"},
+                "reviewing": {"body": "reviewed"},
+                "cost_estimating": {"total": 1},
+            },
+            "name": "Plan A",
+            "agent_loop": None,
+        }
+
+        result = runner.apply_hard_interrupt(
+            InterruptVerdict(
+                action="hard_interrupt",
+                reason="generate again",
+                rollback_target="template_generating",
+                candidate_scope="candidate:0",
+            )
+        )
+
+        assert result is False
+        mock_task.cancel.assert_called_once()
+        assert runner._pending_candidate_restarts[0].preserved_conclusions == {}
+        assert runner._execution["candidates"]["0"]["conclusions"] == {}
+        assert runner._execution["candidates"]["0"]["step_conclusions"] == {}
+
+    def test_candidate_restart_after_second_duplicate_writer_keeps_reviewed_template(self, tmp_path):
+        runner = _duplicate_template_pipeline_runner(tmp_path)
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        mock_task.cancel = MagicMock()
+        runner._active_candidates[0] = {
+            "task": mock_task,
+            "current_sub_step": "cost_estimating",
+            "conclusions": {"template": {"body": "reviewed"}, "cost": {"total": 1}},
+            "step_conclusions": {
+                "template_generating": {"body": "generated"},
+                "reviewing": {"body": "reviewed"},
+                "cost_estimating": {"total": 1},
+            },
+            "name": "Plan A",
+            "agent_loop": None,
+        }
+
+        result = runner.apply_hard_interrupt(
+            InterruptVerdict(
+                action="hard_interrupt",
+                reason="redo cost",
+                rollback_target="cost_estimating",
+                candidate_scope="candidate:0",
+            )
+        )
+
+        assert result is False
+        mock_task.cancel.assert_called_once()
+        assert runner._pending_candidate_restarts[0].preserved_conclusions == {"template": {"body": "reviewed"}}
+        assert runner._execution["candidates"]["0"]["conclusions"] == {"template": {"body": "reviewed"}}
+        assert runner._execution["candidates"]["0"]["step_conclusions"] == {
+            "template_generating": {"body": "generated"},
+            "reviewing": {"body": "reviewed"},
+        }
 
     def test_parent_attempt_creation_preserves_restored_parallel_execution(self, pipeline_runner):
         _seed_restored_parallel_judge_state(pipeline_runner)

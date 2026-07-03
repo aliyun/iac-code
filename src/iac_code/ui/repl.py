@@ -18,13 +18,16 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
+from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+import yaml
 from loguru import logger
 from rich.console import Console, Group
 from rich.live import Live
@@ -80,11 +83,13 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
 )
 from iac_code.ui.banner import render_update_prompt_header, render_welcome_banner
-from iac_code.ui.components.select import Select, SelectLayout, TextOption
+from iac_code.ui.components.select import InputOption, Select, SelectLayout, TextOption
+from iac_code.ui.core.in_place_render import InPlaceRenderer
 from iac_code.ui.core.input_history import InputHistory
 from iac_code.ui.core.prompt_input import PromptInput, PromptInputResult
 from iac_code.ui.keybindings.manager import KeyBinding, KeybindingManager
 from iac_code.ui.renderer import Renderer, StreamingInputBuffer
+from iac_code.ui.spinner import ShimmerSpinner
 from iac_code.ui.suggestions.aggregator import SuggestionAggregator
 from iac_code.ui.suggestions.command_provider import CommandProvider
 from iac_code.ui.suggestions.directory_provider import DirectoryProvider
@@ -101,6 +106,7 @@ if TYPE_CHECKING:
     from iac_code.pipeline import PipelineRunner
     from iac_code.pipeline.config import RunMode
     from iac_code.pipeline.engine.events import PipelineEvent
+    from iac_code.pipeline.engine.prerequisites import InstallerSpec, PrerequisiteProgress
     from iac_code.pipeline.engine.user_input import PipelineUserInput
 
 termios: ModuleType | None
@@ -117,6 +123,309 @@ else:
 # so users are never locked out of the basics while a pipeline is running.
 _PIPELINE_SAFE_COMMANDS: frozenset[str] = frozenset({"/exit", "/help", "/status", "/prompt", "/resume"})
 PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed", "persistence_failed"]
+
+
+class _BlockingPrerequisiteInterruptGuard:
+    """Make Ctrl+C interrupt synchronous prerequisite work immediately."""
+
+    def __init__(self) -> None:
+        self._previous_handler: Any = None
+        self._previous_wakeup_fd: int | None = None
+        self._installed = False
+
+    def __enter__(self) -> "_BlockingPrerequisiteInterruptGuard":
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        try:
+            self._previous_wakeup_fd = signal.set_wakeup_fd(-1)
+            self._previous_handler = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, self._raise_keyboard_interrupt)
+            self._installed = True
+        except (ValueError, OSError, RuntimeError):
+            self._restore_wakeup_fd()
+            self._previous_handler = None
+            self._installed = False
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        if not self._installed:
+            return
+        try:
+            signal.signal(signal.SIGINT, self._previous_handler)
+        except (ValueError, OSError, RuntimeError):
+            pass
+        self._restore_wakeup_fd()
+
+    @staticmethod
+    def _raise_keyboard_interrupt(_signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    def _restore_wakeup_fd(self) -> None:
+        if self._previous_wakeup_fd is None:
+            return
+        try:
+            signal.set_wakeup_fd(self._previous_wakeup_fd)
+        except (ValueError, OSError, RuntimeError):
+            pass
+        self._previous_wakeup_fd = None
+
+
+class _PipelinePrerequisiteProgressDisplay:
+    """Bounded progress display for long prerequisite installers."""
+
+    _MAX_LINES = 3
+
+    def __init__(self, console: Console | None, *, refresh_interval: float = 0.08) -> None:
+        self._console = console
+        self._renderer: InPlaceRenderer | None = None
+        self._lines: list[str] = []
+        self._download_progress_line: str | None = None
+        self._spinner = ShimmerSpinner(status=_("Installing prerequisites..."))
+        self._refresh_interval = refresh_interval
+        self._stop_refresh = threading.Event()
+        self._refresh_thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def handle(self, event: "PrerequisiteProgress") -> None:
+        if self._console is None:
+            return
+        should_start_refresh = False
+        with self._lock:
+            self._spinner.update_status(self._status_for_event(event))
+            line = self._format_event(event)
+            if event.phase == "download":
+                self._lines = []
+            if _is_download_progress_event(event):
+                self._download_progress_line = line or None
+            elif line:
+                self._lines.append(line)
+                self._lines = self._lines[-self._MAX_LINES :]
+            if self._renderer is None:
+                self._renderer = InPlaceRenderer(self._console)
+                should_start_refresh = True
+            self._renderer.render(self._render())
+        if should_start_refresh:
+            self._start_refresh_loop()
+
+    def close(self) -> None:
+        self.clear()
+
+    def clear(self) -> None:
+        self._stop_refresh.set()
+        if self._refresh_thread is not None:
+            self._refresh_thread.join(timeout=0.5)
+            self._refresh_thread = None
+        with self._lock:
+            self._stop_refresh = threading.Event()
+            if self._renderer is None:
+                return
+            self._renderer.clear(clear_to_screen_end=True)
+            self._renderer = None
+
+    def _format_event(self, event: "PrerequisiteProgress") -> str:
+        message = _clean_progress_message(event.message)
+        command = _format_short_command(event.command)
+        download_progress = _format_download_progress(event)
+        if download_progress:
+            line = download_progress
+        elif event.status == "output":
+            line = message
+        elif command:
+            status_labels = {
+                "started": _("Running: {command}"),
+                "succeeded": _("Done: {command}"),
+                "failed": _("Failed: {command}"),
+            }
+            line = status_labels.get(event.status, "{command}").format(command=command)
+        else:
+            line = message
+        width = max(40, min(getattr(self._console, "width", 100) or 100, 120) - 6)
+        return _truncate_progress_line(line, width)
+
+    def _status_for_event(self, event: "PrerequisiteProgress") -> str:
+        if event.phase == "download":
+            return _("Downloading prerequisites...")
+        if event.phase == "post_install":
+            return _("Initializing prerequisites...")
+        installer_label = _pipeline_prerequisite_installer_label_from_progress(event)
+        if installer_label:
+            return _("Installing prerequisites with {installer}...").format(installer=installer_label)
+        return _("Installing prerequisites...")
+
+    def _render(self) -> Group:
+        parts = [self._spinner.render()]
+        body = Text()
+        if self._download_progress_line:
+            body.append("  " + self._download_progress_line, style="dim")
+            body.append("\n")
+        for line in self._lines:
+            body.append("  " + line, style="dim")
+            body.append("\n")
+        if body.plain.endswith("\n"):
+            body = Text(body.plain[:-1])
+        if body.plain:
+            parts.append(body)
+        return Group(*parts)
+
+    def _start_refresh_loop(self) -> None:
+        if self._refresh_thread is not None:
+            return
+        self._refresh_thread = threading.Thread(
+            target=self._refresh_until_closed,
+            name="pipeline-prerequisite-progress",
+            daemon=True,
+        )
+        self._refresh_thread.start()
+
+    def _refresh_until_closed(self) -> None:
+        while not self._stop_refresh.wait(self._refresh_interval):
+            self._render_in_place()
+
+    def _render_in_place(self) -> None:
+        with self._lock:
+            if self._renderer is not None:
+                self._renderer.render(self._render())
+
+
+def _format_short_command(command: list[str]) -> str:
+    if not command:
+        return ""
+    if len(command) <= 3:
+        return " ".join(command)
+    return " ".join(command[:3]) + " ..."
+
+
+def _clean_progress_message(message: str) -> str:
+    return " ".join(message.strip().split())
+
+
+def _truncate_progress_line(line: str, width: int) -> str:
+    if len(line) <= width:
+        return line
+    return line[: max(0, width - 4)].rstrip() + " ..."
+
+
+def _format_download_progress(event: "PrerequisiteProgress") -> str:
+    if not _is_download_progress_event(event):
+        return ""
+    downloaded_bytes = event.downloaded_bytes
+    if downloaded_bytes is None:
+        return ""
+    downloaded = _format_progress_bytes(downloaded_bytes)
+    if event.total_bytes and event.total_bytes > 0:
+        return _("Download: {percent} ({downloaded} / {total})").format(
+            percent=_format_progress_percent(downloaded_bytes, event.total_bytes),
+            downloaded=downloaded,
+            total=_format_progress_bytes(event.total_bytes),
+        )
+    return _("Download: {downloaded} downloaded").format(downloaded=downloaded)
+
+
+def _is_download_progress_event(event: "PrerequisiteProgress") -> bool:
+    return event.phase == "download" and event.status == "output" and event.downloaded_bytes is not None
+
+
+def _format_progress_bytes(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{int(value)} B"
+
+
+def _format_progress_percent(downloaded: int, total: int) -> str:
+    percent = max(0.0, min(100.0, downloaded / total * 100))
+    if 0 < percent < 1:
+        return "<1%"
+    return f"{percent:.0f}%"
+
+
+def _format_prerequisite_failure_reason(reason: str) -> str:
+    lines = [line.strip() for line in reason.splitlines() if line.strip()]
+    if not lines:
+        return reason.strip()
+    if len(lines) <= 4:
+        return "\n".join(lines)
+    return "\n".join([*lines[:4], "..."])
+
+
+def _resolve_feature_flags(raw: object) -> dict[str, bool]:
+    from iac_code.pipeline.engine.loader import _resolve_feature_flags as resolve
+
+    return resolve(raw if isinstance(raw, dict) else None)
+
+
+def _pipeline_feature_label_from_key(key: str) -> str | None:
+    labels = {
+        "review_step": _("review step"),
+    }
+    return labels.get(key)
+
+
+def _pipeline_installer_label_from_key(key: str) -> str | None:
+    labels = {
+        "direct_binary": _("Direct binary download"),
+        "direct_binary_download": _("Direct binary download"),
+        "go_install": _("Go install"),
+        "homebrew": _("Homebrew"),
+    }
+    return labels.get(key)
+
+
+def _pipeline_prerequisite_installer_label(installer: "InstallerSpec") -> str:
+    raw_key = getattr(installer, "display_key", None)
+    if isinstance(raw_key, str) and raw_key:
+        label = _pipeline_installer_label_from_key(raw_key)
+        if label:
+            return label
+    raw_name = getattr(installer, "display_name", None)
+    if isinstance(raw_name, str) and raw_name:
+        return raw_name
+    label = _pipeline_installer_label_from_key(str(getattr(installer, "id", "")).replace("-", "_"))
+    return label or str(getattr(installer, "id", ""))
+
+
+def _pipeline_prerequisite_installer_label_from_progress(event: "PrerequisiteProgress") -> str:
+    raw_key = getattr(event, "installer_display_key", None)
+    if isinstance(raw_key, str) and raw_key:
+        label = _pipeline_installer_label_from_key(raw_key)
+        if label:
+            return label
+    raw_name = getattr(event, "installer_display_name", None)
+    if isinstance(raw_name, str) and raw_name:
+        return raw_name
+    installer_id = str(getattr(event, "installer_id", "") or "")
+    label = _pipeline_installer_label_from_key(installer_id.replace("-", "_"))
+    return label or installer_id
+
+
+def _pipeline_prerequisite_feature_labels(raw_flags: object) -> dict[str, str]:
+    if not isinstance(raw_flags, dict):
+        return {}
+    labels: dict[str, str] = {}
+    for flag_name, raw_spec in raw_flags.items():
+        if not isinstance(flag_name, str) or not isinstance(raw_spec, dict):
+            continue
+        spec = cast(dict[str, Any], raw_spec)
+        raw_key = spec.get("display_key") or spec.get("label_key")
+        if isinstance(raw_key, str) and raw_key:
+            label = _pipeline_feature_label_from_key(raw_key)
+            if label:
+                labels[flag_name] = label
+                continue
+        raw_label = spec.get("display_name") or spec.get("label")
+        if isinstance(raw_label, str) and raw_label:
+            labels[flag_name] = raw_label
+    return labels
+
+
+def prepare_prerequisites(*args: Any, **kwargs: Any) -> Any:
+    from iac_code.pipeline.engine.prerequisites import prepare_prerequisites as prepare
+
+    return prepare(*args, **kwargs)
 
 
 class ExitREPLError(Exception):
@@ -2728,6 +3037,181 @@ class InlineREPL:
         except Exception as exc:
             logger.warning("Failed to record pipeline display user abort: {}", exc)
 
+    def _sidecar_prerequisite_metadata(self, *, cwd: str, session_id: str) -> dict[str, Any] | None:
+        try:
+            raw_session_dir = self._session_storage.session_dir(cwd, session_id)
+            meta_path = Path(raw_session_dir) / "pipeline" / "meta.yaml"
+            if not meta_path.exists():
+                return None
+            raw = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            logger.debug("Failed to peek pipeline sidecar prerequisites", exc_info=True)
+            return None
+        if not isinstance(raw, dict):
+            return None
+        metadata = raw.get("prerequisites")
+        return dict(metadata) if isinstance(metadata, dict) else None
+
+    @staticmethod
+    def _apply_pipeline_prerequisite_env_overrides(metadata: dict[str, Any]) -> None:
+        # Prerequisite environment belongs to pipeline tool execution only. Keep this
+        # compatibility hook as a no-op so older tests/mocks can still bind it.
+        return None
+
+    def _load_pipeline_raw_config(self, pipeline_name: str) -> dict[str, Any]:
+        from iac_code.pipeline import discover_pipelines
+
+        pipeline_dir = discover_pipelines().get(pipeline_name)
+        if pipeline_dir is None:
+            return {}
+        raw = yaml.safe_load((pipeline_dir / "pipeline.yaml").read_text(encoding="utf-8")) or {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _prepare_pipeline_prerequisite_metadata(
+        self,
+        *,
+        pipeline_name: str,
+        cwd: str,
+        session_id: str,
+        allow_sidecar_metadata: bool = False,
+    ) -> dict[str, Any]:
+        if allow_sidecar_metadata:
+            sidecar_metadata = self._sidecar_prerequisite_metadata(cwd=cwd, session_id=session_id)
+            if sidecar_metadata is not None:
+                self._apply_pipeline_prerequisite_env_overrides(sidecar_metadata)
+                return sidecar_metadata
+
+        raw = self._load_pipeline_raw_config(pipeline_name)
+        raw_prerequisites = raw.get("prerequisites") or {}
+        if not isinstance(raw_prerequisites, dict):
+            raw_prerequisites = {}
+
+        feature_flags = _resolve_feature_flags(raw.get("feature_flags"))
+        self._pipeline_prerequisite_feature_labels_by_flag = _pipeline_prerequisite_feature_labels(
+            raw.get("feature_flags")
+        )
+        self._pipeline_prerequisite_required_flags_by_name = {
+            str(name): [str(flag) for flag in (raw_prerequisite.get("required_by_flags") or []) if flag]
+            for name, raw_prerequisite in raw_prerequisites.items()
+            if isinstance(raw_prerequisite, dict)
+        }
+        progress_display = self._make_pipeline_prerequisite_progress_display()
+
+        def choose_installer(name: str, installers: list[InstallerSpec]) -> str | None:
+            progress_display.clear()
+            return self._pipeline_prerequisite_choice(name, installers)
+
+        try:
+            with _BlockingPrerequisiteInterruptGuard():
+                resolution = prepare_prerequisites(
+                    raw_prerequisites,
+                    feature_flags=feature_flags,
+                    surface="repl",
+                    choose_installer=choose_installer,
+                    progress_handler=progress_display.handle,
+                )
+        finally:
+            progress_display.close()
+        metadata = resolution.to_metadata()
+        self._apply_pipeline_prerequisite_env_overrides(metadata)
+        self._print_pipeline_prerequisite_status_messages(metadata)
+        return metadata
+
+    def _make_pipeline_prerequisite_progress_display(self) -> _PipelinePrerequisiteProgressDisplay:
+        console = getattr(self, "console", None)
+        return _PipelinePrerequisiteProgressDisplay(console if isinstance(console, Console) else None)
+
+    def _pipeline_prerequisite_choice(self, name: str, installers: list[InstallerSpec]) -> str | None:
+        if not installers:
+            self.renderer.print_system_message(
+                _(
+                    "Pipeline prerequisite {name} is missing and no configured installer is usable; "
+                    "{feature} will be skipped for this run."
+                ).format(feature=self._pipeline_prerequisite_feature_label(name), name=name),
+                style="yellow",
+            )
+            return None
+
+        feature_label = self._pipeline_prerequisite_feature_label(name)
+        self.renderer.print_system_message(
+            _(
+                "Pipeline prerequisite {name} is missing; it is required for {feature}. "
+                "Choose an installer or skip this feature for this run."
+            ).format(feature=feature_label, name=name),
+            style="yellow",
+        )
+        options: list[TextOption | InputOption] = [
+            TextOption(
+                label=_pipeline_prerequisite_installer_label(installer),
+                value=installer.id,
+            )
+            for installer in installers
+        ]
+        options.append(TextOption(label=_("Skip {feature} for this run").format(feature=feature_label), value="skip"))
+        selection = Select(options, default_value="skip", layout=SelectLayout.EXPANDED).run(
+            console=getattr(self, "console", None)
+        )
+        return None if selection in (None, "skip") else str(selection)
+
+    def _print_pipeline_prerequisite_status_messages(self, metadata: dict[str, Any]) -> None:
+        decisions = metadata.get("decisions")
+        feature_flags = metadata.get("feature_flags")
+        if not isinstance(decisions, dict) or not isinstance(feature_flags, dict):
+            return
+
+        warning_statuses = {
+            "declined_or_unavailable",
+            "disabled_feature",
+            "install_failed",
+            "missing_after_install",
+            "post_install_failed",
+        }
+        for name, raw_decision in decisions.items():
+            if not isinstance(raw_decision, dict):
+                continue
+            status = str(raw_decision.get("status") or "")
+            if status not in warning_statuses:
+                continue
+            required_flags = [str(flag) for flag in raw_decision.get("required_flags") or [] if flag]
+            disabled_flags = [flag for flag in required_flags if feature_flags.get(flag) is False]
+            if not disabled_flags:
+                continue
+            feature_name = self._pipeline_prerequisite_feature_name(disabled_flags)
+            reason = str(raw_decision.get("message") or status.replace("_", " "))
+            summary = _(
+                "{feature} skipped\n"
+                "Prerequisite {name} failed, so {feature} is disabled for this run.\n"
+                "Reason: {reason}"
+            ).format(
+                feature=feature_name,
+                name=name,
+                reason=_format_prerequisite_failure_reason(reason),
+            )
+            self.renderer.print_system_message(
+                summary,
+                style="yellow",
+            )
+            console = getattr(self, "console", None)
+            if console is not None:
+                console.print()
+
+    def _pipeline_prerequisite_feature_name(self, required_flags: list[str]) -> str:
+        labels_by_flag = getattr(self, "_pipeline_prerequisite_feature_labels_by_flag", {})
+        labels: list[str] = []
+        if isinstance(labels_by_flag, dict):
+            for flag in required_flags:
+                label = labels_by_flag.get(flag)
+                if isinstance(label, str) and label and label not in labels:
+                    labels.append(label)
+        if labels:
+            return ", ".join(labels)
+        return _("configured feature")
+
+    def _pipeline_prerequisite_feature_label(self, prerequisite_name: str) -> str:
+        flags_by_name = getattr(self, "_pipeline_prerequisite_required_flags_by_name", {})
+        required_flags = flags_by_name.get(prerequisite_name, []) if isinstance(flags_by_name, dict) else []
+        return self._pipeline_prerequisite_feature_name([str(flag) for flag in required_flags])
+
     async def ensure_pipeline_restored_for_prompt(self) -> bool:
         """Restore a resumable pipeline sidecar so /prompt can inspect the real AgentLoop context."""
         from iac_code.pipeline import create_pipeline
@@ -2741,9 +3225,16 @@ class InlineREPL:
         pipeline_cwd = get_working_directory() or self._original_cwd
         if not self._detect_pipeline_session(pipeline_cwd, self._session_id):
             return False
+        pipeline_name = get_pipeline_name()
+        prerequisite_resolution = self._prepare_pipeline_prerequisite_metadata(
+            pipeline_name=pipeline_name,
+            cwd=pipeline_cwd,
+            session_id=self._session_id,
+            allow_sidecar_metadata=True,
+        )
 
         self._pipeline = create_pipeline(
-            name=get_pipeline_name(),
+            name=pipeline_name,
             provider_manager=self._provider_manager,
             base_tool_registry=self.tool_registry,
             session_storage=self._session_storage,
@@ -2753,6 +3244,7 @@ class InlineREPL:
             memory_content_getter=self._pipeline_memory_content_getter(),
             auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
             resume_from_sidecar=True,
+            prerequisite_resolution=prerequisite_resolution,
         )
         self._refresh_pipeline_display_recorder()
         restored = self._pipeline.sidecar_restore_result
@@ -2821,8 +3313,16 @@ class InlineREPL:
         if self._pipeline is None:
             pipeline_cwd = get_working_directory() or self._original_cwd
             self._prepare_pipeline_session_layout(pipeline_cwd, self._session_id)
+            pipeline_name = get_pipeline_name()
+            has_resumable_sidecar = self._detect_pipeline_session(pipeline_cwd, self._session_id)
+            prerequisite_resolution = self._prepare_pipeline_prerequisite_metadata(
+                pipeline_name=pipeline_name,
+                cwd=pipeline_cwd,
+                session_id=self._session_id,
+                allow_sidecar_metadata=has_resumable_sidecar,
+            )
             self._pipeline = create_pipeline(
-                name=get_pipeline_name(),
+                name=pipeline_name,
                 provider_manager=self._provider_manager,
                 base_tool_registry=self.tool_registry,
                 session_storage=self._session_storage,
@@ -2831,11 +3331,12 @@ class InlineREPL:
                 permission_context_getter=lambda: self.store.get_state().permission_context,
                 memory_content_getter=self._pipeline_memory_content_getter(),
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
+                prerequisite_resolution=prerequisite_resolution,
             )
             self._refresh_pipeline_display_recorder()
             self._pipeline_backup_blocked = False
             restored = None
-            if self._detect_pipeline_session(pipeline_cwd, self._session_id):
+            if has_resumable_sidecar:
                 restored = await self._pipeline.restore_from_sidecar()
                 if restored.ok is False:
                     detail = restored.reason or restored.status
@@ -5231,8 +5732,15 @@ class InlineREPL:
         if choice == "resume":
             from iac_code.pipeline import create_pipeline
 
+            pipeline_name = get_pipeline_name()
+            prerequisite_resolution = self._prepare_pipeline_prerequisite_metadata(
+                pipeline_name=pipeline_name,
+                cwd=pipeline_cwd,
+                session_id=new_session_id,
+                allow_sidecar_metadata=True,
+            )
             self._pipeline = create_pipeline(
-                name=get_pipeline_name(),
+                name=pipeline_name,
                 provider_manager=self._provider_manager,
                 base_tool_registry=self.tool_registry,
                 session_storage=self._session_storage,
@@ -5242,6 +5750,7 @@ class InlineREPL:
                 memory_content_getter=self._pipeline_memory_content_getter(),
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
                 resume_from_sidecar=True,
+                prerequisite_resolution=prerequisite_resolution,
             )
             restored = self._pipeline.sidecar_restore_result
             if restored is None or restored.ok is False:
@@ -5274,7 +5783,7 @@ class InlineREPL:
         import yaml as _yaml
 
         from iac_code.pipeline.display_names import display_step_name
-        from iac_code.ui.components.select import InputOption, Select, SelectLayout, TextOption
+        from iac_code.ui.components.select import Select, SelectLayout, TextOption
 
         try:
             loaded = _yaml.safe_load(meta_path.read_text(encoding="utf-8"))

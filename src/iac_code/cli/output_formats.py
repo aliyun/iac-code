@@ -13,6 +13,7 @@ from typing import IO, Any
 
 from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.services.permissions.audit import build_input_summary
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.types.stream_events import (
     ErrorEvent,
     MessageEndEvent,
@@ -42,10 +43,27 @@ def _public_tool_result(event: ToolResultEvent) -> Any:
 
 
 def _public_tool_metadata(event: ToolResultEvent, metadata: Any) -> Any:
+    public_metadata = _strip_internal_tool_metadata(metadata)
+    if event.is_error:
+        public_metadata = _sanitize_public_value(public_metadata, public_path_roots=event.public_path_roots)
     return sanitize_public_tool_output_data(
-        _sanitize_public_value(metadata, public_path_roots=event.public_path_roots) if event.is_error else metadata,
+        public_metadata,
         public_path_roots=event.public_path_roots,
     )
+
+
+def _strip_internal_tool_metadata(metadata: Any) -> Any:
+    if isinstance(metadata, dict):
+        return {
+            str(key): _strip_internal_tool_metadata(value)
+            for key, value in metadata.items()
+            if key != EXTERNALIZED_RESULT_PATH_METADATA_KEY
+        }
+    if isinstance(metadata, list):
+        return [_strip_internal_tool_metadata(item) for item in metadata]
+    if isinstance(metadata, tuple):
+        return [_strip_internal_tool_metadata(item) for item in metadata]
+    return metadata
 
 
 def _sanitize_public_value(value: Any, *, public_path_roots: list[dict[str, str]] | None = None) -> Any:
@@ -63,6 +81,12 @@ def _sanitize_public_value(value: Any, *, public_path_roots: list[dict[str, str]
 
 
 def _stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
+    if isinstance(event, ToolUseStartEvent):
+        return {
+            "tool_use_id": event.tool_use_id,
+            "name": event.name,
+            "type": event.type,
+        }
     if isinstance(event, PermissionRequestEvent):
         return {
             "input_summary": build_input_summary(event.tool_name, event.tool_input),
