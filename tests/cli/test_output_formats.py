@@ -262,6 +262,26 @@ class TestStreamJsonWriter:
         assert data["type"] == "tool_result"
         assert "metadata" not in data
 
+    def test_tool_result_relativizes_public_paths_without_emitting_roots(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="bash",
+                result="/Users/alice/project/src/app.py\n/Users/alice/private/secret.txt",
+                public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert data["type"] == "tool_result"
+        assert data["result"] == "./src/app.py\n[PATH]"
+        assert "public_path_roots" not in data
+        assert "publicPathRoots" not in rendered
+        assert "/Users/alice" not in rendered
+
     def test_subagent_tool_event_omits_raw_child_input(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
@@ -597,6 +617,30 @@ class TestStreamJsonWriter:
         assert "hunter2" not in rendered
         assert "/Users/alice" not in rendered
         assert data["metadata"]["step_result"]["error"] == "Schema failed DB_PASSWORD=[REDACTED] at [PATH]"
+
+    def test_failed_tool_result_metadata_relativizes_public_paths(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="complete_step",
+                result="Tool failed",
+                is_error=True,
+                metadata={
+                    "step_result": {
+                        "step_id": "x",
+                        "error": "Schema failed at /Users/alice/project/logs/result.txt",
+                    }
+                },
+                public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert "/Users/alice" not in rendered
+        assert data["metadata"]["step_result"]["error"] == "Schema failed at ./logs/result.txt"
 
     def test_finalize_is_noop(self) -> None:
         stream = io.StringIO()

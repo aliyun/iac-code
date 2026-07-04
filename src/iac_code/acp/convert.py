@@ -259,8 +259,14 @@ class ACPEventConverter:
                         ],
                     )
                 ]
-            case ToolResultEvent(tool_use_id=tool_use_id, tool_name=tool_name, result=result, is_error=is_error):
-                visible_result = _public_tool_result_text(result)
+            case ToolResultEvent(
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                result=result,
+                is_error=is_error,
+                public_path_roots=public_path_roots,
+            ):
+                visible_result = _public_tool_result_text(result, public_path_roots=public_path_roots)
                 content: list[
                     acp.schema.ContentToolCallContent
                     | acp.schema.FileEditToolCallContent
@@ -386,8 +392,8 @@ def _input_delta_summary_text(accumulated_input: str) -> str:
     return _("Input received ({count} chars)").format(count=len(accumulated_input))
 
 
-def _public_tool_result_text(value: Any) -> str:
-    sanitized = sanitize_public_tool_output_data(value)
+def _public_tool_result_text(value: Any, *, public_path_roots: list[dict[str, str]] | None = None) -> str:
+    sanitized = sanitize_public_tool_output_data(value, public_path_roots=public_path_roots)
     if isinstance(sanitized, str):
         return sanitized
     return json.dumps(sanitized, ensure_ascii=False, default=str)

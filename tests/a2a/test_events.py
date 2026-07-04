@@ -786,6 +786,42 @@ async def test_failed_tool_result_metadata_is_sanitized() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_result_metadata_relativizes_paths_under_public_roots() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="bash",
+            result=(
+                "STDOUT:\n"
+                "/Users/alice/project/src/app.py:12\n"
+                "/Users/alice/.iac-code/tool-results/session-1/result.txt\n"
+                "/Users/alice/private/secret.txt\n"
+                "Exit code: 0"
+            ),
+            public_path_roots=[
+                {"path": "/Users/alice/project", "label": "."},
+                {"path": "/Users/alice/.iac-code", "label": "$IAC_CODE_CONFIG_DIR"},
+            ],
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    tool = dumped["metadata"]["iac_code"]["tool"]
+    assert tool["result"] == (
+        "STDOUT:\n./src/app.py:12\n$IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt\n[PATH]\nExit code: 0"
+    )
+    rendered = str(dumped)
+    assert "public_path_roots" not in rendered
+    assert "publicPathRoots" not in rendered
+    assert "/Users/alice" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_failed_tool_result_metadata_redacts_malformed_opaque_artifact_uri() -> None:
     queue = FakeEventQueue()
     malformed_uri = r"iac-code-artifact://artifact-1/C:\Users\alice\.iac-code\projects\demo\template.yaml"

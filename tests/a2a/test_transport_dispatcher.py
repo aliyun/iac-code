@@ -130,7 +130,7 @@ async def test_dispatcher_stream_redacts_sensitive_message_metadata_echo(monkeyp
 
     echoed_metadata = events[0]["result"]["history"][0]["metadata"]
     assert echoed_metadata["iac_code"] == {
-        "cwd": str(tmp_path),
+        "cwd": ".",
         "iac_code_model": "qwen3.6-plus",
         "iac_code_api_key": "***",
         "alibaba_cloud_access_key_id": "***",

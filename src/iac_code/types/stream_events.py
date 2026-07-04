@@ -119,6 +119,7 @@ class ToolResultEvent:
     result: str
     is_error: bool = False
     metadata: dict[str, Any] | None = None
+    public_path_roots: list[dict[str, str]] | None = None
     type: Literal["tool_result"] = "tool_result"
 
 

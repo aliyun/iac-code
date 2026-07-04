@@ -207,6 +207,30 @@ def test_sanitize_public_artifact_text_decodes_percent_encoded_local_paths() -> 
     assert ".iac-code" not in sanitized
 
 
+def test_sanitize_public_artifact_text_relativizes_file_uri_under_public_root() -> None:
+    roots = [{"path": "/Users/alice/project", "label": "."}]
+
+    sanitized = sanitize_public_artifact_text(
+        "see file:///Users/alice/project/output/template.yaml",
+        public_path_roots=roots,
+    )
+
+    assert sanitized == "see ./output/template.yaml"
+    assert "/Users/alice" not in sanitized
+
+
+def test_sanitize_public_artifact_text_relativizes_localhost_file_uri_under_public_root() -> None:
+    roots = [{"path": "/Users/alice/project", "label": "."}]
+
+    sanitized = sanitize_public_artifact_text(
+        "see file://localhost/Users/alice/project/output/template.yaml",
+        public_path_roots=roots,
+    )
+
+    assert sanitized == "see ./output/template.yaml"
+    assert "/Users/alice" not in sanitized
+
+
 def test_sanitize_public_artifact_text_redacts_raw_file_uri_with_spaces() -> None:
     value = r"failed at file:///Users/Alice and Bob/.iac-code/projects/demo/template.yaml and next"
 
@@ -262,6 +286,181 @@ def test_sanitize_public_tool_output_handles_artifacts_containers_and_sensitive_
         "api_key": "[REDACTED]",
         "note": "stored at [PATH]\nnext",
     }
+
+
+def test_sanitize_public_tool_output_relativizes_paths_under_public_roots() -> None:
+    output = sanitize_public_tool_output_data(
+        "STDOUT:\n"
+        "/Users/alice/project/src/app.py:12\n"
+        "/Users/alice/.iac-code/tool-results/session-1/result.txt\n"
+        "/Volumes/shared/templates/base.yaml\n"
+        "/Users/alice/private/secret.txt\n"
+        "Exit code: 0",
+        public_path_roots=[
+            {"path": "/Users/alice/project", "label": "."},
+            {"path": "/Users/alice/.iac-code", "label": "$IAC_CODE_CONFIG_DIR"},
+            {"path": "/Volumes/shared/templates", "label": "[trusted]"},
+        ],
+    )
+
+    assert output == (
+        "STDOUT:\n"
+        "./src/app.py:12\n"
+        "$IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt\n"
+        "[trusted]/base.yaml\n"
+        "[PATH]\n"
+        "Exit code: 0"
+    )
+
+
+def test_sanitize_public_tool_output_relativizes_path_keys_under_public_roots() -> None:
+    output = sanitize_public_tool_output_data(
+        {
+            "/Users/alice/project/src/app.py": "workspace",
+            "/Users/alice/.iac-code/tool-results/session-1/result.txt": "config",
+            "/Volumes/shared/templates/base.yaml": "trusted",
+            "/opt/private/config.txt": "outside",
+            "nested": {"/Users/alice/project/output.yaml": "nested"},
+        },
+        public_path_roots=[
+            {"path": "/Users/alice/project", "label": "."},
+            {"path": "/Users/alice/.iac-code", "label": "$IAC_CODE_CONFIG_DIR"},
+            {"path": "/Volumes/shared/templates", "label": "[trusted]"},
+        ],
+    )
+
+    assert output == {
+        "./src/app.py": "workspace",
+        "$IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt": "config",
+        "[trusted]/base.yaml": "trusted",
+        "[PATH]": "outside",
+        "nested": {"./output.yaml": "nested"},
+    }
+
+
+def test_sanitize_public_tool_output_redacts_sensitive_keys_that_also_contain_paths() -> None:
+    output = sanitize_public_tool_output_data(
+        {
+            "password_file /Users/alice/project/config.txt": "super-secret",
+            "/Users/alice/project/config.txt password_file": "suffix-secret",
+            "file:///Users/alice/project/config-uri.txt password_file": "uri-suffix-secret",
+        },
+        public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+    )
+
+    assert output == {
+        "password_file ./config.txt": "[REDACTED]",
+        "./config.txt password_file": "[REDACTED]",
+        "./config-uri.txt password_file": "[REDACTED]",
+    }
+
+
+def test_sanitize_public_artifact_data_relativizes_path_keys_under_public_roots() -> None:
+    output = sanitize_public_artifact_data(
+        {
+            "filename": "result.txt",
+            "metadata": {
+                "/Users/alice/project/template.yaml": "workspace",
+                "/Volumes/shared/templates/base.yaml": "trusted",
+            },
+        },
+        public_path_roots=[
+            {"path": "/Users/alice/project", "label": "."},
+            {"path": "/Volumes/shared/templates", "label": "[trusted]"},
+        ],
+    )
+
+    assert output == {
+        "filename": "result.txt",
+        "metadata": {
+            "./template.yaml": "workspace",
+            "[trusted]/base.yaml": "trusted",
+        },
+    }
+
+
+def test_sanitize_public_artifact_data_redacts_sensitive_keys_that_also_contain_paths() -> None:
+    output = sanitize_public_artifact_data(
+        {
+            "metadata": {
+                "password_file /Users/alice/project/config.txt": "super-secret",
+                "/Users/alice/project/config.txt password_file": "suffix-secret",
+            }
+        },
+        public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+    )
+
+    assert output == {
+        "metadata": {
+            "password_file ./config.txt": "[REDACTED]",
+            "./config.txt password_file": "[REDACTED]",
+        }
+    }
+
+
+def test_sanitize_public_tool_output_redacts_unmatched_absolute_paths_without_touching_urls() -> None:
+    output = sanitize_public_tool_output_data(
+        "files:\n"
+        "/opt/private/secret.txt\n"
+        "/mnt/data/foo.txt\n"
+        "/Volumes/shared/secret.txt\n"
+        "https://example.com/docs/template.yaml\n"
+        "path=/srv/app/config.yaml",
+        public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+    )
+
+    assert output == ("files:\n[PATH]\n[PATH]\n[PATH]\nhttps://example.com/docs/template.yaml\npath=[PATH]")
+
+
+def test_sanitize_public_tool_output_preserves_json_unicode_escapes() -> None:
+    output = sanitize_public_tool_output_data(
+        r'{"Label": "{\"en\": \"VPC\", \"zh-cn\": \"\\u4e13\\u6709\\u7f51\\u7edc\"}"}',
+        public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+    )
+
+    assert output == r'{"Label": "{\"en\": \"VPC\", \"zh-cn\": \"\\u4e13\\u6709\\u7f51\\u7edc\"}"}'
+
+
+def test_sanitize_public_tool_output_uses_shortest_matching_public_root() -> None:
+    output = sanitize_public_tool_output_data(
+        "/repo/subdir/file.yaml",
+        public_path_roots=[
+            {"path": "/repo", "label": "."},
+            {"path": "/repo/subdir", "label": "[trusted]"},
+        ],
+    )
+
+    assert output == "./subdir/file.yaml"
+
+
+def test_sanitize_public_tool_output_relativizes_windows_paths_under_public_roots() -> None:
+    output = sanitize_public_tool_output_data(
+        r"C:\Users\alice\project\src\app.py:12",
+        public_path_roots=[{"path": r"C:\Users\alice\project", "label": "."}],
+    )
+
+    assert output == "./src/app.py:12"
+    assert "C:\\Users\\alice" not in output
+
+
+def test_sanitize_public_tool_output_relativizes_unc_paths_under_public_roots() -> None:
+    output = sanitize_public_tool_output_data(
+        r"\\server\share\dir\file.txt",
+        public_path_roots=[{"path": r"\\server\share", "label": "[trusted]"}],
+    )
+
+    assert output == "[trusted]/dir/file.txt"
+    assert "\\\\server\\share" not in output
+
+
+def test_sanitize_public_tool_output_relativizes_unc_paths_with_unicode_like_server_names() -> None:
+    output = sanitize_public_tool_output_data(
+        r"\\u1234\share\dir\file.txt",
+        public_path_roots=[{"path": r"\\u1234\share", "label": "[trusted]"}],
+    )
+
+    assert output == "[trusted]/dir/file.txt"
+    assert r"\\u1234\share" not in output
 
 
 def test_sanitize_public_tool_output_handles_root_artifact_payload_dicts() -> None:

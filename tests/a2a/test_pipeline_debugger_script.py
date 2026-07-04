@@ -1009,6 +1009,56 @@ def test_index_html_groups_normal_a2a_message_deltas_outside_pipeline_steps() ->
         assert expected in html
 
 
+def test_index_html_surfaces_normal_a2a_metadata_events_outside_pipeline_steps() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+
+    for expected in [
+        "function a2aStatusUpdate",
+        "function normalMetadataEventsFromRawItem",
+        "function appendNormalMetadataEvent",
+        "normalMetadataGroups: {}",
+        "metadata.thinking",
+        "metadata.tool",
+        '"normal_thinking_group"',
+        '"normal_tool_event"',
+        "appendNormalMetadataEvent(rawRow || payload);",
+    ]:
+        assert expected in html
+
+
+def test_index_html_backfills_normal_a2a_metadata_when_replaying_existing_tree() -> None:
+    debugger = load_debugger_module()
+
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+
+    for expected in [
+        "function executionTreeHasNormalMetadataTimeline",
+        "function rebuildNormalChatTimelineFromRawEvents",
+        "function removeNormalChatNodes",
+        "normal_thinking_group",
+        "normal_tool_event",
+        "if (!executionTreeHasNormalMetadataTimeline(state.executionTree)) {",
+        "rebuildNormalChatTimelineFromRawEvents(state.raw.sse);",
+    ]:
+        assert expected in html
+
+
 def test_index_html_deduplicates_pipeline_events_across_overlapping_streams() -> None:
     debugger = load_debugger_module()
 

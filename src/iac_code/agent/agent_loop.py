@@ -47,6 +47,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
+from iac_code.utils.public_paths import build_public_path_roots
 
 
 @dataclass
@@ -1115,12 +1116,20 @@ class AgentLoop:
                     else:
                         denied_results.append((request, ToolResult.error(_("Permission denied."))))
 
+                public_path_roots = build_public_path_roots(
+                    cwd=context.cwd,
+                    additional_directories=context.additional_directories,
+                    trusted_read_directories=context.trusted_read_directories,
+                    relative_read_directories=context.relative_read_directories,
+                )
+
                 for request, result in denied_results:
                     yield ToolResultEvent(
                         tool_use_id=request.id,
                         tool_name=request.name,
                         result=result.content,
                         is_error=True,
+                        public_path_roots=public_path_roots,
                     )
 
                 if not allowed_requests:
@@ -1226,6 +1235,7 @@ class AgentLoop:
                         result=processed.content,
                         is_error=result.is_error,
                         metadata=result.metadata,
+                        public_path_roots=public_path_roots,
                     )
 
                     tool_result_blocks.append(

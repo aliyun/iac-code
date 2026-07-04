@@ -38,22 +38,27 @@ class OutputFormat(str, Enum):
 
 
 def _public_tool_result(event: ToolResultEvent) -> Any:
-    return sanitize_public_tool_output_data(event.result)
+    return sanitize_public_tool_output_data(event.result, public_path_roots=event.public_path_roots)
 
 
 def _public_tool_metadata(event: ToolResultEvent, metadata: Any) -> Any:
-    return sanitize_public_tool_output_data(_sanitize_public_value(metadata) if event.is_error else metadata)
+    return sanitize_public_tool_output_data(
+        _sanitize_public_value(metadata, public_path_roots=event.public_path_roots) if event.is_error else metadata,
+        public_path_roots=event.public_path_roots,
+    )
 
 
-def _sanitize_public_value(value: Any) -> Any:
+def _sanitize_public_value(value: Any, *, public_path_roots: list[dict[str, str]] | None = None) -> Any:
     if isinstance(value, str):
-        return sanitize_public_text(value)
+        return sanitize_public_text(value, public_path_roots=public_path_roots)
     if isinstance(value, list):
-        return [_sanitize_public_value(item) for item in value]
+        return [_sanitize_public_value(item, public_path_roots=public_path_roots) for item in value]
     if isinstance(value, tuple):
-        return [_sanitize_public_value(item) for item in value]
+        return [_sanitize_public_value(item, public_path_roots=public_path_roots) for item in value]
     if isinstance(value, dict):
-        return {str(key): _sanitize_public_value(item) for key, item in value.items()}
+        return {
+            str(key): _sanitize_public_value(item, public_path_roots=public_path_roots) for key, item in value.items()
+        }
     return value
 
 
@@ -99,6 +104,7 @@ def _stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
     if isinstance(event, ErrorEvent):
         data["error"] = sanitize_public_text(event.error)
     elif isinstance(event, ToolResultEvent):
+        data.pop("public_path_roots", None)
         if data.get("metadata") is None:
             data.pop("metadata", None)
         elif "metadata" in data:

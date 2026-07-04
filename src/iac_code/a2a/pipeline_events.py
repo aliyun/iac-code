@@ -1287,7 +1287,11 @@ def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
         "toolName": event.tool_name,
         "toolUseId": event.tool_use_id,
         "isError": event.is_error,
-        "result": _tool_result_metadata(event.result, is_error=event.is_error),
+        "result": _tool_result_metadata(
+            event.result,
+            is_error=event.is_error,
+            public_path_roots=event.public_path_roots,
+        ),
     }
 
 

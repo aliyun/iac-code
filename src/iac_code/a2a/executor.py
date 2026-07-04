@@ -85,6 +85,7 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
+from iac_code.utils.public_paths import build_public_path_roots
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -836,12 +837,19 @@ class IacCodeA2AExecutor(AgentExecutor):
         context_id = context.context_id or "ctx-" + uuid.uuid4().hex[:12]
         task = None
         initial_task_published = False
+        public_path_roots: list[dict[str, str]] | None = None
 
         async def publish_initial_task_if_missing() -> None:
             nonlocal initial_task_published
             if initial_task_published or isinstance(getattr(context, "current_task", None), Task):
                 return
-            await self._publish_initial_task(event_queue, task_id=task_id, context_id=context_id, context=context)
+            await self._publish_initial_task(
+                event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                context=context,
+                public_path_roots=public_path_roots,
+            )
             initial_task_published = True
 
         try:
@@ -849,6 +857,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 getattr(context, "message", None), "metadata", None
             )
             cwd = self._resolve_cwd(metadata)
+            public_path_roots = build_public_path_roots(cwd=cwd)
             user_id = self._resolve_user_id(metadata)
             metadata_model = self._resolve_model(metadata)
             metadata_api_key = self._resolve_api_key(metadata)
@@ -1680,6 +1689,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         context_id: str,
         context: RequestContext,
         session_id: str | None = None,
+        public_path_roots: list[dict[str, str]] | None = None,
     ) -> None:
         task = Task(
             id=task_id,
@@ -1690,7 +1700,12 @@ class IacCodeA2AExecutor(AgentExecutor):
             ParseDict(iac_code_session_metadata(session_id), task.metadata)
         message = getattr(context, "message", None)
         if isinstance(message, Message):
-            task.history.append(self._metadata_echo_redactor.redact_message_echo(message))
+            task.history.append(
+                self._metadata_echo_redactor.redact_message_echo(
+                    message,
+                    public_path_roots=public_path_roots,
+                )
+            )
         await event_queue.enqueue_event(task)
 
     def _refresh_runtime_cloud_tools(self, runtime: Any) -> None:

@@ -1079,6 +1079,36 @@ def test_failed_tool_result_payload_is_sanitized() -> None:
     assert "/Users/alice" not in rendered
 
 
+def test_tool_result_payload_relativizes_paths_under_public_roots() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-paths",
+            tool_name="bash",
+            result=(
+                "STDOUT:\n"
+                "/Users/alice/project/src/app.py:12\n"
+                "/Users/alice/.iac-code/tool-results/session-1/result.txt\n"
+                "/Users/alice/private/secret.txt\n"
+                "Exit code: 0"
+            ),
+            public_path_roots=[
+                {"path": "/Users/alice/project", "label": "."},
+                {"path": "/Users/alice/.iac-code", "label": "$IAC_CODE_CONFIG_DIR"},
+            ],
+        )
+    )
+
+    assert envelopes[0]["data"]["result"] == (
+        "STDOUT:\n./src/app.py:12\n$IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt\n[PATH]\nExit code: 0"
+    )
+    rendered = json.dumps(envelopes[0], ensure_ascii=False)
+    assert "public_path_roots" not in rendered
+    assert "publicPathRoots" not in rendered
+    assert "/Users/alice" not in rendered
+
+
 def test_tool_result_keeps_valid_opaque_artifact_uri() -> None:
     translator = PipelineEventTranslator(_ctx())
     uri = "iac-code-artifact://artifact-1/template.yaml"

@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import ntpath
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
 from iac_code.i18n import _
+from iac_code.utils.public_paths import relativize_public_file_uri, sanitize_public_paths
 
 _SECRET_VALUE_PATTERN = r"""(?:\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|"[^"]*"|'[^']*'|[^\s,;}]+)"""
 
@@ -100,7 +102,10 @@ _PATH_PATTERNS = (
     re.compile(r"/workspaces/[^\r\n,;:)\"']*?" + _PATH_END_PATTERN),
     re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:/[^\r\n,;:)\"']*?" + _PATH_END_PATTERN),
     re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\[^\r\n,;:)\"']*?" + _PATH_END_PATTERN),
-    re.compile(r"\\\\[^\r\n,;:)\"']*?" + _PATH_END_PATTERN),
+    re.compile(
+        r"""\\\\u[0-9A-Fa-f]{4}\\(?!\\u[0-9A-Fa-f]{4})(?=[^\r\n,;:)"'\]}\\])[^\r\n,;:)\"']*?""" + _PATH_END_PATTERN
+    ),
+    re.compile(r"\\\\(?!u[0-9A-Fa-f]{4})[^\r\n,;:)\"']*?" + _PATH_END_PATTERN),
     re.compile(r"(?<!:)//[^\r\n,;:)\"']*?" + _PATH_END_PATTERN),
 )
 
@@ -150,11 +155,16 @@ def public_error(
     return PublicError(summary=summary, details=details, error_id=error_id)
 
 
-def sanitize_public_text(value: Any, *, fallback_summary: str | None = None) -> str:
+def sanitize_public_text(
+    value: Any,
+    *,
+    fallback_summary: str | None = None,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> str:
     if fallback_summary is None:
         fallback_summary = _("Unknown error")
     raw_summary = str(value) if value is not None else ""
-    return _sanitize_public_summary(raw_summary) or fallback_summary
+    return _sanitize_public_summary(raw_summary, public_path_roots=public_path_roots) or fallback_summary
 
 
 def _error_id(*, error_type: str, summary: str) -> str:
@@ -162,18 +172,18 @@ def _error_id(*, error_type: str, summary: str) -> str:
     return digest[:12]
 
 
-def _sanitize_public_summary(value: str) -> str:
+def _sanitize_public_summary(value: str, *, public_path_roots: Iterable[Mapping[str, str]] | None = None) -> str:
     protected, placeholders = _replace_public_artifact_uri_tokens(value)
-    protected = _replace_file_uri_tokens(protected)
-    sanitized = _apply_public_patterns(protected)
+    protected = _replace_file_uri_tokens(protected, public_path_roots=public_path_roots)
+    sanitized = _apply_public_patterns(protected, public_path_roots=public_path_roots)
 
     decoded_raw = unquote(protected)
     decoded, decoded_placeholders = _replace_public_artifact_uri_tokens(
         decoded_raw, prefix="__IAC_CODE_PUBLIC_DECODED_URI_"
     )
-    decoded = _replace_file_uri_tokens(decoded)
+    decoded = _replace_file_uri_tokens(decoded, public_path_roots=public_path_roots)
     if decoded_raw != protected:
-        decoded_sanitized = _apply_public_patterns(decoded)
+        decoded_sanitized = _apply_public_patterns(decoded, public_path_roots=public_path_roots)
         if decoded != decoded_raw or decoded_sanitized != decoded:
             sanitized = decoded_sanitized
             placeholders.update(decoded_placeholders)
@@ -183,7 +193,7 @@ def _sanitize_public_summary(value: str) -> str:
     return sanitized
 
 
-def _apply_public_patterns(value: str) -> str:
+def _apply_public_patterns(value: str, *, public_path_roots: Iterable[Mapping[str, str]] | None = None) -> str:
     sanitized = value
     for pattern in _SECRET_PATTERNS:
         if pattern.groups:
@@ -195,18 +205,22 @@ def _apply_public_patterns(value: str) -> str:
         sanitized,
     )
     sanitized = _SECRET_ASSIGNMENT_PATTERN.sub(lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", sanitized)
+    sanitized = sanitize_public_paths(sanitized, public_path_roots)
     for pattern in _PATH_PATTERNS:
         sanitized = pattern.sub("[PATH]", sanitized)
     return sanitized
 
 
-def _replace_file_uri_tokens(value: str) -> str:
+def _replace_file_uri_tokens(value: str, *, public_path_roots: Iterable[Mapping[str, str]] | None = None) -> str:
     def replace_file_uri(match: re.Match[str]) -> str:
         uri = match.group(0)
         trailing = ""
         while uri and uri[-1] in ".,:!?":
             trailing = uri[-1] + trailing
             uri = uri[:-1]
+        public_path = relativize_public_file_uri(uri, public_path_roots)
+        if public_path is not None:
+            return f"{public_path}{trailing}"
         return f"[PATH]{trailing}"
 
     return _FILE_URI_TEXT_PATTERN.sub(replace_file_uri, value)

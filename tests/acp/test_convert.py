@@ -600,6 +600,26 @@ def test_successful_tool_result_content_is_sanitized() -> None:
     assert updates[1].status == "completed"
 
 
+def test_successful_tool_result_relativizes_public_paths() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
+
+    updates = converter.event_to_updates(
+        ToolResultEvent(
+            tool_use_id="t1",
+            tool_name="bash",
+            result="/Users/alice/project/src/app.py\n/Users/alice/private/secret.txt",
+            is_error=False,
+            public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+        )
+    )
+
+    rendered = str(updates[0].content[0].content.text)
+    assert rendered == "./src/app.py\n[PATH]"
+    assert "/Users/alice" not in rendered
+    assert updates[1].status == "completed"
+
+
 def test_successful_tool_result_dict_is_sanitized_and_serialized() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="write_file"))
