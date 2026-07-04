@@ -56,6 +56,8 @@ from iac_code.a2a.jsonrpc_passthrough import (
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_executor import (
+    _CANCEL_WAITING_INPUT_BACKUP_BLOCKED,
+    WaitingInputCancelResult,
     cancel_waiting_input_task_from_sidecar,
     recoverable_task_id_from_sidecar,
     terminal_task_state_from_sidecar,
@@ -72,6 +74,7 @@ from iac_code.a2a.push_worker import A2APushDeliveryWorker
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
+from iac_code.services.session_backup import SessionBackupService
 from iac_code.utils.public_errors import public_exception_summary
 
 logger = logging.getLogger(__name__)
@@ -142,9 +145,11 @@ def create_runtime_components(
     agent_extensions: object | None = None,
     auto_approve_permissions: bool = False,
     thinking_exposure: object | None = None,
+    backup_service: Any | None = None,
 ) -> A2ARuntimeComponents:
     metrics = NoOpA2AMetrics()
     thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure)
+    backup_service = backup_service or SessionBackupService()
     persistence = A2APersistenceStore(persistence_dir) if persistence_dir is not None else None
     artifact_store = A2AArtifactStore(artifact_dir) if artifact_dir is not None else None
     push_config_store = None
@@ -196,6 +201,7 @@ def create_runtime_components(
         artifact_store=artifact_store,
         auto_approve_permissions=auto_approve_permissions,
         thinking_exposure_types=thinking_exposure_types,
+        backup_service=backup_service,
     )
     card = build_agent_card(
         host=host,
@@ -218,6 +224,8 @@ def create_runtime_components(
         push_config_store=push_config_store,
         push_sender=push_sender,
         extended_agent_card=build_extended_agent_card(card),
+        backup_service=backup_service,
+        metrics=metrics,
     )
     return A2ARuntimeComponents(
         handler=handler,
@@ -231,6 +239,17 @@ def create_runtime_components(
 
 
 class IacCodeRequestHandler(DefaultRequestHandler):
+    def __init__(
+        self,
+        *args: Any,
+        backup_service: Any | None = None,
+        metrics: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._backup_service = backup_service or SessionBackupService()
+        self._metrics = metrics or NoOpA2AMetrics()
+
     async def on_get_task(self, params: GetTaskRequest, context):
         self._validate_extensions(context)
         return await super().on_get_task(params, context)
@@ -384,13 +403,31 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             context_record = await self.task_store.get_context_record(task.context_id)
         except Exception:
             return None
-        if not cancel_waiting_input_task_from_sidecar(
+        try:
+            task_record = await self.task_store.get_task_record(task.id)
+        except Exception:
+            task_record = None
+        cancel_result = await asyncio.to_thread(
+            cancel_waiting_input_task_from_sidecar,
             cwd=context_record.cwd,
             session_id=context_record.session_id,
             context_id=task.context_id,
             task_id=task.id,
             reason=_("Task canceled while waiting for input."),
-        ):
+            backup_service=self._backup_service,
+            task_store=self.task_store,
+            task_record=task_record,
+            context_record=context_record,
+            metrics=self._metrics,
+        )
+        if cancel_result in {
+            _CANCEL_WAITING_INPUT_BACKUP_BLOCKED,
+            WaitingInputCancelResult.BACKUP_BLOCKED_PERSIST_FAILED,
+        }:
+            return await self._reconcile_inactive_pipeline_input_required_task(task, context)
+        if cancel_result == WaitingInputCancelResult.PERSIST_FAILED:
+            return None
+        if cancel_result == WaitingInputCancelResult.NOT_OWNER:
             terminal_state = terminal_task_state_from_sidecar(
                 cwd=context_record.cwd,
                 session_id=context_record.session_id,
@@ -401,7 +438,15 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 return None
             return await self._reconcile_inactive_pipeline_terminal_task(task, context, terminal_state)
 
+        if cancel_result != WaitingInputCancelResult.CANCELED:
+            return None
         return await self._reconcile_inactive_pipeline_terminal_task(task, context, "canceled")
+
+    async def _reconcile_inactive_pipeline_input_required_task(self, task: Task, context) -> Task:
+        task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
+        task.status.timestamp.GetCurrentTime()
+        await self.task_store.save(task, context)
+        return task
 
     async def _reconcile_inactive_pipeline_terminal_task(self, task: Task, context, terminal_state: str) -> Task:
         proto_state = {

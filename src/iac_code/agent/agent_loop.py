@@ -10,6 +10,7 @@ from collections import deque
 from collections.abc import AsyncGenerator, Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
@@ -110,6 +111,7 @@ def _emit_no_prompt_permission_audit(
     permission: PermissionResult,
     decision: Literal["allow", "deny"],
     settings: PermissionAuditSettings | None,
+    audit_log_path: str | None = None,
 ) -> bool:
     audit = permission.audit
     if audit is None or is_routine_read_only_allow(decision, audit):
@@ -131,6 +133,7 @@ def _emit_no_prompt_permission_audit(
             operation=permission_audit_operation(audit),
             input_summary=build_input_summary(request.name, request.input),
             tool_input_redacted=redacted_tool_input_for_settings(request.input, settings),
+            audit_log_path=audit_log_path,
         ),
         settings=settings,
     )
@@ -196,6 +199,10 @@ class AgentLoop:
         tool_context_trusted_read_directories: list[str] | None = None,
         tool_context_relative_read_directories: list[str] | None = None,
         pipeline_mode: bool = False,
+        root_session_id: str | None = None,
+        transcript_id: str | None = None,
+        result_storage_dir: str | Path | None = None,
+        audit_log_path: str | Path | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self.system_prompt = system_prompt
@@ -203,6 +210,10 @@ class AgentLoop:
         self._max_turns = max_turns
         self._session_storage = session_storage
         self._session_id = session_id or str(uuid.uuid4())[:8]
+        self._root_session_id = root_session_id or self._session_id
+        self._transcript_id = transcript_id
+        self._has_session_hierarchy = root_session_id is not None or transcript_id is not None
+        self._audit_log_path = str(audit_log_path) if audit_log_path is not None else None
         self._cwd = cwd or os.getcwd()
         self._session_usage_store = session_usage_store or SessionUsageStore()
         self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
@@ -234,9 +245,12 @@ class AgentLoop:
         self._tool_executor = ToolExecutor(registry=tool_registry)
         from iac_code.config import get_config_dir
 
-        self._result_storage = ResultStorage(
-            storage_dir=os.path.join(str(get_config_dir()), "tool-results", self._session_id),
+        storage_dir = (
+            str(result_storage_dir)
+            if result_storage_dir is not None
+            else os.path.join(str(get_config_dir()), "tool-results", self._session_id)
         )
+        self._result_storage = ResultStorage(storage_dir=storage_dir)
         self._pending_injections: deque[str | list[ContentBlock]] = deque()
         self._current_turn_text: str = ""
         self._accepting_injected_user_messages = False
@@ -1025,6 +1039,11 @@ class AgentLoop:
                         "settings": perm_ctx.audit_settings if perm_ctx is not None else None,
                         "metadata": permission.audit,
                     }
+                    if self._has_session_hierarchy:
+                        audit_context["root_session_id"] = self._root_session_id
+                        audit_context["transcript_id"] = self._transcript_id
+                    if self._audit_log_path is not None:
+                        audit_context["audit_log_path"] = self._audit_log_path
 
                     if permission.behavior == "allow":
                         audit_ok = _emit_no_prompt_permission_audit(
@@ -1034,6 +1053,7 @@ class AgentLoop:
                             permission=permission,
                             decision="allow",
                             settings=audit_context["settings"],
+                            audit_log_path=self._audit_log_path,
                         )
                         if not audit_ok:
                             denied_results.append((request, ToolResult.error(_("Permission denied."))))
@@ -1048,6 +1068,7 @@ class AgentLoop:
                             permission=permission,
                             decision="deny",
                             settings=audit_context["settings"],
+                            audit_log_path=self._audit_log_path,
                         )
                         msg = permission.message or _("Permission denied.")
                         denied_results.append((request, ToolResult.error(msg)))
@@ -1302,11 +1323,35 @@ class AgentLoop:
             "allowed_tool_rules": getattr(self, "_allowed_tool_rules", []),
             "model_override": getattr(self, "_model_override", None),
             "effort_override": getattr(self, "_effort_override", None),
+            "tool_context_trusted_read_directories": list(self._tool_context_trusted_read_directories),
+            "tool_context_relative_read_directories": list(self._tool_context_relative_read_directories),
         }
         modified = modifier(current_ctx)
         self._allowed_tool_rules = modified.get("allowed_tool_rules", [])
         self._model_override = modified.get("model_override")
         self._effort_override = modified.get("effort_override")
+        self._tool_context_trusted_read_directories = []
+        self._tool_context_relative_read_directories = []
+        _extend_unique(
+            self._tool_context_trusted_read_directories,
+            list(
+                modified.get(
+                    "tool_context_trusted_read_directories",
+                    current_ctx["tool_context_trusted_read_directories"],
+                )
+                or []
+            ),
+        )
+        _extend_unique(
+            self._tool_context_relative_read_directories,
+            list(
+                modified.get(
+                    "tool_context_relative_read_directories",
+                    current_ctx["tool_context_relative_read_directories"],
+                )
+                or []
+            ),
+        )
 
     async def _auto_compact(self) -> CompactionEvent | None:
         """Perform automatic context compaction via provider."""
@@ -1411,19 +1456,47 @@ class AgentLoop:
         self._memory_recall_generation += 1
         self._last_provider_request_snapshot = None
         self._session_id = session_id
+        self._root_session_id = session_id
+        self._transcript_id = None
+        self._has_session_hierarchy = False
+        self._audit_log_path = None
         self._current_git_branch = None
         self._auto_loaded_skills.clear()
         self.context_manager.reset()
         if resume_messages:
             self.context_manager.load_messages(resume_messages)
+        if self._session_usage_store.uses_direct_path_provider:
+            self._session_usage_store = SessionUsageStore()
         self._session_usage_totals = self._session_usage_store.load(self._cwd, self._session_id)
         reset_recall_stats = getattr(self._memory_recall_service, "reset_stats", None)
         if callable(reset_recall_stats):
             reset_recall_stats()
         self._sync_recall_suppression_from_context()
         self._result_storage = ResultStorage(
-            storage_dir=os.path.join(str(get_config_dir()), "tool-results", session_id),
+            storage_dir=str(
+                self._result_storage_dir_for_replaced_session(session_id)
+                or Path(get_config_dir()) / "tool-results" / session_id
+            ),
         )
+
+    def _result_storage_dir_for_replaced_session(self, session_id: str) -> Path | None:
+        session_dir_factory = getattr(self._session_storage, "v2_session_dir", None)
+        if not callable(session_dir_factory):
+            return None
+        try:
+            raw_session_dir = session_dir_factory(self._cwd, session_id)
+        except (AttributeError, TypeError):
+            return None
+        if raw_session_dir is None:
+            return None
+        if not isinstance(raw_session_dir, (str, os.PathLike)):
+            return None
+        session_dir = Path(raw_session_dir)
+        from iac_code.services.session_layout import SessionPaths, session_layout_version
+
+        if session_layout_version(session_dir) is None:
+            return None
+        return SessionPaths.require_supported(session_dir).tool_results_dir
 
     def _refresh_git_branch(self) -> None:
         """Probe ``git`` once per turn and cache the result.

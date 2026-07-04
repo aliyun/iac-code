@@ -1729,6 +1729,48 @@ async def test_outer_stream_returns_candidate_selection_terminal_event():
 
 
 @pytest.mark.asyncio
+async def test_outer_stream_does_not_rerender_recursive_candidate_selection_backup_blocked():
+    from iac_code.ui.repl import InlineREPL
+
+    backup_event = PipelineEvent(
+        type=PipelineEventType.BACKUP_BLOCKED,
+        step_id="select",
+        timestamp=time.time(),
+        data={"reason": "pipeline_step_completed", "error": "backup unavailable", "recoverable": True},
+    )
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._pipeline = MagicMock()
+    repl._pipeline_step_names = []
+    repl._pipeline_completed_indices = set()
+    repl._update_pipeline_state_from_event = MagicMock()
+    repl._render_pipeline_event = MagicMock()
+    repl._restart_pipeline_stream_after_interrupt = AsyncMock(return_value=_empty_stream())
+
+    async def fake_candidate_selection_tabs(_event_stream, progress_bar_fn=None):
+        repl._render_pipeline_event(backup_event)
+        return backup_event
+
+    repl._render_candidate_selection_tabs = AsyncMock(side_effect=fake_candidate_selection_tabs)
+
+    async def stream():
+        yield PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="select",
+            timestamp=time.time(),
+            data={"index": 1, "total": 1, "ui_mode": "candidate_selection"},
+        )
+
+    result = await repl._render_pipeline_stream(stream())
+
+    backup_render_calls = [
+        call_item for call_item in repl._render_pipeline_event.call_args_list if call_item.args[0] is backup_event
+    ]
+    assert result is backup_event
+    assert len(backup_render_calls) == 1
+    repl._restart_pipeline_stream_after_interrupt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_outer_stream_returns_parallel_tabs_terminal_event():
     from iac_code.ui.repl import InlineREPL
 

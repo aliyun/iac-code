@@ -44,10 +44,25 @@ msgstr "不安全的工件文件名"
 msgid "Unknown error"
 msgstr "未知错误"
 
+#: src/iac_code/a2a/artifacts.py src/iac_code/a2a/pipeline_paths.py
+#: src/iac_code/services/session_layout.py
+#, python-brace-format
+msgid "Unsupported session layout version: {version}"
+msgstr "不支持的会话布局版本：{version}"
+
+#: src/iac_code/a2a/backup.py src/iac_code/a2a/executor.py
+msgid "Session backup failed. Retry after the backup path is available."
+msgstr "会话备份失败。备份路径可用后请重试。"
+
 #: src/iac_code/a2a/events.py src/iac_code/acp/server.py
 #, python-brace-format
 msgid "MCP warning: {message}"
 msgstr "MCP 警告：{message}"
+
+#: src/iac_code/a2a/events.py src/iac_code/a2a/executor.py
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A temporary error occurred. Please retry."
+msgstr "发生临时错误，请重试。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 msgid ""
@@ -87,11 +102,7 @@ msgstr "任务已在运行。"
 msgid "Current model {model} does not support image input."
 msgstr "当前模型 {model} 不支持图片输入。"
 
-#: src/iac_code/a2a/pipeline_executor.py
-msgid "A temporary error occurred. Please retry."
-msgstr "发生临时错误，请重试。"
-
-#: src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "需要身份验证。请配置凭据后重试。"
 
@@ -99,6 +110,27 @@ msgstr "需要身份验证。请配置凭据后重试。"
 #, python-brace-format
 msgid "Pipeline already running. Resume task {task_id}."
 msgstr "管道已在运行。请恢复任务 {task_id}。"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "unknown"
+msgstr "未知"
+
+#: src/iac_code/a2a/pipeline_executor.py
+#, python-brace-format
+msgid "A2A pipeline sidecar restore failed: status={status}, reason={reason}"
+msgstr "A2A pipeline sidecar 恢复失败：status={status}，reason={reason}"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Failed to persist A2A pipeline snapshot"
+msgstr "无法持久化 A2A pipeline 快照"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A2A pipeline sidecar owner is unavailable"
+msgstr "A2A pipeline sidecar owner 不可用"
+
+#: src/iac_code/a2a/pipeline_journal.py
+msgid "Unrepairable A2A pipeline journal tail"
+msgstr "无法修复 A2A pipeline journal 尾部"
 
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A pipeline state not found"
@@ -3058,6 +3090,10 @@ msgid "Pipeline state persistence failed."
 msgstr "管道状态持久化失败。"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
+msgid "Session backup failed."
+msgstr "会话备份失败。"
+
+#: src/iac_code/pipeline/engine/pipeline_runner.py
 #: src/iac_code/pipeline/engine/sub_pipeline_executor.py
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -3327,10 +3363,156 @@ msgstr ""
 "解决方法：在 QwenPaw 中切换到已支持的 provider，或关闭 QwenPaw 模式（从 settings.yml 移除 "
 "'llm_source: qwenpaw'）。"
 
+#: src/iac_code/services/session_backup.py
+msgid "Session backup requires a supported session layout."
+msgstr "会话备份需要受支持的 session layout。"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup root must be an absolute directory: {path}"
+msgstr "备份根目录必须是绝对目录：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup root must not be a filesystem root: {path}"
+msgstr "备份根目录不能是文件系统根目录：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup root must not be drive-relative: {path}"
+msgstr "备份根目录不能是驱动器相对路径：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "unsafe session_id: {session_id!r}"
+msgstr "不安全的 session_id：{session_id!r}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination overlaps session source: {destination}"
+msgstr "备份目标与会话源目录重叠：{destination}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination resolves outside backup root: {destination}"
+msgstr "备份目标解析到了备份根目录之外：{destination}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination is not under backup root: {destination}"
+msgstr "备份目标不在备份根目录下：{destination}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination ancestry contains symlink: {path}"
+msgstr "备份目标路径的上级目录包含符号链接：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} ancestry contains symlink: {path}"
+msgstr "{label} 的上级路径包含符号链接：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source is a symlink: {source}"
+msgstr "会话源目录是符号链接：{source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source is not a directory: {source}"
+msgstr "会话源不是目录：{source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source cannot be resolved: {source}"
+msgstr "无法解析会话源目录：{source}"
+
+#: src/iac_code/services/session_backup.py
+msgid "session source"
+msgstr "会话源目录"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} is a symlink: {path}"
+msgstr "{label} 是符号链接：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} is not a directory: {path}"
+msgstr "{label} 不是目录：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} cannot be resolved: {path}"
+msgstr "无法解析 {label}：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination cannot be resolved: {destination}"
+msgstr "无法解析备份目标路径：{destination}"
+
+#: src/iac_code/services/session_backup.py
+msgid "backup root"
+msgstr "备份根目录"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup lock is a symlink: {path}"
+msgstr "备份锁文件是符号链接：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup lock is not a regular file: {path}"
+msgstr "备份锁不是普通文件：{path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "could not acquire backup lock for {source}"
+msgstr "无法获取会话备份锁：{source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source entry is not a regular file: {source}"
+msgstr "会话源条目不是常规文件：{source}"
+
+#: src/iac_code/services/session_backup.py src/iac_code/utils/state_io.py
+#, python-brace-format
+msgid "could not open file without following reparse point: {path}"
+msgstr "无法在不跟随重解析点的情况下打开文件：{path}"
+
+#: src/iac_code/services/session_layout.py
+#: src/iac_code/services/session_storage.py
+#: src/iac_code/services/session_usage.py
+#, python-brace-format
+msgid "Unsupported session metadata: {path}"
+msgstr "不支持的会话元数据：{path}"
+
+#: src/iac_code/services/session_layout.py
+#, python-brace-format
+msgid "Path is outside session directory: {path}"
+msgstr "路径位于会话目录之外：{path}"
+
+#: src/iac_code/services/session_layout.py
+#, python-brace-format
+msgid "Unsafe session-owned path: {path}"
+msgstr "不安全的会话所属路径：{path}"
+
+#: src/iac_code/services/session_layout.py
+msgid "unsafe transcript id"
+msgstr "不安全的 transcript id"
+
 #: src/iac_code/services/session_metadata.py
 #, python-brace-format
 msgid "Session name must match {pattern}"
 msgstr "会话名称必须匹配 {pattern}"
+
+#: src/iac_code/services/session_metadata.py
+msgid "invalid session metadata"
+msgstr "无效的会话元数据"
+
+#: src/iac_code/services/session_metadata.py
+msgid "invalid session layout version"
+msgstr "无效的会话布局版本"
 
 #: src/iac_code/services/session_storage.py
 #, python-brace-format
@@ -4730,6 +4912,17 @@ msgid "Pipeline warning: {reason}"
 msgstr "管道警告：{reason}"
 
 #: src/iac_code/ui/repl.py
+msgid "backup unavailable"
+msgstr "备份不可用"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"Pipeline backup is blocked; the pipeline is paused and recoverable: "
+"{error}"
+msgstr "管道备份被阻塞；管道已暂停且可恢复：{error}"
+
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Option {index}"
 msgstr "选项 {index}"
@@ -5283,6 +5476,16 @@ msgstr "  方式 2 - 如果无法访问 github.com，运行以下命令通过 np
 #: src/iac_code/utils/public_errors.py
 msgid "Stack trace omitted from public event; see error_id."
 msgstr "公开事件中已省略堆栈跟踪；请查看 error_id。"
+
+#: src/iac_code/utils/state_io.py
+#, python-brace-format
+msgid "refusing to follow symlink or reparse point: {path}"
+msgstr "拒绝跟随符号链接或重解析点：{path}"
+
+#: src/iac_code/utils/state_io.py
+#, python-brace-format
+msgid "refusing to open non-regular file: {path}"
+msgstr "拒绝打开非常规文件：{path}"
 
 #~ msgid "toggle preview"
 #~ msgstr "切换预览"

@@ -19,7 +19,7 @@ CLI 引数 > 環境変数 > 設定ファイル
 ~/.iac-code/
 ```
 
-`IAC_CODE_CONFIG_DIR` 環境変数を設定すると、ディレクトリを変更できます（`~` と `$VAR` の展開をサポート）。設定すると、永続化されるすべての成果物 — 認証情報、設定、履歴、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/` — が新しい場所に追従します。起動/デバッグログはデフォルトで `<config-dir>/logs/` に置かれ、`IAC_CODE_LOG_DIR` で別に移動できます。権限監査レコードは `<config-dir>/logs/` に残ります。
+`IAC_CODE_CONFIG_DIR` 環境変数を設定すると、ディレクトリを変更できます（`~` と `$VAR` の展開をサポート）。設定すると、永続化されるすべての成果物 — 認証情報、設定、履歴、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/` — が新しい場所に追従します。起動/デバッグログはデフォルトで `<config-dir>/logs/` に置かれ、`IAC_CODE_LOG_DIR` で別に移動できます。権限監査レコードは所有するセッションに残ります。
 
 主要ファイル：
 
@@ -156,13 +156,13 @@ ROA 形式のリクエストは、メソッドが `GET` で body がない場合
 
 ### 権限監査ログ
 
-ユーザープロンプト、ツールキャッシュ境界、自動化承認、または resolver 承認をまたぐ権限決定は、次のファイルに追記されます：
+ユーザープロンプト、ツールキャッシュ境界、自動化承認、または resolver 承認をまたぐ権限決定は、アクティブセッションの監査ログに追記されます：
 
 ```text
-<config-dir>/logs/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
 ```
 
-デフォルトでは `~/.iac-code/logs/permission-audit.jsonl` です。権限監査ログは `IAC_CODE_CONFIG_DIR` に従います。`IAC_CODE_LOG_DIR` で移動されるのは起動/デバッグログだけです。監査 writer はファイルロック付きで JSONL レコードを追記し、ファイルをローテーションし、OS が対応している場合はローカルファイル権限を制限します。通常の読み取り専用自動許可は省略されることがありますが、拒否、プロンプト、キャッシュ済み決定、自動化承認、resolver 承認、その他の監査対象の権限境界は記録されます。
+Pipeline step transcript は `<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl` に独自の監査レコードを書き込みます。権限監査ログは `IAC_CODE_CONFIG_DIR` 配下のセッション layout に従います。`IAC_CODE_LOG_DIR` で移動されるのは起動/デバッグログだけで、権限監査レコードは移動されません。監査 writer はファイルロック付きで JSONL レコードを追記し、ファイルをローテーションし、OS が対応している場合はローカルファイル権限を制限します。通常の読み取り専用自動許可は省略されることがありますが、拒否、プロンプト、キャッシュ済み決定、自動化承認、resolver 承認、その他の監査対象の権限境界は記録されます。
 
 監査設定は `permissions.audit` の下で構成します：
 
@@ -173,3 +173,34 @@ ROA 形式のリクエストは、メソッドが `GET` で body がない場合
 | `max_files` | `5` | 保持するローテーション済み監査ファイル数。組み込み上限を超える値は上限に丸められます。 |
 
 監査レコードを必要とする allow 決定を監査ログへ永続化できない場合、IaC Code は fail-closed となり、監査証跡なしで実行する代わりにそのアクションを拒否します。
+
+
+## セッションレイアウトとバックアップ状態
+
+新しいセッションは `layout_version` メタデータでレイアウトを示し、実行時アーティファクトを所有セッション内に閉じ込めます。対象には `image-cache/`、`tool-results/`、A2A スナップショット、pipeline transcript の実行時データ、直近のバックアップ理由と状態を記録する `.backup-state.json` が含まれます。`.backup-state.json` と `.backup-lock` はアクティブセッション側だけに残り、バックアップミラーにはコピーされません。`layout_version` marker のない旧セッションは読み取り可能ですが、新しいセッション単位の artifact ディレクトリは作成されません。非対応の layout version を持つセッションは拒否されます。
+
+v2 session の主要パスは次のとおりです。
+
+```text
+<config-dir>/projects/<project>/<session-id>/
+<config-dir>/projects/<project>/<session-id>/metadata.json
+<config-dir>/projects/<project>/<session-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/image-cache/
+<config-dir>/projects/<project>/<session-id>/tool-results/
+<config-dir>/projects/<project>/<session-id>/a2a/task.json
+<config-dir>/projects/<project>/<session-id>/a2a/context.json
+<config-dir>/projects/<project>/<session-id>/a2a/artifacts/
+<config-dir>/projects/<project>/<session-id>/a2a/pipeline/
+<config-dir>/projects/<project>/<session-id>/a2a/cleanup-deferred-prompts.json
+<config-dir>/projects/<project>/<session-id>/pipeline/meta.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/context.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/events.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/display.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/tool-results/
+```

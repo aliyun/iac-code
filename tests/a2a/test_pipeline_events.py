@@ -118,6 +118,32 @@ def test_pipeline_warning_translates_to_non_terminal_envelope() -> None:
     assert "load_error" not in envelope["data"]
 
 
+def test_backup_blocked_translates_to_recoverable_envelope() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.BACKUP_BLOCKED,
+            step_id="confirm_and_select",
+            timestamp=1717821600.0,
+            data={
+                "reason": "pipeline_step_completed",
+                "error": "backup unavailable",
+                "recoverable": True,
+            },
+        )
+    )
+
+    assert envelope["eventType"] == "backup_blocked"
+    assert envelope["scope"] == "pipeline"
+    assert envelope["status"] == "input_required"
+    assert envelope["data"] == {
+        "reason": "pipeline_step_completed",
+        "error": "backup unavailable",
+        "recoverable": True,
+    }
+
+
 def test_manual_cleanup_event_normalizes_cleanup_data_keys() -> None:
     translator = PipelineEventTranslator(_ctx())
 

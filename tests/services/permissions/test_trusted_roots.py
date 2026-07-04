@@ -17,6 +17,43 @@ def test_build_session_trusted_read_directories_uses_session_artifact_dirs(monke
     ]
 
 
+def test_build_session_trusted_read_directories_includes_session_scoped_artifact_dirs(monkeypatch, tmp_path):
+    monkeypatch.setattr("iac_code.config.get_config_dir", lambda: tmp_path / ".iac-code")
+
+    from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
+
+    session_dir = tmp_path / "sessions" / "abc123"
+
+    roots = build_session_trusted_read_directories("abc123", session_dir=session_dir)
+
+    assert roots == [
+        str(Path(tmp_path / ".iac-code" / "tool-results" / "abc123")),
+        str(Path(tmp_path / ".iac-code" / "image-cache" / "abc123")),
+        str(session_dir / "tool-results"),
+        str(session_dir / "image-cache"),
+    ]
+
+
+def test_build_session_trusted_read_directories_rejects_symlinked_session_artifact_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr("iac_code.config.get_config_dir", lambda: tmp_path / ".iac-code")
+
+    from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
+
+    session_dir = tmp_path / "sessions" / "abc123"
+    session_dir.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (session_dir / "tool-results").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not available on this platform")
+
+    roots = build_session_trusted_read_directories("abc123", session_dir=session_dir)
+
+    assert str(session_dir / "tool-results") not in roots
+    assert str(session_dir / "image-cache") in roots
+
+
 def test_build_session_trusted_read_directories_returns_empty_for_falsey_session_id():
     from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
 

@@ -1,12 +1,24 @@
+from pathlib import Path
+
 import pytest
 
 from iac_code.a2a.artifacts import (
     A2AArtifactStore,
     UnsafeArtifactNameError,
+    artifact_store_for_session,
     sanitize_public_artifact_data,
     sanitize_public_artifact_text,
     sanitize_public_tool_output_data,
 )
+from iac_code.services.session_layout import UnsupportedSessionLayoutError
+from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
 
 
 def test_artifact_store_writes_text_and_metadata(tmp_path) -> None:
@@ -24,6 +36,43 @@ def test_artifact_store_writes_text_and_metadata(tmp_path) -> None:
     assert metadata.uri.startswith(f"iac-code-artifact://{metadata.artifact_id}/")
     assert str(tmp_path) not in metadata.uri
     assert store.path_for(metadata.artifact_id).read_text(encoding="utf-8").startswith("ROSTemplate")
+
+
+def test_artifact_store_for_session_uses_session_a2a_artifacts_dir(tmp_path) -> None:
+    session_dir = tmp_path / "projects" / "p" / "session-1"
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id="session-1", cwd="/repo", layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+
+    store = artifact_store_for_session(session_dir)
+
+    assert store.root == session_dir / "a2a" / "artifacts"
+
+
+def test_artifact_store_for_session_rejects_symlink_artifacts_dir(tmp_path) -> None:
+    session_dir = tmp_path / "projects" / "p" / "session-1"
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id="session-1", cwd="/repo", layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    outside = tmp_path / "outside-artifacts"
+    outside.mkdir()
+    (session_dir / "a2a").mkdir()
+    _symlink_or_skip(outside, session_dir / "a2a" / "artifacts", target_is_directory=True)
+
+    with pytest.raises(UnsupportedSessionLayoutError, match="session-owned path"):
+        artifact_store_for_session(session_dir)
+
+    assert list(outside.iterdir()) == []
+
+
+def test_artifact_store_for_session_rejects_legacy_session_dir(tmp_path) -> None:
+    session_dir = tmp_path / "projects" / "p" / "session-1"
+    session_dir.mkdir(parents=True)
+
+    with pytest.raises(UnsupportedSessionLayoutError):
+        artifact_store_for_session(session_dir)
 
 
 def test_artifact_store_writes_binary_and_metadata(tmp_path) -> None:

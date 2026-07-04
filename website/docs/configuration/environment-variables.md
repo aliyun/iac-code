@@ -52,7 +52,7 @@ See [Alibaba Cloud Credentials](./alibaba-cloud-credentials.md) for more details
 | Variable | Description |
 |---|---|
 | `IAC_CODE_CONFIG_DIR` | Override the runtime configuration directory (default `~/.iac-code/`); supports `~` and `$VAR` expansion. All persisted artifacts (credentials, settings, history, projects, image cache, skills, telemetry, etc.) follow it |
-| `IAC_CODE_LOG_DIR` | Override the local startup/debug log directory (default `<config-dir>/logs/`); supports `~` and `$VAR` expansion. Permission audit records still stay under `<config-dir>/logs/permission-audit.jsonl` |
+| `IAC_CODE_LOG_DIR` | Override the local startup/debug log directory (default `<config-dir>/logs/`); supports `~` and `$VAR` expansion. Permission audit records follow the session layout and are not moved by this variable |
 | `IAC_CODE_PERMISSION_AUDIT_INCLUDE_TOOL_INPUT` | Override `permissions.audit.include_tool_input`; set to `1` / `true` / `yes` / `on` to include shape-only tool input in permission audit records, using type/length/fingerprint instead of raw business payload strings and fingerprinting non-whitelisted field names |
 | `IAC_CODE_ENV` | Deployment environment label (default: `production`) |
 | `IAC_CODE_TENANT_ID` | Tenant identifier for telemetry; auto-prefixed with `iac_tenant_` if not already |
@@ -60,3 +60,10 @@ See [Alibaba Cloud Credentials](./alibaba-cloud-credentials.md) for more details
 | `IAC_CODE_A2A_PUSH_KEYRING` | Environment-managed encrypted push secret keyring for A2A (JSON format) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Standard OpenTelemetry endpoint; when set, enables OTLP export |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Capture GenAI message/tool content on spans: `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` |
+
+
+## Session Backup
+
+| Variable | Description |
+|---|---|
+| `IAC_CODE_CONFIG_BACKUP_DIR` | Optional session backup directory; supports `~` and `$VAR` expansion, and `%VAR%` expansion on Windows. In PowerShell, pass a concrete path or let the shell expand `$env:VAR` before starting `iac-code`. In sandbox deployments this is commonly an OSS-mounted path, but it must be independent from and not overlap `IAC_CODE_CONFIG_DIR` or any session source, and should be low latency enough for critical checkpoints. UNC paths, mapped drives, and mounted OSS paths must preserve `.backup-lock` file locking, atomic replace semantics, and file metadata well enough for incremental mirroring; avoid symlink, junction, or reparse-point ancestry for the active session source, backup root, and mirrored sessions. When enabled, checkpoints mirror each v2 session to `<backup>/projects/<project>/<session_id>/` with the same directory shape as the active session; `.backup-state.json` and `.backup-lock` stay local and are not copied. Normal chat turn-end backups use `normal_turn_end` and do not block the response; only `critical=true` checkpoint failures block publication. Shared A2A task/context indexes can be mounted separately. |

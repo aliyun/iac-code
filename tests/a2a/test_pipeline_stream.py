@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -137,6 +138,34 @@ async def test_test_fault_injection_fires_after_snapshot_save(tmp_path: Path, mo
     assert snapshot is not None
     assert snapshot["status"] == "working"
     assert queue.events == []
+
+
+@pytest.mark.asyncio
+async def test_publish_serializes_delivery_while_before_enqueue_waits(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    hook_started = asyncio.Event()
+    release_hook = asyncio.Event()
+
+    async def before_enqueue(envelope: dict[str, Any]) -> bool:
+        if envelope.get("eventType") == "pipeline_started":
+            hook_started.set()
+            await release_hook.wait()
+        return True
+
+    publisher.before_enqueue = before_enqueue
+    first = asyncio.create_task(publisher.publish_manual("pipeline_started", "pipeline", status="working"))
+    await asyncio.wait_for(hook_started.wait(), timeout=1)
+    second = asyncio.create_task(publisher.publish_manual("pipeline_warning", "pipeline", status="working"))
+    await asyncio.sleep(0.05)
+
+    assert queue.events == []
+    assert not second.done()
+
+    release_hook.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=1)
+
+    pipeline_events = [dump(event)["metadata"]["iac_code"]["pipeline"] for event in queue.events]
+    assert [event["eventType"] for event in pipeline_events] == ["pipeline_started", "pipeline_warning"]
 
 
 @pytest.mark.asyncio
@@ -1143,6 +1172,46 @@ async def test_publish_continues_when_pipeline_persistence_fails(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_publish_append_failure_warning_does_not_include_journal_path(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+    monkeypatch.setattr(publisher, "_ensure_monotonic_sequence", lambda _envelope: None)
+    journal_path = tmp_path / "pipeline" / "a2a-events.jsonl"
+    journal_path.parent.mkdir(parents=True, exist_ok=True)
+    existing_event = _envelope("text_delta")
+    existing_event["sequence"] = 1
+    existing_event["data"] = {"text": "old"}
+    after_corrupt_event = _envelope("text_delta")
+    after_corrupt_event["eventId"] = "evt-after-corrupt"
+    after_corrupt_event["sequence"] = 2
+    after_corrupt_event["data"] = {"text": "after"}
+    journal_path.write_text(
+        json.dumps(existing_event, separators=(",", ":"))
+        + "\n"
+        + '{"eventId":"evt-corrupt"\n'
+        + json.dumps(after_corrupt_event, separators=(",", ":"))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        returned = await publisher.publish(TextDeltaEvent(text="still streams"))
+
+    assert returned == "still streams"
+    assert dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]["data"]["text"] == "still streams"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "Failed to append A2A pipeline journal event error_type=A2APipelineJournalReadError" in message
+        for message in messages
+    )
+    assert str(journal_path) not in "\n".join(messages)
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_publish_skips_pipeline_metadata_when_journal_read_fails_for_sequence_high_water(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path)
 
@@ -1229,6 +1298,29 @@ async def test_publish_rebuilds_missing_snapshot_with_current_event_when_journal
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     assert snapshot["display"]["messages"][0]["text"] == "old new"
+
+
+@pytest.mark.asyncio
+async def test_publish_manual_can_require_journal_metadata(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    def fail_append(_event: dict[str, Any], durable: bool = False) -> None:
+        raise OSError("journal locked")
+
+    publisher.journal.append = fail_append  # type: ignore[method-assign]
+
+    result = await publisher.publish_manual(
+        "backup_blocked",
+        "pipeline",
+        status="input_required",
+        data={"reason": "terminal"},
+        require_durable_metadata=True,
+        require_journal_metadata=True,
+    )
+
+    assert result is None
+    assert queue.events == []
+    assert publisher.snapshot_store.load() is not None
 
 
 @pytest.mark.asyncio

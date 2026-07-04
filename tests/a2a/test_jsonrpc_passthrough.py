@@ -17,6 +17,9 @@ def test_importing_pipeline_executor_does_not_install_jsonrpc_passthrough(monkey
     import iac_code.a2a.pipeline_executor as pipeline_executor
 
     importlib.reload(pipeline_executor)
+    import iac_code.a2a.executor as executor_module
+
+    executor_module.IacCodeA2APipelineExecutor = pipeline_executor.IacCodeA2APipelineExecutor
 
     assert response_helpers.build_error_response is sentinel_build_error_response
     assert jsonrpc_dispatcher.build_error_response is sentinel_build_error_response

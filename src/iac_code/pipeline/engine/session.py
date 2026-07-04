@@ -14,8 +14,16 @@ import yaml
 from iac_code.pipeline.engine.types import StepStatus
 from iac_code.utils.state_io import atomic_write_text
 
-PipelineStatus = Literal["running", "waiting_input", "completed", "user_aborted", "failed", "discarded"]
-RESUMABLE_STATUSES: set[PipelineStatus] = {"running", "waiting_input"}
+PipelineStatus = Literal[
+    "running",
+    "waiting_input",
+    "completed",
+    "user_aborted",
+    "failed",
+    "discarded",
+    "backup_blocked",
+]
+RESUMABLE_STATUSES: set[PipelineStatus] = {"running", "waiting_input", "backup_blocked"}
 SKIP_RESTORE_STATUSES: set[PipelineStatus] = {"completed", "user_aborted", "failed", "discarded"}
 
 _ALL_STATUSES = RESUMABLE_STATUSES | SKIP_RESTORE_STATUSES
@@ -256,6 +264,53 @@ class PipelineSession:
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
         self.save_failed_sync(
+            step_id,
+            state_machine_snapshot,
+            context_snapshot,
+            identity,
+            reason=reason,
+            execution=execution,
+            attempts=attempts,
+            normal_handoff=normal_handoff,
+        )
+
+    def save_backup_blocked_sync(
+        self,
+        step_id: str,
+        state_machine_snapshot: dict,
+        context_snapshot: dict,
+        identity: PipelineIdentity | dict,
+        reason: str | None = None,
+        *,
+        execution: _MetadataValue = _PRESERVE_METADATA,
+        attempts: _MetadataValue = _PRESERVE_METADATA,
+        normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+    ) -> None:
+        self._save_snapshot_sync(
+            "backup_blocked",
+            step_id,
+            state_machine_snapshot,
+            context_snapshot,
+            identity,
+            reason=reason,
+            execution=execution,
+            attempts=attempts,
+            normal_handoff=normal_handoff,
+        )
+
+    async def save_backup_blocked(
+        self,
+        step_id: str,
+        state_machine_snapshot: dict,
+        context_snapshot: dict,
+        identity: PipelineIdentity | dict,
+        reason: str | None = None,
+        *,
+        execution: _MetadataValue = _PRESERVE_METADATA,
+        attempts: _MetadataValue = _PRESERVE_METADATA,
+        normal_handoff: _MetadataValue = _PRESERVE_METADATA,
+    ) -> None:
+        self.save_backup_blocked_sync(
             step_id,
             state_machine_snapshot,
             context_snapshot,
@@ -600,6 +655,7 @@ class PipelineSession:
             return self._restore_failure("invalid_context", status=status)
         return RestoreResult(
             ok=True,
+            reason=meta.get("reason"),
             status=status,
             state_machine_snapshot=state_machine,
             context_snapshot=context_data,

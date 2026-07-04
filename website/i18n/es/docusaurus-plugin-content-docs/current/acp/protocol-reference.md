@@ -27,6 +27,12 @@ Las sesiones tambien pueden cargarse desde el historial (`session/load`) o reanu
 
 ---
 
+## Backups de sesión
+
+Las sesiones ACP usan el mismo comportamiento de backup de sesión v2 que las ejecuciones interactivas y headless. Cuando `IAC_CODE_CONFIG_BACKUP_DIR` está definido, una finalización normal de prompt registra un backup no bloqueante `normal_turn_end`; si ese backup falla, el fallo se registra como `warning` y queda guardado en `.backup-state.json`, mientras que la respuesta final aún se completa sin prometer un campo warning. El modo Pipeline tiene sus propios gates de backup crítico.
+
+---
+
 ## Metodos
 
 ### initialize

@@ -41,7 +41,13 @@ IaC Code konvertiert MCP-Content-Blöcke in modell-sichtbaren Text:
 | `resource_link` | Als Ressourcenlink mit URI und MIME-Type gerendert. |
 | Bild-, Audio- und Blob-Daten | Als private Artefaktdateien gespeichert und per Artefakt-ID referenziert. |
 
-Binärartefakte werden hier gespeichert:
+In v2-Sitzungen werden Binärartefakte im sitzungseigenen MCP-tool-results-Verzeichnis gespeichert:
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/<server>/<tool>/
+```
+
+Legacy-Sitzungen ohne unterstützten Layout-Marker verwenden weiterhin:
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/<server>/<tool>/

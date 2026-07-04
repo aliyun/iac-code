@@ -352,7 +352,7 @@ Task 和 context IDs 必须非空，最多 128 个字符，并且只能包含字
 | `TASK_STATE_CANCELED` | 已请求并应用取消 |
 | `TASK_STATE_FAILED` | task 验证或执行失败 |
 
-iac-code 使用 `TASK_STATE_INPUT_REQUIRED` 作为正常完成状态，因为 context 仍可用于后续消息。
+iac-code 使用 `TASK_STATE_INPUT_REQUIRED` 作为正常完成状态，因为 context 仍可用于后续消息。普通 A2A 轮次会把 `TASK_STATE_INPUT_REQUIRED` 视为这种正常完成状态；成功的轮次结束备份是非阻塞的 `normal_turn_end` 检查点。如果普通 A2A 的 terminal 或 cancellation 发布被关键备份门控阻塞，task metadata 会暴露 `metadata.iac_code.backupBlocked`，其中包含 `reason`、`error` 和 `recoverable`；客户端应等待恢复后再发送下一轮。Pipeline 模式会把备份门控失败作为 pipeline 事件发布，客户端应检查 `metadata.iac_code.pipeline.eventType == "backup_blocked"` 以及事件 data。Pipeline 模式启用 `IAC_CODE_CONFIG_BACKUP_DIR` 后，原因是 `pipeline_step_completed`、`input_required`、`waiting_input`、`terminal` 和 `handoff_ready` 的发布都会被关键备份门控阻塞。`terminal` reason 保护的是 terminal 发布，`handoff_ready` reason 保护的是 `pipeline_handoff_ready` 事件类型。对于 terminal 和 `pipeline_handoff_ready` 的 committed 发布，iac-code 会持久化一个 `backup_committed` pipeline 事件，其 data 包含 `committedEventId`、`committedEventType` 和 `committedSequence`；客户端可先把它与受保护事件配对，再把该发布视为重启后可恢复。
 
 ## 流式更新
 

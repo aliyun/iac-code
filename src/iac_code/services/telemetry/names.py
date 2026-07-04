@@ -186,6 +186,9 @@ class Events:
     PIPELINE_STEP_NUDGED = "iac.pipeline.step.nudged"
     PIPELINE_HARD_INTERRUPT = "iac.pipeline.hard_interrupt"
     PIPELINE_SIDECAR_FAILED = "iac.pipeline.sidecar.failed"
+    PIPELINE_BACKUP_SUCCEEDED = "iac.pipeline.backup.succeeded"
+    PIPELINE_BACKUP_FAILED = "iac.pipeline.backup.failed"
+    PIPELINE_BACKUP_BLOCKED = "iac.pipeline.backup.blocked"
     PIPELINE_USER_INPUT_REQUIRED = "iac.pipeline.user_input.required"
     PIPELINE_USER_INPUT_RECEIVED = "iac.pipeline.user_input.received"
     PIPELINE_SELECTION_MADE = "iac.pipeline.selection.made"
@@ -228,6 +231,9 @@ class Metrics:
     PIPELINE_CANDIDATE_SUCCESS_COUNT = "iac.pipeline.candidate.success.count"
     PIPELINE_CANDIDATE_FAILED_COUNT = "iac.pipeline.candidate.failed.count"
     PIPELINE_FUNNEL_STEP_COUNT = "iac.pipeline.funnel.step.count"
+    PIPELINE_BACKUP_SUCCEEDED_COUNT = "iac.pipeline.backup.succeeded.count"
+    PIPELINE_BACKUP_FAILED_COUNT = "iac.pipeline.backup.failed.count"
+    PIPELINE_BACKUP_BLOCKED_COUNT = "iac.pipeline.backup.blocked.count"
 
 
 class Spans:

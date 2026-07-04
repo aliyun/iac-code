@@ -48,10 +48,27 @@ msgstr "Nome de arquivo de artefato inseguro"
 msgid "Unknown error"
 msgstr "Erro desconhecido"
 
+#: src/iac_code/a2a/artifacts.py src/iac_code/a2a/pipeline_paths.py
+#: src/iac_code/services/session_layout.py
+#, python-brace-format
+msgid "Unsupported session layout version: {version}"
+msgstr "Versão de layout de sessão não suportada: {version}"
+
+#: src/iac_code/a2a/backup.py src/iac_code/a2a/executor.py
+msgid "Session backup failed. Retry after the backup path is available."
+msgstr ""
+"Falha no backup da sessão. Tente novamente quando o caminho de backup "
+"estiver disponível."
+
 #: src/iac_code/a2a/events.py src/iac_code/acp/server.py
 #, python-brace-format
 msgid "MCP warning: {message}"
 msgstr "Aviso MCP: {message}"
+
+#: src/iac_code/a2a/events.py src/iac_code/a2a/executor.py
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A temporary error occurred. Please retry."
+msgstr "Ocorreu um erro temporário. Tente novamente."
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 msgid ""
@@ -99,11 +116,7 @@ msgstr "A tarefa já está em execução."
 msgid "Current model {model} does not support image input."
 msgstr "O modelo atual {model} não oferece suporte a entrada de imagem."
 
-#: src/iac_code/a2a/pipeline_executor.py
-msgid "A temporary error occurred. Please retry."
-msgstr "Ocorreu um erro temporário. Tente novamente."
-
-#: src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "Autenticação necessária. Configure as credenciais e tente novamente."
 
@@ -111,6 +124,29 @@ msgstr "Autenticação necessária. Configure as credenciais e tente novamente."
 #, python-brace-format
 msgid "Pipeline already running. Resume task {task_id}."
 msgstr "O pipeline já está em execução. Retome a tarefa {task_id}."
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "unknown"
+msgstr "desconhecido"
+
+#: src/iac_code/a2a/pipeline_executor.py
+#, python-brace-format
+msgid "A2A pipeline sidecar restore failed: status={status}, reason={reason}"
+msgstr ""
+"Falha ao restaurar o sidecar do pipeline A2A: status={status}, "
+"reason={reason}"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "Failed to persist A2A pipeline snapshot"
+msgstr "Não foi possível persistir o snapshot do pipeline A2A"
+
+#: src/iac_code/a2a/pipeline_executor.py
+msgid "A2A pipeline sidecar owner is unavailable"
+msgstr "O owner do sidecar do pipeline A2A está indisponível"
+
+#: src/iac_code/a2a/pipeline_journal.py
+msgid "Unrepairable A2A pipeline journal tail"
+msgstr "Cauda irreparável do journal do pipeline A2A"
 
 #: src/iac_code/a2a/pipeline_recovery.py
 msgid "A2A pipeline state not found"
@@ -3225,6 +3261,10 @@ msgid "Pipeline state persistence failed."
 msgstr "Falha ao persistir o estado do pipeline."
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
+msgid "Session backup failed."
+msgstr "Falha no backup da sessão."
+
+#: src/iac_code/pipeline/engine/pipeline_runner.py
 #: src/iac_code/pipeline/engine/sub_pipeline_executor.py
 #: src/iac_code/ui/repl.py
 #, python-brace-format
@@ -3516,10 +3556,156 @@ msgstr ""
 "Solução: mude para um provider suportado no QwenPaw, ou desative o modo "
 "QwenPaw (remova 'llm_source: qwenpaw' do settings.yml)."
 
+#: src/iac_code/services/session_backup.py
+msgid "Session backup requires a supported session layout."
+msgstr "O backup da sessão requer um layout de sessão compatível."
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup root must be an absolute directory: {path}"
+msgstr "A raiz de backup deve ser um diretório absoluto: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup root must not be a filesystem root: {path}"
+msgstr "A raiz de backup não deve ser a raiz do sistema de arquivos: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup root must not be drive-relative: {path}"
+msgstr "A raiz de backup não deve ser um caminho relativo à unidade: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "unsafe session_id: {session_id!r}"
+msgstr "session_id inseguro: {session_id!r}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination overlaps session source: {destination}"
+msgstr "O destino de backup se sobrepõe à origem da sessão: {destination}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination resolves outside backup root: {destination}"
+msgstr "O destino de backup resolve para fora da raiz de backup: {destination}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination is not under backup root: {destination}"
+msgstr "O destino de backup não está abaixo da raiz de backup: {destination}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination ancestry contains symlink: {path}"
+msgstr "O caminho pai do destino de backup contém um link simbólico: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} ancestry contains symlink: {path}"
+msgstr "O caminho pai de {label} contém um link simbólico: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source is a symlink: {source}"
+msgstr "A origem da sessão é um link simbólico: {source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source is not a directory: {source}"
+msgstr "A origem da sessão não é um diretório: {source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source cannot be resolved: {source}"
+msgstr "Não foi possível resolver a origem da sessão: {source}"
+
+#: src/iac_code/services/session_backup.py
+msgid "session source"
+msgstr "origem da sessão"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} is a symlink: {path}"
+msgstr "{label} é um link simbólico: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} is not a directory: {path}"
+msgstr "{label} não é um diretório: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "{label} cannot be resolved: {path}"
+msgstr "Não foi possível resolver {label}: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup destination cannot be resolved: {destination}"
+msgstr "Não foi possível resolver o destino de backup: {destination}"
+
+#: src/iac_code/services/session_backup.py
+msgid "backup root"
+msgstr "raiz do backup"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup lock is a symlink: {path}"
+msgstr "O lock de backup é um link simbólico: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "backup lock is not a regular file: {path}"
+msgstr "O lock de backup nao e um arquivo regular: {path}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "could not acquire backup lock for {source}"
+msgstr "Não foi possível adquirir o lock de backup para {source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
+msgid "session source entry is not a regular file: {source}"
+msgstr "A entrada de origem da sessão não é um arquivo regular: {source}"
+
+#: src/iac_code/services/session_backup.py src/iac_code/utils/state_io.py
+#, python-brace-format
+msgid "could not open file without following reparse point: {path}"
+msgstr "Não foi possível abrir o arquivo sem seguir o ponto de reanálise: {path}"
+
+#: src/iac_code/services/session_layout.py
+#: src/iac_code/services/session_storage.py
+#: src/iac_code/services/session_usage.py
+#, python-brace-format
+msgid "Unsupported session metadata: {path}"
+msgstr "Metadados de sessão sem suporte: {path}"
+
+#: src/iac_code/services/session_layout.py
+#, python-brace-format
+msgid "Path is outside session directory: {path}"
+msgstr "O caminho está fora do diretório da sessão: {path}"
+
+#: src/iac_code/services/session_layout.py
+#, python-brace-format
+msgid "Unsafe session-owned path: {path}"
+msgstr "Caminho pertencente à sessão inseguro: {path}"
+
+#: src/iac_code/services/session_layout.py
+msgid "unsafe transcript id"
+msgstr "transcript id inseguro"
+
 #: src/iac_code/services/session_metadata.py
 #, python-brace-format
 msgid "Session name must match {pattern}"
 msgstr "O nome da sessão deve corresponder a {pattern}"
+
+#: src/iac_code/services/session_metadata.py
+msgid "invalid session metadata"
+msgstr "metadados de sessão inválidos"
+
+#: src/iac_code/services/session_metadata.py
+msgid "invalid session layout version"
+msgstr "versão de layout de sessão inválida"
 
 #: src/iac_code/services/session_storage.py
 #, python-brace-format
@@ -4981,6 +5167,19 @@ msgid "Pipeline warning: {reason}"
 msgstr "Aviso do pipeline: {reason}"
 
 #: src/iac_code/ui/repl.py
+msgid "backup unavailable"
+msgstr "backup indisponível"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid ""
+"Pipeline backup is blocked; the pipeline is paused and recoverable: "
+"{error}"
+msgstr ""
+"O backup do pipeline está bloqueado; o pipeline foi pausado e pode ser "
+"recuperado: {error}"
+
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Option {index}"
 msgstr "Opção {index}"
@@ -5555,6 +5754,16 @@ msgstr ""
 #: src/iac_code/utils/public_errors.py
 msgid "Stack trace omitted from public event; see error_id."
 msgstr "Rastreamento de pilha omitido do evento público; veja error_id."
+
+#: src/iac_code/utils/state_io.py
+#, python-brace-format
+msgid "refusing to follow symlink or reparse point: {path}"
+msgstr "Recusado seguir link simbólico ou ponto de reanálise: {path}"
+
+#: src/iac_code/utils/state_io.py
+#, python-brace-format
+msgid "refusing to open non-regular file: {path}"
+msgstr "Recusado abrir arquivo não regular: {path}"
 
 #~ msgid "DashScope Token Plan"
 #~ msgstr "DashScope Token Plan"

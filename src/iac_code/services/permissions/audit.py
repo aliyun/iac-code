@@ -12,11 +12,17 @@ from typing import Any, Literal
 
 from loguru import logger
 
+from iac_code.services.session_layout import (
+    SESSION_LAYOUT_VERSION_V2,
+    ensure_session_owned_dir,
+    ensure_session_owned_parent,
+    require_supported_session_layout,
+)
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import log_event
 from iac_code.services.telemetry.names import Events
 from iac_code.types.permissions import MAX_PERMISSION_AUDIT_FILES, PermissionAuditSettings
-from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
+from iac_code.utils.file_security import ensure_private_file
 from iac_code.utils.public_errors import sanitize_public_text
 from iac_code.utils.state_io import append_jsonl_rotating_locked
 
@@ -191,6 +197,7 @@ class PermissionAuditRecord:
     operation: dict[str, Any] = field(default_factory=dict)
     input_summary: dict[str, Any] = field(default_factory=dict)
     tool_input_redacted: dict[str, Any] | None = None
+    audit_log_path: str | None = None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -560,6 +567,7 @@ def emit_permission_boundary_audit(
             operation=permission_audit_operation(metadata),
             input_summary=build_input_summary(event.tool_name, event.tool_input),
             tool_input_redacted=redacted_tool_input_for_settings(event.tool_input, settings),
+            audit_log_path=_permission_audit_log_path(event),
         ),
         settings=settings,
     )
@@ -611,6 +619,7 @@ def emit_auto_permission_audit(
             operation=permission_audit_operation(metadata),
             input_summary=build_input_summary(event.tool_name, event.tool_input),
             tool_input_redacted=redacted_tool_input_for_settings(event.tool_input, settings),
+            audit_log_path=_permission_audit_log_path(event),
         ),
         settings=settings,
     )
@@ -651,6 +660,13 @@ def _permission_audit_cwd(event: Any) -> str:
     return cwd if isinstance(cwd, str) else ""
 
 
+def _permission_audit_log_path(event: Any) -> str | None:
+    audit_log_path = _permission_audit_context(event).get("audit_log_path")
+    if isinstance(audit_log_path, Path):
+        return str(audit_log_path)
+    return audit_log_path if isinstance(audit_log_path, str) else None
+
+
 def emit_permission_audit(record: PermissionAuditRecord, settings: PermissionAuditSettings | None = None) -> bool:
     """Write a permission audit row and emit a telemetry event."""
 
@@ -673,7 +689,7 @@ def emit_permission_audit(record: PermissionAuditRecord, settings: PermissionAud
         _ensure_audit_log_files_private(log_path, max_files=max_files)
         log_written = True
     except Exception as exc:  # pragma: no cover - defensive logging only
-        logger.warning("Failed to write permission audit log: {}", exc)
+        logger.warning("Failed to write permission audit log (error_type={})", type(exc).__name__)
 
     if log_written or record.decision == "deny":
         try:
@@ -1049,10 +1065,38 @@ def _event_name(record: PermissionAuditRecord) -> str:
 
 
 def _log_path(record: PermissionAuditRecord) -> Path:
+    if record.audit_log_path:
+        return _validated_direct_audit_log_path(Path(record.audit_log_path))
     cwd = record.cwd.strip() or os.getcwd()
     session_id = record.session_id.strip() or "unknown-session"
-    session_dir = ensure_private_dir(SessionStorage().session_dir(cwd, session_id))
+    session_dir = SessionStorage().session_dir(cwd, session_id)
+    if session_dir.exists():
+        require_supported_session_layout(session_dir)
+    session_dir = ensure_session_owned_dir(session_dir, session_dir)
     return session_dir / "permission-audit.jsonl"
+
+
+def _validated_direct_audit_log_path(path: Path) -> Path:
+    if path.name != "permission-audit.jsonl":
+        raise ValueError("invalid permission audit log path")
+    session_dir = _session_dir_from_direct_audit_log_path(path)
+    if session_dir is None:
+        raise ValueError("invalid permission audit log path")
+    if require_supported_session_layout(session_dir) != SESSION_LAYOUT_VERSION_V2:
+        raise ValueError("invalid permission audit log path")
+    ensure_session_owned_parent(session_dir, path)
+    return path
+
+
+def _session_dir_from_direct_audit_log_path(path: Path) -> Path | None:
+    parent = path.parent
+    if (
+        parent.name.startswith("transcript_")
+        and parent.parent.name == "transcripts"
+        and parent.parent.parent.name == "pipeline"
+    ):
+        return parent.parent.parent.parent
+    return parent
 
 
 def _ensure_audit_log_files_private(path: Path, *, max_files: int) -> None:

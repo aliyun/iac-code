@@ -36,6 +36,7 @@ from iac_code.services.permissions.audit import (
     is_permission_audit_non_read_only,
     should_fail_closed_permission_audit,
 )
+from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
 from iac_code.types.permissions import PermissionDecision
@@ -317,6 +318,34 @@ class ACPSession:
         """Update last active timestamp."""
         self.last_active = time.monotonic()
 
+    async def _backup_normal_turn_end(self) -> None:
+        cwd = getattr(self.agent_loop, "_cwd", None)
+        session_storage = getattr(self.agent_loop, "_session_storage", None)
+        if not isinstance(cwd, str) or session_storage is None:
+            return
+        try:
+            result = await asyncio.to_thread(
+                SessionBackupService(session_storage=session_storage).backup_session,
+                cwd,
+                self.id,
+                reason=BackupReason.NORMAL_TURN_END,
+                critical=False,
+            )
+            if getattr(result, "enabled", False) and not getattr(result, "succeeded", True):
+                logger.warning(
+                    "ACP session backup failed (reason=%s, retry_count=%s): %s",
+                    BackupReason.NORMAL_TURN_END.value,
+                    getattr(result, "retry_count", 0),
+                    getattr(result, "error", None) or "unknown",
+                )
+        except Exception as exc:
+            logger.warning(
+                "ACP session backup failed (reason=%s, retry_count=%s, error_type=%s)",
+                BackupReason.NORMAL_TURN_END.value,
+                getattr(exc, "retry_count", 0),
+                type(exc).__name__,
+            )
+
     async def replay_history(self, messages: list[Message]) -> None:
         """Replay persisted history as ACP session_update events.
 
@@ -419,6 +448,8 @@ class ACPSession:
                         content=acp.schema.TextContentBlock(type="text", text=result),
                     ),
                 )
+                await self._backup_normal_turn_end()
+                self.touch()
                 return acp.PromptResponse(stop_reason="end_turn")
 
         if stream_factory is None:
@@ -496,6 +527,7 @@ class ACPSession:
             except Exception:
                 logger.debug("flush_telemetry after prompt failed", exc_info=True)
 
+        await self._backup_normal_turn_end()
         self.touch()
 
         # Build _meta with timing and token usage

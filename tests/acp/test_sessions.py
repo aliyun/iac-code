@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+from unittest.mock import patch
 
 import acp
 import acp.schema
@@ -15,6 +16,7 @@ from iac_code.acp.server import SESSION_IDLE_TIMEOUT, ACPServer
 from iac_code.acp.session import ACPSession, _current_turn_id
 from iac_code.acp.state import TurnState
 from iac_code.agent.message import Message, TextBlock
+from iac_code.services.session_metadata import SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import MessageEndEvent, TextDeltaEvent, Usage
 from iac_code.utils.project_paths import format_resume_command
@@ -122,6 +124,155 @@ async def test_touch_refreshes_last_active_preventing_cleanup() -> None:
     ]
 
     assert "touched-1" not in expired
+
+
+@pytest.mark.asyncio
+async def test_prompt_backs_up_successful_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.services.session_backup import BackupReason
+
+    class LoopWithSession:
+        _cwd = "/repo"
+        _session_storage = object()
+
+        async def run_streaming(self, prompt: str):
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+    calls = []
+
+    class FakeBackupService:
+        def __init__(self, *, session_storage=None):
+            self.session_storage = session_storage
+
+        def backup_session(self, cwd, session_id, *, reason, critical):
+            calls.append((self.session_storage, cwd, session_id, reason, critical))
+
+    monkeypatch.setattr("iac_code.acp.session.SessionBackupService", FakeBackupService, raising=False)
+    session = ACPSession("acp-session", LoopWithSession(), FakeConn())
+
+    response = await session.prompt([acp.schema.TextContentBlock(type="text", text="hello")])
+
+    assert response.stop_reason == "end_turn"
+    assert calls == [(LoopWithSession._session_storage, "/repo", "acp-session", BackupReason.NORMAL_TURN_END, False)]
+
+
+@pytest.mark.asyncio
+async def test_prompt_logs_non_critical_backup_result_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.services.session_backup import BackupReason, BackupResult
+
+    class LoopWithSession:
+        _cwd = "/repo"
+        _session_storage = object()
+
+        async def run_streaming(self, prompt: str):
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+    class FakeBackupService:
+        def __init__(self, *, session_storage=None):
+            self.session_storage = session_storage
+
+        def backup_session(self, cwd, session_id, *, reason, critical):
+            assert (self.session_storage, cwd, session_id, reason, critical) == (
+                LoopWithSession._session_storage,
+                "/repo",
+                "acp-session",
+                BackupReason.NORMAL_TURN_END,
+                False,
+            )
+            return BackupResult(enabled=True, succeeded=False, error="[PATH]", retry_count=2)
+
+    monkeypatch.setattr("iac_code.acp.session.SessionBackupService", FakeBackupService, raising=False)
+    session = ACPSession("acp-session", LoopWithSession(), FakeConn())
+
+    with patch("iac_code.acp.session.logger.warning") as warning:
+        response = await session.prompt([acp.schema.TextContentBlock(type="text", text="hello")])
+
+    assert response.stop_reason == "end_turn"
+    warning.assert_called_once_with(
+        "ACP session backup failed (reason=%s, retry_count=%s): %s",
+        "normal_turn_end",
+        2,
+        "[PATH]",
+    )
+
+
+@pytest.mark.asyncio
+async def test_prompt_backup_exception_warning_does_not_include_exception_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.services.session_backup import BackupReason
+
+    class LoopWithSession:
+        _cwd = "/repo"
+        _session_storage = object()
+
+        async def run_streaming(self, prompt: str):
+            yield TextDeltaEvent(text="ok")
+            yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+    class FakeBackupService:
+        def __init__(self, *, session_storage=None):
+            self.session_storage = session_storage
+
+        def backup_session(self, cwd, session_id, *, reason, critical):
+            assert (self.session_storage, cwd, session_id, reason, critical) == (
+                LoopWithSession._session_storage,
+                "/repo",
+                "acp-session",
+                BackupReason.NORMAL_TURN_END,
+                False,
+            )
+            raise RuntimeError("/mnt/oss/customer-bucket/acp-session source failed")
+
+    monkeypatch.setattr("iac_code.acp.session.SessionBackupService", FakeBackupService, raising=False)
+    session = ACPSession("acp-session", LoopWithSession(), FakeConn())
+
+    with patch("iac_code.acp.session.logger.warning") as warning:
+        response = await session.prompt([acp.schema.TextContentBlock(type="text", text="hello")])
+
+    assert response.stop_reason == "end_turn"
+    warning.assert_called_once_with(
+        "ACP session backup failed (reason=%s, retry_count=%s, error_type=%s)",
+        "normal_turn_end",
+        0,
+        "RuntimeError",
+    )
+    assert "/mnt/oss/customer-bucket" not in " ".join(str(arg) for arg in warning.call_args.args)
+
+
+@pytest.mark.asyncio
+async def test_prompt_backs_up_successful_slash_command_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.services.session_backup import BackupReason
+
+    class LoopWithSession:
+        _cwd = "/repo"
+        _session_storage = object()
+
+    class FakeSlashRegistry:
+        def is_slash_command(self, text: str) -> bool:
+            return True
+
+        async def execute(self, text: str, agent_loop, **context):
+            return "Renamed session to deploy-prod"
+
+    calls = []
+
+    class FakeBackupService:
+        def __init__(self, *, session_storage=None):
+            self.session_storage = session_storage
+
+        def backup_session(self, cwd, session_id, *, reason, critical):
+            calls.append((self.session_storage, cwd, session_id, reason, critical))
+
+    monkeypatch.setattr("iac_code.acp.session.ACPSlashRegistry", FakeSlashRegistry)
+    monkeypatch.setattr("iac_code.acp.session.SessionBackupService", FakeBackupService, raising=False)
+    session = ACPSession("acp-session", LoopWithSession(), FakeConn())
+
+    response = await session.prompt([acp.schema.TextContentBlock(type="text", text="/rename deploy-prod")])
+
+    assert response.stop_reason == "end_turn"
+    assert calls == [(LoopWithSession._session_storage, "/repo", "acp-session", BackupReason.NORMAL_TURN_END, False)]
 
 
 @pytest.mark.asyncio
@@ -597,6 +748,29 @@ async def test_resume_from_storage(monkeypatch: pytest.MonkeyPatch, tmp_path) ->
     resumed_session = server.sessions["stored-session"]
     ctx = resumed_session.agent_loop.context_manager
     assert len(ctx.loaded_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_metadata_only_v2_session(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    _patch_resume_server(monkeypatch, session_id="metadata-only-session")
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+    storage = SessionStorage()
+    session_dir = storage.session_dir("/tmp", "metadata-only-session")
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id="metadata-only-session", cwd="/tmp", layout_version=2),
+    )
+    (session_dir / "a2a").mkdir()
+
+    conn = _RecordingFakeConn()
+    server = ACPServer()
+    server.on_connect(conn)
+
+    result = await server.resume_session(cwd="/tmp", session_id="metadata-only-session")
+
+    assert isinstance(result, acp.schema.ResumeSessionResponse)
+    resumed_session = server.sessions["metadata-only-session"]
+    assert resumed_session.agent_loop.context_manager.loaded_messages == []
 
 
 @pytest.mark.asyncio

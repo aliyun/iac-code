@@ -20,6 +20,9 @@ from pathlib import Path
 from iac_code.config import get_config_dir
 
 MAX_SANITIZED_LENGTH = 200
+_HASH_LENGTH = 12
+_HASH_SUFFIX_LENGTH = 1 + _HASH_LENGTH
+_SANITIZED_PREFIX_LENGTH = MAX_SANITIZED_LENGTH - _HASH_SUFFIX_LENGTH
 _NON_ALNUM = re.compile(r"[^a-zA-Z0-9]")
 _WINDOWS_DRIVE_PATH = re.compile(r"^[a-zA-Z]:[\\/]")
 
@@ -37,6 +40,18 @@ def sanitize_path(name: str) -> str:
     return f"{sanitized[:MAX_SANITIZED_LENGTH]}-{digest}"
 
 
+def _legacy_sanitize_path(name: str) -> str:
+    return sanitize_path(name)
+
+
+def _session_project_sanitize_path(name: str) -> str:
+    sanitized = _NON_ALNUM.sub("-", name)
+    if len(sanitized) <= MAX_SANITIZED_LENGTH:
+        return sanitized
+    digest = blake2b(name.encode("utf-8"), digest_size=6).hexdigest()
+    return f"{sanitized[:_SANITIZED_PREFIX_LENGTH]}-{digest}"
+
+
 def get_projects_dir() -> Path:
     """Root directory holding all per-project session folders."""
     return get_config_dir() / "projects"
@@ -44,7 +59,20 @@ def get_projects_dir() -> Path:
 
 def get_project_dir(cwd: str) -> Path:
     """Directory holding session files for a specific working directory."""
-    return get_projects_dir() / sanitize_path(cwd)
+    candidates = project_dir_candidates(cwd)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def project_dir_candidates(cwd: str, projects_dir: Path | None = None) -> tuple[Path, ...]:
+    root = projects_dir or get_projects_dir()
+    current = root / _session_project_sanitize_path(cwd)
+    legacy = root / _legacy_sanitize_path(cwd)
+    if current == legacy:
+        return (current,)
+    return (current, legacy)
 
 
 def get_session_path(cwd: str, session_id: str) -> Path:

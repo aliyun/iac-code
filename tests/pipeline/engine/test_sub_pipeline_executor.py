@@ -12,6 +12,7 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec, SubPipelineSpec
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor, SubPipelineResult
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.stream_events import ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
 
@@ -41,6 +42,43 @@ def _make_sub_spec() -> SubPipelineSpec:
         iterate_over="architecture.candidates",
         context_fields_from_parent=["intent"],
     )
+
+
+def _make_single_step_sub_spec() -> SubPipelineSpec:
+    return SubPipelineSpec(
+        name="evaluate_candidate",
+        steps=[
+            StepSpec(
+                step_id="template_generating",
+                conclusion_field="template",
+                forward=None,
+                prompt_file="prompts/template.md",
+                skill="iac_aliyun",
+                context_fields=["candidate", "intent"],
+            )
+        ],
+        max_rollbacks=2,
+        iterate_over="architecture.candidates",
+        context_fields_from_parent=["intent"],
+    )
+
+
+class RecordingBackupService:
+    def __init__(self, *, block_on: BackupReason | None = None):
+        self.block_on = block_on
+        self.calls = []
+
+    def backup_session(self, cwd, session_id, *, reason, critical):
+        self.calls.append(
+            {
+                "cwd": cwd,
+                "session_id": session_id,
+                "reason": reason,
+                "critical": critical,
+            }
+        )
+        if reason == self.block_on:
+            raise SessionBackupBlocked("cannot mirror /Users/alice/.iac-code access_key_secret=abc123")
 
 
 class TestSubPipelineResult:
@@ -85,6 +123,105 @@ class TestSubPipelineResult:
 
 
 class TestSubPipelineExecutor:
+    @pytest.mark.asyncio
+    async def test_execute_streaming_does_not_backup_after_sub_step_completion(self, tmp_path, monkeypatch):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "template.md").write_text("Generate template", encoding="utf-8")
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={"intent": []},
+            max_rollbacks=3,
+            skills={"iac_aliyun": "# IaC Skill"},
+        )
+        parent_ctx = PipelineContext({"intent": []})
+        parent_ctx.set_conclusion("intent", {"type": "test"})
+        backup = RecordingBackupService()
+
+        class FakeStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            cwd=str(tmp_path),
+            backup_service=backup,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: FakeStepExecutor())
+
+        events = [
+            event
+            async for event in executor.execute_streaming(
+                sub_spec=_make_single_step_sub_spec(),
+                candidate={"name": "Plan A"},
+                candidate_index=0,
+                parent_context=parent_ctx,
+                session_id="test_session",
+            )
+        ]
+
+        assert backup.calls == []
+        assert any(
+            isinstance(event, PipelineEvent) and event.type == PipelineEventType.SUB_STEP_COMPLETED for event in events
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_streaming_does_not_run_sub_step_backup_that_can_block(self, tmp_path, monkeypatch):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "template.md").write_text("Generate template", encoding="utf-8")
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={"intent": []},
+            max_rollbacks=3,
+            skills={"iac_aliyun": "# IaC Skill"},
+        )
+        parent_ctx = PipelineContext({"intent": []})
+        parent_ctx.set_conclusion("intent", {"type": "test"})
+        backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED)
+
+        class FakeStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"body": "ok"})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            cwd=str(tmp_path),
+            backup_service=backup,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: FakeStepExecutor())
+        events = [
+            event
+            async for event in executor.execute_streaming(
+                sub_spec=_make_single_step_sub_spec(),
+                candidate={"name": "Plan A"},
+                candidate_index=0,
+                parent_context=parent_ctx,
+                session_id="test_session",
+            )
+        ]
+
+        assert backup.calls == []
+        assert not any(
+            isinstance(event, PipelineEvent) and event.type == PipelineEventType.SUB_STEP_FAILED for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+            and event.data.get("failed", False)
+            for event in events
+        )
+
     @pytest.mark.asyncio
     async def test_execute_streaming_resumes_current_sub_step_with_attempt_data(self, tmp_path, monkeypatch):
         """Resume starts at the recorded sub-step and passes attempt/transcript state through."""

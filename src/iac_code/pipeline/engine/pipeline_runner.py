@@ -8,11 +8,13 @@ import inspect
 import json
 import logging
 import os
+import stat
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import Mock
 
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
@@ -24,7 +26,7 @@ from iac_code.pipeline.engine.cleanup import (
 )
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.display_replay import DISPLAY_TRANSCRIPT_FILENAME
-from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType, backup_blocked_event
 from iac_code.pipeline.engine.handoff import build_handoff_summary, terminal_outcome_from_completed_event
 from iac_code.pipeline.engine.interrupt import InterruptController, InterruptVerdict
 from iac_code.pipeline.engine.loader import load_pipeline_dir
@@ -43,6 +45,8 @@ from iac_code.pipeline.engine.user_input import (
     PipelineUserInput,
     normalize_pipeline_user_input,
 )
+from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
+from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.types.stream_events import ResourceObservedEvent, StreamEvent
 from iac_code.utils.public_errors import sanitize_public_text
 
@@ -64,6 +68,94 @@ _REAL_RESTORE_FAILURE_REASONS = {
     "corrupt_context",
     "invalid_context",
 }
+_SIDECAR_ROOT_DIRS = {"a2a", "image-cache", "pipeline", "tool-results"}
+_SIDECAR_ROOT_FILES = {
+    ".backup-state.json",
+    ".backup-lock",
+    ".permission-audit.jsonl.lock",
+    "permission-audit.jsonl",
+    ".usage.jsonl.lock",
+    "usage.jsonl",
+}
+
+
+def _entry_exists_no_follow(path: Path) -> bool:
+    try:
+        path.stat(follow_symlinks=False)
+    except OSError:
+        return False
+    return True
+
+
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        attributes = getattr(path.stat(follow_symlinks=False), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _is_directory_entry(path: Path) -> bool:
+    if path.is_symlink() or _is_reparse_point(path):
+        return False
+    try:
+        return stat.S_ISDIR(path.stat(follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+
+
+def _is_regular_file_entry(path: Path) -> bool:
+    if path.is_symlink() or _is_reparse_point(path):
+        return False
+    try:
+        return stat.S_ISREG(path.stat(follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+
+
+def _is_allowed_sidecar_file_name(name: str) -> bool:
+    if name in _SIDECAR_ROOT_FILES:
+        return True
+    prefix = "permission-audit.jsonl."
+    suffix = name[len(prefix) :] if name.startswith(prefix) else ""
+    return suffix.isdecimal()
+
+
+def _is_safe_sidecar_directory_tree(path: Path) -> bool:
+    if not _is_directory_entry(path):
+        return False
+    stack = [path]
+    while stack:
+        current = stack.pop()
+        try:
+            children = list(current.iterdir())
+        except OSError:
+            return False
+        for child in children:
+            if child.is_symlink() or _is_reparse_point(child):
+                return False
+            try:
+                mode = child.stat(follow_symlinks=False).st_mode
+            except OSError:
+                return False
+            if stat.S_ISDIR(mode):
+                stack.append(child)
+            elif not stat.S_ISREG(mode):
+                return False
+    return True
+
+
+def _is_safe_sidecar_root_child(child: Path) -> bool:
+    if _is_allowed_sidecar_file_name(child.name):
+        return _is_regular_file_entry(child)
+    return child.name in _SIDECAR_ROOT_DIRS and _is_safe_sidecar_directory_tree(child)
+
+
+def _storage_method(storage: Any, name: str) -> Any | None:
+    method = getattr(storage, name, None)
+    if isinstance(method, Mock) and method.side_effect is None and isinstance(method.return_value, Mock):
+        return None
+    return method
 
 
 class PipelineStatePersistenceError(RuntimeError):
@@ -328,10 +420,12 @@ class PipelineRunner:
         auto_trigger_skills: list[Any] | None = None,
         resume_from_sidecar: bool = False,
         surface: str = "repl",
+        backup_service: Any | None = None,
     ) -> None:
         self._session_storage = session_storage
         self._session_id = session_id
         self._cwd = cwd or os.getcwd()
+        self._backup_service = backup_service or self._default_backup_service(session_storage)
         self._permission_context_getter = permission_context_getter
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
@@ -369,14 +463,22 @@ class PipelineRunner:
         # rather than the legacy sibling <session_id>.pipeline/ that pre-dated
         # the directory format. SessionStorage.session_dir is the canonical
         # accessor for <projects>/<cwd>/<session_id>/.
-        if hasattr(session_storage, "session_dir"):
-            raw_session_dir = session_storage.session_dir(self._cwd, session_id)
-            if isinstance(raw_session_dir, (str, Path)):
-                self.session = PipelineSession(Path(raw_session_dir) / "pipeline")
-            else:
-                self.session = None
-        else:
-            self.session = None
+        v2_session_dir = _storage_method(session_storage, "v2_session_dir")
+        session_dir = _storage_method(session_storage, "session_dir")
+        raw_session_dir = None
+        ensure_v2_session_dir = _storage_method(session_storage, "ensure_v2_session_dir_for_new_session")
+        if callable(ensure_v2_session_dir):
+            raw_session_dir = ensure_v2_session_dir(self._cwd, session_id)
+        if raw_session_dir is None:
+            if callable(v2_session_dir):
+                raw_session_dir = v2_session_dir(self._cwd, session_id)
+                if raw_session_dir is None and callable(session_dir):
+                    raw_session_dir = self._writable_pipeline_sidecar_session_dir(session_dir(self._cwd, session_id))
+            elif callable(session_dir):
+                raw_session_dir = session_dir(self._cwd, session_id)
+        self.session = (
+            PipelineSession(Path(raw_session_dir) / "pipeline") if isinstance(raw_session_dir, (str, Path)) else None
+        )
 
         self._attempts: dict[str, Any] = {"next_attempt_number": 1, "items": {}}
         self._execution: dict[str, Any] = {}
@@ -393,6 +495,7 @@ class PipelineRunner:
             pipeline=self._loaded,
             pipeline_dir=pipeline_dir,
             session_storage=self._transcript_storage or session_storage,
+            root_session_storage=session_storage,
             cwd=self._cwd,
             pause_event=self._agent_pause_event,
             permission_context_getter=self._permission_context_getter,
@@ -430,6 +533,12 @@ class PipelineRunner:
         # iter_active_agent_loops to surface per-candidate AgentLoops to the
         # /status aggregator (problem 6).
         self._current_sub_executor_list: list[SubPipelineExecutor] | None = None
+
+    @staticmethod
+    def _default_backup_service(session_storage: Any) -> SessionBackupService:
+        if callable(getattr(session_storage, "session_dir", None)):
+            return SessionBackupService(session_storage=session_storage)
+        return SessionBackupService()
 
     @property
     def pipeline_name(self) -> str:
@@ -666,6 +775,38 @@ class PipelineRunner:
             pipeline_fingerprint=digest,
         )
 
+    @staticmethod
+    def _existing_pipeline_sidecar_session_dir(raw_session_dir: str | Path) -> Path | None:
+        session_dir = PipelineRunner._writable_pipeline_sidecar_session_dir(raw_session_dir)
+        if session_dir is None:
+            return None
+        pipeline_dir = session_dir / "pipeline"
+        if not _is_directory_entry(pipeline_dir):
+            return None
+        for name in ("meta.yaml", "context.yaml", "events.jsonl"):
+            if _is_regular_file_entry(pipeline_dir / name):
+                return session_dir
+        return None
+
+    @staticmethod
+    def _writable_pipeline_sidecar_session_dir(raw_session_dir: str | Path) -> Path | None:
+        session_dir = Path(raw_session_dir)
+        if not _entry_exists_no_follow(session_dir):
+            return session_dir
+        if not _is_directory_entry(session_dir):
+            return None
+        if _entry_exists_no_follow(session_dir / SESSION_JSONL_FILENAME) or _entry_exists_no_follow(
+            session_dir / SESSION_METADATA_FILENAME
+        ):
+            return None
+        try:
+            children = list(session_dir.iterdir())
+        except OSError:
+            return None
+        if not all(_is_safe_sidecar_root_child(child) for child in children):
+            return None
+        return session_dir
+
     def should_switch_to_normal(self, completed_event_data: dict) -> bool:
         policy = self.on_complete_policy
         if policy is None or policy.action != "switch_to_normal":
@@ -791,9 +932,37 @@ class PipelineRunner:
     def continue_from_sidecar(
         self, user_input: str | list[ContentBlock] | PipelineUserInput | None = None
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+        if self.sidecar_status == "backup_blocked":
+            return self._continue_from_backup_blocked(user_input)
         if not user_input:
             return self._continue_from_current(resume_running_step=True)
         return self._continue_from_sidecar_with_input(user_input)
+
+    async def _continue_from_backup_blocked(
+        self,
+        user_input: str | list[ContentBlock] | PipelineUserInput | None = None,
+    ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+        reason = self._backup_blocked_restore_reason()
+        blocked_event = await self._critical_backup_blocked_event(self._terminal_current_step_id() or None, reason)
+        if blocked_event is not None:
+            yield blocked_event
+            return
+        if self._sidecar_status == "backup_blocked":
+            self._sidecar_status = "running"
+        if not user_input:
+            async for event in self._continue_from_current(resume_running_step=True):
+                yield event
+            return
+        async for event in self._continue_from_sidecar_with_input(user_input):
+            yield event
+
+    def _backup_blocked_restore_reason(self) -> BackupReason:
+        result = self._sidecar_restore_result
+        raw_reason = getattr(result, "reason", None)
+        try:
+            return BackupReason(str(raw_reason))
+        except ValueError:
+            return BackupReason.PIPELINE_STEP_COMPLETED
 
     async def _continue_from_sidecar_with_input(
         self, user_input: str | list[ContentBlock] | PipelineUserInput
@@ -900,6 +1069,13 @@ class PipelineRunner:
             return
         if self.sidecar_status == "failed":
             current_step = getattr(self.state_machine, "current_step", None)
+            blocked_event = await self._critical_backup_blocked_event(
+                getattr(current_step, "step_id", None),
+                BackupReason.TERMINAL,
+            )
+            if blocked_event is not None:
+                yield blocked_event
+                return
             yield PipelineEvent(
                 type=PipelineEventType.PIPELINE_COMPLETED,
                 step_id=getattr(current_step, "step_id", None),
@@ -930,6 +1106,9 @@ class PipelineRunner:
         )
         self._set_pending_input_kind(_PIPELINE_PAUSE_CONFIRMATION_KIND)
         await self._save_waiting_input(step_id)
+        blocked_event = await self._critical_backup_blocked_event(step_id, BackupReason.INPUT_REQUIRED)
+        if blocked_event is not None:
+            return blocked_event
         if step_id:
             self._waiting_input_started_at[step_id] = self._observability.now()
             self._waiting_input_options_by_step[step_id] = []
@@ -1325,18 +1504,31 @@ class PipelineRunner:
             attempt["status"] = "failed"
 
     def _load_repaired_resume_messages(self, transcript_id: str | None) -> list | None:
-        if self._transcript_storage is None or not transcript_id:
+        if not transcript_id:
             return None
-        loaded = self._transcript_storage.load(self._cwd, transcript_id)
-        return self._transcript_storage.repair_interrupted(loaded)
+        if self._transcript_storage is not None:
+            loaded = self._transcript_storage.load(self._cwd, transcript_id)
+            if isinstance(loaded, list) and loaded:
+                return self._transcript_storage.repair_interrupted(loaded)
+        if self._session_storage is None:
+            return None
+        loaded = self._session_storage.load(self._cwd, transcript_id)
+        return self._session_storage.repair_interrupted(loaded) if isinstance(loaded, list) and loaded else None
 
     def _attempt_has_resume_transcript(self, attempt: dict[str, Any] | None) -> bool:
-        if self._transcript_storage is None or not attempt:
+        if not attempt:
             return False
         transcript_id = attempt.get("transcript_id")
         if not isinstance(transcript_id, str):
             return False
-        return bool(self._transcript_storage.load(self._cwd, transcript_id))
+        if self._transcript_storage is not None:
+            loaded = self._transcript_storage.load(self._cwd, transcript_id)
+            if isinstance(loaded, list) and loaded:
+                return True
+        if self._session_storage is not None:
+            loaded = self._session_storage.load(self._cwd, transcript_id)
+            return isinstance(loaded, list) and bool(loaded)
+        return False
 
     def _record_sidecar_save_failure(self, status: str, operation: str, exc: Exception) -> None:
         self._sidecar_status = None
@@ -1396,6 +1588,110 @@ class PipelineRunner:
             return False
         error_details = event.data.get("error_details", {})
         return isinstance(error_details, dict) and error_details.get("type") == "PipelineStatePersistenceError"
+
+    @staticmethod
+    def _is_backup_blocked_event(event: object) -> bool:
+        return isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+
+    @staticmethod
+    def _backup_retry_count(value: object) -> int:
+        retry_count = getattr(value, "retry_count", 0)
+        return retry_count if isinstance(retry_count, int) and retry_count >= 0 else 0
+
+    async def _backup_critical(self, reason: BackupReason, *, step_id: str | None = None) -> None:
+        result = await asyncio.to_thread(
+            self._backup_service.backup_session,
+            self._cwd,
+            self._session_id,
+            reason=reason,
+            critical=True,
+        )
+        retry_count = self._backup_retry_count(result)
+        if getattr(result, "enabled", True) and not getattr(result, "succeeded", True):
+            message = getattr(result, "error", None) or _("Session backup failed.")
+            raise SessionBackupBlocked(str(message), retry_count=retry_count, result=result)
+        if getattr(result, "enabled", False):
+            self._observability.backup_succeeded(
+                step_id=step_id,
+                reason=reason.value,
+                critical=True,
+                retry_count=retry_count,
+            )
+
+    async def _critical_backup_blocked_event(
+        self,
+        step_id: str | None,
+        reason: BackupReason,
+    ) -> PipelineEvent | None:
+        try:
+            await self._backup_critical(reason, step_id=step_id)
+        except SessionBackupBlocked as exc:
+            return await self._backup_blocked_event_from_exception(step_id, reason, exc)
+        return None
+
+    async def _backup_blocked_event_from_exception(
+        self,
+        step_id: str | None,
+        reason: BackupReason,
+        exc: SessionBackupBlocked,
+    ) -> PipelineEvent:
+        self._observability.backup_failed(
+            step_id=step_id,
+            reason=reason.value,
+            critical=True,
+            retry_count=self._backup_retry_count(exc),
+        )
+        if not await self._save_backup_blocked_sidecar(step_id, reason):
+            self._observability.backup_blocked(
+                step_id=step_id,
+                reason=reason.value,
+                recoverable=False,
+                persisted=False,
+            )
+            return self._persistence_failure_event(
+                PipelineStatePersistenceError(
+                    _("Pipeline state persistence failed."),
+                    step_id=step_id,
+                )
+            )
+        self._observability.backup_blocked(
+            step_id=step_id,
+            reason=reason.value,
+            recoverable=True,
+            persisted=True,
+        )
+        return backup_blocked_event(step_id, reason, exc)
+
+    async def _save_backup_blocked_sidecar(self, step_id: str | None, reason: BackupReason) -> bool:
+        if not self.session:
+            return False
+        session = self.session
+        current_step = step_id or self._terminal_current_step_id()
+        metadata_kwargs: dict[str, Any] = {"attempts": dict(self._attempts)}
+        if self._execution:
+            metadata_kwargs["execution"] = dict(self._execution)
+
+        async def save() -> None:
+            await session.save_backup_blocked(
+                current_step,
+                self._state_machine_snapshot_for_sidecar(),
+                self.context.to_snapshot(),
+                self._pipeline_identity,
+                reason=reason.value,
+                **metadata_kwargs,
+            )
+
+        try:
+            await save()
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist pipeline backup_blocked sidecar state (pipeline=%s, error_type=%s)",
+                self.pipeline_name,
+                type(exc).__name__,
+            )
+            return False
+        self._sidecar_status = "backup_blocked"
+        return True
 
     async def _try_save_sidecar(
         self,
@@ -1653,7 +1949,6 @@ class PipelineRunner:
         self._set_current_step_user_input(None)
         try:
             if self.state_machine.is_complete:
-                await self._save_completed(completed_step_id, reason="pipeline completed")
                 return
             await self._save_running(
                 self.state_machine.current_step.step_id,
@@ -1769,6 +2064,7 @@ class PipelineRunner:
             pipeline=self._loaded,
             pipeline_dir=self._pipeline_dir,
             session_storage=self._transcript_storage or self._session_storage,
+            root_session_storage=self._session_storage,
             cwd=self._cwd,
             pause_event=self._agent_pause_event,
             permission_context_getter=self._permission_context_getter,
@@ -1812,6 +2108,7 @@ class PipelineRunner:
                 pipeline=self._loaded,
                 pipeline_dir=self._pipeline_dir,
                 session_storage=self._transcript_storage or self._session_storage,
+                root_session_storage=self._session_storage,
                 cwd=self._cwd,
                 pause_event=self._agent_pause_event,
                 permission_context_getter=self._permission_context_getter,
@@ -2918,6 +3215,7 @@ class PipelineRunner:
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         is_first_step = True
         terminal_pipeline_telemetry_emitted = False
+        terminal_backup_completed = False
         step_result: StepResult | None = None
         restored_step_user_input = self._consume_restored_current_step_user_input() if user_input is None else None
         restored_resume_messages, restored_precompleted_tools = (
@@ -3036,6 +3334,15 @@ class PipelineRunner:
                             yield event
                             if self._is_persistence_failure_event(event):
                                 return
+                            if self._is_backup_blocked_event(event):
+                                return
+                except SessionBackupBlocked as exc:
+                    yield await self._backup_blocked_event_from_exception(
+                        step.step_id,
+                        BackupReason.PIPELINE_STEP_COMPLETED,
+                        exc,
+                    )
+                    return
                 except Exception as exc:
                     failure = public_error(
                         message=str(exc) or type(exc).__name__,
@@ -3047,6 +3354,11 @@ class PipelineRunner:
                     except PipelineStatePersistenceError as persistence_exc:
                         yield self._persistence_failure_event(persistence_exc)
                         return
+                    blocked_event = await self._critical_backup_blocked_event(step.step_id, BackupReason.TERMINAL)
+                    if blocked_event is not None:
+                        yield blocked_event
+                        return
+                    terminal_backup_completed = True
                     self._observability.step_failed(
                         step_id=step.step_id,
                         duration_ms=self._observability.duration_ms(step_started_at),
@@ -3089,6 +3401,13 @@ class PipelineRunner:
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return
+                blocked_event = await self._critical_backup_blocked_event(
+                    completed_step_id,
+                    BackupReason.PIPELINE_STEP_COMPLETED,
+                )
+                if blocked_event is not None:
+                    yield blocked_event
+                    return
                 self._observability.step_completed(
                     step_id=step.step_id,
                     duration_ms=duration_ms,
@@ -3108,8 +3427,24 @@ class PipelineRunner:
                     ui_mode=step.ui_mode,
                     duration_ms=duration_ms,
                 )
-                if step.forward is None:
+                pipeline_completed_event: PipelineEvent | None = None
+                if self.state_machine.is_complete:
+                    try:
+                        await self._save_completed(completed_step_id, reason="pipeline completed")
+                    except PipelineStatePersistenceError as exc:
+                        yield self._persistence_failure_event(exc)
+                        return
+                    blocked_event = await self._critical_backup_blocked_event(None, BackupReason.TERMINAL)
+                    if blocked_event is not None:
+                        yield blocked_event
+                        return
                     emit_pipeline_completed(failed=False, early_exit=False)
+                    pipeline_completed_event = PipelineEvent(
+                        type=PipelineEventType.PIPELINE_COMPLETED,
+                        step_id=None,
+                        timestamp=time.time(),
+                        data={"total_steps": self.state_machine.total_steps},
+                    )
                 parallel_result = self.context.get_conclusion(step.conclusion_field)
                 candidates_count = len(parallel_result) if isinstance(parallel_result, list) else 0
                 yield PipelineEvent(
@@ -3123,6 +3458,9 @@ class PipelineRunner:
                         "conclusion": parallel_result,
                     },
                 )
+                if pipeline_completed_event is not None:
+                    yield pipeline_completed_event
+                    return
                 continue
 
             with self._observability.step_span(
@@ -3214,6 +3552,11 @@ class PipelineRunner:
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return
+                blocked_event = await self._critical_backup_blocked_event(step.step_id, BackupReason.TERMINAL)
+                if blocked_event is not None:
+                    yield blocked_event
+                    return
+                terminal_backup_completed = True
                 self._observability.step_failed(
                     step_id=step.step_id,
                     duration_ms=self._observability.duration_ms(step_started_at),
@@ -3250,7 +3593,18 @@ class PipelineRunner:
 
             duration_ms = self._observability.duration_ms(step_started_at)
             elapsed = duration_ms / 1000
+            step_success_meta_appended = False
             step_success_observed = False
+
+            def append_step_success_meta() -> None:
+                nonlocal step_success_meta_appended
+                if step_success_meta_appended:
+                    return
+                self._append_pipeline_session_meta_best_effort(
+                    {"type": "pipeline_step_complete", "step_id": step.step_id},
+                    operation="pipeline_step_complete",
+                )
+                step_success_meta_appended = True
 
             def emit_step_success_observability(funnel_status: str | None = "completed") -> None:
                 nonlocal step_success_observed
@@ -3276,10 +3630,6 @@ class PipelineRunner:
                         ui_mode=step.ui_mode,
                         duration_ms=duration_ms,
                     )
-                self._append_pipeline_session_meta_best_effort(
-                    {"type": "pipeline_step_complete", "step_id": step.step_id},
-                    operation="pipeline_step_complete",
-                )
                 step_success_observed = True
 
             step_completed_event = PipelineEvent(
@@ -3300,10 +3650,22 @@ class PipelineRunner:
                 matched = actual is ec_value if isinstance(ec_value, bool) else actual == ec_value
                 if matched:
                     logger.info("Exit condition met for step %s: %s=%r", step.step_id, ec_field, ec_value)
+                    append_step_success_meta()
+                    blocked_event = await self._critical_backup_blocked_event(
+                        step.step_id,
+                        BackupReason.PIPELINE_STEP_COMPLETED,
+                    )
+                    if blocked_event is not None:
+                        yield blocked_event
+                        return
                     try:
                         await self._save_completed(step.step_id, reason="exit condition met")
                     except PipelineStatePersistenceError as exc:
                         yield self._persistence_failure_event(exc)
+                        return
+                    blocked_event = await self._critical_backup_blocked_event(step.step_id, BackupReason.TERMINAL)
+                    if blocked_event is not None:
+                        yield blocked_event
                         return
                     emit_step_success_observability()
                     emit_pipeline_completed(failed=False, early_exit=True)
@@ -3344,6 +3706,11 @@ class PipelineRunner:
                     except PipelineStatePersistenceError as persistence_exc:
                         yield self._persistence_failure_event(persistence_exc)
                         return
+                    blocked_event = await self._critical_backup_blocked_event(step.step_id, BackupReason.TERMINAL)
+                    if blocked_event is not None:
+                        yield blocked_event
+                        return
+                    terminal_backup_completed = True
                     self._observability.step_failed(
                         step_id=step.step_id,
                         duration_ms=self._observability.duration_ms(step_started_at),
@@ -3377,12 +3744,6 @@ class PipelineRunner:
                             "error_details": failure.details,
                         },
                     )
-                    # Emit terminal event so consumers (e.g. renderer teardown)
-                    # see a clean pipeline end. Mirrors the post-loop
-                    # PIPELINE_COMPLETED(failed=True) emission for genuine
-                    # step failures, which we can't reuse here because
-                    # step_result.status is COMPLETED (the step itself succeeded;
-                    # only the rollback target was invalid).
                     yield PipelineEvent(
                         type=PipelineEventType.PIPELINE_COMPLETED,
                         step_id=step.step_id,
@@ -3411,7 +3772,18 @@ class PipelineRunner:
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return
-                emit_step_success_observability()
+                append_step_success_meta()
+                self._append_pipeline_session_meta_best_effort(
+                    {"type": "pipeline_rollback", "from": step.step_id, "to": target, "reason": reason},
+                    operation="pipeline_rollback",
+                )
+                blocked_event = await self._critical_backup_blocked_event(
+                    step.step_id,
+                    BackupReason.PIPELINE_STEP_COMPLETED,
+                )
+                if blocked_event is not None:
+                    yield blocked_event
+                    return
                 self._observability.rollback(
                     from_step=step.step_id,
                     to_step=target,
@@ -3419,10 +3791,7 @@ class PipelineRunner:
                     rollback_scope="parent",
                     stale_fields=stale,
                 )
-                self._append_pipeline_session_meta_best_effort(
-                    {"type": "pipeline_rollback", "from": step.step_id, "to": target, "reason": reason},
-                    operation="pipeline_rollback",
-                )
+                emit_step_success_observability()
                 yield step_completed_event
                 yield PipelineEvent(
                     type=PipelineEventType.ROLLBACK_TRIGGERED,
@@ -3445,16 +3814,53 @@ class PipelineRunner:
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
                     return
-                emit_step_success_observability()
-                if step.forward is None:
+                append_step_success_meta()
+                blocked_event = await self._critical_backup_blocked_event(
+                    completed_step_id,
+                    BackupReason.PIPELINE_STEP_COMPLETED,
+                )
+                if blocked_event is not None:
+                    yield blocked_event
+                    return
+                pipeline_completed_event = None
+                if self.state_machine.is_complete:
+                    try:
+                        await self._save_completed(completed_step_id, reason="pipeline completed")
+                    except PipelineStatePersistenceError as exc:
+                        yield self._persistence_failure_event(exc)
+                        return
+                    blocked_event = await self._critical_backup_blocked_event(None, BackupReason.TERMINAL)
+                    if blocked_event is not None:
+                        yield blocked_event
+                        return
+                    emit_step_success_observability()
                     emit_pipeline_completed(failed=False, early_exit=False)
+                    pipeline_completed_event = PipelineEvent(
+                        type=PipelineEventType.PIPELINE_COMPLETED,
+                        step_id=None,
+                        timestamp=time.time(),
+                        data={"total_steps": self.state_machine.total_steps},
+                    )
+                else:
+                    emit_step_success_observability()
                 yield step_completed_event
+                if pipeline_completed_event is not None:
+                    yield pipeline_completed_event
+                    return
             else:
                 self._set_current_step_user_input(None)
                 try:
                     await self._save_waiting_input(step.step_id)
                 except PipelineStatePersistenceError as exc:
                     yield self._persistence_failure_event(exc)
+                    return
+                append_step_success_meta()
+                blocked_event = await self._critical_backup_blocked_event(
+                    step.step_id,
+                    BackupReason.PIPELINE_STEP_COMPLETED,
+                )
+                if blocked_event is not None:
+                    yield blocked_event
                     return
                 emit_step_success_observability(funnel_status=None)
                 yield step_completed_event
@@ -3463,6 +3869,10 @@ class PipelineRunner:
                 options = conclusion.get("options", [])
                 if not isinstance(options, list):
                     options = []
+                blocked_event = await self._critical_backup_blocked_event(step.step_id, BackupReason.INPUT_REQUIRED)
+                if blocked_event is not None:
+                    yield blocked_event
+                    return
                 self._waiting_input_started_at[step.step_id] = self._observability.now()
                 self._waiting_input_options_by_step[step.step_id] = options
                 self._observability.user_input_required(
@@ -3498,6 +3908,20 @@ class PipelineRunner:
                 return
 
         if self.state_machine.is_complete:
+            completed_step = locals().get("step")
+            completed_step_id = getattr(completed_step, "step_id", None)
+            if not isinstance(completed_step_id, str) and self._loaded.steps:
+                completed_step_id = self._loaded.steps[-1].step_id
+            if isinstance(completed_step_id, str):
+                try:
+                    await self._save_completed(completed_step_id, reason="pipeline completed")
+                except PipelineStatePersistenceError as exc:
+                    yield self._persistence_failure_event(exc)
+                    return
+            blocked_event = await self._critical_backup_blocked_event(None, BackupReason.TERMINAL)
+            if blocked_event is not None:
+                yield blocked_event
+                return
             emit_pipeline_completed(failed=False, early_exit=False)
             yield PipelineEvent(
                 type=PipelineEventType.PIPELINE_COMPLETED,
@@ -3506,6 +3930,11 @@ class PipelineRunner:
                 data={"total_steps": self.state_machine.total_steps},
             )
         elif step_result is None or step_result.status == StepStatus.FAILED:
+            if not terminal_backup_completed:
+                blocked_event = await self._critical_backup_blocked_event(step.step_id, BackupReason.TERMINAL)
+                if blocked_event is not None:
+                    yield blocked_event
+                    return
             emit_pipeline_completed(failed=True, early_exit=False)
             yield PipelineEvent(
                 type=PipelineEventType.PIPELINE_COMPLETED,
@@ -3549,12 +3978,14 @@ class PipelineRunner:
                 pipeline=self._loaded,
                 pipeline_dir=self._step_executor._pipeline_dir,
                 session_storage=self._transcript_storage or self._session_storage,
+                root_session_storage=self._session_storage,
                 cwd=self._cwd,
                 pause_event=self._agent_pause_event,
                 permission_context_getter=self._permission_context_getter,
                 memory_content_getter=self._memory_content_getter,
                 auto_trigger_skills=self._auto_trigger_skills,
                 surface=self._surface,
+                backup_service=self._backup_service,
             )
             for _ in candidates
         ]
@@ -3807,6 +4238,8 @@ class PipelineRunner:
                 logger.debug("Candidate %d cancelled", i)
             except PipelineStatePersistenceError as exc:
                 await event_queue.put(exc)
+            except SessionBackupBlocked as exc:
+                await event_queue.put(exc)
             except Exception as exc:
                 failure = public_error_from_exception(exc)
                 error_summary = failure.summary
@@ -3919,6 +4352,13 @@ class PipelineRunner:
                 event = await event_queue.get()
                 if isinstance(event, PipelineStatePersistenceError):
                     yield self._persistence_failure_event(event)
+                    return
+                if isinstance(event, SessionBackupBlocked):
+                    yield await self._backup_blocked_event_from_exception(
+                        step.step_id,
+                        BackupReason.PIPELINE_STEP_COMPLETED,
+                        event,
+                    )
                     return
                 if isinstance(event, CandidateSentinel):
                     idx = event.candidate_index

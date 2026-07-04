@@ -41,7 +41,13 @@ IaC Code は MCP content blocks をモデルに見えるテキストへ変換し
 | `resource_link` | URI と MIME type 付きの resource link として表示します。 |
 | Image、audio、blob data | 非公開 artifact ファイルとして保存し、artifact id で参照します。 |
 
-バイナリ artifacts は次の場所に保存されます。
+v2 セッションでは、バイナリ artifacts はセッション所有の MCP tool-results ディレクトリに保存されます。
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/<server>/<tool>/
+```
+
+対応 layout marker のない旧セッションは引き続き次を使います。
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/<server>/<tool>/

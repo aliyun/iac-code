@@ -39,6 +39,10 @@ iac-code --prompt "Create a VPC" --max-turns 20
 | `json` | 最終レスポンスを解析する呼び出し元向けの単一 JSON 結果。 |
 | `stream-json` | 増分進捗を処理する呼び出し元向けのストリーミング JSON イベント。 |
 
+## セッションバックアップ
+
+`IAC_CODE_CONFIG_BACKUP_DIR` を設定すると、非対話実行は重要なチェックポイントで v2 セッションをミラーします。通常のターン終了チェックポイントは `normal_turn_end` を使用します。この時点のバックアップ失敗は `warning` としてログに記録され、`.backup-state.json` に保存されますが、完了レスポンスを失敗させず、最終出力に warning フィールドを追加しません。Pipeline mode には独自の重要なバックアップ制御があります。
+
 ## 自動化における権限制御
 
 非対話実行時に `--permission-mode` を使用して、エージェントのツール承認の処理方法を制御します：

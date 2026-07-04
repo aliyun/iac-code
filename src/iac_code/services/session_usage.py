@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,11 +11,25 @@ from typing import Any
 
 from loguru import logger
 
+from iac_code.i18n import _
+from iac_code.services.session_layout import (
+    SESSION_LAYOUT_VERSION_V2,
+    UnsupportedSessionLayoutError,
+    ensure_session_owned_parent,
+    is_supported_session_dir_for_id,
+    require_supported_session_layout,
+)
+from iac_code.services.session_metadata import (
+    SESSION_JSONL_FILENAME,
+    session_metadata_entry_exists,
+)
 from iac_code.types.stream_events import Usage
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
-from iac_code.utils.project_paths import get_project_dir, get_projects_dir, sanitize_path
+from iac_code.utils.project_paths import get_projects_dir, project_dir_candidates
+from iac_code.utils.state_io import open_text_no_follow
 
 USAGE_JSONL_FILENAME = "usage.jsonl"
+UsagePathProvider = Callable[[str, str], Path]
 
 
 @dataclass
@@ -59,11 +74,23 @@ class SessionUsageTotals:
 class SessionUsageStore:
     """Persist cumulative API usage as a sidecar JSONL file."""
 
-    def __init__(self, projects_dir: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        projects_dir: Path | str | None = None,
+        *,
+        path_provider: UsagePathProvider | None = None,
+    ) -> None:
         self._projects_dir = Path(projects_dir) if projects_dir is not None else get_projects_dir()
+        self._path_provider = path_provider
 
     def path_for(self, cwd: str, session_id: str) -> Path:
-        return self._project_dir_for(cwd) / session_id / USAGE_JSONL_FILENAME
+        if self._path_provider is not None:
+            return Path(self._path_provider(cwd, session_id))
+        return self._usage_path_for_write(cwd, session_id)
+
+    @property
+    def uses_direct_path_provider(self) -> bool:
+        return self._path_provider is not None
 
     def legacy_path_for(self, cwd: str, session_id: str) -> Path:
         return self._project_dir_for(cwd) / f"{session_id}.usage.jsonl"
@@ -83,9 +110,9 @@ class SessionUsageStore:
             return False
 
         path = self.path_for(cwd, session_id)
-        ensure_private_dir(path.parent)
+        _ensure_usage_parent(path)
         row = _usage_to_row(usage, provider=provider, model=model, created_at=created_at)
-        with open(path, "a", encoding="utf-8") as f:
+        with open_text_no_follow(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
         ensure_private_file(path)
         return True
@@ -93,16 +120,36 @@ class SessionUsageStore:
     def load(self, cwd: str, session_id: str) -> SessionUsageTotals:
         """Load cumulative usage totals, skipping corrupt or unrelated rows."""
         totals = SessionUsageTotals()
-        for path in (self.path_for(cwd, session_id), self.legacy_path_for(cwd, session_id)):
+        if self._path_provider is not None:
+            path = self.path_for(cwd, session_id)
+            if _can_read_direct_usage_path(path):
+                self._load_path(path, totals)
+            return totals
+        seen: set[Path] = set()
+        paths = []
+        legacy_session_path = self._existing_legacy_session_path(cwd, session_id)
+        for project_dir in self._project_read_dirs_for(cwd):
+            session_dir = project_dir / session_id
+            if self._can_read_directory_usage(
+                session_dir,
+                session_id,
+                legacy_session_exists=legacy_session_path is not None,
+            ):
+                paths.append(session_dir / USAGE_JSONL_FILENAME)
+            paths.append(project_dir / f"{session_id}.usage.jsonl")
+        for path in paths:
+            if path in seen:
+                continue
+            seen.add(path)
             self._load_path(path, totals)
         return totals
 
     def _load_path(self, path: Path, totals: SessionUsageTotals) -> None:
-        if not path.exists():
+        if not _entry_exists_no_follow(path):
             return
 
         try:
-            with open(path, encoding="utf-8") as f:
+            with open_text_no_follow(path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -119,9 +166,106 @@ class SessionUsageStore:
             logger.debug("Failed to load usage sidecar {}: {}", path, exc)
 
     def _project_dir_for(self, cwd: str) -> Path:
-        if self._projects_dir == get_projects_dir():
-            return get_project_dir(cwd)
-        return self._projects_dir / sanitize_path(cwd)
+        return project_dir_candidates(cwd, self._projects_dir)[0]
+
+    def _project_read_dirs_for(self, cwd: str) -> tuple[Path, ...]:
+        candidates = project_dir_candidates(cwd, self._projects_dir)
+        existing = tuple(candidate for candidate in candidates if candidate.exists())
+        return existing or (candidates[0],)
+
+    def _usage_path_for_write(self, cwd: str, session_id: str) -> Path:
+        existing_legacy_session_path = self._existing_legacy_session_path(cwd, session_id)
+        for project_dir in self._project_read_dirs_for(cwd):
+            session_dir = project_dir / session_id
+            if _entry_exists_no_follow(session_dir / SESSION_JSONL_FILENAME):
+                if is_supported_session_dir_for_id(session_dir, session_id):
+                    return session_dir / USAGE_JSONL_FILENAME
+                if existing_legacy_session_path is not None:
+                    return _legacy_usage_path(existing_legacy_session_path)
+                _raise_unsupported_session_metadata(session_dir)
+            project_legacy_session_path = project_dir / f"{session_id}.jsonl"
+            if project_legacy_session_path.exists():
+                return _legacy_usage_path(project_legacy_session_path)
+            if session_metadata_entry_exists(session_dir):
+                if existing_legacy_session_path is not None:
+                    continue
+                if is_supported_session_dir_for_id(session_dir, session_id):
+                    return session_dir / USAGE_JSONL_FILENAME
+                _raise_unsupported_session_metadata(session_dir)
+        if existing_legacy_session_path is not None:
+            return _legacy_usage_path(existing_legacy_session_path)
+        return self._project_dir_for(cwd) / session_id / USAGE_JSONL_FILENAME
+
+    @staticmethod
+    def _can_read_directory_usage(session_dir: Path, session_id: str, *, legacy_session_exists: bool) -> bool:
+        if not _entry_exists_no_follow(session_dir):
+            return True
+        has_session_jsonl = _entry_exists_no_follow(session_dir / SESSION_JSONL_FILENAME)
+        has_metadata = session_metadata_entry_exists(session_dir)
+        if legacy_session_exists and has_metadata and not has_session_jsonl:
+            return False
+        if not has_session_jsonl and not has_metadata:
+            return True
+        try:
+            return is_supported_session_dir_for_id(session_dir, session_id)
+        except UnsupportedSessionLayoutError:
+            return False
+
+    def _existing_legacy_session_path(self, cwd: str, session_id: str) -> Path | None:
+        for project_dir in self._project_read_dirs_for(cwd):
+            legacy_path = project_dir / f"{session_id}.jsonl"
+            if legacy_path.exists():
+                return legacy_path
+        return None
+
+
+def _ensure_usage_parent(path: Path) -> None:
+    session_dir = _session_dir_from_usage_path(path)
+    if session_dir is not None and session_metadata_entry_exists(session_dir):
+        if require_supported_session_layout(session_dir) == SESSION_LAYOUT_VERSION_V2:
+            ensure_session_owned_parent(session_dir, path)
+            return
+    ensure_private_dir(path.parent)
+
+
+def _session_dir_from_usage_path(path: Path) -> Path | None:
+    if path.name != USAGE_JSONL_FILENAME:
+        return None
+    parent = path.parent
+    if (
+        parent.name.startswith("transcript_")
+        and parent.parent.name == "transcripts"
+        and parent.parent.parent.name == "pipeline"
+    ):
+        return parent.parent.parent.parent
+    return parent
+
+
+def _legacy_usage_path(legacy_session_path: Path) -> Path:
+    return legacy_session_path.with_name(f"{legacy_session_path.stem}.usage.jsonl")
+
+
+def _can_read_direct_usage_path(path: Path) -> bool:
+    session_dir = _session_dir_from_usage_path(path)
+    if session_dir is None or not session_metadata_entry_exists(session_dir):
+        return True
+    try:
+        require_supported_session_layout(session_dir)
+    except UnsupportedSessionLayoutError:
+        return False
+    return True
+
+
+def _entry_exists_no_follow(path: Path) -> bool:
+    try:
+        path.stat(follow_symlinks=False)
+    except OSError:
+        return False
+    return True
+
+
+def _raise_unsupported_session_metadata(session_dir: Path) -> None:
+    raise UnsupportedSessionLayoutError(_("Unsupported session metadata: {path}").format(path=session_dir))
 
 
 def _usage_is_zero(usage: Usage) -> bool:

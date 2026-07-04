@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import inspect
 import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -13,16 +15,23 @@ import httpx
 from a2a.types import Message, Role, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 
+from iac_code.a2a.artifacts import artifact_store_for_session
+from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import (
-    a2a_pipeline_dir_for_session,
     a2a_pipeline_dir_for_sidecar_dir,
     existing_a2a_pipeline_dir_for_session,
 )
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
-from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+from iac_code.a2a.pipeline_stream import (
+    BACKUP_COMMITTED_EVENT_TYPE,
+    PipelineA2AEventPublisher,
+    backup_committed_delivery_envelope,
+    committed_backup_publication_envelope,
+    pending_backup_publication_envelope,
+)
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -49,9 +58,11 @@ from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pip
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.providers.aliyun import AliyunCredential
+from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent
-from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.path_locks import PathLockRegistry
+from iac_code.utils.public_errors import public_exception_summary, sanitize_public_text
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -62,6 +73,11 @@ _TERMINAL_SNAPSHOT_STATUSES = {"completed", "failed", "canceled"}
 _TERMINAL_A2A_STATUSES = {"completed", "failed", "canceled"}
 _WAITING_A2A_STATUSES = {"waiting_input", "input_required"}
 _RUNNING_A2A_STATUSES = {"working"}
+_PENDING_BACKUP_VISIBILITY = "pending_backup"
+_COMMITTED_BACKUP_VISIBILITY = "committed"
+_WAITING_INPUT_CANCEL_LOCKS = PathLockRegistry()
+_TERMINAL_PUBLICATION_UNAVAILABLE_KIND = "terminal_publication_unavailable"
+_HANDOFF_PUBLICATION_UNAVAILABLE_ACTION = "switch_to_normal_unavailable"
 _TERMINAL_EVENT_BY_SIDECAR_STATUS = {
     "completed": ("pipeline_completed", "completed"),
     "failed": ("pipeline_failed", "failed"),
@@ -72,6 +88,17 @@ _TERMINAL_EVENT_BY_SIDECAR_STATUS = {
 _PENDING_QUESTION_NOT_ROUTED = "not_routed"
 _PENDING_QUESTION_ANSWERED = "answered"
 _PENDING_QUESTION_STALE_FINISHED = "stale_finished"
+
+
+class WaitingInputCancelResult(str, Enum):
+    CANCELED = "canceled"
+    NOT_OWNER = "not_owner"
+    PERSIST_FAILED = "persist_failed"
+    BACKUP_BLOCKED = "backup_blocked"
+    BACKUP_BLOCKED_PERSIST_FAILED = "backup_blocked_persist_failed"
+
+
+_CANCEL_WAITING_INPUT_BACKUP_BLOCKED = WaitingInputCancelResult.BACKUP_BLOCKED
 
 
 def _retry_text() -> str:
@@ -110,6 +137,7 @@ class A2APipelineRuntime:
     publisher: PipelineA2AEventPublisher | None = None
     current_stream: Any | None = None
     pending_question: "_PendingAskUserQuestion | None" = None
+    active_owner_task: asyncio.Task[Any] | None = None
     restart_after_interrupt: bool = False
     pause_after_interrupt: bool = False
     restart_requested: asyncio.Event = field(default_factory=asyncio.Event)
@@ -119,6 +147,7 @@ class A2APipelineRuntime:
 class _StreamConsumeResult:
     had_events: bool
     restart_requested: bool
+    terminal_handoff_unavailable: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,6 +170,19 @@ class _PendingAskUserQuestion:
     envelope: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class _NormalHandoffPublication:
+    status: str
+    data: dict[str, Any]
+    summary: str
+
+
+@dataclass(frozen=True)
+class _TerminalHandoffPublishResult:
+    attempted: bool
+    terminal_available: bool
+
+
 class _SidecarOwnerUnavailableError(RuntimeError):
     pass
 
@@ -153,10 +195,19 @@ class _SidecarStateTerminalError(RuntimeError):
 
 class _SidecarRestoreFailedError(RuntimeError):
     def __init__(self, status: str, reason: str | None) -> None:
-        detail = reason or "unknown"
-        super().__init__(f"A2A pipeline sidecar restore failed: status={status}, reason={detail}")
+        detail = reason or _("unknown")
+        super().__init__(
+            _("A2A pipeline sidecar restore failed: status={status}, reason={reason}").format(
+                status=status,
+                reason=detail,
+            )
+        )
         self.status = status
         self.reason = reason
+
+
+class _PipelineBackupBlockedTransitionError(Exception):
+    pass
 
 
 class IacCodeA2APipelineExecutor:
@@ -176,6 +227,7 @@ class IacCodeA2APipelineExecutor:
         model_from_metadata: bool = False,
         metadata_api_key: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
+        backup_service: Any | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -190,6 +242,7 @@ class IacCodeA2APipelineExecutor:
         self._model_from_metadata = model_from_metadata
         self._metadata_api_key = metadata_api_key
         self._request_policy_override = request_policy_override
+        self._backup_service = backup_service or SessionBackupService()
 
     async def execute(
         self,
@@ -302,6 +355,14 @@ class IacCodeA2APipelineExecutor:
                         session_id=ctx.session_id,
                         cwd=cwd,
                     )
+                    self._install_backup_hook(
+                        publisher,
+                        pipeline=pipeline,
+                        cwd=cwd,
+                        session_id=ctx.session_id,
+                        task=task,
+                        ctx=ctx,
+                    )
                     pipeline_runtime = A2APipelineRuntime(
                         agent_runtime=agent_runtime,
                         pipeline=pipeline,
@@ -325,7 +386,7 @@ class IacCodeA2APipelineExecutor:
                         )
                         return fresh_pipeline
 
-                    selected = self._select_stream(
+                    selected = await self._select_stream(
                         pipeline,
                         prompt,
                         pipeline_input=pipeline_input,
@@ -341,11 +402,13 @@ class IacCodeA2APipelineExecutor:
                 stream = selected.stream
                 ctx.active_task_id = task.task_id
                 task.active_task = owner_task
+                pipeline_runtime.active_owner_task = owner_task
                 task.state = TASK_STATE_WORKING
                 task_persistence_started = True
                 self._task_store.mirror_task(task)
                 self._task_store.mirror_context(ctx)
                 stream_had_events = False
+                terminal_handoff_unavailable = False
                 with self._request_context(session_id=ctx.session_id):
                     while True:
                         stream_result = await self._consume_stream_until_restart(
@@ -355,6 +418,9 @@ class IacCodeA2APipelineExecutor:
                             task=task,
                         )
                         stream_had_events = stream_had_events or stream_result.had_events
+                        terminal_handoff_unavailable = (
+                            terminal_handoff_unavailable or stream_result.terminal_handoff_unavailable
+                        )
 
                         if not stream_result.restart_requested:
                             break
@@ -363,16 +429,36 @@ class IacCodeA2APipelineExecutor:
 
                 terminal_status_published = False
                 terminal_sidecar = _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None))
-                if terminal_sidecar and publisher is not None:
+                terminal_sidecar_recovery_allowed = not terminal_handoff_unavailable
+                if terminal_sidecar and terminal_sidecar_recovery_allowed and publisher is not None:
                     terminal_status_published = await self._publish_terminal_sidecar_recovery_event(
                         publisher,
                         pipeline,
                         task_id=task_id,
                         context_id=context_id,
                     )
+                committed_terminal_status = (
+                    _committed_terminal_status_for_task_context(
+                        publisher,
+                        task_id=task_id,
+                        context_id=context_id,
+                    )
+                    if terminal_sidecar and terminal_sidecar_recovery_allowed and publisher is not None
+                    else None
+                )
+                sidecar_terminal_status = _terminal_status_from_sidecar(getattr(pipeline, "sidecar_status", None))
+                terminal_snapshot_available = terminal_status_published or committed_terminal_status is not None
+                sidecar_terminal_fallback_available = terminal_status_published or (
+                    committed_terminal_status is not None and committed_terminal_status == sidecar_terminal_status
+                )
 
                 snapshot = publisher.snapshot_store.load() or {}
-                task.state = _task_state_from_pipeline(pipeline, snapshot)
+                task.state = _task_state_from_pipeline(
+                    pipeline,
+                    snapshot,
+                    allow_terminal_snapshot=not terminal_sidecar or terminal_snapshot_available,
+                    allow_sidecar_terminal_fallback=sidecar_terminal_fallback_available,
+                )
                 self._task_store.mirror_task(task)
                 if not stream_had_events and terminal_sidecar and not terminal_status_published:
                     await self._publish_status(
@@ -384,31 +470,54 @@ class IacCodeA2APipelineExecutor:
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
                 self._record_state(task.state)
             except asyncio.CancelledError:
-                task.state = TASK_STATE_CANCELED
-                if pipeline is not None:
-                    await self._mark_user_aborted(pipeline)
-                await self._publish_pipeline_terminal_event(
-                    publisher,
-                    event_type="pipeline_canceled",
-                    status="canceled",
-                    data={"source": "executor", "reason": _("Task canceled.")},
-                )
-                if pipeline is not None and publisher is not None:
-                    await self._publish_normal_handoff_ready(
-                        pipeline,
-                        publisher,
-                        {"canceled": True, "reason": _("Task canceled.")},
+                try:
+                    task.state = TASK_STATE_CANCELED
+                    if pipeline is not None:
+                        await self._mark_user_aborted(pipeline)
+                    cancel_data = {"source": "executor", "reason": _("Task canceled.")}
+                    cancel_handoff_data = {"canceled": True, "reason": _("Task canceled.")}
+                    cancel_transaction_result = _TerminalHandoffPublishResult(
+                        attempted=False,
+                        terminal_available=False,
                     )
-                await self._publish_status(
-                    event_queue,
-                    task_id=task_id,
-                    context_id=context_id,
-                    state=TaskState.TASK_STATE_CANCELED,
-                    text=_("Task canceled."),
-                )
-                self._task_store.mirror_task(task)
-                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
-                self._metrics.record_task_canceled()
+                    if pipeline is not None and publisher is not None:
+                        cancel_transaction_result = await self._publish_manual_terminal_with_normal_handoff(
+                            pipeline,
+                            publisher,
+                            event_type="pipeline_canceled",
+                            status="canceled",
+                            terminal_data=cancel_data,
+                            handoff_data=cancel_handoff_data,
+                        )
+                    cancel_terminal_available = cancel_transaction_result.terminal_available
+                    if not cancel_transaction_result.attempted:
+                        cancel_terminal_available = await self._publish_pipeline_terminal_event(
+                            publisher,
+                            event_type="pipeline_canceled",
+                            status="canceled",
+                            data=cancel_data,
+                        )
+                        if cancel_terminal_available and pipeline is not None and publisher is not None:
+                            await self._publish_normal_handoff_ready(pipeline, publisher, cancel_handoff_data)
+                    if not cancel_terminal_available:
+                        task.state = TASK_STATE_INPUT_REQUIRED
+                    await self._publish_status(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        state=_a2a_state_from_task_state(task.state),
+                        text=_("Task canceled."),
+                    )
+                    self._task_store.mirror_task(task)
+                    await self._notify_terminal_task(
+                        task_id=task.task_id,
+                        context_id=task.context_id,
+                        state=task.state,
+                    )
+                    self._record_state(task.state)
+                except _PipelineBackupBlockedTransitionError:
+                    task_persistence_started = True
+                    await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             except _SidecarStateTerminalError as exc:
                 task.state = _task_state_from_a2a_status(exc.status)
                 self._task_store.mirror_task(task)
@@ -422,21 +531,41 @@ class IacCodeA2APipelineExecutor:
                 self._record_state(task.state)
             except RecoverablePipelineInvalidParamsError:
                 raise
+            except _PipelineBackupBlockedTransitionError:
+                task_persistence_started = True
+                await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             except Exception as exc:
                 task_persistence_started = True
-                await self._publish_exception_status(
-                    event_queue,
-                    task=task,
-                    task_id=task_id,
-                    context_id=context_id,
-                    exc=exc,
-                    pipeline_publisher=publisher,
-                )
+                try:
+                    await self._publish_exception_status(
+                        event_queue,
+                        task=task,
+                        task_id=task_id,
+                        context_id=context_id,
+                        exc=exc,
+                        pipeline_publisher=publisher,
+                    )
+                except _PipelineBackupBlockedTransitionError:
+                    await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             finally:
-                if task.active_task is owner_task:
+                replacement_owner = getattr(ctx.runtime, "active_owner_task", None)
+                if (
+                    replacement_owner is not None
+                    and replacement_owner is not owner_task
+                    and not replacement_owner.done()
+                ):
+                    task.active_task = replacement_owner
+                    ctx.active_task_id = task.task_id
+                elif (
+                    task.active_task is not None and task.active_task is not owner_task and not task.active_task.done()
+                ):
+                    ctx.active_task_id = task.task_id
+                elif task.active_task is owner_task:
                     task.active_task = None
-                    if ctx.active_task_id == task.task_id:
+                    if ctx.active_task_id == task.task_id and getattr(pipeline, "sidecar_status", None) != "running":
                         ctx.active_task_id = None
+                    if replacement_owner is owner_task and hasattr(ctx.runtime, "active_owner_task"):
+                        ctx.runtime.active_owner_task = None
                 ctx.touch()
                 if task_persistence_started:
                     task.touch()
@@ -496,19 +625,32 @@ class IacCodeA2APipelineExecutor:
         pipeline = getattr(runtime, "pipeline", None)
         if pipeline is None:
             return False
+        publisher = getattr(runtime, "publisher", None)
+        if isinstance(publisher, PipelineA2AEventPublisher):
+            self._install_backup_hook(
+                publisher,
+                pipeline=pipeline,
+                cwd=cwd,
+                session_id=ctx.session_id,
+                task=task,
+                ctx=ctx,
+            )
 
         try:
             pending_question_route = await self._route_pending_question_answer(runtime, pipeline_input)
         except Exception as exc:
-            await self._publish_exception_status(
-                event_queue,
-                task=task,
-                task_id=task_id,
-                context_id=context_id,
-                exc=exc,
-                preserve_task_record=preserve_task_record,
-                pipeline_publisher=getattr(runtime, "publisher", None),
-            )
+            try:
+                await self._publish_exception_status(
+                    event_queue,
+                    task=task,
+                    task_id=task_id,
+                    context_id=context_id,
+                    exc=exc,
+                    preserve_task_record=preserve_task_record,
+                    pipeline_publisher=publisher,
+                )
+            except _PipelineBackupBlockedTransitionError:
+                await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             return True
         if pending_question_route == _PENDING_QUESTION_ANSWERED:
             task.state = TASK_STATE_WORKING
@@ -519,7 +661,6 @@ class IacCodeA2APipelineExecutor:
             self._task_store.mirror_task(task)
             return True
 
-        publisher = getattr(runtime, "publisher", None)
         publish_interrupt = getattr(publisher, "publish_interrupt", None)
         if not callable(publish_interrupt):
             try:
@@ -539,6 +680,14 @@ class IacCodeA2APipelineExecutor:
                 self._task_store.mirror_context(ctx)
         if publisher is None:
             return False
+        self._install_backup_hook(
+            publisher,
+            pipeline=pipeline,
+            cwd=cwd,
+            session_id=ctx.session_id,
+            task=task,
+            ctx=ctx,
+        )
 
         if _pending_pipeline_pause_input_from_sidecar(publisher, task_id=task_id, context_id=context_id) is not None:
             await self._continue_active_pause_confirmation(
@@ -550,6 +699,7 @@ class IacCodeA2APipelineExecutor:
                 publisher=publisher,
                 task_id=task_id,
                 context_id=context_id,
+                cwd=cwd,
                 session_id=ctx.session_id,
                 pipeline_input=pipeline_input,
                 preserve_task_record=preserve_task_record,
@@ -600,14 +750,29 @@ class IacCodeA2APipelineExecutor:
                 include_received=not interrupt_received_published,
             )
             if _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None)):
-                await self._publish_terminal_sidecar_recovery_event(
+                terminal_status_published = await self._publish_terminal_sidecar_recovery_event(
                     publisher,
                     pipeline,
                     task_id=task_id,
                     context_id=context_id,
                 )
+                committed_terminal_status = _committed_terminal_status_for_task_context(
+                    publisher,
+                    task_id=task_id,
+                    context_id=context_id,
+                )
+                sidecar_terminal_status = _terminal_status_from_sidecar(getattr(pipeline, "sidecar_status", None))
+                terminal_snapshot_available = terminal_status_published or committed_terminal_status is not None
+                sidecar_terminal_fallback_available = terminal_status_published or (
+                    committed_terminal_status is not None and committed_terminal_status == sidecar_terminal_status
+                )
                 snapshot = publisher.snapshot_store.load() or {}
-                task.state = _task_state_from_pipeline(pipeline, snapshot)
+                task.state = _task_state_from_pipeline(
+                    pipeline,
+                    snapshot,
+                    allow_terminal_snapshot=terminal_snapshot_available,
+                    allow_sidecar_terminal_fallback=sidecar_terminal_fallback_available,
+                )
                 self._task_store.mirror_task(task)
                 await self._notify_terminal_task(task_id=task_id, context_id=context_id, state=task.state)
                 self._record_state(task.state)
@@ -624,15 +789,21 @@ class IacCodeA2APipelineExecutor:
                 runtime.pause_after_interrupt = True
                 _restart_requested_event(runtime).set()
             return True
+        except _PipelineBackupBlockedTransitionError:
+            await self._complete_backup_blocked_transition(task=task, ctx=ctx)
+            return True
         except Exception as exc:
-            await self._publish_exception_status(
-                event_queue,
-                task=task,
-                task_id=task_id,
-                context_id=context_id,
-                exc=exc,
-                preserve_task_record=preserve_task_record,
-            )
+            try:
+                await self._publish_exception_status(
+                    event_queue,
+                    task=task,
+                    task_id=task_id,
+                    context_id=context_id,
+                    exc=exc,
+                    preserve_task_record=preserve_task_record,
+                )
+            except _PipelineBackupBlockedTransitionError:
+                await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             return True
         finally:
             if paused and not bool(getattr(verdict, "paused", False)):
@@ -654,6 +825,7 @@ class IacCodeA2APipelineExecutor:
         publisher: PipelineA2AEventPublisher,
         task_id: str,
         context_id: str,
+        cwd: str,
         session_id: str,
         pipeline_input: PipelineUserInput,
         preserve_task_record: bool,
@@ -661,7 +833,16 @@ class IacCodeA2APipelineExecutor:
         pipeline_input = normalize_pipeline_user_input(pipeline_input)
         prompt = pipeline_input.display_text
         owner_task = asyncio.current_task()
+        self._install_backup_hook(
+            publisher,
+            pipeline=pipeline,
+            cwd=cwd,
+            session_id=session_id,
+            task=task,
+            ctx=ctx,
+        )
         task.active_task = owner_task
+        runtime.active_owner_task = owner_task
         ctx.active_task_id = task_id
         restart_event = _restart_requested_event(runtime)
         if runtime.pause_after_interrupt and restart_event.is_set():
@@ -678,6 +859,7 @@ class IacCodeA2APipelineExecutor:
                 stream = pipeline.continue_from_sidecar()
             task.state = TASK_STATE_WORKING
             self._task_store.mirror_task(task)
+            terminal_handoff_unavailable = False
             with self._request_context(session_id=session_id):
                 while True:
                     stream_result = await self._consume_stream_until_restart(
@@ -686,28 +868,68 @@ class IacCodeA2APipelineExecutor:
                         publisher=publisher,
                         task=task,
                     )
+                    terminal_handoff_unavailable = (
+                        terminal_handoff_unavailable or stream_result.terminal_handoff_unavailable
+                    )
                     if not stream_result.restart_requested:
                         break
                     stream = self._continue_after_interrupt_stream(pipeline, pipeline_input)
 
+            terminal_status_published = False
+            terminal_sidecar = _is_terminal_sidecar_status(getattr(pipeline, "sidecar_status", None))
+            terminal_sidecar_recovery_allowed = not terminal_handoff_unavailable
+            if terminal_sidecar and terminal_sidecar_recovery_allowed:
+                terminal_status_published = await self._publish_terminal_sidecar_recovery_event(
+                    publisher,
+                    pipeline,
+                    task_id=task_id,
+                    context_id=context_id,
+                )
+            committed_terminal_status = (
+                _committed_terminal_status_for_task_context(
+                    publisher,
+                    task_id=task_id,
+                    context_id=context_id,
+                )
+                if terminal_sidecar and terminal_sidecar_recovery_allowed
+                else None
+            )
+            sidecar_terminal_status = _terminal_status_from_sidecar(getattr(pipeline, "sidecar_status", None))
+            terminal_snapshot_available = terminal_status_published or committed_terminal_status is not None
+            sidecar_terminal_fallback_available = terminal_status_published or (
+                committed_terminal_status is not None and committed_terminal_status == sidecar_terminal_status
+            )
+
             snapshot = publisher.snapshot_store.load() or {}
-            task.state = _task_state_from_pipeline(pipeline, snapshot)
+            task.state = _task_state_from_pipeline(
+                pipeline,
+                snapshot,
+                allow_terminal_snapshot=not terminal_sidecar or terminal_snapshot_available,
+                allow_sidecar_terminal_fallback=sidecar_terminal_fallback_available,
+            )
             self._task_store.mirror_task(task)
             await self._notify_terminal_task(task_id=task_id, context_id=context_id, state=task.state)
             self._record_state(task.state)
+        except _PipelineBackupBlockedTransitionError:
+            await self._complete_backup_blocked_transition(task=task, ctx=ctx)
         except Exception as exc:
-            await self._publish_exception_status(
-                event_queue,
-                task=task,
-                task_id=task_id,
-                context_id=context_id,
-                exc=exc,
-                preserve_task_record=False,
-                pipeline_publisher=publisher,
-            )
+            try:
+                await self._publish_exception_status(
+                    event_queue,
+                    task=task,
+                    task_id=task_id,
+                    context_id=context_id,
+                    exc=exc,
+                    preserve_task_record=False,
+                    pipeline_publisher=publisher,
+                )
+            except _PipelineBackupBlockedTransitionError:
+                await self._complete_backup_blocked_transition(task=task, ctx=ctx)
         finally:
             if task.active_task is owner_task:
                 task.active_task = None
+                if runtime.active_owner_task is owner_task:
+                    runtime.active_owner_task = None
                 if ctx.active_task_id == task_id:
                     ctx.active_task_id = None
                 ctx.touch()
@@ -733,6 +955,7 @@ class IacCodeA2APipelineExecutor:
             cwd=cwd,
             resume_from_sidecar=resume_from_sidecar,
             surface="a2a",
+            backup_service=self._backup_service,
         )
 
     def _set_pipeline_telemetry_correlation(self, pipeline: Any, *, task_id: str, context_id: str) -> None:
@@ -760,23 +983,36 @@ class IacCodeA2APipelineExecutor:
     ) -> "_StreamConsumeResult":
         had_events = False
         stream_iter = stream.__aiter__()
+        owner_task = asyncio.current_task()
+        if owner_task is not None:
+            runtime.active_owner_task = owner_task
+            task.active_task = owner_task
         runtime.current_stream = stream_iter
         restart_event = _restart_requested_event(runtime)
         next_task: asyncio.Task[Any] | None = None
         restart_task: asyncio.Task[Any] | None = None
         close_stream_on_exit = False
+        terminal_handoff_unavailable = False
         try:
             while True:
                 if runtime.pause_after_interrupt and restart_event.is_set():
                     restart_event.clear()
                     runtime.pause_after_interrupt = False
                     await _close_stream_safely(stream_iter)
-                    return _StreamConsumeResult(had_events=had_events, restart_requested=False)
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=False,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
                 if runtime.restart_after_interrupt and restart_event.is_set():
                     restart_event.clear()
                     runtime.restart_after_interrupt = False
                     await _close_stream_safely(stream_iter)
-                    return _StreamConsumeResult(had_events=had_events, restart_requested=True)
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=True,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
 
                 next_task = asyncio.create_task(_next_stream_event(stream_iter))
                 restart_task = asyncio.create_task(restart_event.wait())
@@ -793,7 +1029,11 @@ class IacCodeA2APipelineExecutor:
                     await _cancel_task_safely(restart_task)
                     restart_task = None
                     await _close_stream_safely(stream_iter)
-                    return _StreamConsumeResult(had_events=had_events, restart_requested=True)
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=True,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
                 if restart_task in done and runtime.pause_after_interrupt:
                     restart_event.clear()
                     runtime.pause_after_interrupt = False
@@ -802,7 +1042,11 @@ class IacCodeA2APipelineExecutor:
                     await _cancel_task_safely(restart_task)
                     restart_task = None
                     await _close_stream_safely(stream_iter)
-                    return _StreamConsumeResult(had_events=had_events, restart_requested=False)
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=False,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
 
                 await _cancel_task_safely(restart_task)
                 restart_task = None
@@ -817,7 +1061,11 @@ class IacCodeA2APipelineExecutor:
                         runtime=runtime.agent_runtime,
                         iac_code_session_id=publisher.translator.context.iac_code_session_id,
                     )
-                    return _StreamConsumeResult(had_events=had_events, restart_requested=False)
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=False,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
                 finally:
                     next_task = None
 
@@ -829,18 +1077,32 @@ class IacCodeA2APipelineExecutor:
                     runtime=runtime.agent_runtime,
                     iac_code_session_id=publisher.translator.context.iac_code_session_id,
                 )
-                text = await publisher.publish(
+                terminal_handoff_result = await self._maybe_publish_terminal_with_normal_handoff(
+                    runtime.pipeline,
+                    publisher,
                     event,
-                    permission_resolver=self._permission_resolver,
-                    auto_approve_permissions=self._auto_approve_permissions,
                 )
-                self._track_pending_question(runtime, publisher, event)
+                if terminal_handoff_result.attempted:
+                    if not terminal_handoff_result.terminal_available:
+                        terminal_handoff_unavailable = True
+                    text = None
+                else:
+                    text = await publisher.publish(
+                        event,
+                        permission_resolver=self._permission_resolver,
+                        auto_approve_permissions=self._auto_approve_permissions,
+                    )
+                    self._track_pending_question(runtime, publisher, event)
+                    await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
                 if text:
                     task.output_text.append(text)
-                await self._maybe_publish_normal_handoff_ready(runtime.pipeline, publisher, event)
                 if _ask_user_question_from(event) is not None:
                     close_stream_on_exit = True
-                    return _StreamConsumeResult(had_events=had_events, restart_requested=False)
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=False,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
         except asyncio.CancelledError:
             close_stream_on_exit = True
             raise
@@ -882,16 +1144,185 @@ class IacCodeA2APipelineExecutor:
             translator.hydrate_from_events(journal.read_all_repairing_tail())
         except Exception:
             logger.warning("Failed to hydrate A2A pipeline translator from journal", exc_info=True)
+        artifact_store = self._artifact_store_for_session(cwd=cwd, session_id=session_id)
         return PipelineA2AEventPublisher(
             event_queue=event_queue,
             translator=translator,
             journal=journal,
             snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
-            artifact_store=self._artifact_store,
+            artifact_store=artifact_store,
             exposure_types=self._thinking_exposure_types,
+            backup_commit_gate=_requires_backup_committed_publication,
         )
 
-    def _select_stream(
+    def _install_backup_hook(
+        self,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        pipeline: Any,
+        cwd: str,
+        session_id: str,
+        task: Any,
+        ctx: Any,
+    ) -> None:
+        async def before_enqueue(envelope: dict[str, Any]) -> bool:
+            return await self._backup_before_pipeline_publication(
+                envelope,
+                publisher=publisher,
+                pipeline=pipeline,
+                cwd=cwd,
+                session_id=session_id,
+                task=task,
+                ctx=ctx,
+            )
+
+        async def after_backup_commit(envelope: dict[str, Any]) -> None:
+            self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
+
+        publisher.before_enqueue = before_enqueue
+        publisher.after_backup_commit = after_backup_commit
+
+    async def _backup_before_pipeline_publication(
+        self,
+        envelope: dict[str, Any],
+        *,
+        publisher: PipelineA2AEventPublisher,
+        pipeline: Any,
+        cwd: str,
+        session_id: str,
+        task: Any,
+        ctx: Any,
+    ) -> bool:
+        reason = _backup_reason_for_pipeline_envelope(envelope)
+        if reason is None:
+            return True
+        if reason in {BackupReason.TERMINAL, BackupReason.HANDOFF_READY}:
+            if _is_pending_backup_publication_event(envelope):
+                return True
+        else:
+            self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
+        try:
+            await backup_session_async(
+                self._backup_service,
+                cwd,
+                session_id,
+                reason=reason,
+                critical=True,
+                metrics=self._metrics,
+            )
+        except SessionBackupBlocked as exc:
+            sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
+                pipeline,
+                reason=reason,
+                step_id=_pipeline_step_id_from_envelope(envelope),
+            )
+            if not sidecar_synced:
+                logger.warning("A2A pipeline backup_blocked sidecar state was not durably persisted")
+                _record_backup_blocked_metric(self._metrics, reason=reason.value, recoverable=False)
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=envelope,
+                    reason="backup_blocked_sidecar_persist_failed",
+                )
+                task.state = TASK_STATE_INPUT_REQUIRED
+                task.touch()
+                ctx.touch()
+                self._task_store.mirror_task(task)
+                self._task_store.mirror_context(ctx)
+                raise _PipelineBackupBlockedTransitionError from exc
+            backup_blocked_published = await self._publish_backup_blocked(
+                publisher,
+                reason=reason,
+                exc=exc,
+            )
+            if not backup_blocked_published:
+                logger.warning("A2A pipeline backup_blocked event was not durably published")
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=envelope,
+                    reason="backup_blocked_publish_failed",
+                )
+            task.state = TASK_STATE_INPUT_REQUIRED
+            task.touch()
+            ctx.touch()
+            self._task_store.mirror_task(task)
+            self._task_store.mirror_context(ctx)
+            raise _PipelineBackupBlockedTransitionError from exc
+        return True
+
+    def _mirror_a2a_snapshots_for_pipeline_publication(
+        self,
+        envelope: dict[str, Any],
+        *,
+        task: Any,
+        ctx: Any,
+    ) -> None:
+        state = _task_state_for_pipeline_publication_envelope(envelope)
+        if state == TASK_STATE_INPUT_REQUIRED:
+            task_snapshot = copy.copy(task)
+            task_snapshot.state = state
+            context_snapshot = copy.copy(ctx)
+            self._task_store.mirror_task(task_snapshot)
+            self._task_store.mirror_context(context_snapshot)
+            return
+
+        task.state = state
+        if task.state in {TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED}:
+            ctx.active_task_id = None
+        task.touch()
+        ctx.touch()
+        self._task_store.mirror_task(task)
+        self._task_store.mirror_context(ctx)
+
+    async def _publish_backup_blocked(
+        self,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        reason: BackupReason,
+        exc: SessionBackupBlocked,
+    ) -> bool:
+        try:
+            published = await publisher.publish_manual(
+                "backup_blocked",
+                "pipeline",
+                status="input_required",
+                data={
+                    "reason": reason.value,
+                    "error": public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+                    "recoverable": True,
+                },
+                require_durable_metadata=True,
+                require_journal_metadata=True,
+            )
+            if published is not None:
+                _record_backup_blocked_metric(self._metrics, reason=reason.value, recoverable=True)
+                return True
+            _record_backup_blocked_metric(self._metrics, reason=reason.value, recoverable=False)
+            return False
+        except Exception as publish_exc:
+            logger.warning(
+                "Failed to publish A2A pipeline backup_blocked event error_type=%s",
+                type(publish_exc).__name__,
+            )
+            _record_backup_blocked_metric(self._metrics, reason=reason.value, recoverable=False)
+            return False
+
+    async def _complete_backup_blocked_transition(self, *, task: Any, ctx: Any) -> None:
+        task.state = TASK_STATE_INPUT_REQUIRED
+        task.touch()
+        ctx.touch()
+        self._task_store.mirror_task(task)
+        self._task_store.mirror_context(ctx)
+        await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+        self._metrics.record_executor_error()
+
+    def _artifact_store_for_session(self, *, cwd: str, session_id: str) -> Any | None:
+        session_dir = SessionStorage().v2_session_dir(cwd, session_id)
+        if session_dir is None:
+            return self._artifact_store
+        return artifact_store_for_session(session_dir)
+
+    async def _select_stream(
         self,
         pipeline: Any,
         prompt: str,
@@ -903,6 +1334,24 @@ class IacCodeA2APipelineExecutor:
         fresh_pipeline_factory: Callable[[], Any],
     ) -> _SelectedPipelineStream:
         status = getattr(pipeline, "sidecar_status", None)
+        pending_backup_blocked = _pending_backup_blocked_input_from_sidecar(
+            publisher,
+            task_id=task_id,
+            context_id=context_id,
+        )
+        if pending_backup_blocked is not None and status != "backup_blocked":
+            sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
+                pipeline,
+                reason=_backup_reason_from_pending_backup_blocked_input(pending_backup_blocked),
+                step_id=_pipeline_step_id_from_pending_input(pending_backup_blocked),
+            )
+            if not sidecar_synced:
+                raise _active_sidecar_mismatch_error_from_publisher(
+                    publisher,
+                    context_id=context_id,
+                    sidecar_status="backup_blocked",
+                )
+            status = getattr(pipeline, "sidecar_status", status)
         if status == "waiting_input":
             _raise_if_sidecar_restore_failed(pipeline, status)
             if not _sidecar_matches_task(publisher, task_id=task_id, context_id=context_id, sidecar_status=status):
@@ -985,6 +1434,20 @@ class IacCodeA2APipelineExecutor:
                     stream=pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input)),
                 )
             return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.continue_from_sidecar())
+        if status == "backup_blocked":
+            _raise_if_sidecar_restore_failed(pipeline, status)
+            if not _sidecar_matches_task(publisher, task_id=task_id, context_id=context_id, sidecar_status=status):
+                raise _active_sidecar_mismatch_error_from_publisher(
+                    publisher,
+                    context_id=context_id,
+                    sidecar_status=status,
+                )
+            stream = (
+                pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input))
+                if prompt
+                else pipeline.continue_from_sidecar()
+            )
+            return _SelectedPipelineStream(pipeline=pipeline, stream=stream)
         if status in _TERMINAL_SIDECAR_STATUSES:
             if _terminal_sidecar_matches_task(publisher, status, task_id=task_id, context_id=context_id):
                 return _SelectedPipelineStream(pipeline=pipeline, stream=_empty_stream())
@@ -1031,6 +1494,8 @@ class IacCodeA2APipelineExecutor:
         snapshot = publisher.snapshot_store.load()
         journal_events = _safe_read_pipeline_journal(publisher.journal)
         scoped_journal_events = _events_for_task_context(journal_events, task_id=task_id, context_id=context_id)
+        if _terminal_publication_unavailable_blocks_recovery(scoped_journal_events):
+            return False
         existing_terminal_event = _latest_terminal_a2a_event(scoped_journal_events)
         if existing_terminal_event is not None:
             existing_status = _terminal_status_from_a2a_event(existing_terminal_event)
@@ -1048,7 +1513,12 @@ class IacCodeA2APipelineExecutor:
             return False
         if _snapshot_has_conflicting_terminal_status(snapshot, status, task_id=task_id, context_id=context_id):
             return False
-        if not _terminal_snapshot_needs_recovery_event(snapshot, status, task_id=task_id, context_id=context_id):
+        if not _terminal_snapshot_needs_recovery_event(
+            snapshot,
+            status,
+            task_id=task_id,
+            context_id=context_id,
+        ) and not _has_unacknowledged_committed_terminal_event(scoped_journal_events):
             return False
 
         published = await publisher.publish_manual(
@@ -1060,7 +1530,18 @@ class IacCodeA2APipelineExecutor:
                 "recovered": True,
             },
         )
-        return published is not None
+        if published is None:
+            await self._persist_terminal_publication_unavailable(
+                publisher,
+                terminal_envelope={
+                    "eventType": event_type,
+                    "status": status,
+                    "visibility": _COMMITTED_BACKUP_VISIBILITY,
+                },
+                reason="terminal_recovery_publication_failed",
+            )
+            return False
+        return True
 
     def _rebuild_terminal_recovery_snapshot(
         self,
@@ -1084,10 +1565,313 @@ class IacCodeA2APipelineExecutor:
         if publisher is None:
             return False
         try:
-            return await publisher.publish_manual(event_type, "pipeline", status=status, data=data) is not None
+            published = await publisher.publish_manual(event_type, "pipeline", status=status, data=data)
+            if published is None:
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope={
+                        "eventType": event_type,
+                        "status": status,
+                        "visibility": _COMMITTED_BACKUP_VISIBILITY,
+                    },
+                    reason="terminal_publication_failed",
+                )
+                return False
+            return True
+        except _PipelineBackupBlockedTransitionError:
+            raise
         except Exception:
             logger.warning("Failed to publish A2A pipeline terminal event", exc_info=True)
             return False
+
+    async def _maybe_publish_terminal_with_normal_handoff(
+        self,
+        pipeline: Any,
+        publisher: PipelineA2AEventPublisher,
+        event: Any,
+    ) -> _TerminalHandoffPublishResult:
+        if not isinstance(event, PipelineEvent) or event.type != PipelineEventType.PIPELINE_COMPLETED:
+            return _TerminalHandoffPublishResult(attempted=False, terminal_available=False)
+
+        publication = self._normal_handoff_publication(pipeline, event.data or {})
+        if publication is None:
+            return _TerminalHandoffPublishResult(attempted=False, terminal_available=False)
+
+        terminal_envelopes = publisher.translator.translate(event)
+        terminal_envelope = next(
+            (
+                envelope
+                for envelope in terminal_envelopes
+                if _backup_reason_for_pipeline_envelope(envelope) == BackupReason.TERMINAL
+            ),
+            None,
+        )
+        if terminal_envelope is None:
+            logger.warning("Skipping A2A pipeline handoff transaction because terminal envelope was not translated")
+            return _TerminalHandoffPublishResult(attempted=True, terminal_available=False)
+
+        terminal_available = await self._publish_terminal_handoff_transaction(
+            pipeline,
+            publisher,
+            terminal_envelope=terminal_envelope,
+            publication=publication,
+        )
+        return _TerminalHandoffPublishResult(attempted=True, terminal_available=terminal_available)
+
+    async def _publish_manual_terminal_with_normal_handoff(
+        self,
+        pipeline: Any,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        event_type: str,
+        status: str,
+        terminal_data: dict[str, Any],
+        handoff_data: dict[str, Any],
+    ) -> _TerminalHandoffPublishResult:
+        publication = self._normal_handoff_publication(pipeline, handoff_data)
+        if publication is None:
+            return _TerminalHandoffPublishResult(attempted=False, terminal_available=False)
+        terminal_envelope = publisher.translator.manual_event(
+            event_type,
+            "pipeline",
+            status=status,
+            data=terminal_data,
+        )
+        terminal_available = await self._publish_terminal_handoff_transaction(
+            pipeline,
+            publisher,
+            terminal_envelope=terminal_envelope,
+            publication=publication,
+        )
+        return _TerminalHandoffPublishResult(attempted=True, terminal_available=terminal_available)
+
+    async def _publish_terminal_handoff_transaction(
+        self,
+        pipeline: Any,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        terminal_envelope: dict[str, Any],
+        publication: _NormalHandoffPublication,
+    ) -> bool:
+        handoff_envelope = publisher.translator.manual_event(
+            "pipeline_handoff_ready",
+            "pipeline",
+            status=publication.status,
+            data=publication.data,
+        )
+        pending_terminal_envelope = _pending_backup_publication_envelope(terminal_envelope)
+        pending_handoff_envelope = _pending_backup_publication_envelope(handoff_envelope)
+        pending_terminal_safe_envelope = await publisher.persist_envelope(
+            pending_terminal_envelope,
+            require_journal_metadata=True,
+        )
+        if pending_terminal_safe_envelope is None:
+            await self._persist_terminal_publication_unavailable(
+                publisher,
+                terminal_envelope=terminal_envelope,
+                reason="pending_terminal_persist_failed",
+            )
+            return False
+        pending_handoff_safe_envelope = await publisher.persist_envelope(
+            pending_handoff_envelope,
+            require_journal_metadata=True,
+        )
+        if pending_handoff_safe_envelope is None:
+            await self._persist_terminal_publication_unavailable(
+                publisher,
+                terminal_envelope=pending_terminal_safe_envelope,
+                reason="pending_handoff_persist_failed",
+            )
+            return False
+
+        async with publisher.delivery_transaction():
+            committed_terminal_envelope = _committed_backup_publication_envelope(
+                publisher,
+                pending_terminal_safe_envelope,
+            )
+            committed_handoff_envelope = _committed_backup_publication_envelope(
+                publisher,
+                pending_handoff_safe_envelope,
+            )
+            terminal_safe_envelope = await publisher.persist_envelope(
+                committed_terminal_envelope,
+                require_journal_metadata=True,
+            )
+            if terminal_safe_envelope is None:
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=committed_terminal_envelope,
+                    reason="committed_terminal_persist_failed",
+                )
+                return False
+            handoff_safe_envelope = await publisher.persist_envelope(
+                committed_handoff_envelope,
+                require_journal_metadata=True,
+            )
+            if handoff_safe_envelope is None:
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=terminal_safe_envelope,
+                    reason="committed_handoff_persist_failed",
+                )
+                return False
+            if not await self._run_before_enqueue_hook(publisher, terminal_safe_envelope):
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=terminal_safe_envelope,
+                    reason="committed_terminal_before_enqueue_failed",
+                )
+                return False
+            if not await self._run_before_enqueue_hook(publisher, handoff_safe_envelope):
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=terminal_safe_envelope,
+                    reason="committed_handoff_before_enqueue_failed",
+                )
+                return False
+            terminal_ack_envelope = await publisher.persist_backup_committed_ack(terminal_safe_envelope)
+            if terminal_ack_envelope is None:
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=terminal_safe_envelope,
+                    reason="committed_terminal_backup_ack_failed",
+                )
+                return False
+            handoff_ack_envelope = await publisher.persist_backup_committed_ack(handoff_safe_envelope)
+            if not await publisher.enqueue_persisted(terminal_safe_envelope, run_before_enqueue=False):
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=terminal_safe_envelope,
+                    reason="committed_terminal_enqueue_failed",
+                )
+                return False
+            if not await publisher.enqueue_persisted(
+                backup_committed_delivery_envelope(terminal_ack_envelope, terminal_safe_envelope),
+                run_before_enqueue=False,
+            ):
+                await self._persist_terminal_publication_unavailable(
+                    publisher,
+                    terminal_envelope=terminal_safe_envelope,
+                    reason="committed_terminal_backup_ack_enqueue_failed",
+                )
+                return False
+            await publisher._run_after_backup_commit_hook(terminal_safe_envelope)
+            if handoff_ack_envelope is None:
+                await self._persist_and_enqueue_handoff_publication_unavailable(
+                    publisher,
+                    handoff_envelope=handoff_safe_envelope,
+                    reason="committed_handoff_backup_ack_failed",
+                )
+                return True
+            if await publisher.enqueue_persisted(handoff_safe_envelope, run_before_enqueue=False):
+                if not await publisher.enqueue_persisted(
+                    backup_committed_delivery_envelope(handoff_ack_envelope, handoff_safe_envelope),
+                    run_before_enqueue=False,
+                ):
+                    await self._persist_and_enqueue_handoff_publication_unavailable(
+                        publisher,
+                        handoff_envelope=handoff_safe_envelope,
+                        reason="committed_handoff_backup_ack_enqueue_failed",
+                    )
+                    return True
+                await publisher._run_after_backup_commit_hook(handoff_safe_envelope)
+                _persist_normal_handoff_summary(pipeline, publication.summary)
+            else:
+                await self._persist_handoff_publication_unavailable(
+                    publisher,
+                    handoff_envelope=handoff_safe_envelope,
+                    reason="committed_handoff_enqueue_failed",
+                )
+                return True
+        return True
+
+    async def _persist_terminal_publication_unavailable(
+        self,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        terminal_envelope: dict[str, Any],
+        reason: str,
+    ) -> None:
+        marker = publisher.translator.manual_event(
+            "input_required",
+            "pipeline",
+            status="input_required",
+            data={
+                "kind": _TERMINAL_PUBLICATION_UNAVAILABLE_KIND,
+                "reason": reason,
+                "terminalEventId": terminal_envelope.get("eventId"),
+                "terminalEventType": terminal_envelope.get("eventType"),
+                "terminalVisibility": _publication_visibility_from_event(terminal_envelope),
+            },
+        )
+        persisted = await publisher.persist_envelope(
+            marker,
+            require_durable_metadata=True,
+            require_journal_metadata=True,
+        )
+        if persisted is None:
+            logger.warning("Failed to persist A2A pipeline terminal publication unavailable marker")
+
+    async def _persist_and_enqueue_handoff_publication_unavailable(
+        self,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        handoff_envelope: dict[str, Any],
+        reason: str,
+    ) -> None:
+        persisted = await self._persist_handoff_publication_unavailable(
+            publisher,
+            handoff_envelope=handoff_envelope,
+            reason=reason,
+        )
+        if persisted is None:
+            return
+        if not await publisher.enqueue_persisted(persisted, run_before_enqueue=False):
+            logger.warning("Failed to enqueue A2A pipeline handoff publication unavailable marker")
+
+    async def _persist_handoff_publication_unavailable(
+        self,
+        publisher: PipelineA2AEventPublisher,
+        *,
+        handoff_envelope: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any] | None:
+        raw_data = handoff_envelope.get("data")
+        data = raw_data if isinstance(raw_data, dict) else {}
+        marker = publisher.translator.manual_event(
+            "pipeline_handoff_ready",
+            "pipeline",
+            status=str(handoff_envelope.get("status") or "input_required"),
+            data={
+                "action": _HANDOFF_PUBLICATION_UNAVAILABLE_ACTION,
+                "targetMode": "pipeline",
+                "outcome": data.get("outcome"),
+                "summary": data.get("summary"),
+                "unavailable": True,
+                "reason": reason,
+                "handoffEventId": handoff_envelope.get("eventId"),
+            },
+        )
+        persisted = await publisher.persist_envelope(
+            marker,
+            require_durable_metadata=True,
+            require_journal_metadata=True,
+        )
+        if persisted is None:
+            logger.warning("Failed to persist A2A pipeline handoff publication unavailable marker")
+        return persisted
+
+    async def _run_before_enqueue_hook(
+        self,
+        publisher: PipelineA2AEventPublisher,
+        envelope: dict[str, Any],
+    ) -> bool:
+        if publisher.before_enqueue is None:
+            return True
+        should_enqueue = publisher.before_enqueue(envelope)
+        if inspect.isawaitable(should_enqueue):
+            should_enqueue = await should_enqueue
+        return should_enqueue is not False
 
     async def _maybe_publish_normal_handoff_ready(
         self,
@@ -1100,23 +1884,24 @@ class IacCodeA2APipelineExecutor:
 
         await self._publish_normal_handoff_ready(pipeline, publisher, event.data or {})
 
-    async def _publish_normal_handoff_ready(
+    def _normal_handoff_publication(
         self,
         pipeline: Any,
-        publisher: PipelineA2AEventPublisher,
         event_data: dict[str, Any],
-    ) -> None:
+    ) -> _NormalHandoffPublication | None:
         should_switch_to_normal = getattr(pipeline, "should_switch_to_normal", None)
         if not callable(should_switch_to_normal):
-            return
+            return None
         try:
             if not bool(should_switch_to_normal(event_data)):
-                return
+                return None
             summary = pipeline.build_normal_handoff_summary(event_data)
             outcome = terminal_outcome_from_completed_event(event_data)
+        except _PipelineBackupBlockedTransitionError:
+            raise
         except Exception:
             logger.warning("Failed to build A2A pipeline normal handoff event", exc_info=True)
-            return
+            return None
 
         data = {
             "action": "switch_to_normal",
@@ -1127,15 +1912,33 @@ class IacCodeA2APipelineExecutor:
         cleanup = _pipeline_cleanup_handoff_data(pipeline)
         if cleanup is not None:
             data["cleanup"] = cleanup
-
-        published = await publisher.publish_manual(
-            "pipeline_handoff_ready",
-            "pipeline",
+        return _NormalHandoffPublication(
             status=_handoff_status_from_outcome(outcome),
             data=data,
+            summary=summary,
         )
+
+    async def _publish_normal_handoff_ready(
+        self,
+        pipeline: Any,
+        publisher: PipelineA2AEventPublisher,
+        event_data: dict[str, Any],
+    ) -> None:
+        publication = self._normal_handoff_publication(pipeline, event_data)
+        if publication is None:
+            return
+
+        try:
+            published = await publisher.publish_manual(
+                "pipeline_handoff_ready",
+                "pipeline",
+                status=publication.status,
+                data=publication.data,
+            )
+        except _PipelineBackupBlockedTransitionError:
+            raise
         if published is not None:
-            _persist_normal_handoff_summary(pipeline, summary)
+            _persist_normal_handoff_summary(pipeline, publication.summary)
 
     def _track_pending_question(
         self,
@@ -1278,8 +2081,9 @@ class IacCodeA2APipelineExecutor:
         task_state = TASK_STATE_INPUT_REQUIRED if retryable else TASK_STATE_FAILED
         text = _retry_text() if retryable else _sanitize_error(exc)
         failure = None if retryable else public_error(message=text, error_type=type(exc).__name__)
+        terminal_status_available = retryable or preserve_task_record
         if not retryable and not preserve_task_record:
-            await self._publish_pipeline_terminal_event(
+            terminal_status_available = await self._publish_pipeline_terminal_event(
                 pipeline_publisher,
                 event_type="pipeline_failed",
                 status="failed",
@@ -1289,11 +2093,13 @@ class IacCodeA2APipelineExecutor:
                     "errorDetails": _public_error_details_for_a2a(failure.details) if failure is not None else {},
                 },
             )
+        if not terminal_status_available:
+            task_state = TASK_STATE_INPUT_REQUIRED
         await self._publish_status(
             event_queue,
             task_id=task_id,
             context_id=context_id,
-            state=TaskState.TASK_STATE_INPUT_REQUIRED if retryable else TaskState.TASK_STATE_FAILED,
+            state=_a2a_state_from_task_state(task_state),
             text=text,
         )
         if not preserve_task_record:
@@ -1301,7 +2107,7 @@ class IacCodeA2APipelineExecutor:
             self._task_store.mirror_task(task)
             await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
         self._metrics.record_executor_error()
-        if not retryable and not preserve_task_record:
+        if not retryable and not preserve_task_record and terminal_status_available:
             self._metrics.record_task_failed()
 
     async def _publish_status(
@@ -1361,6 +2167,174 @@ async def _empty_stream() -> AsyncIterator[Any]:
 
 def _pipeline_runner_input(pipeline_input: PipelineUserInput) -> PipelineUserInput | str:
     return pipeline_input if pipeline_input.has_images else pipeline_input.display_text
+
+
+def _backup_reason_for_pipeline_envelope(envelope: dict[str, Any]) -> BackupReason | None:
+    event_type = envelope.get("eventType")
+    status = envelope.get("status")
+    if event_type == "backup_blocked":
+        return None
+    if event_type == "pipeline_handoff_ready":
+        return BackupReason.HANDOFF_READY
+    if event_type in {"pipeline_completed", "pipeline_failed", "pipeline_canceled"}:
+        return BackupReason.TERMINAL
+    if status in _TERMINAL_A2A_STATUSES:
+        return BackupReason.TERMINAL
+    if event_type == "input_required" or status in _WAITING_A2A_STATUSES:
+        return BackupReason.WAITING_INPUT if status == "waiting_input" else BackupReason.INPUT_REQUIRED
+    return None
+
+
+def _backup_reason_from_pending_backup_blocked_input(pending_input: dict[str, Any]) -> BackupReason:
+    backup_blocked = pending_input.get("backupBlocked")
+    raw_reason = backup_blocked.get("reason") if isinstance(backup_blocked, dict) else pending_input.get("reason")
+    if isinstance(raw_reason, BackupReason):
+        return raw_reason
+    try:
+        return BackupReason(str(raw_reason))
+    except ValueError:
+        return BackupReason.PIPELINE_STEP_COMPLETED
+
+
+def _pipeline_step_id_from_envelope(envelope: dict[str, Any]) -> str | None:
+    step = envelope.get("step")
+    if not isinstance(step, dict):
+        return None
+    step_id = _string_value(step.get("id") or step.get("stepId") or step.get("step_id"))
+    return step_id or None
+
+
+def _pipeline_step_id_from_pending_input(pending_input: dict[str, Any]) -> str | None:
+    step = pending_input.get("step")
+    if not isinstance(step, dict):
+        return None
+    step_id = _string_value(step.get("id") or step.get("stepId") or step.get("step_id"))
+    return step_id or None
+
+
+async def _sync_pipeline_backup_blocked_sidecar(
+    pipeline: Any,
+    *,
+    reason: BackupReason,
+    step_id: str | None,
+) -> bool:
+    save_backup_blocked_sidecar = getattr(pipeline, "_save_backup_blocked_sidecar", None)
+    if callable(save_backup_blocked_sidecar):
+        try:
+            result = save_backup_blocked_sidecar(step_id, reason)
+            if inspect.isawaitable(result):
+                result = await result
+            return result is not False
+        except Exception as exc:
+            logger.warning(
+                "Failed to sync pipeline backup_blocked sidecar state error_type=%s",
+                type(exc).__name__,
+            )
+            return False
+    try:
+        setattr(pipeline, "sidecar_status", "backup_blocked")
+        return True
+    except Exception as exc:
+        logger.warning(
+            "Failed to mark pipeline backup_blocked sidecar status error_type=%s",
+            type(exc).__name__,
+        )
+        return False
+
+
+def _record_backup_blocked_metric(metrics: Any, *, reason: str, recoverable: bool) -> None:
+    record_backup_blocked = getattr(metrics, "record_backup_blocked", None)
+    if not callable(record_backup_blocked):
+        return
+    try:
+        record_backup_blocked(reason=reason, recoverable=recoverable)
+    except Exception as exc:
+        logger.debug("Failed to record A2A backup_blocked metric error_type=%s", type(exc).__name__)
+
+
+def _record_backup_succeeded_metric(metrics: Any, *, reason: str, critical: bool, retry_count: int) -> None:
+    record_backup_succeeded = getattr(metrics, "record_backup_succeeded", None)
+    if not callable(record_backup_succeeded):
+        return
+    try:
+        record_backup_succeeded(reason=reason, critical=critical, retry_count=retry_count)
+    except Exception as exc:
+        logger.debug("Failed to record A2A backup_succeeded metric error_type=%s", type(exc).__name__)
+
+
+def _record_backup_failed_metric(metrics: Any, *, reason: str, critical: bool, retry_count: int) -> None:
+    record_backup_failed = getattr(metrics, "record_backup_failed", None)
+    if not callable(record_backup_failed):
+        return
+    try:
+        record_backup_failed(reason=reason, critical=critical, retry_count=retry_count)
+    except Exception as exc:
+        logger.debug("Failed to record A2A backup_failed metric error_type=%s", type(exc).__name__)
+
+
+def _backup_retry_count(result: Any) -> int:
+    value = getattr(result, "retry_count", 0)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _backup_retry_count_from_exception(exc: BaseException) -> int:
+    value = getattr(exc, "retry_count", 0)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _requires_backup_committed_publication(envelope: dict[str, Any]) -> bool:
+    if _publication_visibility_from_event(envelope) in {_PENDING_BACKUP_VISIBILITY, _COMMITTED_BACKUP_VISIBILITY}:
+        return False
+    return _backup_reason_for_pipeline_envelope(envelope) in {BackupReason.TERMINAL, BackupReason.HANDOFF_READY}
+
+
+def _pending_backup_publication_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    return pending_backup_publication_envelope(envelope)
+
+
+def _committed_backup_publication_envelope(
+    publisher: PipelineA2AEventPublisher,
+    pending_envelope: dict[str, Any],
+) -> dict[str, Any]:
+    return _committed_backup_publication_envelope_from_translator(publisher.translator, pending_envelope)
+
+
+def _committed_backup_publication_envelope_from_translator(
+    translator: PipelineEventTranslator,
+    pending_envelope: dict[str, Any],
+) -> dict[str, Any]:
+    return committed_backup_publication_envelope(translator, pending_envelope)
+
+
+def _is_pending_backup_publication_event(event: dict[str, Any]) -> bool:
+    raw_data = event.get("data")
+    data = raw_data if isinstance(raw_data, dict) else {}
+    return _publication_visibility_from_event(event) == _PENDING_BACKUP_VISIBILITY or data.get("backupPending") is True
+
+
+def _is_committed_backup_publication_event(event: dict[str, Any]) -> bool:
+    return _publication_visibility_from_event(event) == _COMMITTED_BACKUP_VISIBILITY
+
+
+def _publication_visibility_from_event(event: dict[str, Any]) -> str | None:
+    visibility = event.get("visibility")
+    if isinstance(visibility, str):
+        return visibility
+    raw_data = event.get("data")
+    data = raw_data if isinstance(raw_data, dict) else {}
+    data_visibility = data.get("visibility")
+    return data_visibility if isinstance(data_visibility, str) else None
+
+
+def _task_state_for_pipeline_publication_envelope(envelope: dict[str, Any]) -> str:
+    event_type = envelope.get("eventType")
+    if event_type == "pipeline_completed":
+        return TASK_STATE_COMPLETED
+    if event_type == "pipeline_failed":
+        return TASK_STATE_FAILED
+    if event_type == "pipeline_canceled":
+        return TASK_STATE_CANCELED
+    return _task_state_from_a2a_status(envelope.get("status"))
 
 
 async def _resume_pending_ask_user_question_stream(
@@ -1551,6 +2525,27 @@ def _pending_pipeline_pause_input_from_sidecar(
     return pending_input if pending_input.get("kind") == "pipeline_pause_confirmation" else None
 
 
+def _pending_backup_blocked_input_from_sidecar(
+    publisher: PipelineA2AEventPublisher,
+    *,
+    task_id: str,
+    context_id: str,
+) -> dict[str, Any] | None:
+    pending_input = _pending_input_from_snapshot(
+        _authoritative_snapshot_for_task(
+            snapshot_store=publisher.snapshot_store,
+            journal=publisher.journal,
+            task_id=task_id,
+            context_id=context_id,
+        ),
+        task_id=task_id,
+        context_id=context_id,
+    )
+    if pending_input is None:
+        return None
+    return pending_input if pending_input.get("kind") == "backup_blocked" else None
+
+
 def waiting_input_task_id_from_sidecar(*, cwd: str, session_id: str, context_id: str) -> str | None:
     return recoverable_task_id_from_sidecar(
         cwd=cwd,
@@ -1567,11 +2562,45 @@ def cancel_waiting_input_task_from_sidecar(
     context_id: str,
     task_id: str,
     reason: str | None = None,
-) -> bool:
+    backup_service: Any | None = None,
+    task_store: Any | None = None,
+    task_record: Any | None = None,
+    context_record: Any | None = None,
+    metrics: Any | None = None,
+) -> WaitingInputCancelResult:
     if reason is None:
         reason = _("Task canceled.")
+    pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    with _WAITING_INPUT_CANCEL_LOCKS.lock_for(pipeline_dir / ".waiting-input-cancel.lock"):
+        return _cancel_waiting_input_task_from_sidecar_locked(
+            cwd=cwd,
+            session_id=session_id,
+            context_id=context_id,
+            task_id=task_id,
+            reason=reason,
+            backup_service=backup_service,
+            task_store=task_store,
+            task_record=task_record,
+            context_record=context_record,
+            metrics=metrics,
+        )
+
+
+def _cancel_waiting_input_task_from_sidecar_locked(
+    *,
+    cwd: str,
+    session_id: str,
+    context_id: str,
+    task_id: str,
+    reason: str,
+    backup_service: Any | None = None,
+    task_store: Any | None = None,
+    task_record: Any | None = None,
+    context_record: Any | None = None,
+    metrics: Any | None = None,
+) -> WaitingInputCancelResult:
     if waiting_input_task_id_from_sidecar(cwd=cwd, session_id=session_id, context_id=context_id) != task_id:
-        return False
+        return WaitingInputCancelResult.NOT_OWNER
 
     pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
     journal = A2APipelineJournal(pipeline_dir)
@@ -1580,12 +2609,15 @@ def cancel_waiting_input_task_from_sidecar(
         events = journal.read_all_repairing_tail()
     except Exception:
         logger.warning("Failed to cancel waiting A2A pipeline sidecar", exc_info=True)
-        return False
+        return WaitingInputCancelResult.PERSIST_FAILED
 
     snapshot = snapshot_store.load()
     pipeline_name = get_pipeline_name()
     if isinstance(snapshot, dict) and isinstance(snapshot.get("pipelineName"), str):
         pipeline_name = snapshot["pipelineName"]
+    pending_input = copy.deepcopy(snapshot.get("pendingInput")) if isinstance(snapshot, dict) else None
+    if not isinstance(pending_input, dict):
+        pending_input = None
     context = PipelineA2AContext(
         pipeline_run_id=context_id,
         task_id=task_id,
@@ -1619,16 +2651,319 @@ def cancel_waiting_input_task_from_sidecar(
         envelope.get("sequence") or 0
     ):
         handoff_envelope["sequence"] = int(envelope.get("sequence") or 0) + 1
+    pending_envelope = _pending_backup_publication_envelope(envelope)
+    pending_handoff_envelope = (
+        _pending_backup_publication_envelope(handoff_envelope) if handoff_envelope is not None else None
+    )
     try:
-        events_to_append = [envelope]
-        if handoff_envelope is not None:
-            events_to_append.append(handoff_envelope)
+        events_to_append = [pending_envelope]
+        if pending_handoff_envelope is not None:
+            events_to_append.append(pending_handoff_envelope)
         journal.append_many(events_to_append, durable=True)
-        snapshot_store.save(reduce_pipeline_events(journal.read_all_repairing_tail()))
+        _save_pipeline_snapshot_or_raise(snapshot_store, reduce_pipeline_events(journal.read_all_repairing_tail()))
     except Exception:
         logger.warning("Failed to persist waiting A2A pipeline cancellation", exc_info=True)
-        return False
-    return True
+        return WaitingInputCancelResult.PERSIST_FAILED
+    _mirror_waiting_input_cancel_a2a_snapshots(
+        task_store=task_store,
+        task_record=task_record,
+        context_record=context_record,
+        state=TASK_STATE_INPUT_REQUIRED,
+    )
+    committed_envelope = _committed_backup_publication_envelope_from_translator(translator, pending_envelope)
+    high_water_sequence = max(
+        [int(event.get("sequence") or 0) for event in journal.read_all_repairing_tail() if isinstance(event, dict)],
+        default=0,
+    )
+    if int(committed_envelope.get("sequence") or 0) <= high_water_sequence:
+        committed_envelope["sequence"] = high_water_sequence + 1
+    committed_handoff_envelope = None
+    if pending_handoff_envelope is not None:
+        committed_handoff_envelope = _committed_backup_publication_envelope_from_translator(
+            translator,
+            pending_handoff_envelope,
+        )
+        if int(committed_handoff_envelope.get("sequence") or 0) <= int(committed_envelope.get("sequence") or 0):
+            committed_handoff_envelope["sequence"] = int(committed_envelope.get("sequence") or 0) + 1
+    try:
+        committed_events = [committed_envelope]
+        if committed_handoff_envelope is not None:
+            committed_events.append(committed_handoff_envelope)
+        events_before_commit = journal.read_all_repairing_tail()
+        _save_pipeline_snapshot_or_raise(
+            snapshot_store,
+            reduce_pipeline_events([*events_before_commit, *committed_events]),
+        )
+        journal.append_many(committed_events, durable=True)
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist committed waiting A2A pipeline cancellation error_type=%s",
+            type(exc).__name__,
+        )
+        try:
+            _save_pipeline_snapshot_or_raise(snapshot_store, reduce_pipeline_events(journal.read_all_repairing_tail()))
+        except Exception as restore_exc:
+            logger.debug(
+                "Failed to restore waiting A2A pipeline snapshot after commit failure error_type=%s",
+                type(restore_exc).__name__,
+            )
+        try:
+            _persist_waiting_input_terminal_publication_unavailable(
+                journal=journal,
+                snapshot_store=snapshot_store,
+                translator=translator,
+                pending_input=pending_input,
+                reason="committed_cancel_persist_failed",
+            )
+        except Exception as marker_exc:
+            logger.debug(
+                "Failed to persist waiting A2A pipeline publication unavailable marker after commit failure "
+                "error_type=%s",
+                type(marker_exc).__name__,
+            )
+        _mirror_waiting_input_cancel_a2a_snapshots(
+            task_store=task_store,
+            task_record=task_record,
+            context_record=context_record,
+            state=TASK_STATE_INPUT_REQUIRED,
+        )
+        return WaitingInputCancelResult.PERSIST_FAILED
+    try:
+        backup_result = (backup_service or SessionBackupService()).backup_session(
+            cwd,
+            session_id,
+            reason=BackupReason.TERMINAL,
+            critical=True,
+        )
+    except SessionBackupBlocked as exc:
+        _record_backup_failed_metric(
+            metrics,
+            reason=BackupReason.TERMINAL.value,
+            critical=True,
+            retry_count=_backup_retry_count_from_exception(exc),
+        )
+        _mirror_waiting_input_cancel_a2a_snapshots(
+            task_store=task_store,
+            task_record=task_record,
+            context_record=context_record,
+            state=TASK_STATE_INPUT_REQUIRED,
+        )
+        result = _persist_waiting_input_backup_blocked_event(
+            journal=journal,
+            snapshot_store=snapshot_store,
+            translator=translator,
+            pending_input=pending_input,
+            error=public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+        )
+        _record_backup_blocked_metric(
+            metrics,
+            reason=BackupReason.TERMINAL.value,
+            recoverable=result == WaitingInputCancelResult.BACKUP_BLOCKED,
+        )
+        return result
+    if getattr(backup_result, "enabled", True) and not getattr(backup_result, "succeeded", True):
+        backup_error = getattr(backup_result, "error", None) or type(backup_result).__name__
+        blocked_exc = SessionBackupBlocked(
+            str(backup_error),
+            retry_count=_backup_retry_count(backup_result),
+            result=backup_result,
+        )
+        _record_backup_failed_metric(
+            metrics,
+            reason=BackupReason.TERMINAL.value,
+            critical=True,
+            retry_count=_backup_retry_count(backup_result),
+        )
+        _mirror_waiting_input_cancel_a2a_snapshots(
+            task_store=task_store,
+            task_record=task_record,
+            context_record=context_record,
+            state=TASK_STATE_INPUT_REQUIRED,
+        )
+        result = _persist_waiting_input_backup_blocked_event(
+            journal=journal,
+            snapshot_store=snapshot_store,
+            translator=translator,
+            pending_input=pending_input,
+            error=public_exception_summary(blocked_exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+        )
+        _record_backup_blocked_metric(
+            metrics,
+            reason=BackupReason.TERMINAL.value,
+            recoverable=result == WaitingInputCancelResult.BACKUP_BLOCKED,
+        )
+        return result
+    _record_backup_succeeded_metric(
+        metrics,
+        reason=BackupReason.TERMINAL.value,
+        critical=True,
+        retry_count=_backup_retry_count(backup_result),
+    )
+    try:
+        _persist_waiting_input_backup_committed_acks(
+            journal=journal,
+            snapshot_store=snapshot_store,
+            translator=translator,
+            committed_events=committed_events,
+        )
+    except Exception as ack_exc:
+        logger.warning(
+            "Failed to persist waiting A2A pipeline backup committed ack error_type=%s",
+            type(ack_exc).__name__,
+        )
+        _mirror_waiting_input_cancel_a2a_snapshots(
+            task_store=task_store,
+            task_record=task_record,
+            context_record=context_record,
+            state=TASK_STATE_INPUT_REQUIRED,
+        )
+        return WaitingInputCancelResult.PERSIST_FAILED
+    _mirror_waiting_input_cancel_a2a_snapshots(
+        task_store=task_store,
+        task_record=task_record,
+        context_record=context_record,
+        state=TASK_STATE_CANCELED,
+    )
+    return WaitingInputCancelResult.CANCELED
+
+
+def _persist_waiting_input_backup_committed_acks(
+    *,
+    journal: A2APipelineJournal,
+    snapshot_store: A2APipelineSnapshotStore,
+    translator: PipelineEventTranslator,
+    committed_events: list[dict[str, Any]],
+) -> None:
+    ack_events: list[dict[str, Any]] = []
+    high_water_sequence = max(
+        [int(event.get("sequence") or 0) for event in journal.read_all_repairing_tail() if isinstance(event, dict)],
+        default=0,
+    )
+    for committed_event in committed_events:
+        ack = translator.manual_event(
+            BACKUP_COMMITTED_EVENT_TYPE,
+            "pipeline",
+            data={
+                "committedEventId": committed_event.get("eventId"),
+                "committedEventType": committed_event.get("eventType"),
+                "committedSequence": committed_event.get("sequence"),
+            },
+        )
+        ack.pop("status", None)
+        high_water_sequence += 1
+        ack["sequence"] = high_water_sequence
+        ack_events.append(ack)
+    journal.append_many(ack_events, durable=True)
+    _save_pipeline_snapshot_or_raise(snapshot_store, reduce_pipeline_events(journal.read_all_repairing_tail()))
+
+
+def _persist_waiting_input_backup_blocked_event(
+    *,
+    journal: A2APipelineJournal,
+    snapshot_store: A2APipelineSnapshotStore,
+    translator: PipelineEventTranslator,
+    pending_input: dict[str, Any] | None,
+    error: str,
+) -> WaitingInputCancelResult:
+    try:
+        backup_blocked = translator.manual_event(
+            "backup_blocked",
+            "pipeline",
+            status="input_required",
+            data={
+                "reason": BackupReason.TERMINAL.value,
+                "error": error,
+                "recoverable": True,
+            },
+        )
+        if pending_input is not None:
+            backup_blocked["input"] = pending_input
+        high_water_sequence = max(
+            [int(event.get("sequence") or 0) for event in journal.read_all_repairing_tail() if isinstance(event, dict)],
+            default=0,
+        )
+        if int(backup_blocked.get("sequence") or 0) <= high_water_sequence:
+            backup_blocked["sequence"] = high_water_sequence + 1
+        journal.append(backup_blocked, durable=True)
+        _save_pipeline_snapshot_or_raise(snapshot_store, reduce_pipeline_events(journal.read_all_repairing_tail()))
+    except Exception as persist_exc:
+        logger.warning(
+            "Failed to persist waiting A2A pipeline backup_blocked event error_type=%s",
+            type(persist_exc).__name__,
+        )
+        try:
+            _persist_waiting_input_terminal_publication_unavailable(
+                journal=journal,
+                snapshot_store=snapshot_store,
+                translator=translator,
+                pending_input=pending_input,
+                reason="backup_blocked_persist_failed",
+            )
+        except Exception as marker_exc:
+            logger.debug(
+                "Failed to persist waiting A2A pipeline publication unavailable marker error_type=%s",
+                type(marker_exc).__name__,
+            )
+        return WaitingInputCancelResult.BACKUP_BLOCKED_PERSIST_FAILED
+    return WaitingInputCancelResult.BACKUP_BLOCKED
+
+
+def _persist_waiting_input_terminal_publication_unavailable(
+    *,
+    journal: A2APipelineJournal,
+    snapshot_store: A2APipelineSnapshotStore,
+    translator: PipelineEventTranslator,
+    pending_input: dict[str, Any] | None,
+    reason: str,
+) -> None:
+    marker = translator.manual_event(
+        "input_required",
+        "pipeline",
+        status="input_required",
+        data={
+            "kind": _TERMINAL_PUBLICATION_UNAVAILABLE_KIND,
+            "reason": reason,
+        },
+    )
+    if pending_input is not None:
+        marker["input"] = pending_input
+    high_water_sequence = max(
+        [int(event.get("sequence") or 0) for event in journal.read_all_repairing_tail() if isinstance(event, dict)],
+        default=0,
+    )
+    if int(marker.get("sequence") or 0) <= high_water_sequence:
+        marker["sequence"] = high_water_sequence + 1
+    journal.append(marker, durable=True)
+    _save_pipeline_snapshot_or_raise(snapshot_store, reduce_pipeline_events(journal.read_all_repairing_tail()))
+
+
+def _save_pipeline_snapshot_or_raise(
+    snapshot_store: A2APipelineSnapshotStore,
+    snapshot: dict[str, Any],
+) -> None:
+    if not snapshot_store.save(snapshot):
+        raise OSError(_("Failed to persist A2A pipeline snapshot"))
+
+
+def _mirror_waiting_input_cancel_a2a_snapshots(
+    *,
+    task_store: Any | None,
+    task_record: Any | None,
+    context_record: Any | None,
+    state: str,
+) -> None:
+    if task_store is None:
+        return
+    if task_record is not None:
+        task_record.state = state
+        task_record.active_task = None
+        task_record.touch()
+        task_store.mirror_task(task_record)
+    if context_record is not None:
+        if state in {TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED}:
+            context_record.active_task_id = None
+        context_record.touch()
+        task_store.mirror_context(context_record)
 
 
 def _waiting_input_cancel_handoff_event(
@@ -1734,18 +3069,22 @@ def _flatten_pipeline_context_snapshot(snapshot: dict[str, Any]) -> dict[str, An
 def terminal_task_state_from_sidecar(*, cwd: str, session_id: str, context_id: str, task_id: str) -> str | None:
     pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
     journal = A2APipelineJournal(pipeline_dir)
-    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
     try:
-        owner = _current_sidecar_owner_from_stores(
-            snapshot_store=snapshot_store,
-            journal=journal,
+        events = _events_for_task_context(
+            journal.read_all_repairing_tail(),
+            task_id=task_id,
             context_id=context_id,
         )
-    except _SidecarOwnerUnavailableError:
+    except Exception as exc:
+        logger.warning(
+            "Failed to inspect A2A pipeline terminal task state error_type=%s",
+            type(exc).__name__,
+        )
         return None
-    if owner is None or owner.task_id != task_id:
+    terminal_event = _latest_terminal_a2a_event(events)
+    if terminal_event is None:
         return None
-    status = _normalized_a2a_status(owner.status)
+    status = _terminal_status_from_a2a_event(terminal_event)
     if status not in _TERMINAL_A2A_STATUSES:
         return None
     return _task_state_from_sidecar_status(status)
@@ -2004,10 +3343,11 @@ def _pipeline_sidecar_dir(pipeline: Any, cwd: str, session_id: str) -> Path:
     session = getattr(pipeline, "session", None)
     session_dir = getattr(session, "session_dir", None)
     if isinstance(session_dir, (str, Path)):
-        pipeline_dir = a2a_pipeline_dir_for_sidecar_dir(session_dir)
-        if pipeline_dir == a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id):
+        sidecar_dir = Path(session_dir)
+        root_session_dir = SessionStorage().session_dir(cwd, session_id)
+        if sidecar_dir.name == "pipeline" and sidecar_dir.parent == root_session_dir:
             return existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
-        return pipeline_dir
+        return a2a_pipeline_dir_for_sidecar_dir(sidecar_dir)
     return existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
 
 
@@ -2092,12 +3432,42 @@ def _task_state_from_a2a_status(status: Any) -> str:
     return TASK_STATE_INPUT_REQUIRED
 
 
-def _task_state_from_pipeline(pipeline: Any, snapshot: dict[str, Any]) -> str:
+def _committed_terminal_status_for_task_context(
+    publisher: PipelineA2AEventPublisher,
+    *,
+    task_id: str,
+    context_id: str,
+) -> str | None:
+    events = _safe_read_pipeline_journal(publisher.journal)
+    scoped_events = _events_for_task_context(events, task_id=task_id, context_id=context_id)
+    terminal_event = _latest_terminal_a2a_event(scoped_events)
+    if terminal_event is None:
+        return None
+    return _terminal_status_from_a2a_event(terminal_event)
+
+
+def _terminal_status_from_sidecar(status: Any) -> str | None:
+    terminal_event = _terminal_event_from_sidecar_status(status)
+    if terminal_event is None:
+        return None
+    return terminal_event[1]
+
+
+def _task_state_from_pipeline(
+    pipeline: Any,
+    snapshot: dict[str, Any],
+    *,
+    allow_terminal_snapshot: bool = True,
+    allow_sidecar_terminal_fallback: bool = True,
+) -> str:
     snapshot_status = snapshot.get("status")
+    snapshot_state = _task_state_from_snapshot(snapshot)
+    if snapshot_status in _TERMINAL_SNAPSHOT_STATUSES:
+        return snapshot_state if allow_terminal_snapshot else TASK_STATE_INPUT_REQUIRED
     sidecar_status = getattr(pipeline, "sidecar_status", None)
-    if _is_terminal_sidecar_status(sidecar_status) and snapshot_status not in _TERMINAL_SNAPSHOT_STATUSES:
+    if allow_sidecar_terminal_fallback and _is_terminal_sidecar_status(sidecar_status):
         return _task_state_from_sidecar_status(sidecar_status)
-    return _task_state_from_snapshot(snapshot)
+    return snapshot_state
 
 
 def _is_terminal_sidecar_status(status: Any) -> bool:
@@ -2142,6 +3512,11 @@ def _terminal_sidecar_matches_task(
         _current_sidecar_owner(publisher, context_id=context_id),
         task_id=task_id,
         context_id=context_id,
+    ) or _unacknowledged_committed_terminal_matches_task(
+        publisher,
+        sidecar_status,
+        task_id=task_id,
+        context_id=context_id,
     )
 
 
@@ -2167,6 +3542,16 @@ def _sidecar_matches_task(
             if _pending_pipeline_pause_input_from_sidecar(publisher, task_id=task_id, context_id=context_id):
                 return True
         return status in _RUNNING_A2A_STATUSES
+    if sidecar_status == "backup_blocked":
+        return (
+            status in _WAITING_A2A_STATUSES
+            and _pending_backup_blocked_input_from_sidecar(
+                publisher,
+                task_id=task_id,
+                context_id=context_id,
+            )
+            is not None
+        )
     return False
 
 
@@ -2200,14 +3585,25 @@ def _current_sidecar_owner_from_stores(
     journal: A2APipelineJournal,
     context_id: str,
 ) -> _TaskContextOwner | None:
-    snapshot_owner = _owner_from_snapshot(snapshot_store.load())
-    if snapshot_owner is not None and snapshot_owner.context_id != context_id:
-        snapshot_owner = None
+    snapshot = snapshot_store.load()
     try:
         journal_events = journal.read_all_repairing_tail()
     except Exception:
         logger.warning("Failed to inspect A2A pipeline sidecar owner journal", exc_info=True)
-        raise _SidecarOwnerUnavailableError("A2A pipeline sidecar owner is unavailable") from None
+        raise _SidecarOwnerUnavailableError(_("A2A pipeline sidecar owner is unavailable")) from None
+    snapshot = _journal_authoritative_snapshot(
+        snapshot_store=snapshot_store,
+        snapshot=snapshot,
+        journal_events=journal_events,
+    )
+    snapshot_owner = _owner_from_snapshot(snapshot)
+    if snapshot_owner is not None and snapshot_owner.context_id != context_id:
+        snapshot_owner = None
+    if snapshot_owner is not None and _has_unacknowledged_committed_event_at_or_after(
+        journal_events,
+        snapshot_owner.sequence,
+    ):
+        snapshot_owner = None
     journal_owner = _owner_from_journal_events(journal_events, context_id=context_id)
     if snapshot_owner is not None and (journal_owner is None or snapshot_owner.sequence >= journal_owner.sequence):
         return snapshot_owner
@@ -2228,27 +3624,61 @@ def _authoritative_snapshot_for_task(
             task_id=task_id,
             context_id=context_id,
         )
-    except Exception:
-        logger.warning("Failed to build A2A pipeline snapshot from journal", exc_info=True)
-        return snapshot
+    except Exception as exc:
+        logger.warning(
+            "Failed to build A2A pipeline snapshot from journal error_type=%s",
+            type(exc).__name__,
+        )
+        return None
     if not events:
         return snapshot
     try:
         rebuilt = reduce_pipeline_events(events)
-    except Exception:
-        logger.warning("Failed to reduce A2A pipeline journal events", exc_info=True)
-        return snapshot
+    except Exception as exc:
+        logger.warning(
+            "Failed to reduce A2A pipeline journal events error_type=%s",
+            type(exc).__name__,
+        )
+        return None
     if not isinstance(rebuilt, dict):
-        return snapshot
+        return None
     snapshot_sequence = _sequence_number(snapshot.get("lastSequence")) if isinstance(snapshot, dict) else 0
     rebuilt_sequence = _sequence_number(rebuilt.get("lastSequence"))
-    if rebuilt_sequence >= snapshot_sequence:
+    if rebuilt_sequence != snapshot_sequence:
         try:
             snapshot_store.save(rebuilt)
-        except Exception:
-            logger.debug("Failed to save repaired A2A pipeline snapshot", exc_info=True)
-        return rebuilt
-    return snapshot
+        except Exception as exc:
+            logger.debug("Failed to save repaired A2A pipeline snapshot error_type=%s", type(exc).__name__)
+    return rebuilt
+
+
+def _journal_authoritative_snapshot(
+    *,
+    snapshot_store: A2APipelineSnapshotStore,
+    snapshot: dict[str, Any] | None,
+    journal_events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not journal_events:
+        return snapshot
+    snapshot_sequence = _sequence_number(snapshot.get("lastSequence")) if isinstance(snapshot, dict) else 0
+    journal_sequence = max((_sequence_number(event.get("sequence")) for event in journal_events), default=0)
+    if isinstance(snapshot, dict) and snapshot_sequence == journal_sequence:
+        return snapshot
+    try:
+        rebuilt = reduce_pipeline_events(journal_events)
+    except Exception as exc:
+        logger.warning(
+            "Failed to reduce A2A pipeline journal events error_type=%s",
+            type(exc).__name__,
+        )
+        return None
+    if not isinstance(rebuilt, dict):
+        return None
+    try:
+        snapshot_store.save(rebuilt)
+    except Exception as exc:
+        logger.debug("Failed to save repaired A2A pipeline snapshot error_type=%s", type(exc).__name__)
+    return rebuilt
 
 
 def _owner_matches_task(owner: _TaskContextOwner | None, *, task_id: str, context_id: str) -> bool:
@@ -2270,6 +3700,10 @@ def _owner_from_journal_events(events: list[dict[str, Any]], *, context_id: str)
     owner: _TaskContextOwner | None = None
     for event in events:
         if event.get("contextId") != context_id:
+            continue
+        if _is_pending_backup_publication_event(event):
+            continue
+        if _requires_backup_committed_ack(event) and not _has_backup_committed_ack(events, event):
             continue
         candidate = _owner_from_values(
             event.get("taskId"),
@@ -2325,8 +3759,13 @@ def _events_for_task_context(
 
 def _latest_terminal_a2a_event(events: list[dict[str, Any]]) -> dict[str, Any] | None:
     terminal_event: dict[str, Any] | None = None
+    unavailable_sequence = _latest_terminal_recovery_blocking_sequence(events)
     for event in events:
+        if _sequence_number(event.get("sequence")) <= unavailable_sequence:
+            continue
         if _terminal_status_from_a2a_event(event) is None:
+            continue
+        if _requires_backup_committed_ack(event) and not _has_backup_committed_ack(events, event):
             continue
         if terminal_event is None or _sequence_number(event.get("sequence")) >= _sequence_number(
             terminal_event.get("sequence")
@@ -2335,7 +3774,122 @@ def _latest_terminal_a2a_event(events: list[dict[str, Any]]) -> dict[str, Any] |
     return terminal_event
 
 
+def _terminal_publication_unavailable_blocks_recovery(events: list[dict[str, Any]]) -> bool:
+    unavailable_sequence = _latest_terminal_recovery_blocking_sequence(events)
+    if unavailable_sequence <= 0:
+        return False
+    latest_terminal_sequence = max(
+        (
+            _sequence_number(event.get("sequence"))
+            for event in events
+            if _terminal_status_from_a2a_event(event) is not None
+        ),
+        default=0,
+    )
+    return unavailable_sequence >= latest_terminal_sequence
+
+
+def _latest_terminal_publication_unavailable_sequence(events: list[dict[str, Any]]) -> int:
+    return max(
+        (
+            _sequence_number(event.get("sequence"))
+            for event in events
+            if _is_terminal_publication_unavailable_event(event)
+        ),
+        default=0,
+    )
+
+
+def _latest_terminal_recovery_blocking_sequence(events: list[dict[str, Any]]) -> int:
+    return max(
+        _latest_terminal_publication_unavailable_sequence(events),
+        max(
+            (_sequence_number(event.get("sequence")) for event in events if event.get("eventType") == "backup_blocked"),
+            default=0,
+        ),
+    )
+
+
+def _is_terminal_publication_unavailable_event(event: dict[str, Any]) -> bool:
+    if event.get("eventType") != "input_required":
+        return False
+    raw_data = event.get("data")
+    data = raw_data if isinstance(raw_data, dict) else {}
+    return data.get("kind") == _TERMINAL_PUBLICATION_UNAVAILABLE_KIND
+
+
+def _requires_backup_committed_ack(event: dict[str, Any]) -> bool:
+    return event.get("visibility") == _COMMITTED_BACKUP_VISIBILITY
+
+
+def _has_unacknowledged_committed_terminal_event(events: list[dict[str, Any]]) -> bool:
+    return any(
+        _terminal_status_from_a2a_event(event) is not None
+        and _requires_backup_committed_ack(event)
+        and not _has_backup_committed_ack(events, event)
+        for event in events
+    )
+
+
+def _unacknowledged_committed_terminal_matches_task(
+    publisher: PipelineA2AEventPublisher,
+    sidecar_status: Any,
+    *,
+    task_id: str,
+    context_id: str,
+) -> bool:
+    expected_status = _terminal_status_from_sidecar(sidecar_status)
+    if expected_status is None:
+        return False
+    events = _events_for_task_context(
+        _safe_read_pipeline_journal(publisher.journal),
+        task_id=task_id,
+        context_id=context_id,
+    )
+    blocking_sequence = _latest_terminal_recovery_blocking_sequence(events)
+    for event in events:
+        if _sequence_number(event.get("sequence")) <= blocking_sequence:
+            continue
+        if _terminal_status_from_a2a_event(event) != expected_status:
+            continue
+        if _requires_backup_committed_ack(event) and not _has_backup_committed_ack(events, event):
+            return True
+    return False
+
+
+def _has_unacknowledged_committed_event_at_or_after(events: list[dict[str, Any]], sequence: int) -> bool:
+    return any(
+        _sequence_number(event.get("sequence")) >= sequence
+        and _requires_backup_committed_ack(event)
+        and not _has_backup_committed_ack(events, event)
+        for event in events
+    )
+
+
+def _has_backup_committed_ack(events: list[dict[str, Any]], terminal_event: dict[str, Any]) -> bool:
+    terminal_sequence = _sequence_number(terminal_event.get("sequence"))
+    terminal_event_id = terminal_event.get("eventId")
+    terminal_event_type = terminal_event.get("eventType")
+    for event in events:
+        if event.get("eventType") != BACKUP_COMMITTED_EVENT_TYPE:
+            continue
+        if _sequence_number(event.get("sequence")) <= terminal_sequence:
+            continue
+        raw_data = event.get("data")
+        data = raw_data if isinstance(raw_data, dict) else {}
+        if data.get("committedEventId") == terminal_event_id:
+            return True
+        if (
+            _sequence_number(data.get("committedSequence")) == terminal_sequence
+            and data.get("committedEventType") == terminal_event_type
+        ):
+            return True
+    return False
+
+
 def _terminal_status_from_a2a_event(event: dict[str, Any]) -> str | None:
+    if _is_pending_backup_publication_event(event):
+        return None
     status = _normalized_a2a_status(event.get("status") if isinstance(event.get("status"), str) else None)
     if status in _TERMINAL_A2A_STATUSES:
         return status
@@ -2380,7 +3934,7 @@ def _terminal_snapshot_needs_journal_rebuild(
         return True
     snapshot_sequence = _sequence_number(snapshot.get("lastSequence"))
     journal_sequence = max((_sequence_number(event.get("sequence")) for event in journal_events), default=0)
-    return snapshot_sequence < journal_sequence
+    return bool(journal_events) and snapshot_sequence != journal_sequence
 
 
 def _terminal_snapshot_needs_recovery_event(

@@ -27,6 +27,12 @@ initialize → new_session → prompt (loop) → close_session
 
 ---
 
+## 会话备份
+
+ACP session 使用与交互式和 headless 运行相同的 v2 session 备份行为。设置 `IAC_CODE_CONFIG_BACKUP_DIR` 后，普通 prompt 完成会记录非阻塞的 `normal_turn_end` 备份；如果该备份失败，失败会记录为 `warning` 并写入 `.backup-state.json`，最终响应仍会完成，但不承诺包含 warning 字段。Pipeline 模式有自己的关键备份 gate。
+
+---
+
 ## 方法
 
 ### initialize

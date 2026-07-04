@@ -1,6 +1,18 @@
 from __future__ import annotations
 
+import base64
+from pathlib import Path
+
+import pytest
+
 from iac_code.services.agent_factory import AgentFactoryOptions, AgentRuntime, create_agent_runtime
+from iac_code.services.session_metadata import (
+    SESSION_LAYOUT_VERSION_V2,
+    SessionMetadata,
+    read_session_metadata,
+    write_session_metadata,
+)
+from iac_code.services.session_storage import SessionStorage
 
 
 def _current_time_line(prompt: str) -> str:
@@ -61,8 +73,140 @@ def test_create_agent_runtime_adds_session_trusted_read_directories(tmp_path, mo
     )
 
     roots = runtime.agent_loop._permission_context.trusted_read_directories
+    session_dir = runtime.agent_loop._session_storage.session_dir(str(tmp_path), "session-42")
     assert str(tmp_path / "config" / "tool-results" / "session-42") in roots
     assert str(tmp_path / "config" / "image-cache" / "session-42") in roots
+    assert str(session_dir / "tool-results") in roots
+    assert str(session_dir / "image-cache") in roots
+
+
+def test_create_agent_runtime_result_storage_uses_v2_session_dir(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    session_id = "session-results"
+    storage = SessionStorage()
+    session_dir = storage.session_dir(str(tmp_path), session_id)
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id=session_id, cwd=str(tmp_path), layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id=session_id,
+            cwd=str(tmp_path),
+        )
+    )
+
+    assert Path(runtime.agent_loop._result_storage._storage_dir) == session_dir / "tool-results"
+
+
+def test_create_agent_runtime_prepares_new_session_as_v2_before_first_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    session_id = "new-session-results"
+    storage = SessionStorage()
+    session_dir = storage.session_dir(str(tmp_path), session_id)
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id=session_id,
+            cwd=str(tmp_path),
+        )
+    )
+
+    assert Path(runtime.agent_loop._result_storage._storage_dir) == session_dir / "tool-results"
+    metadata = read_session_metadata(session_dir)
+    assert metadata is not None
+    assert metadata.layout_version == SESSION_LAYOUT_VERSION_V2
+
+
+def test_create_agent_runtime_result_storage_uses_legacy_global_dir_without_session_metadata(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    session_id = "legacy-session-results"
+    storage = SessionStorage()
+    session_dir = storage.session_dir(str(tmp_path), session_id)
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.jsonl").write_text("", encoding="utf-8")
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id=session_id,
+            cwd=str(tmp_path),
+        )
+    )
+
+    assert Path(runtime.agent_loop._result_storage._storage_dir) == tmp_path / "config" / "tool-results" / session_id
+    assert Path(runtime.agent_loop._result_storage._storage_dir) != session_dir / "tool-results"
+
+
+@pytest.mark.asyncio
+async def test_create_agent_runtime_mcp_binary_output_uses_session_dir(tmp_path, monkeypatch):
+    from iac_code.mcp.types import MCPToolRecord
+    from iac_code.tools.base import ToolContext
+
+    class BinaryMCPManager:
+        async def connect_all(self) -> None:
+            pass
+
+        def list_tools(self) -> list[MCPToolRecord]:
+            return [
+                MCPToolRecord(
+                    server_name="ros",
+                    tool_name="render",
+                    public_name="mcp__ros__render",
+                    input_schema={"type": "object"},
+                )
+            ]
+
+        def list_resources(self) -> list:
+            return []
+
+        def list_prompts(self) -> list:
+            return []
+
+        def list_connections(self) -> list:
+            return []
+
+        def needs_auth_servers(self) -> list[str]:
+            return []
+
+        async def call_tool(self, *args, **kwargs):
+            return {
+                "content": [
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(b"factory-png").decode("ascii"),
+                        "mimeType": "image/png",
+                    }
+                ]
+            }
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    manager = BinaryMCPManager()
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id="session-1",
+            cwd=str(tmp_path),
+            mcp_configs=[{"name": "ros", "command": "uvx"}],
+            mcp_manager_factory=lambda configs, roots: manager,
+        )
+    )
+
+    tool = runtime.tool_registry.get("mcp__ros__render")
+    result = await tool.execute(tool_input={}, context=ToolContext())
+
+    session_dir = runtime.agent_loop._session_storage.session_dir(str(tmp_path), "session-1")
+    artifact_path = result.metadata["mcp"]["artifacts"][0]["path"]
+    assert artifact_path.startswith(str(session_dir / "tool-results" / "mcp" / "ros" / "render"))
+    assert not (tmp_path / "config" / "tool-results" / "session-1").exists()
 
 
 def test_create_agent_runtime_all_fields_populated(tmp_path, monkeypatch) -> None:

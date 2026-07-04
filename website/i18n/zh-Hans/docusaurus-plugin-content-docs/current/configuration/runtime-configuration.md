@@ -19,7 +19,7 @@ CLI 参数 > 环境变量 > 配置文件
 ~/.iac-code/
 ```
 
-可通过设置 `IAC_CODE_CONFIG_DIR` 环境变量更改该目录（支持 `~` 和 `$VAR` 展开）。设置后，所有持久化产物——凭证、设置、历史、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/`——都会跟随到新位置。启动/调试日志默认位于 `<config-dir>/logs/`，可用 `IAC_CODE_LOG_DIR` 单独移动；权限审计记录仍位于 `<config-dir>/logs/`。
+可通过设置 `IAC_CODE_CONFIG_DIR` 环境变量更改该目录（支持 `~` 和 `$VAR` 展开）。设置后，所有持久化产物——凭证、设置、历史、`projects/`、`image-cache/`、`tool-results/`、`logs/`、`memory/`、`a2a/`、`telemetry/`、`skills/`——都会跟随到新位置。启动/调试日志默认位于 `<config-dir>/logs/`，可用 `IAC_CODE_LOG_DIR` 单独移动；权限审计记录会保留在所属 session 中。
 
 常见文件：
 
@@ -156,13 +156,13 @@ ROA 风格请求只有在方法为 `GET` 且请求没有 body 时才视为只读
 
 ### 权限审计日志
 
-跨越用户提示、工具缓存边界、自动化批准或 resolver 批准的权限决策会追加写入：
+跨越用户提示、工具缓存边界、自动化批准或 resolver 批准的权限决策会追加写入当前 session 的审计日志：
 
 ```text
-<config-dir>/logs/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
 ```
 
-默认情况下，该路径是 `~/.iac-code/logs/permission-audit.jsonl`。权限审计日志跟随 `IAC_CODE_CONFIG_DIR`；`IAC_CODE_LOG_DIR` 只移动启动/调试日志。审计写入器会用文件锁追加 JSONL 记录，执行日志轮转，并在操作系统支持时限制本地文件权限。常规只读自动允许决策可能会省略，但拒绝、提示、缓存决策、自动化批准、resolver 批准以及其他被审计的权限边界都会记录。
+Pipeline step transcript 会把自己的审计记录写到 `<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl`。权限审计日志跟随 `IAC_CODE_CONFIG_DIR` 下的 session layout；`IAC_CODE_LOG_DIR` 只移动启动/调试日志，不会移动权限审计记录。审计写入器会用文件锁追加 JSONL 记录，执行日志轮转，并在操作系统支持时限制本地文件权限。常规只读自动允许决策可能会省略，但拒绝、提示、缓存决策、自动化批准、resolver 批准以及其他被审计的权限边界都会记录。
 
 审计设置位于 `permissions.audit` 下：
 
@@ -173,3 +173,34 @@ ROA 风格请求只有在方法为 `GET` 且请求没有 body 时才视为只读
 | `max_files` | `5` | 保留的轮转审计文件数量。超过内置上限的值会被截断到上限。 |
 
 如果任何需要审计记录的允许决策无法持久化到审计日志，IaC Code 会 fail closed，拒绝该操作，而不是在没有审计轨迹的情况下执行。
+
+
+## 会话布局和备份状态
+
+新会话使用 `layout_version` 元数据标记，确保运行期产物只归属到自己的 session。会话内文件包括 `image-cache/`、`tool-results/`、A2A 快照、pipeline transcript 运行期数据以及 `.backup-state.json`，其中记录最近一次备份原因和状态；`.backup-state.json` 和 `.backup-lock` 只保留在活跃 session 本地，不会复制到备份镜像。没有 `layout_version` marker 的旧会话仍可读取，但不会再写入新的 session 级 artifact 目录；带有不受支持 layout version 的会话会被拒绝。
+
+v2 session 的关键路径如下：
+
+```text
+<config-dir>/projects/<project>/<session-id>/
+<config-dir>/projects/<project>/<session-id>/metadata.json
+<config-dir>/projects/<project>/<session-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/image-cache/
+<config-dir>/projects/<project>/<session-id>/tool-results/
+<config-dir>/projects/<project>/<session-id>/a2a/task.json
+<config-dir>/projects/<project>/<session-id>/a2a/context.json
+<config-dir>/projects/<project>/<session-id>/a2a/artifacts/
+<config-dir>/projects/<project>/<session-id>/a2a/pipeline/
+<config-dir>/projects/<project>/<session-id>/a2a/cleanup-deferred-prompts.json
+<config-dir>/projects/<project>/<session-id>/pipeline/meta.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/context.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/events.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/display.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/tool-results/
+```

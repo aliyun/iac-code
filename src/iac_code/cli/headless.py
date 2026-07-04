@@ -11,6 +11,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
 from typing import IO, Any
@@ -21,6 +22,7 @@ from iac_code.cli.output_formats import OutputFormat, create_writer
 from iac_code.i18n import _
 from iac_code.providers.manager import ProviderNotConfiguredError
 from iac_code.services.permissions.audit import emit_auto_permission_audit, is_aliyun_api_non_read_only_permission_event
+from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.telemetry import graceful_shutdown, log_event
 from iac_code.services.telemetry.names import Events
 from iac_code.types.stream_events import (
@@ -181,6 +183,35 @@ class HeadlessRunner:
             self._progress_stream.flush()
         self._mcp_warnings_printed_count = len(warnings)
 
+    async def _backup_normal_turn_end(self, agent_loop: Any) -> None:
+        cwd = getattr(agent_loop, "_cwd", None)
+        session_id = getattr(agent_loop, "_session_id", None)
+        session_storage = getattr(agent_loop, "_session_storage", None)
+        if not isinstance(cwd, str) or not isinstance(session_id, str) or session_storage is None:
+            return
+        try:
+            result = await asyncio.to_thread(
+                SessionBackupService(session_storage=session_storage).backup_session,
+                cwd,
+                session_id,
+                reason=BackupReason.NORMAL_TURN_END,
+                critical=False,
+            )
+            if getattr(result, "enabled", False) and not getattr(result, "succeeded", True):
+                logger.warning(
+                    "Headless session backup failed (reason={}, retry_count={}): {}",
+                    BackupReason.NORMAL_TURN_END.value,
+                    getattr(result, "retry_count", 0),
+                    getattr(result, "error", None) or "unknown",
+                )
+        except Exception as exc:
+            logger.warning(
+                "Headless session backup failed (reason={}, retry_count={}, error_type={})",
+                BackupReason.NORMAL_TURN_END.value,
+                getattr(exc, "retry_count", 0),
+                type(exc).__name__,
+            )
+
     async def run(self, prompt: str) -> int:
         """Execute a single prompt to completion and return an exit code."""
         started = time.monotonic()
@@ -191,6 +222,7 @@ class HeadlessRunner:
 
         has_error = False
         hit_max_turns = False
+        agent_loop = None
 
         try:
             agent_loop = self._create_agent_loop()
@@ -222,6 +254,8 @@ class HeadlessRunner:
                     progress_writer.handle(event)
 
                 writer.handle(event)
+            if not has_error:
+                await self._backup_normal_turn_end(agent_loop)
         except ProviderNotConfiguredError as exc:
             self._print_provider_not_configured(exc)
             self._record_structured_error(writer, exc)

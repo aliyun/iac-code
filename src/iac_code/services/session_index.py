@@ -16,12 +16,15 @@ from pathlib import Path
 
 from iac_code.agent.message import RECALLED_MEMORY_MARKER, RECALLED_MEMORY_METADATA_TYPE
 from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
-from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, read_session_metadata
+from iac_code.services.session_layout import (
+    UnsupportedSessionLayoutError,
+    is_supported_session_dir_for_id,
+)
+from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME, read_session_metadata
 from iac_code.utils.project_paths import (
-    get_project_dir,
     get_projects_dir,
     is_conversation_session_file,
-    sanitize_path,
+    project_dir_candidates,
 )
 
 LITE_READ_BUF_SIZE = 64 * 1024
@@ -274,7 +277,7 @@ def _trim_title(text: str, max_len: int = 200) -> str:
     return flat[:max_len].rstrip() + "…"
 
 
-def _iter_session_files(project_dir: Path) -> list[tuple[Path, str]]:
+def _iter_session_files(project_dir: Path, *, projects_dir: Path | None = None) -> list[tuple[Path, str]]:
     files_by_session_id = {
         jsonl.stem: jsonl for jsonl in project_dir.glob("*.jsonl") if is_conversation_session_file(jsonl)
     }
@@ -283,8 +286,95 @@ def _iter_session_files(project_dir: Path) -> list[tuple[Path, str]]:
             continue
         jsonl = session_dir / SESSION_JSONL_FILENAME
         if jsonl.exists():
+            if not _is_indexable_session_dir(session_dir, session_dir.name):
+                continue
             files_by_session_id[session_dir.name] = jsonl
+            continue
+        metadata = session_dir / SESSION_METADATA_FILENAME
+        if metadata.exists():
+            if not _is_indexable_session_dir(session_dir, session_dir.name):
+                continue
+            session_metadata = read_session_metadata(session_dir)
+            if session_metadata is None:
+                continue
+            if _metadata_only_shadowed_by_legacy_session(
+                project_dir,
+                projects_dir or project_dir.parent,
+                session_dir.name,
+                session_metadata,
+            ):
+                continue
+            if session_dir.name in files_by_session_id:
+                continue
+            files_by_session_id[session_dir.name] = metadata
     return [(jsonl, session_id) for session_id, jsonl in files_by_session_id.items()]
+
+
+def _is_indexable_session_dir(session_dir: Path, session_id: str) -> bool:
+    try:
+        return is_supported_session_dir_for_id(session_dir, session_id)
+    except UnsupportedSessionLayoutError:
+        return False
+
+
+def _metadata_only_shadowed_by_legacy_session(
+    project_dir: Path,
+    projects_dir: Path,
+    session_id: str,
+    metadata: object,
+) -> bool:
+    for candidate in _metadata_shadow_project_dirs(project_dir, projects_dir, metadata):
+        legacy_path = candidate / f"{session_id}.jsonl"
+        if legacy_path.exists() and is_conversation_session_file(legacy_path):
+            return True
+    return False
+
+
+def _metadata_shadow_project_dirs(project_dir: Path, projects_dir: Path, metadata: object) -> tuple[Path, ...]:
+    project_dirs: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(candidate: Path) -> None:
+        if candidate not in seen:
+            project_dirs.append(candidate)
+            seen.add(candidate)
+
+    cwd = getattr(metadata, "cwd", None)
+    if isinstance(cwd, str) and cwd:
+        for candidate in project_dir_candidates(cwd, projects_dir):
+            add(candidate)
+    add(project_dir)
+    suffix = _long_project_dir_hash_suffix(project_dir)
+    if suffix is not None and projects_dir.exists():
+        for candidate in projects_dir.iterdir():
+            if candidate.is_dir() and _long_project_dir_hash_suffix(candidate) == suffix:
+                add(candidate)
+    return tuple(project_dirs)
+
+
+def _long_project_dir_hash_suffix(project_dir: Path) -> str | None:
+    name = project_dir.name
+    if len(name) < 14 or name[-13] != "-":
+        return None
+    suffix = name[-12:]
+    try:
+        int(suffix, 16)
+    except ValueError:
+        return None
+    return suffix
+
+
+def _session_file_priority(path: Path) -> int:
+    if path.name == SESSION_JSONL_FILENAME:
+        return 3
+    if path.name == SESSION_METADATA_FILENAME:
+        return 1
+    return 2
+
+
+def _project_dirs_for_cwd(cwd: str, projects_dir: Path) -> tuple[Path, ...]:
+    candidates = project_dir_candidates(cwd, projects_dir)
+    return tuple(candidate for candidate in candidates if candidate.exists())
 
 
 def _build_entry(path: Path, fallback_cwd: str, session_id: str | None = None) -> SessionEntry | None:
@@ -292,9 +382,12 @@ def _build_entry(path: Path, fallback_cwd: str, session_id: str | None = None) -
         stat = path.stat()
     except OSError:
         return None
-    lite_meta = read_lite_metadata(path)
+    metadata_only = path.name == SESSION_METADATA_FILENAME
+    lite_meta = LiteMetadata() if metadata_only else read_lite_metadata(path)
     path_session_id = session_id or path.stem
-    directory_metadata = read_session_metadata(path.parent) if path.name == SESSION_JSONL_FILENAME else None
+    directory_metadata = (
+        read_session_metadata(path.parent) if path.name in {SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME} else None
+    )
     if directory_metadata and directory_metadata.session_id != path_session_id:
         directory_metadata = None
     name = directory_metadata.name if directory_metadata else None
@@ -309,10 +402,10 @@ def _build_entry(path: Path, fallback_cwd: str, session_id: str | None = None) -
         git_branch=(directory_metadata.git_branch if directory_metadata else None) or lite_meta.git_branch,
         title=title,
         mtime=stat.st_mtime,
-        size_bytes=stat.st_size,
+        size_bytes=0 if metadata_only else stat.st_size,
         name=name,
         auto_title=auto_title,
-        is_legacy=path.name != SESSION_JSONL_FILENAME,
+        is_legacy=path.name not in {SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME},
     )
 
 
@@ -328,17 +421,22 @@ class SessionIndex:
 
     def list_for_cwd(self, cwd: str) -> list[SessionEntry]:
         """List entries that belong to ``cwd``, mtime-descending."""
-        if self._projects_dir == get_projects_dir():
-            project_dir = get_project_dir(cwd)
-        else:
-            project_dir = self._projects_dir / sanitize_path(cwd)
-        if not project_dir.exists():
+        project_dirs = _project_dirs_for_cwd(cwd, self._projects_dir)
+        if not project_dirs:
             return []
-        entries: list[SessionEntry] = []
-        for jsonl, session_id in _iter_session_files(project_dir):
-            entry = _build_entry(jsonl, fallback_cwd=cwd, session_id=session_id)
-            if entry is not None:
-                entries.append(entry)
+        entries_by_session_id: dict[str, SessionEntry] = {}
+        priorities: dict[str, int] = {}
+        for project_dir in project_dirs:
+            for jsonl, session_id in _iter_session_files(project_dir, projects_dir=self._projects_dir):
+                entry = _build_entry(jsonl, fallback_cwd=cwd, session_id=session_id)
+                if entry is None:
+                    continue
+                priority = _session_file_priority(jsonl)
+                if priority <= priorities.get(session_id, -1):
+                    continue
+                entries_by_session_id[session_id] = entry
+                priorities[session_id] = priority
+        entries = list(entries_by_session_id.values())
         entries.sort(key=lambda e: e.mtime, reverse=True)
         return entries
 
@@ -346,14 +444,22 @@ class SessionIndex:
         """List entries across every known project, mtime-descending."""
         if not self._projects_dir.exists():
             return []
-        entries: list[SessionEntry] = []
+        entries_by_project_session: dict[tuple[str, str], SessionEntry] = {}
+        priorities: dict[tuple[str, str], int] = {}
         for proj_dir in self._projects_dir.iterdir():
             if not proj_dir.is_dir():
                 continue
-            for jsonl, session_id in _iter_session_files(proj_dir):
+            for jsonl, session_id in _iter_session_files(proj_dir, projects_dir=self._projects_dir):
                 entry = _build_entry(jsonl, fallback_cwd="", session_id=session_id)
-                if entry is not None:
-                    entries.append(entry)
+                if entry is None:
+                    continue
+                priority = _session_file_priority(jsonl)
+                key = (entry.cwd, session_id)
+                if priority <= priorities.get(key, -1):
+                    continue
+                entries_by_project_session[key] = entry
+                priorities[key] = priority
+        entries = list(entries_by_project_session.values())
         entries.sort(key=lambda e: e.mtime, reverse=True)
         return entries
 

@@ -10,12 +10,17 @@ This is the "automated testing mechanism" requested to replace manual REPL testi
 import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
+from iac_code.commands.registry import CommandRegistry, PromptCommand
+from iac_code.skills.frontmatter import SkillFrontmatter
+from iac_code.skills.skill_definition import SkillDefinition
+from iac_code.skills.skill_tool import SkillTool
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.permissions import (
     PermissionMode,
     PermissionRuleValue,
     ToolPermissionContext,
 )
+from iac_code.types.skill_source import SkillSource
 from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
@@ -85,6 +90,21 @@ def _read_file_turn(tool_use_id: str, path: str, *, text: str = "") -> list:
     return events
 
 
+def _skill_turn(tool_use_id: str, skill: str, *, args: str = "", text: str = "") -> list:
+    """Build a fake LLM turn that calls the skill tool."""
+    events = [MessageStartEvent(message_id=f"msg-{tool_use_id}")]
+    if text:
+        events.append(TextDeltaEvent(text=text))
+    events.extend(
+        [
+            ToolUseStartEvent(tool_use_id=tool_use_id, name="skill"),
+            ToolUseEndEvent(tool_use_id=tool_use_id, name="skill", input={"skill": skill, "args": args}),
+            MessageEndEvent(stop_reason="tool_use", usage=Usage()),
+        ]
+    )
+    return events
+
+
 def _text_turn(text: str) -> list:
     """Build a fake LLM turn that just responds with text (no tool calls)."""
     return [
@@ -118,6 +138,19 @@ def _tool_results(events) -> list[ToolResultEvent]:
 
 def _permission_events(events) -> list[PermissionRequestEvent]:
     return [e for e in events if isinstance(e, PermissionRequestEvent)]
+
+
+def _skill_command(name: str, *, skill_root: str) -> PromptCommand:
+    frontmatter = SkillFrontmatter(description="Demo skill")
+    skill = SkillDefinition(
+        name=name,
+        description="Demo skill",
+        frontmatter=frontmatter,
+        content="Read the referenced file.",
+        source=SkillSource.BUNDLED,
+        skill_root=skill_root,
+    )
+    return PromptCommand(name=name, description="Demo skill", skill=skill, source=SkillSource.BUNDLED)
 
 
 class TestSingleCommandPermissionScenarios:
@@ -203,6 +236,45 @@ class TestSingleCommandPermissionScenarios:
         expected_error = f"File not found: {project / 'references' / 'template-parameters.md'}"
         assert any(expected_error in result.result for result in results)
         assert not any("Session reference content" in result.result for result in results)
+
+    @pytest.mark.asyncio
+    async def test_inline_skill_root_is_trusted_for_followup_file_reads(self, tmp_path):
+        """Loading an inline skill should trust its own reference files for subsequent read_file calls."""
+        project = tmp_path / "project"
+        skill_root = tmp_path / "skill"
+        reference = skill_root / "references" / "ros-template.md"
+        project.mkdir()
+        reference.parent.mkdir(parents=True)
+        reference.write_text("Skill reference content", encoding="utf-8")
+
+        command_registry = CommandRegistry()
+        command_registry.register(_skill_command("demo-skill", skill_root=str(skill_root)))
+
+        registry = ToolRegistry()
+        registry.register_default_tools()
+        registry.register(SkillTool(command_registry=command_registry, session_id="sess-1"))
+
+        provider = FakeProvider(
+            [
+                _skill_turn("skill-1", "demo-skill"),
+                _read_file_turn("read-1", str(reference)),
+                _text_turn("done"),
+            ]
+        )
+        loop = AgentLoop(
+            provider_manager=provider,
+            system_prompt="test",
+            tool_registry=registry,
+            cwd=str(project),
+            max_turns=3,
+            permission_context=ToolPermissionContext(cwd=str(project)),
+        )
+
+        events = await _collect_events(loop, "load skill and read reference")
+
+        assert not _has_permission_request(events)
+        results = _tool_results(events)
+        assert any("Skill reference content" in result.result for result in results)
 
     @pytest.mark.asyncio
     async def test_curl_requires_permission(self):

@@ -145,7 +145,13 @@ Los logs runtime van por defecto a:
 
 o a `IAC_CODE_LOG_DIR` cuando está definido.
 
-Los artefactos binarios de resultados de herramientas MCP se guardan bajo:
+En sesiones v2, los artefactos binarios de resultados de herramientas MCP se guardan en el directorio propio de la sesión:
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/
+```
+
+Las sesiones legacy sin marcador de layout compatible usan:
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/

@@ -39,6 +39,10 @@ Los formatos de salida soportados son:
 | `json` | Un único resultado JSON para llamadores que analizan la respuesta final. |
 | `stream-json` | Eventos JSON en streaming para llamadores que procesan progreso incremental. |
 
+## Backups de sesión
+
+Cuando `IAC_CODE_CONFIG_BACKUP_DIR` está definido, las ejecuciones no interactivas reflejan la sesión v2 en checkpoints clave. El checkpoint ordinario de fin de turno usa `normal_turn_end`; un fallo de backup en ese punto se registra como `warning` y queda guardado en `.backup-state.json`, sin hacer fallar la respuesta completada ni agregar un campo warning a la salida final. El modo Pipeline tiene sus propios gates de backup crítico.
+
 ## Control de permisos en automatización
 
 Cuando ejecute en modo no interactivo, use `--permission-mode` para controlar cómo el agente maneja las aprobaciones de herramientas:

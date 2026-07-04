@@ -10,6 +10,7 @@ from iac_code.utils.project_paths import (
     find_git_worktree_root,
     format_resume_command,
     get_git_branch,
+    get_project_dir,
     same_project_path,
     sanitize_path,
 )
@@ -26,7 +27,7 @@ class TestSanitizePath:
     def test_long_path_gets_hash_suffix(self):
         original = "x" * (MAX_SANITIZED_LENGTH + 50)
         result = sanitize_path(original)
-        # Length should be MAX_SANITIZED_LENGTH + dash + hash
+        # Legacy sanitizer behavior is retained for non-session callers.
         assert len(result) > MAX_SANITIZED_LENGTH
         assert result.startswith("x" * MAX_SANITIZED_LENGTH)
         assert "-" in result[MAX_SANITIZED_LENGTH:]
@@ -42,6 +43,27 @@ class TestSanitizePath:
 
     def test_empty_string(self):
         assert sanitize_path("") == ""
+
+
+def test_get_project_dir_prefers_existing_legacy_long_directory(tmp_path, monkeypatch):
+    import iac_code.utils.project_paths as project_paths
+
+    cwd = "x" * (MAX_SANITIZED_LENGTH + 50)
+    legacy_name = project_paths._legacy_sanitize_path(cwd)
+    legacy_dir = tmp_path / "projects" / legacy_name
+    legacy_dir.mkdir(parents=True)
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    assert get_project_dir(cwd) == legacy_dir
+
+
+def test_get_project_dir_uses_bounded_component_for_new_long_directory(tmp_path, monkeypatch):
+    cwd = "x" * (MAX_SANITIZED_LENGTH + 50)
+    monkeypatch.setattr("iac_code.utils.project_paths.get_config_dir", lambda: tmp_path)
+
+    project_dir = get_project_dir(cwd)
+
+    assert len(project_dir.name) <= MAX_SANITIZED_LENGTH
 
 
 class TestProjectPathComparison:

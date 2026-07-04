@@ -10,6 +10,9 @@ def test_noop_metrics_records_events() -> None:
     metrics.record_task_failed()
     metrics.record_context_evicted()
     metrics.record_executor_error()
+    metrics.record_backup_blocked(reason="terminal", recoverable=True)
+    metrics.record_backup_succeeded(reason="normal_turn_end", critical=False, retry_count=0)
+    metrics.record_backup_failed(reason="terminal", critical=True, retry_count=2)
 
 
 def test_noop_metrics_support_push_delivery_hooks() -> None:

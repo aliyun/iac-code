@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import os
@@ -30,7 +31,13 @@ from iac_code.services.permissions.audit import is_aliyun_api_non_read_only_perm
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, ToolResultEvent
 
 PipelinePermissionResolver = Callable[[PermissionRequestEvent], bool | Awaitable[bool]]
+PipelineBeforeEnqueueHook = Callable[[dict[str, Any]], bool | Awaitable[bool]]
+PipelineAfterBackupCommitHook = Callable[[dict[str, Any]], None | Awaitable[None]]
+PipelineBackupCommitGate = Callable[[dict[str, Any]], bool]
 logger = logging.getLogger(__name__)
+PENDING_BACKUP_VISIBILITY = "pending_backup"
+COMMITTED_BACKUP_VISIBILITY = "committed"
+BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
 _RECOVERY_SEMANTIC_EVENT_TYPES = {
     "pipeline_started",
     "pipeline_resumed",
@@ -46,6 +53,8 @@ _RECOVERY_SEMANTIC_EVENT_TYPES = {
     "candidate_step_failed",
     "input_required",
     "input_received",
+    "backup_blocked",
+    BACKUP_COMMITTED_EVENT_TYPE,
     "pipeline_completed",
     "pipeline_failed",
     "pipeline_canceled",
@@ -71,6 +80,17 @@ _RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"
 _RECOVERY_STATE_STATUSES = {"working"}
 
 
+def backup_committed_delivery_envelope(
+    ack_envelope: dict[str, Any],
+    committed_envelope: dict[str, Any],
+) -> dict[str, Any]:
+    delivery_envelope = dict(ack_envelope)
+    status = committed_envelope.get("status")
+    if isinstance(status, str):
+        delivery_envelope["status"] = status
+    return delivery_envelope
+
+
 class _SnapshotCatchUpUnavailableError(Exception):
     pass
 
@@ -90,6 +110,9 @@ class PipelineA2AEventPublisher:
         exposure_types: Any = None,
         delivery_task_id: str | None = None,
         delivery_context_id: str | None = None,
+        before_enqueue: PipelineBeforeEnqueueHook | None = None,
+        after_backup_commit: PipelineAfterBackupCommitHook | None = None,
+        backup_commit_gate: PipelineBackupCommitGate | None = None,
     ) -> None:
         self.event_queue = event_queue
         self.translator = translator
@@ -99,7 +122,13 @@ class PipelineA2AEventPublisher:
         self.exposure_types = normalize_a2a_exposure_types(exposure_types)
         self.delivery_task_id = delivery_task_id
         self.delivery_context_id = delivery_context_id
+        self.before_enqueue = before_enqueue
+        self.after_backup_commit = after_backup_commit
+        self.backup_commit_gate = backup_commit_gate
         self._sequence_lock = asyncio.Lock()
+        self._delivery_lock = asyncio.Lock()
+        self._delivery_lock_owner: asyncio.Task[Any] | None = None
+        self._delivery_lock_depth = 0
         self._last_sequence = 0
         self.last_envelope: dict[str, Any] | None = None
 
@@ -286,6 +315,7 @@ class PipelineA2AEventPublisher:
         data: dict[str, Any] | None = None,
         coordinates: dict[str, Any] | None = None,
         require_durable_metadata: bool = False,
+        require_journal_metadata: bool = False,
     ) -> dict[str, Any] | None:
         envelope = self.translator.manual_event(event_type, scope, status=status, data=data)
         if coordinates:
@@ -293,10 +323,10 @@ class PipelineA2AEventPublisher:
                 value = coordinates.get(key)
                 if isinstance(value, dict):
                     envelope[key] = dict(value)
-        return (
-            envelope
-            if await self._persist_and_enqueue(envelope, require_durable_metadata=require_durable_metadata)
-            else None
+        return await self._persist_and_enqueue_envelope(
+            envelope,
+            require_durable_metadata=require_durable_metadata,
+            require_journal_metadata=require_journal_metadata,
         )
 
     def _next_snapshot(self, envelope: dict[str, Any]) -> dict[str, Any]:
@@ -304,8 +334,11 @@ class PipelineA2AEventPublisher:
         if existing_snapshot is not None:
             try:
                 events = self.journal.read_all_repairing_tail()
-            except Exception:
-                logger.warning("Failed to read A2A pipeline journal snapshot catch-up events", exc_info=True)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read A2A pipeline journal snapshot catch-up events error_type=%s",
+                    type(exc).__name__,
+                )
                 raise _SnapshotCatchUpUnavailableError from None
 
             scoped_events = _events_for_envelope_identity(events, envelope)
@@ -316,6 +349,7 @@ class PipelineA2AEventPublisher:
                 catch_up_events = [
                     event for event in scoped_events if _int_value(event.get("sequence"), 0) > snapshot_sequence
                 ]
+                catch_up_events = _include_backup_ack_committed_event(catch_up_events, scoped_events, envelope)
                 snapshot_base = existing_snapshot
             else:
                 catch_up_events = scoped_events
@@ -324,38 +358,45 @@ class PipelineA2AEventPublisher:
 
         try:
             journal_events = self.journal.read_all_repairing_tail()
-        except Exception:
-            logger.warning("Failed to read A2A pipeline journal snapshot events", exc_info=True)
+        except Exception as exc:
+            logger.warning(
+                "Failed to read A2A pipeline journal snapshot events error_type=%s",
+                type(exc).__name__,
+            )
             raise _SnapshotCatchUpUnavailableError from None
         events = _events_for_envelope_identity(journal_events, envelope)
         return reduce_pipeline_events([*events, envelope])
 
-    async def _persist_and_enqueue(
+    async def persist_envelope(
         self,
         envelope: dict[str, Any],
         *,
         artifact_metadata: dict[str, Any] | None = None,
         require_durable_metadata: bool = False,
-    ) -> bool:
+        require_journal_metadata: bool = False,
+    ) -> dict[str, Any] | None:
         async with self._sequence_lock:
             self._annotate_delivery_alias(envelope)
             try:
                 self._ensure_monotonic_sequence(envelope)
             except _SequenceHighWaterUnavailableError:
                 logger.warning("Skipping A2A pipeline event until journal high-water sequence is readable")
-                return False
+                return None
             safe_envelope = to_json_safe(envelope)
             if not isinstance(safe_envelope, dict):
                 logger.warning("Skipping invalid A2A pipeline envelope: %r", envelope)
-                return False
+                return None
             durable_required = require_durable_metadata or is_recovery_semantic_event(safe_envelope)
             journal_persisted = False
             snapshot_persisted = False
             try:
                 self.journal.append(safe_envelope, durable=durable_required)
                 journal_persisted = True
-            except Exception:
-                logger.warning("Failed to append A2A pipeline journal event", exc_info=True)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to append A2A pipeline journal event error_type=%s",
+                    type(exc).__name__,
+                )
             try:
                 snapshot = self._next_snapshot(safe_envelope)
                 snapshot_persisted = self.snapshot_store.save(snapshot)
@@ -365,17 +406,183 @@ class PipelineA2AEventPublisher:
                 logger.warning("Failed to persist A2A pipeline snapshot", exc_info=True)
             if snapshot_persisted:
                 _maybe_inject_test_fault("after_a2a_pipeline_snapshot_saved")
+            if require_journal_metadata and not journal_persisted:
+                logger.warning("Skipping A2A pipeline status update because journal metadata was not persisted")
+                return None
             if durable_required and not (journal_persisted or snapshot_persisted):
                 logger.warning("Skipping A2A pipeline status update because durable metadata was not persisted")
-                return False
+                return None
             if artifact_metadata is not None and not (journal_persisted or snapshot_persisted):
                 logger.warning("Skipping A2A artifact update because pipeline metadata was not persisted")
-                return False
+                return None
+        return safe_envelope
+
+    async def enqueue_persisted(
+        self,
+        envelope: dict[str, Any],
+        *,
+        artifact_metadata: dict[str, Any] | None = None,
+        run_before_enqueue: bool = True,
+    ) -> bool:
+        async with self._delivery_guard():
+            if run_before_enqueue:
+                if not await self._run_before_enqueue_hook(envelope):
+                    return False
             if artifact_metadata is not None:
-                await self._enqueue_artifact_update(safe_envelope, artifact_metadata)
-            await self._enqueue_status(safe_envelope)
-            self.last_envelope = safe_envelope
+                await self._enqueue_artifact_update(envelope, artifact_metadata)
+            await self._enqueue_status(envelope)
+            self.last_envelope = envelope
+        return True
+
+    async def _persist_and_enqueue(
+        self,
+        envelope: dict[str, Any],
+        *,
+        artifact_metadata: dict[str, Any] | None = None,
+        require_durable_metadata: bool = False,
+        require_journal_metadata: bool = False,
+    ) -> bool:
+        return (
+            await self._persist_and_enqueue_envelope(
+                envelope,
+                artifact_metadata=artifact_metadata,
+                require_durable_metadata=require_durable_metadata,
+                require_journal_metadata=require_journal_metadata,
+            )
+            is not None
+        )
+
+    async def _persist_and_enqueue_envelope(
+        self,
+        envelope: dict[str, Any],
+        *,
+        artifact_metadata: dict[str, Any] | None = None,
+        require_durable_metadata: bool = False,
+        require_journal_metadata: bool = False,
+    ) -> dict[str, Any] | None:
+        if self._requires_backup_commit(envelope):
+            return await self._persist_backup_gated_publication(
+                envelope,
+                artifact_metadata=artifact_metadata,
+                require_durable_metadata=require_durable_metadata,
+                require_journal_metadata=require_journal_metadata,
+            )
+        safe_envelope = await self.persist_envelope(
+            envelope,
+            artifact_metadata=artifact_metadata,
+            require_durable_metadata=require_durable_metadata,
+            require_journal_metadata=require_journal_metadata,
+        )
+        if safe_envelope is None:
+            return None
+        if not await self.enqueue_persisted(safe_envelope, artifact_metadata=artifact_metadata):
+            return None
+        return safe_envelope
+
+    async def _persist_backup_gated_publication(
+        self,
+        envelope: dict[str, Any],
+        *,
+        artifact_metadata: dict[str, Any] | None = None,
+        require_durable_metadata: bool = False,
+        require_journal_metadata: bool = False,
+    ) -> dict[str, Any] | None:
+        pending_envelope = pending_backup_publication_envelope(envelope)
+        pending_safe_envelope = await self.persist_envelope(
+            pending_envelope,
+            artifact_metadata=artifact_metadata,
+            require_durable_metadata=require_durable_metadata,
+            require_journal_metadata=require_journal_metadata,
+        )
+        if pending_safe_envelope is None:
+            return None
+        async with self.delivery_transaction():
+            committed_envelope = committed_backup_publication_envelope(
+                self.translator,
+                pending_safe_envelope,
+            )
+            committed_safe_envelope = await self.persist_envelope(
+                committed_envelope,
+                artifact_metadata=artifact_metadata,
+                require_durable_metadata=require_durable_metadata,
+                require_journal_metadata=True,
+            )
+            if committed_safe_envelope is None:
+                return None
+            if not await self._run_before_enqueue_hook(committed_safe_envelope):
+                return None
+            ack_envelope = await self.persist_backup_committed_ack(committed_safe_envelope)
+            if ack_envelope is None:
+                return None
+            if not await self.enqueue_persisted(
+                committed_safe_envelope,
+                artifact_metadata=artifact_metadata,
+                run_before_enqueue=False,
+            ):
+                return None
+            if not await self.enqueue_persisted(
+                backup_committed_delivery_envelope(ack_envelope, committed_safe_envelope),
+                run_before_enqueue=False,
+            ):
+                return None
+            await self._run_after_backup_commit_hook(committed_safe_envelope)
+            return committed_safe_envelope
+
+    async def persist_backup_committed_ack(self, committed_envelope: dict[str, Any]) -> dict[str, Any] | None:
+        ack = self.translator.manual_event(
+            BACKUP_COMMITTED_EVENT_TYPE,
+            "pipeline",
+            data={
+                "committedEventId": committed_envelope.get("eventId"),
+                "committedEventType": committed_envelope.get("eventType"),
+                "committedSequence": committed_envelope.get("sequence"),
+            },
+        )
+        ack.pop("status", None)
+        return await self.persist_envelope(ack, require_durable_metadata=True, require_journal_metadata=True)
+
+    async def _run_before_enqueue_hook(self, envelope: dict[str, Any]) -> bool:
+        if self.before_enqueue is None:
             return True
+        should_enqueue = self.before_enqueue(envelope)
+        if inspect.isawaitable(should_enqueue):
+            should_enqueue = await should_enqueue
+        return should_enqueue is not False
+
+    async def _run_after_backup_commit_hook(self, envelope: dict[str, Any]) -> None:
+        if self.after_backup_commit is None:
+            return
+        result = self.after_backup_commit(envelope)
+        if inspect.isawaitable(result):
+            await result
+
+    def _requires_backup_commit(self, envelope: dict[str, Any]) -> bool:
+        if self.backup_commit_gate is None:
+            return False
+        return bool(self.backup_commit_gate(envelope))
+
+    def delivery_transaction(self):
+        return self._delivery_guard()
+
+    @contextlib.asynccontextmanager
+    async def _delivery_guard(self):
+        owner = asyncio.current_task()
+        if owner is not None and self._delivery_lock_owner is owner:
+            self._delivery_lock_depth += 1
+            try:
+                yield
+            finally:
+                self._delivery_lock_depth -= 1
+            return
+
+        async with self._delivery_lock:
+            self._delivery_lock_owner = owner
+            self._delivery_lock_depth = 1
+            try:
+                yield
+            finally:
+                self._delivery_lock_depth = 0
+                self._delivery_lock_owner = None
 
     def _annotate_delivery_alias(self, envelope: dict[str, Any]) -> None:
         delivery_task_id = self._delivery_task_id(envelope)
@@ -403,8 +610,11 @@ class PipelineA2AEventPublisher:
                 (_int_value(event.get("sequence"), 0) for event in self.journal.read_all_repairing_tail()),
                 default=0,
             )
-        except Exception:
-            logger.warning("Failed to read A2A pipeline journal high-water sequence", exc_info=True)
+        except Exception as exc:
+            logger.warning(
+                "Failed to read A2A pipeline journal high-water sequence error_type=%s",
+                type(exc).__name__,
+            )
             raise _SequenceHighWaterUnavailableError from None
         return max(sequence, journal_sequence)
 
@@ -548,6 +758,35 @@ def _permission_approval_metadata(approved: bool) -> dict[str, Any]:
     return {"approved": approved, "decision": "allow_once" if approved else "deny"}
 
 
+def pending_backup_publication_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    pending = dict(to_json_safe(envelope) or {})
+    pending["visibility"] = PENDING_BACKUP_VISIBILITY
+    return pending
+
+
+def committed_backup_publication_envelope(
+    translator: PipelineEventTranslator,
+    pending_envelope: dict[str, Any],
+) -> dict[str, Any]:
+    pending_data = pending_envelope.get("data")
+    data = dict(pending_data) if isinstance(pending_data, dict) else {}
+    envelope = translator.manual_event(
+        str(pending_envelope.get("eventType") or ""),
+        str(pending_envelope.get("scope") or "pipeline"),
+        status=str(pending_envelope.get("status") or "working"),
+        data=data,
+    )
+    envelope["visibility"] = COMMITTED_BACKUP_VISIBILITY
+    created_at = pending_envelope.get("createdAt")
+    if isinstance(created_at, str) and created_at:
+        envelope["createdAt"] = created_at
+    for key in ("step", "candidate", "candidateStep"):
+        value = pending_envelope.get(key)
+        if isinstance(value, dict):
+            envelope[key] = dict(value)
+    return envelope
+
+
 def is_recovery_semantic_event(envelope: dict[str, Any]) -> bool:
     event_type = envelope.get("eventType")
     event_type = event_type if isinstance(event_type, str) else None
@@ -619,6 +858,44 @@ def _snapshot_schema_is_current(snapshot: dict[str, Any]) -> bool:
     return snapshot.get("schemaVersion") == SNAPSHOT_SCHEMA_VERSION
 
 
+def _include_backup_ack_committed_event(
+    catch_up_events: list[dict[str, Any]],
+    scoped_events: list[dict[str, Any]],
+    envelope: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if envelope.get("eventType") != BACKUP_COMMITTED_EVENT_TYPE:
+        return catch_up_events
+    committed_event = _matching_committed_event_for_backup_ack(scoped_events, envelope)
+    if committed_event is None:
+        return catch_up_events
+    committed_event_id = committed_event.get("eventId")
+    if committed_event_id is not None and any(event.get("eventId") == committed_event_id for event in catch_up_events):
+        return catch_up_events
+    return [committed_event, *catch_up_events]
+
+
+def _matching_committed_event_for_backup_ack(
+    events: list[dict[str, Any]],
+    ack_envelope: dict[str, Any],
+) -> dict[str, Any] | None:
+    data = ack_envelope.get("data")
+    data = data if isinstance(data, dict) else {}
+    committed_event_id = data.get("committedEventId")
+    committed_event_type = data.get("committedEventType")
+    committed_sequence = _int_value(data.get("committedSequence"), 0)
+    for event in events:
+        if event.get("visibility") != COMMITTED_BACKUP_VISIBILITY:
+            continue
+        if committed_event_id is not None and event.get("eventId") == committed_event_id:
+            return event
+        if (
+            _int_value(event.get("sequence"), 0) == committed_sequence
+            and event.get("eventType") == committed_event_type
+        ):
+            return event
+    return None
+
+
 def _int_value(value: Any, default: int) -> int:
     try:
         return int(value)
@@ -626,4 +903,15 @@ def _int_value(value: Any, default: int) -> int:
         return default
 
 
-__all__ = ["PipelineA2AEventPublisher", "PipelinePermissionResolver", "is_recovery_semantic_event"]
+__all__ = [
+    "COMMITTED_BACKUP_VISIBILITY",
+    "PENDING_BACKUP_VISIBILITY",
+    "PipelineA2AEventPublisher",
+    "PipelineAfterBackupCommitHook",
+    "PipelineBackupCommitGate",
+    "PipelineBeforeEnqueueHook",
+    "PipelinePermissionResolver",
+    "committed_backup_publication_envelope",
+    "is_recovery_semantic_event",
+    "pending_backup_publication_envelope",
+]

@@ -19,7 +19,7 @@ Le répertoire d'exécution par défaut est :
 ~/.iac-code/
 ```
 
-Vous pouvez le déplacer en définissant la variable d'environnement `IAC_CODE_CONFIG_DIR` (prend en charge l'expansion de `~` et `$VAR`). Une fois définie, tous les artefacts persistés — identifiants, paramètres, historique, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — suivent le nouvel emplacement. Les journaux de démarrage/débogage vont par défaut dans `<config-dir>/logs/` et peuvent être déplacés séparément avec `IAC_CODE_LOG_DIR` ; les enregistrements d'audit des permissions restent dans `<config-dir>/logs/`.
+Vous pouvez le déplacer en définissant la variable d'environnement `IAC_CODE_CONFIG_DIR` (prend en charge l'expansion de `~` et `$VAR`). Une fois définie, tous les artefacts persistés — identifiants, paramètres, historique, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — suivent le nouvel emplacement. Les journaux de démarrage/débogage vont par défaut dans `<config-dir>/logs/` et peuvent être déplacés séparément avec `IAC_CODE_LOG_DIR` ; les enregistrements d'audit des permissions restent avec leur session propriétaire.
 
 Fichiers courants :
 
@@ -156,13 +156,13 @@ Les requêtes de style ROA sont traitées comme lecture seule uniquement lorsque
 
 ### Journal d'audit des permissions
 
-Les décisions de permissions qui traversent des prompts utilisateur, des frontières de cache d'outils, une approbation d'automatisation ou une approbation de resolver sont ajoutées à :
+Les décisions de permissions qui traversent des prompts utilisateur, des frontières de cache d'outils, une approbation d'automatisation ou une approbation de resolver sont ajoutées au journal d'audit de la session active :
 
 ```text
-<config-dir>/logs/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
 ```
 
-Par défaut, ce chemin est `~/.iac-code/logs/permission-audit.jsonl`. Le journal d'audit des permissions suit `IAC_CODE_CONFIG_DIR` ; `IAC_CODE_LOG_DIR` ne déplace que les journaux de démarrage/débogage. Le writer d'audit ajoute des enregistrements JSONL avec verrouillage de fichier, effectue la rotation du fichier et restreint les permissions locales lorsque le système d'exploitation le permet. Les autorisations automatiques routinières en lecture seule peuvent être omises, mais les refus, prompts, décisions mises en cache, approbations d'automatisation, approbations de resolver et autres frontières de permissions auditées sont enregistrés.
+Les transcripts de steps Pipeline écrivent leurs propres enregistrements d'audit sous `<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl`. Les journaux d'audit des permissions suivent le layout de session sous `IAC_CODE_CONFIG_DIR` ; `IAC_CODE_LOG_DIR` ne déplace que les journaux de démarrage/débogage et ne déplace pas les enregistrements d'audit des permissions. Le writer d'audit ajoute des enregistrements JSONL avec verrouillage de fichier, effectue la rotation du fichier et restreint les permissions locales lorsque le système d'exploitation le permet. Les autorisations automatiques routinières en lecture seule peuvent être omises, mais les refus, prompts, décisions mises en cache, approbations d'automatisation, approbations de resolver et autres frontières de permissions auditées sont enregistrés.
 
 Les paramètres d'audit se configurent sous `permissions.audit` :
 
@@ -173,3 +173,34 @@ Les paramètres d'audit se configurent sous `permissions.audit` :
 | `max_files` | `5` | Nombre de fichiers d'audit tournés à conserver. Les valeurs au-dessus du maximum intégré sont plafonnées. |
 
 Si une décision allow nécessitant un enregistrement d'audit ne peut pas être persistée dans le journal d'audit, IaC Code échoue en mode fail-closed et refuse l'action au lieu de l'exécuter sans trace d'audit.
+
+
+## Layout de session et état de sauvegarde
+
+Les nouvelles sessions utilisent le marqueur de métadonnées `layout_version` afin de garder les artefacts d'exécution dans leur session propriétaire. Les fichiers concernés incluent `image-cache/`, `tool-results/`, les instantanés A2A, les données runtime des transcripts pipeline et `.backup-state.json`, qui enregistre la dernière raison et le dernier état de sauvegarde; `.backup-state.json` et `.backup-lock` restent locaux à la session active et sont exclus des miroirs de sauvegarde. Les anciennes sessions sans marqueur `layout_version` restent lisibles, mais ne reçoivent pas de nouveaux répertoires d'artefacts propres à la session ; les sessions avec des versions de layout non prises en charge sont refusées.
+
+Les chemins clés d'une session v2 sont :
+
+```text
+<config-dir>/projects/<project>/<session-id>/
+<config-dir>/projects/<project>/<session-id>/metadata.json
+<config-dir>/projects/<project>/<session-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/image-cache/
+<config-dir>/projects/<project>/<session-id>/tool-results/
+<config-dir>/projects/<project>/<session-id>/a2a/task.json
+<config-dir>/projects/<project>/<session-id>/a2a/context.json
+<config-dir>/projects/<project>/<session-id>/a2a/artifacts/
+<config-dir>/projects/<project>/<session-id>/a2a/pipeline/
+<config-dir>/projects/<project>/<session-id>/a2a/cleanup-deferred-prompts.json
+<config-dir>/projects/<project>/<session-id>/pipeline/meta.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/context.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/events.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/display.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/tool-results/
+```

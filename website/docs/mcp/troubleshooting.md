@@ -145,7 +145,13 @@ Runtime logs default to:
 
 or `IAC_CODE_LOG_DIR` when set.
 
-MCP binary artifacts from tool results are stored under:
+MCP binary artifacts from tool results are stored under the session-owned directory for v2 sessions:
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/
+```
+
+Legacy sessions without a supported layout marker use:
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/

@@ -72,3 +72,8 @@ iac-code supports A2A server mode over HTTP JSON-RPC/REST and several optional t
 - Push delivery is at-least-once for Redis-backed queues; callback receivers must handle duplicates and enforce their own endpoint-side authorization policy.
 
 Tool permission requests are rejected automatically in A2A server mode unless `auto-approve-permissions` or an explicit permission rule allows them. Permission decisions are audited locally; any allow decision that requires an audit record fails closed if that record cannot be persisted. Protected Alibaba Cloud write APIs still require exact per-API authorization outside blanket bypass modes. Run unauthenticated A2A mode only in trusted local environments or protect it with Bearer token, Basic auth, or API key authentication.
+
+
+## Persistence and Session Backup
+
+A2A task and context indexes remain in the shared runtime area, for example `<config>/a2a/tasks` and `<config>/a2a/contexts`, so they can be mounted or synchronized independently from per-session data. When `IAC_CODE_CONFIG_BACKUP_DIR` is configured, session-scoped A2A snapshots and artifacts inside v2 sessions are mirrored with the session backup, while the shared task/context indexes should be provided by their own mounted storage.

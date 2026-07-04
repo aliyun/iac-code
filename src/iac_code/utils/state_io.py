@@ -6,22 +6,218 @@ import json
 import logging
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, TextIO, cast
 
+from iac_code.i18n import _
 from iac_code.utils.path_locks import PathLockRegistry
 
 logger = logging.getLogger(__name__)
 _PATH_LOCKS = PathLockRegistry()
+_FILE_OPEN = os.open
 
 
 def _path_lock(path: Path):
     return _PATH_LOCKS.lock_for(path)
+
+
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        attributes = getattr(path.stat(follow_symlinks=False), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _reject_symlink_or_reparse_leaf(path: Path) -> None:
+    if path.is_symlink() or _is_reparse_point(path):
+        raise OSError(_("refusing to follow symlink or reparse point: {path}").format(path=path))
+
+
+def _open_no_follow(path: Path, flags: int, mode: int):
+    _reject_symlink_or_reparse_leaf(path)
+    if os.name == "nt":
+        return _open_windows_no_follow(path, flags, mode)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    fd = _FILE_OPEN(path, flags | nofollow, mode)
+    try:
+        fd_stat = os.fstat(fd)
+        if not stat.S_ISREG(fd_stat.st_mode):
+            raise OSError(_("refusing to open non-regular file: {path}").format(path=path))
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _open_windows_no_follow(path: Path, flags: int, _mode: int):
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+    except ImportError as exc:
+        raise OSError(_("could not open file without following reparse point: {path}").format(path=path)) from exc
+
+    windll_factory: Any = getattr(ctypes, "WinDLL", None)
+    if windll_factory is None:
+        raise OSError(_("could not open file without following reparse point: {path}").format(path=path))
+    kernel32 = windll_factory("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+
+    class _ByHandleFileInformation(ctypes.Structure):
+        _fields_ = [
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", wintypes.FILETIME),
+            ("ftLastAccessTime", wintypes.FILETIME),
+            ("ftLastWriteTime", wintypes.FILETIME),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        ]
+
+    kernel32.GetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    ]
+    kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    generic_read = 0x80000000
+    generic_write = 0x40000000
+    file_share_all = 0x00000001 | 0x00000002 | 0x00000004
+    create_new = 1
+    open_existing = 3
+    open_always = 4
+    file_attribute_normal = 0x00000080
+    file_attribute_reparse_point = 0x00000400
+    file_flag_open_reparse_point = 0x00200000
+
+    if flags & os.O_RDWR:
+        desired_access = generic_read | generic_write
+        fd_flags = os.O_RDWR
+    elif flags & os.O_WRONLY:
+        desired_access = generic_write
+        fd_flags = os.O_WRONLY
+    else:
+        desired_access = generic_read
+        fd_flags = os.O_RDONLY
+    if flags & os.O_APPEND:
+        fd_flags |= os.O_APPEND
+    fd_flags |= getattr(os, "O_BINARY", 0)
+    creation_disposition = open_existing
+    if flags & os.O_CREAT:
+        creation_disposition = create_new if flags & os.O_EXCL else open_always
+
+    handle = kernel32.CreateFileW(
+        str(path),
+        desired_access,
+        file_share_all,
+        None,
+        creation_disposition,
+        file_attribute_normal | file_flag_open_reparse_point,
+        None,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle == invalid_handle:
+        raise OSError(_("could not open file without following reparse point: {path}").format(path=path))
+    try:
+        file_info = _ByHandleFileInformation()
+        if (
+            not kernel32.GetFileInformationByHandle(handle, ctypes.byref(file_info))
+            or file_info.dwFileAttributes & file_attribute_reparse_point
+        ):
+            raise OSError(_("refusing to follow symlink or reparse point: {path}").format(path=path))
+        open_osfhandle: Any = getattr(msvcrt, "open_osfhandle", None)
+        if open_osfhandle is None:
+            raise OSError(_("could not open file without following reparse point: {path}").format(path=path))
+        fd = open_osfhandle(handle, fd_flags)
+        handle = None
+        try:
+            fd_stat = os.fstat(fd)
+            if not stat.S_ISREG(fd_stat.st_mode):
+                raise OSError(_("refusing to open non-regular file: {path}").format(path=path))
+            if flags & os.O_TRUNC:
+                os.ftruncate(fd, 0)
+            return fd
+        except Exception:
+            os.close(fd)
+            raise
+    finally:
+        if handle is not None:
+            kernel32.CloseHandle(handle)
+
+
+def _open_append_binary(path: Path, *, create_mode: int | None = None):
+    mode = 0o666 if create_mode is None else create_mode
+    fd = _open_no_follow(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, mode)
+    return os.fdopen(fd, "ab")
+
+
+@contextmanager
+def open_text_no_follow(
+    path: str | Path,
+    mode: str,
+    *,
+    encoding: str = "utf-8",
+    create_mode: int = 0o600,
+) -> Iterator[TextIO]:
+    target = Path(path)
+    if mode == "r":
+        flags = os.O_RDONLY
+    elif mode == "a":
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        target.parent.mkdir(parents=True, exist_ok=True)
+    elif mode == "w":
+        flags = os.O_WRONLY | os.O_TRUNC | os.O_CREAT
+        target.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        raise ValueError("mode must be one of 'r', 'a', or 'w'")
+
+    fd = _open_no_follow(target, flags, create_mode)
+    try:
+        handle = cast(TextIO, os.fdopen(fd, mode, encoding=encoding))
+    except Exception:
+        os.close(fd)
+        raise
+    with handle:
+        yield handle
+
+
+def write_text_no_follow(
+    path: str | Path,
+    content: str,
+    *,
+    encoding: str = "utf-8",
+    create_mode: int = 0o600,
+) -> None:
+    with _path_lock(Path(path)):
+        with open_text_no_follow(path, "w", encoding=encoding, create_mode=create_mode) as handle:
+            handle.write(content)
+
+
+def _open_lock_binary(path: Path):
+    _reject_symlink_or_reparse_leaf(path)
+    fd = _open_no_follow(path, os.O_RDWR | os.O_CREAT, 0o600)
+    return os.fdopen(fd, "a+b")
 
 
 def safe_replace(src: str | Path, dst: str | Path, *, attempts: int = 3, delay: float = 0.05) -> None:
@@ -146,10 +342,10 @@ def atomic_write_json(
 
 
 @contextmanager
-def _cross_process_append_lock(path: Path) -> Iterator[None]:
+def cross_process_append_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f".{path.name}.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as lock_file:
+    with _open_lock_binary(lock_path) as lock_file:
         if sys.platform == "win32":
             import msvcrt
 
@@ -176,6 +372,9 @@ def _cross_process_append_lock(path: Path) -> Iterator[None]:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+_cross_process_append_lock = cross_process_append_lock
+
+
 def append_jsonl_locked(
     path: str | Path,
     records: Iterable[dict[str, Any]],
@@ -190,9 +389,9 @@ def append_jsonl_locked(
     if not lines:
         return
     with _path_lock(target):
-        with _cross_process_append_lock(target):
+        with cross_process_append_lock(target):
             created = not target.exists()
-            with target.open("ab") as handle:
+            with _open_append_binary(target) as handle:
                 for line in lines:
                     handle.write(line.encode("utf-8"))
                 handle.flush()
@@ -240,7 +439,7 @@ def append_jsonl_rotating_locked(
     if not lines:
         return
     with _path_lock(target):
-        with _cross_process_append_lock(target):
+        with cross_process_append_lock(target):
             try:
                 pending_bytes = sum(len(line.encode("utf-8")) for line in lines)
                 _rotate_jsonl_files(
@@ -260,10 +459,3 @@ def append_jsonl_rotating_locked(
                     os.fsync(handle.fileno())
             if durable and created:
                 fsync_parent_dir(target)
-
-
-def _open_append_binary(path: Path, *, create_mode: int | None = None):
-    if create_mode is None:
-        return path.open("ab")
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, create_mode)
-    return os.fdopen(fd, "ab")

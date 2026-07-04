@@ -99,3 +99,8 @@ ACP は現在パイプラインモードをサポートしていません。`--p
 - パイプラインモードには対話型 REPL が必要です。`IAC_CODE_MODE=pipeline` の場合、`--prompt` は拒否されます。
 - パイプラインモードはテキスト入力に対応しています。パイプラインが有効な間、REPL に貼り付けられた画像は無視されます。
 - パイプライン実行中、shell escape、スキルトリガー、大半の slash command は、パイプライン定義で明示的に許可されていない限り制限されます。`/help`、`/status`、`/resume`、`/exit` などの基本コマンドは引き続き利用できます。
+
+
+## バックアップチェックポイント
+
+Pipeline mode は agent loop step の完了後、および待機状態、`pipeline_handoff_ready`、終端状態を外部へ公開する前に重要バックアップを実行します。重要バックアップが完了できない場合、pipeline は `backup_blocked` を出して復旧可能な状態で停止し、`input_required`、`waiting_input`、`pipeline_handoff_ready`、終端完了を先に公開しません。A2A observer には、terminal と `pipeline_handoff_ready` の保護された publication で、mirror が durable になった時点で `committedEventId`、`committedEventType`、`committedSequence` を含む `backup_committed` event が続きます。`parallel_sub_pipeline` の子 step は兄弟 sub-pipeline が実行中の間は個別にバックアップせず、親チェックポイントで安定した集約状態を保存します。

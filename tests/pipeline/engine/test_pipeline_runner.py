@@ -17,6 +17,7 @@ from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import ResourceObservedEvent
 
@@ -35,6 +36,22 @@ class FakeSessionStorage:
 
     def session_path(self, cwd, session_id):
         return self._path
+
+
+class OrderingSessionStorage(FakeSessionStorage):
+    def __init__(self, order_log: list[str]):
+        super().__init__()
+        self.order_log = order_log
+
+    def append_meta(self, cwd, session_id, meta):
+        super().append_meta(cwd, session_id, meta)
+        meta_type = meta.get("type")
+        if meta_type == "pipeline_step_complete":
+            self.order_log.append(f"append:{meta_type}:{meta.get('step_id')}")
+        elif meta_type == "pipeline_rollback":
+            self.order_log.append(f"append:{meta_type}:{meta.get('from')}->{meta.get('to')}")
+        else:
+            self.order_log.append(f"append:{meta_type}")
 
 
 class FailingAppendMetaSessionStorage(FakeSessionStorage):
@@ -86,6 +103,11 @@ class RecordingPipelineSession:
         self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
     ):
         self.calls.append(("failed", current_step, state_machine_snapshot["current_index"], reason))
+
+    async def save_backup_blocked(
+        self, current_step, state_machine_snapshot, context_snapshot, pipeline_identity, reason=None, **kwargs
+    ):
+        self.calls.append(("backup_blocked", current_step, state_machine_snapshot["current_index"], reason))
 
     async def save_rollback(
         self, from_step, to_step, reason, state_machine_snapshot, context_snapshot, pipeline_identity, **kwargs
@@ -192,7 +214,50 @@ class CapturingPipelineSession(RecordingPipelineSession):
         )
 
 
-def _build_two_step_runner(tmp_path, *, auto_advance_first=True, storage=None):
+class RecordingBackupService:
+    def __init__(
+        self,
+        *,
+        block_on: BackupReason | None = None,
+        order_log: list[str] | None = None,
+        on_backup=None,
+        retry_count: int = 0,
+    ):
+        self.block_on = block_on
+        self.order_log = order_log
+        self.on_backup = on_backup
+        self.retry_count = retry_count
+        self.calls = []
+
+    def backup_session(self, cwd, session_id, *, reason, critical):
+        if self.order_log is not None:
+            self.order_log.append(f"backup:{reason.value}")
+        self.calls.append(
+            {
+                "cwd": cwd,
+                "session_id": session_id,
+                "reason": reason,
+                "critical": critical,
+            }
+        )
+        if self.on_backup is not None:
+            self.on_backup(reason)
+        if reason == self.block_on:
+            raise SessionBackupBlocked(
+                "backup path /Users/alice/.iac-code/token failed access_key_secret=abc123",
+                retry_count=self.retry_count,
+            )
+        return BackupResult(enabled=True, retry_count=self.retry_count)
+
+
+def _build_two_step_runner(
+    tmp_path,
+    *,
+    auto_advance_first=True,
+    storage=None,
+    backup_service=None,
+    resume_from_sidecar=False,
+):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "a.md").write_text("A", encoding="utf-8")
     (tmp_path / "prompts" / "b.md").write_text("B", encoding="utf-8")
@@ -226,10 +291,12 @@ def _build_two_step_runner(tmp_path, *, auto_advance_first=True, storage=None):
         session_storage=storage or FakeSessionStorage(),
         session_id="test",
         cwd=str(tmp_path),
+        backup_service=backup_service,
+        resume_from_sidecar=resume_from_sidecar,
     )
 
 
-def _build_parallel_runner(tmp_path, *, storage=None):
+def _build_parallel_runner(tmp_path, *, storage=None, backup_service=None):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "arch.md").write_text("Arch", encoding="utf-8")
     (tmp_path / "prompts" / "eval.md").write_text("Eval", encoding="utf-8")
@@ -279,6 +346,7 @@ def _build_parallel_runner(tmp_path, *, storage=None):
         session_storage=storage or FakeSessionStorage(),
         session_id="test123",
         cwd=str(tmp_path),
+        backup_service=backup_service,
     )
     runner.context.set_conclusion(
         "architecture",
@@ -317,6 +385,44 @@ def test_rollback_to_same_step_creates_new_attempt(tmp_path):
     assert second["transcript_id"] == "transcript_att_0002"
 
 
+def test_pipeline_runner_uses_legacy_placeholder_sidecar_for_legacy_session_file(tmp_path):
+    storage = SessionStorage(tmp_path / "config")
+    legacy_path = storage.legacy_session_path(str(tmp_path), "test")
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text('{"role":"user","content":"legacy","cwd":"/repo"}\n', encoding="utf-8")
+
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+
+    placeholder_dir = storage.session_dir(str(tmp_path), "test")
+    assert runner.session is not None
+    assert runner.session.session_dir == placeholder_dir / "pipeline"
+    assert isinstance(runner._transcript_storage, PipelineTranscriptStorage)
+    assert legacy_path.exists()
+    assert not (legacy_path.parent / "test" / "pipeline").exists()
+
+
+def test_pipeline_runner_does_not_restore_metadata_less_directory_sidecar(tmp_path):
+    storage = SessionStorage(tmp_path / "config")
+    session_dir = storage.session_dir(str(tmp_path), "test")
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.jsonl").write_text('{"role":"user","content":"legacy","cwd":"/repo"}\n', encoding="utf-8")
+    sidecar = PipelineSession(session_dir / "pipeline")
+    sidecar.save_running_sync(
+        "a",
+        {"current_index": 0, "steps": [{"id": "a"}, {"id": "b"}]},
+        {},
+        {"name": "test"},
+        reason="legacy sidecar",
+    )
+
+    runner = _build_two_step_runner(tmp_path, storage=storage, resume_from_sidecar=True)
+
+    assert runner.session is None
+    assert runner.sidecar_status is None
+    assert runner.sidecar_restore_result is None
+    assert runner._transcript_storage is None
+
+
 @pytest.mark.asyncio
 async def test_runner_passes_attempt_transcript_to_step_executor(tmp_path, monkeypatch):
     runner = _build_two_step_runner(tmp_path)
@@ -346,6 +452,501 @@ async def test_runner_passes_attempt_transcript_to_step_executor(tmp_path, monke
     assert captured["session_id"] == runner._session_id
     assert captured["attempt_id"] == "att_0001"
     assert captured["transcript_id"] == "transcript_att_0001"
+
+
+@pytest.mark.asyncio
+async def test_critical_backup_runs_after_completed_steps_and_terminal(tmp_path):
+    def assert_terminal_sidecar_saved(reason):
+        if reason == BackupReason.TERMINAL:
+            assert any(call[0] == "completed" for call in runner.session.calls)
+
+    backup = RecordingBackupService(on_backup=assert_terminal_sidecar_saved)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert [call["reason"] for call in backup.calls] == [
+        BackupReason.PIPELINE_STEP_COMPLETED,
+        BackupReason.PIPELINE_STEP_COMPLETED,
+        BackupReason.TERMINAL,
+    ]
+    assert all(call["critical"] is True for call in backup.calls)
+    assert all(call["cwd"] == str(tmp_path) and call["session_id"] == "test" for call in backup.calls)
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_step_complete_metadata_is_appended_before_step_backup(tmp_path):
+    order: list[str] = []
+    backup = RecordingBackupService(order_log=order)
+    storage = OrderingSessionStorage(order)
+    runner = _build_two_step_runner(tmp_path, storage=storage, backup_service=backup)
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    async for _event in runner._continue_from_current():
+        pass
+
+    assert order[:5] == [
+        "append:pipeline_step_complete:a",
+        "backup:pipeline_step_completed",
+        "append:pipeline_step_complete:b",
+        "backup:pipeline_step_completed",
+        "backup:terminal",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rollback_metadata_is_appended_before_rollback_backup(tmp_path):
+    order: list[str] = []
+    backup = RecordingBackupService(order_log=order)
+    storage = OrderingSessionStorage(order)
+    runner = _build_two_step_runner(tmp_path, storage=storage, backup_service=backup)
+    requested_rollback = False
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        nonlocal requested_rollback
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        rollback_request = None
+        if step.step_id == "b" and not requested_rollback:
+            requested_rollback = True
+            rollback_request = ("a", "retry")
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=rollback_request,
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    async for _event in runner._continue_from_current():
+        pass
+
+    step_b_meta = order.index("append:pipeline_step_complete:b")
+    rollback_meta = order.index("append:pipeline_rollback:b->a")
+    pre_rollback_step_backups = [item for item in order[:rollback_meta] if item == "backup:pipeline_step_completed"]
+    rollback_backup = next(
+        index for index, item in enumerate(order) if index > rollback_meta and item == "backup:pipeline_step_completed"
+    )
+    assert pre_rollback_step_backups == ["backup:pipeline_step_completed"]
+    assert step_b_meta < rollback_meta < rollback_backup
+
+
+@pytest.mark.asyncio
+async def test_backup_after_step_records_success_metric(tmp_path):
+    backup = RecordingBackupService(retry_count=1)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner._observability.backup_succeeded = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    [event async for event in runner._continue_from_current()]
+
+    assert (
+        call(
+            step_id="a",
+            reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
+            critical=True,
+            retry_count=1,
+        )
+        in runner._observability.backup_succeeded.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_backup_blocked_after_step_yields_recoverable_event_without_failed_completion(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED, retry_count=2)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+    runner._observability.step_completed = MagicMock()
+    runner._observability.funnel_step = MagicMock()
+    runner._observability.backup_blocked = MagicMock()
+    runner._observability.backup_failed = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    blocked_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0].step_id == "a"
+    assert blocked_events[0].data["reason"] == BackupReason.PIPELINE_STEP_COMPLETED.value
+    assert blocked_events[0].data["recoverable"] is True
+    assert "/Users/alice" not in blocked_events[0].data["error"]
+    assert "abc123" not in blocked_events[0].data["error"]
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    runner._observability.step_completed.assert_not_called()
+    runner._observability.funnel_step.assert_not_called()
+    runner._observability.backup_blocked.assert_called_once_with(
+        step_id="a",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
+        recoverable=True,
+        persisted=True,
+    )
+    runner._observability.backup_failed.assert_called_once_with(
+        step_id="a",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
+        critical=True,
+        retry_count=2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_backup_blocked_sidecar_persist_failure_does_not_publish_recoverable_event(tmp_path, caplog):
+    backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.pipeline_runner")
+
+    class FailingBackupBlockedSession(RecordingPipelineSession):
+        async def save_backup_blocked(self, *args, **kwargs):
+            raise OSError("sidecar locked at /mnt/oss/customer-bucket/sensitive-session-id/pipeline/meta.yaml")
+
+    runner.session = FailingBackupBlockedSession()
+    runner._observability.backup_blocked = MagicMock()
+    runner._observability.backup_failed = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED for event in events
+    )
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    runner._observability.backup_blocked.assert_called_once_with(
+        step_id="a",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
+        recoverable=False,
+        persisted=False,
+    )
+    runner._observability.backup_failed.assert_called_once_with(
+        step_id="a",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
+        critical=True,
+        retry_count=0,
+    )
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "Failed to persist pipeline backup_blocked sidecar state" in record.getMessage()
+    ]
+    assert messages
+    assert "session_id=" not in messages[0]
+    assert "/mnt/oss" not in messages[0]
+    assert "customer-bucket" not in messages[0]
+    assert "sensitive-session-id" not in messages[0]
+
+
+@pytest.mark.asyncio
+async def test_backup_blocked_missing_sidecar_does_not_publish_recoverable_event(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner.session = None
+    runner._observability.backup_blocked = MagicMock()
+    runner._observability.backup_failed = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED for event in events
+    )
+    assert any(
+        isinstance(event, PipelineEvent)
+        and event.type == PipelineEventType.STEP_FAILED
+        and event.data["error_details"]["type"] == "PipelineStatePersistenceError"
+        for event in events
+    )
+    runner._observability.backup_blocked.assert_called_once_with(
+        step_id="a",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
+        recoverable=False,
+        persisted=False,
+    )
+    runner._observability.backup_failed.assert_called_once_with(
+        step_id="a",
+        reason=BackupReason.PIPELINE_STEP_COMPLETED.value,
+        critical=True,
+        retry_count=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_terminal_backup_blocked_stops_before_pipeline_completed_event(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.TERMINAL)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    completed_step_ids = [
+        event.step_id
+        for event in events
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED
+    ]
+    assert completed_step_ids == ["a"]
+    blocked_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0].data["reason"] == BackupReason.TERMINAL.value
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    assert any(call[0] == "completed" for call in runner.session.calls)
+    assert any(call[0] == "backup_blocked" and call[3] == BackupReason.TERMINAL.value for call in runner.session.calls)
+
+
+@pytest.mark.asyncio
+async def test_input_required_backup_blocks_before_user_input_required_event(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.INPUT_REQUIRED)
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+    runner._observability.user_input_required = MagicMock()
+    runner._observability.funnel_step = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"user_prompt": "choose", "options": ["one"]}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert [call["reason"] for call in backup.calls] == [
+        BackupReason.PIPELINE_STEP_COMPLETED,
+        BackupReason.INPUT_REQUIRED,
+    ]
+    blocked_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0].step_id == "a"
+    assert blocked_events[0].data["reason"] == BackupReason.INPUT_REQUIRED.value
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events
+    )
+    runner._observability.user_input_required.assert_not_called()
+    assert not any(
+        call.kwargs.get("status") == "waiting_input" for call in runner._observability.funnel_step.call_args_list
+    )
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_failed_step_terminal_backup_blocks_before_failure_events(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.TERMINAL)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+    runner._observability.step_failed = MagicMock()
+    runner._observability.funnel_step = MagicMock()
+    runner._observability.backup_blocked = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.FAILED, error="boom")
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    blocked_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0].data["reason"] == BackupReason.TERMINAL.value
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    runner._observability.step_failed.assert_not_called()
+    assert not any(call.kwargs.get("status") == "failed" for call in runner._observability.funnel_step.call_args_list)
+    runner._observability.backup_blocked.assert_called_once_with(
+        step_id="a",
+        reason=BackupReason.TERMINAL.value,
+        recoverable=True,
+        persisted=True,
+    )
+    assert any(call[0] == "failed" for call in runner.session.calls)
+    assert any(call[0] == "backup_blocked" and call[3] == BackupReason.TERMINAL.value for call in runner.session.calls)
+
+
+@pytest.mark.asyncio
+async def test_parallel_exception_terminal_backup_blocks_before_failure_events(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.TERMINAL)
+    runner = _build_parallel_runner(tmp_path, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+    runner._observability.step_failed = MagicMock()
+    runner._observability.funnel_step = MagicMock()
+
+    async def exploding_parallel(*_args, **_kwargs):
+        raise RuntimeError("parallel boom")
+        yield
+
+    runner._execute_parallel_sub_pipeline = exploding_parallel
+
+    events = [event async for event in runner._continue_from_current()]
+
+    blocked_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0].data["reason"] == BackupReason.TERMINAL.value
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    runner._observability.step_failed.assert_not_called()
+    assert not any(call.kwargs.get("status") == "failed" for call in runner._observability.funnel_step.call_args_list)
+    assert any(call[0] == "failed" for call in runner.session.calls)
+
+
+@pytest.mark.asyncio
+async def test_invalid_rollback_terminal_backup_blocks_before_failure_events(tmp_path):
+    backup = RecordingBackupService(block_on=BackupReason.TERMINAL)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+    runner._observability.step_failed = MagicMock()
+    runner._observability.funnel_step = MagicMock()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=("missing-step", "retry"),
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    blocked_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+    ]
+    assert len(blocked_events) == 1
+    assert blocked_events[0].data["reason"] == BackupReason.TERMINAL.value
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED for event in events
+    )
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert not any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+    )
+    runner._observability.step_failed.assert_not_called()
+    assert not any(call.kwargs.get("status") == "failed" for call in runner._observability.funnel_step.call_args_list)
+    assert any(call[0] == "failed" for call in runner.session.calls)
+
+
+@pytest.mark.asyncio
+async def test_invalid_rollback_terminal_backup_runs_after_failed_sidecar(tmp_path):
+    def assert_failed_sidecar_saved(reason):
+        if reason == BackupReason.TERMINAL:
+            assert any(call[0] == "failed" for call in runner.session.calls)
+
+    backup = RecordingBackupService(on_backup=assert_failed_sidecar_saved)
+    runner = _build_two_step_runner(tmp_path, backup_service=backup)
+    runner.session = RecordingPipelineSession()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=("missing-step", "retry"),
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
+    assert any(call[0] == "failed" for call in runner.session.calls)
+
+
+@pytest.mark.asyncio
+async def test_backup_env_with_conflicting_backup_root_yields_recoverable_block(tmp_path, monkeypatch):
+    storage = SessionStorage(tmp_path / "config")
+    storage.ensure_v2_session_dir_for_new_session(str(tmp_path), "test")
+    backup_root = tmp_path / "backups"
+    backup_root.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    runner = _build_two_step_runner(tmp_path, storage=storage)
+    runner.session = RecordingPipelineSession()
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner._continue_from_current()]
+
+    assert any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED for event in events)
+    assert not any(isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_FAILED for event in events)
 
 
 @pytest.mark.asyncio
@@ -1333,6 +1934,47 @@ class TestPipelineRunnerContextDeps:
 
 
 class TestParallelSubPipelineStep:
+    @pytest.mark.asyncio
+    async def test_sub_pipeline_backup_blocked_surfaces_as_parent_backup_blocked(self, tmp_path, monkeypatch):
+        backup = RecordingBackupService(block_on=BackupReason.PIPELINE_STEP_COMPLETED)
+        runner = _build_parallel_runner(tmp_path, backup_service=backup)
+        runner.session = RecordingPipelineSession()
+
+        class FakeStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                conclusion = {"value": step.step_id}
+                context.set_conclusion(step.conclusion_field, conclusion)
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+        monkeypatch.setattr(
+            "iac_code.pipeline.engine.sub_pipeline_executor.SubPipelineExecutor._make_step_executor",
+            lambda _self: FakeStepExecutor(),
+        )
+
+        events = [event async for event in runner._continue_from_current()]
+
+        blocked_events = [
+            event
+            for event in events
+            if isinstance(event, PipelineEvent) and event.type == PipelineEventType.BACKUP_BLOCKED
+        ]
+        assert len(blocked_events) == 1
+        assert blocked_events[0].step_id == "eval"
+        assert blocked_events[0].data["reason"] == BackupReason.PIPELINE_STEP_COMPLETED.value
+        assert not any(
+            isinstance(event, PipelineEvent)
+            and event.type in {PipelineEventType.SUB_STEP_FAILED, PipelineEventType.STEP_FAILED}
+            for event in events
+        )
+        assert not any(
+            isinstance(event, PipelineEvent)
+            and event.type == PipelineEventType.PIPELINE_COMPLETED
+            and event.data.get("failed", False)
+            for event in events
+        )
+
     @pytest.mark.asyncio
     async def test_parallel_step_invokes_sub_pipeline_executor(self, tmp_path):
         """parallel_sub_pipeline step should fan-out to SubPipelineExecutor."""
@@ -2972,6 +3614,39 @@ class TestExitCondition:
         started = [e for e in events if isinstance(e, PipelineEvent) and e.type == PipelineEventType.STEP_STARTED]
         assert len(started) == 1
         assert started[0].data["name"] == "intent_parsing"
+
+    @pytest.mark.asyncio
+    async def test_exit_condition_terminal_backup_runs_after_completed_sidecar(self, tmp_path):
+        self._write_pipeline_with_exit_condition(tmp_path)
+
+        def assert_completed_sidecar_saved(reason):
+            if reason == BackupReason.TERMINAL:
+                assert any(call[0] == "completed" for call in runner.session.calls)
+
+        backup = RecordingBackupService(on_backup=assert_completed_sidecar_saved)
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=FakeSessionStorage(),
+            session_id="test123",
+            backup_service=backup,
+        )
+        runner.session = RecordingPipelineSession()
+
+        async def mock_execute(step, context, session_id, *, user_message=None, **kwargs):
+            conclusion = {"is_infra_intent": False, "rejection_reason": "not infra"}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+        runner._step_executor.execute = mock_execute
+
+        events = [event async for event in runner.run("帮我写个Python脚本")]
+
+        assert any(
+            isinstance(event, PipelineEvent) and event.type == PipelineEventType.PIPELINE_COMPLETED for event in events
+        )
+        assert any(call[0] == "completed" for call in runner.session.calls)
 
     @pytest.mark.asyncio
     async def test_no_exit_when_condition_not_met(self, tmp_path):

@@ -15,6 +15,7 @@ def repl_for_sidecar_restore(tmp_path):
     repl = InlineREPL.__new__(InlineREPL)
     repl._pipeline = None
     repl._pipeline_waiting_input = False
+    repl._pipeline_backup_blocked = False
     repl._pipeline_state_persistence_failed = False
     repl._pipeline_state_persistence_warning_rendered = False
     repl._session_id = "sid"
@@ -174,6 +175,28 @@ def test_finalize_persistence_failure_event_does_not_mark_user_aborted(repl_for_
         "Pipeline state persistence failed. The pipeline is paused; do not continue until state is durable.",
         style="yellow",
     )
+
+
+def test_finalize_backup_blocked_keeps_pipeline_recoverable(repl_for_sidecar_restore):
+    event = PipelineEvent(
+        type=PipelineEventType.BACKUP_BLOCKED,
+        step_id="collect",
+        timestamp=1.0,
+        data={"reason": "pipeline_step_completed", "error": "backup unavailable", "recoverable": True},
+    )
+    pipeline = MagicMock()
+    pipeline.sidecar_status = None
+    pipeline.state_machine.is_complete = False
+    pipeline.mark_user_aborted = MagicMock()
+    repl_for_sidecar_restore._pipeline = pipeline
+    repl_for_sidecar_restore._pipeline_waiting_input = False
+
+    repl_for_sidecar_restore._record_pipeline_display_event(event)
+    repl_for_sidecar_restore._finalize_pipeline_after_render(None)
+
+    assert repl_for_sidecar_restore._pipeline is pipeline
+    assert repl_for_sidecar_restore._pipeline_backup_blocked is True
+    pipeline.mark_user_aborted.assert_not_called()
 
 
 def test_finalize_user_abort_persistence_failure_keeps_pipeline_paused(repl_for_sidecar_restore):
@@ -581,6 +604,29 @@ async def test_restored_running_routes_to_continue_without_user_prompt(monkeypat
 
     pipeline.continue_from_sidecar.assert_called_once_with(
         user_input=PipelineUserInput(content="hello after crash", display_text="hello after crash", has_images=False)
+    )
+    pipeline.run.assert_not_called()
+    pipeline.resume.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restored_backup_blocked_routes_to_continue(monkeypatch, repl_for_sidecar_restore):
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    pipeline = MagicMock()
+    pipeline.restore_from_sidecar = AsyncMock(return_value=MagicMock(ok=True, status="backup_blocked", reason=None))
+    pipeline.continue_from_sidecar = MagicMock(return_value=_empty_stream())
+    pipeline.run = MagicMock(return_value=_empty_stream())
+    pipeline.resume = MagicMock(return_value=_empty_stream())
+    pipeline.state_machine.is_complete = False
+    pipeline.sidecar_status = "backup_blocked"
+    pipeline.mark_user_aborted = MagicMock()
+    _seed_sidecar(repl_for_sidecar_restore, "backup_blocked")
+
+    with patch("iac_code.pipeline.create_pipeline", return_value=pipeline):
+        await repl_for_sidecar_restore._handle_pipeline_chat("retry backup")
+
+    pipeline.continue_from_sidecar.assert_called_once_with(
+        user_input=PipelineUserInput(content="retry backup", display_text="retry backup", has_images=False)
     )
     pipeline.run.assert_not_called()
     pipeline.resume.assert_not_called()

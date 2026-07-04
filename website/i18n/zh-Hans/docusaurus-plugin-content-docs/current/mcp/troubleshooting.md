@@ -145,7 +145,13 @@ Runtime logs 默认位于：
 
 设置 `IAC_CODE_LOG_DIR` 时使用该目录。
 
-MCP tool results 产生的 binary artifacts 存储在：
+v2 session 中，MCP tool results 产生的 binary artifacts 存储在 session 自己的目录：
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/
+```
+
+没有受支持 layout marker 的旧 session 使用：
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/

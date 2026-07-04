@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from hashlib import blake2b
 from pathlib import Path
 
+from iac_code.services.session_layout import ensure_session_owned_dir
+from iac_code.services.session_metadata import session_metadata_entry_exists
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
+from iac_code.utils.state_io import write_text_no_follow
 
 DEFAULT_MAX_INLINE_CHARS = 50_000
 DEFAULT_PREVIEW_CHARS = 2_000
@@ -52,13 +55,24 @@ class ResultStorage:
         if len(content) <= self._max_inline_chars:
             return ProcessedResult(content=content)
         storage_path = Path(self._storage_dir)
-        if storage_path.parent.name == "tool-results":
+        session_root = _session_root_for_storage_path(storage_path)
+        if session_root is not None:
+            storage_dir = ensure_session_owned_dir(session_root, storage_path)
+        elif storage_path.parent.name == "tool-results":
             ensure_private_dir(storage_path.parent)
-        storage_dir = ensure_private_dir(storage_path)
+            storage_dir = ensure_private_dir(storage_path)
+        else:
+            storage_dir = ensure_private_dir(storage_path)
         file_path = storage_dir / _result_filename(tool_use_id)
-        with file_path.open("w", encoding="utf-8") as f:
-            f.write(content)
+        write_text_no_follow(file_path, content, encoding="utf-8")
         ensure_private_file(file_path)
         preview = content[: self._preview_chars]
         preview += f"\n\n... [truncated — full output ({len(content)} chars) saved to {file_path}]"
         return ProcessedResult(content=preview, is_externalized=True, file_path=str(file_path))
+
+
+def _session_root_for_storage_path(storage_path: Path) -> Path | None:
+    for candidate in (storage_path, *storage_path.parents):
+        if session_metadata_entry_exists(candidate):
+            return candidate
+    return None

@@ -50,6 +50,7 @@ from iac_code.services.permissions.audit import (
     permission_audit_operation,
     redacted_tool_input_for_settings,
 )
+from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.session_index import SessionIndex
 from iac_code.services.session_metadata import normalize_session_name
 from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
@@ -154,6 +155,7 @@ class InlineREPL:
         cli_allowed_tools: list[str] | None = None,
         cli_disallowed_tools: list[str] | None = None,
         cli_permission_mode: str | None = None,
+        backup_service: SessionBackupService | None = None,
     ) -> None:
         self.console = Console()
         # Lock the working directory for the lifetime of this REPL. All session
@@ -184,13 +186,19 @@ class InlineREPL:
             base_url_override=self._base_url_override,
         )
         self._session_storage = SessionStorage()
+        self._backup_service = (
+            backup_service
+            if backup_service is not None
+            else SessionBackupService(session_storage=self._session_storage)
+        )
         self.session_index = SessionIndex()
         self._session_id = self._resolve_session_id(resume_session_id)
-        self._was_resumed = resume_session_id is not None
+        self._was_resumed = bool(getattr(self, "_resolved_existing_session", False))
         self._runtime_mode = self._resolve_initial_runtime_mode(resume_session_id)
-        from iac_code.utils.image.store import ImageStore
+        if not self._was_resumed:
+            self._prepare_new_session_layout(self._session_id)
 
-        self._image_store = ImageStore(session_id=self._session_id)
+        self._set_image_store_for_session(self._session_id)
         self._resume_messages = self._load_resume_messages(resume_session_id)
         self._session_name = self._load_current_session_name()
         self._task_manager = TaskManager()
@@ -254,7 +262,12 @@ class InlineREPL:
             cli_disallowed=cli_disallowed_tools,
             cli_mode=cli_permission_mode,
         )
-        permission_context.trusted_read_directories.extend(build_session_trusted_read_directories(self._session_id))
+        permission_context.trusted_read_directories.extend(
+            build_session_trusted_read_directories(
+                self._session_id,
+                session_dir=self._session_dir_for_artifacts(),
+            )
+        )
         self.store.set_state(permission_context=permission_context)
 
         agent_tool = self.tool_registry.get("agent")
@@ -279,18 +292,20 @@ class InlineREPL:
             auto_trigger_skills=skill_commands,
             memory_recall_service=self._memory_recall_service,
             system_prompt_refresher=self._build_current_system_prompt,
+            result_storage_dir=self._result_storage_dir_for_session(),
         )
         self.renderer = Renderer(
             self.console,
             self.tool_registry,
             status_callback=self._status_text,
             app_state_store=self.store,
-            image_path_resolver=self._image_store.get_path,
-            image_block_path_resolver=self._image_store.store_block,
+            image_path_resolver=lambda image_id: self._image_store.get_path(image_id),
+            image_block_path_resolver=lambda block: self._image_store.store_block(block),
         )
 
         self._pipeline: PipelineRunner | None = None
         self._pipeline_waiting_input: bool = False
+        self._pipeline_backup_blocked: bool = False
         self._pipeline_restored_status: str | None = None
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id: str | None = None
@@ -344,6 +359,114 @@ class InlineREPL:
         """Return skill names that cannot be disabled."""
         return getattr(self, "_locked_skill_names", set())
 
+    def _session_dir_for_artifacts(self, session_id: str | None = None):
+        from pathlib import Path
+
+        selected_session_id = session_id or self._session_id
+        if not selected_session_id:
+            return None
+        session_dir_factory = getattr(self._session_storage, "v2_session_dir", None)
+        used_v2_session_dir = callable(session_dir_factory)
+        if not used_v2_session_dir:
+            session_dir_factory = getattr(self._session_storage, "session_dir", None)
+            if not callable(session_dir_factory):
+                return None
+        try:
+            raw_session_dir = session_dir_factory(self._original_cwd, selected_session_id)
+        except (AttributeError, TypeError):
+            return None
+        if raw_session_dir is None:
+            return None
+        needs_marker_check = not used_v2_session_dir
+        if isinstance(raw_session_dir, Path):
+            session_dir = Path(raw_session_dir)
+        elif isinstance(raw_session_dir, str):
+            session_dir = Path(raw_session_dir)
+        else:
+            if not used_v2_session_dir:
+                return None
+            raw_session_dir = self._raw_session_dir_for_trusted_roots(selected_session_id)
+            if raw_session_dir is None:
+                return None
+            session_dir = raw_session_dir
+            needs_marker_check = True
+        if needs_marker_check:
+            from iac_code.services.session_layout import SESSION_LAYOUT_VERSION_V2, require_supported_session_layout
+
+            if require_supported_session_layout(session_dir) != SESSION_LAYOUT_VERSION_V2:
+                return None
+        return session_dir
+
+    def _raw_session_dir_for_trusted_roots(self, session_id: str | None = None):
+        from pathlib import Path
+
+        selected_session_id = session_id or self._session_id
+        if not selected_session_id:
+            return None
+        session_dir_factory = getattr(self._session_storage, "session_dir", None)
+        if not callable(session_dir_factory):
+            return None
+        try:
+            raw_session_dir = session_dir_factory(self._original_cwd, selected_session_id)
+        except (AttributeError, TypeError):
+            return None
+        if isinstance(raw_session_dir, Path):
+            return raw_session_dir
+        if isinstance(raw_session_dir, (str, os.PathLike)):
+            return Path(raw_session_dir)
+        return None
+
+    def _prepare_new_session_layout(self, session_id: str) -> None:
+        ensure_v2_session = getattr(self._session_storage, "ensure_v2_session_dir_for_new_session", None)
+        if not callable(ensure_v2_session):
+            return
+        try:
+            ensure_v2_session(self._original_cwd, session_id, git_branch=self.current_git_branch())
+        except (AttributeError, TypeError):
+            return
+
+    def _prepare_pipeline_session_layout(self, pipeline_cwd: str, session_id: str) -> None:
+        ensure_v2_session = getattr(self._session_storage, "ensure_v2_session_dir_for_new_session", None)
+        if not callable(ensure_v2_session):
+            return
+        try:
+            ensure_v2_session(pipeline_cwd, session_id, git_branch=self.current_git_branch())
+        except (AttributeError, TypeError):
+            return
+
+    def _result_storage_dir_for_session(self, session_id: str | None = None):
+        from iac_code.services.session_layout import SessionPaths, session_layout_version
+
+        session_dir = self._session_dir_for_artifacts(session_id)
+        if session_dir is None:
+            return None
+        if session_layout_version(session_dir) is None:
+            return None
+        return SessionPaths.require_supported(session_dir).tool_results_dir
+
+    def _set_image_store_for_session(self, session_id: str) -> None:
+        from iac_code.utils.image.store import ImageStore
+
+        self._image_store = ImageStore(session_id=session_id, session_root=self._session_dir_for_artifacts(session_id))
+        prompt_input = getattr(self, "_prompt_input", None)
+        if prompt_input is not None:
+            setattr(prompt_input, "_image_store", self._image_store)
+
+    def _refresh_mcp_tool_wrappers_for_session(self) -> None:
+        from iac_code.services.agent_factory import _sync_mcp_tool_registry
+
+        mcp_manager = getattr(self, "_mcp_manager", None)
+        tool_registry = getattr(self, "tool_registry", None)
+        if mcp_manager is None or tool_registry is None:
+            return
+        self._registered_mcp_tool_names = _sync_mcp_tool_registry(
+            tool_registry,
+            mcp_manager,
+            self._session_id,
+            getattr(self, "_registered_mcp_tool_names", set()),
+            session_dir=self._session_dir_for_artifacts(),
+        )
+
     def _register_mcp_integrations(self) -> None:
         from pathlib import Path
 
@@ -366,6 +489,7 @@ class InlineREPL:
             return
 
         self._mcp_manager = MCPManager(load_result.servers, roots=[mcp_workspace_root], session_id=self._session_id)
+        session_dir = self._session_dir_for_artifacts()
         try:
             _run_async_blocking(self._mcp_manager.connect_all())
             self.mcp_config_warnings.extend(_mcp_connection_warnings(self._mcp_manager))
@@ -384,6 +508,7 @@ class InlineREPL:
                 self._mcp_manager,
                 self._session_id,
                 self._registered_mcp_tool_names,
+                session_dir=session_dir,
             )
             self._registered_mcp_command_names, command_warnings = _run_async_blocking(
                 _sync_mcp_command_registry(self.command_registry, self._mcp_manager, self._registered_mcp_command_names)
@@ -407,6 +532,7 @@ class InlineREPL:
                         self._mcp_manager,
                         self._session_id,
                         self._registered_mcp_tool_names,
+                        session_dir=self._session_dir_for_artifacts(),
                     )
                 if capability in {"prompts", "resources"}:
                     self._registered_mcp_command_names, warnings = await _sync_mcp_command_registry(
@@ -1543,8 +1669,8 @@ class InlineREPL:
             self.tool_registry,
             status_callback=self._status_text,
             app_state_store=self.store,
-            image_path_resolver=self._image_store.get_path,
-            image_block_path_resolver=self._image_store.store_block,
+            image_path_resolver=lambda image_id: self._image_store.get_path(image_id),
+            image_block_path_resolver=lambda block: self._image_store.store_block(block),
         )
         temp_renderer.replay_history(messages)
         rendered = stream.getvalue().rstrip()
@@ -1574,6 +1700,35 @@ class InlineREPL:
     def _set_runtime_mode(self, mode: RunMode) -> None:
         self._runtime_mode = mode
 
+    async def _backup_normal_turn_end(self) -> None:
+        backup_service = getattr(self, "_backup_service", None)
+        original_cwd = getattr(self, "_original_cwd", None)
+        session_id = getattr(self, "_session_id", None)
+        if backup_service is None or not isinstance(original_cwd, str) or not isinstance(session_id, str):
+            return
+        try:
+            result = await asyncio.to_thread(
+                backup_service.backup_session,
+                original_cwd,
+                session_id,
+                reason=BackupReason.NORMAL_TURN_END,
+                critical=False,
+            )
+            if getattr(result, "enabled", False) and not getattr(result, "succeeded", True):
+                logger.warning(
+                    "Normal REPL session backup failed (reason={}, retry_count={}): {}",
+                    BackupReason.NORMAL_TURN_END.value,
+                    getattr(result, "retry_count", 0),
+                    getattr(result, "error", None) or "unknown",
+                )
+        except Exception as exc:
+            logger.warning(
+                "Normal REPL session backup failed (reason={}, retry_count={}, error_type={})",
+                BackupReason.NORMAL_TURN_END.value,
+                getattr(exc, "retry_count", 0),
+                type(exc).__name__,
+            )
+
     async def _handle_chat_continue(self) -> list[str]:
         """Continue the agent loop after injecting messages (e.g., skill prompt).
 
@@ -1591,6 +1746,7 @@ class InlineREPL:
             return []
 
         self.store.set_state(is_busy=True)
+        backup_turn_end = False
         try:
             streaming_input = StreamingInputBuffer()
             events = self._wrap_cleanup_observer(
@@ -1612,10 +1768,13 @@ class InlineREPL:
                 msg_count = len(self._agent_loop.context_manager.get_messages())
                 for err in self.renderer._last_streaming_errors:
                     self._streaming_error_log.append((err, msg_count))
+            backup_turn_end = not bool(getattr(result, "interrupted", False))
             return queued_inputs
         finally:
             self._prune_cleanup_prompts_if_no_pending_cleanup()
             self.store.set_state(is_busy=False)
+            if backup_turn_end:
+                await self._backup_normal_turn_end()
 
     def _cleanup_ledger_for_pipeline(self, pipeline: object | None):
         if pipeline is None:
@@ -2217,6 +2376,7 @@ class InlineREPL:
             return False
 
         self.store.set_state(is_busy=True)
+        backup_turn_end = False
         try:
             streaming_input = StreamingInputBuffer()
             events = self._wrap_cleanup_observer(self._agent_loop.continue_streaming(), ledger=ledger)
@@ -2235,9 +2395,12 @@ class InlineREPL:
                 msg_count = len(self._agent_loop.context_manager.get_messages())
                 for err in self.renderer._last_streaming_errors:
                     self._streaming_error_log.append((err, msg_count))
+            backup_turn_end = not bool(getattr(result, "interrupted", False))
         finally:
             self._prune_cleanup_prompts_if_no_pending_cleanup(ledger)
             self.store.set_state(is_busy=False)
+            if backup_turn_end:
+                await self._backup_normal_turn_end()
         return True
 
     def _cleanup_prompt_messages_from_context(self):
@@ -2412,6 +2575,7 @@ class InlineREPL:
 
         self.store.set_state(is_busy=True)
         self.renderer.record_user_turn(record_text)
+        backup_turn_end = False
         try:
             streaming_input = StreamingInputBuffer()
             events = self._wrap_cleanup_observer(
@@ -2433,10 +2597,13 @@ class InlineREPL:
                 msg_count = len(self._agent_loop.context_manager.get_messages())
                 for err in self.renderer._last_streaming_errors:
                     self._streaming_error_log.append((err, msg_count))
+            backup_turn_end = not bool(getattr(result, "interrupted", False))
             return queued_inputs
         finally:
             self._prune_cleanup_prompts_if_no_pending_cleanup()
             self.store.set_state(is_busy=False)
+            if backup_turn_end:
+                await self._backup_normal_turn_end()
 
     async def _flush_pipeline_telemetry(self) -> None:
         from iac_code.services.telemetry import flush_telemetry
@@ -2463,8 +2630,14 @@ class InlineREPL:
             self._pipeline_display_recorder = None
 
     def _record_pipeline_display_event(self, event) -> None:
+        from iac_code.pipeline.engine.events import PipelineEventType
+
         if self._is_pipeline_state_persistence_failure_event(event):
             self._pipeline_state_persistence_failed = True
+        if getattr(event, "type", None) == PipelineEventType.BACKUP_BLOCKED:
+            self._pipeline_backup_blocked = True
+        elif getattr(event, "type", None) == PipelineEventType.PIPELINE_STARTED:
+            self._pipeline_backup_blocked = False
         recorder = getattr(self, "_pipeline_display_recorder", None)
         if recorder is None:
             return
@@ -2585,11 +2758,13 @@ class InlineREPL:
                 )
             self._pipeline = None
             self._pipeline_waiting_input = False
+            self._pipeline_backup_blocked = False
             self._pipeline_restored_status = None
             return False
 
         self._pipeline_restored_status = restored.status
         self._pipeline_waiting_input = restored.status == "waiting_input"
+        self._pipeline_backup_blocked = False
         return True
 
     def _pipeline_user_input_from_repl_input(
@@ -2636,6 +2811,7 @@ class InlineREPL:
 
         if self._pipeline is None:
             pipeline_cwd = get_working_directory() or self._original_cwd
+            self._prepare_pipeline_session_layout(pipeline_cwd, self._session_id)
             self._pipeline = create_pipeline(
                 name=get_pipeline_name(),
                 provider_manager=self._provider_manager,
@@ -2648,6 +2824,7 @@ class InlineREPL:
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
             )
             self._refresh_pipeline_display_recorder()
+            self._pipeline_backup_blocked = False
             restored = None
             if self._detect_pipeline_session(pipeline_cwd, self._session_id):
                 restored = await self._pipeline.restore_from_sidecar()
@@ -2666,7 +2843,7 @@ class InlineREPL:
                     resume_waiting_candidate_selection = True
                 else:
                     event_stream = cast(Any, self._pipeline).resume(pipeline_input)
-            elif restored and restored.ok and restored.status == "running":
+            elif restored and restored.ok and restored.status in {"running", "backup_blocked"}:
                 self._pipeline_waiting_input = False
                 event_stream = cast(Any, self._pipeline).continue_from_sidecar(user_input=pipeline_input)
             else:
@@ -2675,11 +2852,12 @@ class InlineREPL:
         else:
             self._refresh_pipeline_display_recorder()
             self._pipeline_waiting_input = False
+            self._pipeline_backup_blocked = False
             restored_status = getattr(self, "_pipeline_restored_status", None)
             self._pipeline_restored_status = None
             resume_waiting_candidate_selection = False
             event_stream = None
-            if restored_status == "running":
+            if restored_status in {"running", "backup_blocked"}:
                 event_stream = cast(Any, self._pipeline).continue_from_sidecar(user_input=pipeline_input)
             elif restored_status == "waiting_input":
                 if self._pipeline_current_step_is_candidate_selection() is True:
@@ -2897,6 +3075,7 @@ class InlineREPL:
     def _clear_pipeline_runtime_state(self) -> None:
         self._pipeline = None
         self._pipeline_waiting_input = False
+        self._pipeline_backup_blocked = False
         self._pipeline_restored_status = None
         self._pipeline_display_recorder = None
         self._pipeline_display_current_step_id = None
@@ -2914,6 +3093,11 @@ class InlineREPL:
             self._pipeline_waiting_input = False
             self._warn_pipeline_state_persistence_failed_once()
             return
+        from iac_code.pipeline.engine.events import PipelineEventType
+
+        if getattr(terminal_event, "type", None) == PipelineEventType.BACKUP_BLOCKED:
+            self._pipeline_backup_blocked = True
+            return
         handoff_result = self._handoff_pipeline_to_normal(terminal_event)
         if handoff_result == "persistence_failed":
             if self._pipeline is not None:
@@ -2928,7 +3112,11 @@ class InlineREPL:
             self._clear_pipeline_runtime_state()
         elif self._pipeline is not None and self._pipeline.state_machine.is_complete:
             self._clear_pipeline_runtime_state()
-        elif self._pipeline is not None and not self._pipeline_waiting_input:
+        elif (
+            self._pipeline is not None
+            and not self._pipeline_waiting_input
+            and not getattr(self, "_pipeline_backup_blocked", False)
+        ):
             from iac_code.pipeline.engine.pipeline_runner import PipelineStatePersistenceError
 
             try:
@@ -3377,6 +3565,7 @@ class InlineREPL:
                         teardown_events = (
                             PipelineEventType.STEP_STARTED,
                             PipelineEventType.USER_INPUT_REQUIRED,
+                            PipelineEventType.BACKUP_BLOCKED,
                             PipelineEventType.PIPELINE_COMPLETED,
                         )
                         if event.type in teardown_events:
@@ -3401,9 +3590,9 @@ class InlineREPL:
                             selection_result = await self._render_candidate_selection_tabs(
                                 event_stream, progress_bar_fn=_make_header_fn()
                             )
-                            if (
-                                isinstance(selection_result, PipelineEvent)
-                                and selection_result.type == PipelineEventType.PIPELINE_COMPLETED
+                            if isinstance(selection_result, PipelineEvent) and selection_result.type in (
+                                PipelineEventType.PIPELINE_COMPLETED,
+                                PipelineEventType.BACKUP_BLOCKED,
                             ):
                                 return selection_result
                             if isinstance(
@@ -3433,10 +3622,12 @@ class InlineREPL:
                             tabs_interrupted = await self._render_parallel_tabs(
                                 event_stream, progress_bar_fn=_make_header_fn()
                             )
-                            if (
-                                isinstance(tabs_interrupted, PipelineEvent)
-                                and tabs_interrupted.type == PipelineEventType.PIPELINE_COMPLETED
+                            if isinstance(tabs_interrupted, PipelineEvent) and tabs_interrupted.type in (
+                                PipelineEventType.PIPELINE_COMPLETED,
+                                PipelineEventType.BACKUP_BLOCKED,
                             ):
+                                if tabs_interrupted.type == PipelineEventType.BACKUP_BLOCKED:
+                                    self._render_pipeline_event(tabs_interrupted)
                                 return tabs_interrupted
                             if isinstance(
                                 tabs_interrupted, PipelineEvent
@@ -3456,7 +3647,7 @@ class InlineREPL:
                         self._update_pipeline_state_from_event(event)
                         self._render_pipeline_event(event)
 
-                        if event.type == PipelineEventType.PIPELINE_COMPLETED:
+                        if event.type in (PipelineEventType.PIPELINE_COMPLETED, PipelineEventType.BACKUP_BLOCKED):
                             return event
 
                         if event.type == PipelineEventType.PIPELINE_STARTED:
@@ -3581,6 +3772,7 @@ class InlineREPL:
         interrupted = False
         interrupt_feedback = ""
         terminal_event: PipelineEvent | None = None
+        render_terminal_event_after_live = False
 
         detail_tool_ids: set[str] = set()
         detail_accumulated: dict[str, str] = {}
@@ -3761,12 +3953,15 @@ class InlineREPL:
                         PipelineEventType.STEP_FAILED,
                         PipelineEventType.PIPELINE_COMPLETED,
                         PipelineEventType.ROLLBACK_TRIGGERED,
+                        PipelineEventType.BACKUP_BLOCKED,
                     ):
                         if (
                             event.type == PipelineEventType.PIPELINE_COMPLETED
+                            or event.type == PipelineEventType.BACKUP_BLOCKED
                             or self._is_pipeline_state_persistence_failure_event(event)
                         ):
                             terminal_event = event
+                            render_terminal_event_after_live = event.type == PipelineEventType.BACKUP_BLOCKED
                         break
 
                 elif isinstance(event, DiagramEvent):
@@ -3842,6 +4037,8 @@ class InlineREPL:
             return True
 
         if terminal_event is not None:
+            if render_terminal_event_after_live:
+                self._render_pipeline_event(terminal_event)
             return terminal_event
 
         if selected and self._pipeline is not None:
@@ -4139,9 +4336,11 @@ class InlineREPL:
                         PipelineEventType.STEP_STARTED,
                         PipelineEventType.PIPELINE_COMPLETED,
                         PipelineEventType.STEP_FAILED,
+                        PipelineEventType.BACKUP_BLOCKED,
                     ):
                         if (
                             event.type == PipelineEventType.PIPELINE_COMPLETED
+                            or event.type == PipelineEventType.BACKUP_BLOCKED
                             or self._is_pipeline_state_persistence_failure_event(event)
                         ):
                             terminal_event = event
@@ -4223,10 +4422,13 @@ class InlineREPL:
 
         if self._is_pipeline_state_persistence_failure_event(event):
             self._pipeline_state_persistence_failed = True
+        if event.type == PipelineEventType.BACKUP_BLOCKED:
+            self._pipeline_backup_blocked = True
         if event.type == PipelineEventType.PIPELINE_STARTED:
             self._pipeline_step_names = event.data.get("step_names", [])
             self._pipeline_start_time = time.time()
             self._pipeline_completed_indices = set()
+            self._pipeline_backup_blocked = False
 
     @staticmethod
     def _is_pipeline_state_persistence_failure_event(event) -> bool:
@@ -4272,6 +4474,14 @@ class InlineREPL:
                 reason = str(event.data.get("reason") or "warning")
                 message = str(event.data.get("message") or _("Pipeline warning: {reason}").format(reason=reason))
                 con.print(f"  [yellow]⚠[/] [yellow]{message}[/]")
+            case PipelineEventType.BACKUP_BLOCKED:
+                error = str(event.data.get("error") or _("backup unavailable"))
+                con.print(
+                    "  [yellow]⚠[/] "
+                    + _("Pipeline backup is blocked; the pipeline is paused and recoverable: {error}").format(
+                        error=error
+                    )
+                )
             case PipelineEventType.USER_INPUT_REQUIRED:
                 options = event.data.get("options", [])
                 prompt_text = event.data.get("prompt", "")
@@ -4488,6 +4698,7 @@ class InlineREPL:
         """
         import uuid
 
+        self._resolved_existing_session = False
         if resume is True:
             latest = self._session_storage.get_latest_session_anywhere()
             if latest is None:
@@ -4495,6 +4706,7 @@ class InlineREPL:
             cwd, sid = latest
             if cwd and not same_project_path(cwd, self._original_cwd):
                 raise ValueError(self._cross_project_message(cwd, sid))
+            self._resolved_existing_session = True
             return sid
         if isinstance(resume, str) and resume:
             resolution = resolve_session_argument(self.session_index, self._original_cwd, resume)
@@ -4506,6 +4718,7 @@ class InlineREPL:
                 raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
             if resolution.entry.cwd and not same_project_path(resolution.entry.cwd, self._original_cwd):
                 raise ValueError(self._cross_project_message(resolution.entry.cwd, resolution.entry.session_id))
+            self._resolved_existing_session = True
             return resolution.entry.session_id
         return str(uuid.uuid4())
 
@@ -4901,6 +5114,8 @@ class InlineREPL:
         new_messages = self._with_terminal_pipeline_abort_notice(new_messages, pipeline_cwd, new_session_id)
         self._agent_loop.replace_session(new_session_id, new_messages or None)
         self._session_id = new_session_id
+        self._set_image_store_for_session(new_session_id)
+        self._refresh_mcp_tool_wrappers_for_session()
         self._clear_pipeline_cleanup_ledger_path()
         self._was_resumed = True
         self._session_name = self._load_current_session_name()
@@ -4908,11 +5123,21 @@ class InlineREPL:
         state = self.store.get_state()
         permission_context = getattr(state, "permission_context", None)
         if permission_context is not None:
-            old_roots = set(build_session_trusted_read_directories(old_session_id))
+            old_roots = set(
+                build_session_trusted_read_directories(
+                    old_session_id,
+                    session_dir=self._raw_session_dir_for_trusted_roots(old_session_id),
+                )
+            )
             permission_context.trusted_read_directories = [
                 root for root in permission_context.trusted_read_directories if root not in old_roots
             ]
-            permission_context.trusted_read_directories.extend(build_session_trusted_read_directories(new_session_id))
+            permission_context.trusted_read_directories.extend(
+                build_session_trusted_read_directories(
+                    new_session_id,
+                    session_dir=self._session_dir_for_artifacts(new_session_id),
+                )
+            )
 
         # Clear screen + scrollback, redraw banner, replay history.
         self.console.file.write("\033[H\033[2J\033[3J")
@@ -4944,6 +5169,7 @@ class InlineREPL:
         # session's sidecar after the id rotation in step 2.
         self._pipeline = None
         self._pipeline_waiting_input = False
+        self._pipeline_backup_blocked = False
         self._pipeline_restored_status = None
 
         # Step 2: delegate to existing sync swap (handles message reload, clear,
@@ -5000,6 +5226,7 @@ class InlineREPL:
                 )
                 self._pipeline = None
                 self._pipeline_waiting_input = False
+                self._pipeline_backup_blocked = False
                 self._pipeline_restored_status = None
                 return
             self._pipeline_restored_status = restored.status

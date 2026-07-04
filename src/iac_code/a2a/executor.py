@@ -17,6 +17,7 @@ from a2a.types import Message, Role, Task, TaskState, TaskStatus, TaskStatusUpda
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict, ParseDict
 
+from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.events import (
     iac_code_session_metadata,
     make_text_part,
@@ -39,7 +40,7 @@ from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, recoverab
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
-from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -79,6 +80,7 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential
+from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
@@ -398,26 +400,53 @@ def _a2a_pipeline_state_for_session(
     *,
     cwd: str,
     session_id: str,
-) -> tuple[A2APipelineSnapshotStore, A2APipelineJournal, dict[str, Any], list[dict[str, Any]] | None] | None:
+) -> tuple[A2APipelineSnapshotStore, A2APipelineJournal, dict[str, Any], list[dict[str, Any]]] | None:
     try:
         pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
         snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
         journal = A2APipelineJournal(pipeline_dir)
         snapshot = snapshot_store.load()
-    except Exception:
-        logger.warning("Failed to load A2A pipeline snapshot", exc_info=True)
+    except Exception as exc:
+        logger.warning(
+            "Failed to load A2A pipeline snapshot error_type=%s",
+            type(exc).__name__,
+        )
         return None
-    journal_events: list[dict[str, Any]] | None = None
-    if not isinstance(snapshot, dict):
-        try:
-            journal_events = journal.read_all_repairing_tail()
-        except Exception:
-            logger.warning("Failed to rebuild A2A pipeline snapshot from journal", exc_info=True)
-            return None
-        if not journal_events:
-            return None
+    try:
+        journal_events = journal.read_all_repairing_tail()
+    except Exception as exc:
+        # Route decisions must be conservative: a stale snapshot can expose an obsolete normalHandoff.
+        logger.warning(
+            "Failed to read A2A pipeline journal error_type=%s",
+            type(exc).__name__,
+        )
+        return None
+
+    snapshot_sequence = _a2a_pipeline_sequence_number(snapshot.get("lastSequence")) if isinstance(snapshot, dict) else 0
+    journal_sequence = max(
+        (_a2a_pipeline_sequence_number(event.get("sequence")) for event in journal_events if isinstance(event, dict)),
+        default=0,
+    )
+    if journal_events and (not isinstance(snapshot, dict) or journal_sequence != snapshot_sequence):
         snapshot = reduce_pipeline_events(journal_events)
+        if not isinstance(snapshot, dict):
+            return None
+        try:
+            snapshot_store.save(snapshot)
+        except Exception as exc:
+            logger.debug("Failed to save repaired A2A pipeline snapshot error_type=%s", type(exc).__name__)
+    elif not isinstance(snapshot, dict):
+        return None
     return snapshot_store, journal, snapshot, journal_events
+
+
+def _a2a_pipeline_sequence_number(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _prune_completed_cleanup_prompt_from_runtime(runtime: Any, ledger: CleanupLedger | None) -> None:
@@ -788,6 +817,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         permission_resolver: A2APermissionResolver | None = None,
         auto_approve_permissions: bool = False,
         thinking_exposure_types: Any = None,
+        backup_service: Any | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -798,6 +828,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._auto_approve_permissions = auto_approve_permissions
         self._thinking_exposure_types = normalize_a2a_exposure_types(thinking_exposure_types)
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
+        self._backup_service = backup_service or SessionBackupService()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         requested_task_id = context.task_id or None
@@ -869,7 +900,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_INPUT_REQUIRED,
-                    text="A temporary error occurred. Please retry.",
+                    text=_("A temporary error occurred. Please retry."),
                 )
                 if task is not None:
                     task.state = TASK_STATE_INPUT_REQUIRED
@@ -926,6 +957,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 model_from_metadata=metadata_model is not None,
                 metadata_api_key=metadata_api_key,
                 request_policy_override=request_policy_override,
+                backup_service=self._backup_service,
             )
             await pipeline_executor.execute(
                 context=context,
@@ -946,6 +978,9 @@ class IacCodeA2AExecutor(AgentExecutor):
 
         def runtime_factory(session_id: str) -> Any:
             session_storage = SessionStorage()
+            ensure_v2_session = getattr(session_storage, "ensure_v2_session_dir_for_new_session", None)
+            if callable(ensure_v2_session):
+                ensure_v2_session(cwd, session_id)
             resume_messages = None
             if session_storage.exists(cwd, session_id):
                 loaded = session_storage.load(cwd, session_id)
@@ -1152,6 +1187,19 @@ class IacCodeA2AExecutor(AgentExecutor):
                         iac_code_session_id=ctx.session_id,
                     )
                 task.state = TASK_STATE_INPUT_REQUIRED
+                ctx.active_task_id = None
+                task.touch()
+                ctx.touch()
+                self._task_store.mirror_task(task)
+                self._task_store.mirror_context(ctx)
+                await backup_session_async(
+                    self._backup_service,
+                    cwd,
+                    ctx.session_id,
+                    reason=BackupReason.NORMAL_TURN_END,
+                    critical=False,
+                    metrics=self._metrics,
+                )
                 await self._publish_status(
                     event_queue,
                     task_id=task_id,
@@ -1159,11 +1207,27 @@ class IacCodeA2AExecutor(AgentExecutor):
                     state=TaskState.TASK_STATE_INPUT_REQUIRED,
                     session_id=ctx.session_id,
                 )
-                self._task_store.mirror_task(task)
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
                 self._metrics.record_turn_completed()
             except asyncio.CancelledError:
                 task.state = TASK_STATE_CANCELED
+                ctx.active_task_id = None
+                task.touch()
+                ctx.touch()
+                self._task_store.mirror_task(task)
+                self._task_store.mirror_context(ctx)
+                if await self._publish_backup_blocked_after_terminal_backup_failure(
+                    event_queue,
+                    task=task,
+                    ctx=ctx,
+                    cwd=cwd,
+                    task_id=task_id,
+                    context_id=context_id,
+                    reason=BackupReason.TERMINAL,
+                    blocked_terminal_state=TASK_STATE_CANCELED,
+                ):
+                    self._metrics.record_task_canceled()
+                    return
                 await self._publish_status(
                     event_queue,
                     task_id=task_id,
@@ -1172,26 +1236,55 @@ class IacCodeA2AExecutor(AgentExecutor):
                     text=_("Task canceled."),
                     session_id=ctx.session_id,
                 )
-                self._task_store.mirror_task(task)
                 await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
                 self._metrics.record_task_canceled()
             except Exception as exc:
                 if _is_retryable_executor_error(exc):
                     task.state = TASK_STATE_INPUT_REQUIRED
+                    ctx.active_task_id = None
+                    task.touch()
+                    ctx.touch()
+                    self._task_store.mirror_task(task)
+                    self._task_store.mirror_context(ctx)
+                    await backup_session_async(
+                        self._backup_service,
+                        cwd,
+                        ctx.session_id,
+                        reason=BackupReason.INPUT_REQUIRED,
+                        critical=False,
+                        metrics=self._metrics,
+                    )
                     await self._publish_status(
                         event_queue,
                         task_id=task_id,
                         context_id=context_id,
                         state=TaskState.TASK_STATE_INPUT_REQUIRED,
-                        text="A temporary error occurred. Please retry.",
+                        text=_("A temporary error occurred. Please retry."),
                         session_id=ctx.session_id,
                     )
-                    self._task_store.mirror_task(task)
                     await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
                     self._metrics.record_executor_error()
                 else:
-                    task.state = TASK_STATE_FAILED
                     self._log_executor_exception("streaming", task_id=task_id, context_id=context_id)
+                    task.state = TASK_STATE_FAILED
+                    ctx.active_task_id = None
+                    task.touch()
+                    ctx.touch()
+                    self._task_store.mirror_task(task)
+                    self._task_store.mirror_context(ctx)
+                    if await self._publish_backup_blocked_after_terminal_backup_failure(
+                        event_queue,
+                        task=task,
+                        ctx=ctx,
+                        cwd=cwd,
+                        task_id=task_id,
+                        context_id=context_id,
+                        reason=BackupReason.TERMINAL,
+                        blocked_terminal_state=TASK_STATE_FAILED,
+                    ):
+                        self._metrics.record_executor_error()
+                        self._metrics.record_task_failed()
+                        return
                     await self._publish_status(
                         event_queue,
                         task_id=task_id,
@@ -1200,7 +1293,6 @@ class IacCodeA2AExecutor(AgentExecutor):
                         text=self._sanitize_error(exc),
                         session_id=ctx.session_id,
                     )
-                    self._task_store.mirror_task(task)
                     await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
                     self._metrics.record_executor_error()
                     self._metrics.record_task_failed()
@@ -1397,13 +1489,75 @@ class IacCodeA2AExecutor(AgentExecutor):
         if isinstance(exc, ValueError):
             msg = str(exc).lower()
             if "provider" in msg or "configure" in msg or "/auth" in msg:
-                return "Authentication required. Please configure your API credentials."
+                return _("Authentication required. Configure credentials and retry.")
         if type(exc).__name__ == "AuthenticationError":
-            return "Authentication required. Please configure your API credentials."
+            return _("Authentication required. Configure credentials and retry.")
         status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
         if status == 401:
-            return "Authentication required. Please configure your API credentials."
+            return _("Authentication required. Configure credentials and retry.")
         return _format_exception(exc)
+
+    async def _publish_backup_blocked_after_terminal_backup_failure(
+        self,
+        event_queue: EventQueue,
+        *,
+        task: Any,
+        ctx: Any,
+        cwd: str,
+        task_id: str,
+        context_id: str,
+        reason: BackupReason,
+        blocked_terminal_state: str,
+    ) -> bool:
+        try:
+            await backup_session_async(
+                self._backup_service,
+                cwd,
+                ctx.session_id,
+                reason=reason,
+                critical=True,
+                metrics=self._metrics,
+            )
+            return False
+        except SessionBackupBlocked as exc:
+            logger.warning(
+                "A2A terminal session backup blocked task publication reason=%s retry_count=%s error=%s",
+                reason.value,
+                getattr(exc, "retry_count", 0),
+                public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+            )
+            record_backup_blocked = getattr(self._metrics, "record_backup_blocked", None)
+            if callable(record_backup_blocked):
+                try:
+                    record_backup_blocked(reason=reason.value, recoverable=True)
+                except Exception as metric_exc:
+                    logger.debug("Failed to record A2A backup_blocked metric: %s", type(metric_exc).__name__)
+            task.state = TASK_STATE_INPUT_REQUIRED
+            ctx.active_task_id = None
+            task.touch()
+            ctx.touch()
+            self._task_store.mirror_task(task)
+            self._task_store.mirror_context(ctx)
+            await self._publish_status(
+                event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                text=_("Session backup failed. Retry after the backup path is available."),
+                metadata={
+                    "iac_code": {
+                        "backupBlocked": {
+                            "reason": reason.value,
+                            "blockedTerminalState": blocked_terminal_state,
+                            "error": public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS),
+                            "recoverable": True,
+                        }
+                    }
+                },
+                session_id=ctx.session_id,
+            )
+            await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+            return True
 
     async def _should_route_pipeline_handoff_to_normal(self, *, context_id: str, cwd: str) -> bool:
         try:
@@ -1415,9 +1569,11 @@ class IacCodeA2AExecutor(AgentExecutor):
         state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=ctx.session_id)
         if state is None:
             return False
-        _snapshot_store, _journal, snapshot, _journal_events = state
+        _snapshot_store, _journal, snapshot, journal_events = state
         handoff = snapshot.get("normalHandoff")
         if not isinstance(handoff, dict):
+            return False
+        if not _normal_handoff_has_backup_ack(handoff, journal_events):
             return False
         return handoff.get("action") == "switch_to_normal" and handoff.get("targetMode") == "normal"
 
@@ -1431,9 +1587,11 @@ class IacCodeA2AExecutor(AgentExecutor):
         state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=ctx.session_id)
         if state is None:
             return
-        _snapshot_store, _journal, snapshot, _journal_events = state
+        _snapshot_store, _journal, snapshot, journal_events = state
         handoff = snapshot.get("normalHandoff")
         if not isinstance(handoff, dict):
+            return
+        if not _normal_handoff_has_backup_ack(handoff, journal_events):
             return
         summary = handoff.get("summary")
         cleanup_payload = None
@@ -1577,6 +1735,29 @@ class IacCodeA2AExecutor(AgentExecutor):
             await self._push_notifier.notify_task_state(task_id=task_id, context_id=context_id, state=state)
         except Exception:
             logger.warning("A2A push notification failed", exc_info=True)
+
+
+def _normal_handoff_has_backup_ack(handoff: dict[str, Any], journal_events: list[dict[str, Any]]) -> bool:
+    if handoff.get("visibility") != "committed":
+        return True
+    handoff_sequence = _a2a_pipeline_sequence_number(handoff.get("sequence"))
+    handoff_event_id = handoff.get("eventId")
+    handoff_event_type = handoff.get("eventType") or "pipeline_handoff_ready"
+    for event in journal_events:
+        if event.get("eventType") != BACKUP_COMMITTED_EVENT_TYPE:
+            continue
+        if _a2a_pipeline_sequence_number(event.get("sequence")) <= handoff_sequence:
+            continue
+        data = event.get("data")
+        data = data if isinstance(data, dict) else {}
+        if data.get("committedEventId") == handoff_event_id:
+            return True
+        if (
+            _a2a_pipeline_sequence_number(data.get("committedSequence")) == handoff_sequence
+            and data.get("committedEventType") == handoff_event_type
+        ):
+            return True
+    return False
 
 
 def _is_retryable_executor_error(exc: Exception) -> bool:

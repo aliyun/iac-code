@@ -126,6 +126,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     register_cloud_tools(tool_registry, CloudCredentials())
 
     session_storage = SessionStorage()
+    session_dir = _prepare_session_dir_for_artifacts(session_storage, cwd, session_id)
 
     memory_runtime = ProjectMemoryRuntime(cwd)
     memory_manager = memory_runtime.memory_manager
@@ -224,6 +225,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                 mcp_manager,
                 session_id,
                 registered_mcp_tool_names,
+                session_dir=session_dir,
             )
             registered_mcp_command_names, command_warnings = _run_async_blocking(
                 _sync_mcp_command_registry(command_registry, mcp_manager, registered_mcp_command_names)
@@ -247,6 +249,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                         mcp_manager,
                         session_id,
                         registered_mcp_tool_names,
+                        session_dir=session_dir,
                     )
                 if capability in {"prompts", "resources"}:
                     registered_mcp_command_names, warnings = await _sync_mcp_command_registry(
@@ -274,7 +277,9 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             cli_disallowed=options.cli_disallowed_tools,
             cli_mode=options.cli_permission_mode,
         )
-        permission_context.trusted_read_directories.extend(build_session_trusted_read_directories(session_id))
+        permission_context.trusted_read_directories.extend(
+            build_session_trusted_read_directories(session_id, session_dir=session_dir)
+        )
 
         if hasattr(tool_registry, "get"):
             agent_tool = tool_registry.get("agent")
@@ -304,6 +309,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             auto_trigger_skills=command_registry.get_model_invocable_skills(),
             memory_recall_service=memory_recall_service,
             system_prompt_refresher=build_agent_system_prompt,
+            result_storage_dir=_result_storage_dir_for_session(session_dir),
         )
         if mcp_manager is not None:
             add_change_listener = getattr(mcp_manager, "add_change_listener", None)
@@ -342,6 +348,69 @@ def _session_mcp_configs(configs: list[dict[str, Any]] | None) -> dict[str, dict
             continue
         normalized[name] = {key: value for key, value in config.items() if key != "name"}
     return normalized
+
+
+def _prepare_session_dir_for_artifacts(session_storage: Any, cwd: str, session_id: str) -> Path | None:
+    ensure_v2_session = getattr(session_storage, "ensure_v2_session_dir_for_new_session", None)
+    if callable(ensure_v2_session):
+        try:
+            ensure_v2_session(cwd, session_id)
+        except (AttributeError, TypeError):
+            pass
+    return _session_dir_for_artifacts(session_storage, cwd, session_id)
+
+
+def _session_dir_for_artifacts(session_storage: Any, cwd: str, session_id: str) -> Path | None:
+    v2_session_dir_factory = getattr(session_storage, "v2_session_dir", None)
+    used_v2_session_dir = callable(v2_session_dir_factory)
+    if not used_v2_session_dir:
+        v2_session_dir_factory = getattr(session_storage, "session_dir", None)
+        if not callable(v2_session_dir_factory):
+            return None
+    try:
+        raw_session_dir = v2_session_dir_factory(cwd, session_id)
+    except (AttributeError, TypeError):
+        return None
+    if raw_session_dir is None:
+        return None
+    needs_marker_check = not used_v2_session_dir
+    if isinstance(raw_session_dir, Path):
+        session_dir = raw_session_dir
+    elif isinstance(raw_session_dir, str):
+        session_dir = Path(raw_session_dir)
+    else:
+        if not used_v2_session_dir:
+            return None
+        session_dir_factory = getattr(session_storage, "session_dir", None)
+        if not callable(session_dir_factory):
+            return None
+        try:
+            fallback_session_dir = session_dir_factory(cwd, session_id)
+        except (AttributeError, TypeError):
+            return None
+        if isinstance(fallback_session_dir, Path):
+            session_dir = fallback_session_dir
+        elif isinstance(fallback_session_dir, str):
+            session_dir = Path(fallback_session_dir)
+        else:
+            return None
+        needs_marker_check = True
+    if needs_marker_check:
+        from iac_code.services.session_layout import SESSION_LAYOUT_VERSION_V2, require_supported_session_layout
+
+        if require_supported_session_layout(session_dir) != SESSION_LAYOUT_VERSION_V2:
+            return None
+    return session_dir
+
+
+def _result_storage_dir_for_session(session_dir: Path | None) -> Path | None:
+    if session_dir is None:
+        return None
+    from iac_code.services.session_layout import SessionPaths, session_layout_version
+
+    if session_layout_version(session_dir) is None:
+        return None
+    return SessionPaths.require_supported(session_dir).tool_results_dir
 
 
 def _mcp_connection_warnings(mcp_manager: Any) -> list[Any]:
@@ -459,18 +528,21 @@ def _sync_mcp_tool_registry(
     mcp_manager: Any,
     session_id: str,
     registered_names: set[str],
+    *,
+    session_dir: Path | str | None = None,
 ) -> set[str]:
     from iac_code.mcp.tools import ListMCPResourcesTool, MCPTool, ReadMCPResourceTool
 
     records = {record.public_name: record for record in mcp_manager.list_tools()}
     for record in records.values():
-        tool_registry.register(MCPTool(manager=mcp_manager, record=record, session_id=session_id))
+        tool_registry.register(
+            MCPTool(manager=mcp_manager, record=record, session_id=session_id, session_dir=session_dir)
+        )
     desired = set(records)
     if mcp_manager.list_resources():
         if tool_registry.get("list_mcp_resources") is None:
             tool_registry.register(ListMCPResourcesTool(manager=mcp_manager))
-        if tool_registry.get("read_mcp_resource") is None:
-            tool_registry.register(ReadMCPResourceTool(manager=mcp_manager, session_id=session_id))
+        tool_registry.register(ReadMCPResourceTool(manager=mcp_manager, session_id=session_id, session_dir=session_dir))
         desired.update({"list_mcp_resources", "read_mcp_resource"})
     for name in registered_names - desired:
         tool_registry.unregister(name)

@@ -145,7 +145,13 @@ Runtime logs の既定場所:
 
 `IAC_CODE_LOG_DIR` が設定されている場合はそのディレクトリを使います。
 
-MCP tool results の binary artifacts は次に保存されます。
+v2 セッションでは、MCP tool results の binary artifacts はセッション所有のディレクトリに保存されます。
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/
+```
+
+対応 layout marker のない旧セッションは次を使います。
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/

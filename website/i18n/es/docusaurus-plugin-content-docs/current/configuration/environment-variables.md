@@ -52,7 +52,7 @@ Consulta [Credenciales de Alibaba Cloud](./alibaba-cloud-credentials.md) para ma
 | Variable | Descripcion |
 |---|---|
 | `IAC_CODE_CONFIG_DIR` | Sobreescribe el directorio de configuracion en tiempo de ejecucion (predeterminado `~/.iac-code/`); admite expansion de `~` y `$VAR`. Todos los artefactos persistidos (credenciales, ajustes, historial, projects, image-cache, skills, telemetry, etc.) siguen este directorio |
-| `IAC_CODE_LOG_DIR` | Sobrescribe el directorio local de logs de arranque/depuración (predeterminado `<config-dir>/logs/`); admite expansión de `~` y `$VAR`. Los registros de auditoría de permisos permanecen en `<config-dir>/logs/permission-audit.jsonl` |
+| `IAC_CODE_LOG_DIR` | Sobrescribe el directorio local de logs de arranque/depuración (predeterminado `<config-dir>/logs/`); admite expansión de `~` y `$VAR`. Los registros de auditoría de permisos siguen el layout de sesión y esta variable no los mueve |
 | `IAC_CODE_PERMISSION_AUDIT_INCLUDE_TOOL_INPUT` | Sobrescribe `permissions.audit.include_tool_input`; establécelo en `1` / `true` / `yes` / `on` para incluir entrada de herramienta solo con forma en los registros de auditoría de permisos, usando tipo/longitud/huella en vez de cadenas de payload de negocio sin procesar y aplicando huellas a nombres de campo fuera de la lista permitida |
 | `IAC_CODE_ENV` | Etiqueta del entorno de despliegue (predeterminado: `production`) |
 | `IAC_CODE_TENANT_ID` | Identificador de tenant para telemetria; se le agrega automaticamente el prefijo `iac_tenant_` si no lo tiene |
@@ -60,3 +60,10 @@ Consulta [Credenciales de Alibaba Cloud](./alibaba-cloud-credentials.md) para ma
 | `IAC_CODE_A2A_PUSH_KEYRING` | Keyring de secretos push A2A cifrados gestionado por el entorno (formato JSON) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint estandar de OpenTelemetry; cuando se establece, habilita la exportacion OTLP |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Capturar contenido de mensajes/herramientas de GenAI en spans: `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` |
+
+
+## Copia de seguridad de sesiones
+
+| Variable | Descripción |
+|---|---|
+| `IAC_CODE_CONFIG_BACKUP_DIR` | Directorio opcional para copias de seguridad de sesión; admite expansión de `~` y `$VAR`, y expansión `%VAR%` en Windows. En PowerShell, pase una ruta concreta o deje que el shell expanda `$env:VAR` antes de iniciar `iac-code`. En despliegues sandbox suele ser una ruta OSS montada, pero debe ser independiente de `IAC_CODE_CONFIG_DIR` y de cualquier origen de sesión, sin solaparse, y con latencia suficientemente baja para checkpoints críticos. Las rutas UNC, unidades mapeadas y rutas OSS montadas deben conservar el bloqueo de archivo `.backup-lock`, reemplazo atómico y metadatos de archivo para el mirroring incremental; evite ancestros symlink, junction o reparse point en el origen de sesión activo, la raíz de backup y las sesiones reflejadas. Cuando está habilitado, los puntos de control reflejan cada sesión v2 en `<backup>/projects/<project>/<session_id>/` con la misma estructura que la sesión activa; `.backup-state.json` y `.backup-lock` quedan locales y no se copian. Los backups de fin de turno normal usan `normal_turn_end` y no bloquean la respuesta; solo los fallos de checkpoints `critical=true` bloquean la publicación. Los índices A2A task/context compartidos pueden montarse por separado. |

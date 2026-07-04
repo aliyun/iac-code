@@ -1,4 +1,6 @@
 import asyncio
+import json
+import shutil
 import threading
 import time
 from collections.abc import Callable
@@ -14,6 +16,15 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.services.session_layout import UnsupportedSessionLayoutError
+from iac_code.services.session_storage import SessionStorage
+
+
+def _symlink_or_skip(target, link, *, target_is_directory=False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
 
 
 class FailingPersistence:
@@ -92,6 +103,50 @@ async def test_context_reuses_runtime_until_evicted() -> None:
 
     assert again is context
     assert again.runtime == context.runtime
+
+
+def test_mirror_session_task_treats_session_path_resolution_as_best_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
+    warning_calls = []
+
+    def fail_session_paths(context_id: str):
+        raise UnsupportedSessionLayoutError(
+            "future layout at /mnt/oss/customer-bucket/projects/sensitive-session-id/metadata.json"
+        )
+
+    monkeypatch.setattr(store, "_session_paths_for_task_context", fail_session_paths)
+    monkeypatch.setattr("iac_code.a2a.task_store.logger.warning", lambda *args, **kwargs: warning_calls.append(args))
+
+    store._mirror_session_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+
+    assert warning_calls
+    logged = " ".join(str(arg) for arg in warning_calls[0])
+    assert "UnsupportedSessionLayoutError" in logged
+    assert "/mnt/oss" not in logged
+    assert "customer-bucket" not in logged
+    assert "sensitive-session-id" not in logged
+
+
+def test_load_context_snapshot_failure_logs_sanitized_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    class ExplodingPersistence:
+        def load_context(self, context_id: str):
+            raise OSError(f"failed for {context_id} at /tmp/secret/path")
+
+    warning_calls = []
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, persistence=ExplodingPersistence())
+
+    monkeypatch.setattr("iac_code.a2a.task_store.logger.warning", lambda *args, **kwargs: warning_calls.append(args))
+    monkeypatch.setattr(
+        "iac_code.a2a.task_store.logger.exception",
+        lambda *args, **kwargs: pytest.fail("context snapshot load should not log traceback"),
+    )
+
+    assert store._load_context_snapshot("ctx-secret") is None
+
+    assert warning_calls
+    template, error_type = warning_calls[0]
+    assert "context %s" not in template
+    assert error_type == "OSError"
 
 
 @pytest.mark.asyncio
@@ -670,6 +725,72 @@ async def test_save_updates_existing_executor_record_state_in_persistence(tmp_pa
     assert record.state == "completed"
     assert snapshot is not None
     assert snapshot.state == "completed"
+
+
+@pytest.mark.asyncio
+async def test_save_updates_session_task_snapshot_after_restart_without_contexts(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    persistence = A2APersistenceStore(config_dir / "a2a")
+    writer = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await writer.get_or_create_context(context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda sid: object())
+    await writer.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    session_task_path = SessionStorage().session_dir(str(cwd), context.session_id) / "a2a" / "task.json"
+    assert json.loads(session_task_path.read_text(encoding="utf-8"))["state"] == "submitted"
+
+    restarted = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await restarted.save(sdk_task("task-1", context_id="ctx-1", state=TaskState.TASK_STATE_CANCELED, updated_at=2))
+
+    session_task = json.loads(session_task_path.read_text(encoding="utf-8"))
+    assert session_task["state"] == "canceled"
+    assert persistence.load_task("task-1").state == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_session_snapshots_are_written_without_global_persistence(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=None)
+
+    context = await store.get_or_create_context(context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda sid: object())
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+
+    session_dir = SessionStorage().session_dir(str(cwd), context.session_id)
+    session_context = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+    session_task = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
+    assert session_context["context_id"] == "ctx-1"
+    assert session_context["session_id"] == context.session_id
+    assert session_task["task_id"] == "task-1"
+    assert session_task["context_id"] == "ctx-1"
+    assert not (config_dir / "a2a" / "tasks" / "task-1.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_session_snapshots_refuse_symlinked_a2a_dir(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=None)
+
+    context = await store.get_or_create_context(context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda sid: object())
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    session_dir = SessionStorage().session_dir(str(cwd), context.session_id)
+    shutil.rmtree(session_dir / "a2a")
+    outside = tmp_path / "outside-a2a"
+    outside.mkdir()
+    _symlink_or_skip(outside, session_dir / "a2a", target_is_directory=True)
+    task.state = "working"
+
+    store.mirror_task(task)
+    store.mirror_context(context)
+
+    assert not (outside / "task.json").exists()
+    assert not (outside / "context.json").exists()
 
 
 @pytest.mark.asyncio

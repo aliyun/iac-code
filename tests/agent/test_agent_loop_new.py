@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -1297,6 +1298,88 @@ class TestAgentLoopStreaming:
         assert loop.get_session_usage().input_tokens == 7
         assert loop.get_session_usage().output_tokens == 8
         assert loop.get_session_usage().total_tokens == 15
+
+    async def test_replace_session_resets_transcript_usage_store(
+        self, mock_provider, mock_registry, tmp_path, monkeypatch
+    ):
+        from iac_code.services.session_usage import SessionUsageStore
+
+        cwd = "/tmp/status-project"
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+        transcript_usage_path = (
+            tmp_path / "root-session" / "pipeline" / "transcripts" / "transcript_att_0001" / "usage.jsonl"
+        )
+        transcript_store = SessionUsageStore(path_provider=lambda _cwd, _session_id: transcript_usage_path)
+        transcript_store.append(cwd, "transcript_att_0001", Usage(input_tokens=1, output_tokens=2))
+        normal_store = SessionUsageStore()
+        normal_store.append(cwd, "normal-session", Usage(input_tokens=7, output_tokens=8))
+
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_id="transcript_att_0001",
+            cwd=cwd,
+            session_usage_store=transcript_store,
+            root_session_id="root-session",
+            transcript_id="transcript_att_0001",
+            result_storage_dir=tmp_path
+            / "root-session"
+            / "pipeline"
+            / "transcripts"
+            / "transcript_att_0001"
+            / "tool-results",
+            audit_log_path=tmp_path
+            / "root-session"
+            / "pipeline"
+            / "transcripts"
+            / "transcript_att_0001"
+            / "permission-audit.jsonl",
+        )
+
+        assert loop.get_session_usage().total_tokens == 3
+
+        loop.replace_session("normal-session", resume_messages=None)
+        loop._record_session_usage(Usage(input_tokens=2, output_tokens=3))
+
+        assert loop.session_id == "normal-session"
+        assert loop.get_session_usage().total_tokens == 20
+        assert transcript_store.load(cwd, "transcript_att_0001").total_tokens == 3
+        assert normal_store.load(cwd, "normal-session").total_tokens == 20
+
+    async def test_replace_session_uses_v2_session_tool_results(self, mock_provider, mock_registry, tmp_path):
+        from iac_code.services.session_metadata import (
+            SESSION_LAYOUT_VERSION_V2,
+            SessionMetadata,
+            write_session_metadata,
+        )
+        from iac_code.services.session_storage import SessionStorage
+
+        cwd = str(tmp_path / "workspace")
+        session_storage = SessionStorage(projects_dir=tmp_path / "projects")
+        old_session_dir = session_storage.session_dir(cwd, "old-session")
+        new_session_dir = session_storage.session_dir(cwd, "new-session")
+        write_session_metadata(
+            old_session_dir,
+            SessionMetadata(session_id="old-session", cwd=cwd, layout_version=SESSION_LAYOUT_VERSION_V2),
+        )
+        write_session_metadata(
+            new_session_dir,
+            SessionMetadata(session_id="new-session", cwd=cwd, layout_version=SESSION_LAYOUT_VERSION_V2),
+        )
+        loop = AgentLoop(
+            provider_manager=mock_provider,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            session_storage=session_storage,
+            session_id="old-session",
+            cwd=cwd,
+            result_storage_dir=old_session_dir / "tool-results",
+        )
+
+        loop.replace_session("new-session", resume_messages=None)
+
+        assert Path(loop._result_storage._storage_dir) == new_session_dir / "tool-results"
 
     async def test_refresh_session_usage_reloads_external_usage_totals(self, mock_provider, mock_registry, tmp_path):
         from iac_code.services.session_usage import SessionUsageStore
