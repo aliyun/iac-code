@@ -12,7 +12,20 @@ from pathlib import Path
 
 import pytest
 
-from iac_code.utils.state_io import append_jsonl_locked, atomic_write_json, atomic_write_text, safe_replace
+from iac_code.utils.state_io import (
+    append_jsonl_locked,
+    atomic_write_json,
+    atomic_write_text,
+    safe_replace,
+    write_text_no_follow,
+)
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
 
 
 def test_atomic_write_text_replaces_file_and_removes_temp(tmp_path: Path) -> None:
@@ -23,6 +36,15 @@ def test_atomic_write_text_replaces_file_and_removes_temp(tmp_path: Path) -> Non
 
     assert path.read_text(encoding="utf-8") == "new"
     assert not list(tmp_path.glob(".state.txt.*.tmp"))
+
+
+def test_write_text_no_follow_truncates_existing_file(tmp_path: Path) -> None:
+    path = tmp_path / "state.txt"
+    path.write_text("longer old content", encoding="utf-8")
+
+    write_text_no_follow(path, "short", encoding="utf-8")
+
+    assert path.read_text(encoding="utf-8") == "short"
 
 
 def test_atomic_write_json_fails_without_overwriting_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,6 +83,32 @@ def test_append_jsonl_locked_writes_one_complete_line_per_record(tmp_path: Path)
     assert [json.loads(line) for line in lines] == [{"a": 1}, {"b": 2}]
 
 
+def test_append_jsonl_locked_refuses_symlink_leaf(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("outside\n", encoding="utf-8")
+    path = tmp_path / "session.jsonl"
+    _symlink_or_skip(outside, path)
+
+    with pytest.raises(OSError):
+        append_jsonl_locked(path, [{"a": 1}], durable=False)
+
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
+def test_cross_process_append_lock_refuses_symlink_lock_leaf(tmp_path: Path) -> None:
+    from iac_code.utils import state_io
+
+    outside = tmp_path / "outside.lock"
+    outside.write_text("outside\n", encoding="utf-8")
+    _symlink_or_skip(outside, tmp_path / ".session.jsonl.lock")
+
+    with pytest.raises(OSError):
+        with state_io.cross_process_append_lock(tmp_path / "session.jsonl"):
+            pass
+
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
 def test_append_jsonl_rotating_locked_rotates_before_append(tmp_path: Path) -> None:
     from iac_code.utils.state_io import append_jsonl_rotating_locked
 
@@ -71,6 +119,20 @@ def test_append_jsonl_rotating_locked_rotates_before_append(tmp_path: Path) -> N
 
     assert json.loads(path.read_text(encoding="utf-8")) == {"created": True}
     assert (tmp_path / "permission-audit.jsonl.1").exists()
+
+
+def test_append_jsonl_rotating_locked_refuses_symlink_leaf(tmp_path: Path) -> None:
+    from iac_code.utils.state_io import append_jsonl_rotating_locked
+
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("outside\n", encoding="utf-8")
+    path = tmp_path / "permission-audit.jsonl"
+    _symlink_or_skip(outside, path)
+
+    with pytest.raises(OSError):
+        append_jsonl_rotating_locked(path, [{"created": True}], max_file_bytes=1024, max_files=2)
+
+    assert outside.read_text(encoding="utf-8") == "outside\n"
 
 
 def test_append_jsonl_rotating_locked_rotates_when_pending_record_would_exceed_limit(tmp_path: Path) -> None:
@@ -241,6 +303,14 @@ def test_append_jsonl_locked_fails_loudly_when_posix_lock_acquisition_fails(
     assert not path.exists()
 
 
+def test_cross_process_append_lock_is_public_alias(tmp_path: Path) -> None:
+    from iac_code.utils import state_io
+
+    assert state_io._cross_process_append_lock is state_io.cross_process_append_lock
+    with state_io.cross_process_append_lock(tmp_path / "session.jsonl"):
+        pass
+
+
 def test_windows_append_lock_seeks_before_lock_and_unlock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from iac_code.utils import state_io
 
@@ -259,7 +329,7 @@ def test_windows_append_lock_seeks_before_lock_and_unlock(tmp_path: Path, monkey
         def seek(self, offset: int) -> None:
             events.append(("seek", offset))
 
-    def fake_open(self: Path, mode: str = "r", *args: object, **kwargs: object) -> FakeLockFile:
+    def fake_open_lock(_path: Path) -> FakeLockFile:
         return FakeLockFile()
 
     def fake_locking(fd: int, mode: int, nbytes: int) -> None:
@@ -268,7 +338,7 @@ def test_windows_append_lock_seeks_before_lock_and_unlock(tmp_path: Path, monkey
     fake_msvcrt = types.SimpleNamespace(LK_LOCK=1, LK_UNLCK=2, locking=fake_locking)
     monkeypatch.setattr("iac_code.utils.state_io.sys.platform", "win32")
     monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
-    monkeypatch.setattr(Path, "open", fake_open)
+    monkeypatch.setattr(state_io, "_open_lock_binary", fake_open_lock)
 
     with state_io._cross_process_append_lock(tmp_path / "session.jsonl"):
         events.append(("yield", 0))
@@ -280,6 +350,46 @@ def test_windows_append_lock_seeks_before_lock_and_unlock(tmp_path: Path, monkey
         ("seek", 0),
         ("locking", 2, 1),
     ]
+
+
+def test_windows_no_follow_rejects_reparse_attribute_from_handle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+
+    from iac_code.utils import state_io
+
+    class FakeFunction:
+        def __init__(self, result: object = True, *, reparse_info: bool = False) -> None:
+            self.result = result
+            self.reparse_info = reparse_info
+            self.calls: list[tuple[object, ...]] = []
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            self.calls.append(args)
+            if self.reparse_info:
+                args[1]._obj.dwFileAttributes = 0x400
+            return self.result
+
+    class FakeKernel32:
+        def __init__(self) -> None:
+            self.CreateFileW = FakeFunction(result=1234)
+            self.GetFileInformationByHandle = FakeFunction(reparse_info=True)
+            self.CloseHandle = FakeFunction(result=True)
+
+    fake_kernel32 = FakeKernel32()
+    fake_msvcrt = types.SimpleNamespace(open_osfhandle=lambda *_args: pytest.fail("open_osfhandle called"))
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: fake_kernel32, raising=False)
+
+    with pytest.raises(OSError, match="symlink or reparse"):
+        state_io._open_windows_no_follow(tmp_path / "state.jsonl", os.O_RDONLY, 0o600)
+
+    assert fake_kernel32.GetFileInformationByHandle.calls
+    assert fake_kernel32.CloseHandle.calls == [(1234,)]
 
 
 def test_parent_directory_fsync_is_best_effort(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

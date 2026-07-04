@@ -39,6 +39,10 @@ Unterstützte Ausgabeformate sind:
 | `json` | Ein einzelnes JSON-Ergebnis für Aufrufer, die die endgültige Antwort parsen. |
 | `stream-json` | Streaming-JSON-Ereignisse für Aufrufer, die inkrementellen Fortschritt verarbeiten. |
 
+## Sitzungsbackups
+
+Wenn `IAC_CODE_CONFIG_BACKUP_DIR` gesetzt ist, spiegeln nicht-interaktive Laeufe die v2-Sitzung an wichtigen Checkpoints. Der normale Turn-End-Checkpoint verwendet `normal_turn_end`; Backupfehler an diesem Punkt werden als `warning` protokolliert und in `.backup-state.json` erfasst, ohne die abgeschlossene Antwort fehlschlagen zu lassen oder dem finalen Output ein warning-Feld hinzuzufuegen. Der Pipeline-Modus hat eigene kritische Backup-Gates.
+
 ## Berechtigungssteuerung in der Automatisierung
 
 Verwenden Sie beim nicht-interaktiven Ausführen `--permission-mode`, um zu steuern, wie der Agent Werkzeuggenehmigungen behandelt:

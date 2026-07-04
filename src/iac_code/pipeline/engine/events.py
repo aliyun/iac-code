@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from enum import Enum
+
+from iac_code.utils.public_errors import sanitize_public_text
 
 
 class PipelineEventType(str, Enum):
     PIPELINE_STARTED = "pipeline_started"
     PIPELINE_COMPLETED = "pipeline_completed"
     PIPELINE_RESUMED = "pipeline_resumed"
+    BACKUP_BLOCKED = "backup_blocked"
     PIPELINE_ERROR = "pipeline_error"
     PIPELINE_WARNING = "pipeline_warning"
 
@@ -42,3 +46,17 @@ class PipelineEvent:
     step_id: str | None
     timestamp: float
     data: dict
+
+
+def backup_blocked_event(step_id: str | None, reason: object, error: object) -> PipelineEvent:
+    reason_text = getattr(reason, "value", reason)
+    return PipelineEvent(
+        type=PipelineEventType.BACKUP_BLOCKED,
+        step_id=step_id,
+        timestamp=time.time(),
+        data={
+            "reason": sanitize_public_text(str(reason_text)),
+            "error": sanitize_public_text(str(error)),
+            "recoverable": True,
+        },
+    )

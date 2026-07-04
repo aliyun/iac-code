@@ -64,11 +64,26 @@ PIPELINE_USER_VISIBLE_MSGIDS = {
     "Cost estimation",
     "Current step",
     "Complete step",
+    "backup unavailable",
+    "Pipeline backup is blocked; the pipeline is paused and recoverable: {error}",
     "Ask user question",
     "Show architecture diagram",
     "Show candidate details",
     'Generated the architecture diagram for "{candidate_name}".',
     'Displayed details for "{candidate_name}".',
+}
+
+SESSION_BACKUP_USER_VISIBLE_MSGIDS = {
+    "A2A pipeline sidecar owner is unavailable",
+    "A2A pipeline sidecar restore failed: status={status}, reason={reason}",
+    "Failed to persist A2A pipeline snapshot",
+    "Session backup requires a supported session layout.",
+    "Unrepairable A2A pipeline journal tail",
+    "backup root",
+    "invalid session layout version",
+    "invalid session metadata",
+    "session source",
+    "unknown",
 }
 
 
@@ -401,6 +416,27 @@ def test_pipeline_user_visible_translations_are_complete():
         po_file = lang_dir / "LC_MESSAGES" / "messages.po"
         translations = _get_all_translations_from_po(po_file)
         for msgid in sorted(PIPELINE_USER_VISIBLE_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+
+    assert not errors, "\n".join(errors)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_session_backup_labels_are_translatable():
+    """Session backup validation errors interpolate labels, so guard against raw English labels."""
+    assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = SESSION_BACKUP_USER_VISIBLE_MSGIDS - pot_msgids
+    assert not missing_from_pot, "Session backup msgids missing from messages.pot: {}".format(sorted(missing_from_pot))
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(SESSION_BACKUP_USER_VISIBLE_MSGIDS):
             msgstr = translations.get(msgid, "").strip()
             if not msgstr:
                 errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")

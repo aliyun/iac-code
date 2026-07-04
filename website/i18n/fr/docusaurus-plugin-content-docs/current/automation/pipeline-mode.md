@@ -99,3 +99,8 @@ ACP ne prend pas actuellement en charge le mode pipeline. `--prompt` / le [mode 
 - Le mode pipeline nécessite le REPL interactif. `--prompt` est refusé lorsque `IAC_CODE_MODE=pipeline`.
 - Le mode pipeline accepte les entrées texte. Les images collées dans le REPL sont ignorées lorsque le pipeline est actif.
 - Pendant un pipeline, les shell escapes, les déclencheurs de skills et la plupart des slash commands sont limités, sauf autorisation explicite dans la définition du pipeline. Les commandes de base comme `/help`, `/status`, `/resume` et `/exit` restent disponibles.
+
+
+## Points de contrôle de sauvegarde
+
+Le mode Pipeline exécute des sauvegardes critiques après les steps agent loop terminés et avant de publier des états d'attente, `pipeline_handoff_ready` ou terminaux visibles. Si une sauvegarde critique échoue, le pipeline émet `backup_blocked` et se met en pause dans un état récupérable au lieu de publier d'abord `input_required`, `waiting_input`, `pipeline_handoff_ready` ou la terminaison. Pour les observateurs A2A, les publications protégées terminales et `pipeline_handoff_ready` sont suivies d'un événement `backup_committed` avec `committedEventId`, `committedEventType` et `committedSequence` une fois le miroir durable. La progression des steps enfants `parallel_sub_pipeline` n'est pas sauvegardée séparément pendant que des sous-pipelines frères peuvent encore s'exécuter; le point de contrôle parent capture l'état agrégé stable.

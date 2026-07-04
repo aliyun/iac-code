@@ -147,6 +147,136 @@ async def test_headless_closes_agent_runtime_after_run(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_headless_backs_up_successful_turn(monkeypatch):
+    from iac_code.services.session_backup import BackupReason
+
+    runner = _make_runner()
+    events = [MessageEndEvent(stop_reason="end_turn", usage=Usage())]
+    mock_loop = AsyncMock()
+    mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+    mock_loop._cwd = "/repo"
+    mock_loop._session_id = "session-headless"
+    mock_loop._session_storage = object()
+    runtime = SimpleNamespace(
+        agent_loop=mock_loop,
+        session_id="session-headless",
+        mcp_config_warnings=[],
+        aclose=AsyncMock(),
+    )
+    calls = []
+
+    class FakeBackupService:
+        def __init__(self, *, session_storage=None):
+            self.session_storage = session_storage
+
+        def backup_session(self, cwd, session_id, *, reason, critical):
+            calls.append((self.session_storage, cwd, session_id, reason, critical))
+
+    monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.cli.headless.SessionBackupService", FakeBackupService, raising=False)
+
+    exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    assert calls == [(mock_loop._session_storage, "/repo", "session-headless", BackupReason.NORMAL_TURN_END, False)]
+
+
+@pytest.mark.asyncio
+async def test_headless_logs_non_critical_backup_result_failure(monkeypatch):
+    from iac_code.services.session_backup import BackupReason, BackupResult
+
+    runner = _make_runner()
+    events = [MessageEndEvent(stop_reason="end_turn", usage=Usage())]
+    mock_loop = AsyncMock()
+    mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+    mock_loop._cwd = "/repo"
+    mock_loop._session_id = "session-headless"
+    mock_loop._session_storage = object()
+    runtime = SimpleNamespace(
+        agent_loop=mock_loop,
+        session_id="session-headless",
+        mcp_config_warnings=[],
+        aclose=AsyncMock(),
+    )
+
+    class FakeBackupService:
+        def __init__(self, *, session_storage=None):
+            self.session_storage = session_storage
+
+        def backup_session(self, cwd, session_id, *, reason, critical):
+            assert (self.session_storage, cwd, session_id, reason, critical) == (
+                mock_loop._session_storage,
+                "/repo",
+                "session-headless",
+                BackupReason.NORMAL_TURN_END,
+                False,
+            )
+            return BackupResult(enabled=True, succeeded=False, error="[PATH]", retry_count=2)
+
+    monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.cli.headless.SessionBackupService", FakeBackupService, raising=False)
+
+    with patch("iac_code.cli.headless.logger.warning") as warning:
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    warning.assert_called_once_with(
+        "Headless session backup failed (reason={}, retry_count={}): {}",
+        "normal_turn_end",
+        2,
+        "[PATH]",
+    )
+
+
+@pytest.mark.asyncio
+async def test_headless_backup_exception_warning_does_not_include_exception_message(monkeypatch):
+    from iac_code.services.session_backup import BackupReason
+
+    runner = _make_runner()
+    events = [MessageEndEvent(stop_reason="end_turn", usage=Usage())]
+    mock_loop = AsyncMock()
+    mock_loop.run_streaming = lambda prompt: _fake_stream(*events)
+    mock_loop._cwd = "/repo"
+    mock_loop._session_id = "session-headless"
+    mock_loop._session_storage = object()
+    runtime = SimpleNamespace(
+        agent_loop=mock_loop,
+        session_id="session-headless",
+        mcp_config_warnings=[],
+        aclose=AsyncMock(),
+    )
+
+    class FakeBackupService:
+        def __init__(self, *, session_storage=None):
+            self.session_storage = session_storage
+
+        def backup_session(self, cwd, session_id, *, reason, critical):
+            assert (self.session_storage, cwd, session_id, reason, critical) == (
+                mock_loop._session_storage,
+                "/repo",
+                "session-headless",
+                BackupReason.NORMAL_TURN_END,
+                False,
+            )
+            raise RuntimeError("/mnt/oss/customer-bucket/session source failed")
+
+    monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", lambda options: runtime)
+    monkeypatch.setattr("iac_code.cli.headless.SessionBackupService", FakeBackupService, raising=False)
+
+    with patch("iac_code.cli.headless.logger.warning") as warning:
+        exit_code = await runner.run("test prompt")
+
+    assert exit_code == EXIT_OK
+    warning.assert_called_once_with(
+        "Headless session backup failed (reason={}, retry_count={}, error_type={})",
+        "normal_turn_end",
+        0,
+        "RuntimeError",
+    )
+    assert "/mnt/oss/customer-bucket" not in " ".join(str(arg) for arg in warning.call_args.args)
+
+
+@pytest.mark.asyncio
 async def test_json_output():
     """TextDeltaEvent + MessageEndEvent produces valid JSON output and exit code 0."""
     buf = io.StringIO()

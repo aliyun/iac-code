@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,15 +10,20 @@ from a2a.types import TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
+from iac_code.a2a.backup import backup_session_async
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
+from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import ImageBlock, TextBlock
 from iac_code.pipeline.engine.user_input import PipelineUserInput
+from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent, ToolResultEvent
 
 from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntime, pending_future
@@ -35,9 +41,137 @@ def _image_only_pipeline_input() -> PipelineUserInput:
     )
 
 
+def _ensure_v2_session(cwd: str, session_id: str) -> Path:
+    return SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
+
+
+class FailingBackupService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, BackupReason, bool]] = []
+
+    def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+        self.calls.append((cwd, session_id, reason, critical))
+        raise RuntimeError("backup destination unavailable")
+
+
+class SnapshotReadingBackupService:
+    def __init__(self) -> None:
+        self.snapshots: list[tuple[BackupReason, dict, dict]] = []
+        self.calls: list[tuple[str, str, BackupReason, bool]] = []
+
+    def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+        self.calls.append((cwd, session_id, reason, critical))
+        session_dir = SessionStorage().session_dir(cwd, session_id)
+        task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
+        context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+        self.snapshots.append((reason, task_snapshot, context_snapshot))
+
+
+class UnsuccessfulBackupService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, BackupReason, bool]] = []
+
+    def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> BackupResult:
+        self.calls.append((cwd, session_id, reason, critical))
+        return BackupResult(enabled=True, succeeded=False, error="backup destination unavailable")
+
+
+class UnsuccessfulBackupServiceWithoutError:
+    def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> BackupResult:
+        return BackupResult(enabled=True, succeeded=False, error=None)
+
+
+class BlockedBackupServiceWithRetries:
+    def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> BackupResult:
+        raise SessionBackupBlocked("backup destination unavailable", retry_count=2)
+
+
+class BackupBlockedMetrics(NoOpA2AMetrics):
+    def __init__(self) -> None:
+        self.backup_blocked: list[tuple[str, bool]] = []
+        self.backup_failed: list[tuple[str, bool, int]] = []
+        self.backup_succeeded: list[tuple[str, bool, int]] = []
+        self.executor_error = 0
+        self.task_canceled = 0
+        self.task_failed = 0
+
+    def record_backup_blocked(self, *, reason: str, recoverable: bool) -> None:
+        self.backup_blocked.append((reason, recoverable))
+
+    def record_backup_failed(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        self.backup_failed.append((reason, critical, retry_count))
+
+    def record_backup_succeeded(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        self.backup_succeeded.append((reason, critical, retry_count))
+
+    def record_executor_error(self) -> None:
+        self.executor_error += 1
+
+    def record_task_canceled(self) -> None:
+        self.task_canceled += 1
+
+    def record_task_failed(self) -> None:
+        self.task_failed += 1
+
+
+class ExplodingBackupMetrics(NoOpA2AMetrics):
+    def record_backup_blocked(self, *, reason: str, recoverable: bool) -> None:
+        raise RuntimeError("metrics sink failed with token=abc123")
+
+    def record_backup_failed(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        raise RuntimeError("metrics sink failed with token=abc123")
+
+    def record_backup_succeeded(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        raise RuntimeError("metrics sink failed with token=abc123")
+
+
 @pytest.fixture(autouse=True)
 def default_normal_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("IAC_CODE_MODE", raising=False)
+
+
+@pytest.mark.asyncio
+async def test_backup_session_async_uses_translatable_fallback_for_missing_error() -> None:
+    with pytest.raises(SessionBackupBlocked, match="Session backup failed"):
+        await backup_session_async(
+            UnsuccessfulBackupServiceWithoutError(),
+            "/repo",
+            "session-1",
+            reason=BackupReason.TERMINAL,
+            critical=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_backup_session_async_records_retry_count_from_blocked_exception() -> None:
+    metrics = BackupBlockedMetrics()
+
+    with pytest.raises(SessionBackupBlocked):
+        await backup_session_async(
+            BlockedBackupServiceWithRetries(),
+            "/repo",
+            "session-1",
+            reason=BackupReason.TERMINAL,
+            critical=True,
+            metrics=metrics,
+        )
+
+    assert metrics.backup_failed == [(BackupReason.TERMINAL.value, True, 2)]
+
+
+@pytest.mark.asyncio
+async def test_backup_session_async_swallows_metrics_errors_for_noncritical_failure() -> None:
+    result = await backup_session_async(
+        UnsuccessfulBackupService(),
+        "/repo",
+        "session-1",
+        reason=BackupReason.NORMAL_TURN_END,
+        critical=False,
+        metrics=ExplodingBackupMetrics(),
+    )
+
+    assert result is not None
+    assert result.succeeded is False
 
 
 @pytest.mark.asyncio
@@ -50,7 +184,8 @@ async def test_executor_runs_prompt_and_finishes_input_required(
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
-    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    backup_service = SnapshotReadingBackupService()
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=backup_service)
     queue = FakeEventQueue()
     context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
 
@@ -66,6 +201,271 @@ async def test_executor_runs_prompt_and_finishes_input_required(
 
 
 @pytest.mark.asyncio
+async def test_executor_runs_noncritical_backup_after_normal_turn_without_failing_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    backup_service = FailingBackupService()
+    metrics = BackupBlockedMetrics()
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=metrics,
+        backup_service=backup_service,
+    )
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [
+        (BackupReason.NORMAL_TURN_END, False)
+    ]
+    assert dump(queue.events[-1])["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "input-required"
+    assert "A2A session backup failed" in caplog.text
+    assert "reason=normal_turn_end" in caplog.text
+    assert "retry_count=0" in caplog.text
+    assert metrics.backup_failed == [(BackupReason.NORMAL_TURN_END.value, False, 0)]
+
+
+@pytest.mark.asyncio
+async def test_executor_mirrors_input_required_before_normal_turn_backup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    backup_service = SnapshotReadingBackupService()
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        backup_service=backup_service,
+    )
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+
+    assert len(backup_service.snapshots) == 1
+    reason, task_snapshot, context_snapshot = backup_service.snapshots[0]
+    assert reason == BackupReason.NORMAL_TURN_END
+    assert task_snapshot["state"] == "input-required"
+    assert context_snapshot["active_task_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_executor_mirrors_failed_terminal_before_terminal_backup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class ExplodingLoop:
+        async def run_streaming(self, prompt: str):
+            raise RuntimeError("boom")
+            yield TextDeltaEvent(text="never")
+
+    runtime = FakeRuntime(agent_loop=ExplodingLoop(), session_id="session-1")
+    backup_service = SnapshotReadingBackupService()
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        backup_service=backup_service,
+    )
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+
+    assert len(backup_service.snapshots) == 1
+    reason, task_snapshot, context_snapshot = backup_service.snapshots[0]
+    assert reason == BackupReason.TERMINAL
+    assert task_snapshot["state"] == "failed"
+    assert context_snapshot["active_task_id"] is None
+    assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [(BackupReason.TERMINAL, True)]
+    record = await executor._task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_executor_failed_terminal_backup_result_blocks_terminal_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class ExplodingLoop:
+        async def run_streaming(self, prompt: str):
+            raise RuntimeError("boom")
+            yield TextDeltaEvent(text="never")
+
+    runtime = FakeRuntime(agent_loop=ExplodingLoop(), session_id="session-1")
+    backup_service = UnsuccessfulBackupService()
+    metrics = BackupBlockedMetrics()
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=metrics,
+        backup_service=backup_service,
+    )
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [(BackupReason.TERMINAL, True)]
+    states = [dump(event)["status"]["state"] for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
+    assert "TASK_STATE_FAILED" not in states
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "input-required"
+    terminal_update = dump(queue.events[-1])
+    backup_metadata = terminal_update["metadata"]["iac_code"]["backupBlocked"]
+    assert backup_metadata["reason"] == BackupReason.TERMINAL.value
+    assert backup_metadata["blockedTerminalState"] == "failed"
+    assert backup_metadata["recoverable"] is True
+    assert metrics.backup_blocked == [(BackupReason.TERMINAL.value, True)]
+    assert metrics.backup_failed == [(BackupReason.TERMINAL.value, True, 0)]
+    assert metrics.executor_error == 1
+    assert metrics.task_failed == 1
+    assert metrics.task_canceled == 0
+
+
+@pytest.mark.asyncio
+async def test_executor_terminal_backup_blocked_ignores_metrics_sink_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class ExplodingLoop:
+        async def run_streaming(self, prompt: str):
+            raise RuntimeError("boom")
+            yield TextDeltaEvent(text="never")
+
+    runtime = FakeRuntime(agent_loop=ExplodingLoop(), session_id="session-1")
+    backup_service = UnsuccessfulBackupService()
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        metrics=ExplodingBackupMetrics(),
+        backup_service=backup_service,
+    )
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    states = [dump(event)["status"]["state"] for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
+    terminal_update = dump(queue.events[-1])
+    backup_metadata = terminal_update["metadata"]["iac_code"]["backupBlocked"]
+    assert backup_metadata["reason"] == BackupReason.TERMINAL.value
+
+
+@pytest.mark.asyncio
+async def test_executor_mirrors_canceled_terminal_before_terminal_backup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    started = asyncio.Event()
+
+    class BlockingLoop:
+        async def run_streaming(self, prompt: str):
+            started.set()
+            await asyncio.Future()
+            yield TextDeltaEvent(text="never")
+
+    runtime = FakeRuntime(agent_loop=BlockingLoop(), session_id="session-1")
+    backup_service = SnapshotReadingBackupService()
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics()),
+        model="qwen3.6-plus",
+        backup_service=backup_service,
+    )
+    execute_task = asyncio.create_task(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+    )
+    await started.wait()
+
+    execute_task.cancel()
+    await execute_task
+
+    assert len(backup_service.snapshots) == 1
+    reason, task_snapshot, context_snapshot = backup_service.snapshots[0]
+    assert reason == BackupReason.TERMINAL
+    assert task_snapshot["state"] == "canceled"
+    assert context_snapshot["active_task_id"] is None
+    assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [(BackupReason.TERMINAL, True)]
+    record = await executor._task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_executor_canceled_terminal_backup_blocked_records_cancel_intent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    started = asyncio.Event()
+
+    class BlockingLoop:
+        async def run_streaming(self, prompt: str):
+            started.set()
+            await asyncio.Future()
+            yield TextDeltaEvent(text="never")
+
+    runtime = FakeRuntime(agent_loop=BlockingLoop(), session_id="session-1")
+    backup_service = UnsuccessfulBackupService()
+    metrics = BackupBlockedMetrics()
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=metrics,
+        backup_service=backup_service,
+    )
+    queue = FakeEventQueue()
+    execute_task = asyncio.create_task(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+    )
+    await started.wait()
+
+    execute_task.cancel()
+    await execute_task
+
+    assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [(BackupReason.TERMINAL, True)]
+    states = [dump(event)["status"]["state"] for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
+    assert "TASK_STATE_CANCELED" not in states
+    terminal_update = dump(queue.events[-1])
+    backup_metadata = terminal_update["metadata"]["iac_code"]["backupBlocked"]
+    assert backup_metadata["reason"] == BackupReason.TERMINAL.value
+    assert backup_metadata["blockedTerminalState"] == "canceled"
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "input-required"
+    assert metrics.backup_blocked == [(BackupReason.TERMINAL.value, True)]
+    assert metrics.backup_failed == [(BackupReason.TERMINAL.value, True, 0)]
+    assert metrics.task_canceled == 1
+    assert metrics.executor_error == 0
+    assert metrics.task_failed == 0
+
+
+@pytest.mark.asyncio
 async def test_executor_publishes_mcp_warnings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     runtime = FakeRuntime(
         agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]),
@@ -77,7 +477,8 @@ async def test_executor_publishes_mcp_warnings(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
-    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    backup_service = SnapshotReadingBackupService()
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=backup_service)
     queue = FakeEventQueue()
 
     await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
@@ -137,7 +538,8 @@ async def test_executor_exposes_iac_code_session_id_in_status_metadata(
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
-    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    backup_service = SnapshotReadingBackupService()
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=backup_service)
     queue = FakeEventQueue()
 
     await executor.execute(
@@ -557,6 +959,7 @@ async def test_executor_hydrates_running_pipeline_task_id_from_sidecar(
     persistence = A2APersistenceStore(tmp_path / "a2a-state")
     persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
     persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
+    _ensure_v2_session(str(tmp_path), "session-1")
     journal = A2APipelineJournal(a2a_pipeline_dir_for_session(cwd=str(tmp_path), session_id="session-1"))
     journal.append(
         {
@@ -1141,6 +1544,7 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
     context_id = "ctx-handoff"
     persistence = A2APersistenceStore(tmp_path / "a2a")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    _ensure_v2_session(str(cwd), session_id)
     A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
         {
             "normalHandoff": {
@@ -1186,6 +1590,105 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_handoff_route_replays_newer_backup_blocked_journal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    session_id = "session-stale-blocked"
+    context_id = "ctx-stale-blocked"
+    task_id = "task-stale-blocked"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    _ensure_v2_session(str(cwd), session_id)
+
+    def event(sequence: int, event_type: str, status: str, *, data: dict | None = None) -> dict:
+        return {
+            "schemaVersion": "1.0",
+            "eventId": f"evt-{sequence}",
+            "sequence": sequence,
+            "eventType": event_type,
+            "scope": "pipeline",
+            "pipelineRunId": context_id,
+            "taskId": task_id,
+            "contextId": context_id,
+            "pipelineName": "selling",
+            "status": status,
+            "data": data or {},
+        }
+
+    pending_input = {
+        "inputId": "ask-ask-1",
+        "kind": "ask_user_question",
+        "toolUseId": "ask-1",
+        "question": "请选择部署目标",
+        "options": [{"id": "nginx", "label": "Nginx 网站"}],
+        "allowFreeText": True,
+    }
+    input_required = event(1, "input_required", "input_required", data={"kind": "ask_user_question"})
+    input_required["input"] = pending_input
+    canceled = event(2, "pipeline_canceled", "canceled", data={"source": "a2a_cancel"})
+    handoff = event(
+        3,
+        "pipeline_handoff_ready",
+        "canceled",
+        data={
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "canceled",
+            "summary": "[Pipeline Handoff Context]\nOutcome: canceled",
+        },
+    )
+    backup_blocked = event(
+        4,
+        "backup_blocked",
+        "input_required",
+        data={"reason": "terminal", "error": "Backup blocked.", "recoverable": True},
+    )
+    backup_blocked["input"] = pending_input
+
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append_many([input_required, canceled, handoff, backup_blocked], durable=True)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot_store.save(
+        {
+            "schemaVersion": "1.1",
+            "pipelineRunId": context_id,
+            "taskId": task_id,
+            "contextId": context_id,
+            "pipelineName": "selling",
+            "status": "canceled",
+            "lastSequence": 3,
+            "pendingInput": None,
+            "normalHandoff": {
+                "action": "switch_to_normal",
+                "targetMode": "normal",
+                "outcome": "canceled",
+                "summary": "[Pipeline Handoff Context]\nOutcome: canceled",
+            },
+        }
+    )
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence),
+        model="qwen3.6-plus",
+    )
+
+    assert not await executor._should_route_pipeline_handoff_to_normal(context_id=context_id, cwd=str(cwd))
+    repaired = snapshot_store.load()
+    assert repaired is not None
+    assert repaired["status"] == "waiting_input"
+    assert repaired["lastSequence"] == 4
+    assert repaired["pendingInput"]["kind"] == "ask_user_question"
+    assert repaired["normalHandoff"] is None
+    assert recoverable_task_id_from_sidecar(cwd=str(cwd), session_id=session_id, context_id=context_id) == task_id
+
+
+@pytest.mark.asyncio
 async def test_pipeline_handoff_image_request_passes_image_blocks_to_normal_agent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1212,6 +1715,7 @@ async def test_pipeline_handoff_image_request_passes_image_blocks_to_normal_agen
     context_id = "ctx-handoff"
     persistence = A2APersistenceStore(tmp_path / "a2a")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    _ensure_v2_session(str(cwd), session_id)
     A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
         {"normalHandoff": {"action": "switch_to_normal", "targetMode": "normal", "summary": "handoff"}}
     )
@@ -1283,6 +1787,7 @@ async def test_pipeline_handoff_context_is_backfilled_from_snapshot_when_session
     summary = "[Pipeline Handoff Context]\nPipeline: selling"
     persistence = A2APersistenceStore(tmp_path / "a2a")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    _ensure_v2_session(str(cwd), session_id)
     A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
         {
             "normalHandoff": {
@@ -1352,6 +1857,7 @@ async def test_pipeline_handoff_context_routes_and_backfills_public_summary_from
     cleanup_prompt = "cleanup prompt for stack-123"
     persistence = A2APersistenceStore(tmp_path / "a2a")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
+    _ensure_v2_session(str(cwd), session_id)
     pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
     pipeline_dir.mkdir(parents=True, exist_ok=True)
     (pipeline_dir / "a2a-snapshot.json").write_text("{broken", encoding="utf-8")
@@ -1453,8 +1959,7 @@ async def test_auth_error_is_sanitized(monkeypatch: pytest.MonkeyPatch, tmp_path
     dumped = dump(queue.events[-1])
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     assert (
-        dumped["status"]["message"]["parts"][0]["text"]
-        == "Authentication required. Please configure your API credentials."
+        dumped["status"]["message"]["parts"][0]["text"] == "Authentication required. Configure credentials and retry."
     )
 
 
@@ -1469,7 +1974,8 @@ async def test_retryable_executor_error_returns_input_required(monkeypatch: pyte
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
-    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    backup_service = SnapshotReadingBackupService()
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=backup_service)
     queue = FakeEventQueue()
     context = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}})
 
@@ -1478,6 +1984,13 @@ async def test_retryable_executor_error_returns_input_required(monkeypatch: pyte
     dumped = dump(queue.events[-1])
     assert dumped["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
     assert dumped["status"]["message"]["parts"][0]["text"] == "A temporary error occurred. Please retry."
+    assert [(reason, critical) for *_ids, reason, critical in backup_service.calls] == [
+        (BackupReason.INPUT_REQUIRED, False)
+    ]
+    reason, task_snapshot, context_snapshot = backup_service.snapshots[0]
+    assert reason == BackupReason.INPUT_REQUIRED
+    assert task_snapshot["state"] == "input-required"
+    assert context_snapshot["active_task_id"] is None
 
 
 @pytest.mark.asyncio
@@ -1625,8 +2138,7 @@ async def test_auth_error_still_uses_friendly_hint(monkeypatch: pytest.MonkeyPat
     dumped = dump(queue.events[-1])
     assert dumped["status"]["state"] == "TASK_STATE_FAILED"
     assert (
-        dumped["status"]["message"]["parts"][0]["text"]
-        == "Authentication required. Please configure your API credentials."
+        dumped["status"]["message"]["parts"][0]["text"] == "Authentication required. Configure credentials and retry."
     )
 
 

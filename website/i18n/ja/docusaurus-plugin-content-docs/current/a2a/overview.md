@@ -72,3 +72,8 @@ iac-code は HTTP JSON-RPC/REST と複数の任意トランスポート上の A2
 - Redis ベースのキューではプッシュ配信は at-least-once です。コールバック受信側は重複を処理し、エンドポイント側の認可ポリシーを自分で適用する必要があります。
 
 A2A サーバーモードでは、`auto-approve-permissions` または明示的な権限ルールで許可されない限り、ツール権限リクエストは自動的に拒否されます。権限決定はローカルで監査され、監査レコードを必要とする allow 決定は、そのレコードを永続化できない場合に fail-closed になります。保護された Alibaba Cloud 書き込み API は、グローバル bypass モード以外では引き続き API ごとの正確な承認が必要です。認証なしの A2A モードは信頼できるローカル環境でのみ実行するか、Bearer token、Basic auth、または API key 認証で保護してください。
+
+
+## 永続化とセッションバックアップ
+
+A2A の task/context インデックスは `<config>/a2a/tasks` と `<config>/a2a/contexts` などの共有実行領域に残り、セッションデータとは別にマウントまたは同期できます。`IAC_CODE_CONFIG_BACKUP_DIR` を設定すると、v2 セッション内の A2A スナップショットと artifact はセッションバックアップでミラーされます。共有 task/context インデックスは別のマウントストレージで提供してください。

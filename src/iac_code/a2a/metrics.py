@@ -31,6 +31,18 @@ class A2AMetrics(Protocol):
         """Record an executor-level error while handling a task."""
         ...
 
+    def record_backup_blocked(self, *, reason: str, recoverable: bool) -> None:
+        """Record a task publication blocked by a recoverable session backup failure."""
+        ...
+
+    def record_backup_succeeded(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        """Record a successful session backup."""
+        ...
+
+    def record_backup_failed(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        """Record a session backup failure after retries are exhausted."""
+        ...
+
     def record_push_enqueued(self) -> None:
         """Record enqueueing of a push notification job."""
         ...
@@ -78,6 +90,15 @@ class NoOpA2AMetrics:
 
     def record_executor_error(self) -> None:
         logger.debug("a2a executor error")
+
+    def record_backup_blocked(self, *, reason: str, recoverable: bool) -> None:
+        logger.debug("a2a backup blocked reason=%s recoverable=%s", reason, recoverable)
+
+    def record_backup_succeeded(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        logger.debug("a2a backup succeeded reason=%s critical=%s retry_count=%d", reason, critical, retry_count)
+
+    def record_backup_failed(self, *, reason: str, critical: bool, retry_count: int) -> None:
+        logger.debug("a2a backup failed reason=%s critical=%s retry_count=%d", reason, critical, retry_count)
 
     def record_push_enqueued(self) -> None:
         logger.debug("a2a push enqueued")

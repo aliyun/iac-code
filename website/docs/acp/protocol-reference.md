@@ -27,6 +27,12 @@ Sessions can also be loaded from history (`session/load`) or resumed (`session/r
 
 ---
 
+## Session Backups
+
+ACP sessions use the same v2 session backup behavior as interactive and headless runs. When `IAC_CODE_CONFIG_BACKUP_DIR` is set, a normal prompt completion records a non-blocking `normal_turn_end` backup; if that backup fails, the failure is logged as a `warning` and recorded in `.backup-state.json`, while the final response still completes without a promised warning field. Pipeline mode has its own critical backup gates.
+
+---
+
 ## Methods
 
 ### initialize

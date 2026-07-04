@@ -27,6 +27,12 @@ initialize → new_session → prompt (loop) → close_session
 
 ---
 
+## セッションバックアップ
+
+ACP セッションは、対話実行および headless 実行と同じ v2 セッションバックアップ動作を使います。`IAC_CODE_CONFIG_BACKUP_DIR` が設定されている場合、通常の prompt 完了では非ブロッキングの `normal_turn_end` バックアップを記録します。このバックアップが失敗すると、失敗は `warning` としてログに記録され、`.backup-state.json` に保存されますが、最終レスポンスに warning フィールドが必ず追加されるわけではありません。Pipeline mode には独自の重要なバックアップ制御があります。
+
+---
+
 ## メソッド
 
 ### initialize

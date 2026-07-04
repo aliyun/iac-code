@@ -34,6 +34,7 @@ def create_pipeline(
     auto_trigger_skills: list[Any] | None = None,
     resume_from_sidecar: bool = False,
     surface: str = "repl",
+    backup_service: Any | None = None,
 ) -> PipelineRunner:
     """Factory: create a pipeline runner by name.
 
@@ -62,6 +63,7 @@ def create_pipeline(
         auto_trigger_skills=auto_trigger_skills,
         resume_from_sidecar=resume_from_sidecar,
         surface=surface,
+        backup_service=backup_service,
     )
 
 

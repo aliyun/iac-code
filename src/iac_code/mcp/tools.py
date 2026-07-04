@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+from pathlib import Path
 from typing import Any, Callable
 
 from iac_code.i18n import _
@@ -13,10 +14,18 @@ from iac_code.types.stream_events import MCPProgressEvent
 
 
 class MCPTool(Tool):
-    def __init__(self, *, manager: Any, record: MCPToolRecord, session_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        manager: Any,
+        record: MCPToolRecord,
+        session_id: str,
+        session_dir: Path | str | None = None,
+    ) -> None:
         self._manager = manager
         self._record = record
         self._session_id = session_id
+        self._session_dir = session_dir
 
     @property
     def name(self) -> str:
@@ -70,6 +79,7 @@ class MCPTool(Tool):
             server_name=self._record.server_name,
             tool_name=self._record.tool_name,
             session_id=self._session_id,
+            session_dir=self._session_dir,
         )
 
     def _build_progress_callback(self, context: ToolContext):
@@ -141,9 +151,10 @@ class ReadMCPResourceTool(Tool):
         "additionalProperties": False,
     }
 
-    def __init__(self, *, manager: Any, session_id: str) -> None:
+    def __init__(self, *, manager: Any, session_id: str, session_dir: Path | str | None = None) -> None:
         self._manager = manager
         self._session_id = session_id
+        self._session_dir = session_dir
 
     def is_read_only(self, input: dict | None = None) -> bool:
         return True
@@ -157,6 +168,7 @@ class ReadMCPResourceTool(Tool):
             server_name=server_name,
             tool_name="read_resource",
             session_id=self._session_id,
+            session_dir=self._session_dir,
         )
 
 

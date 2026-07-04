@@ -145,7 +145,13 @@ Les logs runtime se trouvent par défaut dans :
 
 ou dans `IAC_CODE_LOG_DIR` si défini.
 
-Les artefacts binaires produits par les résultats d'outils MCP sont stockés sous :
+Pour les sessions v2, les artefacts binaires produits par les résultats d'outils MCP sont stockés dans le répertoire propre à la session :
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/
+```
+
+Les sessions legacy sans marqueur de layout pris en charge utilisent :
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/

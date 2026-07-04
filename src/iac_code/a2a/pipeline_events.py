@@ -378,6 +378,16 @@ class PipelineEventTranslator:
                     created_at=created_at,
                 )
             ]
+        if event.type == PipelineEventType.BACKUP_BLOCKED:
+            return [
+                self._envelope(
+                    "backup_blocked",
+                    "pipeline",
+                    "input_required",
+                    _event_data(data),
+                    created_at=created_at,
+                )
+            ]
         if event.type == PipelineEventType.PIPELINE_COMPLETED:
             event_type = "pipeline_failed" if data.get("failed") is True else "pipeline_completed"
             status = "failed" if event_type == "pipeline_failed" else "completed"

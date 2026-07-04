@@ -27,6 +27,12 @@ Les sessions peuvent également être chargées depuis l'historique (`session/lo
 
 ---
 
+## Sauvegardes de session
+
+Les sessions ACP utilisent le même comportement de sauvegarde de session v2 que les exécutions interactives et headless. Lorsque `IAC_CODE_CONFIG_BACKUP_DIR` est défini, la fin normale d'un prompt enregistre une sauvegarde non bloquante `normal_turn_end`; si cette sauvegarde échoue, l'échec est journalisé comme `warning` et enregistré dans `.backup-state.json`, tandis que la réponse finale se termine encore sans champ warning garanti. Le mode Pipeline possède ses propres gates de sauvegarde critique.
+
+---
+
 ## Méthodes
 
 ### initialize

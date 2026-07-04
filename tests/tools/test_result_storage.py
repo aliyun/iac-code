@@ -4,7 +4,16 @@ from pathlib import Path
 
 import pytest
 
+from iac_code.services.session_layout import SESSION_LAYOUT_VERSION_V2, UnsupportedSessionLayoutError
+from iac_code.services.session_metadata import SessionMetadata, write_session_metadata
 from iac_code.tools.result_storage import ResultStorage
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
 
 
 @pytest.fixture
@@ -58,6 +67,54 @@ class TestResultStorage:
         assert file_path.parent == storage_dir
         assert not (tmp_path / "escape.txt").exists()
         assert file_path.name.endswith(".txt")
+
+    def test_session_owned_storage_refuses_symlinked_tool_results_dir(self, tmp_path):
+        session_dir = tmp_path / "session"
+        write_session_metadata(
+            session_dir,
+            SessionMetadata(session_id="session", cwd="/repo", layout_version=SESSION_LAYOUT_VERSION_V2),
+        )
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _symlink_or_skip(outside, session_dir / "tool-results", target_is_directory=True)
+        storage = ResultStorage(storage_dir=str(session_dir / "tool-results"), max_inline_chars=1)
+
+        with pytest.raises(UnsupportedSessionLayoutError, match="Unsafe session-owned path"):
+            storage.process(tool_use_id="tool-1", content="long output")
+
+        assert not (outside / "tool-1.txt").exists()
+
+    def test_session_owned_storage_refuses_symlinked_result_leaf(self, tmp_path):
+        session_dir = tmp_path / "session"
+        write_session_metadata(
+            session_dir,
+            SessionMetadata(session_id="session", cwd="/repo", layout_version=SESSION_LAYOUT_VERSION_V2),
+        )
+        storage_dir = session_dir / "tool-results"
+        storage_dir.mkdir()
+        outside = tmp_path / "outside-tool-result.txt"
+        outside.write_text("outside content", encoding="utf-8")
+        _symlink_or_skip(outside, storage_dir / "tool-1.txt")
+        storage = ResultStorage(storage_dir=str(storage_dir), max_inline_chars=1)
+
+        with pytest.raises(OSError, match="symlink|reparse"):
+            storage.process(tool_use_id="tool-1", content="long output")
+
+        assert outside.read_text(encoding="utf-8") == "outside content"
+
+    def test_session_owned_storage_refuses_dangling_symlinked_metadata_before_fallback(self, tmp_path):
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+        _symlink_or_skip(tmp_path / "missing-metadata.json", session_dir / "metadata.json")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _symlink_or_skip(outside, session_dir / "tool-results", target_is_directory=True)
+        storage = ResultStorage(storage_dir=str(session_dir / "tool-results"), max_inline_chars=1)
+
+        with pytest.raises(UnsupportedSessionLayoutError, match="Unsupported session metadata"):
+            storage.process(tool_use_id="tool-1", content="long output")
+
+        assert not (outside / "tool-1.txt").exists()
 
     def test_externalized_file_content(self, storage):
         content = "line\n" * 100

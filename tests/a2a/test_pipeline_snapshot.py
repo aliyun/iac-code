@@ -491,6 +491,38 @@ def test_reduce_records_normal_handoff_ready() -> None:
     assert snapshot["normalHandoff"]["summary"] == "[Pipeline Handoff Context]"
 
 
+def test_reduce_defers_committed_handoff_until_backup_ack() -> None:
+    pending = _base("evt-pending", 1, "pipeline_handoff_ready", status="completed")
+    pending["visibility"] = "pending_backup"
+    pending["data"] = {
+        "action": "switch_to_normal",
+        "targetMode": "normal",
+        "outcome": "completed",
+        "summary": "[Pipeline Handoff Context]",
+    }
+    committed = dict(pending)
+    committed["eventId"] = "evt-committed"
+    committed["sequence"] = 2
+    committed["visibility"] = "committed"
+
+    snapshot = reduce_pipeline_events([pending, committed])
+
+    assert snapshot["normalHandoff"] is None
+    assert snapshot["pendingNormalHandoff"]["eventId"] == "evt-pending"
+
+    ack = _base("evt-ack", 3, "backup_committed", status=None)
+    ack["data"] = {
+        "committedEventId": "evt-committed",
+        "committedEventType": "pipeline_handoff_ready",
+        "committedSequence": 2,
+    }
+
+    snapshot = reduce_pipeline_events([pending, committed, ack])
+
+    assert snapshot["normalHandoff"]["eventId"] == "evt-committed"
+    assert snapshot["pendingNormalHandoff"] is None
+
+
 def test_reduce_is_idempotent_by_event_id() -> None:
     event = _base("evt-1", 1, "text_delta", scope="step")
     event["step"] = {"runId": "step-a-1", "id": "a", "index": 1, "total": 1, "attempt": 1}

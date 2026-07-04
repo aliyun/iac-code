@@ -145,7 +145,13 @@ Runtime-Logs liegen standardmäßig unter:
 
 oder unter `IAC_CODE_LOG_DIR`, wenn gesetzt.
 
-Binärartefakte aus MCP-Tool-Ergebnissen werden gespeichert unter:
+In v2-Sitzungen werden Binärartefakte aus MCP-Tool-Ergebnissen im sitzungseigenen Verzeichnis gespeichert:
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/
+```
+
+Legacy-Sitzungen ohne unterstützten Layout-Marker verwenden:
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/

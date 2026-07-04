@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, TypeAlias
 
 from a2a.server.context import ServerCallContext
@@ -31,6 +34,9 @@ from iac_code.a2a.types import (
     validate_protocol_id,
 )
 from iac_code.i18n import _
+from iac_code.services.session_layout import SessionPaths, ensure_session_owned_parent
+from iac_code.services.session_storage import SessionStorage
+from iac_code.utils.file_security import atomic_write_text
 
 logger = logging.getLogger(__name__)
 A2ATaskSnapshotList: TypeAlias = list[A2ATaskSnapshot]
@@ -257,6 +263,7 @@ class A2ATaskStore(TaskStore):
 
                 if session_id is None:
                     session_id = str(uuid.uuid4())
+                    _ensure_new_a2a_session_layout(cwd, session_id)
                 record = A2AContextRecord(
                     context_id=context_id,
                     session_id=session_id,
@@ -509,36 +516,67 @@ class A2ATaskStore(TaskStore):
                 logger.exception("A2A cleanup loop failed")
 
     def _mirror_task(self, record: A2ATaskRecord) -> None:
-        if self._persistence is None:
-            return
-        try:
-            self._persistence.save_task(
-                A2ATaskSnapshot(
-                    task_id=record.task_id,
-                    context_id=record.context_id,
-                    state=record.state,
-                    owner=record.owner,
-                    output_text=list(record.output_text),
-                    updated_at=record.updated_at,
-                )
-            )
-        except Exception:
-            logger.exception("Failed to persist A2A task %s", record.task_id)
+        snapshot = A2ATaskSnapshot(
+            task_id=record.task_id,
+            context_id=record.context_id,
+            state=record.state,
+            owner=record.owner,
+            output_text=list(record.output_text),
+            updated_at=record.updated_at,
+        )
+        if self._persistence is not None:
+            try:
+                self._persistence.save_task(snapshot)
+            except Exception:
+                logger.exception("Failed to persist A2A task %s", record.task_id)
+        self._mirror_session_task(snapshot)
 
     def _mirror_context(self, record: A2AContextRecord) -> None:
-        if self._persistence is None:
-            return
+        snapshot = A2AContextSnapshot(
+            context_id=record.context_id,
+            session_id=record.session_id,
+            cwd=record.cwd,
+            active_task_id=record.active_task_id,
+        )
+        if self._persistence is not None:
+            try:
+                self._persistence.save_context(snapshot)
+            except Exception:
+                logger.exception("Failed to persist A2A context %s", record.context_id)
+        self._mirror_session_context(snapshot)
+
+    def _mirror_session_task(self, snapshot: A2ATaskSnapshot) -> None:
         try:
-            self._persistence.save_context(
-                A2AContextSnapshot(
-                    context_id=record.context_id,
-                    session_id=record.session_id,
-                    cwd=record.cwd,
-                    active_task_id=record.active_task_id,
-                )
+            session_paths = self._session_paths_for_task_context(snapshot.context_id)
+            if session_paths is None:
+                return
+            _write_session_snapshot(session_paths.session_dir, session_paths.a2a_task_path, asdict(snapshot))
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist A2A session task snapshot error_type=%s",
+                type(exc).__name__,
             )
-        except Exception:
-            logger.exception("Failed to persist A2A context %s", record.context_id)
+
+    def _mirror_session_context(self, snapshot: A2AContextSnapshot) -> None:
+        try:
+            session_paths = _session_paths_for_a2a_snapshot(snapshot)
+            if session_paths is None:
+                return
+            _write_session_snapshot(session_paths.session_dir, session_paths.a2a_context_path, asdict(snapshot))
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist A2A session context snapshot error_type=%s",
+                type(exc).__name__,
+            )
+
+    def _session_paths_for_task_context(self, context_id: str) -> SessionPaths | None:
+        context = self._contexts.get(context_id)
+        if context is not None:
+            return _session_paths_for_a2a_context(context)
+        snapshot = self._load_context_snapshot(context_id)
+        if snapshot is None:
+            return None
+        return _session_paths_for_a2a_snapshot(snapshot)
 
     def _load_task_snapshot(self, task_id: str) -> A2ATaskSnapshot | None:
         if self._persistence is None:
@@ -563,6 +601,22 @@ class A2ATaskStore(TaskStore):
         except Exception:
             logger.exception("Failed to restore persisted A2A task %s", task_id)
             return None
+
+    def _load_context_snapshot(self, context_id: str) -> A2AContextSnapshot | None:
+        if self._persistence is None:
+            return None
+        load_context = getattr(self._persistence, "load_context", None)
+        if load_context is None:
+            return None
+        try:
+            snapshot = load_context(context_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to load persisted A2A context error_type=%s",
+                type(exc).__name__,
+            )
+            return None
+        return snapshot if isinstance(snapshot, A2AContextSnapshot) else None
 
     def _list_task_snapshots(self, owner: str) -> A2ATaskSnapshotList:
         if self._persistence is None:
@@ -605,6 +659,35 @@ class A2ATaskStore(TaskStore):
                 owner_contexts.pop(context_id, None)
                 if not owner_contexts:
                     self._sdk_tasks_by_context.pop(owner, None)
+
+
+def _session_paths_for_a2a_context(record: A2AContextRecord) -> SessionPaths | None:
+    session_dir = SessionStorage().v2_session_dir(record.cwd, record.session_id)
+    if session_dir is None:
+        return None
+    return SessionPaths.require_supported(session_dir)
+
+
+def _session_paths_for_a2a_snapshot(snapshot: A2AContextSnapshot) -> SessionPaths | None:
+    session_dir = SessionStorage().v2_session_dir(snapshot.cwd, snapshot.session_id)
+    if session_dir is None:
+        return None
+    return SessionPaths.require_supported(session_dir)
+
+
+def _ensure_new_a2a_session_layout(cwd: str, session_id: str) -> None:
+    try:
+        SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
+    except Exception as exc:
+        logger.warning(
+            "Failed to prepare A2A session layout error_type=%s",
+            type(exc).__name__,
+        )
+
+
+def _write_session_snapshot(session_dir: Path, path: Path, data: dict[str, Any]) -> None:
+    ensure_session_owned_parent(session_dir, path)
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
 
 
 async def _close_runtime(runtime: Any | None) -> None:

@@ -72,3 +72,8 @@ iac-code unterstuetzt A2A-Servermodus ueber HTTP JSON-RPC/REST und mehrere optio
 - Push-Zustellung ist fuer Redis-gestuetzte Queues mindestens einmal; Callback-Empfaenger muessen Duplikate behandeln und ihre eigene autorisierungsseitige Endpoint-Policy erzwingen.
 
 Tool-Berechtigungsanfragen werden im A2A-Servermodus automatisch abgelehnt, sofern sie nicht durch `auto-approve-permissions` oder eine explizite Berechtigungsregel erlaubt werden. Berechtigungsentscheidungen werden lokal auditiert; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn dieser Datensatz nicht persistiert werden kann. Geschuetzte Alibaba-Cloud-Schreib-APIs erfordern ausserhalb pauschaler Bypass-Modi weiterhin eine exakte Autorisierung pro API. Fuehren Sie den unauthentifizierten A2A-Modus nur in vertrauenswuerdigen lokalen Umgebungen aus oder schuetzen Sie ihn mit Bearer-Token-, Basic-Auth- oder API-Key-Authentifizierung.
+
+
+## Persistenz und Sitzungsbackup
+
+A2A task/context-Indizes bleiben im gemeinsamen Runtime-Bereich, zum Beispiel `<config>/a2a/tasks` und `<config>/a2a/contexts`, damit sie unabhaengig von sitzungsbezogenen Daten gemountet oder synchronisiert werden koennen. Wenn `IAC_CODE_CONFIG_BACKUP_DIR` konfiguriert ist, werden A2A-Snapshots und Artefakte innerhalb von v2-Sitzungen mit dem Sitzungsbackup gespiegelt; die gemeinsamen task/context-Indizes sollten ueber eigenen gemounteten Speicher bereitgestellt werden.

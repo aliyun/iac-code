@@ -27,6 +27,12 @@ Sitzungen koennen auch aus dem Verlauf geladen (`session/load`) oder fortgesetzt
 
 ---
 
+## Sitzungsbackups
+
+ACP-Sitzungen verwenden dasselbe v2-Sitzungsbackup-Verhalten wie interaktive und headless-Laeufe. Wenn `IAC_CODE_CONFIG_BACKUP_DIR` gesetzt ist, zeichnet ein normaler Prompt-Abschluss ein nicht blockierendes `normal_turn_end`-Backup auf; wenn dieses Backup fehlschlaegt, wird der Fehler als `warning` protokolliert und in `.backup-state.json` erfasst, waehrend die finale Antwort ohne zugesichertes warning-Feld abgeschlossen wird. Der Pipeline-Modus hat eigene kritische Backup-Gates.
+
+---
+
 ## Methoden
 
 ### initialize

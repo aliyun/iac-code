@@ -41,7 +41,13 @@ IaC Code converts MCP content blocks into model-visible text:
 | `resource_link` | Rendered as a resource link with URI and MIME type. |
 | Image, audio, and blob data | Stored as private artifact files and referenced by artifact id. |
 
-Binary artifacts are stored below:
+Binary artifacts are stored in the session-owned MCP tool-results directory for v2 sessions:
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/<server>/<tool>/
+```
+
+Legacy sessions without a supported layout marker continue to use:
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/<server>/<tool>/

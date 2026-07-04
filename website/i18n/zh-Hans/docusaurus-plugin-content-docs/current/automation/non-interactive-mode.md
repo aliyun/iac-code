@@ -39,6 +39,10 @@ iac-code --prompt "创建一个 VPC" --max-turns 20
 | `json` | 返回单个 JSON 结果，适合调用方解析最终响应。 |
 | `stream-json` | 输出流式 JSON 事件，适合调用方处理增量进度。 |
 
+## 会话备份
+
+设置 `IAC_CODE_CONFIG_BACKUP_DIR` 后，非交互运行会在关键检查点镜像 v2 session。普通轮次结束检查点使用 `normal_turn_end`；此时备份失败只会记录为 `warning` 并写入 `.backup-state.json`，不会让已完成响应失败，也不会在最终输出中新增 warning 字段。Pipeline 模式有自己的关键备份 gate。
+
 ## 自动化中的权限控制
 
 在非交互模式下运行时，使用 `--permission-mode` 控制代理处理工具审批的方式：

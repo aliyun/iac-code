@@ -19,7 +19,7 @@ El directorio de tiempo de ejecución por defecto es:
 ~/.iac-code/
 ```
 
-Puede reubicarlo estableciendo la variable de entorno `IAC_CODE_CONFIG_DIR` (admite expansión de `~` y `$VAR`). Cuando se establece, todos los artefactos persistidos — credenciales, ajustes, historial, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — siguen la nueva ubicación. Los logs de arranque/depuración van por defecto a `<config-dir>/logs/` y se pueden mover por separado con `IAC_CODE_LOG_DIR`; los registros de auditoría de permisos permanecen en `<config-dir>/logs/`.
+Puede reubicarlo estableciendo la variable de entorno `IAC_CODE_CONFIG_DIR` (admite expansión de `~` y `$VAR`). Cuando se establece, todos los artefactos persistidos — credenciales, ajustes, historial, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — siguen la nueva ubicación. Los logs de arranque/depuración van por defecto a `<config-dir>/logs/` y se pueden mover por separado con `IAC_CODE_LOG_DIR`; los registros de auditoría de permisos permanecen con su sesión propietaria.
 
 Archivos comunes:
 
@@ -156,13 +156,13 @@ Las solicitudes de estilo ROA se tratan como de solo lectura únicamente cuando 
 
 ### Registro de auditoría de permisos
 
-Las decisiones de permisos que cruzan prompts de usuario, límites de caché de herramientas, aprobación de automatización o aprobación de un resolver se anexan a:
+Las decisiones de permisos que cruzan prompts de usuario, límites de caché de herramientas, aprobación de automatización o aprobación de un resolver se anexan al registro de auditoría de la sesión activa:
 
 ```text
-<config-dir>/logs/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
 ```
 
-De forma predeterminada, esta ruta es `~/.iac-code/logs/permission-audit.jsonl`. El registro de auditoría de permisos sigue `IAC_CODE_CONFIG_DIR`; `IAC_CODE_LOG_DIR` solo mueve los logs de arranque/depuración. El escritor de auditoría anexa registros JSONL con bloqueo de archivo, rota el archivo y restringe los permisos del archivo local cuando el sistema operativo lo permite. Las aprobaciones automáticas rutinarias de solo lectura pueden omitirse, pero se registran denegaciones, prompts, decisiones en caché, aprobaciones de automatización, aprobaciones de resolver y otros límites de permisos auditados.
+Los transcripts de pasos de Pipeline escriben sus propios registros de auditoría en `<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl`. Los registros de auditoría de permisos siguen el layout de sesión bajo `IAC_CODE_CONFIG_DIR`; `IAC_CODE_LOG_DIR` solo mueve los logs de arranque/depuración y no mueve los registros de auditoría de permisos. El escritor de auditoría anexa registros JSONL con bloqueo de archivo, rota el archivo y restringe los permisos del archivo local cuando el sistema operativo lo permite. Las aprobaciones automáticas rutinarias de solo lectura pueden omitirse, pero se registran denegaciones, prompts, decisiones en caché, aprobaciones de automatización, aprobaciones de resolver y otros límites de permisos auditados.
 
 La configuración de auditoría se define en `permissions.audit`:
 
@@ -173,3 +173,34 @@ La configuración de auditoría se define en `permissions.audit`:
 | `max_files` | `5` | Número de archivos de auditoría rotados que se conservan. Los valores por encima del máximo integrado se limitan. |
 
 Si una decisión allow que requiere un registro de auditoría no se puede persistir en el registro de auditoría, IaC Code falla en modo cerrado y deniega la acción en lugar de ejecutarla sin rastro de auditoría.
+
+
+## Layout de sesión y estado de backup
+
+Las sesiones nuevas usan el marcador de metadatos `layout_version` para mantener los artefactos de ejecución dentro de su sesión propietaria. Esto incluye `image-cache/`, `tool-results/`, snapshots A2A, datos runtime de transcripts de pipeline y `.backup-state.json`, que registra el último motivo y estado de backup; `.backup-state.json` y `.backup-lock` quedan locales en la sesión activa y se excluyen de los espejos de backup. Las sesiones antiguas sin marcador `layout_version` siguen siendo legibles, pero no reciben nuevos directorios de artefactos por sesión; las sesiones con versiones de layout no compatibles se rechazan.
+
+Las rutas clave de una sesión v2 son:
+
+```text
+<config-dir>/projects/<project>/<session-id>/
+<config-dir>/projects/<project>/<session-id>/metadata.json
+<config-dir>/projects/<project>/<session-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/image-cache/
+<config-dir>/projects/<project>/<session-id>/tool-results/
+<config-dir>/projects/<project>/<session-id>/a2a/task.json
+<config-dir>/projects/<project>/<session-id>/a2a/context.json
+<config-dir>/projects/<project>/<session-id>/a2a/artifacts/
+<config-dir>/projects/<project>/<session-id>/a2a/pipeline/
+<config-dir>/projects/<project>/<session-id>/a2a/cleanup-deferred-prompts.json
+<config-dir>/projects/<project>/<session-id>/pipeline/meta.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/context.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/events.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/display.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/tool-results/
+```

@@ -19,7 +19,7 @@ Das Laufzeitverzeichnis ist standardmäßig:
 ~/.iac-code/
 ```
 
-Sie können es verlegen, indem Sie die Umgebungsvariable `IAC_CODE_CONFIG_DIR` setzen (unterstützt `~`- und `$VAR`-Erweiterung). Sobald gesetzt, folgen alle persistierten Artefakte — Anmeldedaten, Einstellungen, Verlauf, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — dem neuen Speicherort. Start-/Debug-Logs liegen standardmaessig unter `<config-dir>/logs/` und koennen separat mit `IAC_CODE_LOG_DIR` verschoben werden; Berechtigungsauditdatensaetze bleiben unter `<config-dir>/logs/`.
+Sie können es verlegen, indem Sie die Umgebungsvariable `IAC_CODE_CONFIG_DIR` setzen (unterstützt `~`- und `$VAR`-Erweiterung). Sobald gesetzt, folgen alle persistierten Artefakte — Anmeldedaten, Einstellungen, Verlauf, `projects/`, `image-cache/`, `tool-results/`, `logs/`, `memory/`, `a2a/`, `telemetry/`, `skills/` — dem neuen Speicherort. Start-/Debug-Logs liegen standardmaessig unter `<config-dir>/logs/` und koennen separat mit `IAC_CODE_LOG_DIR` verschoben werden; Berechtigungsauditdatensaetze bleiben bei ihrer eigenen Sitzung.
 
 Häufige Dateien:
 
@@ -156,13 +156,13 @@ ROA-artige Requests gelten nur dann als nur lesend, wenn die Methode `GET` ist u
 
 ### Berechtigungsauditprotokoll
 
-Berechtigungsentscheidungen, die Benutzerabfragen, Tool-Cache-Grenzen, Automatisierungsgenehmigungen oder Resolver-Genehmigungen ueberschreiten, werden angehaengt an:
+Berechtigungsentscheidungen, die Benutzerabfragen, Tool-Cache-Grenzen, Automatisierungsgenehmigungen oder Resolver-Genehmigungen ueberschreiten, werden an das Auditlog der aktiven Sitzung angehaengt:
 
 ```text
-<config-dir>/logs/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
 ```
 
-Standardmaessig ist dies `~/.iac-code/logs/permission-audit.jsonl`. Das Berechtigungsauditlog folgt `IAC_CODE_CONFIG_DIR`; `IAC_CODE_LOG_DIR` verschiebt nur Start-/Debug-Logs. Der Audit-Writer haengt JSONL-Datensaetze mit Dateisperren an, rotiert die Datei und schraenkt lokale Dateiberechtigungen ein, soweit das Betriebssystem dies unterstuetzt. Routinemaessige automatische Nur-Lese-Genehmigungen koennen ausgelassen werden, aber Ablehnungen, Prompts, gecachte Entscheidungen, Automatisierungsgenehmigungen, Resolver-Genehmigungen und andere auditierte Berechtigungsgrenzen werden aufgezeichnet.
+Pipeline-Step-Transcripts schreiben eigene Auditdatensaetze unter `<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl`. Berechtigungsauditlogs folgen dem Sitzungslayout unter `IAC_CODE_CONFIG_DIR`; `IAC_CODE_LOG_DIR` verschiebt nur Start-/Debug-Logs und verschiebt keine Berechtigungsauditdatensaetze. Der Audit-Writer haengt JSONL-Datensaetze mit Dateisperren an, rotiert die Datei und schraenkt lokale Dateiberechtigungen ein, soweit das Betriebssystem dies unterstuetzt. Routinemaessige automatische Nur-Lese-Genehmigungen koennen ausgelassen werden, aber Ablehnungen, Prompts, gecachte Entscheidungen, Automatisierungsgenehmigungen, Resolver-Genehmigungen und andere auditierte Berechtigungsgrenzen werden aufgezeichnet.
 
 Audit-Einstellungen werden unter `permissions.audit` konfiguriert:
 
@@ -173,3 +173,34 @@ Audit-Einstellungen werden unter `permissions.audit` konfiguriert:
 | `max_files` | `5` | Anzahl der aufzubewahrenden rotierten Auditdateien. Werte ueber dem eingebauten Maximum werden begrenzt. |
 
 Wenn eine Allow-Entscheidung, die einen Auditdatensatz erfordert, nicht im Auditprotokoll persistiert werden kann, verhaelt sich IaC Code fail-closed und lehnt die Aktion ab, statt sie ohne Auditspur auszufuehren.
+
+
+## Sitzungslayout und Backup-Status
+
+Neue Sitzungen verwenden den Metadatenmarker `layout_version`, damit Laufzeit-Artefakte der eigenen Sitzung zugeordnet bleiben. Dazu gehoeren `image-cache/`, `tool-results/`, A2A-Snapshots, Pipeline-Transcript-Laufzeitdaten und `.backup-state.json`, das den letzten Backup-Grund und Status speichert; `.backup-state.json` und `.backup-lock` bleiben lokal in der aktiven Sitzung und werden nicht in Backup-Spiegel kopiert. Alte Sitzungen ohne `layout_version`-Marker bleiben lesbar, erhalten aber keine neuen sitzungsspezifischen Artifact-Verzeichnisse; Sitzungen mit nicht unterstützten Layout-Versionen werden abgelehnt.
+
+Die wichtigsten Pfade einer v2-Sitzung sind:
+
+```text
+<config-dir>/projects/<project>/<session-id>/
+<config-dir>/projects/<project>/<session-id>/metadata.json
+<config-dir>/projects/<project>/<session-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/image-cache/
+<config-dir>/projects/<project>/<session-id>/tool-results/
+<config-dir>/projects/<project>/<session-id>/a2a/task.json
+<config-dir>/projects/<project>/<session-id>/a2a/context.json
+<config-dir>/projects/<project>/<session-id>/a2a/artifacts/
+<config-dir>/projects/<project>/<session-id>/a2a/pipeline/
+<config-dir>/projects/<project>/<session-id>/a2a/cleanup-deferred-prompts.json
+<config-dir>/projects/<project>/<session-id>/pipeline/meta.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/context.yaml
+<config-dir>/projects/<project>/<session-id>/pipeline/events.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/display.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/session.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/usage.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl
+<config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/tool-results/
+```

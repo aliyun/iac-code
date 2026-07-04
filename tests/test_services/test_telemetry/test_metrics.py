@@ -38,6 +38,9 @@ def test_metric_names_include_pipeline_metrics():
         M.PIPELINE_CANDIDATE_SUCCESS_COUNT,
         M.PIPELINE_CANDIDATE_FAILED_COUNT,
         M.PIPELINE_FUNNEL_STEP_COUNT,
+        M.PIPELINE_BACKUP_SUCCEEDED_COUNT,
+        M.PIPELINE_BACKUP_FAILED_COUNT,
+        M.PIPELINE_BACKUP_BLOCKED_COUNT,
     }
     assert expected.issubset(set(METRIC_NAMES))
 
@@ -105,3 +108,6 @@ def test_pipeline_count_metrics_are_counters():
     assert M.PIPELINE_CANDIDATE_SUCCESS_COUNT in counter_names
     assert M.PIPELINE_CANDIDATE_FAILED_COUNT in counter_names
     assert M.PIPELINE_FUNNEL_STEP_COUNT in counter_names
+    assert M.PIPELINE_BACKUP_SUCCEEDED_COUNT in counter_names
+    assert M.PIPELINE_BACKUP_FAILED_COUNT in counter_names
+    assert M.PIPELINE_BACKUP_BLOCKED_COUNT in counter_names

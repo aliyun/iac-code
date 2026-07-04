@@ -30,11 +30,15 @@ _METRIC_ATTR_KEYS = frozenset(
         "all_failed",
         "candidate_index",
         "candidate_count_bucket",
+        "critical",
         "error_type",
         "from_step",
         "input_length_bucket",
         "parent_step_id",
+        "persisted",
         "reason",
+        "recoverable",
+        "retry_count",
         "rollback_scope",
         "status",
         "step_attempt",
@@ -498,6 +502,54 @@ class PipelineObservability:
                 self.metric_attrs(status="user_aborted"),
             )
         self._event(Events.PIPELINE_USER_ABORTED, attrs)
+
+    def backup_succeeded(
+        self,
+        *,
+        reason: str,
+        critical: bool,
+        step_id: str | None = None,
+        retry_count: int = 0,
+    ) -> None:
+        attrs = self.base_attrs(step_id=step_id, reason=reason, critical=critical, retry_count=retry_count)
+        self._event(Events.PIPELINE_BACKUP_SUCCEEDED, attrs)
+        self._metric(
+            Metrics.PIPELINE_BACKUP_SUCCEEDED_COUNT,
+            1,
+            self.metric_attrs(step_id=step_id, reason=reason, critical=critical, retry_count=retry_count),
+        )
+
+    def backup_failed(
+        self,
+        *,
+        reason: str,
+        critical: bool,
+        step_id: str | None = None,
+        retry_count: int = 0,
+    ) -> None:
+        attrs = self.base_attrs(step_id=step_id, reason=reason, critical=critical, retry_count=retry_count)
+        self._event(Events.PIPELINE_BACKUP_FAILED, attrs)
+        self._metric(
+            Metrics.PIPELINE_BACKUP_FAILED_COUNT,
+            1,
+            self.metric_attrs(step_id=step_id, reason=reason, critical=critical, retry_count=retry_count),
+        )
+
+    def backup_blocked(
+        self,
+        *,
+        reason: str,
+        step_id: str | None = None,
+        recoverable: bool = True,
+        persisted: bool = True,
+    ) -> None:
+        attrs = self.base_attrs(step_id=step_id, reason=reason, recoverable=recoverable, persisted=persisted)
+        self._event(Events.PIPELINE_BACKUP_BLOCKED, attrs)
+        self._metric(
+            Metrics.PIPELINE_BACKUP_BLOCKED_COUNT,
+            1,
+            self.metric_attrs(step_id=step_id, reason=reason, recoverable=recoverable, persisted=persisted),
+        )
 
     def step_started(self, **attrs: Any) -> None:
         self._event(Events.PIPELINE_STEP_STARTED, self.base_attrs(**attrs))

@@ -1,7 +1,18 @@
 import base64
 from pathlib import Path
 
+import pytest
+
 from iac_code.mcp.output import convert_mcp_tool_result
+from iac_code.services.session_layout import UnsupportedSessionLayoutError
+from iac_code.services.session_metadata import SessionMetadata, write_session_metadata
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
 
 
 def test_convert_mcp_result_includes_text_structured_content_and_meta(monkeypatch, tmp_path: Path) -> None:
@@ -106,6 +117,72 @@ def test_convert_mcp_result_stores_binary_content_without_exposing_base64(monkey
     assert artifact_paths[0].read_bytes() == b"fake-png"
     assert artifact_paths[1].read_bytes() == b"resource-bytes"
     assert artifacts[1]["uri"] == "file:///tmp/archive.bin"
+
+
+def test_convert_mcp_result_stores_binary_content_under_session_dir(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    image_data = base64.b64encode(b"session-png").decode("ascii")
+    session_dir = tmp_path / "sessions" / "session-1"
+
+    result = convert_mcp_tool_result(
+        {"content": [{"type": "image", "data": image_data, "mimeType": "image/png"}]},
+        server_name="ros/server",
+        tool_name="render template",
+        session_id="session-1",
+        session_dir=session_dir,
+    )
+
+    artifacts = result.metadata["mcp"]["artifacts"]
+    assert len(artifacts) == 1
+    artifact_path = Path(artifacts[0]["path"])
+    assert artifact_path.parent == session_dir / "tool-results" / "mcp" / "ros-server" / "render-template"
+    assert artifact_path.read_bytes() == b"session-png"
+    assert not (tmp_path / "config" / "tool-results" / "session-1").exists()
+
+
+def test_convert_mcp_result_rejects_symlink_session_tool_results(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    session_id = "session-1"
+    session_dir = tmp_path / "sessions" / session_id
+    write_session_metadata(session_dir, SessionMetadata(session_id=session_id, cwd=str(tmp_path), layout_version=2))
+    outside = tmp_path / "outside-tool-results"
+    outside.mkdir()
+    _symlink_or_skip(outside, session_dir / "tool-results", target_is_directory=True)
+    image_data = base64.b64encode(b"session-png").decode("ascii")
+
+    with pytest.raises(UnsupportedSessionLayoutError, match="session-owned path"):
+        convert_mcp_tool_result(
+            {"content": [{"type": "image", "data": image_data, "mimeType": "image/png"}]},
+            server_name="ros",
+            tool_name="render",
+            session_id=session_id,
+            session_dir=session_dir,
+        )
+
+    assert list(outside.iterdir()) == []
+
+
+def test_convert_mcp_result_rejects_future_session_layout(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    session_id = "future-session"
+    session_dir = tmp_path / "sessions" / session_id
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id=session_id, cwd=str(tmp_path), layout_version=99),
+    )
+    image_data = base64.b64encode(b"future-png").decode("ascii")
+
+    with pytest.raises(UnsupportedSessionLayoutError):
+        convert_mcp_tool_result(
+            {"content": [{"type": "image", "data": image_data, "mimeType": "image/png"}]},
+            server_name="ros",
+            tool_name="render",
+            session_id=session_id,
+            session_dir=session_dir,
+        )
+
+    assert not (tmp_path / "config" / "tool-results" / session_id).exists()
+    assert not (session_dir / "tool-results").exists()
 
 
 def test_convert_mcp_is_error_maps_to_tool_result_error(monkeypatch, tmp_path: Path) -> None:

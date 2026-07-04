@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from iac_code.services.session_backup import BackupReason
 from iac_code.services.update_checker import PendingUpdate
 from iac_code.ui.components.select import SelectLayout
 from iac_code.utils.project_paths import format_resume_command
@@ -68,6 +70,50 @@ class TestREPLProviderIntegration:
 
         repl = InlineREPL(model="claude-sonnet-4-6")
         assert hasattr(repl, "_provider_manager")
+
+    @patch("iac_code.ui.repl.SessionBackupService")
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_init_default_backup_service_reuses_session_storage(self, mock_mm, mock_ss, mock_pm, mock_backup):
+        from iac_code.ui.repl import InlineREPL
+
+        repl = InlineREPL(model="claude-sonnet-4-6")
+
+        mock_backup.assert_called_once_with(session_storage=mock_ss.return_value)
+        assert repl._backup_service is mock_backup.return_value
+
+    @patch("iac_code.ui.repl.SessionBackupService")
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_init_keeps_injected_backup_service(self, mock_mm, mock_ss, mock_pm, mock_backup):
+        from iac_code.ui.repl import InlineREPL
+
+        backup_service = Mock()
+
+        repl = InlineREPL(model="claude-sonnet-4-6", backup_service=backup_service)
+
+        mock_backup.assert_not_called()
+        assert repl._backup_service is backup_service
+
+    @patch("iac_code.ui.repl.SessionBackupService")
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_init_keeps_falsey_injected_backup_service(self, mock_mm, mock_ss, mock_pm, mock_backup):
+        from iac_code.ui.repl import InlineREPL
+
+        class FalseyBackupService:
+            def __bool__(self) -> bool:
+                return False
+
+        backup_service = FalseyBackupService()
+
+        repl = InlineREPL(model="claude-sonnet-4-6", backup_service=backup_service)
+
+        mock_backup.assert_not_called()
+        assert repl._backup_service is backup_service
 
     @patch("iac_code.ui.repl.ProviderManager")
     @patch("iac_code.ui.repl.SessionStorage")
@@ -333,6 +379,24 @@ def test_insert_text_delegates_to_prompt_input():
     repl._prompt_input.insert_text.assert_called_once_with("hello from history")
 
 
+def test_session_dir_for_artifacts_returns_none_for_legacy_directory_without_layout(tmp_path, monkeypatch):
+    from iac_code.services.session_storage import SessionStorage
+    from iac_code.ui.repl import InlineREPL
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    cwd = str(tmp_path)
+    storage = SessionStorage()
+    session_dir = storage.session_dir(cwd, "legacy-session")
+    session_dir.mkdir(parents=True)
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._session_storage = storage
+    repl._original_cwd = cwd
+    repl._session_id = "legacy-session"
+
+    assert repl._session_dir_for_artifacts() is None
+    assert repl._result_storage_dir_for_session() is None
+
+
 def test_history_search_uses_agent_context_messages():
     from iac_code.agent.message import Message
     from iac_code.state.app_state import AppState
@@ -468,6 +532,9 @@ async def test_handle_chat_returns_queued_inputs_from_streaming_renderer():
         stamp_last_turn_elapsed=Mock(),
         context_manager=SimpleNamespace(get_messages=Mock(return_value=[])),
     )
+    repl._backup_service = SimpleNamespace(backup_session=Mock())
+    repl._original_cwd = "/repo"
+    repl._session_id = "session-1"
     repl._streaming_error_log = []
 
     queued_inputs = await repl._handle_chat("first turn")
@@ -479,6 +546,179 @@ async def test_handle_chat_returns_queued_inputs_from_streaming_renderer():
     _, renderer_kwargs = repl.renderer.run_streaming_output.call_args
     assert renderer_kwargs["streaming_input"] is not None
     repl.renderer.record_user_turn.assert_called_once_with("first turn")
+    repl._backup_service.backup_session.assert_called_once_with(
+        "/repo",
+        "session-1",
+        reason=BackupReason.NORMAL_TURN_END,
+        critical=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_backup_failure_warns_and_preserves_queued_inputs():
+    from iac_code.ui.renderer import StreamingOutputResult
+    from iac_code.ui.repl import InlineREPL
+
+    async def events():
+        if False:
+            yield None
+
+    def raise_backup(*args, **kwargs):
+        raise RuntimeError("/mnt/oss/customer-bucket/repl-session source failed")
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = SimpleNamespace(set_state=Mock())
+    repl.renderer = SimpleNamespace(
+        record_user_turn=Mock(),
+        run_streaming_output=AsyncMock(return_value=StreamingOutputResult(elapsed=0.2, queued_inputs=["next turn"])),
+        prompt_permission=AsyncMock(),
+        _last_streaming_errors=[],
+    )
+    repl._agent_loop = SimpleNamespace(
+        run_streaming=Mock(return_value=events()),
+        stamp_last_turn_elapsed=Mock(),
+        context_manager=SimpleNamespace(get_messages=Mock(return_value=[])),
+    )
+    repl._backup_service = SimpleNamespace(backup_session=Mock(side_effect=raise_backup))
+    repl._original_cwd = "/repo"
+    repl._session_id = "session-1"
+    repl._streaming_error_log = []
+
+    with patch("iac_code.ui.repl.logger.warning") as warning:
+        queued_inputs = await repl._handle_chat("first turn")
+
+    assert queued_inputs == ["next turn"]
+    repl.store.set_state.assert_any_call(is_busy=False)
+    warning.assert_called_once()
+    assert warning.call_args.args == (
+        "Normal REPL session backup failed (reason={}, retry_count={}, error_type={})",
+        "normal_turn_end",
+        0,
+        "RuntimeError",
+    )
+    assert "/mnt/oss/customer-bucket" not in " ".join(str(arg) for arg in warning.call_args.args)
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_non_critical_backup_result_failure_warns():
+    from iac_code.services.session_backup import BackupResult
+    from iac_code.ui.renderer import StreamingOutputResult
+    from iac_code.ui.repl import InlineREPL
+
+    async def events():
+        if False:
+            yield None
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = SimpleNamespace(set_state=Mock())
+    repl.renderer = SimpleNamespace(
+        record_user_turn=Mock(),
+        run_streaming_output=AsyncMock(return_value=StreamingOutputResult(elapsed=0.2, queued_inputs=[])),
+        prompt_permission=AsyncMock(),
+        _last_streaming_errors=[],
+    )
+    repl._agent_loop = SimpleNamespace(
+        run_streaming=Mock(return_value=events()),
+        stamp_last_turn_elapsed=Mock(),
+        context_manager=SimpleNamespace(get_messages=Mock(return_value=[])),
+    )
+    repl._backup_service = SimpleNamespace(
+        backup_session=Mock(return_value=BackupResult(enabled=True, succeeded=False, error="[PATH]", retry_count=2))
+    )
+    repl._original_cwd = "/repo"
+    repl._session_id = "session-1"
+    repl._streaming_error_log = []
+
+    with patch("iac_code.ui.repl.logger.warning") as warning:
+        queued_inputs = await repl._handle_chat("first turn")
+
+    assert queued_inputs == []
+    warning.assert_called_once()
+    assert warning.call_args.args == (
+        "Normal REPL session backup failed (reason={}, retry_count={}): {}",
+        "normal_turn_end",
+        2,
+        "[PATH]",
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_interrupted_result_does_not_backup():
+    from iac_code.ui.renderer import StreamingOutputResult
+    from iac_code.ui.repl import InlineREPL
+
+    async def events():
+        if False:
+            yield None
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = SimpleNamespace(set_state=Mock())
+    repl.renderer = SimpleNamespace(
+        record_user_turn=Mock(),
+        run_streaming_output=AsyncMock(
+            return_value=StreamingOutputResult(
+                elapsed=0.2,
+                queued_inputs=["next turn"],
+                draft_input="half typed",
+                interrupted=True,
+            )
+        ),
+        prompt_permission=AsyncMock(),
+        _last_streaming_errors=[],
+    )
+    repl._agent_loop = SimpleNamespace(
+        run_streaming=Mock(return_value=events()),
+        stamp_last_turn_elapsed=Mock(),
+        context_manager=SimpleNamespace(get_messages=Mock(return_value=[])),
+    )
+    repl._backup_service = SimpleNamespace(backup_session=Mock())
+    repl._original_cwd = "/repo"
+    repl._session_id = "session-1"
+    repl._streaming_error_log = []
+    repl._prune_cleanup_prompts_if_no_pending_cleanup = Mock()
+
+    queued_inputs = await repl._handle_chat("first turn")
+
+    assert queued_inputs == ["next turn"]
+    assert repl._streaming_draft_input == "half typed"
+    repl._backup_service.backup_session.assert_not_called()
+    repl._prune_cleanup_prompts_if_no_pending_cleanup.assert_called_once_with()
+    repl.store.set_state.assert_any_call(is_busy=False)
+
+
+@pytest.mark.parametrize("exc_type", [asyncio.CancelledError, KeyboardInterrupt])
+@pytest.mark.asyncio
+async def test_handle_chat_propagates_interrupts_without_warning_or_backup(exc_type):
+    from iac_code.ui.repl import InlineREPL
+
+    async def events():
+        if False:
+            yield None
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = SimpleNamespace(set_state=Mock())
+    repl.renderer = SimpleNamespace(
+        record_user_turn=Mock(),
+        run_streaming_output=AsyncMock(side_effect=exc_type()),
+        prompt_permission=AsyncMock(),
+        _last_streaming_errors=[],
+    )
+    repl._agent_loop = SimpleNamespace(
+        run_streaming=Mock(return_value=events()),
+        stamp_last_turn_elapsed=Mock(),
+        context_manager=SimpleNamespace(get_messages=Mock(return_value=[])),
+    )
+    repl._backup_service = SimpleNamespace(backup_session=Mock())
+    repl._original_cwd = "/repo"
+    repl._session_id = "session-1"
+    repl._streaming_error_log = []
+
+    with patch("iac_code.ui.repl.logger.opt") as logger_opt, pytest.raises(exc_type):
+        await repl._handle_chat("first turn")
+
+    repl.store.set_state.assert_any_call(is_busy=False)
+    repl._backup_service.backup_session.assert_not_called()
+    logger_opt.assert_not_called()
 
 
 def test_normalize_streaming_output_result_includes_draft_input():
@@ -1013,14 +1253,26 @@ def test_swap_session_clears_stale_cleanup_ledger_path_before_pruning(tmp_path: 
 
 
 def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tmp_path):
+    from iac_code.mcp.types import MCPToolRecord
+    from iac_code.services.agent_factory import _sync_mcp_tool_registry
+    from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
     from iac_code.state.app_state import AppState
+    from iac_code.tools.base import ToolRegistry
     from iac_code.types.permissions import ToolPermissionContext
     from iac_code.ui.repl import InlineREPL
+    from iac_code.utils.image.pasted_content import PastedContent
 
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    sessions_root = tmp_path / "sessions"
+    write_session_metadata(
+        sessions_root / "new",
+        SessionMetadata(session_id="new", cwd=str(tmp_path), layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
     old_roots = [
         str(tmp_path / "config" / "tool-results" / "old"),
         str(tmp_path / "config" / "image-cache" / "old"),
+        str(sessions_root / "old" / "tool-results"),
+        str(sessions_root / "old" / "image-cache"),
     ]
     custom_root = "/custom/trusted"
     permission_context = ToolPermissionContext(
@@ -1034,9 +1286,31 @@ def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tm
     repl._session_storage = SimpleNamespace(
         load=Mock(return_value=[]),
         repair_interrupted=Mock(return_value=[]),
+        session_dir=lambda _cwd, session_id: sessions_root / session_id,
     )
     repl._agent_loop = SimpleNamespace(replace_session=Mock())
     repl._load_current_session_name = Mock(return_value=None)
+    repl.tool_registry = ToolRegistry()
+    repl._mcp_manager = SimpleNamespace(
+        list_tools=Mock(
+            return_value=[
+                MCPToolRecord(
+                    server_name="ros",
+                    tool_name="render",
+                    public_name="mcp__ros__render",
+                    input_schema={"type": "object"},
+                )
+            ]
+        ),
+        list_resources=Mock(return_value=[]),
+    )
+    repl._registered_mcp_tool_names = _sync_mcp_tool_registry(
+        repl.tool_registry,
+        repl._mcp_manager,
+        "old",
+        set(),
+        session_dir=sessions_root / "old",
+    )
     repl.store = SimpleNamespace(
         get_state=Mock(
             return_value=AppState(model="test-model", cwd=str(tmp_path), permission_context=permission_context)
@@ -1050,9 +1324,18 @@ def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tm
     roots = permission_context.trusted_read_directories
     assert old_roots[0] not in roots
     assert old_roots[1] not in roots
+    assert old_roots[2] not in roots
+    assert old_roots[3] not in roots
     assert str(tmp_path / "config" / "tool-results" / "new") in roots
     assert str(tmp_path / "config" / "image-cache" / "new") in roots
+    assert str(sessions_root / "new" / "tool-results") in roots
+    assert str(sessions_root / "new" / "image-cache") in roots
     assert custom_root in roots
+    stored_path = repl._image_store.store(PastedContent(id=1, type="image", content="aGk=", media_type="image/png"))
+    assert stored_path == str(sessions_root / "new" / "image-cache" / "1.png")
+    mcp_tool = repl.tool_registry.get("mcp__ros__render")
+    assert mcp_tool._session_id == "new"
+    assert mcp_tool._session_dir == sessions_root / "new"
 
 
 def test_extract_last_user_text_skips_recalled_memory_message():
@@ -1179,6 +1462,68 @@ def test_resolve_session_id_continue_cross_project_raises_with_hint():
     assert format_resume_command("/elsewhere/repo", "latest-id") in str(exc_info.value)
 
 
+@patch("iac_code.ui.repl.AgentLoop")
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_continue_without_history_prepares_new_session_layout(
+    mock_mm,
+    mock_ss,
+    mock_pm,
+    mock_agent_loop,
+    monkeypatch,
+    tmp_path,
+):
+    from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
+    from iac_code.ui.repl import InlineREPL
+
+    session_id = "fresh-continue-session"
+    sessions_root = tmp_path / "sessions"
+    session_dir = sessions_root / session_id
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("uuid.uuid4", lambda: session_id)
+    storage = mock_ss.return_value
+    storage.get_latest_session_anywhere.return_value = None
+    storage.load.return_value = []
+    storage.repair_interrupted.return_value = []
+    storage.session_dir.side_effect = lambda _cwd, selected_session_id: sessions_root / selected_session_id
+
+    def ensure_v2_session(cwd, selected_session_id, **_kwargs):
+        write_session_metadata(
+            sessions_root / selected_session_id,
+            SessionMetadata(session_id=selected_session_id, cwd=cwd, layout_version=SESSION_LAYOUT_VERSION_V2),
+        )
+
+    storage.ensure_v2_session_dir_for_new_session.side_effect = ensure_v2_session
+    storage.v2_session_dir.side_effect = lambda _cwd, selected_session_id: (
+        sessions_root / selected_session_id if storage.ensure_v2_session_dir_for_new_session.called else None
+    )
+
+    repl = InlineREPL(model="test-model", resume_session_id=True)
+
+    assert repl.session_id == session_id
+    assert storage.ensure_v2_session_dir_for_new_session.call_args.args[:2] == (str(tmp_path), session_id)
+    assert mock_agent_loop.call_args.kwargs["result_storage_dir"] == session_dir / "tool-results"
+
+
+def test_prepare_pipeline_session_layout_uses_pipeline_cwd() -> None:
+    from iac_code.ui.repl import InlineREPL
+
+    storage = Mock()
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._session_storage = storage
+    repl.current_git_branch = Mock(return_value="feature")
+
+    repl._prepare_pipeline_session_layout("/pipeline-workspace", "session-1")
+
+    storage.ensure_v2_session_dir_for_new_session.assert_called_once_with(
+        "/pipeline-workspace",
+        "session-1",
+        git_branch="feature",
+    )
+
+
 def test_cross_project_message_uses_windows_resume_command(monkeypatch):
     import iac_code.utils.project_paths as project_paths
     from iac_code.ui.repl import InlineREPL
@@ -1188,6 +1533,71 @@ def test_cross_project_message_uses_windows_resume_command(monkeypatch):
     message = InlineREPL._cross_project_message(r"C:\Users\Me\iac repo & unsafe", "abc & unsafe")
 
     assert r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume "abc & unsafe"' in message
+
+
+@patch("iac_code.ui.repl.AgentLoop")
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_inline_repl_agent_loop_uses_session_tool_results(
+    mock_mm,
+    mock_ss,
+    mock_pm,
+    mock_agent_loop,
+    monkeypatch,
+    tmp_path,
+):
+    from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
+    from iac_code.ui.repl import InlineREPL
+
+    session_id = "session-v2"
+    sessions_root = tmp_path / "sessions"
+    session_dir = sessions_root / session_id
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id=session_id, cwd=str(tmp_path), layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("uuid.uuid4", lambda: session_id)
+    mock_ss.return_value.load.return_value = []
+    mock_ss.return_value.repair_interrupted.return_value = []
+    mock_ss.return_value.session_dir.side_effect = lambda _cwd, selected_session_id: sessions_root / selected_session_id
+
+    repl = InlineREPL(model="test-model")
+
+    assert repl.session_id == session_id
+    assert mock_agent_loop.call_args.kwargs["result_storage_dir"] == session_dir / "tool-results"
+
+
+@patch("iac_code.ui.repl.AgentLoop")
+@patch("iac_code.ui.repl.ProviderManager")
+@patch("iac_code.ui.repl.SessionStorage")
+@patch("iac_code.ui.repl.MemoryManager")
+def test_inline_repl_agent_loop_uses_legacy_tool_results_without_session_metadata(
+    mock_mm,
+    mock_ss,
+    mock_pm,
+    mock_agent_loop,
+    monkeypatch,
+    tmp_path,
+):
+    from iac_code.ui.repl import InlineREPL
+
+    session_id = "legacy-session"
+    sessions_root = tmp_path / "sessions"
+    session_dir = sessions_root / session_id
+    session_dir.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("uuid.uuid4", lambda: session_id)
+    mock_ss.return_value.load.return_value = []
+    mock_ss.return_value.repair_interrupted.return_value = []
+    mock_ss.return_value.session_dir.side_effect = lambda _cwd, selected_session_id: sessions_root / selected_session_id
+
+    repl = InlineREPL(model="test-model")
+
+    assert repl.session_id == session_id
+    assert mock_agent_loop.call_args.kwargs["result_storage_dir"] is None
 
 
 @patch("iac_code.ui.repl.ProviderManager")

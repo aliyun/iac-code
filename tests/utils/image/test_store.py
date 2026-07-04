@@ -1,10 +1,20 @@
+import hashlib
 import sys
 from pathlib import Path
 
 import pytest
 
+from iac_code.services.session_layout import UnsupportedSessionLayoutError
+from iac_code.services.session_metadata import SessionMetadata, write_session_metadata
 from iac_code.utils.image.pasted_content import PastedContent
 from iac_code.utils.image.store import ImageStore, cleanup_old_image_caches
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
 
 
 def test_store_writes_per_session_file_with_0o600(tmp_path, monkeypatch):
@@ -22,6 +32,168 @@ def test_store_writes_per_session_file_with_0o600(tmp_path, monkeypatch):
 
     if os.name == "posix":
         assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def test_store_with_session_root_writes_under_session_image_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    path = store.store(PastedContent(id=7, type="image", content="aGVsbG8=", media_type="image/png"))
+
+    assert path == str(session_root / "image-cache" / "7.png")
+    assert Path(path).read_bytes() == b"hello"
+    assert not (tmp_path / "config" / "image-cache" / "sess-a").exists()
+
+
+def test_store_with_session_root_rejects_symlink_image_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    write_session_metadata(session_root, SessionMetadata(session_id="sess-a", cwd=str(tmp_path), layout_version=2))
+    outside = tmp_path / "outside-cache"
+    outside.mkdir()
+    _symlink_or_skip(outside, session_root / "image-cache", target_is_directory=True)
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    with pytest.raises(UnsupportedSessionLayoutError, match="session-owned path"):
+        store.store(PastedContent(id=7, type="image", content="aGVsbG8=", media_type="image/png"))
+
+    assert list(outside.iterdir()) == []
+
+
+def test_store_with_future_session_root_raises_without_global_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    write_session_metadata(
+        session_root,
+        SessionMetadata(session_id="sess-a", cwd=str(tmp_path), layout_version=99),
+    )
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    with pytest.raises(UnsupportedSessionLayoutError):
+        store.store(PastedContent(id=7, type="image", content="aGVsbG8=", media_type="image/png"))
+
+    assert not (session_root / "image-cache").exists()
+    assert not (tmp_path / "config" / "image-cache" / "sess-a").exists()
+
+
+def test_store_with_session_root_discovers_legacy_cached_file(tmp_path, monkeypatch):
+    legacy_dir = tmp_path / "config" / "image-cache" / "sess-a"
+    legacy_dir.mkdir(parents=True)
+    legacy_path = legacy_dir / "7.png"
+    legacy_path.write_bytes(b"legacy")
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    store = ImageStore(session_id="sess-a", session_root=tmp_path / "sessions" / "sess-a")
+
+    assert store.get_path(7) == str(legacy_path)
+
+
+def test_store_with_session_root_prefers_session_scoped_file_over_legacy(tmp_path, monkeypatch):
+    legacy_dir = tmp_path / "config" / "image-cache" / "sess-a"
+    session_cache_dir = tmp_path / "sessions" / "sess-a" / "image-cache"
+    legacy_dir.mkdir(parents=True)
+    session_cache_dir.mkdir(parents=True)
+    legacy_path = legacy_dir / "7.png"
+    session_path = session_cache_dir / "7.png"
+    legacy_path.write_bytes(b"legacy")
+    session_path.write_bytes(b"session")
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    store = ImageStore(session_id="sess-a", session_root=tmp_path / "sessions" / "sess-a")
+
+    assert store.get_path(7) == str(session_path)
+
+
+def test_get_path_with_session_root_rejects_symlink_image_cache_read(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    write_session_metadata(session_root, SessionMetadata(session_id="sess-a", cwd=str(tmp_path), layout_version=2))
+    outside = tmp_path / "outside-cache"
+    outside.mkdir()
+    (outside / "7.png").write_bytes(b"outside")
+    _symlink_or_skip(outside, session_root / "image-cache", target_is_directory=True)
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    assert store.get_path(7) is None
+
+
+def test_get_path_with_session_root_rejects_symlink_image_file(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    write_session_metadata(session_root, SessionMetadata(session_id="sess-a", cwd=str(tmp_path), layout_version=2))
+    image_cache = session_root / "image-cache"
+    image_cache.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"outside")
+    _symlink_or_skip(outside, image_cache / "7.png")
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    assert store.get_path(7) is None
+
+
+def test_store_with_session_root_next_image_id_counts_session_and_legacy_files(tmp_path, monkeypatch):
+    legacy_dir = tmp_path / "config" / "image-cache" / "sess-a"
+    session_cache_dir = tmp_path / "sessions" / "sess-a" / "image-cache"
+    legacy_dir.mkdir(parents=True)
+    session_cache_dir.mkdir(parents=True)
+    (legacy_dir / "7.png").write_bytes(b"legacy")
+    (session_cache_dir / "3.png").write_bytes(b"session")
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    store = ImageStore(session_id="sess-a", session_root=tmp_path / "sessions" / "sess-a")
+
+    assert store.next_image_id() == 8
+
+
+def test_next_image_id_with_session_root_rejects_symlink_image_cache_read(tmp_path, monkeypatch):
+    legacy_dir = tmp_path / "config" / "image-cache" / "sess-a"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "7.png").write_bytes(b"legacy")
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    write_session_metadata(session_root, SessionMetadata(session_id="sess-a", cwd=str(tmp_path), layout_version=2))
+    outside = tmp_path / "outside-cache"
+    outside.mkdir()
+    (outside / "99.png").write_bytes(b"outside")
+    _symlink_or_skip(outside, session_root / "image-cache", target_is_directory=True)
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    assert store.next_image_id() == 8
+
+
+def test_next_image_id_with_session_root_rejects_symlink_image_file(tmp_path, monkeypatch):
+    legacy_dir = tmp_path / "config" / "image-cache" / "sess-a"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "7.png").write_bytes(b"legacy")
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    write_session_metadata(session_root, SessionMetadata(session_id="sess-a", cwd=str(tmp_path), layout_version=2))
+    image_cache = session_root / "image-cache"
+    image_cache.mkdir()
+    outside = tmp_path / "99.png"
+    outside.write_bytes(b"outside")
+    _symlink_or_skip(outside, image_cache / "99.png")
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    assert store.next_image_id() == 8
+
+
+def test_store_block_with_session_root_replaces_symlink_image_file(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.utils.image.store._get_base_dir", lambda: tmp_path / "config" / "image-cache")
+    session_root = tmp_path / "sessions" / "sess-a"
+    write_session_metadata(session_root, SessionMetadata(session_id="sess-a", cwd=str(tmp_path), layout_version=2))
+    image_cache = session_root / "image-cache"
+    image_cache.mkdir()
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"outside")
+    digest = hashlib.sha256("aGVsbG8=".encode()).hexdigest()[:32]
+    image_path = image_cache / f"block-{digest}.png"
+    _symlink_or_skip(outside, image_path)
+    block = type("ImageBlock", (), {"data": "aGVsbG8=", "media_type": "image/png"})()
+    store = ImageStore(session_id="sess-a", session_root=session_root)
+
+    assert store.store_block(block) == str(image_path)
+    assert image_path.read_bytes() == b"hello"
+    assert not image_path.is_symlink()
+    assert outside.read_bytes() == b"outside"
 
 
 def test_get_path_discovers_cached_file_after_store_recreated(tmp_path, monkeypatch):

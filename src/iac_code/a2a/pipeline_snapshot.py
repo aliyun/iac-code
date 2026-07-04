@@ -47,6 +47,9 @@ _CLEANUP_ERROR_KEYS = {
     "last_error",
 }
 _PIPELINE_WARNING_PRIVATE_DATA_KEYS = {"ledger_path", "ledgerPath", "load_error", "loadError"}
+_PENDING_BACKUP_VISIBILITY = "pending_backup"
+_COMMITTED_BACKUP_VISIBILITY = "committed"
+_BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
 
 
 class A2APipelineSnapshotStore:
@@ -93,7 +96,7 @@ def reduce_pipeline_events(
     existing_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reducer = _PipelineSnapshotReducer(existing_snapshot)
-    reducer.reduce(events)
+    reducer.reduce(_backup_ack_authoritative_events(events))
     return reducer.snapshot()
 
 
@@ -417,8 +420,12 @@ class _PipelineSnapshotReducer:
             self._apply_pipeline_started(data)
         elif event_type == "pipeline_handoff_ready":
             handoff = _normal_handoff(event)
-            self._snapshot["normalHandoff"] = handoff
-            self._append_control_history("handoffHistory", self._handoff_history_keys, handoff)
+            if _is_pending_backup_publication(event):
+                self._snapshot["pendingNormalHandoff"] = handoff
+            else:
+                self._snapshot["normalHandoff"] = handoff
+                self._snapshot["pendingNormalHandoff"] = None
+                self._append_control_history("handoffHistory", self._handoff_history_keys, handoff)
             cleanup_data = _dict_or_none(data.get("cleanup"))
             if cleanup_data is not None:
                 self._apply_cleanup_data(cleanup_data, event)
@@ -467,19 +474,37 @@ class _PipelineSnapshotReducer:
         elif event_type == "candidate_restart_requested":
             self._append_candidate_restart(event)
         elif event_type == "input_required":
+            if data.get("kind") == "terminal_publication_unavailable":
+                self._snapshot["normalHandoff"] = None
+                self._snapshot["pendingNormalHandoff"] = None
+                self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = self._pending_input(event)
             self._snapshot["status"] = "waiting_input"
         elif event_type == "input_received":
             self._snapshot["pendingInput"] = None
             self._snapshot["status"] = "working"
+        elif event_type == "backup_blocked":
+            self._snapshot["normalHandoff"] = None
+            self._snapshot["pendingNormalHandoff"] = None
+            self._snapshot["pendingTerminal"] = None
+            self._snapshot["pendingInput"] = self._backup_blocked_pending_input(event)
+            self._snapshot["status"] = "waiting_input"
 
         terminal_status = _TERMINAL_STATUS_BY_EVENT_TYPE.get(event_type)
-        if terminal_status is not None:
+        if terminal_status is not None and _is_pending_backup_publication(event):
+            self._snapshot["pendingTerminal"] = _terminal_publication(event)
+        elif terminal_status is not None:
             self._snapshot["status"] = terminal_status
+            self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = None
             self._snapshot["control"]["activeCandidateRunIds"] = []
-        elif event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE} and not (
-            event_type == "pipeline_handoff_ready" and self._snapshot["status"] in {"completed", "failed", "canceled"}
+        elif (
+            event_type not in {"input_required", "input_received", *_CLEANUP_STATUS_BY_EVENT_TYPE}
+            and not _is_pending_backup_publication(event)
+            and not (
+                event_type == "pipeline_handoff_ready"
+                and self._snapshot["status"] in {"completed", "failed", "canceled"}
+            )
         ):
             self._apply_event_status(event)
 
@@ -491,6 +516,8 @@ class _PipelineSnapshotReducer:
 
     def _apply_pipeline_started(self, data: dict[str, Any]) -> None:
         self._snapshot["normalHandoff"] = None
+        self._snapshot["pendingNormalHandoff"] = None
+        self._snapshot["pendingTerminal"] = None
         control = self._snapshot["control"]
         if "totalSteps" in data:
             control["totalSteps"] = data["totalSteps"]
@@ -972,6 +999,14 @@ class _PipelineSnapshotReducer:
         _merge_event_coordinates(pending, event)
         return pending
 
+    def _backup_blocked_pending_input(self, event: dict[str, Any]) -> dict[str, Any]:
+        pending = self._pending_input(event)
+        pending.setdefault("kind", "backup_blocked")
+        data = copy.deepcopy(_dict_or_empty(event.get("data")))
+        if data:
+            pending["backupBlocked"] = data
+        return pending
+
 
 def _normal_handoff(event: dict[str, Any]) -> dict[str, Any]:
     data = _sanitize_cleanup_private_fields(copy.deepcopy(_dict_or_empty(event.get("data"))))
@@ -981,6 +1016,7 @@ def _normal_handoff(event: dict[str, Any]) -> dict[str, Any]:
         "sequence": _sequence_value(event),
         "createdAt": _string_or_none(event.get("createdAt")),
         "status": _string_or_none(event.get("status")),
+        "visibility": _publication_visibility(event),
         "action": data.get("action"),
         "targetMode": data.get("targetMode"),
         "outcome": data.get("outcome"),
@@ -989,6 +1025,78 @@ def _normal_handoff(event: dict[str, Any]) -> dict[str, Any]:
     }
     _merge_event_coordinates(handoff, event)
     return handoff
+
+
+def _terminal_publication(event: dict[str, Any]) -> dict[str, Any]:
+    data = _sanitize_cleanup_private_fields(copy.deepcopy(_dict_or_empty(event.get("data"))))
+    terminal = {
+        "eventType": _string_or_none(event.get("eventType")),
+        "eventId": _string_or_none(event.get("eventId")),
+        "sequence": _sequence_value(event),
+        "createdAt": _string_or_none(event.get("createdAt")),
+        "status": _string_or_none(event.get("status")),
+        "visibility": _publication_visibility(event),
+        "data": data,
+    }
+    _merge_event_coordinates(terminal, event)
+    return terminal
+
+
+def _is_pending_backup_publication(event: dict[str, Any]) -> bool:
+    data = _dict_or_empty(event.get("data"))
+    return _publication_visibility(event) == _PENDING_BACKUP_VISIBILITY or data.get("backupPending") is True
+
+
+def _is_committed_backup_publication(event: dict[str, Any]) -> bool:
+    event_type = _string_or_none(event.get("eventType"))
+    return _publication_visibility(event) == _COMMITTED_BACKUP_VISIBILITY and event_type in {
+        "pipeline_handoff_ready",
+        *_TERMINAL_STATUS_BY_EVENT_TYPE,
+    }
+
+
+def _backup_ack_authoritative_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    authoritative: list[dict[str, Any]] = []
+    pending_by_id: dict[str, dict[str, Any]] = {}
+    pending_by_sequence_type: dict[tuple[int, str], dict[str, Any]] = {}
+    for event in sorted(events, key=_sequence_value):
+        if not isinstance(event, dict):
+            authoritative.append(event)
+            continue
+        if _is_committed_backup_publication(event):
+            event_id = _string_or_none(event.get("eventId"))
+            event_type = _string_or_none(event.get("eventType")) or ""
+            sequence = _sequence_value(event)
+            if event_id:
+                pending_by_id[event_id] = event
+            pending_by_sequence_type[(sequence, event_type)] = event
+            continue
+        if event.get("eventType") == _BACKUP_COMMITTED_EVENT_TYPE:
+            data = _dict_or_empty(event.get("data"))
+            committed_event = None
+            committed_event_id = _string_or_none(data.get("committedEventId"))
+            if committed_event_id:
+                committed_event = pending_by_id.pop(committed_event_id, None)
+            if committed_event is None:
+                committed_event_type = _string_or_none(data.get("committedEventType")) or ""
+                committed_event = pending_by_sequence_type.pop(
+                    (_sequence_value(data.get("committedSequence")), committed_event_type),
+                    None,
+                )
+            if committed_event is not None:
+                authoritative.append(committed_event)
+            authoritative.append(event)
+            continue
+        authoritative.append(event)
+    return authoritative
+
+
+def _publication_visibility(event: dict[str, Any]) -> str | None:
+    value = _string_or_none(event.get("visibility"))
+    if value is not None:
+        return value
+    data = _dict_or_empty(event.get("data"))
+    return _string_or_none(data.get("visibility"))
 
 
 def _warning_history_entry(event: dict[str, Any]) -> dict[str, Any]:
@@ -1090,6 +1198,8 @@ def _empty_snapshot() -> dict[str, Any]:
             "history": [],
         },
         "normalHandoff": None,
+        "pendingNormalHandoff": None,
+        "pendingTerminal": None,
         "pendingInput": None,
         "control": {
             "activeCandidateRunIds": [],
@@ -1165,6 +1275,14 @@ def _snapshot_from_existing(existing_snapshot: dict[str, Any] | None) -> dict[st
     snapshot["normalHandoff"] = (
         _sanitize_cleanup_private_fields(normal_handoff) if isinstance(normal_handoff, dict) else None
     )
+    pending_normal_handoff = snapshot.get("pendingNormalHandoff")
+    snapshot["pendingNormalHandoff"] = (
+        _sanitize_cleanup_private_fields(pending_normal_handoff) if isinstance(pending_normal_handoff, dict) else None
+    )
+    pending_terminal = snapshot.get("pendingTerminal")
+    snapshot["pendingTerminal"] = (
+        _sanitize_cleanup_private_fields(pending_terminal) if isinstance(pending_terminal, dict) else None
+    )
     cleanup = snapshot.get("cleanup")
     if not isinstance(cleanup, dict):
         cleanup = {}
@@ -1214,6 +1332,12 @@ def _sanitize_public_snapshot_private_cleanup_fields(value: dict[str, Any]) -> d
     normal_handoff = sanitized.get("normalHandoff")
     if isinstance(normal_handoff, dict):
         sanitized["normalHandoff"] = _sanitize_cleanup_private_fields(normal_handoff)
+    pending_normal_handoff = sanitized.get("pendingNormalHandoff")
+    if isinstance(pending_normal_handoff, dict):
+        sanitized["pendingNormalHandoff"] = _sanitize_cleanup_private_fields(pending_normal_handoff)
+    pending_terminal = sanitized.get("pendingTerminal")
+    if isinstance(pending_terminal, dict):
+        sanitized["pendingTerminal"] = _sanitize_cleanup_private_fields(pending_terminal)
     cleanup = sanitized.get("cleanup")
     if isinstance(cleanup, dict):
         sanitized["cleanup"] = _sanitize_cleanup_private_fields(cleanup, root_is_cleanup=True)

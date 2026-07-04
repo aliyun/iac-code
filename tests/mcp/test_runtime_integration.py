@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import threading
 from pathlib import Path
 from typing import Any
@@ -188,6 +189,42 @@ async def test_runtime_mcp_list_changed_refreshes_registered_tools(monkeypatch, 
 
     assert runtime.tool_registry.get("mcp__ros__plan") is None
     assert runtime.tool_registry.get("mcp__ros__apply") is not None
+
+
+@pytest.mark.asyncio
+async def test_runtime_mcp_tools_changed_uses_session_dir_for_binary_output(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    manager = FakeMCPManager()
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id="session-1",
+            cwd=str(tmp_path),
+            mcp_configs=[{"name": "ros", "command": "uvx"}],
+            mcp_manager_factory=lambda configs, roots: manager,
+        )
+    )
+
+    manager._tools = [
+        MCPToolRecord(
+            server_name="ros",
+            tool_name="render",
+            public_name="mcp__ros__render",
+            input_schema={"type": "object"},
+        )
+    ]
+
+    await manager.listeners[0]("ros", "tools")
+
+    tool = runtime.tool_registry.get("mcp__ros__render")
+    result = await tool.execute(tool_input={}, context=ToolContext())
+
+    session_dir = runtime.agent_loop._session_storage.session_dir(str(tmp_path), "session-1")
+    artifact_path = result.metadata["mcp"]["artifacts"][0]["path"]
+    assert artifact_path.startswith(str(session_dir / "tool-results" / "mcp" / "ros" / "render"))
+    assert not (tmp_path / "config" / "tool-results" / "session-1").exists()
 
 
 @pytest.mark.asyncio
@@ -551,6 +588,17 @@ class FakeMCPManager:
 
     def add_change_listener(self, listener) -> None:
         self.listeners.append(listener)
+
+    async def call_tool(self, *args, **kwargs):
+        return {
+            "content": [
+                {
+                    "type": "image",
+                    "data": base64.b64encode(b"runtime-png").decode("ascii"),
+                    "mimeType": "image/png",
+                }
+            ]
+        }
 
     async def read_resource(self, uri: str, server_name: str | None = None):
         return (

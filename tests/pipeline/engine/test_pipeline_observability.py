@@ -872,6 +872,49 @@ def test_telemetry_failure_is_swallowed(caplog):
     assert "Pipeline telemetry emission failed" in caplog.text
 
 
+def test_pipeline_backup_telemetry_signal_names_are_pinned() -> None:
+    assert Events.PIPELINE_BACKUP_SUCCEEDED == "iac.pipeline.backup.succeeded"
+    assert Events.PIPELINE_BACKUP_FAILED == "iac.pipeline.backup.failed"
+    assert Events.PIPELINE_BACKUP_BLOCKED == "iac.pipeline.backup.blocked"
+    assert Metrics.PIPELINE_BACKUP_SUCCEEDED_COUNT == "iac.pipeline.backup.succeeded.count"
+    assert Metrics.PIPELINE_BACKUP_FAILED_COUNT == "iac.pipeline.backup.failed.count"
+    assert Metrics.PIPELINE_BACKUP_BLOCKED_COUNT == "iac.pipeline.backup.blocked.count"
+
+
+def test_pipeline_backup_succeeded_failed_and_blocked_emit_events_and_metrics() -> None:
+    obs = PipelineObservability(pipeline_name="selling", session_id="sid", cwd="/repo")
+
+    with (
+        patch("iac_code.pipeline.engine.observability.log_event") as log_event,
+        patch("iac_code.pipeline.engine.observability.add_metric") as add_metric,
+    ):
+        obs.backup_succeeded(reason="terminal", step_id="deploy", critical=True, retry_count=2)
+        obs.backup_failed(reason="terminal", step_id="deploy", critical=True, retry_count=2)
+        obs.backup_blocked(reason="terminal", step_id="deploy", recoverable=True, persisted=False)
+
+    assert [call.args[0] for call in log_event.call_args_list] == [
+        Events.PIPELINE_BACKUP_SUCCEEDED,
+        Events.PIPELINE_BACKUP_FAILED,
+        Events.PIPELINE_BACKUP_BLOCKED,
+    ]
+    assert log_event.call_args_list[0].args[1] == {
+        "pipeline_name": "selling",
+        "session_id": "sid",
+        "cwd_present": True,
+        "step_id": "deploy",
+        "reason": "terminal",
+        "critical": True,
+        "retry_count": 2,
+    }
+    assert log_event.call_args_list[1].args[1]["retry_count"] == 2
+    assert log_event.call_args_list[2].args[1]["persisted"] is False
+    assert [call.args[0] for call in add_metric.call_args_list] == [
+        Metrics.PIPELINE_BACKUP_SUCCEEDED_COUNT,
+        Metrics.PIPELINE_BACKUP_FAILED_COUNT,
+        Metrics.PIPELINE_BACKUP_BLOCKED_COUNT,
+    ]
+
+
 def test_safe_span_falls_back_to_nullcontext():
     obs = PipelineObservability(pipeline_name="selling", session_id="sid", cwd="/repo")
 

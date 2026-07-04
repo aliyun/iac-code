@@ -12,7 +12,15 @@ from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
 from iac_code.i18n import _
+from iac_code.services.session_layout import (
+    SESSION_LAYOUT_VERSION_V2,
+    SessionPaths,
+    UnsupportedSessionLayoutError,
+    ensure_session_owned_dir,
+    require_supported_session_layout,
+)
 from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.state_io import atomic_write_bytes
 
 PUBLIC_ARTIFACT_URI_PREFIX = "iac-code-artifact://"
 _PUBLIC_ARTIFACT_URI_SCHEME = "iac-code-artifact"
@@ -333,8 +341,9 @@ class A2AArtifactMetadata:
 
 
 class A2AArtifactStore:
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, session_dir: str | Path | None = None) -> None:
         self.root = Path(root)
+        self._session_dir = Path(session_dir) if session_dir is not None else None
 
     def save_text(self, *, filename: str, content: str, media_type: str) -> A2AArtifactMetadata:
         encoded = content.encode("utf-8")
@@ -348,9 +357,12 @@ class A2AArtifactStore:
         safe_name = self._safe_filename(filename)
         artifact_id = str(uuid.uuid4())
         artifact_dir = self.root / artifact_id
-        artifact_dir.mkdir(parents=True, exist_ok=False)
+        if self._session_dir is not None:
+            ensure_session_owned_dir(self._session_dir, artifact_dir)
+        else:
+            artifact_dir.mkdir(parents=True, exist_ok=False)
         path = artifact_dir / safe_name
-        path.write_bytes(content)
+        atomic_write_bytes(path, content)
         return A2AArtifactMetadata(
             artifact_id=artifact_id,
             filename=safe_name,
@@ -373,3 +385,13 @@ class A2AArtifactStore:
     @staticmethod
     def _safe_filename(filename: str) -> str:
         return safe_artifact_filename(filename)
+
+
+def artifact_store_for_session(session_dir: str | Path) -> A2AArtifactStore:
+    session_path = Path(session_dir)
+    version = require_supported_session_layout(session_path)
+    if version != SESSION_LAYOUT_VERSION_V2:
+        raise UnsupportedSessionLayoutError(_("Unsupported session layout version: {version}").format(version="legacy"))
+    session_paths = SessionPaths.from_session_dir(session_path)
+    root = ensure_session_owned_dir(session_path, session_paths.a2a_artifacts_dir)
+    return A2AArtifactStore(root, session_dir=session_path)

@@ -4,10 +4,12 @@ import base64
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any, Mapping
 
 from iac_code.config import get_config_dir
 from iac_code.i18n import _
+from iac_code.services.session_layout import SessionPaths, ensure_session_owned_dir
 from iac_code.tools.base import ToolResult
 from iac_code.utils.file_security import ensure_private_dir
 from iac_code.utils.state_io import atomic_write_bytes
@@ -19,6 +21,7 @@ def convert_mcp_tool_result(
     server_name: str,
     tool_name: str,
     session_id: str,
+    session_dir: Path | str | None = None,
 ) -> ToolResult:
     """Convert an MCP tool result into iac-code's model-visible ToolResult."""
 
@@ -31,6 +34,7 @@ def convert_mcp_tool_result(
             server_name=server_name,
             tool_name=tool_name,
             session_id=session_id,
+            session_dir=session_dir,
             index=index,
             artifacts=artifacts,
         )
@@ -67,6 +71,7 @@ def _convert_content_block(
     server_name: str,
     tool_name: str,
     session_id: str,
+    session_dir: Path | str | None,
     index: int,
     artifacts: list[dict[str, Any]],
 ) -> str:
@@ -82,6 +87,7 @@ def _convert_content_block(
             server_name=server_name,
             tool_name=tool_name,
             session_id=session_id,
+            session_dir=session_dir,
             index=index,
             artifacts=artifacts,
         )
@@ -106,6 +112,7 @@ def _convert_content_block(
                 server_name=server_name,
                 tool_name=tool_name,
                 session_id=session_id,
+                session_dir=session_dir,
                 index=index,
                 artifacts=artifacts,
                 uri=uri,
@@ -131,6 +138,7 @@ def _store_base64_artifact(
     server_name: str,
     tool_name: str,
     session_id: str,
+    session_dir: Path | str | None,
     index: int,
     artifacts: list[dict[str, Any]],
     uri: str | None = None,
@@ -141,15 +149,17 @@ def _store_base64_artifact(
     data = base64.b64decode(encoded, validate=True)
     digest = hashlib.sha256(data).hexdigest()[:16]
     extension = _extension_for_mime_type(mime_type)
-    directory = (
-        get_config_dir()
-        / "tool-results"
-        / session_id
-        / "mcp"
-        / _safe_path_segment(server_name)
-        / _safe_path_segment(tool_name)
-    )
-    ensure_private_dir(directory)
+    if session_dir is not None:
+        session_root = Path(session_dir)
+        session_paths = SessionPaths.require_supported(session_root)
+        artifact_root = ensure_session_owned_dir(session_root, session_paths.tool_results_dir)
+    else:
+        artifact_root = get_config_dir() / "tool-results" / session_id
+    directory = artifact_root / "mcp" / _safe_path_segment(server_name) / _safe_path_segment(tool_name)
+    if session_dir is not None:
+        ensure_session_owned_dir(session_dir, directory)
+    else:
+        ensure_private_dir(directory)
     path = directory / "{:02d}-{}-{}{}".format(index, _safe_path_segment(kind), digest, extension)
     atomic_write_bytes(path, data)
 

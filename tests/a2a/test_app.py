@@ -1,6 +1,7 @@
 import asyncio
 import builtins
 import json
+import threading
 from base64 import b64encode
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,11 +34,15 @@ from iac_code.a2a.app import (
     resolve_token,
     run_server,
 )
+from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
+from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import create_runtime_components
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
 
@@ -95,6 +100,36 @@ def test_health_route() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
+
+
+@pytest.mark.asyncio
+async def test_a2a_task_store_writes_session_snapshots_and_global_indexes(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    persistence = A2APersistenceStore(config_dir / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: FakeRuntime(),
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id=ctx.context_id)
+    task.state = "working"
+    store.mirror_task(task)
+
+    session_dir = SessionStorage().session_dir(str(cwd), ctx.session_id)
+    session_task = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
+    session_context = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+
+    assert session_task["task_id"] == "task-1"
+    assert session_task["context_id"] == "ctx-1"
+    assert session_context["context_id"] == "ctx-1"
+    assert session_context["session_id"] == ctx.session_id
+    assert (config_dir / "a2a" / "tasks" / "task-1.json").exists()
+    assert (config_dir / "a2a" / "contexts" / "ctx-1.json").exists()
 
 
 def test_run_server_reports_aligned_missing_uvicorn_hint(monkeypatch, tmp_path) -> None:
@@ -809,6 +844,7 @@ def test_streaming_v03_active_sidecar_mismatch_preserves_recoverable_error_data(
     persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
     persistence.save_task(A2ATaskSnapshot(task_id="task-owner", context_id="ctx-1", state="working"))
     persistence.save_task(A2ATaskSnapshot(task_id="task-new", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
 
     pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
     owner_event = _pipeline_event(1, "evt-owner")
@@ -1605,6 +1641,7 @@ def test_send_message_routes_context_only_pending_pipeline_input_after_restart(m
     persistence = A2APersistenceStore(persistence_dir)
     persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
     persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
 
     pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
     pending = _pipeline_pending_ask_event()
@@ -1855,6 +1892,7 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
     persistence = A2APersistenceStore(persistence_dir)
     persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
     persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
 
     pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
     pending = _pipeline_pending_ask_event()
@@ -1882,7 +1920,169 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
         assert snapshot["normalHandoff"]["outcome"] == "canceled"
         assert "Outcome: canceled" in snapshot["normalHandoff"]["summary"]
         events = A2APipelineJournal(pipeline_dir).read_all_repairing_tail()
-        assert [event["eventType"] for event in events[-2:]] == ["pipeline_canceled", "pipeline_handoff_ready"]
+        assert [event["eventType"] for event in events[-4:]] == [
+            "pipeline_canceled",
+            "pipeline_handoff_ready",
+            "backup_committed",
+            "backup_committed",
+        ]
+        assert [event["data"]["committedEventType"] for event in events[-2:]] == [
+            "pipeline_canceled",
+            "pipeline_handoff_ready",
+        ]
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_input_required_pipeline_task_backup_blocked_returns_input_required(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    class BlockingBackupService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, BackupReason, bool]] = []
+            self.thread_ids: list[int] = []
+
+        def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+            self.calls.append((cwd, session_id, reason, critical))
+            self.thread_ids.append(threading.get_ident())
+            session_dir = SessionStorage().session_dir(cwd, session_id)
+            task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
+            context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+            pipeline_snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+            assert task_snapshot["state"] == "input-required"
+            assert context_snapshot["session_id"] == session_id
+            assert context_snapshot["active_task_id"] is None
+            assert pipeline_snapshot is not None
+            assert pipeline_snapshot["status"] == "waiting_input"
+            assert pipeline_snapshot["pendingTerminal"]["eventType"] == "pipeline_canceled"
+            assert pipeline_snapshot["normalHandoff"] is None
+            assert pipeline_snapshot["pendingNormalHandoff"]["outcome"] == "canceled"
+            raise SessionBackupBlocked("copy failed secret_token=tok-live at /tmp/iac-code/cancel")
+
+    backup_service = BlockingBackupService()
+    event_loop_thread_id = threading.get_ident()
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+        backup_service=backup_service,
+    )
+    call_context = ServerCallContext()
+
+    try:
+        task = await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), call_context)
+
+        assert isinstance(task, Task)
+        assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        assert persistence.load_task("task-1").state == "input-required"
+        assert backup_service.calls == [(str(tmp_path), session_id, BackupReason.TERMINAL, True)]
+        assert backup_service.thread_ids and backup_service.thread_ids[0] != event_loop_thread_id
+        snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+        assert snapshot is not None
+        assert snapshot["status"] == "waiting_input"
+        assert snapshot["pendingInput"]["kind"] == "ask_user_question"
+        assert snapshot["normalHandoff"] is None
+        assert snapshot["pendingNormalHandoff"] is None
+        assert snapshot["pendingTerminal"] is None
+        assert (
+            recoverable_task_id_from_sidecar(cwd=str(tmp_path), session_id=session_id, context_id="ctx-1") == "task-1"
+        )
+        assert (
+            recoverable_task_id_from_sidecar(
+                cwd=str(tmp_path),
+                session_id=session_id,
+                context_id="ctx-1",
+                include_running=False,
+            )
+            == "task-1"
+        )
+        assert not await components.handler.agent_executor._should_route_pipeline_handoff_to_normal(
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+        )
+        events = A2APipelineJournal(pipeline_dir).read_all_repairing_tail()
+        assert events[-1]["eventType"] == "backup_blocked"
+        assert events[-1]["status"] == "input_required"
+        assert events[-1]["data"]["reason"] == "terminal"
+        assert events[-1]["data"]["recoverable"] is True
+        assert "tok-live" not in events[-1]["data"]["error"]
+        assert "/tmp/iac-code" not in events[-1]["data"]["error"]
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_input_required_pipeline_task_backup_blocked_persist_failure_stays_input_required(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), session_id) / "a2a" / "pipeline"
+    pending = _pipeline_pending_ask_event()
+    A2APipelineJournal(pipeline_dir).append(pending)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
+
+    class BlockingBackupService:
+        def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+            raise SessionBackupBlocked("copy failed secret_token=tok-live at /tmp/iac-code/cancel")
+
+    original_append = A2APipelineJournal.append
+
+    def fail_backup_blocked_append(self, event: dict, durable: bool = False):
+        if event.get("eventType") == "backup_blocked":
+            raise OSError("journal locked")
+        return original_append(self, event, durable=durable)
+
+    monkeypatch.setattr(A2APipelineJournal, "append", fail_backup_blocked_append)
+
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+        backup_service=BlockingBackupService(),
+    )
+    call_context = ServerCallContext()
+
+    try:
+        task = await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), call_context)
+
+        assert isinstance(task, Task)
+        assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        assert persistence.load_task("task-1").state == "input-required"
+        events = A2APipelineJournal(pipeline_dir).read_all_repairing_tail()
+        assert [event["eventType"] for event in events] == [
+            "input_required",
+            "pipeline_canceled",
+            "pipeline_handoff_ready",
+            "pipeline_canceled",
+            "pipeline_handoff_ready",
+            "input_required",
+        ]
+        assert [event.get("visibility") for event in events[1:5]] == [
+            "pending_backup",
+            "pending_backup",
+            "committed",
+            "committed",
+        ]
+        assert events[-1]["data"]["kind"] == "terminal_publication_unavailable"
     finally:
         await components.aclose()
 

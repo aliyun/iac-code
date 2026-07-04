@@ -39,6 +39,10 @@ Supported output formats are:
 | `json` | A single JSON result for callers that parse the final response. |
 | `stream-json` | Streaming JSON events for callers that process incremental progress. |
 
+## Session Backups
+
+When `IAC_CODE_CONFIG_BACKUP_DIR` is set, non-interactive runs mirror the v2 session at key checkpoints. The ordinary end-of-turn checkpoint uses `normal_turn_end`; backup failures at that point are logged as a `warning` and recorded in `.backup-state.json` without failing the completed response or adding a warning field to the final output. Pipeline mode has its own critical backup gates.
+
 ## Permission Control in Automation
 
 When running non-interactively, use `--permission-mode` to control how the agent handles tool approvals:

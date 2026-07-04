@@ -23,6 +23,7 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.services.session_backup import SessionBackupBlocked
 from iac_code.types.stream_events import SubPipelineStreamEvent
 
 logger = logging.getLogger(__name__)
@@ -67,18 +68,21 @@ class SubPipelineExecutor:
         pipeline: LoadedPipeline,
         pipeline_dir: Path,
         session_storage: Any = None,
+        root_session_storage: Any = None,
         cwd: str | None = None,
         pause_event: asyncio.Event | None = None,
         permission_context_getter: Callable[[], Any] | None = None,
         memory_content_getter: Callable[[], str] | None = None,
         auto_trigger_skills: list[Any] | None = None,
         surface: str = "repl",
+        backup_service: Any | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
         self._pipeline = pipeline
         self._pipeline_dir = pipeline_dir
         self._session_storage = session_storage
+        self._root_session_storage = root_session_storage or session_storage
         self._cwd = cwd
         self._pause_event = pause_event
         self._permission_context_getter = permission_context_getter
@@ -157,6 +161,7 @@ class SubPipelineExecutor:
             pipeline=self._pipeline,
             pipeline_dir=self._pipeline_dir,
             session_storage=self._session_storage,
+            root_session_storage=self._root_session_storage,
             cwd=self._cwd,
             pause_event=self._pause_event,
             permission_context_getter=self._permission_context_getter,
@@ -289,6 +294,8 @@ class SubPipelineExecutor:
 
                 state_machine.advance()
 
+        except SessionBackupBlocked:
+            raise
         except Exception as e:
             failure = public_error_from_exception(e)
             return SubPipelineResult(
@@ -331,6 +338,7 @@ class SubPipelineExecutor:
             pipeline=self._pipeline,
             pipeline_dir=self._pipeline_dir,
             session_storage=self._session_storage,
+            root_session_storage=self._root_session_storage,
             cwd=self._cwd,
             pause_event=self._pause_event,
             permission_context_getter=self._permission_context_getter,
@@ -703,6 +711,13 @@ class SubPipelineExecutor:
                                     duration_ms=self._observability.duration_ms(sub_step_started_at),
                                     **current_step_attrs,
                                 )
+                                self._mark_rolled_back_fields_stale(sub_context, sub_spec, target)
+                                await publish_sub_step_state(
+                                    status="running",
+                                    attempt_status="rolled_back",
+                                    current_sub_step=target,
+                                    attempt_info=attempt_info,
+                                )
                                 yield PipelineEvent(
                                     type=PipelineEventType.SUB_STEP_COMPLETED,
                                     step_id=step.step_id,
@@ -714,13 +729,6 @@ class SubPipelineExecutor:
                                             "conclusion": step_result.conclusion,
                                         },
                                     ),
-                                )
-                                self._mark_rolled_back_fields_stale(sub_context, sub_spec, target)
-                                await publish_sub_step_state(
-                                    status="running",
-                                    attempt_status="rolled_back",
-                                    current_sub_step=target,
-                                    attempt_info=attempt_info,
                                 )
                             except ValueError as e:
                                 # P-I9: emit SUB_STEP_FAILED for symmetry with parent runner's STEP_FAILED
@@ -814,6 +822,8 @@ class SubPipelineExecutor:
                             ),
                         )
 
+                except SessionBackupBlocked:
+                    raise
                 except Exception as e:
                     # Keep public failure events structured without exposing traceback text.
                     failure = public_error_from_exception(e)

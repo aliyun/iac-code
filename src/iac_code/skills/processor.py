@@ -57,9 +57,10 @@ async def process_prompt_command(
     allowed_tools = skill.allowed_tools
     model_override = skill.model_override
     effort_override = skill.effort_override
+    skill_root = skill.skill_root or ""
 
     context_modifier = None
-    if allowed_tools or (model_override and model_override != "inherit") or effort_override:
+    if allowed_tools or (model_override and model_override != "inherit") or effort_override or skill_root:
 
         def context_modifier(ctx: dict) -> dict:
             modified = {**ctx}
@@ -70,6 +71,15 @@ async def process_prompt_command(
                 modified["model_override"] = model_override
             if effort_override:
                 modified["effort_override"] = effort_override
+            if skill_root:
+                trusted_roots = list(modified.get("tool_context_trusted_read_directories", []) or [])
+                relative_roots = list(modified.get("tool_context_relative_read_directories", []) or [])
+                if skill_root not in trusted_roots:
+                    trusted_roots.append(skill_root)
+                if skill_root not in relative_roots:
+                    relative_roots.append(skill_root)
+                modified["tool_context_trusted_read_directories"] = trusted_roots
+                modified["tool_context_relative_read_directories"] = relative_roots
             return modified
 
     return ProcessedSkillResult(

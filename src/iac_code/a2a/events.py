@@ -455,7 +455,7 @@ async def publish_stream_event(
         if event.error_id:
             error_metadata["errorId"] = event.error_id
         if event.is_retryable:
-            text = "A temporary error occurred. Please retry."
+            text = _("A temporary error occurred. Please retry.")
             state = TaskState.TASK_STATE_INPUT_REQUIRED
         else:
             raw = event.error or "Unknown error"

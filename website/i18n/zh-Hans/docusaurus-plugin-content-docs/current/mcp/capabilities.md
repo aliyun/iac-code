@@ -41,7 +41,13 @@ IaC Code 会把 MCP content blocks 转换为模型可见文本：
 | `resource_link` | 渲染为带 URI 和 MIME type 的 resource link。 |
 | Image、audio 和 blob data | 存为私有 artifact 文件，并以 artifact id 引用。 |
 
-二进制 artifacts 存储在：
+v2 session 的二进制 artifacts 存储在 session 自己的 MCP tool-results 目录：
+
+```text
+<config-dir>/projects/<project>/<session-id>/tool-results/mcp/<server>/<tool>/
+```
+
+没有受支持 layout marker 的旧 session 继续使用：
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/<server>/<tool>/

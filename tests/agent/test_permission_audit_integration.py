@@ -205,6 +205,42 @@ async def test_agent_loop_prompt_event_carries_internal_audit_context(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_prompt_event_carries_transcript_audit_context(tmp_path):
+    settings = PermissionAuditSettings(max_file_bytes=123, max_files=2)
+    metadata = _audit_metadata(scope="once", rule_source=None, rule=None, reason_type="needs_prompt")
+    transcript_dir = tmp_path / "root-session" / "pipeline" / "transcripts" / "transcript_att_0001"
+    audit_log_path = transcript_dir / "permission-audit.jsonl"
+    provider = FakeProvider([_tool_turn(), _text_turn("done")])
+    registry = ToolRegistry()
+    registry.register(FakePermissionTool(PermissionResult(behavior="ask", audit=metadata)))
+    loop = AgentLoop(
+        provider_manager=provider,
+        system_prompt="test",
+        tool_registry=registry,
+        cwd=str(tmp_path),
+        max_turns=2,
+        session_id="transcript_att_0001",
+        root_session_id="root-session",
+        transcript_id="transcript_att_0001",
+        audit_log_path=audit_log_path,
+        permission_context=ToolPermissionContext(cwd=str(tmp_path), audit_settings=settings),
+    )
+
+    events = await _collect_events(loop, "run fake tool", permission_handler=Mock(return_value=False))
+
+    [prompt] = _permission_requests(events)
+    assert prompt.audit_context == {
+        "session_id": "transcript_att_0001",
+        "root_session_id": "root-session",
+        "transcript_id": "transcript_att_0001",
+        "cwd": str(tmp_path),
+        "settings": settings,
+        "metadata": metadata,
+        "audit_log_path": str(audit_log_path),
+    }
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_bash_ask_rule_prompt_carries_rule_audit_context(tmp_path):
     settings = PermissionAuditSettings(max_file_bytes=123, max_files=2)
     provider = FakeProvider([_tool_turn(tool_name="bash", tool_input={"command": "mkdir foo"}), _text_turn("done")])

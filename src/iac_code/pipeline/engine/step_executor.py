@@ -25,6 +25,14 @@ from iac_code.pipeline.engine.observability import PipelineObservability
 from iac_code.pipeline.engine.recovery import last_successful_tool_input, reconstruct_completion_guard_state
 from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, render_prompt
 from iac_code.pipeline.engine.types import StepConfig, StepResult, StepStatus
+from iac_code.services.session_layout import (
+    SESSION_LAYOUT_VERSION_V2,
+    SessionPaths,
+    ensure_session_owned_dir,
+    ensure_session_owned_parent,
+    require_supported_session_layout,
+)
+from iac_code.services.session_usage import SessionUsageStore
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.stream_events import StreamEvent, ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
 
@@ -67,6 +75,7 @@ class StepExecutor:
         pipeline: LoadedPipeline,
         pipeline_dir: Path,
         session_storage: Any = None,
+        root_session_storage: Any = None,
         cwd: str | None = None,
         pause_event: asyncio.Event | None = None,
         permission_context_getter: Callable[[], Any] | None = None,
@@ -79,6 +88,7 @@ class StepExecutor:
         self._pipeline = pipeline
         self._pipeline_dir = pipeline_dir
         self._session_storage = session_storage
+        self._root_session_storage = root_session_storage or session_storage
         self._cwd = cwd
         self._pause_event = pause_event
         self._permission_context_getter = permission_context_getter
@@ -377,6 +387,28 @@ class StepExecutor:
         from iac_code.agent.agent_loop import AgentLoop
 
         agent_session_id = transcript_id or session_id
+        session_usage_store = None
+        result_storage_dir = None
+        audit_log_path = None
+        if (
+            transcript_id
+            and self._root_session_storage is not None
+            and hasattr(self._root_session_storage, "session_dir")
+        ):
+            root_session_dir = Path(self._root_session_storage.session_dir(self._cwd or "", session_id))
+            if require_supported_session_layout(root_session_dir) == SESSION_LAYOUT_VERSION_V2:
+                session_paths = SessionPaths.require_supported(root_session_dir)
+                transcript_dir = ensure_session_owned_dir(root_session_dir, session_paths.transcript_dir(transcript_id))
+                result_storage_dir = ensure_session_owned_dir(
+                    root_session_dir,
+                    session_paths.transcript_tool_results_dir(transcript_id),
+                )
+                audit_log_path = session_paths.transcript_permission_audit_path(transcript_id)
+                usage_path = session_paths.transcript_usage_path(transcript_id)
+                ensure_session_owned_parent(root_session_dir, audit_log_path)
+                ensure_session_owned_parent(root_session_dir, usage_path)
+                assert transcript_dir == session_paths.transcript_dir(transcript_id)
+                session_usage_store = SessionUsageStore(path_provider=lambda _cwd, _sid, path=usage_path: path)
         step_skill_roots = self._resolve_step_skill_roots(step)
         agent_loop = AgentLoop(
             provider_manager=self._provider_manager,
@@ -384,7 +416,12 @@ class StepExecutor:
             tool_registry=tool_registry,
             max_turns=step.max_agent_turns,
             session_storage=self._session_storage,
+            session_usage_store=session_usage_store,
             session_id=agent_session_id,
+            root_session_id=session_id if transcript_id else None,
+            transcript_id=transcript_id,
+            result_storage_dir=result_storage_dir,
+            audit_log_path=audit_log_path,
             resume_messages=repaired_messages or None,
             cwd=self._cwd,
             pause_event=self._pause_event,

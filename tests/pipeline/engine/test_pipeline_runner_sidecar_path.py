@@ -11,6 +11,23 @@ import yaml
 from iac_code.agent.message import ImageBlock, Message, TextBlock, ToolResultBlock
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
+from iac_code.services.session_storage import SessionStorage
+from iac_code.utils import project_paths
+
+
+def _symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
+
+
+def _seed_minimal_pipeline_sidecar(session_dir: Path) -> Path:
+    pipeline_dir = session_dir / "pipeline"
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+    (pipeline_dir / "meta.yaml").write_text("status: running\n", encoding="utf-8")
+    return pipeline_dir
 
 
 def _stub_session_storage(tmp_path: Path):
@@ -19,6 +36,7 @@ def _stub_session_storage(tmp_path: Path):
     sessions_root = tmp_path / "projects" / "proj"
     sessions_root.mkdir(parents=True, exist_ok=True)
     storage.session_dir.side_effect = lambda cwd, sid: sessions_root / sid
+    storage.v2_session_dir.side_effect = lambda cwd, sid: sessions_root / sid
     storage.session_path.side_effect = lambda cwd, sid: sessions_root / sid / "session.jsonl"
     return storage
 
@@ -50,6 +68,259 @@ def _build_runner(tmp_path: Path, *, resume_from_sidecar: bool = False):
         cwd="/proj",
         resume_from_sidecar=resume_from_sidecar,
     )
+
+
+def _pipeline_dir(tmp_path: Path) -> Path:
+    pipeline_dir = tmp_path / "pipe-real-storage"
+    pipeline_dir.mkdir(exist_ok=True)
+    (pipeline_dir / "pipeline.yaml").write_text(
+        yaml.dump(
+            {
+                "name": "t",
+                "context_dependencies": {"x": []},
+                "steps": [{"id": "s1", "conclusion_field": "x", "forward": None, "prompt": "prompts/s1.md"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts_dir = pipeline_dir / "prompts"
+    prompts_dir.mkdir(exist_ok=True)
+    (prompts_dir / "s1.md").write_text("step 1", encoding="utf-8")
+    return pipeline_dir
+
+
+def test_runner_creates_v2_metadata_before_session_sidecar(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+
+    runner = PipelineRunner(
+        pipeline_dir=_pipeline_dir(tmp_path),
+        provider_manager=MagicMock(),
+        base_tool_registry=MagicMock(),
+        session_storage=storage,
+        session_id="sess123",
+        cwd="/proj",
+    )
+
+    metadata = storage.read_metadata("/proj", "sess123")
+    assert metadata is not None
+    assert metadata.layout_version == SESSION_LAYOUT_VERSION_V2
+    assert runner.session is not None
+    assert runner.session.session_dir == storage.session_dir("/proj", "sess123") / "pipeline"
+
+
+def test_runner_uses_writable_legacy_sidecar_placeholder_for_legacy_file(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    legacy_path = storage.legacy_session_path("/proj", "sess123")
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text('{"role":"user","content":"legacy"}\n', encoding="utf-8")
+
+    runner = PipelineRunner(
+        pipeline_dir=_pipeline_dir(tmp_path),
+        provider_manager=MagicMock(),
+        base_tool_registry=MagicMock(),
+        session_storage=storage,
+        session_id="sess123",
+        cwd="/proj",
+    )
+
+    placeholder_dir = storage.session_dir("/proj", "sess123")
+    assert runner.session is not None
+    assert runner.session.session_dir == placeholder_dir / "pipeline"
+    runner._save_running_sync("s1", reason="first legacy pipeline state")
+    assert legacy_path.exists()
+    assert (placeholder_dir / "pipeline" / "meta.yaml").exists()
+    assert not (legacy_path.parent / "sess123" / "pipeline").exists()
+
+
+@pytest.mark.parametrize("sidecar_file", [None, "usage.jsonl", "permission-audit.jsonl"])
+def test_runner_uses_legacy_sidecar_placeholder_for_non_pipeline_sidecar_shadow(
+    tmp_path: Path,
+    sidecar_file: str | None,
+) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    legacy_path = storage.legacy_session_path("/proj", "sess123")
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text('{"role":"user","content":"legacy"}\n', encoding="utf-8")
+    shadow_dir = legacy_path.parent / "sess123"
+    shadow_dir.mkdir()
+    if sidecar_file is not None:
+        (shadow_dir / sidecar_file).write_text("", encoding="utf-8")
+
+    runner = PipelineRunner(
+        pipeline_dir=_pipeline_dir(tmp_path),
+        provider_manager=MagicMock(),
+        base_tool_registry=MagicMock(),
+        session_storage=storage,
+        session_id="sess123",
+        cwd="/proj",
+    )
+
+    placeholder_dir = storage._legacy_sidecar_placeholder_dir(legacy_path)
+    assert runner.session is not None
+    assert runner.session.session_dir == placeholder_dir / "pipeline"
+    runner._save_running_sync("s1", reason="legacy pipeline state")
+    assert (placeholder_dir / "pipeline" / "meta.yaml").exists()
+    assert not (shadow_dir / "pipeline").exists()
+
+
+def test_runner_restores_existing_sidecar_for_legacy_flat_session(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    legacy_path = storage.legacy_session_path("/proj", "sess123")
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text('{"role":"user","content":"legacy","cwd":"/proj"}\n', encoding="utf-8")
+    pipeline_dir = _pipeline_dir(tmp_path)
+    sidecar_dir = legacy_path.parent / "sess123" / "pipeline"
+    sidecar_dir.mkdir(parents=True)
+    (sidecar_dir / "meta.yaml").write_text(
+        yaml.dump(
+            {
+                "pipeline_name": "t",
+                "status": "running",
+                "current_step": "s1",
+                "step_ids": ["s1"],
+                "sub_pipeline_step_ids": {},
+                "pipeline_fingerprint": hashlib.sha256((pipeline_dir / "pipeline.yaml").read_bytes()).hexdigest(),
+                "state_machine": {
+                    "current_index": 0,
+                    "rollback_count": 0,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {"s1": "running"},
+                },
+                "updated_at": 0.0,
+                "reason": "seeded legacy sidecar",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (sidecar_dir / "context.yaml").write_text(yaml.dump({}), encoding="utf-8")
+
+    runner = PipelineRunner(
+        pipeline_dir=pipeline_dir,
+        provider_manager=MagicMock(),
+        base_tool_registry=MagicMock(),
+        session_storage=storage,
+        session_id="sess123",
+        cwd="/proj",
+        resume_from_sidecar=True,
+    )
+
+    assert runner.session is not None
+    assert runner.session.session_dir == sidecar_dir
+    assert runner.sidecar_restore_result is not None
+    assert runner.sidecar_restore_result.ok is True
+    assert runner.state_machine.current_step.step_id == "s1"
+
+
+def test_runner_restores_long_cwd_legacy_sidecar_despite_current_metadata_shadow(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
+    projects_dir = tmp_path / "projects"
+    current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, projects_dir)
+    session_id = "sess123"
+    write_session_metadata(
+        current_project_dir / session_id,
+        SessionMetadata(session_id=session_id, cwd=cwd, layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    storage = SessionStorage(projects_dir=projects_dir)
+    pipeline_dir = _pipeline_dir(tmp_path)
+    sidecar_dir = legacy_project_dir / session_id / "pipeline"
+    sidecar_dir.mkdir(parents=True)
+    (sidecar_dir / "meta.yaml").write_text(
+        yaml.dump(
+            {
+                "pipeline_name": "t",
+                "status": "running",
+                "current_step": "s1",
+                "step_ids": ["s1"],
+                "sub_pipeline_step_ids": {},
+                "pipeline_fingerprint": hashlib.sha256((pipeline_dir / "pipeline.yaml").read_bytes()).hexdigest(),
+                "state_machine": {
+                    "current_index": 0,
+                    "rollback_count": 0,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {"s1": "running"},
+                },
+                "updated_at": 0.0,
+                "reason": "seeded legacy sidecar",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (sidecar_dir / "context.yaml").write_text(yaml.dump({}), encoding="utf-8")
+
+    runner = PipelineRunner(
+        pipeline_dir=pipeline_dir,
+        provider_manager=MagicMock(),
+        base_tool_registry=MagicMock(),
+        session_storage=storage,
+        session_id=session_id,
+        cwd=cwd,
+        resume_from_sidecar=True,
+    )
+
+    assert runner.session is not None
+    assert runner.session.session_dir == sidecar_dir
+    assert runner.sidecar_restore_result is not None
+    assert runner.sidecar_restore_result.ok is True
+    assert runner.state_machine.current_step.step_id == "s1"
+    assert not (current_project_dir / session_id / "pipeline").exists()
+
+
+def test_writable_pipeline_sidecar_allows_usage_lock_file(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    (session_dir / "usage.jsonl").write_text("", encoding="utf-8")
+    (session_dir / ".usage.jsonl.lock").write_text("", encoding="utf-8")
+
+    assert PipelineRunner._writable_pipeline_sidecar_session_dir(session_dir) == session_dir
+
+
+def test_existing_pipeline_sidecar_rejects_symlinked_session_root(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    external_session_dir = tmp_path / "external-session"
+    _seed_minimal_pipeline_sidecar(external_session_dir)
+    symlinked_session_dir = tmp_path / "session-link"
+    _symlink_or_skip(external_session_dir, symlinked_session_dir, target_is_directory=True)
+
+    assert PipelineRunner._existing_pipeline_sidecar_session_dir(symlinked_session_dir) is None
+
+
+def test_existing_pipeline_sidecar_rejects_symlinked_pipeline_dir(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    external_pipeline_dir = tmp_path / "external-pipeline"
+    external_pipeline_dir.mkdir()
+    (external_pipeline_dir / "meta.yaml").write_text("status: running\n", encoding="utf-8")
+    _symlink_or_skip(external_pipeline_dir, session_dir / "pipeline", target_is_directory=True)
+
+    assert PipelineRunner._existing_pipeline_sidecar_session_dir(session_dir) is None
+
+
+def test_existing_pipeline_sidecar_rejects_symlinked_marker_file(tmp_path: Path) -> None:
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    session_dir = tmp_path / "session"
+    pipeline_dir = session_dir / "pipeline"
+    pipeline_dir.mkdir(parents=True)
+    external_marker = tmp_path / "external-meta.yaml"
+    external_marker.write_text("status: running\n", encoding="utf-8")
+    _symlink_or_skip(external_marker, pipeline_dir / "meta.yaml")
+
+    assert PipelineRunner._existing_pipeline_sidecar_session_dir(session_dir) is None
 
 
 def _build_two_step_runner(tmp_path: Path, *, resume_from_sidecar: bool = False, max_rollbacks: int = 3):

@@ -18,10 +18,17 @@ from iac_code.services.session_index import (
     extract_last_json_string_field,
     read_lite_metadata,
 )
-from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SessionMetadata, write_session_metadata
+from iac_code.services.session_metadata import (
+    SESSION_JSONL_FILENAME,
+    SESSION_LAYOUT_VERSION_V2,
+    SESSION_METADATA_FILENAME,
+    SessionMetadata,
+    write_session_metadata,
+)
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.session_usage import SessionUsageStore
 from iac_code.types.stream_events import Usage
+from iac_code.utils import project_paths
 
 # ---------------------------------------------------------------------------
 # Field extraction helpers
@@ -204,6 +211,18 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
         ids = {e.session_id for e in index.list_all_projects()}
         assert ids == {"id-a", "id-b"}
 
+    def test_list_all_projects_keeps_same_session_id_in_different_projects(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append("/a", "same-id", Message(role="user", content="from a"), git_branch=None)
+        storage.append("/b", "same-id", Message(role="user", content="from b"), git_branch=None)
+
+        entries = SessionIndex(projects_dir=tmp_path).list_all_projects()
+
+        assert sorted((entry.session_id, entry.cwd, entry.title) for entry in entries) == [
+            ("same-id", "/a", "from a"),
+            ("same-id", "/b", "from b"),
+        ]
+
     def test_list_all_projects_includes_legacy_sessions(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
         legacy_path = storage.legacy_session_path("/legacy", "legacy-id")
@@ -214,6 +233,26 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
         entries = index.list_all_projects()
 
         assert [(e.session_id, e.cwd, e.title) for e in entries] == [("legacy-id", "/legacy", "old")]
+
+    def test_list_for_cwd_includes_metadata_only_v2_session(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        session_dir = storage.session_dir("/metadata-only", "metadata-only-id")
+        write_session_metadata(
+            session_dir,
+            SessionMetadata(
+                session_id="metadata-only-id",
+                cwd="/metadata-only",
+                name="waiting-pipeline",
+                layout_version=SESSION_LAYOUT_VERSION_V2,
+            ),
+        )
+        (session_dir / "a2a").mkdir()
+
+        entries = SessionIndex(projects_dir=tmp_path).list_for_cwd("/metadata-only")
+
+        assert [(entry.session_id, entry.cwd, entry.title, entry.size_bytes) for entry in entries] == [
+            ("metadata-only-id", "/metadata-only", "waiting-pipeline", 0)
+        ]
 
     def test_directory_session_metadata_name_takes_precedence(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
@@ -323,13 +362,7 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
             SessionMetadata(session_id="stale", name="copied-name", cwd="/p", git_branch=None),
         )
 
-        entry = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")[0]
-
-        assert entry.session_id == "actual"
-        assert entry.name is None
-        assert entry.title == "first prompt"
-        assert entry.auto_title == "first prompt"
-        assert entry.is_legacy is False
+        assert SessionIndex(projects_dir=tmp_path).list_for_cwd("/p") == []
 
     def test_duplicate_legacy_and_directory_session_id_prefers_directory(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)
@@ -337,7 +370,7 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
         legacy_path.parent.mkdir(parents=True, exist_ok=True)
         legacy_path.write_text('{"role":"user","content":"legacy","cwd":"/p"}\n', encoding="utf-8")
 
-        session_dir = storage.session_dir("/p", "same")
+        session_dir = legacy_path.parent / "same"
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / SESSION_JSONL_FILENAME).write_text(
             '{"role":"user","content":"directory","cwd":"/p"}\n',
@@ -347,6 +380,138 @@ print(json.dumps(sorted(name for name in sys.modules if name.startswith("iac_cod
         entries = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")
 
         assert [(entry.session_id, entry.title, entry.is_legacy) for entry in entries] == [("same", "directory", False)]
+
+    def test_duplicate_legacy_and_unsupported_directory_keeps_legacy(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        legacy_path = storage.legacy_session_path("/p", "same")
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text('{"role":"user","content":"legacy","cwd":"/p"}\n', encoding="utf-8")
+
+        session_dir = storage.session_dir("/p", "same")
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / SESSION_JSONL_FILENAME).write_text(
+            '{"role":"user","content":"future","cwd":"/p"}\n',
+            encoding="utf-8",
+        )
+        (session_dir / SESSION_METADATA_FILENAME).write_text('{"layout_version":99}\n', encoding="utf-8")
+
+        entries = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")
+
+        assert [(entry.session_id, entry.title, entry.is_legacy) for entry in entries] == [("same", "legacy", True)]
+
+    def test_duplicate_legacy_and_metadata_only_directory_keeps_legacy(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        legacy_path = storage.legacy_session_path("/p", "same")
+        legacy_path.parent.mkdir(parents=True, exist_ok=True)
+        legacy_path.write_text('{"role":"user","content":"legacy","cwd":"/p"}\n', encoding="utf-8")
+        write_session_metadata(
+            legacy_path.parent / "same",
+            SessionMetadata(
+                session_id="same",
+                cwd="/shadow",
+                name="shadow",
+                layout_version=SESSION_LAYOUT_VERSION_V2,
+            ),
+        )
+
+        entries = SessionIndex(projects_dir=tmp_path).list_for_cwd("/p")
+
+        assert [(entry.session_id, entry.cwd, entry.title, entry.is_legacy) for entry in entries] == [
+            ("same", "/p", "legacy", True)
+        ]
+
+    def test_metadata_only_mismatched_session_id_is_ignored(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        write_session_metadata(
+            storage.session_dir("/p", "requested"),
+            SessionMetadata(
+                session_id="different",
+                cwd="/p",
+                name="wrong-id",
+                layout_version=SESSION_LAYOUT_VERSION_V2,
+            ),
+        )
+
+        index = SessionIndex(projects_dir=tmp_path)
+
+        assert index.list_for_cwd("/p") == []
+        assert index.list_all_projects() == []
+        assert index.find_by_id_or_prefix("requested") is None
+
+    def test_directory_session_mismatched_session_id_is_ignored(self, tmp_path):
+        storage = SessionStorage(projects_dir=tmp_path)
+        session_dir = storage.session_dir("/p", "requested-dir")
+        session_dir.mkdir(parents=True)
+        (session_dir / SESSION_JSONL_FILENAME).write_text(
+            '{"role":"user","content":"wrong","cwd":"/p"}\n',
+            encoding="utf-8",
+        )
+        write_session_metadata(
+            session_dir,
+            SessionMetadata(
+                session_id="different",
+                cwd="/p",
+                name="wrong-id",
+                layout_version=SESSION_LAYOUT_VERSION_V2,
+            ),
+        )
+
+        index = SessionIndex(projects_dir=tmp_path)
+
+        assert index.list_for_cwd("/p") == []
+        assert index.list_all_projects() == []
+        assert index.find_by_id_or_prefix("requested-dir") is None
+
+    def test_list_for_cwd_merges_bounded_and_legacy_long_project_dirs(self, tmp_path):
+        cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
+        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        legacy_project_dir.mkdir(parents=True)
+        (legacy_project_dir / "legacy-long.jsonl").write_text(
+            '{"role":"user","content":"old","cwd":"%s"}\n' % cwd,
+            encoding="utf-8",
+        )
+        current_project_dir.mkdir(parents=True)
+        storage = SessionStorage(projects_dir=tmp_path)
+        storage.append(cwd, "new-long", Message(role="user", content="new"), git_branch=None)
+
+        entries = SessionIndex(projects_dir=tmp_path).list_for_cwd(cwd)
+
+        assert {entry.session_id: entry.title for entry in entries} == {
+            "legacy-long": "old",
+            "new-long": "new",
+        }
+
+    def test_list_all_projects_ignores_metadata_only_shadow_with_stale_metadata_cwd(self, tmp_path):
+        cwd = "x" * (project_paths.MAX_SANITIZED_LENGTH + 50)
+        current_project_dir, legacy_project_dir = project_paths.project_dir_candidates(cwd, tmp_path)
+        legacy_project_dir.mkdir(parents=True)
+        legacy_path = legacy_project_dir / "legacy-long-stale-shadow.jsonl"
+        legacy_path.write_text(
+            '{"role":"user","content":"legacy","cwd":"%s"}\n' % cwd,
+            encoding="utf-8",
+        )
+        shadow_dir = current_project_dir / "legacy-long-stale-shadow"
+        write_session_metadata(
+            shadow_dir,
+            SessionMetadata(
+                session_id="legacy-long-stale-shadow",
+                cwd="/stale-cwd",
+                name="shadow",
+                layout_version=SESSION_LAYOUT_VERSION_V2,
+            ),
+        )
+        metadata_path = shadow_dir / SESSION_METADATA_FILENAME
+        os.utime(metadata_path, (metadata_path.stat().st_atime, legacy_path.stat().st_mtime + 100))
+
+        entries = [
+            entry
+            for entry in SessionIndex(projects_dir=tmp_path).list_all_projects()
+            if entry.session_id == "legacy-long-stale-shadow"
+        ]
+
+        assert len(entries) == 1
+        assert entries[0].cwd == cwd
+        assert entries[0].title == "legacy"
 
     def test_list_sorted_by_mtime_desc(self, tmp_path):
         storage = SessionStorage(projects_dir=tmp_path)

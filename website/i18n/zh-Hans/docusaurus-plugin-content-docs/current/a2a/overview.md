@@ -72,3 +72,8 @@ iac-code 支持通过 HTTP JSON-RPC/REST 以及若干可选传输运行 A2A serv
 - Redis 后端队列的推送投递是至少一次；callback 接收方必须处理重复投递，并执行自己的端点侧授权策略。
 
 在 A2A server 模式下，除非 `auto-approve-permissions` 或显式权限规则允许，否则工具权限请求会被自动拒绝。权限决策会在本地审计；任何需要审计记录的允许决策在审计记录无法持久化时都会 fail closed。在非 blanket bypass 模式下，受保护的阿里云写 API 仍然需要按 API 精确授权。只应在受信任的本地环境中运行未认证的 A2A 模式，或者使用 Bearer token、Basic auth 或 API key authentication 进行保护。
+
+
+## 持久化和会话备份
+
+A2A task/context 索引仍保存在共享运行目录，例如 `<config>/a2a/tasks` 和 `<config>/a2a/contexts`，这样可以与 session 数据分开挂载或同步。配置 `IAC_CODE_CONFIG_BACKUP_DIR` 后，v2 session 内的 A2A 快照和 artifact 会随 session 备份一起镜像；共享 task/context 索引应由单独挂载的存储提供。

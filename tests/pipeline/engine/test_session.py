@@ -350,6 +350,23 @@ class TestRestore:
             if record.name == "iac_code.pipeline.engine.session" and record.levelno >= logging.WARNING
         ]
 
+    def test_backup_blocked_status_restore_does_not_look_terminal(self, session, caplog):
+        sm_snap = {"current_index": 1, "rollback_count": 0, "interrupt_rollback_count": 0, "step_statuses": {}}
+        session.save_backup_blocked_sync("confirm", sm_snap, {}, _identity(), reason="terminal")
+        caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.session")
+
+        restored = session.restore_sync(_identity())
+
+        assert session.has_resumable_status() is True
+        assert restored.ok is True
+        assert restored.status == "backup_blocked"
+        assert restored.reason == "terminal"
+        assert not [
+            record
+            for record in caplog.records
+            if record.name == "iac_code.pipeline.engine.session" and record.levelno >= logging.WARNING
+        ]
+
     def test_identity_mismatch_restore_does_not_log_warning(self, session, caplog):
         sm_snap = {"current_index": 0, "rollback_count": 0, "interrupt_rollback_count": 0, "step_statuses": {}}
         session.save_running_sync("intent", sm_snap, {}, _identity(fingerprint="old"))

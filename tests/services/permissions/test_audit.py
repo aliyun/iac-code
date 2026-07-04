@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
+import iac_code.services.permissions.audit as audit_module
 from iac_code.services.permissions.audit import (
     PermissionAuditRecord,
     build_display_tool_input,
@@ -18,6 +19,8 @@ from iac_code.services.permissions.audit import (
     is_permission_audit_non_read_only,
     sanitize_free_text,
 )
+from iac_code.services.session_layout import UnsupportedSessionLayoutError
+from iac_code.services.session_metadata import SessionMetadata, write_session_metadata
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings
 from iac_code.utils.project_paths import sanitize_path
 
@@ -46,6 +49,76 @@ def _has_truncated_object(value: object) -> bool:
             return True
         return any(_has_truncated_object(child) for child in value.values())
     return False
+
+
+def test_emit_permission_audit_log_failure_warning_redacts_session_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_id = "sensitive-session-id"
+    session_dir = tmp_path / "projects" / "sensitive-project" / session_id
+    session_dir.mkdir(parents=True)
+    (session_dir / "metadata.json").write_text("{not-json", encoding="utf-8")
+    warning = Mock()
+    monkeypatch.setattr(audit_module.logger, "warning", warning)
+
+    written = emit_permission_audit(
+        PermissionAuditRecord(
+            session_id=session_id,
+            tool_name="bash",
+            tool_use_id="toolu_1",
+            decision="allow",
+            scope="session",
+            source="unit_test",
+            audit_log_path=str(session_dir / "permission-audit.jsonl"),
+        )
+    )
+
+    assert written is False
+    warning.assert_called_once()
+    logged = " ".join(str(arg) for arg in warning.call_args.args)
+    assert str(tmp_path) not in logged
+    assert "sensitive-project" not in logged
+    assert session_id not in logged
+    assert "UnsupportedSessionLayoutError" in logged
+
+
+def test_emit_permission_audit_log_failure_warning_omits_mounted_config_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = "sensitive-session-id"
+    warning = Mock()
+    monkeypatch.setattr(audit_module.logger, "warning", warning)
+    monkeypatch.setattr(
+        audit_module,
+        "_log_path",
+        Mock(
+            side_effect=UnsupportedSessionLayoutError(
+                "Unsupported session metadata: "
+                "/mnt/oss/customer-bucket/projects/sensitive-project/"
+                f"{session_id}/metadata.json"
+            )
+        ),
+    )
+
+    written = emit_permission_audit(
+        PermissionAuditRecord(
+            session_id=session_id,
+            tool_name="bash",
+            tool_use_id="toolu_1",
+            decision="allow",
+            scope="session",
+            source="unit_test",
+        )
+    )
+
+    assert written is False
+    warning.assert_called_once()
+    logged = " ".join(str(arg) for arg in warning.call_args.args)
+    assert "/mnt/oss" not in logged
+    assert "customer-bucket" not in logged
+    assert "sensitive-project" not in logged
+    assert session_id not in logged
+    assert "UnsupportedSessionLayoutError" in logged
 
 
 def test_fingerprint_is_stable_and_short() -> None:
@@ -169,6 +242,53 @@ def test_emit_permission_audit_preserves_field_shape_fingerprint_keys(
     field_key = fingerprint_text("StackName")
     assert row["input_summary"]["params_fields"] == [field_key]
     assert field_key in row["input_summary"]["params_field_shapes"]
+
+
+def test_emit_permission_audit_uses_direct_log_path_from_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
+    session_dir = tmp_path / "session"
+    write_session_metadata(session_dir, SessionMetadata(session_id="session", cwd="/repo", layout_version=2))
+    log_path = session_dir / "pipeline" / "transcripts" / "transcript_1" / "permission-audit.jsonl"
+    record = PermissionAuditRecord(
+        session_id="transcript_1",
+        cwd="/repo",
+        tool_name="write_file",
+        tool_use_id="tool-1",
+        decision="allow",
+        scope="once",
+        source="test",
+        audit_log_path=str(log_path),
+    )
+
+    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
+
+    assert log_path.exists()
+    assert not (tmp_path / "projects").exists()
+
+
+def test_emit_permission_audit_refuses_direct_log_path_outside_supported_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    telemetry = Mock()
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", telemetry)
+    record = PermissionAuditRecord(
+        session_id="s1",
+        cwd="/repo",
+        tool_name="write_file",
+        tool_use_id="tool-1",
+        decision="allow",
+        scope="once",
+        source="test",
+        audit_log_path=str(tmp_path / "outside" / "permission-audit.jsonl"),
+    )
+
+    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is False
+    assert not (tmp_path / "outside" / "permission-audit.jsonl").exists()
+    telemetry.assert_not_called()
 
 
 def test_emit_permission_audit_sanitizes_raw_field_shape_keys(
@@ -503,6 +623,41 @@ def test_emit_permission_audit_skips_allow_telemetry_when_jsonl_write_fails(
 
     assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is False
     telemetry.assert_not_called()
+
+
+@pytest.mark.parametrize("existing_log", [False, True])
+def test_emit_permission_audit_refuses_future_layout_session_without_mutating_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_log: bool,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
+    telemetry = Mock()
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", telemetry)
+    cwd = "/home/workspace/context-future-layout"
+    session_id = "future-layout"
+    session_dir = _session_audit_log_path(tmp_path, cwd, session_id).parent
+    write_session_metadata(session_dir, SessionMetadata(session_id=session_id, cwd=cwd, layout_version=99))
+    log_path = session_dir / "permission-audit.jsonl"
+    if existing_log:
+        log_path.write_text('{"old":true}\n', encoding="utf-8")
+    before = log_path.read_text(encoding="utf-8") if log_path.exists() else None
+    record = PermissionAuditRecord(
+        session_id=session_id,
+        cwd=cwd,
+        tool_name="bash",
+        tool_use_id="tu-future-layout",
+        decision="allow",
+        scope="once",
+        source="permission_pipeline",
+    )
+
+    assert emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2)) is False
+    telemetry.assert_not_called()
+    if before is None:
+        assert not log_path.exists()
+    else:
+        assert log_path.read_text(encoding="utf-8") == before
 
 
 def test_emit_permission_audit_clamps_excessive_max_files_before_rotation(
