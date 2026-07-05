@@ -5,7 +5,7 @@ when_to_use: 当需要对阿里云 ROS 模板进行费用预估时
 user_invocable: false
 conclusion_schema:
   type: object
-  required: [monthly_estimate, currency, resources, template_fixed, deployment_parameters]
+  required: [monthly_estimate, currency, resources, template_fixed, deployment_parameters, preview_validation]
   additionalProperties: false
   properties:
     monthly_estimate:
@@ -29,6 +29,39 @@ conclusion_schema:
     deployment_parameters:
       type: object
       description: 当前已选、已验证或已用于询价并传递给 deploying 的模板参数字典；可由后续选择阶段补充覆盖
+    preview_validation:
+      type: object
+      required: [succeeded]
+      additionalProperties: false
+      description: ros_preview_template 的结构化成功证明；deploying 仅在模板路径匹配且没有部署参数缺口时跳过例行校验并直接 CreateStack
+      properties:
+        succeeded:
+          type: boolean
+        template_url:
+          type: string
+        parameters:
+          type: object
+        region_id:
+          type: string
+        request_id:
+          type: string
+        error:
+          type: string
+      allOf:
+        - if:
+            properties:
+              succeeded:
+                const: true
+            required: [succeeded]
+          then:
+            required: [template_url, parameters]
+        - if:
+            properties:
+              succeeded:
+                const: false
+            required: [succeeded]
+          then:
+            required: [error]
     missing_deployment_parameters:
       type: array
       description: PreviewStack 或最终部署仍缺少、需要用户在后续选择阶段补充的参数
@@ -64,7 +97,7 @@ conclusion_schema:
 4. **调用询价工具** — 优先使用 Preview-Validated Pricing Parameter Set；若 PreviewStack 因完整部署参数缺口无法通过，可用当前已选或可用于询价的参数调用 `ros_estimate_template_cost`
 5. **按需修复问题** — 仅当询价失败且错误指向模板问题，或你必须修复/改写模板时，修改模板并写回原文件路径
 6. **修改后校验并重新询价** — 调用 `ros_validate_template` 校验改动；通过后调用 `ros_estimate_template_cost` 重新询价；失败则修复重试（最多 7 轮）
-7. **结构化传递参数** — 在 `complete_step.conclusion.deployment_parameters` 输出当前已选或已用于询价的参数字典；在 `missing_deployment_parameters` 输出仍需用户补充的完整部署参数缺口
+7. **结构化传递参数** — 在 `complete_step.conclusion.deployment_parameters` 输出当前已选或已用于询价的参数字典；在 `preview_validation` 输出预览成功证明；在 `missing_deployment_parameters` 输出仍需用户补充的完整部署参数缺口
 8. **输出结果** — 汇总费用并调用 `complete_step`
 
 ## 按需校验模板
@@ -104,7 +137,7 @@ PreviewStack 不是硬门禁。它要求完整部署参数，常比询价工具�
 - VpcId、VSwitchId、SecurityGroupId、KeyPairName 等已有资源参数：先查询约束或只读资源候选；API 返回候选不是编造，可作为参数候选参与回溯与 PreviewStack。没有上下文值、模板 Default、用户提供值或 API 返回候选时，才按外部输入缺失处理。
 - 只能在合法候选内筛选或排序，不得编造 API 未返回的库存值；LicenseKey、Token、证书、真实域名等外部输入不得编造。不要仅因参数名是 VpcId、VSwitchId、SecurityGroupId 或 KeyPairName 就跳过参数推荐并直接停止询价。
 - `PreviewStack` 因候选组合不可行失败时，按 reference 的回溯规则更换候选；因外部输入缺失失败时，记录缺口，不用占位值伪造，并按上方软门禁规则决定是否继续询价。
-- 最终得到的参数集不写入模板 `Default`；将当前已选、已验证或已用于询价的参数作为结构化数据放入 `complete_step.conclusion.deployment_parameters`，传递给 deploying。模板 Default 只是参数求解的输入来源之一，不是跨步骤传参介质。
+- 最终得到的参数集不写入模板 `Default`；将当前已选、已验证或已用于询价的参数作为结构化数据放入 `complete_step.conclusion.deployment_parameters`，传递给 deploying。`ros_preview_template` 成功时，还必须把 `succeeded: true`、同一个 `template_url` 和预览时使用的 `parameters` 写入 `complete_step.conclusion.preview_validation`；deploying 用它判断同一模板是否已完成预览验证，实际部署参数由 CreateStack 做最终校验。模板 Default 只是参数求解的输入来源之一，不是跨步骤传参介质。
 - PreviewStack 成功但询价失败时，不要丢弃 Preview-Validated Pricing Parameter Set；仍在 `deployment_parameters` 输出该参数集，同时如实报告询价失败原因。
 
 ## 调用询价 API
@@ -163,6 +196,7 @@ aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<�
 - `cost` 字段为字符串，包含金额和计费周期（如 "¥800/月"、"¥0.5/小时"、"¥0"）
 - 若修复了模板，设置 `template_fixed: true` 并在 `fix_summary` 中说明修复内容；仅形成或输出 `deployment_parameters` 不算模板修复
 - `deployment_parameters` 填当前已选、已验证或已用于 `ros_estimate_template_cost` 的参数字典；PreviewStack 成功但询价失败时仍填该参数集；没有任何可用参数时填 `{}`
+- `preview_validation` 填 `ros_preview_template` 的结构化状态：成功时填 `{"succeeded": true, "template_url": "<当前模板文件路径>", "parameters": <预览通过的同一参数字典>}`；失败或未执行时填 `{"succeeded": false, "error": "<原因>"}`
 - `missing_deployment_parameters` 填完整部署或 PreviewStack 仍缺少的参数及原因；没有缺口时可省略或填 `[]`
 - `parameter_set_summary` 可简要说明参数来源、可用性筛选、PreviewStack 验证结果以及是否使用软门禁继续询价
 - 询价失败时 `monthly_estimate` 填 "询价失败"，`resources` 为空数组，`error` 说明原因

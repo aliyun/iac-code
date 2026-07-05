@@ -186,6 +186,43 @@
         {"name": "uses_delete_stack", "check": "调用 ros_stack 的 DeleteStack 操作"},
         {"name": "completed_success", "check": "调用 complete_step 且 status 为 success"}
       ]
+    },
+    {
+      "id": 10,
+      "name": "create-stack-preview-ready-fast-path",
+      "prompt": "确认部署该方案到阿里云",
+      "selected_plan": {
+        "selection_valid": true,
+        "template_url": "{TMPDIR}/ros-vpc-ecs-template.yml",
+        "preview_ready_for_create": true,
+        "effective_deployment_parameters": {
+          "ZoneId": "cn-hangzhou-k",
+          "InstanceType": "ecs.g7.large",
+          "ImageId": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+          "SystemDiskCategory": "cloud_essd"
+        },
+        "selected_candidate_result": {
+          "cost": {
+            "preview_validation": {
+              "succeeded": true,
+              "template_url": "{TMPDIR}/ros-vpc-ecs-template.yml",
+              "parameters": {
+                "ZoneId": "cn-hangzhou-k",
+                "InstanceType": "ecs.g7.large",
+                "ImageId": "centos_stream_9_x64_20G_alibase_20260414.vhd",
+                "SystemDiskCategory": "cloud_essd"
+              }
+            }
+          }
+        }
+      },
+      "expected_behavior": "selected_plan.preview_ready_for_create 为 true 时，直接调用 ros_stack CreateStack，跳过例行 ros_validate_template 和跳过例行可用性查询",
+      "assertions": [
+        {"name": "uses_direct_create_stack", "check": "直接调用 ros_stack 的 CreateStack"},
+        {"name": "skips_routine_validation", "check": "跳过例行 ros_validate_template"},
+        {"name": "skips_routine_availability_query", "check": "跳过例行可用性查询"},
+        {"name": "uses_template_url", "check": "CreateStack 参数中使用 params.TemplateURL，不使用 params.TemplateBody"}
+      ]
     }
   ]
 }

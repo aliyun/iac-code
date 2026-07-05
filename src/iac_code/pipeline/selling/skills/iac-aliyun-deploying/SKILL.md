@@ -63,13 +63,15 @@ conclusion_schema:
 - 删除请求本身不等于删除确认。只有用户明确回复“确认删除”“我确认删除”等删除确认语句，或上下文显式提供 `delete_confirmed: true` 时，才可执行删除；未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`。
 - `status: cancelled` 只表示用户明确取消部署，不得用 status: cancelled 表示等待用户确认。
 
-## 模板校验
+## 快速创建与模板校验
 
-部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），修复模板文件后重试（最多 5 轮）。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
+- `selected_plan.preview_ready_for_create` 为 `true` 时，表示成本步骤已对同一模板路径完成预览验证，且没有完整部署参数缺口；部署时直接调用 `ros_stack` 执行 `CreateStack`，跳过例行 `ros_validate_template`，并跳过例行可用性查询。用户覆盖后的最终部署参数由 CreateStack 做最终校验。
+- 否则，部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），修复模板文件后重试（最多 5 轮）。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
+- CreateStack 失败后，如果需要修改模板，成本步骤的预览验证已失效；修复后必须重新调用 `ros_validate_template`，通过后再 ContinueCreateStack 或重试。只调整部署参数时，不需要为了参数变化补跑 `ros_validate_template`；最终参数由 CreateStack 校验。
 
 ## 可用性查询
 
-当用户确认执行以下操作时，**必须先查询可用性**：
+快速创建路径已跳过例行可用性查询。其他情况下，当用户确认执行以下操作时，**必须先查询可用性**：
 
 | 操作 | 查询范围 |
 |------|----------|

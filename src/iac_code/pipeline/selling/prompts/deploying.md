@@ -3,7 +3,7 @@
 你正在执行 AI 售卖流程的最终步骤：将用户选择的方案模板部署到阿里云。
 
 ## 部署执行
-用户已在上一步确认选择了该方案，该选择等价于本步骤的部署确认。不要再次询问是否确认部署，也不要询问是否确认部署参数。完成模板校验、可用性查询和参数装配后，直接调用 `ros_stack` 执行部署。
+用户已在上一步确认选择了该方案，该选择等价于本步骤的部署确认。不要再次询问是否确认部署，也不要询问是否确认部署参数。`selected_plan.preview_ready_for_create` 为 `true` 时按快速创建路径执行，快速创建路径见技能；否则按常规部署路径执行。
 
 上述确认只适用于部署执行，不适用于删除已有 Stack。删除请求本身不等于删除确认；只有用户明确回复“确认删除”“我确认删除”等删除确认语句，或上下文显式提供 `delete_confirmed: true` 时，才可执行删除。未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`。
 
@@ -27,7 +27,7 @@
 ## ROS 模板来源
 本步骤已选定模板文件路径：`{selected_plan.template_url}`。
 
-调用 `ros_validate_template` 校验时，必须传 `template_url = "{selected_plan.template_url}"`。调用 `ros_stack` 的 `CreateStack` / `UpdateStack` 时，必须传 `params.TemplateURL = "{selected_plan.template_url}"`。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口；不要传 `params.TemplateBody`、`TemplateId` 或 `TemplateScratchId`；不要省略 `params.TemplateURL`。
+需要调用 `ros_validate_template` 校验时，必须传 `template_url = "{selected_plan.template_url}"`。调用 `ros_stack` 的 `CreateStack` / `UpdateStack` 时，必须传 `params.TemplateURL = "{selected_plan.template_url}"`。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口；不要传 `params.TemplateBody`、`TemplateId` 或 `TemplateScratchId`；不要省略 `params.TemplateURL`。
 
 ## 所有候选方案的评估数据
 `selected_plan.selection_valid` 为 `true` 时，使用 `selected_plan.selected_candidate` 和
@@ -47,6 +47,7 @@
 
 ## 错误处理
 - 模板校验失败 → 就地修复模板后重试（最多 5 轮）
+- CreateStack 失败后，如果修改模板 → 重新调用 `ros_validate_template`，通过后再 ContinueCreateStack 或重试；只调整部署参数时由 CreateStack 校验
 - 架构层面必须变更（如产品组合不可行）→ rollback_request 到 `architecture_planning`
 
 ## 注意事项

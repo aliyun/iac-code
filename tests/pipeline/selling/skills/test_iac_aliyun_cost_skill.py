@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import jsonschema
 import pytest
 import yaml
 
@@ -83,6 +84,60 @@ class TestSkillFrontmatter:
         schema = fm["conclusion_schema"]
         assert "missing_deployment_parameters" in schema["properties"]
         assert schema["properties"]["missing_deployment_parameters"]["type"] == "array"
+
+    def test_conclusion_schema_can_report_preview_validation_proof(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        preview_schema = schema["properties"]["preview_validation"]
+
+        assert preview_schema["type"] == "object"
+        assert preview_schema["properties"]["succeeded"]["type"] == "boolean"
+        assert preview_schema["properties"]["template_url"]["type"] == "string"
+        assert preview_schema["properties"]["parameters"]["type"] == "object"
+
+    def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "¥100/月",
+            "currency": "CNY",
+            "resources": [{"type": "ALIYUN::ECS::InstanceGroup", "cost": "¥100/月"}],
+            "template_fixed": False,
+            "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+            "preview_validation": {
+                "succeeded": True,
+                "template_url": "templates/a.yml",
+                "parameters": {"ZoneId": "cn-hangzhou-k"},
+            },
+        }
+
+        jsonschema.validate(conclusion, schema)
+        missing_template_url = dict(conclusion, preview_validation={"succeeded": True, "parameters": {}})
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_template_url, schema)
+        missing_parameters = dict(conclusion, preview_validation={"succeeded": True, "template_url": "templates/a.yml"})
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_parameters, schema)
+
+    def test_conclusion_schema_requires_error_when_preview_validation_failed(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        schema = fm["conclusion_schema"]
+        conclusion = {
+            "monthly_estimate": "询价失败",
+            "currency": "CNY",
+            "resources": [],
+            "template_fixed": False,
+            "deployment_parameters": {},
+            "preview_validation": {"succeeded": False, "error": "missing VpcId"},
+        }
+
+        jsonschema.validate(conclusion, schema)
+        missing_error = dict(conclusion, preview_validation={"succeeded": False})
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(missing_error, schema)
 
 
 class TestSkillContentRosOnly:
@@ -169,6 +224,12 @@ class TestSkillContentRosOnly:
         assert "PreviewStack 成功但询价失败" in body
         assert "不要丢弃 Preview-Validated Pricing Parameter Set" in body
         assert "询价失败或外部输入缺失时填 `{}`" not in body
+
+    def test_records_preview_validation_for_downstream_create_stack_fast_path(self, body):
+        assert "preview_validation" in body
+        assert "template_url" in body
+        assert "parameters" in body
+        assert "deploying" in body
 
     def test_preview_stack_is_not_hard_gate_for_pricing(self, body):
         assert "PreviewStack 不是硬门禁" in body
@@ -285,6 +346,16 @@ class TestReferencesExist:
         assert 'action="PreviewStack"' not in content
         assert "调用 `GetTemplateEstimateCost`" not in content
 
+    def test_template_parameter_recommendation_does_not_require_create_stack_to_reuse_preview_inputs(self):
+        reference = _direct_references_dir_or_skip() / "template-parameter-recommendation.md"
+        content = reference.read_text(encoding="utf-8")
+
+        assert "`PreviewStack` 与后续 `CreateStack`" not in content
+        assert "`CreateStack` 与 `PreviewStack`" not in content
+        assert "同一地域" not in content
+        assert "参数必须一致" not in content
+        assert "最终参数由 `CreateStack` 校验" in content
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -326,6 +397,11 @@ class TestCostPrompt:
         assert "不是硬门禁" in body
         assert "参数缺口" in body
 
+    def test_prompt_records_preview_validation_for_deploying(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert "preview_validation" in body
+        assert "PreviewStack 成功证明" in body
+
     def test_prompt_names_template_url_value_for_pricing_tools(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")
         assert 'template_url = "{template.file_path}"' in body
@@ -348,6 +424,7 @@ class TestEvalsJson:
         assert "Parameters.<N>.ParameterKey" not in text
         assert "Parameters.1.ParameterKey" not in text
         assert "deployment_parameters" in text
+        assert "preview_validation" in text
 
     def test_evals_do_not_require_validation_before_initial_pricing(self):
         text = EVALS_JSON.read_text(encoding="utf-8")

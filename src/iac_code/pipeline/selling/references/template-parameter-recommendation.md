@@ -10,7 +10,7 @@
 ## 核心原则
 
 - 仅推荐 `CreateStack` 前的新建栈参数，由 skill 编排专用 ROS 模板工具和必要的只读资源查询。
-- `PreviewStack` 是预览验证门槛，不是部署成功保证。通过的参数集称为 **Preview-Validated Parameter Set**：同一地域、`StackName`、模板来源、共享栈操作参数下成立。
+- `PreviewStack` 是预览验证门槛，不是部署成功保证。通过的参数集称为 **Preview-Validated Parameter Set**：表示指定模板来源在当时参数集下可预览。
 - 原始约束快照与 API 响应只在 agent 上下文持有，不写文件；用户要求保存时只能保存脱敏后的摘要。
 - 密码类参数可在用户要求时生成合规随机值，报告与日志中只显示 `***` / `<redacted>`。
 - 不编造外部资源、账号资源、AccessKey/Secret/Token/Webhook/LicenseKey/证书/真实域名/已有资源 ID。
@@ -27,7 +27,7 @@
 | `StackName` | 用户指定 → 由模板描述/文件名生成安全名称 |
 | 共享操作参数 | 至少 `DisableRollback: true` |
 
-`PreviewStack` 与后续 `CreateStack` 的模板来源、地域、`StackName`、`DisableRollback`、参数必须一致。
+本流程输出的预览证明只用于说明模板来源已通过预览；后续选择或部署阶段可以调整部署参数，最终参数由 `CreateStack` 校验。
 
 ### 2. 读取模板
 
@@ -112,7 +112,7 @@ ros_preview_template(
 )
 ```
 
-- 模板来源、地域、`stack_name` 和参数必须与后续 `CreateStack` 一致；`DisableRollback` 等仅部署工具支持的参数在部署步骤保持一致。
+- 预览成功证明记录本次 `template_url` 与预览时使用的参数集；后续选择或部署阶段调整参数时，不需要因此重做 `PreviewStack`。
 - 成功 → 形成 Preview-Validated Parameter Set。
 - 失败 → 记录组合与错误，回到第 6/7 步。
 - 最多尝试 5 个组合；5 次失败后停止，总结冲突并询问用户。
@@ -135,9 +135,9 @@ ros_preview_template(
 
 同时满足才能进入写操作：
 
-- 已形成 Preview-Validated Parameter Set。
+- 已形成 Preview-Validated Parameter Set，且没有完整部署参数缺口。
 - 用户确认；高成本、多地域、修改已有资源、RunCommand、DNS/证书/域名操作单独说明影响。
-- `CreateStack` 与 `PreviewStack` 的模板来源、地域、`StackName`、`DisableRollback`、参数一致。
+- 部署时使用最终确认的模板来源和部署参数；最终参数由 `CreateStack` 校验。
 
 部署后注意：
 

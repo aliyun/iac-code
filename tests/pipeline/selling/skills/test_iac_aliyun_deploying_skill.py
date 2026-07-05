@@ -130,6 +130,19 @@ class TestSkillContentRosOnly:
         assert "ValidateTemplate" in body
         assert "模板校验" in body
 
+    def test_preview_ready_path_skips_routine_validation_and_availability(self, body):
+        assert body.count("selected_plan.preview_ready_for_create") == 1
+        assert "CreateStack" in body
+        assert "跳过例行 `ros_validate_template`" in body
+        assert "跳过例行可用性查询" in body
+
+    def test_create_stack_failure_revalidates_after_template_change_only(self, body):
+        assert "CreateStack 失败" in body
+        assert "修改模板" in body
+        assert "修改模板或部署参数" not in body
+        assert "只调整部署参数" in body
+        assert "重新调用 `ros_validate_template`" in body
+
     def test_no_pricing_section(self, body):
         assert "GetTemplateEstimateCost" not in body
         assert "部署前询价" not in body
@@ -228,6 +241,12 @@ class TestDeployingPrompt:
         assert "不要传 `params.TemplateBody`" in body
         assert "<选中方案模板文件路径>" not in body
 
+    def test_prompt_allows_preview_ready_direct_create(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "`selected_plan.preview_ready_for_create` 为 `true`" in body
+        assert "快速创建路径见技能" in body
+        assert "跳过例行 `ros_validate_template`" not in body
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -285,6 +304,12 @@ class TestEvalsJson:
         for ev in data["evals"]:
             prompt_lower = ev["prompt"].lower()
             assert "terraform" not in prompt_lower
+
+    def test_evals_cover_preview_ready_fast_path(self):
+        data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))
+        eval_text = json.dumps(data, ensure_ascii=False)
+        assert "preview_ready_for_create" in eval_text
+        assert "跳过例行" in eval_text
 
     def test_assertions_have_name_and_check(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))

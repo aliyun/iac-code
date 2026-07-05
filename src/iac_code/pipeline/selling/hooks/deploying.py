@@ -97,6 +97,10 @@ def normalize_selected_plan(
     effective_parameters = _effective_deployment_parameters(resolution.result, selected.parameter_overrides)
     if effective_parameters:
         plan["effective_deployment_parameters"] = effective_parameters
+    plan["preview_ready_for_create"] = _preview_ready_for_create(
+        selected_candidate_result=resolution.result,
+        template_url=template_url,
+    )
     plan["cost_estimate_parameter_overridden"] = bool(selected.parameter_overrides)
     return plan
 
@@ -156,6 +160,34 @@ def _effective_deployment_parameters(
                 parameters.update(deployment_parameters)
     parameters.update(parameter_overrides)
     return parameters
+
+
+def _preview_ready_for_create(
+    *,
+    selected_candidate_result: dict[str, Any] | None,
+    template_url: str,
+) -> bool:
+    if not template_url or not isinstance(selected_candidate_result, dict):
+        return False
+
+    cost = selected_candidate_result.get("cost")
+    if not isinstance(cost, dict):
+        return False
+    if cost.get("missing_deployment_parameters"):
+        return False
+
+    preview_validation = cost.get("preview_validation")
+    if not isinstance(preview_validation, dict):
+        return False
+    if preview_validation.get("succeeded") is not True:
+        return False
+    if preview_validation.get("template_url") != template_url:
+        return False
+
+    preview_parameters = preview_validation.get("parameters")
+    if not isinstance(preview_parameters, dict):
+        return False
+    return True
 
 
 def on_enter(ctx: PipelineContext) -> None:

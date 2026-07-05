@@ -1,6 +1,6 @@
 {
   "skill_name": "iac-aliyun-cost",
-  "description": "验证成本预估技能：正确调用专用 ROS 模板询价工具、parameters 字典格式、参数推荐传递、模板按需校验修复、错误处理",
+  "description": "验证成本预估技能：正确调用专用 ROS 模板询价工具、parameters 字典格式、参数推荐传递、preview_validation 预览证明、模板按需校验修复、错误处理",
   "evals": [
     {
       "id": 1,
@@ -11,7 +11,7 @@
         "file_path": "templates/1-simple-ecs.yml",
         "region": "cn-hangzhou"
       },
-      "expected_behavior": "先形成 Preview-Validated Pricing Parameter Set，再调用 ros_estimate_template_cost，parameters 以字典形式传递，并在 conclusion.deployment_parameters 输出同一参数集",
+      "expected_behavior": "先形成 Preview-Validated Pricing Parameter Set，再调用 ros_estimate_template_cost，parameters 以字典形式传递，并在 conclusion.deployment_parameters 和 conclusion.preview_validation 输出同一参数集",
       "assertions": [
         {"name": "uses_preview_stack_tool", "check": "PreviewStack 通过 ros_preview_template 调用，不使用 ros_stack"},
         {"name": "uses_estimate_cost_tool", "check": "调用了 ros_estimate_template_cost"},
@@ -19,6 +19,7 @@
         {"name": "uses_template_url", "check": "通过 template_url 传递模板文件路径而非内联模板内容"},
         {"name": "outputs_monthly_estimate", "check": "conclusion 中包含 monthly_estimate 和 resources 费用明细"},
         {"name": "outputs_deployment_parameters", "check": "conclusion.deployment_parameters 包含最终用于询价的参数字典，供 deploying 使用"},
+        {"name": "outputs_preview_validation", "check": "conclusion.preview_validation.succeeded 为 true，且 template_url 和 parameters 与 ros_preview_template 调用一致"},
         {"name": "no_doc_search", "check": "不调用 aliyun_doc_search 或搜索定价文档"}
       ]
     },
@@ -71,13 +72,14 @@
         "region": "cn-shanghai",
         "description": "仅 VPC+OSS 的模板，OSS 可能不支持询价"
       },
-      "expected_behavior": "PreviewStack 成功但询价失败（如 OSS 不支持询价）时，应报告错误而不编造费用，同时不丢弃已验证的 deployment_parameters",
+      "expected_behavior": "PreviewStack 成功但询价失败（如 OSS 不支持询价）时，应报告错误而不编造费用，同时不丢弃已验证的 deployment_parameters 和 preview_validation",
       "assertions": [
         {"name": "uses_preview_stack_tool", "check": "PreviewStack 通过 ros_preview_template 调用，不使用 ros_stack"},
         {"name": "attempts_pricing", "check": "尝试调用了 ros_estimate_template_cost"},
         {"name": "reports_error_honestly", "check": "如果 API 返回错误，如实报告错误原因"},
         {"name": "no_fabricated_cost", "check": "不编造费用数据"},
         {"name": "keeps_preview_parameters", "check": "PreviewStack 成功但询价失败时不丢弃 deployment_parameters"},
+        {"name": "keeps_preview_validation", "check": "PreviewStack 成功但询价失败时 conclusion.preview_validation.succeeded 仍为 true"},
         {"name": "error_in_conclusion", "check": "conclusion 中包含 error 字段说明失败原因"}
       ]
     },
@@ -110,13 +112,14 @@
         "region": "cn-hangzhou",
         "description": "PreviewStack 需要完整的已有网络参数，但 ECS 费用可先基于规格和磁盘参数估算"
       },
-      "expected_behavior": "优先尝试参数推荐和 PreviewStack；如果 VpcId/VSwitchId/SecurityGroupId 无法自动补齐，PreviewStack 不是硬门禁，不要直接终止。可用 ZoneId、InstanceType、ImageId、SystemDiskCategory 等当前可询价参数调用 ros_estimate_template_cost，并在 conclusion.missing_deployment_parameters 中列出仍需用户通过选择阶段 parameter_overrides 补充的完整部署参数缺口",
+      "expected_behavior": "优先尝试参数推荐和 PreviewStack；如果 VpcId/VSwitchId/SecurityGroupId 无法自动补齐，PreviewStack 不是硬门禁，不要直接终止。可用 ZoneId、InstanceType、ImageId、SystemDiskCategory 等当前可询价参数调用 ros_estimate_template_cost，并在 conclusion.missing_deployment_parameters 中列出仍需用户通过选择阶段 parameter_overrides 补充的完整部署参数缺口，同时将 conclusion.preview_validation.succeeded 置为 false",
       "assertions": [
         {"name": "preview_is_soft_gate", "check": "明确说明 PreviewStack 不是硬门禁，不能仅因完整部署参数暂缺就停止询价"},
         {"name": "attempts_pricing_with_available_params", "check": "调用 ros_estimate_template_cost，用当前已选或可用于询价的参数估算费用"},
         {"name": "reports_missing_deployment_parameters", "check": "conclusion.missing_deployment_parameters 包含 VpcId、VSwitchId、SecurityGroupId 等缺口"},
         {"name": "outputs_partial_deployment_parameters", "check": "conclusion.deployment_parameters 保留已用于询价的 ZoneId、InstanceType、ImageId、SystemDiskCategory"},
-        {"name": "mentions_later_overrides", "check": "说明用户后续可在选择阶段通过 parameter_overrides 补充缺失参数"}
+        {"name": "mentions_later_overrides", "check": "说明用户后续可在选择阶段通过 parameter_overrides 补充缺失参数"},
+        {"name": "marks_preview_validation_failed", "check": "完整部署参数缺失导致 PreviewStack 未通过时，conclusion.preview_validation.succeeded 为 false"}
       ]
     },
     {
