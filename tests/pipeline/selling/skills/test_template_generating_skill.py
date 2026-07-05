@@ -120,6 +120,13 @@ class TestSkillContentRosOnly:
         assert "已有 VPC 中创建安全组" in body
         assert "forbidden_resources" not in body
 
+    def test_file_write_details_stay_in_step_prompt(self, body):
+        assert "并写入文件" in body
+        assert "write_file" not in body
+        assert "无需提前创建目录" not in body
+        assert "bash" not in body.lower()
+        assert "mkdir" not in body.lower()
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -145,6 +152,14 @@ class TestSkillPromptRendering:
         assert "ros_validate_template" in body
         assert "ValidateTemplate" in body
         assert "TemplateBody" in body
+
+    def test_prompt_uses_write_file_without_directory_creation(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert "write_file" in body
+        assert "无需提前创建目录" in body
+        assert "如果 `templates/` 目录不存在，先创建它" not in body
+        assert "mkdir" not in body.lower()
+        assert "bash" not in body.lower()
 
     def test_full_prompt_includes_skill_base_directory(self, tmp_path):
         from iac_code.pipeline.engine.context import PipelineContext
