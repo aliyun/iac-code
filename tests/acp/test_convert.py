@@ -779,6 +779,9 @@ def test_pipeline_tool_call_titles_use_display_names() -> None:
     end_updates = converter.event_to_updates(ToolUseEndEvent(tool_use_id="tc-1", name="complete_step", input={}))
     assert end_updates[0].title == "Complete step"
 
+    ros_start_updates = converter.event_to_updates(ToolUseStartEvent(tool_use_id="tc-2", name="ros_deploy"))
+    assert ros_start_updates[0].title == "ROS Deploy"
+
 
 def test_converter_works_without_turn_state_backward_compatible() -> None:
     """Scenario 11: Without turn_state, converter still processes events normally."""
@@ -933,6 +936,7 @@ def test_tool_kind_mapping_covers_extension_tools() -> None:
     assert _tool_kind("task_get") == "read"
     assert _tool_kind("task_stop") == "execute"
     assert _tool_kind("ros_stack") == "execute"
+    assert _tool_kind("ros_deploy") == "execute"
     assert _tool_kind("ros_stack_instances") == "execute"
     assert _tool_kind("aliyun_doc_search") == "fetch"
 

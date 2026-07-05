@@ -82,8 +82,9 @@ class TestSkillContentRosOnly:
         assert ".tf" not in lower
         assert "tf2ros" not in lower
 
-    def test_contains_ros_stack(self, body):
-        assert "ros_stack" in body
+    def test_contains_ros_deploy_without_direct_ros_stack(self, body):
+        assert "ros_deploy" in body
+        assert "ros_stack" not in body
 
     def test_contains_availability_query(self, body):
         assert "可用性查询" in body
@@ -91,7 +92,7 @@ class TestSkillContentRosOnly:
     def test_deploying_uses_parameters_without_preview_recommendation(self, body):
         assert "部署参数装配" in body
         assert "selected_plan.effective_deployment_parameters" in body
-        assert "CreateStack" in body
+        assert "ros_deploy" in body
         assert "GetTemplateParameterConstraints" not in body
         assert "PreviewStack" not in body
         assert "Preview-Validated Parameter Set" not in body
@@ -127,28 +128,33 @@ class TestSkillContentRosOnly:
         assert "UpdateStackInstances" not in body
 
     def test_contains_template_validation(self, body):
-        assert "ValidateTemplate" in body
+        assert "ros_validate_template" in body
         assert "模板校验" in body
+
+    def test_dedicated_tool_boundary_covers_validation_and_deploy_lifecycle(self, body):
+        assert "不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口" in body
+        assert "ROS `ValidateTemplate` 接口" not in body
 
     def test_preview_ready_path_skips_routine_validation_and_availability(self, body):
         assert body.count("selected_plan.preview_ready_for_create") == 1
-        assert "CreateStack" in body
+        assert "`ros_deploy` 的 `create`" in body
         assert "跳过例行 `ros_validate_template`" in body
         assert "跳过例行可用性查询" in body
 
     def test_create_stack_failure_revalidates_after_template_change_only(self, body):
-        assert "CreateStack 失败" in body
+        assert "`create` 失败" in body
         assert "修改模板" in body
         assert "修改模板或部署参数" not in body
         assert "只调整部署参数" in body
         assert "重新调用 `ros_validate_template`" in body
+        assert "`continue_create`" in body
 
     def test_no_pricing_section(self, body):
         assert "GetTemplateEstimateCost" not in body
         assert "部署前询价" not in body
 
-    def test_contains_create_stack(self, body):
-        assert "CreateStack" in body
+    def test_deploy_tool_create_documents_disable_rollback(self, body):
+        assert "`ros_deploy` 的 `create`" in body
         assert "DisableRollback" in body
 
     def test_template_url_source_is_not_duplicated_from_prompt(self, body):
@@ -160,7 +166,27 @@ class TestSkillContentRosOnly:
         assert "region_id=<地域>" not in body
 
     def test_contains_continue_create(self, body):
-        assert "ContinueCreateStack" in body
+        assert "ContinueCreateStackValidationFailed" in body
+
+    def test_delete_and_create_documents_replacement_flow(self, body):
+        assert "仅在 `continue_create` 返回 `ContinueCreateStackValidationFailed` 后使用 `delete_and_create`" in body
+        assert "先确认替代创建参数和模板可用" in body
+        assert "删除旧失败 Stack 后创建新的 Stack" in body
+        assert "最终结果使用新 Stack 的 `stack_id`" in body
+        assert "不要把旧 `stack_id` 当成部署成功结果" in body
+
+    def test_does_not_present_raw_stack_lifecycle_api_as_call_target(self, body):
+        body_without_error_codes = body.replace("ContinueCreateStackValidationFailed", "")
+        forbidden_phrases = [
+            "CreateStack 前",
+            "传给 `CreateStack`",
+            "CreateStack 必须传",
+            "CreateStack 无法成功",
+            "最终参数由 CreateStack 校验",
+            "| CreateStack |",
+        ]
+        for phrase in forbidden_phrases:
+            assert phrase not in body_without_error_codes
 
     def test_contains_error_handling(self, body):
         assert "部署失败" in body
@@ -186,10 +212,10 @@ class TestSkillContentRosOnly:
         assert "不得用 status: cancelled 表示等待用户确认" in body
 
     def test_delete_requires_explicit_delete_confirmation(self, body):
-        assert "删除请求本身不等于删除确认" in body
-        assert "`delete_confirmed: true`" in body
+        assert "非本步骤创建的 Stack" in body
         assert "确认删除" in body
-        assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" in body
+        assert "delete_and_create" in body
+        assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" not in body
 
 
 class TestDeployingPrompt:
@@ -224,22 +250,34 @@ class TestDeployingPrompt:
         for phrase in forbidden:
             assert phrase not in body
 
-    def test_prompt_delete_requires_explicit_delete_confirmation(self):
+    def test_prompt_defers_delete_scope_to_skill(self):
         body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
-        assert "删除请求本身不等于删除确认" in body
-        assert "`delete_confirmed: true`" in body
-        assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" in body
+        assert "ros_deploy" in body
+        assert "delete_and_create" in body
+        assert "删除约束和失败恢复策略见技能" in body
+        assert "非本步骤创建的 Stack" not in body
+        assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" not in body
+
+    def test_prompt_does_not_mention_uninjected_ros_stack_tool(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        assert "ros_stack" not in body
 
     def test_prompt_names_template_url_value_for_deploy_tools(self):
         body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
         assert 'template_url = "{selected_plan.template_url}"' in body
-        assert 'params.TemplateURL = "{selected_plan.template_url}"' in body
+        assert 'params.TemplateURL = "{selected_plan.template_url}"' not in body
         assert "selected_plan.template_url" in body
         assert "ros_validate_template" in body
-        assert "ValidateTemplate" in body
-        assert "CreateStack" in body
-        assert "不要传 `params.TemplateBody`" in body
+        assert "ros_deploy" in body
+        assert "不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口" in body
+        assert "ROS `ValidateTemplate` 接口" not in body
+        assert "不要传 `TemplateBody`" in body
         assert "<选中方案模板文件路径>" not in body
+
+    def test_prompt_does_not_present_raw_stack_lifecycle_api_as_call_target(self):
+        body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
+        body_without_error_codes = body.replace("ContinueCreateStackValidationFailed", "")
+        assert "CreateStack" not in body_without_error_codes
 
     def test_prompt_allows_preview_ready_direct_create(self):
         body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
@@ -334,14 +372,16 @@ class TestEvalsJson:
 
         confirmation_eval = evals_by_name["delete-stack-confirmation"]
         confirmation_assertions = {assertion["name"] for assertion in confirmation_eval["assertions"]}
-        assert "user_confirmation" in confirmation_assertions
+        assert "reports_scope" in confirmation_assertions
         assert "uses_delete_stack" not in confirmation_assertions
-        assert "no_delete_without_confirmation" in confirmation_assertions
+        assert "no_delete_stack" in confirmation_assertions
+        assert "no_delete_and_create" in confirmation_assertions
 
         confirmed_eval = evals_by_name["delete-stack-confirmed"]
         confirmed_assertions = {assertion["name"] for assertion in confirmed_eval["assertions"]}
         assert "确认" in confirmed_eval["prompt"]
-        assert "uses_delete_stack" in confirmed_assertions
+        assert "uses_delete_stack" not in confirmed_assertions
+        assert "no_delete_stack" in confirmed_assertions
 
     def test_template_validation_eval_uses_dedicated_tool(self):
         data = json.loads(EVALS_JSON.read_text(encoding="utf-8"))

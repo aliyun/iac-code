@@ -34,6 +34,11 @@ class PermissionRuleValue:
 
     tool_name: str
     rule_content: str
+    display_text: str | None = None
+
+    def display_label(self) -> str:
+        """Return the user-facing label for this rule."""
+        return self.display_text or self.rule_content
 
 
 @dataclass

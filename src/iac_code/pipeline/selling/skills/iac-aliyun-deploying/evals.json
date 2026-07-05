@@ -18,10 +18,10 @@
           "SystemDiskCategory": "cloud_essd"
         }
       },
-      "expected_behavior": "使用 ros_stack 工具 CreateStack，传入 DisableRollback: true，部署前向用户确认",
+      "expected_behavior": "使用 ros_deploy 工具 create，工具内部使用 DisableRollback: true，部署前向用户确认",
       "assertions": [
-        {"name": "uses_ros_stack", "check": "调用了 ros_stack 工具而非 aliyun_api 或 bash"},
-        {"name": "disable_rollback", "check": "CreateStack 参数中包含 DisableRollback: true"},
+        {"name": "uses_ros_deploy", "check": "调用了 ros_deploy 工具而非 ros_stack、aliyun_api 或 bash"},
+        {"name": "uses_create_action", "check": "ros_deploy action 为 create"},
         {"name": "user_confirmation", "check": "部署前向用户展示了确认信息"},
         {"name": "no_terraform", "check": "不包含 terraform init/apply 等 Terraform CLI 步骤"}
       ]
@@ -63,11 +63,11 @@
         "stack_status": "CREATE_FAILED",
         "status_reason": "The resource ALIYUN::ECS::InstanceGroup is CREATE_FAILED: InstanceType ecs.g7.large is out of stock in zone cn-hangzhou-h"
       },
-      "expected_behavior": "分析错误，重新查询可用性换可用区，使用 ContinueCreateStack 而非重新 CreateStack",
+      "expected_behavior": "分析错误，重新查询可用性换可用区，使用 ros_deploy 的 continue_create 而非直接重新 create",
       "assertions": [
-        {"name": "uses_continue_create", "check": "使用 ContinueCreateStack 而非重新 CreateStack"},
+        {"name": "uses_continue_create", "check": "使用 ros_deploy 的 continue_create"},
         {"name": "re_queries_availability", "check": "重新查询了可用区的 ECS 库存"},
-        {"name": "no_delete_and_recreate", "check": "不删除原 Stack 再重建"}
+        {"name": "no_delete_and_recreate", "check": "未收到 ContinueCreateStackValidationFailed 前不使用 delete_and_create"}
       ]
     },
     {
@@ -83,10 +83,10 @@
           "InstanceType": "ecs.g7.xlarge"
         }
       },
-      "expected_behavior": "使用 ⚠️ 警告措辞确认更新操作，查询变更涉及参数的可用性后执行 UpdateStack",
+      "expected_behavior": "部署步骤不处理更新已有 Stack；告知用户该步骤只处理所选方案部署",
       "assertions": [
-        {"name": "warning_before_update", "check": "使用了警告措辞（⚠️ 或「注意」等）提醒用户更新操作的影响"},
-        {"name": "uses_update_stack", "check": "调用 ros_stack 的 UpdateStack 操作"}
+        {"name": "no_update_stack", "check": "不调用 UpdateStack"},
+        {"name": "reports_scope", "check": "说明当前部署步骤只处理所选方案部署"}
       ]
     },
     {
@@ -98,11 +98,11 @@
         "region": "cn-hangzhou",
         "stack_id": "stack-to-delete-456"
       },
-      "expected_behavior": "使用 ⚠️ 警告措辞强调删除不可逆，等待用户明确确认；未确认前不调用 ros_stack DeleteStack",
+      "expected_behavior": "部署步骤不删除非本步骤创建的 Stack；告知用户需要走明确删除流程",
       "assertions": [
-        {"name": "deletion_warning", "check": "使用了 ⚠️ 警告措辞强调删除操作不可逆"},
-        {"name": "user_confirmation", "check": "等待用户明确确认后才执行删除"},
-        {"name": "no_delete_without_confirmation", "check": "未收到明确确认前不调用 ros_stack 的 DeleteStack 操作"}
+        {"name": "no_delete_stack", "check": "不调用 DeleteStack"},
+        {"name": "no_delete_and_create", "check": "不调用 ros_deploy 的 delete_and_create"},
+        {"name": "reports_scope", "check": "说明非本步骤创建的 Stack 不得在部署步骤删除"}
       ]
     },
     {
@@ -180,11 +180,11 @@
         "stack_id": "stack-to-delete-456",
         "delete_confirmed": true
       },
-      "expected_behavior": "用户已明确确认删除后，使用 ros_stack DeleteStack 执行删除，并报告删除请求已提交",
+      "expected_behavior": "即使用户确认删除，部署步骤也不删除非本步骤创建的 Stack；告知用户需要走明确删除流程",
       "assertions": [
-        {"name": "deletion_warning", "check": "使用了 ⚠️ 警告措辞强调删除操作不可逆"},
-        {"name": "uses_delete_stack", "check": "调用 ros_stack 的 DeleteStack 操作"},
-        {"name": "completed_success", "check": "调用 complete_step 且 status 为 success"}
+        {"name": "no_delete_stack", "check": "不调用 DeleteStack"},
+        {"name": "no_delete_and_create", "check": "不调用 ros_deploy 的 delete_and_create"},
+        {"name": "reports_scope", "check": "说明当前部署步骤不能删除非本步骤创建的 Stack"}
       ]
     },
     {
@@ -216,12 +216,12 @@
           }
         }
       },
-      "expected_behavior": "selected_plan.preview_ready_for_create 为 true 时，直接调用 ros_stack CreateStack，跳过例行 ros_validate_template 和跳过例行可用性查询",
+      "expected_behavior": "selected_plan.preview_ready_for_create 为 true 时，直接调用 ros_deploy create，跳过例行 ros_validate_template 和跳过例行可用性查询",
       "assertions": [
-        {"name": "uses_direct_create_stack", "check": "直接调用 ros_stack 的 CreateStack"},
+        {"name": "uses_direct_create_stack", "check": "直接调用 ros_deploy 的 create"},
         {"name": "skips_routine_validation", "check": "跳过例行 ros_validate_template"},
         {"name": "skips_routine_availability_query", "check": "跳过例行可用性查询"},
-        {"name": "uses_template_url", "check": "CreateStack 参数中使用 params.TemplateURL，不使用 params.TemplateBody"}
+        {"name": "uses_template_url", "check": "ros_deploy 参数中使用 template_url，不使用 TemplateBody"}
       ]
     }
   ]

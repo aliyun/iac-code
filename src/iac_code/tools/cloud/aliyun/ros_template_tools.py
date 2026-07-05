@@ -10,7 +10,7 @@ from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
 from iac_code.tools.cloud.aliyun.template_source import is_remote_template_url
-from iac_code.tools.path_safety import check_read_path, resolve_candidate
+from iac_code.tools.path_safety import check_read_path, resolve_read_path
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 
 _TEMPLATE_URL_PROPERTY = {
@@ -69,7 +69,11 @@ def _is_local_template_url(template_url: str) -> bool:
 
 def _resolve_template_url_for_api(template_url: str, context: ToolContext) -> str:
     if _is_local_template_url(template_url):
-        return resolve_candidate(template_url, context.cwd)
+        return resolve_read_path(
+            template_url,
+            context.cwd,
+            relative_read_directories=context.relative_read_directories,
+        )
     return template_url
 
 
@@ -147,6 +151,7 @@ class _RosTemplateTool(Tool):
             cwd=context.cwd,
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
         )
         if decision.behavior == "allow":
             return None

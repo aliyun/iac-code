@@ -41,7 +41,7 @@ def test_deploying_prompt_preserves_explicit_stack_name_without_e2e_controls() -
 
     assert "intent" in deploying_step.context_fields
     assert stack_name in prompt
-    assert "params.StackName" in prompt
+    assert "stack_name" in prompt
     assert "必须精确等于该名称" in prompt
     assert "用户未明确指定 StackName" in prompt
     assert "禁止省略 `params.StackName`" not in prompt
@@ -71,6 +71,7 @@ def test_deploying_prompt_renders_concrete_template_url() -> None:
         deploying_step.context_fields,
     )
 
-    assert 'params.TemplateURL = "templates/vswitch.yml"' in prompt
+    assert 'template_url = "templates/vswitch.yml"' in prompt
+    assert 'params.TemplateURL = "templates/vswitch.yml"' not in prompt
     assert "<选中方案模板文件路径>" not in prompt
     assert "{selected_plan.template_url}" not in prompt

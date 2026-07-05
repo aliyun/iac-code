@@ -1260,6 +1260,68 @@ def test_stack_current_changed_emits_after_successful_ros_create_stack() -> None
     }
 
 
+def test_stack_current_changed_emits_after_successful_ros_deploy_recreate() -> None:
+    ctx = _ctx()
+    ctx.emit_stack_events = True
+    translator = PipelineEventTranslator(ctx)
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="deploying",
+            timestamp=time.time(),
+            data={"index": 5, "total": 5},
+        )
+    )
+    translator.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-deploy",
+            name="ros_deploy",
+            input={
+                "action": "delete_and_create",
+                "stack_id": "stack-old",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+                "region_id": "cn-hangzhou",
+            },
+        )
+    )
+
+    envelopes = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-deploy",
+            tool_name="ros_deploy",
+            result=json.dumps(
+                {
+                    "stack_id": "stack-new",
+                    "stack_name": "demo",
+                    "status": "CREATE_COMPLETE",
+                    "is_success": True,
+                }
+            ),
+            is_error=False,
+        )
+    )
+
+    stack_event = envelopes[0]
+    assert [envelope["eventType"] for envelope in envelopes] == ["stack_current_changed", "tool_result"]
+    assert stack_event["scope"] == "stack"
+    assert stack_event["step"]["id"] == "deploying"
+    assert stack_event["data"] == {
+        "toolName": "ros_deploy",
+        "toolUseId": "toolu-deploy",
+        "provider": "ros",
+        "action": "CreateStack",
+        "deployAction": "delete_and_create",
+        "previousStackId": "stack-old",
+        "regionId": "cn-hangzhou",
+        "stackId": "stack-new",
+        "stackName": "demo",
+        "stackStatus": "CREATE_COMPLETE",
+        "isSuccess": True,
+        "current": True,
+    }
+
+
 def test_stack_current_changed_keeps_current_stack_after_statusless_successful_delete() -> None:
     ctx = _ctx()
     ctx.emit_stack_events = True

@@ -24,7 +24,11 @@ from iac_code.services.telemetry.sanitize import (
 )
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
-from iac_code.tools.cloud.aliyun.template_source import is_remote_template_url, reject_pipeline_template_source_params
+from iac_code.tools.cloud.aliyun.template_source import (
+    is_remote_template_url,
+    reject_pipeline_dedicated_ros_deployment_action,
+    reject_pipeline_template_source_params,
+)
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
 from iac_code.tools.path_safety import resolve_candidate
@@ -485,6 +489,8 @@ class RosStack(BaseCloudStack):
         pipeline_mode: bool = False,
         cwd: str | None = None,
     ) -> str:
+        if error := reject_pipeline_dedicated_ros_deployment_action(action, pipeline_mode=pipeline_mode):
+            raise ValueError(error)
         if error := reject_pipeline_template_source_params(action, params, pipeline_mode=pipeline_mode):
             raise ValueError(error)
         client = self._get_client(region)
@@ -511,6 +517,7 @@ class RosStack(BaseCloudStack):
         elif action == "UpdateStack":
             return await self._handle_update_stack(client, params, region)
         elif action == "ContinueCreateStack":
+            _normalize_stack_parameters_for_sdk(params)
             request = ros_models.ContinueCreateStackRequest().from_map(params)
             response = await asyncio.to_thread(client.continue_create_stack, request)
             return response.body.stack_id

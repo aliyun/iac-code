@@ -61,6 +61,7 @@ def _known_tool_names() -> dict[str, str]:
         "ros_get_template_parameter_constraints": _("ROS Template Parameters"),
         "ros_preview_template": _("ROS Preview Stack"),
         "ros_estimate_template_cost": _("ROS Estimate Cost"),
+        "ros_deploy": _("ROS Deploy"),
     }
 
 

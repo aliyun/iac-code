@@ -221,6 +221,92 @@ def test_reconstruct_completion_guard_state_records_ros_stack_results_for_comple
     ]
 
 
+def test_reconstruct_completion_guard_state_records_ros_deploy_results_for_completion_guards():
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_deploy",
+                    name="ros_deploy",
+                    input={"action": "delete_and_create", "stack_id": "stack-old"},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_deploy",
+                    content=json.dumps(
+                        {
+                            "stack_id": "stack-new",
+                            "stack_name": "demo",
+                            "status": "CREATE_COMPLETE",
+                            "is_success": True,
+                        }
+                    ),
+                    is_error=False,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["successful_tools"] == {"ros_deploy"}
+    assert state["tool_results"]["ros_deploy"]["stack_id"] == "stack-new"
+    assert state["tool_result_records"] == [
+        {
+            "tool_name": "ros_deploy",
+            "input": {"action": "delete_and_create", "stack_id": "stack-old"},
+            "result": {
+                "stack_id": "stack-new",
+                "stack_name": "demo",
+                "status": "CREATE_COMPLETE",
+                "is_success": True,
+            },
+            "is_error": False,
+        }
+    ]
+
+
+def test_reconstruct_completion_guard_state_records_ros_deploy_owned_failed_create_stack():
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_deploy",
+                    name="ros_deploy",
+                    input={"action": "create", "stack_name": "demo"},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_deploy",
+                    content=json.dumps(
+                        {
+                            "stack_id": "stack-failed",
+                            "stack_name": "demo",
+                            "status": "CREATE_FAILED",
+                            "is_success": False,
+                        }
+                    ),
+                    is_error=True,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["ros_deploy_owned_stack_ids"]["stack-failed"]["action"] == "create"
+
+
 def test_completion_guard_state_logs_json_parse_failures(caplog):
     caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
     state = {}

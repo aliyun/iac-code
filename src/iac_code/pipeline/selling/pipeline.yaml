@@ -264,13 +264,13 @@ steps:
           status: success
         required_conclusion_field: stack_id
         require_tool_result:
-          tool: ros_stack
-          action_in: [CreateStack, ContinueCreateStack]
+          tool: ros_deploy
+          action_in: [create, continue_create, delete_and_create]
           is_success: true
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id
-        message: "部署成功必须等待 ros_stack CreateStack 返回 CREATE_COMPLETE。"
+        message: "部署成功必须等待 ros_deploy 返回 CREATE_COMPLETE。"
     tools:
       include: []
-      exclude: [write_memory]
-    inject_tools: [ros_validate_template]
+      exclude: [write_memory, ros_stack]
+    inject_tools: [ros_validate_template, ros_deploy]

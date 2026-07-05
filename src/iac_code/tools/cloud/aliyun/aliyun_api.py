@@ -27,6 +27,7 @@ from iac_code.services.telemetry.sanitize import sanitize_error_message
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.template_source import (
     is_remote_template_url,
+    reject_pipeline_dedicated_ros_deployment_action,
     reject_pipeline_dedicated_ros_template_action,
     reject_pipeline_template_source_params,
 )
@@ -716,6 +717,8 @@ class AliyunApi(BaseCloudApi):
         # ROS: TemplateURL as local file path → read into TemplateBody
         if product == "ros":
             if error := reject_pipeline_dedicated_ros_template_action(action, pipeline_mode=context.pipeline_mode):
+                return ToolResult.error(error)
+            if error := reject_pipeline_dedicated_ros_deployment_action(action, pipeline_mode=context.pipeline_mode):
                 return ToolResult.error(error)
             if error := reject_pipeline_template_source_params(action, params, pipeline_mode=context.pipeline_mode):
                 return ToolResult.error(error)

@@ -663,6 +663,12 @@ class ACPSession:
         ):
             suggestions = event.permission_result.suggestions
 
+        def _suggestion_rules() -> str:
+            return ",".join(s.rule_content for s in suggestions)
+
+        def _suggestion_display() -> str:
+            return ",".join(s.display_label() for s in suggestions)
+
         # Build dynamic option list aligned with local REPL behavior.
         options: list[acp.schema.PermissionOption] = [
             acp.schema.PermissionOption(
@@ -673,10 +679,11 @@ class ACPSession:
         ]
 
         if suggestions:
-            rules_display = ",".join(s.rule_content for s in suggestions)
+            rules_value = _suggestion_rules()
+            rules_display = _suggestion_display()
             options.append(
                 acp.schema.PermissionOption(
-                    option_id=_PREFIX_ALLOW_RULE + rules_display,
+                    option_id=_PREFIX_ALLOW_RULE + rules_value,
                     name=_('Always allow "{rule}" (this session)').format(rule=rules_display),
                     kind="allow_always",
                 )
@@ -699,10 +706,11 @@ class ACPSession:
         )
 
         if suggestions:
-            rules_display = ",".join(s.rule_content for s in suggestions)
+            rules_value = _suggestion_rules()
+            rules_display = _suggestion_display()
             options.append(
                 acp.schema.PermissionOption(
-                    option_id=_PREFIX_DENY_RULE + rules_display,
+                    option_id=_PREFIX_DENY_RULE + rules_value,
                     name=_('Always deny "{rule}" (this session)').format(rule=rules_display),
                     kind="reject_always",
                 )
@@ -741,9 +749,7 @@ class ACPSession:
                 input=tool_input_redacted,
             )
         if suggestions:
-            content_text += "\n" + _("Suggested rule: {rule}").format(
-                rule=",".join(s.rule_content for s in suggestions)
-            )
+            content_text += "\n" + _("Suggested rule: {rule}").format(rule=_suggestion_display())
 
         response = await self._conn.request_permission(
             options,

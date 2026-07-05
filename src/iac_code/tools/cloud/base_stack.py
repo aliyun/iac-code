@@ -201,6 +201,28 @@ class BaseCloudStack(Tool):
             msg = msg[:idx]
         return msg.strip()
 
+    def _started_stack_metadata(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        stack_id: str,
+        *,
+        error_stage: str | None = None,
+    ) -> dict[str, str]:
+        metadata = {
+            "provider": self.provider_name,
+            "action": action,
+            "stack_id": stack_id,
+            "region_id": region,
+        }
+        stack_name = params.get("StackName") or params.get("stack_name")
+        if stack_name:
+            metadata["stack_name"] = str(stack_name)
+        if error_stage:
+            metadata["error_stage"] = error_stage
+        return metadata
+
     def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str | None:
         if verbose:
             return output.strip()
@@ -257,7 +279,17 @@ class BaseCloudStack(Tool):
                         self.on_polling_error(action, params, region, stack_id, "status", e)
                     except Exception:
                         pass
-                    return ToolResult.error(f"[GetStackStatus] {e}")
+                    return ToolResult(
+                        content=f"[GetStackStatus] {e}",
+                        is_error=True,
+                        metadata=self._started_stack_metadata(
+                            action,
+                            params,
+                            region,
+                            stack_id,
+                            error_stage="status",
+                        ),
+                    )
 
                 try:
                     resources = await self.get_stack_resources(stack_id, region)
@@ -269,7 +301,17 @@ class BaseCloudStack(Tool):
                             self.on_polling_error(action, params, region, stack_id, "resources", e)
                         except Exception:
                             pass
-                        return ToolResult.error(f"[GetStackResources] {e}")
+                        return ToolResult(
+                            content=f"[GetStackResources] {e}",
+                            is_error=True,
+                            metadata=self._started_stack_metadata(
+                                action,
+                                params,
+                                region,
+                                stack_id,
+                                error_stage="resources",
+                            ),
+                        )
 
                 elapsed = int(time.monotonic() - start_time)
 

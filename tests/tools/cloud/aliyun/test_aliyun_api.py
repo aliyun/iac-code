@@ -183,6 +183,23 @@ class TestAliyunApiPipelineRosTemplateActions:
         assert expected_tool in result.content
         assert "aliyun_api" in result.content
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["CreateStack", "ContinueCreateStack", "DeleteStack", "UpdateStack"])
+    async def test_pipeline_rejects_raw_ros_deployment_api_actions(self, api: AliyunApi, action: str) -> None:
+        result = await api.execute(
+            tool_input={
+                "product": "ros",
+                "action": action,
+                "params": {"TemplateURL": "templates/app.yml", "StackId": "stack-123"},
+                "region_id": "cn-hangzhou",
+            },
+            context=ToolContext(pipeline_mode=True),
+        )
+
+        assert result.is_error
+        assert "ros_deploy" in result.content
+        assert "raw ROS deployment API" in result.content
+
 
 class TestAliyunApiVersionResolution:
     def test_known_product_resolves_version(self, api: AliyunApi) -> None:
@@ -753,7 +770,7 @@ class TestAliyunApiHooks:
             result = await api.execute(
                 tool_input={
                     "product": "ros",
-                    "action": "CreateStack",
+                    "action": "CreateChangeSet",
                     "params": {"TemplateBody": "{}"},
                     "region_id": "cn-hangzhou",
                 },
@@ -802,7 +819,7 @@ class TestAliyunApiHooks:
             result = await api.execute(
                 tool_input={
                     "product": "ros",
-                    "action": "CreateStack",
+                    "action": "CreateChangeSet",
                     "params": {"Parameters": {"ZoneId": "cn-hangzhou-k"}},
                     "region_id": "cn-hangzhou",
                 },
@@ -811,7 +828,7 @@ class TestAliyunApiHooks:
 
         assert result.is_error is True
         assert "TemplateURL" in result.content
-        assert "CreateStack" in result.content
+        assert "CreateChangeSet" in result.content
         mock_open_api_client.assert_not_called()
 
     @pytest.mark.asyncio
@@ -823,7 +840,7 @@ class TestAliyunApiHooks:
             result = await api.execute(
                 tool_input={
                     "product": "ros",
-                    "action": "CreateStack",
+                    "action": "CreateChangeSet",
                     "params": template_source,
                     "region_id": "cn-hangzhou",
                 },

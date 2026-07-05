@@ -30,6 +30,15 @@ PIPELINE_DEDICATED_ROS_TEMPLATE_TOOLS = {
     "gettemplateestimatecost": "ros_estimate_template_cost",
 }
 
+PIPELINE_DEDICATED_ROS_DEPLOYMENT_ACTIONS = frozenset(
+    {
+        "createstack",
+        "continuecreatestack",
+        "deletestack",
+        "updatestack",
+    }
+)
+
 
 def is_remote_template_url(template_url: str) -> bool:
     """Return True when TemplateURL points to a remote URL rather than a local file."""
@@ -47,6 +56,18 @@ def reject_pipeline_dedicated_ros_template_action(action: str, *, pipeline_mode:
         "ROS pipeline calls for {action} must use the dedicated {tool_name} tool instead of aliyun_api. "
         "Do not call the raw ROS template API directly."
     ).format(action=action, tool_name=tool_name)
+
+
+def reject_pipeline_dedicated_ros_deployment_action(action: str, *, pipeline_mode: bool) -> str | None:
+    """Return an error when pipeline callers use raw ROS deployment APIs."""
+    if not pipeline_mode:
+        return None
+    if action.lower() not in PIPELINE_DEDICATED_ROS_DEPLOYMENT_ACTIONS:
+        return None
+    return _(
+        "ROS pipeline calls for {action} must use the dedicated ros_deploy tool instead of aliyun_api. "
+        "Do not call the raw ROS deployment API directly."
+    ).format(action=action)
 
 
 def reject_template_body_param(params: dict[str, Any], *, pipeline_mode: bool) -> str | None:

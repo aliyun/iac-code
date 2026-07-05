@@ -1344,7 +1344,7 @@ class Renderer:
                 # ── Stack progress ─────────────────────────────
                 elif isinstance(event, StackProgressEvent):
                     for rec in tool_records.values():
-                        if rec.tool_name == "ros_stack" and not rec.done:
+                        if rec.tool_name in {"ros_stack", "ros_deploy"} and not rec.done:
                             rec.progress_renderable = self._render_stack_progress(event)
                             break
                     _ensure_live()
@@ -1643,6 +1643,9 @@ class Renderer:
                 return None
             return ", ".join(f"{suggestion.tool_name}({suggestion.rule_content})" for suggestion in suggestions)
 
+        def _suggestion_display() -> str:
+            return ", ".join(suggestion.display_label() for suggestion in suggestions)
+
         # Short-circuit on cached sticky decisions — no prompt, no input read.
         cached = lookup_permission(cache, tool_name)
         if cached == "always_allow" and tool_name == "aliyun_api" and is_non_read_only:
@@ -1693,7 +1696,7 @@ class Renderer:
             else []
         )
         if suggestions:
-            rules_display = ", ".join(s.rule_content for s in suggestions)
+            rules_display = _suggestion_display()
             options.append(
                 TextOption(
                     label=_('Yes, always allow "{rule}" (this session)').format(rule=rules_display),
@@ -1708,7 +1711,7 @@ class Renderer:
         )
 
         if suggestions:
-            rules_display = ", ".join(s.rule_content for s in suggestions)
+            rules_display = _suggestion_display()
             options.append(
                 TextOption(
                     label=_('No, always deny "{rule}" (this session)').format(rule=rules_display),

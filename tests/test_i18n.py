@@ -86,6 +86,11 @@ SESSION_BACKUP_USER_VISIBLE_MSGIDS = {
     "unknown",
 }
 
+ROS_DEPLOYMENT_REJECTION_MSGID = (
+    "ROS pipeline calls for {action} must use the dedicated ros_deploy tool instead of aliyun_api. "
+    "Do not call the raw ROS deployment API directly."
+)
+
 
 def _get_all_msgids_from_pot(pot_file: Path) -> set[str]:
     """Extract all msgids from a .pot template file.
@@ -421,6 +426,32 @@ def test_pipeline_user_visible_translations_are_complete():
                 errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
             elif msgstr == msgid:
                 errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+
+    assert not errors, "\n".join(errors)
+
+
+def test_ros_deployment_rejection_translations_preserve_format_fields():
+    """The pipeline safety error must not fail while formatting localized text."""
+    language_dirs = _discover_language_dirs()
+    assert language_dirs, "No language directories found"
+
+    errors = []
+    for lang_dir in language_dirs:
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        msgstr = translations.get(ROS_DEPLOYMENT_REJECTION_MSGID, "")
+        if not msgstr:
+            errors.append(f"{lang_dir.name}: missing translation")
+            continue
+        if "{tool_name}" in msgstr:
+            errors.append(f"{lang_dir.name}: stale {{tool_name}} placeholder")
+            continue
+        try:
+            formatted = msgstr.format(action="CreateStack")
+        except (IndexError, KeyError, ValueError) as exc:
+            errors.append(f"{lang_dir.name}: format failed: {exc}")
+            continue
+        if "CreateStack" not in formatted:
+            errors.append(f"{lang_dir.name}: formatted action missing")
 
     assert not errors, "\n".join(errors)
 

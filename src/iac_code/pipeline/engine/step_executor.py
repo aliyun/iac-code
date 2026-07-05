@@ -785,6 +785,8 @@ class StepExecutor:
             if tool_cls is not None:
                 if name == "ask_user_question":
                     registry.register(AskUserQuestionTool(completion_guard_state))
+                elif name == "ros_deploy":
+                    registry.register(tool_cls(completion_guard_state=completion_guard_state))
                 else:
                     registry.register(tool_cls())
 

@@ -74,6 +74,7 @@ _TOOL_KIND_MAP: dict[str, ToolKind] = {
     "bash": "execute",
     "task_stop": "execute",
     "ros_stack": "execute",
+    "ros_deploy": "execute",
     "ros_stack_instances": "execute",
     # Fetch operations
     "web_fetch": "fetch",
