@@ -18,6 +18,10 @@ _RESOURCE_TYPE_CORRECTIONS: dict[str, str] = {
 }
 
 _TERRAFORM_TRANSFORM_PREFIXES = ("Aliyun::Terraform-", "Aliyun::OpenTofu-")
+_EXISTING_VPC_ASSOCIATION_PROPERTIES = {
+    "ALIYUN::ECS::VPC::VPCId",
+    "ALIYUN::VPC::VPCId",
+}
 
 _TEMPLATE_BODY_ACTIONS = [
     "ValidateTemplate",
@@ -94,10 +98,65 @@ def _is_terraform(data: dict) -> bool:
     return any(isinstance(v, str) and v.startswith(_TERRAFORM_TRANSFORM_PREFIXES) for v in values)
 
 
+def _ref_name(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    ref = value.get("Ref")
+    return ref if isinstance(ref, str) and ref else None
+
+
+def _parameter_definition(parameters: dict[str, Any], name: str | None) -> dict[str, Any] | None:
+    if not name:
+        return None
+    parameter = parameters.get(name)
+    return parameter if isinstance(parameter, dict) else None
+
+
+def _is_existing_vpc_parameter(parameters: dict[str, Any], name: str | None) -> bool:
+    parameter = _parameter_definition(parameters, name)
+    if parameter is None:
+        return False
+    return parameter.get("AssociationProperty") in _EXISTING_VPC_ASSOCIATION_PROPERTIES
+
+
+def _validate_existing_vpc_vswitch_cidr(name: str, resource: dict, parameters: dict[str, Any]) -> list[str]:
+    properties = resource.get("Properties")
+    if not isinstance(properties, dict):
+        return []
+    vpc_param = _ref_name(properties.get("VpcId"))
+    if not _is_existing_vpc_parameter(parameters, vpc_param):
+        return []
+
+    cidr_block = properties.get("CidrBlock")
+    cidr_param = _ref_name(cidr_block)
+    cidr_parameter = _parameter_definition(parameters, cidr_param)
+    if cidr_parameter is not None and cidr_parameter.get("Default") is not None:
+        return [
+            _(
+                "Resource '{name}' creates a VSwitch in existing VPC parameter '{vpc_param}', "
+                "but CidrBlock references parameter '{cidr_param}' with a Default. "
+                "Remove Parameters.{cidr_param}.Default and let deployment parameters choose a non-overlapping CIDR "
+                "after VpcId is selected."
+            ).format(name=name, vpc_param=vpc_param, cidr_param=cidr_param)
+        ]
+    if isinstance(cidr_block, str) and cidr_block.strip():
+        return [
+            _(
+                "Resource '{name}' creates a VSwitch in existing VPC parameter '{vpc_param}', "
+                "so CidrBlock must not be a static value. Remove the fixed CidrBlock and let deployment parameters "
+                "choose a non-overlapping CIDR after VpcId is selected."
+            ).format(name=name, vpc_param=vpc_param)
+        ]
+    return []
+
+
 def _validate_structure(data: dict) -> list[str]:
     """Validate ROS template structure. Return list of error messages."""
     errors: list[str] = []
     is_tf = _is_terraform(data)
+    parameters = data.get("Parameters")
+    if not isinstance(parameters, dict):
+        parameters = {}
 
     if "ROSTemplateFormatVersion" not in data:
         errors.append(
@@ -130,6 +189,8 @@ def _validate_structure(data: dict) -> list[str]:
                             name=name, wrong=rtype, correct=correct
                         )
                     )
+                if rtype == "ALIYUN::ECS::VSwitch":
+                    errors.extend(_validate_existing_vpc_vswitch_cidr(name, resource, parameters))
 
     return errors
 

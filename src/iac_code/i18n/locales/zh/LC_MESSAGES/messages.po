@@ -4290,6 +4290,29 @@ msgid ""
 msgstr "模板 {fmt} 解析结果不是对象（dict），请检查模板格式"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Resource '{name}' creates a VSwitch in existing VPC parameter "
+"'{vpc_param}', but CidrBlock references parameter '{cidr_param}' with a "
+"Default. Remove Parameters.{cidr_param}.Default and let deployment "
+"parameters choose a non-overlapping CIDR after VpcId is selected."
+msgstr ""
+"资源 '{name}' 在已有 VPC 参数 '{vpc_param}' 中创建 VSwitch，但 CidrBlock 引用了带 Default"
+" 的参数 '{cidr_param}'。请移除 Parameters.{cidr_param}.Default，并在选择 VpcId "
+"后让部署参数选择不重叠的 CIDR。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Resource '{name}' creates a VSwitch in existing VPC parameter "
+"'{vpc_param}', so CidrBlock must not be a static value. Remove the fixed "
+"CidrBlock and let deployment parameters choose a non-overlapping CIDR "
+"after VpcId is selected."
+msgstr ""
+"资源 '{name}' 在已有 VPC 参数 '{vpc_param}' 中创建 VSwitch，因此 CidrBlock "
+"不能是静态值。请移除固定的 CidrBlock，并在选择 VpcId 后让部署参数选择不重叠的 CIDR。"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
 "Template is missing ROSTemplateFormatVersion (ROS templates must include "
 "this field, e.g. '2015-09-01')"

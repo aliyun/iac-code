@@ -4507,6 +4507,33 @@ msgstr ""
 "verifique o formato do modelo"
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Resource '{name}' creates a VSwitch in existing VPC parameter "
+"'{vpc_param}', but CidrBlock references parameter '{cidr_param}' with a "
+"Default. Remove Parameters.{cidr_param}.Default and let deployment "
+"parameters choose a non-overlapping CIDR after VpcId is selected."
+msgstr ""
+"O recurso '{name}' cria um VSwitch no parâmetro de VPC existente "
+"'{vpc_param}', mas CidrBlock referencia o parâmetro '{cidr_param}' com um"
+" Default. Remova Parameters.{cidr_param}.Default e permita que os "
+"parâmetros de implantação escolham um CIDR sem sobreposição depois que "
+"VpcId for selecionado."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Resource '{name}' creates a VSwitch in existing VPC parameter "
+"'{vpc_param}', so CidrBlock must not be a static value. Remove the fixed "
+"CidrBlock and let deployment parameters choose a non-overlapping CIDR "
+"after VpcId is selected."
+msgstr ""
+"O recurso '{name}' cria um VSwitch no parâmetro de VPC existente "
+"'{vpc_param}', portanto CidrBlock não deve ser um valor estático. Remova "
+"o CidrBlock fixo e permita que os parâmetros de implantação escolham um "
+"CIDR sem sobreposição depois que VpcId for selecionado."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""
 "Template is missing ROSTemplateFormatVersion (ROS templates must include "
 "this field, e.g. '2015-09-01')"

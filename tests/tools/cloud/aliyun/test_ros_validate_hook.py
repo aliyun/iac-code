@@ -120,6 +120,111 @@ class TestValidateStructure:
         errors = _validate_structure(data)
         assert any("ALIYUN::ECS::VPC" in e for e in errors)
 
+    def test_existing_vpc_vswitch_rejects_static_cidr_block_literal(self) -> None:
+        data = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Parameters": {
+                "VpcId": {
+                    "Type": "String",
+                    "AssociationProperty": "ALIYUN::ECS::VPC::VPCId",
+                }
+            },
+            "Resources": {
+                "VSwitch": {
+                    "Type": "ALIYUN::ECS::VSwitch",
+                    "Properties": {
+                        "VpcId": {"Ref": "VpcId"},
+                        "ZoneId": "cn-hangzhou-k",
+                        "CidrBlock": "192.168.0.0/24",
+                    },
+                }
+            },
+        }
+
+        errors = _validate_structure(data)
+
+        assert any("VSwitch" in e and "CidrBlock" in e and "existing VPC" in e for e in errors)
+
+    def test_existing_vpc_vswitch_rejects_cidr_parameter_default(self) -> None:
+        data = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Parameters": {
+                "VpcId": {
+                    "Type": "String",
+                    "AssociationProperty": "ALIYUN::ECS::VPC::VPCId",
+                },
+                "CidrBlock": {
+                    "Type": "String",
+                    "Default": "192.168.0.0/24",
+                },
+            },
+            "Resources": {
+                "VSwitch": {
+                    "Type": "ALIYUN::ECS::VSwitch",
+                    "Properties": {
+                        "VpcId": {"Ref": "VpcId"},
+                        "ZoneId": "cn-hangzhou-k",
+                        "CidrBlock": {"Ref": "CidrBlock"},
+                    },
+                }
+            },
+        }
+
+        errors = _validate_structure(data)
+
+        assert any("CidrBlock" in e and "Default" in e and "existing VPC" in e for e in errors)
+
+    def test_existing_vpc_vswitch_allows_cidr_parameter_without_default(self) -> None:
+        data = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Parameters": {
+                "VpcId": {
+                    "Type": "String",
+                    "AssociationProperty": "ALIYUN::ECS::VPC::VPCId",
+                },
+                "CidrBlock": {
+                    "Type": "String",
+                },
+            },
+            "Resources": {
+                "VSwitch": {
+                    "Type": "ALIYUN::ECS::VSwitch",
+                    "Properties": {
+                        "VpcId": {"Ref": "VpcId"},
+                        "ZoneId": "cn-hangzhou-k",
+                        "CidrBlock": {"Ref": "CidrBlock"},
+                    },
+                }
+            },
+        }
+
+        errors = _validate_structure(data)
+
+        assert errors == []
+
+    def test_new_vpc_vswitch_allows_static_cidr_block_literal(self) -> None:
+        data = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Resources": {
+                "Vpc": {
+                    "Type": "ALIYUN::ECS::VPC",
+                    "Properties": {"CidrBlock": "192.168.0.0/16"},
+                },
+                "VSwitch": {
+                    "Type": "ALIYUN::ECS::VSwitch",
+                    "Properties": {
+                        "VpcId": {"Ref": "Vpc"},
+                        "ZoneId": "cn-hangzhou-k",
+                        "CidrBlock": "192.168.0.0/24",
+                    },
+                },
+            },
+        }
+
+        errors = _validate_structure(data)
+
+        assert errors == []
+
 
 class TestCheckTemplate:
     def test_no_template_body_returns_none(self) -> None:
