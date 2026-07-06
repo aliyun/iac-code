@@ -7,12 +7,17 @@ import os
 from typing import Any
 
 from iac_code.i18n import _
+from iac_code.tools import path_safety
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import _path_is_under, check_read_path, resolve_candidate
+from iac_code.tools.path_safety import check_read_path, resolve_read_path
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 
 MAX_READ_BYTES = 10 * 1024 * 1024
 MAX_READ_LINES = 50_000
+
+
+def _path_is_under(path: str, root: str) -> bool:
+    return path_safety._path_is_under(path, root)
 
 
 def _resolve_input_path(
@@ -21,15 +26,7 @@ def _resolve_input_path(
     *,
     relative_read_directories: list[str] | None = None,
 ) -> str:
-    primary = resolve_candidate(path, cwd)
-    if os.path.isabs(os.path.expanduser(path)) or os.path.exists(primary):
-        return primary
-
-    for root in relative_read_directories or []:
-        candidate = resolve_candidate(path, root)
-        if _path_is_under(candidate, root) and os.path.exists(candidate):
-            return candidate
-    return primary
+    return resolve_read_path(path, cwd, relative_read_directories=relative_read_directories)
 
 
 class ReadFileTool(Tool):
@@ -92,6 +89,7 @@ class ReadFileTool(Tool):
             cwd=context.cwd,
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
         )
         if decision.behavior == "allow":
             return PermissionResult(behavior="allow")

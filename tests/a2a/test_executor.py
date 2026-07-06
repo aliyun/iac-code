@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from a2a.types import TaskStatusUpdateEvent
+from a2a.types import Task, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
@@ -463,6 +463,48 @@ async def test_executor_canceled_terminal_backup_blocked_records_cancel_intent(
     assert metrics.task_canceled == 1
     assert metrics.executor_error == 0
     assert metrics.task_failed == 0
+
+
+@pytest.mark.asyncio
+async def test_executor_sanitizes_initial_task_echo_paths_without_changing_runtime_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from a2a.types import Message, Part, Role
+
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    config_dir.mkdir()
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    prompt = f"paths: {cwd}/src/app.py {config_dir}/tool-results/session-1/result.txt /opt/iac-code-outside/config.yaml"
+    context = FakeRequestContext(text=prompt, metadata={"iac_code": {"cwd": str(cwd)}})
+    context.message = Message(
+        role=Role.ROLE_USER,
+        parts=[Part(text=prompt)],
+        metadata={"iac_code": {"cwd": str(cwd)}},
+        message_id="msg-paths",
+    )
+
+    queue = FakeEventQueue()
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+
+    await executor.execute(context, queue)
+
+    initial_task = next(event for event in queue.events if isinstance(event, Task))
+    rendered = dump(initial_task)
+    history = rendered["history"][0]
+    assert history["parts"][0]["text"] == (
+        "paths: ./src/app.py $IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt [PATH]"
+    )
+    assert history["metadata"]["iac_code"]["cwd"] == "."
+    assert str(cwd) not in json.dumps(rendered)
+    assert str(config_dir) not in json.dumps(rendered)
+    assert "/opt/iac-code-outside/config.yaml" not in json.dumps(rendered)
+    assert loop.prompts == [prompt]
 
 
 @pytest.mark.asyncio

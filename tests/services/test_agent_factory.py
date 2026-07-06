@@ -369,3 +369,19 @@ def test_system_prompt_refresher_reuses_runtime_current_time(tmp_path, monkeypat
     refreshed_line = _current_time_line(runtime.agent_loop._system_prompt_refresher())
 
     assert refreshed_line == initial_line
+
+
+def test_create_agent_runtime_includes_runtime_provider_and_model(tmp_path, monkeypatch) -> None:
+    from iac_code.agent.system_prompt import split_by_dynamic_boundary
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(model="qwen3.7-max", session_id="runtime-model", cwd=str(tmp_path))
+    )
+
+    static, dynamic = split_by_dynamic_boundary(runtime.agent_loop.system_prompt)
+    runtime_line = "Provider & Model: Alibaba Cloud Bailian / qwen3.7-max"
+    assert runtime_line not in static
+    assert runtime_line in dynamic

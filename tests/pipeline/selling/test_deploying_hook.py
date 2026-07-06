@@ -33,6 +33,23 @@ def test_normalize_selected_plan_adds_resolution_metadata():
     assert normalized["selection_valid"] is True
     assert normalized["selected_candidate"]["output_path"] == "templates/a.yml"
     assert normalized["selection"]["selected_candidate_index"] == 0
+    assert normalized["template_url"] == "templates/a.yml"
+
+
+def test_normalize_selected_plan_falls_back_to_result_template_file_path():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Generated"},
+            "template": {"file_path": "templates/generated.yml"},
+            "failed": False,
+        }
+    ]
+    selected_plan = {"user_input": encode_selected_candidate("Generated", 0), "options": []}
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["template_url"] == "templates/generated.yml"
 
 
 def test_normalize_selected_plan_preserves_cost_deployment_parameters():
@@ -52,6 +69,135 @@ def test_normalize_selected_plan_preserves_cost_deployment_parameters():
         "ZoneId": "cn-hangzhou-k",
         "InstanceType": "ecs.g7.large",
     }
+
+
+def test_normalize_selected_plan_marks_preview_ready_when_preview_matches_template_and_no_params_missing():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Ready", "output_path": "templates/a.yml"},
+            "failed": False,
+            "cost": {
+                "deployment_parameters": {"ZoneId": "cn-hangzhou-k", "InstanceType": "ecs.g7.large"},
+                "missing_deployment_parameters": [],
+                "preview_validation": {
+                    "succeeded": True,
+                    "template_url": "templates/a.yml",
+                    "parameters": {"ZoneId": "cn-hangzhou-k", "InstanceType": "ecs.g7.large"},
+                },
+            },
+        }
+    ]
+    selected_plan = {"user_input": encode_selected_candidate("Ready", 0), "options": []}
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["effective_deployment_parameters"] == {
+        "ZoneId": "cn-hangzhou-k",
+        "InstanceType": "ecs.g7.large",
+    }
+    assert normalized["preview_ready_for_create"] is True
+
+
+def test_normalize_selected_plan_ignores_preview_region_when_marking_preview_ready():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Ready", "output_path": "templates/a.yml"},
+            "failed": False,
+            "template": {"region": "cn-beijing"},
+            "cost": {
+                "deployment_parameters": {"ZoneId": "cn-beijing-h", "InstanceType": "ecs.g7.large"},
+                "missing_deployment_parameters": [],
+                "preview_validation": {
+                    "succeeded": True,
+                    "template_url": "templates/a.yml",
+                    "region_id": "cn-hangzhou",
+                    "parameters": {"ZoneId": "cn-beijing-h", "InstanceType": "ecs.g7.large"},
+                },
+            },
+        }
+    ]
+    selected_plan = {"user_input": encode_selected_candidate("Ready", 0), "options": []}
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["preview_ready_for_create"] is True
+
+
+def test_normalize_selected_plan_keeps_preview_ready_when_user_overrides_parameters():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Changed", "output_path": "templates/a.yml"},
+            "failed": False,
+            "cost": {
+                "deployment_parameters": {"ZoneId": "cn-hangzhou-k", "InstanceType": "ecs.g7.large"},
+                "preview_validation": {
+                    "succeeded": True,
+                    "template_url": "templates/a.yml",
+                    "parameters": {"ZoneId": "cn-hangzhou-k", "InstanceType": "ecs.g7.large"},
+                },
+            },
+        }
+    ]
+    selected_plan = {
+        "user_input": encode_selected_candidate("Changed", 0, {"InstanceType": "ecs.c7.large"}),
+        "options": [],
+    }
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["effective_deployment_parameters"]["InstanceType"] == "ecs.c7.large"
+    assert normalized["preview_ready_for_create"] is True
+
+
+def test_normalize_selected_plan_invalidates_preview_ready_when_template_url_changes():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Moved", "output_path": "templates/updated.yml"},
+            "failed": False,
+            "cost": {
+                "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+                "preview_validation": {
+                    "succeeded": True,
+                    "template_url": "templates/original.yml",
+                    "parameters": {"ZoneId": "cn-hangzhou-k"},
+                },
+            },
+        }
+    ]
+    selected_plan = {"user_input": encode_selected_candidate("Moved", 0), "options": []}
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["template_url"] == "templates/updated.yml"
+    assert normalized["preview_ready_for_create"] is False
+
+
+def test_normalize_selected_plan_invalidates_preview_ready_when_deployment_parameters_are_missing():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Incomplete", "output_path": "templates/a.yml"},
+            "failed": False,
+            "cost": {
+                "deployment_parameters": {"ZoneId": "cn-hangzhou-k"},
+                "missing_deployment_parameters": [{"name": "VpcId", "reason": "requires user input"}],
+                "preview_validation": {
+                    "succeeded": True,
+                    "template_url": "templates/a.yml",
+                    "parameters": {"ZoneId": "cn-hangzhou-k"},
+                },
+            },
+        }
+    ]
+    selected_plan = {"user_input": encode_selected_candidate("Incomplete", 0), "options": []}
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["preview_ready_for_create"] is False
 
 
 def test_normalize_selected_plan_applies_user_parameter_overrides():

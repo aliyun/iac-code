@@ -88,6 +88,18 @@ def _display_tool_name(tool_name: str, candidate: str | None = None) -> str:
     return known_tool_display_name(tool_name) or candidate or tool_name
 
 
+def _known_tool_result_message(
+    tool_name: str,
+    output: str,
+    *,
+    is_error: bool = False,
+    verbose: bool = False,
+) -> str | None:
+    from iac_code.tools.cloud.aliyun.ros_template_tools import render_ros_template_tool_result_message
+
+    return render_ros_template_tool_result_message(tool_name, output, is_error=is_error, verbose=verbose)
+
+
 def _permission_detail_text(tool_name: str, tool_input: dict[str, Any], tool: Any | None) -> str | None:
     if tool_name == "aliyun_api":
         summary = json.dumps(build_input_summary(tool_name, tool_input), ensure_ascii=False, sort_keys=True)
@@ -765,6 +777,13 @@ class Renderer:
                 rec.result or "", is_error=rec.is_error, verbose=self._verbose
             )
         if result_text is None and rec.result:
+            result_text = _known_tool_result_message(
+                rec.tool_name,
+                rec.result,
+                is_error=rec.is_error,
+                verbose=self._verbose,
+            )
+        if result_text is None and rec.result:
             result_text = rec.result
 
         if not result_text:
@@ -1325,7 +1344,7 @@ class Renderer:
                 # ── Stack progress ─────────────────────────────
                 elif isinstance(event, StackProgressEvent):
                     for rec in tool_records.values():
-                        if rec.tool_name == "ros_stack" and not rec.done:
+                        if rec.tool_name in {"ros_stack", "ros_deploy"} and not rec.done:
                             rec.progress_renderable = self._render_stack_progress(event)
                             break
                     _ensure_live()
@@ -1624,6 +1643,9 @@ class Renderer:
                 return None
             return ", ".join(f"{suggestion.tool_name}({suggestion.rule_content})" for suggestion in suggestions)
 
+        def _suggestion_display() -> str:
+            return ", ".join(suggestion.display_label() for suggestion in suggestions)
+
         # Short-circuit on cached sticky decisions — no prompt, no input read.
         cached = lookup_permission(cache, tool_name)
         if cached == "always_allow" and tool_name == "aliyun_api" and is_non_read_only:
@@ -1674,7 +1696,7 @@ class Renderer:
             else []
         )
         if suggestions:
-            rules_display = ", ".join(s.rule_content for s in suggestions)
+            rules_display = _suggestion_display()
             options.append(
                 TextOption(
                     label=_('Yes, always allow "{rule}" (this session)').format(rule=rules_display),
@@ -1689,7 +1711,7 @@ class Renderer:
         )
 
         if suggestions:
-            rules_display = ", ".join(s.rule_content for s in suggestions)
+            rules_display = _suggestion_display()
             options.append(
                 TextOption(
                     label=_('No, always deny "{rule}" (this session)').format(rule=rules_display),

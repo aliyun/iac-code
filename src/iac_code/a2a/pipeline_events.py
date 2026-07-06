@@ -749,6 +749,8 @@ class PipelineEventTranslator:
             "toolUseId": event.tool_use_id,
             "provider": operation["provider"],
             "action": action,
+            "deployAction": operation.get("deployAction"),
+            "previousStackId": operation.get("previousStackId"),
             "regionId": operation["regionId"],
             "stackId": stack_id,
             "stackName": _first_string_from_sources((result, params), ("StackName", "stackName", "stack_name", "name")),
@@ -1103,9 +1105,25 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
 def _stack_operation_from_tool_input(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:
     normalized_tool_name = tool_name.lower()
     params = _dict_or_empty(tool_input.get("params") or tool_input.get("parameters"))
+    extra: dict[str, Any] = {}
     if normalized_tool_name == "ros_stack":
         provider = "ros"
         action = _first_string_value(tool_input, ("action", "Action"))
+    elif normalized_tool_name == "ros_deploy":
+        provider = "ros"
+        deploy_action = _first_string_value(tool_input, ("action", "Action"))
+        action = {
+            "create": "CreateStack",
+            "continue_create": "ContinueCreateStack",
+            "delete_and_create": "CreateStack",
+        }.get(deploy_action or "")
+        params = {
+            "StackId": _first_string_value(tool_input, ("stack_id", "stackId", "StackId")),
+            "StackName": _first_string_value(tool_input, ("stack_name", "stackName", "StackName")),
+        }
+        if deploy_action == "delete_and_create":
+            extra["deployAction"] = deploy_action
+            extra["previousStackId"] = params["StackId"]
     elif normalized_tool_name == "aliyun_api":
         product = _first_string_value(tool_input, ("product", "Product", "service", "Service"))
         if product is None or product.lower() != "ros":
@@ -1122,6 +1140,7 @@ def _stack_operation_from_tool_input(tool_name: str, tool_input: dict[str, Any])
         "action": action,
         "params": params,
         "regionId": _first_string_from_sources((tool_input, params), ("region_id", "regionId", "RegionId")),
+        **extra,
     }
 
 
@@ -1287,7 +1306,11 @@ def _tool_result_data(event: ToolResultEvent) -> dict[str, Any]:
         "toolName": event.tool_name,
         "toolUseId": event.tool_use_id,
         "isError": event.is_error,
-        "result": _tool_result_metadata(event.result, is_error=event.is_error),
+        "result": _tool_result_metadata(
+            event.result,
+            is_error=event.is_error,
+            public_path_roots=event.public_path_roots,
+        ),
     }
 
 

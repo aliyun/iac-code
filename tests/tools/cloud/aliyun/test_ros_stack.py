@@ -142,7 +142,7 @@ class TestRosStackExecute:
         assert first.resources[0]["resource_type"] == "ALIYUN::ECS::VPC"
 
     @pytest.mark.asyncio
-    async def test_template_body_is_rejected_before_create_stack(self, tool: RosStack, mock_credentials) -> None:
+    async def test_pipeline_create_stack_is_rejected_before_sdk_call(self, tool: RosStack, mock_credentials) -> None:
         mock_client = MagicMock()
 
         with patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory:
@@ -157,8 +157,7 @@ class TestRosStackExecute:
             )
 
         assert result.is_error is True
-        assert "TemplateBody" in result.content
-        assert "TemplateURL" in result.content
+        assert "ros_deploy" in result.content
         mock_client.create_stack.assert_not_called()
 
     @pytest.mark.asyncio
@@ -303,6 +302,41 @@ class TestRosStackExecute:
 
         assert result.is_error is False
         mock_client.create_stack.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_stack_polling_error_returns_started_stack_metadata(
+        self, tool: RosStack, mock_credentials
+    ) -> None:
+        mock_client = MagicMock()
+
+        create_response = MagicMock()
+        create_response.body.stack_id = "stack-123"
+        mock_client.create_stack.return_value = create_response
+        mock_client.get_stack.side_effect = RuntimeError("status service unavailable")
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
+            patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+        ):
+            mock_factory.create.return_value = mock_client
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(),
+            )
+
+        assert result.is_error is True
+        assert result.metadata == {
+            "provider": "ros",
+            "action": "CreateStack",
+            "stack_id": "stack-123",
+            "stack_name": "test",
+            "region_id": "cn-hangzhou",
+            "error_stage": "status",
+        }
 
     @pytest.mark.asyncio
     async def test_create_stack_polling_cancellation_cleans_context_and_emits_cancel_telemetry(
@@ -497,6 +531,7 @@ class TestRosStackExecute:
         self, tool: RosStack, mock_credentials
     ) -> None:
         mock_client = MagicMock()
+        remote_template_url = "OSS://iac-code-test/template.json"
 
         create_response = MagicMock()
         create_response.body.stack_id = "stack-123"
@@ -518,12 +553,14 @@ class TestRosStackExecute:
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
             patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+            patch("iac_code.tools.cloud.aliyun.ros_stack.Path.read_text") as read_text,
         ):
+            read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
             mock_factory.create.return_value = mock_client
             result = await tool.execute(
                 tool_input={
                     "action": "CreateStack",
-                    "params": {"StackName": "test", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "params": {"StackName": "test", "TemplateURL": remote_template_url},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -532,7 +569,58 @@ class TestRosStackExecute:
         assert result.is_error is False
         mock_client.create_stack.assert_called_once()
         request = mock_client.create_stack.call_args.args[0]
-        assert request.to_map()["TemplateURL"] == _REMOTE_TEMPLATE_URL
+        assert request.to_map()["TemplateURL"] == remote_template_url
+        data = json.loads(result.content)
+        assert data["status"] == "CREATE_COMPLETE"
+
+    @pytest.mark.asyncio
+    async def test_create_stack_relative_template_url_resolves_from_context_cwd(
+        self, tool: RosStack, mock_credentials, tmp_path, monkeypatch
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        other_cwd = tmp_path / "other"
+        template_dir = workspace / "templates"
+        template_dir.mkdir(parents=True)
+        other_cwd.mkdir()
+        template_body = json.dumps({"ROSTemplateFormatVersion": "2015-09-01", "Resources": {}})
+        (template_dir / "stack.json").write_text(template_body, encoding="utf-8")
+        monkeypatch.chdir(other_cwd)
+
+        mock_client = MagicMock()
+        create_response = MagicMock()
+        create_response.body.stack_id = "stack-123"
+        mock_client.create_stack.return_value = create_response
+        get_stack_response = MagicMock()
+        get_stack_response.body.to_map.return_value = {
+            "StackId": "stack-123",
+            "StackName": "test",
+            "Status": "CREATE_COMPLETE",
+            "StatusReason": "",
+        }
+        mock_client.get_stack.return_value = get_stack_response
+        list_resources_response = MagicMock()
+        list_resources_response.body.to_map.return_value = {"Resources": []}
+        mock_client.list_stack_resources.return_value = list_resources_response
+
+        with (
+            patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
+            patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+        ):
+            mock_factory.create.return_value = mock_client
+            result = await tool.execute(
+                tool_input={
+                    "action": "CreateStack",
+                    "params": {"StackName": "test", "TemplateURL": "templates/stack.json"},
+                    "region_id": "cn-hangzhou",
+                },
+                context=ToolContext(cwd=str(workspace)),
+            )
+
+        assert result.is_error is False
+        request = mock_client.create_stack.call_args.args[0]
+        request_map = request.to_map()
+        assert request_map["TemplateBody"] == template_body
+        assert "TemplateURL" not in request_map
         data = json.loads(result.content)
         assert data["status"] == "CREATE_COMPLETE"
 
@@ -910,6 +998,7 @@ class TestRosStackExecute:
         self, tool: RosStack, mock_credentials
     ) -> None:
         mock_client = MagicMock()
+        remote_template_url = "HTTPS://example.com/template.json"
 
         update_response = MagicMock()
         update_response.body.stack_id = "stack-123"
@@ -931,12 +1020,14 @@ class TestRosStackExecute:
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
             patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
+            patch("iac_code.tools.cloud.aliyun.ros_stack.Path.read_text") as read_text,
         ):
+            read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
             mock_factory.create.return_value = mock_client
             result = await tool.execute(
                 tool_input={
                     "action": "UpdateStack",
-                    "params": {"StackId": "stack-123", "TemplateURL": _REMOTE_TEMPLATE_URL},
+                    "params": {"StackId": "stack-123", "TemplateURL": remote_template_url},
                     "region_id": "cn-hangzhou",
                 },
                 context=ToolContext(),
@@ -945,7 +1036,7 @@ class TestRosStackExecute:
         assert result.is_error is False
         mock_client.update_stack.assert_called_once()
         request = mock_client.update_stack.call_args.args[0]
-        assert request.to_map()["TemplateURL"] == _REMOTE_TEMPLATE_URL
+        assert request.to_map()["TemplateURL"] == remote_template_url
         data = json.loads(result.content)
         assert data["status"] == "UPDATE_COMPLETE"
 
@@ -1468,6 +1559,28 @@ class TestRosStackExtra:
         assert result == "stack-fake"
 
     @pytest.mark.asyncio
+    async def test_continue_create_stack_normalizes_parameters_dict(self, stack):
+        client = _FakeRosClient()
+        stack._get_client = lambda region: client
+
+        result = await stack.call_action(
+            "ContinueCreateStack",
+            {
+                "StackId": "sx",
+                "TemplateURL": _REMOTE_TEMPLATE_URL,
+                "Parameters": {"ZoneId": "cn-hangzhou-k", "UseSsl": True},
+            },
+            "cn-hangzhou",
+        )
+
+        assert result == "stack-fake"
+        assert client.continue_create_request is not None
+        assert client.continue_create_request.to_map()["Parameters"] == [
+            {"ParameterKey": "ZoneId", "ParameterValue": "cn-hangzhou-k"},
+            {"ParameterKey": "UseSsl", "ParameterValue": "true"},
+        ]
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("action", "params", "sdk_method"),
         [
@@ -1511,14 +1624,33 @@ class TestRosStackExtra:
         assert result == "stack-fake"
 
     @pytest.mark.asyncio
-    async def test_template_body_dict_is_rejected_in_pipeline(self, stack):
-        with pytest.raises(ValueError, match="TemplateURL"):
+    async def test_create_stack_is_rejected_in_pipeline(self, stack):
+        with pytest.raises(ValueError, match="ros_deploy"):
             await stack.call_action(
                 "CreateStack",
                 {"StackName": "n", "TemplateBody": {"ROSTemplateFormatVersion": "2015-09-01"}},
                 "cn-hangzhou",
                 pipeline_mode=True,
             )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("action", "params"),
+        [
+            ("CreateStack", {"StackName": "n", "TemplateURL": _REMOTE_TEMPLATE_URL}),
+            ("UpdateStack", {"StackId": "sx", "TemplateURL": _REMOTE_TEMPLATE_URL}),
+            ("ContinueCreateStack", {"StackId": "sx", "TemplateURL": _REMOTE_TEMPLATE_URL}),
+            ("DeleteStack", {"StackId": "sx"}),
+        ],
+    )
+    async def test_raw_deployment_actions_are_rejected_in_pipeline_mode(self, stack, monkeypatch, action, params):
+        def fail_client(region):
+            raise AssertionError("raw ROS deployment action should be rejected before client creation")
+
+        monkeypatch.setattr(stack, "_get_client", fail_client)
+
+        with pytest.raises(ValueError, match="ros_deploy"):
+            await stack.call_action(action, dict(params), "cn-hangzhou", pipeline_mode=True)
 
     @pytest.mark.asyncio
     async def test_template_body_dict_to_json_outside_pipeline(self, stack):
@@ -1674,6 +1806,7 @@ class _FakeRosClient:
     def __init__(self):
         self.create_request = None
         self.update_request = None
+        self.continue_create_request = None
 
     def create_stack(self, req):
         self.create_request = req
@@ -1684,6 +1817,7 @@ class _FakeRosClient:
         return _FakeResp("stack-fake")
 
     def continue_create_stack(self, req):
+        self.continue_create_request = req
         return _FakeResp("stack-fake")
 
     def delete_stack(self, req):

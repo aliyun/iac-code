@@ -138,6 +138,45 @@ def _make_event_with_suggestion(tool_name: str = "bash") -> PermissionRequestEve
 
 class TestRuleLevelDeny:
     @pytest.mark.asyncio
+    async def test_rule_suggestion_label_uses_display_text_when_available(self):
+        from iac_code.types.permissions import PermissionResult, PermissionRuleValue
+
+        captured_options = []
+
+        class FakeSelect:
+            def __init__(self, options, **kwargs):
+                captured_options.extend(options)
+
+            def run(self):
+                return "reject_once"
+
+        renderer = _make_renderer(AppStateStore())
+        fut: asyncio.Future[bool] = asyncio.get_event_loop().create_future()
+        event = PermissionRequestEvent(
+            tool_name="ros_deploy",
+            tool_input={"action": "continue_create", "stack_id": "stack-failed"},
+            tool_use_id="t1",
+            response_future=fut,
+            permission_result=PermissionResult(
+                behavior="ask",
+                suggestions=[
+                    PermissionRuleValue(
+                        tool_name="ros_deploy",
+                        rule_content="continue_create:stack-failed",
+                        display_text="Continue ROS stack creation: stack-failed",
+                    )
+                ],
+            ),
+        )
+
+        with patch("iac_code.ui.renderer.Select", FakeSelect):
+            await renderer.prompt_permission(event)
+
+        labels = [option.label for option in captured_options]
+        assert any("Continue ROS stack creation: stack-failed" in label for label in labels)
+        assert not any("continue_create:stack-failed" in label for label in labels)
+
+    @pytest.mark.asyncio
     async def test_always_deny_rule_returns_false(self):
         """Selecting 'always_deny_rule' should return False."""
         import dataclasses

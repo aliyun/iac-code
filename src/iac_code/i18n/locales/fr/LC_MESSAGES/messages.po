@@ -2930,6 +2930,31 @@ msgstr "Afficher le diagramme d’architecture"
 msgid "Show candidate details"
 msgstr "Afficher les détails du candidat"
 
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Validate Template"
+msgstr "Validation du modèle ROS"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Template Parameters"
+msgstr "Paramètres du modèle ROS"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Preview Stack"
+msgstr "Aperçu de la pile ROS"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+msgid "ROS Estimate Cost"
+msgstr "Estimation du coût ROS"
+
+#: src/iac_code/pipeline/display_names.py
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+msgid "ROS Deploy"
+msgstr "Déploiement ROS"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -3397,6 +3422,66 @@ msgstr "Le chemin du fichier de modèle ne peut pas sortir du répertoire de tra
 msgid "[Image input]"
 msgstr "[Entrée d'image]"
 
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{error_code}; recommended action: {action}"
+msgstr "{error_code} ; action recommandée : {action}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Create ROS stack: {target}"
+msgstr "Créer la pile ROS : {target}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Continue ROS stack creation: {target}"
+msgstr "Continuer la création de la pile ROS : {target}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Delete failed ROS stack and create replacement: {target}"
+msgstr ""
+"Supprimer la pile ROS en échec et créer une pile de remplacement : "
+"{target}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid ""
+"ROS stack {stack_id} was not created by the current selling deployment "
+"step."
+msgstr ""
+"La pile ROS {stack_id} n’a pas été créée par l’étape de déploiement de "
+"vente actuelle."
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
+msgid "matched {behavior} rule: {rule}"
+msgstr "Règle {behavior} correspondante : {rule}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
+#: src/iac_code/tools/bash/bash_tool.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
+msgid "Allow {}?"
+msgstr "Autoriser {} ?"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Missing required field: {}"
+msgstr "Champ obligatoire manquant : {}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Template file is not readable: {template_url}: {error}"
+msgstr "Impossible de lire le fichier de modèle : {template_url} : {error}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Invalid action '{}'. Supported actions: {}"
+msgstr "Action '{}' non valide. Actions prises en charge : {}"
+
 #: src/iac_code/pipeline/selling/tools/show_candidate_detail_tool.py
 msgid ""
 "Display candidate details (summary and cost breakdown) in the comparison "
@@ -3762,13 +3847,6 @@ msgstr "--permission-mode invalide : {!r}. Valeurs valides : {}"
 #, python-brace-format
 msgid "matched ask rule(s): {}"
 msgstr "Règle(s) de demande correspondante(s) : {}"
-
-#: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
-#: src/iac_code/tools/bash/bash_tool.py
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
-#, python-brace-format
-msgid "Allow {}?"
-msgstr "Autoriser {} ?"
 
 #: src/iac_code/services/providers/aliyun.py
 msgid "Alibaba Cloud OAuth site is missing."
@@ -4394,11 +4472,6 @@ msgstr "Aliyun API"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format
-msgid "matched {behavior} rule: {rule}"
-msgstr "Règle {behavior} correspondante : {rule}"
-
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
-#, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "Appel réussi (RequestId : {request_id})"
 
@@ -4465,6 +4538,31 @@ msgstr "ROS Stack"
 msgid "CloudStackInstances"
 msgstr "CloudStackInstances"
 
+#: src/iac_code/tools/cloud/aliyun/ros_template_tools.py
+#, python-brace-format
+msgid "Calling ROS template tool for {template_url}..."
+msgstr "Appel de l'outil de modèle ROS pour {template_url}..."
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must use the dedicated {tool_name} tool "
+"instead of aliyun_api. Do not call the raw ROS template API directly."
+msgstr ""
+"Les appels ROS en pipeline pour {action} doivent utiliser l'outil dédié "
+"{tool_name} au lieu de aliyun_api. N'appelez pas directement l'API brute "
+"de modèle ROS."
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must use the dedicated ros_deploy tool "
+"instead of aliyun_api. Do not call the raw ROS deployment API directly."
+msgstr ""
+"Les appels ROS en pipeline pour {action} doivent utiliser l'outil dédié "
+"ros_deploy au lieu d'aliyun_api. N'appelez pas directement l'API de "
+"déploiement ROS brute."
+
 #: src/iac_code/tools/cloud/aliyun/template_source.py
 msgid ""
 "ROS template calls must use TemplateURL instead of TemplateBody. Save the"
@@ -4473,6 +4571,18 @@ msgid ""
 msgstr ""
 "Les appels de modèle ROS doivent utiliser TemplateURL au lieu de "
 "TemplateBody. Enregistrez le modèle dans un fichier et transmettez "
+"params.TemplateURL, par exemple un chemin de fichier local ou une URL "
+"OSS/HTTP."
+
+#: src/iac_code/tools/cloud/aliyun/template_source.py
+#, python-brace-format
+msgid ""
+"ROS pipeline calls for {action} must pass params.TemplateURL. Save the "
+"template to a file and pass params.TemplateURL, for example a local file "
+"path or OSS/HTTP URL."
+msgstr ""
+"Les appels de pipeline ROS pour {action} doivent transmettre "
+"params.TemplateURL. Enregistrez le modèle dans un fichier et transmettez "
 "params.TemplateURL, par exemple un chemin de fichier local ou une URL "
 "OSS/HTTP."
 
@@ -4508,6 +4618,33 @@ msgid ""
 msgstr ""
 "Le résultat de l'analyse {fmt} du modèle n'est pas un objet (dict), "
 "veuillez vérifier le format du modèle"
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Resource '{name}' creates a VSwitch in existing VPC parameter "
+"'{vpc_param}', but CidrBlock references parameter '{cidr_param}' with a "
+"Default. Remove Parameters.{cidr_param}.Default and let deployment "
+"parameters choose a non-overlapping CIDR after VpcId is selected."
+msgstr ""
+"La ressource '{name}' crée un VSwitch dans le paramètre de VPC existant "
+"'{vpc_param}', mais CidrBlock référence le paramètre '{cidr_param}' avec "
+"une valeur Default. Supprimez Parameters.{cidr_param}.Default et laissez "
+"les paramètres de déploiement choisir un CIDR sans chevauchement après la"
+" sélection de VpcId."
+
+#: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
+#, python-brace-format
+msgid ""
+"Resource '{name}' creates a VSwitch in existing VPC parameter "
+"'{vpc_param}', so CidrBlock must not be a static value. Remove the fixed "
+"CidrBlock and let deployment parameters choose a non-overlapping CIDR "
+"after VpcId is selected."
+msgstr ""
+"La ressource '{name}' crée un VSwitch dans le paramètre de VPC existant "
+"'{vpc_param}', donc CidrBlock ne doit pas être une valeur statique. "
+"Supprimez le CidrBlock fixe et laissez les paramètres de déploiement "
+"choisir un CIDR sans chevauchement après la sélection de VpcId."
 
 #: src/iac_code/tools/cloud/aliyun/hooks/ros_validate.py
 msgid ""

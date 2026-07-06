@@ -129,6 +129,38 @@ class TestGrepExecute:
         assert result.is_error is True
         assert "not found" in result.content.lower()
 
+    async def test_relative_path_falls_back_to_symlinked_relative_read_directory(self, tool, tmp_path, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.grep._is_rg_available", lambda: False)
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        package_root = tmp_path / "iac_code"
+        skill_root = package_root / "pipeline" / "selling" / "skills" / "iac-aliyun-cost"
+        selling_refs = package_root / "pipeline" / "selling" / "references"
+        bundled_refs = package_root / "skills" / "bundled" / "iac_aliyun" / "references"
+        skill_root.mkdir(parents=True)
+        selling_refs.mkdir(parents=True)
+        bundled_refs.mkdir(parents=True)
+        bundled_reference = bundled_refs / "ros-template.md"
+        bundled_reference.write_text("ROSTemplateFormatVersion reference", encoding="utf-8")
+        try:
+            (skill_root / "references").symlink_to(selling_refs, target_is_directory=True)
+            (selling_refs / "ros-template.md").symlink_to(bundled_reference)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        context = ToolContext(
+            cwd=str(workspace),
+            trusted_read_directories=[str(package_root)],
+            relative_read_directories=[str(skill_root)],
+        )
+        result = await tool.execute(
+            tool_input={"pattern": "ROSTemplateFormatVersion", "path": "references"},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert str(selling_refs / "ros-template.md") in result.content
+
     async def test_windows_posix_path_conversion(self, tmp_path, tool, monkeypatch):
         (tmp_path / "a.txt").write_text("hello world", encoding="utf-8")
         from unittest.mock import MagicMock
@@ -170,6 +202,29 @@ class TestGrepExecute:
         assert str(src / "app.py") in result.content
         assert str(package / "nested.py") in result.content
         assert str(tmp_path / "app.py") not in result.content
+
+    async def test_rg_path_with_symlinked_directory_matches_python_fallback(self, tool, tmp_path):
+        if not _is_rg_available():
+            pytest.skip("rg is not available")
+
+        real_refs = tmp_path / "real_refs"
+        real_refs.mkdir()
+        (real_refs / "ros-template.md").write_text("ROSTemplateFormatVersion reference\n", encoding="utf-8")
+        search_root = tmp_path / "search"
+        search_root.mkdir()
+        try:
+            (search_root / "references").symlink_to(real_refs, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        context = ToolContext(cwd=str(tmp_path), trusted_read_directories=[str(real_refs)])
+        result = await tool.execute(
+            tool_input={"pattern": "ROSTemplateFormatVersion", "path": str(search_root)},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert str(search_root / "references" / "ros-template.md") in result.content
 
 
 class TestGrepRendering:

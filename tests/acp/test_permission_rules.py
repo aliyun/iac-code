@@ -112,6 +112,34 @@ async def test_options_include_rule_suggestions_when_present():
 
 
 @pytest.mark.asyncio
+async def test_options_display_friendly_rule_text_when_present():
+    """Rule-level option IDs stay machine-readable while names use display text."""
+    suggestions = [
+        PermissionRuleValue(
+            tool_name="ros_deploy",
+            rule_content="continue_create:stack-failed",
+            display_text="Continue ROS stack creation: stack-failed",
+        )
+    ]
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = ACPSession("s1", _FakeLoop(), conn)
+    event = _make_event(tool_name="ros_deploy", suggestions=suggestions)
+
+    await session._request_permission(event)
+
+    option_by_id = {opt.option_id: opt for opt in conn.last_options}
+    assert _PREFIX_ALLOW_RULE + "continue_create:stack-failed" in option_by_id
+    assert _PREFIX_DENY_RULE + "continue_create:stack-failed" in option_by_id
+    assert (
+        "Continue ROS stack creation: stack-failed"
+        in option_by_id[_PREFIX_ALLOW_RULE + "continue_create:stack-failed"].name
+    )
+    assert "continue_create:stack-failed" not in option_by_id[_PREFIX_ALLOW_RULE + "continue_create:stack-failed"].name
+    assert "Suggested rule: Continue ROS stack creation: stack-failed" in conn.last_content
+    assert "Suggested rule: continue_create:stack-failed" not in conn.last_content
+
+
+@pytest.mark.asyncio
 async def test_options_fallback_to_tool_level_without_suggestions():
     """Without suggestions, options include tool-level allow_always."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))

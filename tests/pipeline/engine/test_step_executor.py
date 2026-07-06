@@ -112,6 +112,23 @@ class TestStepExecutorToolSetup:
         assert agent_context.agent_loop is not None
         assert agent_context.agent_loop._pipeline_mode is True
 
+    def test_agent_loop_context_preserves_ros_deploy_owned_stack_ids_from_seed(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+        seed = {"ros_deploy_owned_stack_ids": {"stack-failed": {"action": "create"}}}
+
+        agent_context = executor.build_agent_loop_context(
+            step,
+            ctx,
+            "test_session",
+            completion_guard_state_seed=seed,
+        )
+
+        assert agent_context.completion_guard_state["ros_deploy_owned_stack_ids"] == {
+            "stack-failed": {"action": "create"}
+        }
+
     def test_full_tools_when_step_returns_none(self, tmp_path):
         registry = ToolRegistry()
 
@@ -827,6 +844,39 @@ class TestStepExecutorBaseSections:
         skill_pos = prompt.find("# Skill Content")
         step_pos = prompt.find("# Step Task")
         assert identity_pos < skill_pos < step_pos
+
+    def test_runtime_context_base_section_includes_provider_and_model(self, tmp_path):
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "test.md").write_text("Task", encoding="utf-8")
+
+        step = StepSpec(
+            step_id="test",
+            conclusion_field="result",
+            forward=None,
+            prompt_file="prompts/test.md",
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"result": []},
+            max_rollbacks=3,
+            skills={},
+            base_prompt_sections=IncludeExcludeConfig(include=["runtime_context"]),
+        )
+        provider_manager = MagicMock()
+        provider_manager.get_provider_display.return_value = "Alibaba Cloud Bailian"
+        provider_manager.get_model_name.return_value = "qwen3.7-max"
+        executor = StepExecutor(
+            provider_manager=provider_manager,
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+
+        prompt = executor._build_full_system_prompt(step, PipelineContext({"result": []}))
+
+        assert "# Runtime Context" in prompt
+        assert "Provider & Model: Alibaba Cloud Bailian / qwen3.7-max" in prompt
 
     def test_step_level_sections_override_pipeline(self, tmp_path):
         """Step-level base_prompt_sections overrides pipeline-level."""

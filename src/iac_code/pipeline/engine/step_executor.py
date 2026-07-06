@@ -353,6 +353,11 @@ class StepExecutor:
             completion_guard_state["successful_tools"].update(seed.get("successful_tools", set()))
             completion_guard_state["tool_results"].update(seed.get("tool_results", {}))
             completion_guard_state["tool_result_records"].extend(seed.get("tool_result_records", []))
+            owned_stack_ids = seed.get("ros_deploy_owned_stack_ids")
+            if isinstance(owned_stack_ids, dict):
+                completion_guard_state.setdefault("ros_deploy_owned_stack_ids", {}).update(
+                    copy.deepcopy(owned_stack_ids)
+                )
 
         build_tool_kwargs: dict[str, Any] = {
             "rollback_targets": rollback_targets,
@@ -477,6 +482,8 @@ class StepExecutor:
             resolved_sections,
             cwd=self._cwd or "",
             memory_content=memory_content,
+            provider_display=self._runtime_provider_display(),
+            model=self._runtime_model(),
         )
 
         prompt_file = step.prompt_file_for_surface(self._surface)
@@ -490,6 +497,26 @@ class StepExecutor:
 
         parts = [p for p in [base_prompt, skill_content, rendered_step_prompt] if p]
         return "\n\n---\n\n".join(parts)
+
+    def _runtime_provider_display(self) -> str:
+        getter = getattr(self._provider_manager, "get_provider_display", None)
+        if not callable(getter):
+            return ""
+        try:
+            display = getter()
+        except Exception:
+            return ""
+        return display if isinstance(display, str) else ""
+
+    def _runtime_model(self) -> str:
+        getter = getattr(self._provider_manager, "get_model_name", None)
+        if not callable(getter):
+            return ""
+        try:
+            model = getter()
+        except Exception:
+            return ""
+        return model if isinstance(model, str) else ""
 
     def _resolve_auto_trigger_skills(self, step: StepSpec) -> list[Any] | None:
         """问题 2：step 自带 skill 时，禁用 auto_trigger（避免重复加载）。"""
@@ -763,6 +790,8 @@ class StepExecutor:
             if tool_cls is not None:
                 if name == "ask_user_question":
                     registry.register(AskUserQuestionTool(completion_guard_state))
+                elif name == "ros_deploy":
+                    registry.register(tool_cls(completion_guard_state=completion_guard_state))
                 else:
                     registry.register(tool_cls())
 

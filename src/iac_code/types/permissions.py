@@ -34,6 +34,11 @@ class PermissionRuleValue:
 
     tool_name: str
     rule_content: str
+    display_text: str | None = None
+
+    def display_label(self) -> str:
+        """Return the user-facing label for this rule."""
+        return self.display_text or self.rule_content
 
 
 @dataclass
@@ -98,6 +103,7 @@ class ToolPermissionContext:
     ask_rules: dict[str, list[str]] = field(default_factory=dict)
     additional_directories: list[str] = field(default_factory=list)
     trusted_read_directories: list[str] = field(default_factory=list)
+    relative_read_directories: list[str] = field(default_factory=list)
     audit_settings: PermissionAuditSettings = field(default_factory=PermissionAuditSettings)
 
 

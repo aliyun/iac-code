@@ -102,6 +102,14 @@ class ReadPathDecision:
         )
 
 
+@dataclass(frozen=True)
+class ReadPathResolution:
+    """Resolved read path and whether it came from a relative read root."""
+
+    path: str
+    used_relative_root: bool = False
+
+
 def _build_sensitive_lookups(
     sensitive_paths: Sequence[str] = SENSITIVE_PATHS,
     *,
@@ -148,9 +156,52 @@ def is_sensitive_path(path: str) -> bool:
 def resolve_candidate(path: str, cwd: str) -> str:
     """Resolve a user-supplied path relative to cwd for safety checks."""
     normalized_path = os.path.expanduser(normalize_user_path(path))
+    return _resolve_normalized_candidate(normalized_path, cwd)
+
+
+def _resolve_normalized_candidate(normalized_path: str, cwd: str) -> str:
     if os.path.isabs(normalized_path):
         return os.path.realpath(normalized_path)
     return os.path.realpath(os.path.join(cwd, normalized_path))
+
+
+def resolve_read_path_with_source(
+    path: str,
+    cwd: str,
+    *,
+    relative_read_directories: list[str] | None = None,
+) -> ReadPathResolution:
+    """Resolve a read path from cwd, then from explicit relative read roots.
+
+    Relative read roots let bundled/pipeline skills use stable links like
+    ``references/foo.md`` even when the user's cwd is a project directory.
+    Symlinks are followed by ``resolve_candidate``; permission checks must
+    validate the final real path before execution.
+    """
+    normalized_path = os.path.expanduser(normalize_user_path(path))
+    primary = _resolve_normalized_candidate(normalized_path, cwd)
+    if os.path.isabs(normalized_path) or os.path.exists(primary):
+        return ReadPathResolution(path=primary)
+
+    for root in relative_read_directories or []:
+        candidate = _resolve_normalized_candidate(normalized_path, root)
+        if os.path.exists(candidate):
+            return ReadPathResolution(path=candidate, used_relative_root=True)
+
+    return ReadPathResolution(path=primary)
+
+
+def resolve_read_path(
+    path: str,
+    cwd: str,
+    *,
+    relative_read_directories: list[str] | None = None,
+) -> str:
+    return resolve_read_path_with_source(
+        path,
+        cwd,
+        relative_read_directories=relative_read_directories,
+    ).path
 
 
 def get_iac_code_application_root() -> Path:
@@ -215,9 +266,14 @@ def check_read_path(
     cwd: str,
     additional_directories: list[str],
     trusted_read_directories: list[str],
+    relative_read_directories: list[str] | None = None,
 ) -> ReadPathDecision:
     """Decide whether a read path is safe or should ask for confirmation."""
-    resolved = resolve_candidate(path, cwd)
+    resolved = resolve_read_path(
+        path,
+        cwd,
+        relative_read_directories=relative_read_directories,
+    )
 
     if _is_in_allowed_roots(resolved, trusted_read_directories):
         return ReadPathDecision("allow")

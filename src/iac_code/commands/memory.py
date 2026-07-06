@@ -231,6 +231,18 @@ def _refresh_repl_memory_context(repl: object | None) -> None:
     cwd = getattr(repl, "_original_cwd", os.getcwd())
     skill_listing = getattr(repl, "_skill_listing", "")
     current_time = getattr(repl, "_runtime_current_time", None)
+    provider_display = ""
+    if hasattr(provider_manager, "get_provider_display"):
+        try:
+            provider_display = provider_manager.get_provider_display()
+        except Exception:
+            provider_display = ""
+    model = ""
+    if hasattr(provider_manager, "get_model_name"):
+        try:
+            model = provider_manager.get_model_name()
+        except Exception:
+            model = ""
     agent_loop.set_provider(
         provider_manager,
         system_prompt=build_system_prompt(
@@ -238,5 +250,7 @@ def _refresh_repl_memory_context(repl: object | None) -> None:
             memory_context=memory_context,
             skill_listing=skill_listing,
             current_time=current_time if isinstance(current_time, str) else None,
+            provider_display=provider_display,
+            model=model,
         ),
     )

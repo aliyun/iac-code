@@ -600,6 +600,26 @@ def test_successful_tool_result_content_is_sanitized() -> None:
     assert updates[1].status == "completed"
 
 
+def test_successful_tool_result_relativizes_public_paths() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+    converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="bash"))
+
+    updates = converter.event_to_updates(
+        ToolResultEvent(
+            tool_use_id="t1",
+            tool_name="bash",
+            result="/Users/alice/project/src/app.py\n/Users/alice/private/secret.txt",
+            is_error=False,
+            public_path_roots=[{"path": "/Users/alice/project", "label": "."}],
+        )
+    )
+
+    rendered = str(updates[0].content[0].content.text)
+    assert rendered == "./src/app.py\n[PATH]"
+    assert "/Users/alice" not in rendered
+    assert updates[1].status == "completed"
+
+
 def test_successful_tool_result_dict_is_sanitized_and_serialized() -> None:
     converter = ACPEventConverter(turn_id="turn-1")
     converter.event_to_updates(ToolUseStartEvent(tool_use_id="t1", name="write_file"))
@@ -759,6 +779,9 @@ def test_pipeline_tool_call_titles_use_display_names() -> None:
     end_updates = converter.event_to_updates(ToolUseEndEvent(tool_use_id="tc-1", name="complete_step", input={}))
     assert end_updates[0].title == "Complete step"
 
+    ros_start_updates = converter.event_to_updates(ToolUseStartEvent(tool_use_id="tc-2", name="ros_deploy"))
+    assert ros_start_updates[0].title == "ROS Deploy"
+
 
 def test_converter_works_without_turn_state_backward_compatible() -> None:
     """Scenario 11: Without turn_state, converter still processes events normally."""
@@ -913,6 +936,7 @@ def test_tool_kind_mapping_covers_extension_tools() -> None:
     assert _tool_kind("task_get") == "read"
     assert _tool_kind("task_stop") == "execute"
     assert _tool_kind("ros_stack") == "execute"
+    assert _tool_kind("ros_deploy") == "execute"
     assert _tool_kind("ros_stack_instances") == "execute"
     assert _tool_kind("aliyun_doc_search") == "fetch"
 

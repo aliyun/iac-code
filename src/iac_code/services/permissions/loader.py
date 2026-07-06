@@ -252,5 +252,6 @@ def load_permission_context(
         ask_rules=ask_rules,
         additional_directories=additional_directories,
         trusted_read_directories=[],
+        relative_read_directories=[],
         audit_settings=audit_settings,
     )

@@ -7,7 +7,7 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_read_path
+from iac_code.tools.path_safety import check_read_path, resolve_read_path
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -39,10 +39,12 @@ class ListFilesTool(Tool):
         }
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        path = normalize_user_path(tool_input.get("path", context.cwd))
-
-        if not os.path.isabs(path):
-            path = os.path.join(context.cwd, path)
+        raw_path = normalize_user_path(tool_input.get("path", context.cwd))
+        path = (
+            resolve_read_path(raw_path, context.cwd, relative_read_directories=context.relative_read_directories)
+            if raw_path
+            else context.cwd
+        )
 
         if not os.path.exists(path):
             return ToolResult.error(f"Path not found: {path}")
@@ -84,6 +86,7 @@ class ListFilesTool(Tool):
             cwd=context.cwd,
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
         )
         if decision.behavior == "allow":
             return PermissionResult(behavior="allow")

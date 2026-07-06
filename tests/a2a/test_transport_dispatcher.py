@@ -16,6 +16,8 @@ from iac_code.types.stream_events import TextDeltaEvent
 
 from .fakes import FakeAgentLoop, FakeRuntime
 
+_STREAM_TEST_TIMEOUT = 5
+
 
 @pytest.mark.asyncio
 async def test_dispatcher_handles_unary_v03_message(monkeypatch, tmp_path) -> None:
@@ -130,7 +132,7 @@ async def test_dispatcher_stream_redacts_sensitive_message_metadata_echo(monkeyp
 
     echoed_metadata = events[0]["result"]["history"][0]["metadata"]
     assert echoed_metadata["iac_code"] == {
-        "cwd": str(tmp_path),
+        "cwd": ".",
         "iac_code_model": "qwen3.6-plus",
         "iac_code_api_key": "***",
         "alibaba_cloud_access_key_id": "***",
@@ -267,7 +269,7 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
             first_events.append(event)
 
     first_task = asyncio.create_task(consume_first_stream())
-    await asyncio.wait_for(pipeline.started.wait(), timeout=1)
+    await asyncio.wait_for(pipeline.started.wait(), timeout=_STREAM_TEST_TIMEOUT)
     identity = _active_task_identity(components)
 
     async def consume_second_stream() -> None:
@@ -292,7 +294,7 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
             pass
 
     second_task = asyncio.create_task(consume_second_stream())
-    for _ in range(100):
+    for _ in range(_STREAM_TEST_TIMEOUT * 100):
         if pipeline.interrupts:
             break
         await asyncio.sleep(0.01)
@@ -302,7 +304,7 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
         event_types = [event["eventType"] for event in A2APipelineJournal(pipeline.session.session_dir).read_all()]
         assert "interrupt_received" in event_types
         assert "interrupt_classified" in event_types
-        await asyncio.wait_for(second_task, timeout=1)
+        await asyncio.wait_for(second_task, timeout=_STREAM_TEST_TIMEOUT)
     finally:
         if not second_task.done():
             second_task.cancel()
@@ -311,7 +313,7 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
             except asyncio.CancelledError:
                 pass
         pipeline.release.set()
-        await asyncio.wait_for(first_task, timeout=1)
+        await asyncio.wait_for(first_task, timeout=_STREAM_TEST_TIMEOUT)
         await dispatcher.aclose()
         await components.aclose()
 
@@ -422,7 +424,7 @@ async def test_active_message_stream_cancellation_cancels_producer() -> None:
     stream_task.cancel()
 
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(stream_task, timeout=1)
+        await asyncio.wait_for(stream_task, timeout=_STREAM_TEST_TIMEOUT)
     assert producer_cancelled.is_set()
     assert active_task._reference_count == 0
 

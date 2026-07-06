@@ -1547,6 +1547,7 @@ def render_index_html(config: DebuggerConfig) -> str:
         touchedKeys: new Set(),
         textGroups: {},
         normalMessageGroups: {},
+        normalMetadataGroups: {},
         lastStepKey: "",
         lastCandidateKey: "",
         lastCandidateStepKey: ""
@@ -2155,24 +2156,32 @@ def render_index_html(config: DebuggerConfig) -> str:
         .join("");
     }
 
-    function a2aStatusMessage(payload) {
+    function a2aStatusUpdate(payload) {
       if (!payload || typeof payload !== "object") {
         return null;
       }
       if (Array.isArray(payload)) {
         for (const item of payload) {
-          const message = a2aStatusMessage(item);
-          if (message) {
-            return message;
+          const update = a2aStatusUpdate(item);
+          if (update) {
+            return update;
           }
         }
         return null;
       }
       if (payload.result) {
-        return a2aStatusMessage(payload.result);
+        return a2aStatusUpdate(payload.result);
       }
       const statusUpdate = payload.statusUpdate || payload.status_update;
       if (!statusUpdate || typeof statusUpdate !== "object") {
+        return null;
+      }
+      return statusUpdate;
+    }
+
+    function a2aStatusMessage(payload) {
+      const statusUpdate = a2aStatusUpdate(payload);
+      if (!statusUpdate) {
         return null;
       }
       const status = statusUpdate.status && typeof statusUpdate.status === "object" ? statusUpdate.status : {};
@@ -2249,6 +2258,125 @@ def render_index_html(config: DebuggerConfig) -> str:
         message.messageId || "",
         message.role || "ROLE_AGENT"
       ].join("|");
+    }
+
+    function normalIacCodeMetadataFromRawItem(item) {
+      const statusUpdate = a2aStatusUpdate(rawItemValue(item));
+      if (!statusUpdate) {
+        return null;
+      }
+      const metadata = statusUpdate.metadata && typeof statusUpdate.metadata === "object" ? statusUpdate.metadata : {};
+      const iacCode = metadata.iac_code || metadata.iacCode || metadata["iac-code"];
+      if (!iacCode || typeof iacCode !== "object") {
+        return null;
+      }
+      const status = statusUpdate.status && typeof statusUpdate.status === "object" ? statusUpdate.status : {};
+      return {
+        metadata: iacCode,
+        taskId: statusUpdate.taskId || statusUpdate.task_id || "",
+        contextId: statusUpdate.contextId || statusUpdate.context_id || "",
+        state: status.state || ""
+      };
+    }
+
+    function normalCompactValueText(value, maxLength = 500) {
+      if (value === null || value === undefined || value === "") {
+        return "";
+      }
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        return compactText(value, maxLength);
+      }
+      if (typeof value === "object") {
+        const preferred =
+          value.content || value.text || value.summary || value.safeSummary || value.message || value.error;
+        return preferred ? compactText(preferred, maxLength) : compactText(asPrettyJson(value), maxLength);
+      }
+      return compactText(String(value), maxLength);
+    }
+
+    function normalToolText(tool) {
+      if (!tool || typeof tool !== "object") {
+        return "";
+      }
+      const statusMap = {
+        started: "started",
+        input_delta: "input streaming",
+        input_complete: "input complete",
+        completed: "completed",
+        failed: "failed"
+      };
+      const status = statusMap[tool.status] || tool.status || "";
+      const payload = tool.result || tool.input || tool.inputSummary || tool.artifact || tool.partialJson || "";
+      return [status, normalCompactValueText(payload)].filter(Boolean).join(": ");
+    }
+
+    function normalMetadataEventsFromRawItem(item) {
+      const context = normalIacCodeMetadataFromRawItem(item);
+      if (!context) {
+        return [];
+      }
+      const metadata = context.metadata;
+      const events = [];
+      if (metadata.thinking && typeof metadata.thinking === "object") {
+        const text = normalCompactValueText(metadata.thinking.text || metadata.thinking);
+        if (text) {
+          events.push({
+            type: "normal_thinking_group",
+            kind: "thinking",
+            label: "thinking",
+            text,
+            className: "timeline-thinking",
+            groupKey: `${context.contextId}|${context.taskId}|thinking`,
+            context,
+            raw: rawItemValue(item)
+          });
+        }
+      }
+      if (metadata.tool && typeof metadata.tool === "object") {
+        const tool = metadata.tool;
+        const toolUseId = tool.toolUseId || tool.tool_use_id || "";
+        const status = tool.status || "tool";
+        const name = tool.name || tool.toolName || "tool";
+        const text = normalToolText(tool);
+        events.push({
+          type: "normal_tool_event",
+          kind: "tool",
+          label: `tool: ${name}`,
+          text,
+          meta: [toolUseId, status].filter(Boolean).join(" · "),
+          className: "timeline-tool",
+          groupKey: `${context.contextId}|${context.taskId}|tool|${toolUseId}|${status}`,
+          context,
+          raw: rawItemValue(item)
+        });
+      }
+      if (metadata.permission && typeof metadata.permission === "object") {
+        const permission = metadata.permission;
+        const permissionId = permission.toolUseId || permission.permissionId || "";
+        events.push({
+          type: "normal_permission_event",
+          kind: "permission",
+          label: `permission: ${permission.toolName || permission.tool_name || "tool"}`,
+          text: permission.safeSummary || normalCompactValueText(permission),
+          className: "timeline-permission",
+          groupKey: `${context.contextId}|${context.taskId}|permission|${permissionId}`,
+          context,
+          raw: rawItemValue(item)
+        });
+      }
+      if (metadata.mcpWarning && typeof metadata.mcpWarning === "object") {
+        events.push({
+          type: "normal_warning_event",
+          kind: "warning",
+          label: "mcp warning",
+          text: normalCompactValueText(metadata.mcpWarning.message || metadata.mcpWarning),
+          className: "timeline-event",
+          groupKey: `${context.contextId}|${context.taskId}|mcpWarning`,
+          context,
+          raw: rawItemValue(item)
+        });
+      }
+      return events;
     }
 
     function flushTextDeltaGroup(target, group) {
@@ -2982,6 +3110,56 @@ def render_index_html(config: DebuggerConfig) -> str:
       state.executionTree.touchedKeys.add(node.key);
     }
 
+    function appendNormalMetadataEvent(row) {
+      const events = normalMetadataEventsFromRawItem(row);
+      if (events.length === 0) {
+        return;
+      }
+      events.forEach((event) => {
+        const node = ensureNormalChatNode(event.context);
+        const thinkingKey = `normal:${node.key}:thinking`;
+        if (event.type !== "normal_thinking_group") {
+          delete state.executionTree.normalMetadataGroups[thinkingKey];
+        }
+        let item = null;
+        if (event.type === "normal_thinking_group") {
+          item = state.executionTree.normalMetadataGroups[thinkingKey];
+        } else if (event.kind === "tool" && String(event.groupKey).includes("|input_delta")) {
+          item = state.executionTree.normalMetadataGroups[`normal:${node.key}:${event.groupKey}`];
+        }
+        if (!item) {
+          item = {
+            key: `normal:${node.key}:${event.groupKey}:${node.timeline.length}`,
+            type: event.type,
+            label: event.label,
+            text: "",
+            meta: event.meta || "",
+            className: event.className,
+            count: 0,
+            raw: {
+              eventType: event.type,
+              targetKey: node.key,
+              text: "",
+              events: []
+            }
+          };
+          if (event.type === "normal_thinking_group") {
+            state.executionTree.normalMetadataGroups[thinkingKey] = item;
+          } else if (event.kind === "tool" && String(event.groupKey).includes("|input_delta")) {
+            state.executionTree.normalMetadataGroups[`normal:${node.key}:${event.groupKey}`] = item;
+          }
+          node.timeline.push(item);
+        }
+        item.count += 1;
+        item.text += event.type === "normal_thinking_group" ? event.text : item.text ? `\\n${event.text}` : event.text;
+        item.meta = event.type === "normal_thinking_group" ? `thinking_delta x${item.count}` : event.meta || item.meta;
+        item.raw.count = item.count;
+        item.raw.text = item.text;
+        item.raw.events.push(event.raw);
+        state.executionTree.touchedKeys.add(node.key);
+      });
+    }
+
     function appendExecutionTreeEvent(envelope) {
       if (!envelope || typeof envelope !== "object") {
         return;
@@ -3126,6 +3304,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       const envelope = extractPipelineEnvelope(payload);
       if (!envelope || typeof envelope !== "object") {
         appendNormalMessageEvent(rawRow || payload);
+        appendNormalMetadataEvent(rawRow || payload);
         renderPipeline();
         return;
       }
@@ -4572,6 +4751,55 @@ def render_index_html(config: DebuggerConfig) -> str:
       return tree;
     }
 
+    function executionTreeHasNormalMetadataTimeline(tree) {
+      if (!tree || !tree.nodes || typeof tree.nodes !== "object") {
+        return false;
+      }
+      return Object.values(tree.nodes).some((node) => {
+        const timeline = node && Array.isArray(node.timeline) ? node.timeline : [];
+        return timeline.some((item) => {
+          const type = String((item && item.type) || "");
+          return (
+            type === "normal_thinking_group" ||
+            type === "normal_tool_event" ||
+            type === "normal_permission_event" ||
+            type === "normal_warning_event"
+          );
+        });
+      });
+    }
+
+    function removeNormalChatNodes() {
+      const normalKeys = Object.values(state.executionTree.nodes)
+        .filter((node) => node && node.kind === "normal-chat")
+        .map((node) => node.key);
+      const normalKeySet = new Set(normalKeys);
+      normalKeys.forEach((key) => {
+        const node = state.executionTree.nodes[key];
+        if (node && node.parentKey && state.executionTree.nodes[node.parentKey]) {
+          const parent = state.executionTree.nodes[node.parentKey];
+          parent.children = parent.children.filter((childKey) => childKey !== key);
+        }
+        delete state.executionTree.nodes[key];
+      });
+      state.executionTree.rootIds = state.executionTree.rootIds.filter((key) => !normalKeySet.has(key));
+      state.executionTree.normalMessageGroups = {};
+      state.executionTree.normalMetadataGroups = {};
+    }
+
+    function rebuildNormalChatTimelineFromRawEvents(rows) {
+      if (!Array.isArray(rows)) {
+        return;
+      }
+      removeNormalChatNodes();
+      rows.forEach((row) => {
+        if (!pipelineEnvelopeFromRawItem(row)) {
+          appendNormalMessageEvent(row);
+          appendNormalMetadataEvent(row);
+        }
+      });
+    }
+
     function rebuildExecutionTreeFromRawEvents(rows) {
       if (!Array.isArray(rows)) {
         return;
@@ -4583,6 +4811,7 @@ def render_index_html(config: DebuggerConfig) -> str:
           appendExecutionTreeEvent(envelope);
         } else {
           appendNormalMessageEvent(row);
+          appendNormalMetadataEvent(row);
         }
       });
     }
@@ -4614,6 +4843,8 @@ def render_index_html(config: DebuggerConfig) -> str:
       state.executionTree = restoreExecutionTree(data.executionTree);
       if (state.executionTree.rootIds.length === 0) {
         rebuildExecutionTreeFromRawEvents(state.raw.sse);
+      } else if (!executionTreeHasNormalMetadataTimeline(state.executionTree)) {
+        rebuildNormalChatTimelineFromRawEvents(state.raw.sse);
       }
       state.expandedTreeKeys = restoreSet(uiState.expandedTreeKeys);
       state.expandedTimelineKeys = restoreSet(uiState.expandedTimelineKeys);

@@ -338,6 +338,50 @@ class TestRendererHelpers:
         assert "Complete step" in header.plain
         assert "complete_step" not in header.plain
 
+    def test_render_tool_header_localizes_pipeline_ros_template_tool_name_without_registry_tool(self):
+        renderer = make_renderer()
+        record = _ToolCallRecord(tool_name="ros_estimate_template_cost", tool_input={}, done=True)
+
+        header = renderer._render_tool_header(record)
+
+        assert "ROS Estimate Cost" in header.plain
+        assert "ros_estimate_template_cost" not in header.plain
+
+    def test_render_tool_header_uses_zh_translation_for_ros_parameter_recommendation_tool(self, monkeypatch):
+        from iac_code.i18n import setup_i18n
+
+        monkeypatch.setenv("LANGUAGE", "zh")
+        setup_i18n()
+        try:
+            renderer = make_renderer()
+            record = _ToolCallRecord(
+                tool_name="ros_get_template_parameter_constraints",
+                tool_input={},
+                done=True,
+            )
+
+            header = renderer._render_tool_header(record)
+
+            assert header.plain == "● ROS 模板参数推荐"
+        finally:
+            monkeypatch.setenv("LANGUAGE", "en")
+            setup_i18n()
+
+    def test_render_tool_result_summarizes_pipeline_ros_template_tool_without_registry_tool(self):
+        renderer = make_renderer()
+        record = _ToolCallRecord(
+            tool_name="ros_estimate_template_cost",
+            tool_input={},
+            done=True,
+            result='{\n  "RequestId": "REQ-42",\n  "Resources": ["long output"]\n}',
+        )
+
+        line = renderer._render_tool_result(record)
+
+        assert line is not None
+        assert "Call succeeded (RequestId: REQ-42)" in line.plain
+        assert "Resources" not in line.plain
+
     def test_print_segments_to_scrollback_archives_and_merges_assistant_turns(self):
         renderer = make_renderer()
 

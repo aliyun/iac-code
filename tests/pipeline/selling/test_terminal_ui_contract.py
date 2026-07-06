@@ -7,6 +7,15 @@ def _selling_pipeline_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "src" / "iac_code" / "pipeline" / "selling"
 
 
+def test_selling_pipeline_base_sections_include_runtime_context():
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    intent = next(step for step in loaded.steps if step.step_id == "intent_parsing")
+
+    assert "runtime_context" in loaded.base_prompt_sections.include
+    assert intent.base_prompt_sections is not None
+    assert "runtime_context" in intent.base_prompt_sections.include
+
+
 def test_confirm_options_schema_requires_candidate_index():
     loaded = load_pipeline_dir(_selling_pipeline_dir())
     confirm = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
@@ -113,8 +122,8 @@ def test_deploying_success_requires_create_stack_complete_guard():
     assert guard is not None
     assert guard["required_conclusion_field"] == "stack_id"
     assert guard["require_tool_result"] == {
-        "tool": "ros_stack",
-        "action_in": ["CreateStack", "ContinueCreateStack"],
+        "tool": "ros_deploy",
+        "action_in": ["create", "continue_create", "delete_and_create"],
         "is_success": True,
         "status_in": ["CREATE_COMPLETE"],
         "match_conclusion_field": "stack_id",

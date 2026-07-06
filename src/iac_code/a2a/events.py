@@ -176,10 +176,15 @@ def _extract_artifact_metadata(result: Any, artifact_store: Any | None) -> dict[
     return None
 
 
-def _tool_result_metadata(result: Any, *, is_error: bool = False) -> Any:
-    sanitized = sanitize_public_tool_output_data(result)
+def _tool_result_metadata(
+    result: Any,
+    *,
+    is_error: bool = False,
+    public_path_roots: list[dict[str, str]] | None = None,
+) -> Any:
+    sanitized = sanitize_public_tool_output_data(result, public_path_roots=public_path_roots)
     if is_error and isinstance(sanitized, str):
-        return sanitize_public_artifact_text(sanitized)
+        return sanitize_public_artifact_text(sanitized, public_path_roots=public_path_roots)
     return _truncate(sanitized)
 
 
@@ -351,7 +356,11 @@ async def publish_stream_event(
             "status": "failed" if event.is_error else "completed",
             "toolUseId": event.tool_use_id,
             "name": event.tool_name,
-            "result": _tool_result_metadata(event.result, is_error=event.is_error),
+            "result": _tool_result_metadata(
+                event.result,
+                is_error=event.is_error,
+                public_path_roots=event.public_path_roots,
+            ),
         }
         if artifact_metadata is not None:
             tool_metadata["artifact"] = artifact_metadata

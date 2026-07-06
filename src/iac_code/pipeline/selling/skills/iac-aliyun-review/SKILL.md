@@ -56,7 +56,7 @@ conclusion_schema:
 4. **模板正确性**
    - 资源依赖是否正确（DependsOn）
    - 引用的可用区是否存在于目标地域
-   - 模板语法是否合法（可通过 `aliyun_api` 调用 ROS `ValidateTemplate` 校验）
+   - 模板语法是否合法（可通过 `ros_validate_template` 校验）
 
 ## 行为规则
 
@@ -67,7 +67,7 @@ conclusion_schema:
 
 ## 可选工具使用
 
-- 可调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口校验模板语法
+- 可调用 `ros_validate_template` 校验模板语法
 - 不需要调用其他工具
 
 ## 输出

@@ -6,6 +6,7 @@ import ntpath
 import os
 import re
 import uuid
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from iac_code.services.session_layout import (
     require_supported_session_layout,
 )
 from iac_code.utils.public_errors import sanitize_public_text
+from iac_code.utils.public_paths import relativize_public_file_uri
 from iac_code.utils.state_io import atomic_write_bytes
 
 PUBLIC_ARTIFACT_URI_PREFIX = "iac-code-artifact://"
@@ -112,64 +114,101 @@ def _windows_safe_filename(filename: str) -> str:
     return sanitized
 
 
-def sanitize_public_artifact_data(value: Any) -> Any:
+def sanitize_public_artifact_data(
+    value: Any,
+    *,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> Any:
     if isinstance(value, list):
-        return [sanitize_public_artifact_data(item) for item in value]
+        return [sanitize_public_artifact_data(item, public_path_roots=public_path_roots) for item in value]
     if isinstance(value, tuple):
-        return [sanitize_public_artifact_data(item) for item in value]
+        return [sanitize_public_artifact_data(item, public_path_roots=public_path_roots) for item in value]
     if isinstance(value, str):
-        return _sanitize_artifact_scalar_string(value)
+        return _sanitize_artifact_scalar_string(value, public_path_roots=public_path_roots)
     if not isinstance(value, dict):
         return value
 
     sanitized: dict[Any, Any] = {}
     for key, raw_value in value.items():
         key_name = str(key)
+        output_key, key_is_public_path = _sanitize_public_mapping_key(key, public_path_roots=public_path_roots)
         if key_name.lower() in _ARTIFACT_PAYLOAD_KEYS:
             continue
-        if _is_sensitive_output_key(key_name):
-            sanitized[key] = "[REDACTED]"
+        if not key_is_public_path and _is_sensitive_output_key(key_name):
+            sanitized[output_key] = "[REDACTED]"
             continue
         if _is_artifact_uri_key(key_name):
             if isinstance(raw_value, str):
-                sanitized_value = _sanitize_artifact_string(key_name, raw_value)
+                sanitized_value = _sanitize_artifact_string(key_name, raw_value, public_path_roots=public_path_roots)
                 if sanitized_value is not None:
-                    sanitized[key] = sanitized_value
+                    sanitized[output_key] = sanitized_value
             continue
         if isinstance(raw_value, str):
-            sanitized_value = _sanitize_artifact_string(key_name, raw_value)
+            sanitized_value = _sanitize_artifact_string(key_name, raw_value, public_path_roots=public_path_roots)
             if sanitized_value is None:
                 continue
-            sanitized[key] = sanitized_value
+            sanitized[output_key] = sanitized_value
             continue
-        sanitized[key] = sanitize_public_artifact_data(raw_value)
+        sanitized[output_key] = sanitize_public_artifact_data(raw_value, public_path_roots=public_path_roots)
     return sanitized
 
 
-def sanitize_public_tool_output_data(value: Any) -> Any:
+def sanitize_public_tool_output_data(
+    value: Any,
+    *,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> Any:
     if isinstance(value, str):
-        return sanitize_public_artifact_text(value, fallback_summary="")
+        return sanitize_public_artifact_text(value, fallback_summary="", public_path_roots=public_path_roots)
     if isinstance(value, list):
-        return [sanitize_public_tool_output_data(item) for item in value]
+        return [sanitize_public_tool_output_data(item, public_path_roots=public_path_roots) for item in value]
     if isinstance(value, tuple):
-        return [sanitize_public_tool_output_data(item) for item in value]
+        return [sanitize_public_tool_output_data(item, public_path_roots=public_path_roots) for item in value]
     if not isinstance(value, dict):
         return value
     if _looks_like_artifact_payload_dict(value):
-        return sanitize_public_artifact_data(value)
+        return sanitize_public_artifact_data(value, public_path_roots=public_path_roots)
 
     sanitized: dict[Any, Any] = {}
     for key, raw_value in value.items():
-        if str(key).lower() in _ARTIFACT_CONTAINER_KEYS:
-            sanitized[key] = sanitize_public_artifact_data(raw_value)
-        elif _is_sensitive_output_key(key):
-            sanitized[key] = "[REDACTED]"
+        key_name = str(key)
+        output_key, key_is_public_path = _sanitize_public_mapping_key(key, public_path_roots=public_path_roots)
+        if key_name.lower() in _ARTIFACT_CONTAINER_KEYS:
+            sanitized[output_key] = sanitize_public_artifact_data(raw_value, public_path_roots=public_path_roots)
+        elif not key_is_public_path and _is_sensitive_output_key(key_name):
+            sanitized[output_key] = "[REDACTED]"
         else:
-            sanitized[key] = sanitize_public_tool_output_data(raw_value)
+            sanitized[output_key] = sanitize_public_tool_output_data(raw_value, public_path_roots=public_path_roots)
     return sanitized
 
 
-def _sanitize_artifact_string(key: str, value: str) -> str | None:
+def _sanitize_public_mapping_key(
+    key: Any,
+    *,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> tuple[Any, bool]:
+    if not isinstance(key, str):
+        return key, False
+    sanitized_key = _sanitize_artifact_scalar_string(key, public_path_roots=public_path_roots)
+    return sanitized_key, sanitized_key != key and _is_path_like_mapping_key(key)
+
+
+def _is_path_like_mapping_key(key: str) -> bool:
+    stripped = key.strip()
+    if not stripped or re.search(r"\s", stripped):
+        return False
+    if stripped.lower().startswith("file://"):
+        parsed = urlsplit(stripped)
+        return parsed.scheme.lower() == "file" and bool(parsed.path or parsed.netloc)
+    return bool(stripped.startswith("/") or stripped.startswith("\\\\") or ntpath.splitdrive(stripped)[0])
+
+
+def _sanitize_artifact_string(
+    key: str,
+    value: str,
+    *,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> str | None:
     if _is_artifact_uri_key(key):
         return value if is_valid_public_artifact_uri(value) else None
     if key.lower() in {"filename", "name"}:
@@ -179,34 +218,51 @@ def _sanitize_artifact_string(key: str, value: str) -> str | None:
             except UnsafeArtifactNameError:
                 pass
     if value.lower().startswith("file://"):
-        return "[PATH]"
-    return _sanitize_artifact_scalar_string(value)
+        return relativize_public_file_uri(value, public_path_roots) or "[PATH]"
+    return _sanitize_artifact_scalar_string(value, public_path_roots=public_path_roots)
 
 
-def _sanitize_artifact_scalar_string(value: str) -> str:
+def _sanitize_artifact_scalar_string(
+    value: str,
+    *,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> str:
     if value.lower().startswith("file://"):
-        return "[PATH]"
+        return relativize_public_file_uri(value, public_path_roots) or "[PATH]"
     decoded = unquote(value)
     if decoded != value:
         if decoded.lower().startswith("file://"):
-            return "[PATH]"
-        decoded_sanitized = sanitize_public_artifact_text(decoded, fallback_summary="")
+            return relativize_public_file_uri(decoded, public_path_roots) or "[PATH]"
+        decoded_sanitized = sanitize_public_artifact_text(
+            decoded,
+            fallback_summary="",
+            public_path_roots=public_path_roots,
+        )
         if decoded_sanitized != decoded:
             return decoded_sanitized
-    return sanitize_public_artifact_text(value, fallback_summary="")
+    return sanitize_public_artifact_text(value, fallback_summary="", public_path_roots=public_path_roots)
 
 
-def sanitize_public_artifact_text(value: str, *, fallback_summary: str | None = None) -> str:
+def sanitize_public_artifact_text(
+    value: str,
+    *,
+    fallback_summary: str | None = None,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> str:
     if fallback_summary is None:
         fallback_summary = _("Unknown error")
     protected, placeholders = _replace_public_artifact_uri_tokens(value)
-    protected = _replace_file_uri_tokens(protected)
-    sanitized = sanitize_public_text(protected, fallback_summary=fallback_summary)
+    protected = _replace_file_uri_tokens(protected, public_path_roots=public_path_roots)
+    sanitized = sanitize_public_text(
+        protected,
+        fallback_summary=fallback_summary,
+        public_path_roots=public_path_roots,
+    )
     decoded_raw = unquote(protected)
     decoded, decoded_placeholders = _replace_public_artifact_uri_tokens(decoded_raw, prefix="__IAC_CODE_DECODED_URI_")
-    decoded = _replace_file_uri_tokens(decoded)
+    decoded = _replace_file_uri_tokens(decoded, public_path_roots=public_path_roots)
     if decoded_raw != protected:
-        decoded_sanitized = sanitize_public_text(decoded, fallback_summary="")
+        decoded_sanitized = sanitize_public_text(decoded, fallback_summary="", public_path_roots=public_path_roots)
         if decoded != decoded_raw or decoded_sanitized != decoded:
             sanitized = decoded_sanitized
             placeholders.update(decoded_placeholders)
@@ -215,13 +271,20 @@ def sanitize_public_artifact_text(value: str, *, fallback_summary: str | None = 
     return sanitized
 
 
-def _replace_file_uri_tokens(value: str) -> str:
+def _replace_file_uri_tokens(
+    value: str,
+    *,
+    public_path_roots: Iterable[Mapping[str, str]] | None = None,
+) -> str:
     def replace_file_uri(match: re.Match[str]) -> str:
         uri = match.group(0)
         trailing = ""
         while uri and uri[-1] in ".,:!?":
             trailing = uri[-1] + trailing
             uri = uri[:-1]
+        public_path = relativize_public_file_uri(uri, public_path_roots)
+        if public_path is not None:
+            return f"{public_path}{trailing}"
         return f"[PATH]{trailing}"
 
     return _FILE_URI_TEXT_PATTERN.sub(replace_file_uri, value)

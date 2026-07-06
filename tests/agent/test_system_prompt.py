@@ -88,6 +88,10 @@ class TestBuildSystemPrompt:
     def test_contains_identity_section(self):
         prompt = build_system_prompt(cwd=_TMP)
         assert "AI" in prompt or "assistant" in prompt
+        assert "IaC Code" in prompt
+        assert "iac-code" in prompt
+        assert "AI-powered Infrastructure as Code assistant" in prompt
+        assert "AI 驱动的基础设施即代码助手" not in prompt
 
     def test_contains_environment_section(self):
         prompt = build_system_prompt(cwd=_TMP)
@@ -217,6 +221,45 @@ class TestBuildSystemPrompt:
 
         assert first == second
         assert "- Current time: 2026-06-05 10:00:00" in first
+
+    def test_provider_and_model_line_is_dynamic_near_current_time(self):
+        static, dynamic = split_by_dynamic_boundary(
+            build_system_prompt(
+                cwd=_TMP,
+                current_time="2026-06-05 10:00:00",
+                provider_display="Alibaba Cloud Bailian",
+                model="qwen3.7-max",
+            )
+        )
+
+        runtime_line = "Provider & Model: Alibaba Cloud Bailian / qwen3.7-max"
+        assert "# Runtime Context" in dynamic
+        assert "# Current Time" not in dynamic
+        assert runtime_line not in static
+        assert runtime_line in dynamic
+        assert dynamic.index("- Current time: 2026-06-05 10:00:00") < dynamic.index(runtime_line)
+
+    def test_model_changes_do_not_change_static_cache_prefix(self):
+        first_static, first_dynamic = split_by_dynamic_boundary(
+            build_system_prompt(
+                cwd=_TMP,
+                current_time="2026-06-05 10:00:00",
+                provider_display="Alibaba Cloud Bailian",
+                model="qwen3.7-max",
+            )
+        )
+        second_static, second_dynamic = split_by_dynamic_boundary(
+            build_system_prompt(
+                cwd=_TMP,
+                current_time="2026-06-05 10:00:00",
+                provider_display="Alibaba Cloud Bailian",
+                model="qwen3.7-plus",
+            )
+        )
+
+        assert first_static == second_static
+        assert "Provider & Model: Alibaba Cloud Bailian / qwen3.7-max" in first_dynamic
+        assert "Provider & Model: Alibaba Cloud Bailian / qwen3.7-plus" in second_dynamic
 
 
 class TestSplitByDynamicBoundary:
@@ -355,10 +398,20 @@ class TestBuildBaseSections:
         assert "/some/test/path" in result
 
     def test_default_pipeline_sections_constant(self):
-        assert DEFAULT_PIPELINE_SECTIONS == ["identity", "system", "env", "cloud_config", "tools"]
+        assert DEFAULT_PIPELINE_SECTIONS == ["identity", "system", "env", "cloud_config", "tools", "runtime_context"]
 
     def test_section_builders_has_all_keys(self):
-        expected_keys = {"identity", "system", "env", "cloud_config", "tools", "doing_tasks", "actions", "output_style"}
+        expected_keys = {
+            "identity",
+            "system",
+            "env",
+            "cloud_config",
+            "runtime_context",
+            "tools",
+            "doing_tasks",
+            "actions",
+            "output_style",
+        }
         assert set(SECTION_BUILDERS.keys()) == expected_keys
 
     def test_section_priorities_has_all_keys(self):

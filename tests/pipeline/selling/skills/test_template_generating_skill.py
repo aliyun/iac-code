@@ -16,6 +16,7 @@ SKILL_DIR = (
 )
 SKILL_MD = SKILL_DIR / "SKILL.md"
 EVALS_JSON = SKILL_DIR / "evals.json"
+TEMPLATE_PROMPT_MD = SKILL_DIR.parents[1] / "prompts" / "template_generating.md"
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -73,7 +74,14 @@ class TestSkillContentRosOnly:
         assert "| ECS | ZoneId, InstanceType" not in body
 
     def test_contains_validation_step(self, body):
-        assert "ValidateTemplate" in body
+        assert "ros_validate_template" in body
+
+    def test_template_url_source_is_not_duplicated_from_prompt(self, body):
+        assert "模板来源硬约束" not in body
+        assert "params.TemplateURL = <候选方案输出路径>" not in body
+        assert "不要传 `params.TemplateBody`" not in body
+        assert "template_url=<模板文件路径>" not in body
+        assert "region_id=<地域>" not in body
 
     def test_must_read_ros_template_reference_before_generation(self, body):
         assert "必须" in body
@@ -112,6 +120,13 @@ class TestSkillContentRosOnly:
         assert "已有 VPC 中创建安全组" in body
         assert "forbidden_resources" not in body
 
+    def test_file_write_details_stay_in_step_prompt(self, body):
+        assert "并写入文件" in body
+        assert "write_file" not in body
+        assert "无需提前创建目录" not in body
+        assert "bash" not in body.lower()
+        assert "mkdir" not in body.lower()
+
 
 class TestSkillDiscovery:
     def test_discovered_by_pipeline_loader(self):
@@ -131,6 +146,21 @@ class TestSkillDiscovery:
 
 
 class TestSkillPromptRendering:
+    def test_prompt_names_template_url_value_for_validation(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert 'template_url = "{candidate.output_path}"' in body
+        assert "ros_validate_template" in body
+        assert "ValidateTemplate" in body
+        assert "TemplateBody" in body
+
+    def test_prompt_uses_write_file_without_directory_creation(self):
+        body = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        assert "write_file" in body
+        assert "无需提前创建目录" in body
+        assert "如果 `templates/` 目录不存在，先创建它" not in body
+        assert "mkdir" not in body.lower()
+        assert "bash" not in body.lower()
+
     def test_full_prompt_includes_skill_base_directory(self, tmp_path):
         from iac_code.pipeline.engine.context import PipelineContext
         from iac_code.pipeline.engine.loader import load_pipeline_dir

@@ -26,12 +26,12 @@ on_complete:
 
 # --- Base Prompt Sections ---
 # 控制注入到每个 step system prompt 前的通用 section。
-# 可用 section: identity, system, env, cloud_config, tools, doing_tasks, actions, output_style
+# 可用 section: identity, system, env, cloud_config, tools, runtime_context, doing_tasks, actions, output_style
 # 解析规则: include 为空 = 全部可用 section; exclude 从中移除指定项。
-# 不配置此字段时，默认: [identity, system, env, cloud_config, tools]
+# 不配置此字段时，默认: [identity, system, env, cloud_config, tools, runtime_context]
 # Step 级同名字段可覆盖（整体替换，非合并）。
 base_prompt_sections:
-  include: [identity, system, env, cloud_config, tools, doing_tasks, actions, output_style]
+  include: [identity, system, env, cloud_config, tools, runtime_context, doing_tasks, actions, output_style]
   exclude: []
 
 feature_flags:
@@ -74,6 +74,7 @@ sub_pipelines:
         tools:
           include: []
           exclude: [write_memory]
+        inject_tools: [ros_validate_template]
 
       - id: reviewing
         description: "审查模板的安全性和最佳实践"
@@ -84,8 +85,9 @@ sub_pipelines:
         prompt: prompts/reviewing.md
         context_fields: [template]
         tools:
-          include: [-]
+          include: [ros_validate_template]
           exclude: []
+        inject_tools: [ros_validate_template]
 
       - id: cost_estimating
         description: "评估模板的资源成本"
@@ -101,6 +103,11 @@ sub_pipelines:
         tools:
           include: []
           exclude: [bash, write_memory]
+        inject_tools:
+          - ros_validate_template
+          - ros_get_template_parameter_constraints
+          - ros_preview_template
+          - ros_estimate_template_cost
 
 steps:
   - id: intent_parsing
@@ -170,7 +177,7 @@ steps:
           free_text: clarification_text
         message: "这个输入不是部署/云资源需求，需要先让用户重新输入部署目标或确认暂不处理。"
     base_prompt_sections:
-      include: [identity, system, env, cloud_config, output_style]
+      include: [identity, system, env, cloud_config, runtime_context, output_style]
       exclude: []
 
   - id: architecture_planning
@@ -257,12 +264,13 @@ steps:
           status: success
         required_conclusion_field: stack_id
         require_tool_result:
-          tool: ros_stack
-          action_in: [CreateStack, ContinueCreateStack]
+          tool: ros_deploy
+          action_in: [create, continue_create, delete_and_create]
           is_success: true
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id
-        message: "部署成功必须等待 ros_stack CreateStack 返回 CREATE_COMPLETE。"
+        message: "部署成功必须等待 ros_deploy 返回 CREATE_COMPLETE。"
     tools:
       include: []
-      exclude: [write_memory]
+      exclude: [write_memory, ros_stack]
+    inject_tools: [ros_validate_template, ros_deploy]

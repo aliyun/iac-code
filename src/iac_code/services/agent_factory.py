@@ -142,11 +142,25 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
 
     notification_queue = NotificationQueue()
 
+    def runtime_provider_display() -> str:
+        try:
+            return provider_manager.get_provider_display()
+        except Exception:
+            return ""
+
+    def runtime_model() -> str:
+        try:
+            return provider_manager.get_model_name()
+        except Exception:
+            return model
+
     def build_base_system_prompt() -> str:
         return build_system_prompt(
             cwd=cwd,
             memory_context=memory_runtime.build_memory_context(),
             current_time=runtime_current_time,
+            provider_display=runtime_provider_display(),
+            model=runtime_model(),
         )
 
     base_system_prompt = build_base_system_prompt()
@@ -294,6 +308,8 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                 memory_context=memory_runtime.build_memory_context(),
                 skill_listing=skill_listing_holder["value"],
                 current_time=runtime_current_time,
+                provider_display=runtime_provider_display(),
+                model=runtime_model(),
             )
 
         agent_loop = AgentLoop(
