@@ -116,7 +116,7 @@ class TestGlobBasics:
 
         assert result.is_error is False
         assert "template-parameter-recommendation.md" in result.content
-        assert "cloud-products/ecs.md" in result.content
+        assert "cloud-products/ecs.md" in result.content.replace("\\", "/")
 
     @pytest.mark.asyncio
     async def test_recursive_glob_permission_asks_for_symlink_escape(self, tool, tmp_path):
