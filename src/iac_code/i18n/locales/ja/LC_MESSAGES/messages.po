@@ -45,6 +45,7 @@ msgid "Unknown error"
 msgstr "不明なエラー"
 
 #: src/iac_code/a2a/artifacts.py src/iac_code/a2a/pipeline_paths.py
+#: src/iac_code/services/session_backup.py
 #: src/iac_code/services/session_layout.py
 #, python-brace-format
 msgid "Unsupported session layout version: {version}"
@@ -582,6 +583,11 @@ msgstr ""
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "エラー：{error}"
+
+#: src/iac_code/cli/headless.py src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Session not found: {session_id}"
+msgstr "セッションが見つかりません：{session_id}"
 
 #: src/iac_code/cli/headless.py
 #, python-brace-format
@@ -3256,9 +3262,33 @@ msgid "[Image input]"
 msgstr "[画像入力]"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+msgid "CIDR block overlapped"
+msgstr "CIDR ブロックが重複しています"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
 msgid "{error_code}; recommended action: {action}"
 msgstr "{error_code}; 推奨アクション: {action}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation succeeded ({stack_id})"
+msgstr "{name} の作成に成功しました ({stack_id})"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation succeeded"
+msgstr "{name} の作成に成功しました"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation failed: {reason} ({stack_id})"
+msgstr "{name} の作成に失敗しました: {reason} ({stack_id})"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation failed: {reason}"
+msgstr "{name} の作成に失敗しました: {reason}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -5132,11 +5162,6 @@ msgstr "このセッションを再開するには次を実行してください
 #: src/iac_code/ui/repl.py
 msgid "Session ID"
 msgstr "セッション ID"
-
-#: src/iac_code/ui/repl.py
-#, python-brace-format
-msgid "Session not found: {session_id}"
-msgstr "セッションが見つかりません：{session_id}"
 
 #: src/iac_code/ui/repl.py
 msgid ""

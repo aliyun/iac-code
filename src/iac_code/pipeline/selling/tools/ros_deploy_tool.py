@@ -25,6 +25,9 @@ from iac_code.types.permissions import (
 _OWNED_STACKS_KEY = "ros_deploy_owned_stack_ids"
 _ACTIONS = ("create", "continue_create", "delete_and_create")
 _SAFE_RULE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$")
+_ROS_ERROR_CODE_RE = re.compile(r"\bcode:\s*([A-Za-z0-9_.-]+)")
+_WHITESPACE_RE = re.compile(r"\s+")
+_MAX_REASON_CHARS = 80
 _RULE_SOURCE_ORDER = {
     "cli_arg": 5,
     "session": 4,
@@ -44,6 +47,27 @@ def _json_object(value: str) -> dict[str, Any] | None:
 
 def _string_value(value: Any) -> str:
     return value if isinstance(value, str) else ""
+
+
+def _short_stack_id(stack_id: str) -> str:
+    return stack_id[:8] if stack_id else ""
+
+
+def _friendly_ros_error_code(code: str) -> str:
+    if code == "InvalidCidrBlock.Overlapped":
+        return _("CIDR block overlapped")
+    return code
+
+
+def _short_status_reason(status_reason: str) -> str:
+    match = _ROS_ERROR_CODE_RE.search(status_reason)
+    if match is not None:
+        return _friendly_ros_error_code(match.group(1))
+
+    reason = _WHITESPACE_RE.sub(" ", status_reason).strip()
+    if len(reason) > _MAX_REASON_CHARS:
+        return reason[: _MAX_REASON_CHARS - 3].rstrip() + "..."
+    return reason
 
 
 def _safe_rule_segment(value: str) -> bool:
@@ -131,6 +155,9 @@ class RosDeployTool(Tool):
         return " ".join(part for part in (action, target) if part)
 
     def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str | None:
+        if verbose:
+            return output.strip()
+
         parsed = _json_object(output)
         if is_error and parsed is not None and parsed.get("error_code"):
             message = _string_value(parsed.get("message"))
@@ -144,7 +171,39 @@ class RosDeployTool(Tool):
             if message:
                 detail = f"{detail}: {message}"
             return detail
+
+        if parsed is not None:
+            if message := self._render_stack_summary(parsed, is_error=is_error):
+                return message
         return RosStack().render_tool_result_message(output, is_error=is_error, verbose=verbose)
+
+    def _render_stack_summary(self, parsed: dict[str, Any], *, is_error: bool) -> str | None:
+        stack_name = _string_value(parsed.get("stack_name"))
+        stack_id = _string_value(parsed.get("stack_id"))
+        short_id = _short_stack_id(stack_id)
+        name = stack_name or short_id
+        if not name:
+            return None
+
+        is_success = parsed.get("is_success")
+        if is_success is True:
+            if short_id and stack_name:
+                return _("{name} creation succeeded ({stack_id})").format(name=name, stack_id=short_id)
+            return _("{name} creation succeeded").format(name=name)
+
+        if is_success is False or is_error:
+            reason = _short_status_reason(_string_value(parsed.get("status_reason")))
+            if not reason:
+                return None
+            if short_id and stack_name:
+                return _("{name} creation failed: {reason} ({stack_id})").format(
+                    name=name,
+                    reason=reason,
+                    stack_id=short_id,
+                )
+            return _("{name} creation failed: {reason}").format(name=name, reason=reason)
+
+        return None
 
     def needs_event_queue(self) -> bool:
         return True

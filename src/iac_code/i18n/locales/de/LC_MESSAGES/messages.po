@@ -49,6 +49,7 @@ msgid "Unknown error"
 msgstr "Unbekannter Fehler"
 
 #: src/iac_code/a2a/artifacts.py src/iac_code/a2a/pipeline_paths.py
+#: src/iac_code/services/session_backup.py
 #: src/iac_code/services/session_layout.py
 #, python-brace-format
 msgid "Unsupported session layout version: {version}"
@@ -612,6 +613,11 @@ msgstr ""
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "Fehler: {error}"
+
+#: src/iac_code/cli/headless.py src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "Session not found: {session_id}"
+msgstr "Sitzung nicht gefunden: {session_id}"
 
 #: src/iac_code/cli/headless.py
 #, python-brace-format
@@ -3426,9 +3432,33 @@ msgid "[Image input]"
 msgstr "[Bildeingabe]"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+msgid "CIDR block overlapped"
+msgstr "CIDR-Block überschneidet sich"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
 msgid "{error_code}; recommended action: {action}"
 msgstr "{error_code}; empfohlene Aktion: {action}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation succeeded ({stack_id})"
+msgstr "{name} erfolgreich erstellt ({stack_id})"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation succeeded"
+msgstr "{name} erfolgreich erstellt"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation failed: {reason} ({stack_id})"
+msgstr "Erstellung von {name} fehlgeschlagen: {reason} ({stack_id})"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "{name} creation failed: {reason}"
+msgstr "Erstellung von {name} fehlgeschlagen: {reason}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -5389,11 +5419,6 @@ msgstr "Diese Sitzung fortsetzen mit:"
 #: src/iac_code/ui/repl.py
 msgid "Session ID"
 msgstr "Sitzungs-ID"
-
-#: src/iac_code/ui/repl.py
-#, python-brace-format
-msgid "Session not found: {session_id}"
-msgstr "Sitzung nicht gefunden: {session_id}"
 
 #: src/iac_code/ui/repl.py
 msgid ""
