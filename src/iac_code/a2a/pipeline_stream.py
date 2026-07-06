@@ -20,6 +20,7 @@ from iac_code.a2a.events import (
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.pipeline_events import PipelineEventTranslator, safe_permission_metadata
 from iac_code.a2a.pipeline_journal import A2APipelineJournal, to_json_safe
+from iac_code.a2a.pipeline_performance import a2a_extreme_performance_enabled
 from iac_code.a2a.pipeline_snapshot import SNAPSHOT_SCHEMA_VERSION, A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_COMPLETED,
@@ -76,6 +77,8 @@ _DISPLAY_ONLY_EVENT_TYPES = {
     "text_delta",
     "tool_result",
 }
+_EXTREME_DEFERRED_EVENT_TYPES = {"text_delta", "thinking_delta"}
+_EXTREME_JOURNAL_FLUSH_EVENTS = 512
 _RECOVERY_STATE_SCOPES = {"step", "candidate", "candidateStep", "candidate_step"}
 _RECOVERY_STATE_STATUSES = {"working"}
 
@@ -113,6 +116,7 @@ class PipelineA2AEventPublisher:
         before_enqueue: PipelineBeforeEnqueueHook | None = None,
         after_backup_commit: PipelineAfterBackupCommitHook | None = None,
         backup_commit_gate: PipelineBackupCommitGate | None = None,
+        extreme_performance: bool | None = None,
     ) -> None:
         self.event_queue = event_queue
         self.translator = translator
@@ -131,6 +135,13 @@ class PipelineA2AEventPublisher:
         self._delivery_lock_depth = 0
         self._last_sequence = 0
         self.last_envelope: dict[str, Any] | None = None
+        self.extreme_performance = (
+            a2a_extreme_performance_enabled() if extreme_performance is None else extreme_performance
+        )
+        self._extreme_snapshot_loaded = False
+        self._extreme_snapshot_cache: dict[str, Any] | None = None
+        self._extreme_pending_journal_events: list[dict[str, Any]] = []
+        self._extreme_pending_snapshot_events: list[dict[str, Any]] = []
 
     async def publish(
         self,
@@ -378,7 +389,10 @@ class PipelineA2AEventPublisher:
         async with self._sequence_lock:
             self._annotate_delivery_alias(envelope)
             try:
-                self._ensure_monotonic_sequence(envelope)
+                if self.extreme_performance:
+                    self._ensure_monotonic_sequence_fast(envelope)
+                else:
+                    self._ensure_monotonic_sequence(envelope)
             except _SequenceHighWaterUnavailableError:
                 logger.warning("Skipping A2A pipeline event until journal high-water sequence is readable")
                 return None
@@ -387,6 +401,13 @@ class PipelineA2AEventPublisher:
                 logger.warning("Skipping invalid A2A pipeline envelope: %r", envelope)
                 return None
             durable_required = require_durable_metadata or is_recovery_semantic_event(safe_envelope)
+            if self.extreme_performance:
+                return self._persist_envelope_extreme(
+                    safe_envelope,
+                    artifact_metadata=artifact_metadata,
+                    durable_required=durable_required,
+                    require_journal_metadata=require_journal_metadata,
+                )
             journal_persisted = False
             snapshot_persisted = False
             try:
@@ -416,6 +437,95 @@ class PipelineA2AEventPublisher:
                 logger.warning("Skipping A2A artifact update because pipeline metadata was not persisted")
                 return None
         return safe_envelope
+
+    def _persist_envelope_extreme(
+        self,
+        safe_envelope: dict[str, Any],
+        *,
+        artifact_metadata: dict[str, Any] | None,
+        durable_required: bool,
+        require_journal_metadata: bool,
+    ) -> dict[str, Any] | None:
+        if self._can_defer_extreme_metadata(
+            safe_envelope,
+            artifact_metadata=artifact_metadata,
+            durable_required=durable_required,
+            require_journal_metadata=require_journal_metadata,
+        ):
+            self._extreme_pending_journal_events.append(safe_envelope)
+            self._extreme_pending_snapshot_events.append(safe_envelope)
+            if len(self._extreme_pending_journal_events) >= _EXTREME_JOURNAL_FLUSH_EVENTS:
+                self._flush_extreme_journal_events()
+            return safe_envelope
+
+        journal_persisted = False
+        snapshot_persisted = False
+        self._flush_extreme_journal_events()
+        try:
+            self.journal.append(safe_envelope, durable=False)
+            journal_persisted = True
+        except Exception as exc:
+            logger.warning(
+                "Failed to append A2A pipeline journal event error_type=%s",
+                type(exc).__name__,
+            )
+
+        try:
+            snapshot_events = [*self._extreme_pending_snapshot_events, safe_envelope]
+            snapshot = reduce_pipeline_events(snapshot_events, existing_snapshot=self._extreme_snapshot_base())
+            snapshot_persisted = self.snapshot_store.save(snapshot, durable=False, compact=True)
+            if snapshot_persisted:
+                self._extreme_snapshot_cache = snapshot
+                self._extreme_snapshot_loaded = True
+                self._extreme_pending_snapshot_events.clear()
+                _maybe_inject_test_fault("after_a2a_pipeline_snapshot_saved")
+        except Exception:
+            logger.warning("Failed to persist A2A pipeline snapshot", exc_info=True)
+
+        if require_journal_metadata and not journal_persisted:
+            logger.warning("Skipping A2A pipeline status update because journal metadata was not persisted")
+            return None
+        if durable_required and not (journal_persisted or snapshot_persisted):
+            logger.warning("Skipping A2A pipeline status update because durable metadata was not persisted")
+            return None
+        if artifact_metadata is not None and not (journal_persisted or snapshot_persisted):
+            logger.warning("Skipping A2A artifact update because pipeline metadata was not persisted")
+            return None
+        return safe_envelope
+
+    def _can_defer_extreme_metadata(
+        self,
+        envelope: dict[str, Any],
+        *,
+        artifact_metadata: dict[str, Any] | None,
+        durable_required: bool,
+        require_journal_metadata: bool,
+    ) -> bool:
+        if artifact_metadata is not None or durable_required or require_journal_metadata:
+            return False
+        event_type = envelope.get("eventType")
+        return isinstance(event_type, str) and event_type in _EXTREME_DEFERRED_EVENT_TYPES
+
+    def _flush_extreme_journal_events(self) -> bool:
+        if not self._extreme_pending_journal_events:
+            return True
+        events = list(self._extreme_pending_journal_events)
+        try:
+            self.journal.append_many(events, durable=False)
+        except Exception as exc:
+            logger.warning(
+                "Failed to flush deferred A2A pipeline journal events error_type=%s",
+                type(exc).__name__,
+            )
+            return False
+        self._extreme_pending_journal_events.clear()
+        return True
+
+    def _extreme_snapshot_base(self) -> dict[str, Any] | None:
+        if not self._extreme_snapshot_loaded:
+            self._extreme_snapshot_cache = self.snapshot_store.load()
+            self._extreme_snapshot_loaded = True
+        return self._extreme_snapshot_cache
 
     async def enqueue_persisted(
         self,
@@ -598,6 +708,13 @@ class PipelineA2AEventPublisher:
         if current <= previous:
             envelope["sequence"] = previous + 1
             current = previous + 1
+        self._last_sequence = max(self._last_sequence, current)
+
+    def _ensure_monotonic_sequence_fast(self, envelope: dict[str, Any]) -> None:
+        current = _int_value(envelope.get("sequence"), 0)
+        if current <= self._last_sequence:
+            envelope["sequence"] = self._last_sequence + 1
+            current = self._last_sequence + 1
         self._last_sequence = max(self._last_sequence, current)
 
     def _last_persisted_sequence(self) -> int:

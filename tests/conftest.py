@@ -15,6 +15,12 @@ os.environ["LANG"] = "en_US.UTF-8"
 os.environ["NO_COLOR"] = "1"
 os.environ["TERM"] = "dumb"
 
+# Most existing A2A tests assert the reliability-first sidecar behavior where
+# every published event is immediately visible in journal/snapshot files.
+# Product default remains extreme performance; dedicated tests clear this env
+# var to exercise that default.
+os.environ.setdefault("IAC_CODE_A2A_EXTREME_PERFORMANCE", "0")
+
 # Re-initialize i18n with English locale
 from iac_code.i18n import setup_i18n  # noqa: E402
 
