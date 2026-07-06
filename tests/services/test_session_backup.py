@@ -10,6 +10,7 @@ from iac_code.services.session_backup import (
     SessionBackupBlocked,
     SessionBackupError,
     SessionBackupService,
+    SessionRestoreResult,
 )
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
@@ -168,6 +169,58 @@ def test_backup_mirrors_session_and_excludes_local_markers(monkeypatch: pytest.M
     assert marker["status"] == "succeeded"
     assert marker["reason"] == "pipeline_step_completed"
     assert "error" not in marker
+
+
+def test_restore_session_copies_backup_only_v2_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config_projects = tmp_path / "config" / "projects"
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    cwd = "/repo"
+    session_id = "restore-session"
+    storage = SessionStorage(projects_dir=config_projects)
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    backup_session_dir = _create_v2_session_dir(backup_storage, cwd, session_id)
+    (backup_session_dir / "session.jsonl").write_text('{"role":"user","content":"from backup"}\n', encoding="utf-8")
+    (backup_session_dir / "a2a").mkdir()
+    (backup_session_dir / "a2a" / "context.json").write_text('{"context_id":"ctx-1"}\n', encoding="utf-8")
+
+    result = SessionBackupService(session_storage=storage, retry_delays=()).restore_session(cwd, session_id)
+
+    restored_session_dir = storage.session_dir(cwd, session_id)
+    assert isinstance(result, SessionRestoreResult)
+    assert result.enabled is True
+    assert result.restored is True
+    assert result.source == backup_session_dir
+    assert result.destination == restored_session_dir
+    assert (restored_session_dir / "metadata.json").is_file()
+    assert (restored_session_dir / "session.jsonl").read_text(encoding="utf-8") == (
+        '{"role":"user","content":"from backup"}\n'
+    )
+    assert (restored_session_dir / "a2a" / "context.json").read_text(encoding="utf-8") == '{"context_id":"ctx-1"}\n'
+
+
+def test_restore_session_does_not_overwrite_existing_config_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_projects = tmp_path / "config" / "projects"
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    cwd = "/repo"
+    session_id = "restore-session"
+    storage = SessionStorage(projects_dir=config_projects)
+    local_session_dir = _create_v2_session_dir(storage, cwd, session_id)
+    (local_session_dir / "session.jsonl").write_text("local\n", encoding="utf-8")
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    backup_session_dir = _create_v2_session_dir(backup_storage, cwd, session_id)
+    (backup_session_dir / "session.jsonl").write_text("backup\n", encoding="utf-8")
+
+    result = SessionBackupService(session_storage=storage, retry_delays=()).restore_session(cwd, session_id)
+
+    assert result.enabled is True
+    assert result.restored is False
+    assert result.destination == local_session_dir
+    assert (local_session_dir / "session.jsonl").read_text(encoding="utf-8") == "local\n"
 
 
 def test_backup_deletes_stale_mirror_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

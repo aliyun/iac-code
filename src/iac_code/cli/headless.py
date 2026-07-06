@@ -12,6 +12,7 @@ Exit codes:
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import time
 from typing import IO, Any
@@ -122,6 +123,7 @@ class HeadlessRunner:
         cli_permission_mode: str | None = None,
         verbose: bool = False,
         progress_stream: IO[str] | None = None,
+        resume_session_id: str | bool | None = None,
     ) -> None:
         self._model = model
         self._output_format = output_format
@@ -132,6 +134,7 @@ class HeadlessRunner:
         self._cli_permission_mode = cli_permission_mode
         self._verbose = verbose
         self._progress_stream = progress_stream or sys.stderr
+        self._resume_session_id = resume_session_id
         self._mcp_config_warnings: list[Any] = []
         self._mcp_warnings_printed_count = 0
         self._runtime: Any | None = None
@@ -161,18 +164,64 @@ class HeadlessRunner:
         """Create and return a fully configured AgentLoop."""
         from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 
+        cwd = os.getcwd()
+        session_id, resume_messages = self._resolve_resume_options()
+
         runtime = create_agent_runtime(
             AgentFactoryOptions(
                 model=self._model,
+                session_id=session_id,
+                cwd=cwd,
                 max_turns=self._max_turns,
                 cli_allowed_tools=self._cli_allowed_tools,
                 cli_disallowed_tools=self._cli_disallowed_tools,
                 cli_permission_mode=self._cli_permission_mode,
+                resume_messages=resume_messages,
             )
         )
         self._runtime = runtime
         self._mcp_config_warnings = runtime.mcp_config_warnings if runtime.mcp_config_warnings is not None else []
         return runtime.agent_loop
+
+    def _resolve_resume_options(self) -> tuple[str | None, list[Any] | None]:
+        resume = self._resume_session_id
+        if resume is None:
+            return None, None
+
+        from iac_code.services.session_backup import SessionBackupService
+        from iac_code.services.session_index import SessionIndex
+        from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
+        from iac_code.services.session_storage import SessionStorage
+        from iac_code.utils.project_paths import same_project_path
+
+        cwd = os.getcwd()
+        storage = SessionStorage()
+        session_id: str | None = None
+        if resume is True:
+            latest = storage.get_latest_session_anywhere()
+            if latest is None:
+                return None, None
+            latest_cwd, latest_session_id = latest
+            if latest_cwd and not same_project_path(latest_cwd, cwd):
+                raise ValueError(_("Session not found: {session_id}").format(session_id=latest_session_id))
+            session_id = latest_session_id
+        elif isinstance(resume, str) and resume:
+            index = SessionIndex()
+            resolution = resolve_session_argument(index, cwd, resume)
+            if resolution.status == ResolutionStatus.NOT_FOUND and SessionBackupService.is_safe_session_id(resume):
+                SessionBackupService(session_storage=storage).restore_session(cwd, resume)
+                resolution = resolve_session_argument(index, cwd, resume)
+            if resolution.status != ResolutionStatus.FOUND or resolution.entry is None:
+                raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
+            if resolution.entry.cwd and not same_project_path(resolution.entry.cwd, cwd):
+                raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
+            session_id = resolution.entry.session_id
+
+        if not session_id:
+            return None, None
+        loaded = storage.load(cwd, session_id)
+        repaired = SessionStorage.repair_interrupted(loaded) if loaded else []
+        return session_id, repaired or None
 
     def _print_mcp_config_warnings(self) -> None:
         warnings = list(self._mcp_config_warnings or [])

@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+from iac_code.agent.message import Message
 from iac_code.pipeline.config import RunMode
+from iac_code.services.session_index import SessionIndex
+from iac_code.services.session_storage import SessionStorage
 
 
 class FakeSessionStorage:
@@ -127,3 +130,28 @@ def test_normal_mode_without_sidecar_loads_history(monkeypatch, tmp_path):
     repl = _make_repl_under_test(tmp_path, messages, pipeline_sidecar=False, runtime_mode=RunMode.NORMAL)
     result = repl._load_resume_messages("test-session")
     assert len(result) == 1
+
+
+def test_explicit_resume_restores_backup_only_session(monkeypatch, tmp_path):
+    from iac_code.ui.repl import InlineREPL
+
+    config_dir = tmp_path / "config"
+    backup_root = tmp_path / "backup"
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    session_id = "backup-only-session"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    backup_storage.save(str(cwd), session_id, [Message(role="user", content="from backup")], git_branch=None)
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = str(cwd)
+    repl._session_storage = SessionStorage(projects_dir=config_dir / "projects")
+    repl.session_index = SessionIndex(projects_dir=config_dir / "projects")
+
+    resolved = repl._resolve_session_id(session_id)
+
+    assert resolved == session_id
+    assert repl._resolved_existing_session is True
+    assert repl._session_storage.load(str(cwd), session_id)[0].content == "from backup"

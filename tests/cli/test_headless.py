@@ -12,9 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+from iac_code.agent.message import Message
 from iac_code.cli.headless import EXIT_ERROR, EXIT_MAX_TURNS, EXIT_OK, HeadlessRunner
 from iac_code.cli.output_formats import OutputFormat
 from iac_code.providers.manager import ProviderNotConfiguredError
+from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.types.stream_events import (
@@ -144,6 +146,41 @@ async def test_headless_closes_agent_runtime_after_run(monkeypatch):
 
     assert exit_code == EXIT_OK
     runtime.aclose.assert_awaited_once()
+
+
+def test_headless_explicit_resume_restores_backup_only_session(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    backup_root = tmp_path / "backup"
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    session_id = "backup-only-headless"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    monkeypatch.chdir(cwd)
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    backup_storage.save(str(cwd), session_id, [Message(role="user", content="from backup")], git_branch=None)
+    captured_options = {}
+    mock_loop = AsyncMock()
+    runtime = SimpleNamespace(
+        agent_loop=mock_loop,
+        session_id=session_id,
+        mcp_config_warnings=[],
+        aclose=AsyncMock(),
+    )
+
+    def fake_create_agent_runtime(options):
+        captured_options["session_id"] = options.session_id
+        captured_options["resume_messages"] = options.resume_messages
+        return runtime
+
+    monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", fake_create_agent_runtime)
+
+    runner = HeadlessRunner(model="test-model", resume_session_id=session_id)
+
+    assert runner._create_agent_loop() is mock_loop
+    assert captured_options["session_id"] == session_id
+    assert captured_options["resume_messages"][0].content == "from backup"
+    assert SessionStorage(projects_dir=config_dir / "projects").load(str(cwd), session_id)[0].content == "from backup"
 
 
 @pytest.mark.asyncio

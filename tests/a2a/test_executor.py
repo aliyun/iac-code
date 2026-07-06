@@ -20,7 +20,7 @@ from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
 from iac_code.a2a.task_store import A2ATaskStore
-from iac_code.agent.message import ImageBlock, TextBlock
+from iac_code.agent.message import ImageBlock, Message, TextBlock
 from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
 from iac_code.services.session_storage import SessionStorage
@@ -198,6 +198,48 @@ async def test_executor_runs_prompt_and_finishes_input_required(
     assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert "".join(record.output_text) == "hi"
+
+
+@pytest.mark.asyncio
+async def test_executor_restores_backup_only_session_for_persisted_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    backup_root = tmp_path / "backup"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cwd = str(workspace)
+    session_id = "backup-only-session"
+    context_id = "ctx-restore"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    backup_storage.save(cwd, session_id, [Message(role="user", content="from backup")], git_branch=None)
+    persistence = A2APersistenceStore(tmp_path / "a2a-persistence")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=cwd))
+    captured_options = {}
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+
+    def fake_create_agent_runtime(options):
+        captured_options["session_id"] = options.session_id
+        captured_options["resume_messages"] = options.resume_messages
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_create_agent_runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(context_id=context_id, metadata={"iac_code": {"cwd": cwd}}),
+        FakeEventQueue(),
+    )
+
+    restored_storage = SessionStorage(projects_dir=config_dir / "projects")
+    assert captured_options["session_id"] == session_id
+    assert captured_options["resume_messages"][0].content == "from backup"
+    assert restored_storage.load(cwd, session_id)[0].content == "from backup"
 
 
 @pytest.mark.asyncio

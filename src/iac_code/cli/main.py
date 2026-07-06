@@ -281,6 +281,7 @@ def main(
                 cli_disallowed_tools=cli_disallowed,
                 cli_permission_mode=permission_mode or None,
                 verbose=verbose,
+                resume_session_id=True if continue_session else (resume or None),
             )
             exit_code = asyncio.run(_run_with_handler(runner.run(prompt)))
         except _QwenPawError as exc:
