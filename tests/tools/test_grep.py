@@ -205,6 +205,29 @@ class TestGrepExecute:
         assert str(package / "nested.py") in result.content
         assert str(tmp_path / "app.py") not in result.content
 
+    async def test_rg_path_with_symlinked_directory_matches_python_fallback(self, tool, tmp_path):
+        if not _is_rg_available():
+            pytest.skip("rg is not available")
+
+        real_refs = tmp_path / "real_refs"
+        real_refs.mkdir()
+        (real_refs / "ros-template.md").write_text("ROSTemplateFormatVersion reference\n", encoding="utf-8")
+        search_root = tmp_path / "search"
+        search_root.mkdir()
+        try:
+            (search_root / "references").symlink_to(real_refs, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        context = ToolContext(cwd=str(tmp_path), trusted_read_directories=[str(real_refs)])
+        result = await tool.execute(
+            tool_input={"pattern": "ROSTemplateFormatVersion", "path": str(search_root)},
+            context=context,
+        )
+
+        assert result.is_error is False
+        assert str(search_root / "references" / "ros-template.md") in result.content
+
 
 class TestGrepRendering:
     def test_render_tool_use_empty(self, tool):

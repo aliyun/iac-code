@@ -112,6 +112,23 @@ class TestStepExecutorToolSetup:
         assert agent_context.agent_loop is not None
         assert agent_context.agent_loop._pipeline_mode is True
 
+    def test_agent_loop_context_preserves_ros_deploy_owned_stack_ids_from_seed(self, tmp_path):
+        executor = _make_executor(tmp_path)
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+        seed = {"ros_deploy_owned_stack_ids": {"stack-failed": {"action": "create"}}}
+
+        agent_context = executor.build_agent_loop_context(
+            step,
+            ctx,
+            "test_session",
+            completion_guard_state_seed=seed,
+        )
+
+        assert agent_context.completion_guard_state["ros_deploy_owned_stack_ids"] == {
+            "stack-failed": {"action": "create"}
+        }
+
     def test_full_tools_when_step_returns_none(self, tmp_path):
         registry = ToolRegistry()
 

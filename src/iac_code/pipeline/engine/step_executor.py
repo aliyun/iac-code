@@ -353,6 +353,11 @@ class StepExecutor:
             completion_guard_state["successful_tools"].update(seed.get("successful_tools", set()))
             completion_guard_state["tool_results"].update(seed.get("tool_results", {}))
             completion_guard_state["tool_result_records"].extend(seed.get("tool_result_records", []))
+            owned_stack_ids = seed.get("ros_deploy_owned_stack_ids")
+            if isinstance(owned_stack_ids, dict):
+                completion_guard_state.setdefault("ros_deploy_owned_stack_ids", {}).update(
+                    copy.deepcopy(owned_stack_ids)
+                )
 
         build_tool_kwargs: dict[str, Any] = {
             "rollback_targets": rollback_targets,

@@ -115,6 +115,20 @@ def _path_is_under_any_real_root(path: str, roots: list[str]) -> bool:
     return any(_path_is_under_real_root(path, root) for root in roots if root)
 
 
+def _contains_directory_symlink(path: str) -> bool:
+    if not os.path.isdir(path):
+        return False
+    if os.path.islink(path):
+        return True
+
+    for dirpath, dirnames, _filenames in os.walk(path, followlinks=False):
+        for dirname in dirnames:
+            child = os.path.join(dirpath, dirname)
+            if os.path.islink(child) and os.path.isdir(child):
+                return True
+    return False
+
+
 async def _run_rg(
     pattern: str,
     path: str,
@@ -319,7 +333,7 @@ class GrepTool(Tool):
             *context.trusted_read_directories,
             str(get_iac_code_application_root()),
         ]
-        if _is_rg_available() and not resolution.used_relative_root:
+        if _is_rg_available() and not resolution.used_relative_root and not _contains_directory_symlink(path):
             returncode, stdout, stderr = await _run_rg(
                 pattern,
                 path,
