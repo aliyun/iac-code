@@ -16,11 +16,16 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Iterable
 
 from iac_code.i18n import _
-from iac_code.services.session_layout import UnsupportedSessionLayoutError
-from iac_code.services.session_metadata import SESSION_METADATA_FILENAME
+from iac_code.services.session_layout import (
+    UnsupportedSessionLayoutError,
+    is_supported_session_dir_for_id,
+    require_supported_session_layout,
+)
+from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SESSION_METADATA_FILENAME
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.path_components import is_unsafe_windows_path_component
+from iac_code.utils.project_paths import project_dir_candidates
 from iac_code.utils.public_errors import sanitize_public_text
 from iac_code.utils.state_io import atomic_write_json, fsync_parent_dir, safe_replace
 
@@ -60,6 +65,17 @@ class BackupResult:
     succeeded: bool = True
     error: str | None = None
     retry_count: int = 0
+
+
+@dataclass(frozen=True)
+class SessionRestoreResult:
+    enabled: bool
+    restored: bool = False
+    source: Path | None = None
+    destination: Path | None = None
+    copied_files: int = 0
+    deleted_files: int = 0
+    error: str | None = None
 
 
 class SessionBackupError(Exception):
@@ -179,6 +195,42 @@ class SessionBackupService:
             ) from None
         return failure_result
 
+    def restore_session(self, cwd: str, session_id: str) -> SessionRestoreResult:
+        if not self._backup_enabled():
+            return SessionRestoreResult(enabled=False)
+        self._validate_session_id(session_id)
+        backup_root = self._backup_root()
+        if backup_root is None:
+            return SessionRestoreResult(enabled=False)
+
+        destination = Path(self._session_storage.session_dir(cwd, session_id))
+        if self._session_exists(cwd, session_id):
+            return SessionRestoreResult(enabled=True, restored=False, destination=destination)
+
+        source = self._source_for_restore(cwd, session_id, backup_root)
+        if source is None:
+            return SessionRestoreResult(enabled=True, restored=False, destination=destination)
+
+        with self._session_restore_lock(destination):
+            destination = Path(self._session_storage.session_dir(cwd, session_id))
+            if self._session_exists(cwd, session_id):
+                return SessionRestoreResult(enabled=True, restored=False, source=source, destination=destination)
+            source = self._source_for_restore(cwd, session_id, backup_root)
+            if source is None:
+                return SessionRestoreResult(enabled=True, restored=False, destination=destination)
+            self._validate_restore_paths(source, destination, backup_root)
+            self._reject_existing_restore_destination(destination)
+            result = self._mirror(source, destination)
+            self._validate_restored_session(destination, session_id)
+            return SessionRestoreResult(
+                enabled=True,
+                restored=True,
+                source=source,
+                destination=destination,
+                copied_files=result.copied_files,
+                deleted_files=result.deleted_files,
+            )
+
     def _source_for_backup(self, cwd: str, session_id: str) -> Path | None:
         v2_session_dir = getattr(self._session_storage, "v2_session_dir", None)
         if callable(v2_session_dir):
@@ -202,6 +254,22 @@ class SessionBackupService:
         if (source / SESSION_METADATA_FILENAME).exists():
             return None
         return source
+
+    def _source_for_restore(self, cwd: str, session_id: str, backup_root: Path) -> Path | None:
+        projects_root = backup_root / "projects"
+        for project_dir in project_dir_candidates(cwd, projects_root):
+            candidate = project_dir / session_id
+            if not candidate.exists():
+                continue
+            if not is_supported_session_dir_for_id(candidate, session_id):
+                continue
+            layout_version = require_supported_session_layout(candidate)
+            if layout_version != SESSION_LAYOUT_VERSION_V2:
+                raise UnsupportedSessionLayoutError(
+                    _("Unsupported session layout version: {version}").format(version=layout_version)
+                )
+            return candidate
+        return None
 
     def _backup_root(self) -> Path | None:
         raw = os.environ.get(BACKUP_ENV_VAR, "").strip()
@@ -283,6 +351,14 @@ class SessionBackupService:
     def _backup_enabled() -> bool:
         return bool(os.environ.get(BACKUP_ENV_VAR, "").strip())
 
+    @classmethod
+    def is_safe_session_id(cls, session_id: str) -> bool:
+        try:
+            cls._validate_session_id(session_id)
+        except SessionBackupError:
+            return False
+        return True
+
     @staticmethod
     def _validate_session_id(session_id: str) -> None:
         if (
@@ -326,6 +402,59 @@ class SessionBackupService:
                 _("backup destination resolves outside backup root: {destination}").format(destination=destination)
             )
         self._validate_physical_mirror_paths(source, destination, backup_root)
+
+    def _validate_restore_paths(self, source: Path, destination: Path, backup_root: Path) -> None:
+        source_resolved = self._resolve_real_source(source)
+        backup_root_resolved = self._resolve_real_dir(backup_root, "backup root")
+        self._reject_existing_symlink_ancestry(destination.parent, label="restore destination", include_leaf=True)
+        destination_parent_resolved = self._resolve_real_dir(destination.parent, "restore destination")
+        destination_resolved = destination_parent_resolved / destination.name
+
+        if not self._path_equal_or_under(source_resolved, backup_root_resolved):
+            raise SessionBackupError("restore source resolves outside backup root: {source}".format(source=source))
+        if (
+            self._path_equal_or_under(destination_resolved, source_resolved)
+            or self._path_equal_or_under(source_resolved, destination_resolved)
+            or self._path_equal_or_under(destination_resolved, backup_root_resolved)
+            or self._path_equal_or_under(backup_root_resolved, destination_resolved)
+        ):
+            raise SessionBackupError(
+                "restore destination overlaps backup source: {destination}".format(destination=destination)
+            )
+        self._validate_physical_restore_paths(source, destination, backup_root)
+
+    def _validate_physical_restore_paths(self, source: Path, destination: Path, backup_root: Path) -> None:
+        if os.name != "nt":
+            return
+        source_physical = self._physical_path_text(source)
+        backup_root_physical = self._physical_path_text(backup_root)
+        destination_physical = self._physical_path_text(destination)
+        if not self._path_text_equal_or_under(source_physical, backup_root_physical):
+            raise SessionBackupError("restore source resolves outside backup root: {source}".format(source=source))
+        if (
+            self._path_text_equal_or_under(destination_physical, source_physical)
+            or self._path_text_equal_or_under(source_physical, destination_physical)
+            or self._path_text_equal_or_under(destination_physical, backup_root_physical)
+            or self._path_text_equal_or_under(backup_root_physical, destination_physical)
+        ):
+            raise SessionBackupError(
+                "restore destination overlaps backup source: {destination}".format(destination=destination)
+            )
+
+    def _reject_existing_restore_destination(self, destination: Path) -> None:
+        if destination.is_symlink() or self._is_reparse_point(destination) or destination.exists():
+            raise SessionBackupError(
+                "restore destination already exists: {destination}".format(destination=destination)
+            )
+
+    def _validate_restored_session(self, destination: Path, session_id: str) -> None:
+        layout_version = require_supported_session_layout(destination)
+        if layout_version != SESSION_LAYOUT_VERSION_V2:
+            raise UnsupportedSessionLayoutError(
+                _("Unsupported session layout version: {version}").format(version=layout_version)
+            )
+        if not is_supported_session_dir_for_id(destination, session_id):
+            raise SessionBackupError("restored session metadata does not match session_id")
 
     def _validate_physical_mirror_paths(self, source: Path, destination: Path, backup_root: Path) -> None:
         if os.name != "nt":
@@ -575,9 +704,56 @@ class SessionBackupService:
                     with suppress(OSError):
                         fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
+    @contextmanager
+    def _session_restore_lock(self, destination: Path):
+        lock_path = destination.parent / ".{}.restore.lock".format(destination.name)
+        self._ensure_private_dir(lock_path.parent)
+        if lock_path.is_symlink() or self._is_reparse_point(lock_path):
+            raise SessionBackupError("restore lock is a symlink: {path}".format(path=lock_path))
+        if lock_path.exists() and not lock_path.is_file():
+            raise SessionBackupError("restore lock is not a regular file: {path}".format(path=lock_path.name))
+        with self._open_restore_lock_file(lock_path) as lock_file:
+            ensure_private_file(lock_path)
+            if os.name == "nt":
+                import msvcrt
+
+                try:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                except OSError as exc:
+                    raise SessionBackupError(
+                        "could not acquire restore lock for {destination}".format(destination=destination)
+                    ) from exc
+                try:
+                    yield
+                finally:
+                    with suppress(OSError):
+                        lock_file.seek(0)
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                except OSError as exc:
+                    raise SessionBackupError(
+                        "could not acquire restore lock for {destination}".format(destination=destination)
+                    ) from exc
+                try:
+                    yield
+                finally:
+                    with suppress(OSError):
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     def _open_backup_lock_file(self, lock_path: Path):
         if lock_path.is_symlink() or self._is_reparse_point(lock_path):
             raise SessionBackupError(_("backup lock is a symlink: {path}").format(path=lock_path))
+        fd = self._open_no_follow_fd(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        return os.fdopen(fd, "a+b")
+
+    def _open_restore_lock_file(self, lock_path: Path):
+        if lock_path.is_symlink() or self._is_reparse_point(lock_path):
+            raise SessionBackupError("restore lock is a symlink: {path}".format(path=lock_path))
         fd = self._open_no_follow_fd(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         return os.fdopen(fd, "a+b")
 
@@ -881,6 +1057,22 @@ class SessionBackupService:
         except SessionBackupError:
             return False
         return True
+
+    def _session_exists(self, cwd: str, session_id: str) -> bool:
+        exists = getattr(self._session_storage, "exists", None)
+        if callable(exists):
+            return bool(exists(cwd, session_id))
+        session_path = getattr(self._session_storage, "session_path", None)
+        if callable(session_path):
+            raw_path = session_path(cwd, session_id)
+            if isinstance(raw_path, (str, Path)) and Path(raw_path).exists():
+                return True
+        session_dir = getattr(self._session_storage, "session_dir", None)
+        if callable(session_dir):
+            raw_dir = session_dir(cwd, session_id)
+            if isinstance(raw_dir, (str, Path)) and Path(raw_dir).exists():
+                return True
+        return False
 
     def _prune_empty_dirs(self, root: Path) -> None:
         for path in sorted((p for p in self._iter_tree(root, include_reparse=True) if p.is_dir()), reverse=True):

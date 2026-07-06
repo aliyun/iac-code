@@ -50,8 +50,9 @@ from iac_code.services.permissions.audit import (
     permission_audit_operation,
     redacted_tool_input_for_settings,
 )
-from iac_code.services.session_backup import BackupReason, SessionBackupService
+from iac_code.services.session_backup import BackupReason, SessionBackupError, SessionBackupService
 from iac_code.services.session_index import SessionIndex
+from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import normalize_session_name
 from iac_code.services.session_resolver import ResolutionStatus, resolve_session_argument
 from iac_code.services.session_storage import SessionStorage
@@ -4719,7 +4720,10 @@ class InlineREPL:
         if isinstance(resume, str) and resume:
             resolution = resolve_session_argument(self.session_index, self._original_cwd, resume)
             if resolution.status == ResolutionStatus.NOT_FOUND:
-                raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
+                self._restore_session_from_backup_for_resume(resume)
+                resolution = resolve_session_argument(self.session_index, self._original_cwd, resume)
+                if resolution.status == ResolutionStatus.NOT_FOUND:
+                    raise ValueError(_("Session not found: {session_id}").format(session_id=resume))
             if resolution.status == ResolutionStatus.AMBIGUOUS_NAME:
                 raise ValueError(self._ambiguous_resume_message(resolution.candidates))
             if resolution.entry is None:
@@ -4729,6 +4733,18 @@ class InlineREPL:
             self._resolved_existing_session = True
             return resolution.entry.session_id
         return str(uuid.uuid4())
+
+    def _restore_session_from_backup_for_resume(self, session_id: str) -> bool:
+        if not SessionBackupService.is_safe_session_id(session_id):
+            return False
+        try:
+            result = SessionBackupService(session_storage=self._session_storage).restore_session(
+                self._original_cwd,
+                session_id,
+            )
+        except (SessionBackupError, UnsupportedSessionLayoutError) as exc:
+            raise ValueError(str(exc)) from exc
+        return bool(result.restored)
 
     def _load_resume_messages(self, resume: str | bool | None) -> list:
         """Load and repair saved messages when resuming a session.

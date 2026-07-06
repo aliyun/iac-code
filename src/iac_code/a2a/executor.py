@@ -987,6 +987,7 @@ class IacCodeA2AExecutor(AgentExecutor):
 
         def runtime_factory(session_id: str) -> Any:
             session_storage = SessionStorage()
+            SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
             ensure_v2_session = getattr(session_storage, "ensure_v2_session_dir_for_new_session", None)
             if callable(ensure_v2_session):
                 ensure_v2_session(cwd, session_id)

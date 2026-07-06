@@ -263,6 +263,7 @@ class IacCodeA2APipelineExecutor:
         session_storage = SessionStorage()
 
         def runtime_factory(session_id: str) -> Any:
+            SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
             return create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd))
 
         try:

@@ -30,7 +30,12 @@ async def resume_command(context=None, args: list[str] | None = None, **_kwargs:
     if arg_str:
         resolution = resolve_session_argument(index, repl._original_cwd, arg_str)
         if resolution.status == ResolutionStatus.NOT_FOUND:
-            return _("Session not found: {arg}").format(arg=arg_str)
+            restore = getattr(repl, "_restore_session_from_backup_for_resume", None)
+            if callable(restore):
+                restore(arg_str)
+                resolution = resolve_session_argument(index, repl._original_cwd, arg_str)
+            if resolution.status == ResolutionStatus.NOT_FOUND:
+                return _("Session not found: {arg}").format(arg=arg_str)
         if resolution.status == ResolutionStatus.FOUND:
             if resolution.entry is None:
                 return _("Session not found: {arg}").format(arg=arg_str)
