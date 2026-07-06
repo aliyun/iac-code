@@ -503,3 +503,67 @@ def test_continue_validation_failure_result_rendering_mentions_recommended_actio
     assert message is not None
     assert "ContinueCreateStackValidationFailed" in message
     assert "delete_and_create" in message
+
+
+def test_render_tool_result_message_shows_short_success_summary():
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    content = json.dumps(
+        {
+            "stack_id": "a463b158-5429-4a2d-9173-825271c28dcb",
+            "stack_name": "single-vswitch-20260706-k7m3x9",
+            "status": "CREATE_COMPLETE",
+            "status_reason": "Stack CREATE completed successfully",
+            "progress_percentage": 100.0,
+            "elapsed_seconds": 5,
+            "is_success": True,
+        },
+        indent=2,
+    )
+
+    message = RosDeployTool().render_tool_result_message(content)
+
+    assert message == "single-vswitch-20260706-k7m3x9 creation succeeded (a463b158)"
+
+
+def test_render_tool_result_message_shows_short_failure_summary():
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    content = json.dumps(
+        {
+            "stack_id": "a463b158-5429-4a2d-9173-825271c28dcb",
+            "stack_name": "single-vswitch-20260706-k7m3x9",
+            "status": "CREATE_FAILED",
+            "status_reason": (
+                "Resource CREATE failed: VPCResourceException: resources.VSwitch: "
+                "code: InvalidCidrBlock.Overlapped, message: The CIDR block 192.168.200.0/24 "
+                "Overlapped exists CIDR block."
+            ),
+            "progress_percentage": 0.0,
+            "elapsed_seconds": 5,
+            "is_success": False,
+        },
+        indent=2,
+    )
+
+    message = RosDeployTool().render_tool_result_message(content, is_error=True)
+
+    assert message == "single-vswitch-20260706-k7m3x9 creation failed: CIDR block overlapped (a463b158)"
+
+
+def test_render_tool_result_message_keeps_verbose_json():
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    content = json.dumps(
+        {
+            "stack_id": "a463b158-5429-4a2d-9173-825271c28dcb",
+            "stack_name": "single-vswitch-20260706-k7m3x9",
+            "status": "CREATE_COMPLETE",
+            "is_success": True,
+        },
+        indent=2,
+    )
+
+    message = RosDeployTool().render_tool_result_message(content, verbose=True)
+
+    assert message == content

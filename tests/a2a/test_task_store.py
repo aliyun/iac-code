@@ -152,23 +152,27 @@ def test_load_context_snapshot_failure_logs_sanitized_warning(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_context_runtime_factory_runs_outside_mutation_lock() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=60, cleanup_interval_seconds=300)
+    started = threading.Event()
+    release = threading.Event()
 
     def slow_runtime_factory(session_id: str):
-        time.sleep(0.2)
+        started.set()
+        release.wait(timeout=2)
         return f"rt-{session_id}"
 
-    start = time.monotonic()
     context_task = asyncio.create_task(
         store.get_or_create_context(context_id="ctx-1", cwd="/tmp", runtime_factory=slow_runtime_factory)
     )
-    await asyncio.sleep(0.01)
 
-    await asyncio.wait_for(store.save(sdk_task("task-while-runtime-starts")), timeout=0.1)
-    save_elapsed = time.monotonic() - start
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=1)
+        await asyncio.wait_for(store.save(sdk_task("task-while-runtime-starts")), timeout=1)
+        assert not context_task.done()
+    finally:
+        release.set()
 
-    context = await context_task
+    context = await asyncio.wait_for(context_task, timeout=1)
     assert context.runtime == f"rt-{context.session_id}"
-    assert save_elapsed < 0.15
 
 
 @pytest.mark.asyncio

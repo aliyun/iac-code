@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -381,6 +382,35 @@ class TestRendererHelpers:
         assert line is not None
         assert "Call succeeded (RequestId: REQ-42)" in line.plain
         assert "Resources" not in line.plain
+
+    def test_render_tool_result_summarizes_pipeline_ros_deploy_without_registry_tool(self):
+        renderer = make_renderer()
+        record = _ToolCallRecord(
+            tool_name="ros_deploy",
+            tool_input={},
+            done=True,
+            is_error=True,
+            result=json.dumps(
+                {
+                    "stack_id": "a463b158-5429-4a2d-9173-825271c28dcb",
+                    "stack_name": "single-vswitch-20260706-k7m3x9",
+                    "status": "CREATE_FAILED",
+                    "status_reason": (
+                        "Resource CREATE failed: VPCResourceException: resources.VSwitch: "
+                        "code: InvalidCidrBlock.Overlapped, message: The CIDR block 192.168.200.0/24 "
+                        "Overlapped exists CIDR block."
+                    ),
+                    "is_success": False,
+                },
+                indent=2,
+            ),
+        )
+
+        line = renderer._render_tool_result(record)
+
+        assert line is not None
+        assert "single-vswitch-20260706-k7m3x9 creation failed: CIDR block overlapped (a463b158)" in line.plain
+        assert "status_reason" not in line.plain
 
     def test_print_segments_to_scrollback_archives_and_merges_assistant_turns(self):
         renderer = make_renderer()

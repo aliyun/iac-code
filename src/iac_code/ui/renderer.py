@@ -95,6 +95,11 @@ def _known_tool_result_message(
     is_error: bool = False,
     verbose: bool = False,
 ) -> str | None:
+    if tool_name == "ros_deploy":
+        from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+        return RosDeployTool().render_tool_result_message(output, is_error=is_error, verbose=verbose)
+
     from iac_code.tools.cloud.aliyun.ros_template_tools import render_ros_template_tool_result_message
 
     return render_ros_template_tool_result_message(tool_name, output, is_error=is_error, verbose=verbose)
