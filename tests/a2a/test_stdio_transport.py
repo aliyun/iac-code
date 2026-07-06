@@ -1,9 +1,10 @@
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock
 
 import pytest
 
-from iac_code.a2a.transports.dispatcher import create_runtime_components
+from iac_code.a2a.transports.dispatcher import A2ARuntimeComponents, create_runtime_components
 from iac_code.a2a.transports.stdio import (
     StdioA2AClient,
     StdioA2AServer,
@@ -11,9 +12,6 @@ from iac_code.a2a.transports.stdio import (
     encode_frame,
     is_streaming_request,
 )
-from iac_code.types.stream_events import TextDeltaEvent
-
-from .fakes import FakeAgentLoop, FakeRuntime
 
 
 class MemoryWriter:
@@ -40,6 +38,23 @@ def make_stream_pair() -> tuple[asyncio.StreamReader, MemoryWriter]:
     return reader, MemoryWriter(reader)
 
 
+async def close_stdio_server(
+    client_writer: MemoryWriter,
+    server_task: asyncio.Task[None],
+    components: A2ARuntimeComponents,
+) -> None:
+    client_writer.close()
+    try:
+        await asyncio.wait_for(server_task, timeout=1)
+    except asyncio.TimeoutError:
+        server_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await server_task
+        raise
+    finally:
+        await components.aclose()
+
+
 def test_encode_decode_frame_round_trip() -> None:
     payload = {"jsonrpc": "2.0", "id": "1", "result": {"ok": True}}
 
@@ -51,41 +66,41 @@ def test_send_streaming_message_is_streaming_request() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stdio_server_handles_unary_request(monkeypatch, tmp_path) -> None:
-    loop = FakeAgentLoop([TextDeltaEvent(text="stdio ok")])
-    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
-    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+async def test_stdio_server_handles_unary_request() -> None:
     client_to_server, client_writer = make_stream_pair()
     server_to_client, server_writer = make_stream_pair()
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
     server = StdioA2AServer(components=components, reader=client_to_server, writer=server_writer)
+    expected_response = {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {"status": {"state": "input-required"}},
+    }
+    server._dispatcher.dispatch = AsyncMock(return_value=expected_response)  # type: ignore[method-assign]
     task = asyncio.create_task(server.serve())
+    request = {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "message/send",
+        "params": {
+            "message": {
+                "messageId": "msg-1",
+                "role": "user",
+                "parts": [{"kind": "text", "text": "hello"}],
+            },
+            "configuration": {"acceptedOutputModes": ["text/plain"]},
+        },
+    }
 
-    client_writer.write(
-        encode_frame(
-            {
-                "jsonrpc": "2.0",
-                "id": "1",
-                "method": "message/send",
-                "params": {
-                    "message": {
-                        "messageId": "msg-1",
-                        "role": "user",
-                        "parts": [{"kind": "text", "text": "hello"}],
-                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
-                    },
-                    "configuration": {"acceptedOutputModes": ["text/plain"]},
-                },
-            }
-        )
-    )
+    try:
+        client_writer.write(encode_frame(request))
+        response = decode_frame(await asyncio.wait_for(server_to_client.readline(), timeout=1))
+    finally:
+        await close_stdio_server(client_writer, task, components)
 
-    response = decode_frame(await asyncio.wait_for(server_to_client.readline(), timeout=1))
     assert response["id"] == "1"
     assert response["result"]["status"]["state"] == "input-required"
-    client_writer.close()
-    await task
-    await components.aclose()
+    server._dispatcher.dispatch.assert_awaited_once_with(request)
 
 
 @pytest.mark.asyncio
@@ -101,9 +116,12 @@ async def test_stdio_server_sanitizes_outer_dispatch_errors() -> None:
     )
     task = asyncio.create_task(server.serve())
 
-    client_writer.write(encode_frame({"jsonrpc": "2.0", "id": "1", "method": "ping"}))
+    try:
+        client_writer.write(encode_frame({"jsonrpc": "2.0", "id": "1", "method": "ping"}))
 
-    response = decode_frame(await asyncio.wait_for(server_to_client.readline(), timeout=1))
+        response = decode_frame(await asyncio.wait_for(server_to_client.readline(), timeout=1))
+    finally:
+        await close_stdio_server(client_writer, task, components)
     assert response["id"] == "1"
     error = response["error"]
     assert error["code"] == -32603
@@ -113,10 +131,6 @@ async def test_stdio_server_sanitizes_outer_dispatch_errors() -> None:
     assert "/Users/alice" not in error["message"]
     assert "[REDACTED]" in error["message"]
     assert "[PATH]" in error["message"]
-
-    client_writer.close()
-    await task
-    await components.aclose()
 
 
 @pytest.mark.asyncio
@@ -142,9 +156,7 @@ async def test_stdio_streaming_request_emits_final_frame_and_client_finishes() -
     try:
         events = await asyncio.wait_for(collect(), timeout=1)
     finally:
-        client_writer.close()
-        await server_task
-        await components.aclose()
+        await close_stdio_server(client_writer, server_task, components)
 
     assert events == [
         {"jsonrpc": "2.0", "id": "stream-1", "result": {"status": {"state": "completed"}}},
