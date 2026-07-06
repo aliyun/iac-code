@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ntpath
+
 from iac_code.utils.public_paths import build_public_path_roots, sanitize_public_paths
 
 
@@ -38,3 +40,34 @@ def test_sanitize_public_paths_handles_space_separated_absolute_paths(tmp_path, 
     )
 
     assert sanitized == "paths: ./src/app.py $IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt [PATH]"
+
+
+def test_sanitize_public_paths_handles_space_separated_windows_paths() -> None:
+    roots = [
+        {"path": r"C:\Users\alice\project", "label": "."},
+        {"path": r"C:\Users\alice\config", "label": "$IAC_CODE_CONFIG_DIR"},
+    ]
+
+    value = (
+        r"paths: C:\Users\alice\project\src\app.py "
+        r"C:\Users\alice\config\tool-results\session-1\result.txt "
+        r"C:\outside\config.yaml"
+    )
+    sanitized = sanitize_public_paths(
+        value,
+        roots,
+    )
+
+    assert sanitized == "paths: ./src/app.py $IAC_CODE_CONFIG_DIR/tool-results/session-1/result.txt [PATH]"
+
+
+def test_sanitize_public_paths_keeps_posix_roots_platform_independent(monkeypatch) -> None:
+    monkeypatch.setattr("iac_code.utils.public_paths.os.path.abspath", ntpath.abspath)
+    monkeypatch.setattr("iac_code.utils.public_paths.os.path.realpath", ntpath.abspath)
+
+    sanitized = sanitize_public_paths(
+        "paths: /Users/alice/project/src/app.py /Users/alice/project/logs/result.txt",
+        [{"path": "/Users/alice/project", "label": "."}],
+    )
+
+    assert sanitized == "paths: ./src/app.py ./logs/result.txt"

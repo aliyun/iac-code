@@ -11,7 +11,14 @@ from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
 _CONNECTOR_TOKEN_END_PATTERN = r"""\s+(?:and|at|because|for|from|in|on|to|with)\b(?=\s+[A-Za-z0-9_.-]+\s*[:=])"""
-_PATH_END_PATTERN = r"""(?=""" + _CONNECTOR_TOKEN_END_PATTERN + r"""|$|[\r\n,;:)"'])"""
+_ABSOLUTE_PATH_TOKEN_END_PATTERN = r"""\s+(?=(?:/(?!/)|[A-Za-z]:[\\/]|\\\\))"""
+_PATH_END_PATTERN = (
+    r"""(?="""
+    + _CONNECTOR_TOKEN_END_PATTERN
+    + r"""|"""
+    + _ABSOLUTE_PATH_TOKEN_END_PATTERN
+    + r"""|$|[\r\n,;:)"'])"""
+)
 _POSIX_PATH_TEXT_PATTERN = re.compile(r"""(?<![A-Za-z0-9._~%:/\]-])/(?!/)[^\r\n,;:)\"']*?""" + _PATH_END_PATTERN)
 _WINDOWS_UNICODE_LIKE_UNC_PATH_TEXT_PATTERN = re.compile(
     r"""(?<![A-Za-z0-9])\\\\u[0-9A-Fa-f]{4}\\(?!\\u[0-9A-Fa-f]{4})(?=[^\r\n,;:)"'\]}\\])"""
@@ -144,9 +151,7 @@ def _relativize_public_path(path: str, roots: list[_NormalizedRoot]) -> str | No
         return None
 
     _, _, root, token_norm = min(matches, key=lambda item: (item[0], item[1]))
-    module = ntpath if windows else posixpath
-    rel = module.relpath(token_norm, root.norm_path)
-    rel = "" if rel == "." else rel.replace("\\", "/")
+    rel = _relative_path_under_root(token_norm, root.norm_path, windows=windows)
     if root.label == _WORKSPACE_ROOT_LABEL:
         return "." if not rel else f"./{rel}"
     return root.label if not rel else f"{root.label}/{rel}"
@@ -176,10 +181,15 @@ def _candidate_norm_paths(path: str, *, windows: bool) -> list[str]:
         norm = _normalize_windows_path(expanded)
         return [norm] if norm else []
 
-    absolute = os.path.abspath(expanded)
+    if expanded.startswith("/"):
+        absolute = posixpath.normpath(expanded)
+        real_path = posixpath.realpath(absolute)
+    else:
+        absolute = os.path.abspath(expanded)
+        real_path = os.path.realpath(absolute)
     candidates = [_normalize_posix_path(absolute)]
-    real = _normalize_posix_path(os.path.realpath(absolute))
-    if real not in candidates:
+    real = _normalize_posix_path(real_path)
+    if real.startswith("/") and real not in candidates:
         candidates.append(real)
     return [candidate for candidate in candidates if candidate]
 
@@ -205,6 +215,19 @@ def _path_is_under_root(path: str, root: str, *, windows: bool) -> bool:
     if root == sep or re.match(r"^[a-z]:\\$", root):
         return path.startswith(root)
     return path.startswith(root + sep)
+
+
+def _relative_path_under_root(path: str, root: str, *, windows: bool) -> str:
+    if path == root:
+        return ""
+    sep = "\\" if windows else "/"
+    if root == sep:
+        rel = path.lstrip(sep)
+    elif windows and re.match(r"^[a-z]:\\$", root):
+        rel = path[len(root) :].lstrip("\\/")
+    else:
+        rel = path[len(root.rstrip(sep) + sep) :]
+    return rel.replace("\\", "/")
 
 
 def _is_windows_path(path: str) -> bool:

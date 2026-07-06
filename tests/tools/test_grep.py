@@ -143,10 +143,8 @@ class TestGrepExecute:
         bundled_reference = bundled_refs / "ros-template.md"
         bundled_reference.write_text("ROSTemplateFormatVersion reference", encoding="utf-8")
         try:
-            (skill_root / "references").symlink_to("../../references", target_is_directory=True)
-            (selling_refs / "ros-template.md").symlink_to(
-                "../../../skills/bundled/iac_aliyun/references/ros-template.md"
-            )
+            (skill_root / "references").symlink_to(selling_refs, target_is_directory=True)
+            (selling_refs / "ros-template.md").symlink_to(bundled_reference)
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"Cannot create symlink on this platform: {exc}")
 

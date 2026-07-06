@@ -74,7 +74,7 @@ class TestGlobBasics:
         selling_refs.mkdir(parents=True)
         (selling_refs / "template-parameter-recommendation.md").write_text("pipeline", encoding="utf-8")
         try:
-            (skill_root / "references").symlink_to("../../references", target_is_directory=True)
+            (skill_root / "references").symlink_to(selling_refs, target_is_directory=True)
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"Cannot create symlink on this platform: {exc}")
 
@@ -102,11 +102,8 @@ class TestGlobBasics:
         (selling_refs / "template-parameter-recommendation.md").write_text("pipeline", encoding="utf-8")
         (bundled_products / "ecs.md").write_text("ecs", encoding="utf-8")
         try:
-            (skill_root / "references").symlink_to("../../references", target_is_directory=True)
-            (selling_refs / "cloud-products").symlink_to(
-                "../../../skills/bundled/iac_aliyun/references/cloud-products",
-                target_is_directory=True,
-            )
+            (skill_root / "references").symlink_to(selling_refs, target_is_directory=True)
+            (selling_refs / "cloud-products").symlink_to(bundled_products, target_is_directory=True)
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"Cannot create symlink on this platform: {exc}")
 
