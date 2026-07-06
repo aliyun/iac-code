@@ -19,7 +19,7 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
 from iac_code.utils.public_errors import sanitize_public_text
-from iac_code.utils.state_io import atomic_write_json
+from iac_code.utils.state_io import atomic_write_json, atomic_write_text
 
 SNAPSHOT_SCHEMA_VERSION = "1.1"
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class A2APipelineSnapshotStore:
         self.pipeline_dir = Path(pipeline_dir)
         self.path = self.pipeline_dir / "a2a-snapshot.json"
 
-    def save(self, snapshot: dict[str, Any]) -> bool:
+    def save(self, snapshot: dict[str, Any], *, durable: bool = True, compact: bool = False) -> bool:
         previous = self.load()
         next_snapshot = _sanitize_public_snapshot_private_cleanup_fields(snapshot)
         next_snapshot["snapshotVersion"] = _snapshot_version(previous) + 1
@@ -67,7 +67,17 @@ class A2APipelineSnapshotStore:
             return False
 
         try:
-            atomic_write_json(self.path, next_snapshot, durable=True)
+            if compact:
+                content = json.dumps(
+                    next_snapshot,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                atomic_write_text(self.path, content + "\n", durable=durable)
+            else:
+                atomic_write_json(self.path, next_snapshot, durable=durable)
             return True
         except (OSError, TypeError, ValueError):
             logger.warning("Failed to persist A2A pipeline snapshot to %s", self.path, exc_info=True)
