@@ -1064,6 +1064,39 @@ def test_backup_accepts_symlinked_configured_backup_root(
     ) == "fresh\n"
 
 
+def test_restore_accepts_symlinked_configured_backup_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backup_target = tmp_path / "backup-target"
+    backup_target.mkdir()
+    backup_link = tmp_path / "backup-link"
+    _symlink_or_skip(backup_target, backup_link, target_is_directory=True)
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_link))
+    cwd = "/home/workspace/ctx-restore"
+    session_id = "restore-session"
+    source_storage = SessionStorage(projects_dir=tmp_path / "config-source" / "projects")
+    source_session_dir = _create_v2_session_dir(source_storage, cwd, session_id)
+    (source_session_dir / "session.jsonl").write_text('{"role":"user","content":"from backup"}\n', encoding="utf-8")
+    SessionBackupService(session_storage=source_storage, retry_delays=()).backup_session(
+        cwd,
+        session_id,
+        reason=BackupReason.NORMAL_TURN_END,
+        critical=True,
+    )
+    restored_storage = SessionStorage(projects_dir=tmp_path / "config-restored" / "projects")
+
+    result = SessionBackupService(session_storage=restored_storage, retry_delays=()).restore_session(cwd, session_id)
+
+    restored_session_dir = restored_storage.session_dir(cwd, session_id)
+    assert result.restored is True
+    assert result.source == backup_link / "projects" / source_session_dir.parent.name / session_id
+    assert result.destination == restored_session_dir
+    assert (restored_session_dir / "session.jsonl").read_text(encoding="utf-8") == (
+        '{"role":"user","content":"from backup"}\n'
+    )
+
+
 def test_backup_accepts_symlinked_backup_root_ancestor(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

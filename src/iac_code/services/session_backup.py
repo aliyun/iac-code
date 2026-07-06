@@ -405,7 +405,7 @@ class SessionBackupService:
 
     def _validate_restore_paths(self, source: Path, destination: Path, backup_root: Path) -> None:
         source_resolved = self._resolve_real_source(source)
-        backup_root_resolved = self._resolve_real_dir(backup_root, "backup root")
+        backup_root_resolved = self._resolve_restore_backup_root(backup_root)
         self._reject_existing_symlink_ancestry(destination.parent, label="restore destination", include_leaf=True)
         destination_parent_resolved = self._resolve_real_dir(destination.parent, "restore destination")
         destination_resolved = destination_parent_resolved / destination.name
@@ -649,6 +649,12 @@ class SessionBackupService:
             raise SessionBackupError(
                 _("{label} cannot be resolved: {path}").format(label=_("backup root"), path=path)
             ) from exc
+
+    def _resolve_restore_backup_root(self, path: Path) -> Path:
+        resolved = self._resolve_backup_root(path)
+        if not resolved.is_dir():
+            raise SessionBackupError(_("{label} is not a directory: {path}").format(label=_("backup root"), path=path))
+        return resolved
 
     @staticmethod
     def _path_equal_or_under(path: Path, root: Path) -> bool:

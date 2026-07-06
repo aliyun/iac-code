@@ -89,11 +89,7 @@ _WINDOWS_RESERVED_DIGIT_TRANSLATION = str.maketrans(
 )
 _ABSOLUTE_PATH_TOKEN_END_PATTERN = r"""\s+(?=(?:/(?!/)|[A-Za-z]:[\\/]|\\\\))"""
 _PATH_END_PATTERN = (
-    r"""(?="""
-    + _CONNECTOR_TOKEN_END_PATTERN
-    + r"""|"""
-    + _ABSOLUTE_PATH_TOKEN_END_PATTERN
-    + r"""|$|[\r\n,;:)"'])"""
+    r"""(?=""" + _CONNECTOR_TOKEN_END_PATTERN + r"""|""" + _ABSOLUTE_PATH_TOKEN_END_PATTERN + r"""|$|[\r\n,;:)"'])"""
 )
 _PATH_PATTERNS = (
     re.compile(r"~[/\\]\.iac-code[/\\]?[^\r\n,;:)\"']*?" + _PATH_END_PATTERN),

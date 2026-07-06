@@ -13,11 +13,7 @@ from urllib.parse import unquote, urlsplit
 _CONNECTOR_TOKEN_END_PATTERN = r"""\s+(?:and|at|because|for|from|in|on|to|with)\b(?=\s+[A-Za-z0-9_.-]+\s*[:=])"""
 _ABSOLUTE_PATH_TOKEN_END_PATTERN = r"""\s+(?=(?:/(?!/)|[A-Za-z]:[\\/]|\\\\))"""
 _PATH_END_PATTERN = (
-    r"""(?="""
-    + _CONNECTOR_TOKEN_END_PATTERN
-    + r"""|"""
-    + _ABSOLUTE_PATH_TOKEN_END_PATTERN
-    + r"""|$|[\r\n,;:)"'])"""
+    r"""(?=""" + _CONNECTOR_TOKEN_END_PATTERN + r"""|""" + _ABSOLUTE_PATH_TOKEN_END_PATTERN + r"""|$|[\r\n,;:)"'])"""
 )
 _POSIX_PATH_TEXT_PATTERN = re.compile(r"""(?<![A-Za-z0-9._~%:/\]-])/(?!/)[^\r\n,;:)\"']*?""" + _PATH_END_PATTERN)
 _WINDOWS_UNICODE_LIKE_UNC_PATH_TEXT_PATTERN = re.compile(
