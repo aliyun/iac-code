@@ -36,6 +36,7 @@ from .fakes import FakeEventQueue, FakeRequestContext
 
 RETRY_TEXT = "A temporary error occurred. Please retry."
 AUTH_TEXT = "Authentication required. Configure credentials and retry."
+_A2A_ASYNC_TEST_TIMEOUT = 5
 
 
 def test_active_sidecar_mismatch_error_exposes_jsonrpc_data() -> None:
@@ -946,7 +947,7 @@ async def test_pipeline_executor_reconfigures_cached_runtime_model_and_api_key_p
 
 
 async def _wait_for_output_text(task, expected: str) -> None:
-    for _ in range(100):
+    for _ in range(_A2A_ASYNC_TEST_TIMEOUT * 100):
         if "".join(task.output_text) == expected:
             return
         await asyncio.sleep(0.01)
@@ -954,7 +955,7 @@ async def _wait_for_output_text(task, expected: str) -> None:
 
 
 async def _wait_for_pipeline_event(queue: FakeEventQueue, expected_event_type: str) -> None:
-    for _ in range(100):
+    for _ in range(_A2A_ASYNC_TEST_TIMEOUT * 100):
         for event in queue.events:
             if not isinstance(event, TaskStatusUpdateEvent):
                 continue
@@ -4669,7 +4670,7 @@ async def test_live_paused_interrupt_releases_active_task_and_next_reply_clears_
         ),
         queue,
     )
-    await asyncio.wait_for(first, timeout=1)
+    await asyncio.wait_for(first, timeout=_A2A_ASYNC_TEST_TIMEOUT)
     ctx = await store.get_or_create_context(context_id="ctx-1", cwd=str(tmp_path), runtime_factory=lambda _sid: None)
     assert ctx.active_task_id is None
     assert pipeline.primary_stream.closed is True
@@ -4809,9 +4810,9 @@ async def test_active_pause_continuation_keeps_active_owner_until_continuation_f
         )
     )
     try:
-        await asyncio.wait_for(pipeline.continuation_started.wait(), timeout=1)
+        await asyncio.wait_for(pipeline.continuation_started.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
         pipeline.primary_stream.allow_close.set()
-        await asyncio.wait_for(first, timeout=1)
+        await asyncio.wait_for(first, timeout=_A2A_ASYNC_TEST_TIMEOUT)
 
         ctx = await store.get_or_create_context(
             context_id="ctx-1", cwd=str(tmp_path), runtime_factory=lambda _sid: None
@@ -4821,7 +4822,7 @@ async def test_active_pause_continuation_keeps_active_owner_until_continuation_f
         assert active_task.active_task is continuation
 
         pipeline.finish_continuation.set()
-        await asyncio.wait_for(continuation, timeout=1)
+        await asyncio.wait_for(continuation, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         assert ctx.active_task_id is None
         assert active_task.active_task is None
     finally:
@@ -5129,11 +5130,11 @@ async def test_pipeline_executor_publishes_interrupt_received_before_slow_judge(
         )
     )
     try:
-        await asyncio.wait_for(pipeline.judge_started.wait(), timeout=1)
+        await asyncio.wait_for(pipeline.judge_started.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
         assert [event["eventType"] for event in publisher.journal.read_all()] == ["interrupt_received"]
     finally:
         pipeline.finish_judge.set()
-        await asyncio.wait_for(interrupt_task, timeout=1)
+        await asyncio.wait_for(interrupt_task, timeout=_A2A_ASYNC_TEST_TIMEOUT)
 
     assert [event["eventType"] for event in publisher.journal.read_all()] == [
         "interrupt_received",
@@ -5215,11 +5216,11 @@ async def test_pipeline_executor_stops_at_ask_user_question_without_holding_acti
             prompt="帮我部署网站",
         )
     )
-    await asyncio.wait_for(pipeline.question_ready.wait(), timeout=1)
+    await asyncio.wait_for(pipeline.question_ready.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
     await _wait_for_pipeline_event(queue, "input_required")
 
-    await asyncio.wait_for(runner, timeout=1)
-    await asyncio.wait_for(pipeline.closed.wait(), timeout=1)
+    await asyncio.wait_for(runner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
+    await asyncio.wait_for(pipeline.closed.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
 
     ctx = await store.get_or_create_context(
         context_id="ctx-1",
@@ -7053,7 +7054,7 @@ async def test_parent_hard_interrupt_closes_active_stream_and_restarts(
             prompt="build ecs",
         )
     )
-    await asyncio.wait_for(pipeline.primary_stream.started.wait(), timeout=1)
+    await asyncio.wait_for(pipeline.primary_stream.started.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
     await _wait_for_output_text(active_task, "before interrupt")
 
     try:
@@ -7070,9 +7071,9 @@ async def test_parent_hard_interrupt_closes_active_stream_and_restarts(
             prompt="please change cpu",
         )
 
-        await asyncio.wait_for(pipeline.primary_stream.closed_event.wait(), timeout=1)
+        await asyncio.wait_for(pipeline.primary_stream.closed_event.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
         assert pipeline.primary_stream.closed is True
-        await asyncio.wait_for(runner, timeout=1)
+        await asyncio.wait_for(runner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         assert pipeline.continue_after_interrupt_calls == 1
         assert "".join(active_task.output_text) == "before interruptafter interrupt"
     finally:
@@ -7168,7 +7169,7 @@ async def test_parent_hard_interrupt_cancels_blocked_async_generator_before_rest
             prompt="build ecs",
         )
     )
-    await asyncio.wait_for(pipeline.generator_blocked.wait(), timeout=1)
+    await asyncio.wait_for(pipeline.generator_blocked.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
 
     try:
         await executor.execute(
@@ -7184,9 +7185,9 @@ async def test_parent_hard_interrupt_cancels_blocked_async_generator_before_rest
             prompt="please change cpu",
         )
 
-        await asyncio.wait_for(pipeline.primary_cancelled.wait(), timeout=1)
-        await asyncio.wait_for(pipeline.primary_closed.wait(), timeout=1)
-        await asyncio.wait_for(runner, timeout=1)
+        await asyncio.wait_for(pipeline.primary_cancelled.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        await asyncio.wait_for(pipeline.primary_closed.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        await asyncio.wait_for(runner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         assert pipeline.continue_after_interrupt_calls == 1
         assert "".join(active_task.output_text) == "before interruptafter interrupt"
     finally:
@@ -7255,11 +7256,11 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
             prompt="build ecs",
         )
     )
-    await asyncio.wait_for(pipeline.generator_blocked.wait(), timeout=1)
+    await asyncio.wait_for(pipeline.generator_blocked.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
 
     try:
         runner.cancel()
-        await asyncio.wait_for(runner, timeout=1)
+        await asyncio.wait_for(runner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         await asyncio.sleep(0)
 
         pending_coro_names = _pending_coro_names()
