@@ -3,6 +3,7 @@
 from io import StringIO
 
 from rich.console import Console
+from rich.text import Text
 
 from iac_code.ui.components.candidate_selection import CandidateSelectionRenderer
 from iac_code.ui.core.key_event import KeyEvent
@@ -248,6 +249,34 @@ class TestCandidateSelectionRendererRendering:
 
         assert "Same #1" in output
         assert "Same #2" in output
+
+    def test_render_keeps_diagram_switch_hint_visible_for_tall_diagram(self, monkeypatch):
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, no_color=True, width=100, height=18)
+        r = CandidateSelectionRenderer(console=console)
+        r.enter_selection_mode()
+        r.set_status_message("架构图优化中...")
+        r.add_diagram(
+            "方案1",
+            "graph TD\nA-->B",
+            views=[
+                {"id": "overview", "title": "架构概览", "mermaid_source": "graph TD\nA-->B"},
+                {"id": "detail", "title": "网络详情", "mermaid_source": "graph TD\nB-->C"},
+            ],
+        )
+        r.add_detail(
+            "tu_1", "方案1", "方案说明", [{"name": "VSwitch", "spec": "交换机", "monthly_cost": "¥0/月"}], "¥0/月"
+        )
+        monkeypatch.setattr(
+            r, "_render_diagram", lambda _source: Text("\n".join(f"diagram line {i}" for i in range(60)))
+        )
+
+        console.print(r.render())
+        lines = output.getvalue().splitlines()
+
+        assert len(lines) <= console.height
+        assert "Tab/[ ]" in lines[-1]
+        assert "switch diagrams" in lines[-1] or "切换架构图" in lines[-1]
 
 
 class TestCandidateSelectionRendererSelection:

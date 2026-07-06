@@ -167,6 +167,13 @@ class TestCreateProvider:
         assert not hasattr(p, "_thinking_budget")
         assert not hasattr(p, "_max_completion_tokens")
 
+    def test_effort_override_takes_precedence_over_settings(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {"effort": "high"})
+        p = create_provider("qwen3.7-max", credentials={"dashscope": "key"}, effort_override="none")
+        assert getattr(p, "_effort", None) == "none"
+        assert getattr(p, "_thinking_enabled", None) is False
+
     def test_unknown_raises(self, monkeypatch):
         """Unknown model with no saved provider config raises ValueError."""
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
@@ -295,6 +302,19 @@ class TestProviderManager:
 
         assert m.get_provider_key() == "dashscope_token_plan"
         assert m.get_provider_display() == "Alibaba Cloud Bailian Token Plan"
+
+    def test_effort_override_is_passed_to_provider(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {"effort": "high"})
+        m = ProviderManager(
+            model="qwen3.7-max",
+            credentials={"dashscope": "key"},
+            effort_override="none",
+        )
+
+        assert m._provider is not None
+        assert getattr(m._provider, "_effort", None) == "none"
+        assert getattr(m._provider, "_thinking_enabled", None) is False
 
     def test_reconfigure_swaps_model_and_credentials(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")

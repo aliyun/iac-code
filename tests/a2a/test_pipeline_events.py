@@ -1032,6 +1032,12 @@ def test_candidate_detail_and_diagram_have_distinct_event_types() -> None:
                 template_content="ROSTemplateFormatVersion: '2015-09-01'",
                 mermaid_source="graph TD",
                 candidate_index=0,
+                architecture_context={"visible_nodes": [{"id": "ECS"}]},
+                diagram_stage="optimized",
+                views=[
+                    {"id": "overview", "title": "Overview", "mermaid_source": "graph TD"},
+                    {"id": "detail_app", "title": "App", "mermaid_source": "graph TD; A-->B"},
+                ],
             ),
         )
     )[0]
@@ -1049,6 +1055,9 @@ def test_candidate_detail_and_diagram_have_distinct_event_types() -> None:
     assert diagram["eventType"] == "diagram_shown"
     assert diagram["data"]["format"] == "mermaid"
     assert diagram["data"]["candidateIndex"] == 0
+    assert diagram["data"]["architectureContext"] == {"visible_nodes": [{"id": "ECS"}]}
+    assert diagram["data"]["diagramStage"] == "optimized"
+    assert [view["id"] for view in diagram["data"]["views"]] == ["overview", "detail_app"]
 
 
 def test_top_level_candidate_detail_is_attached_to_current_step() -> None:

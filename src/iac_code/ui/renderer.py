@@ -72,6 +72,7 @@ from iac_code.types.stream_events import (
 )
 from iac_code.ui.components.select import OptionType, Select, SelectLayout, TextOption
 from iac_code.ui.core.key_event import KeyEvent
+from iac_code.ui.diagram_rendering import style_attachment_lines
 from iac_code.ui.spinner import ShimmerSpinner
 from iac_code.utils.json_utils import extract_partial_string_fields
 
@@ -642,7 +643,7 @@ class Renderer:
             from importlib import import_module
 
             render_rich = import_module("termaid").render_rich
-            diagram = render_rich(event.mermaid_source)
+            diagram = style_attachment_lines(render_rich(event.mermaid_source))
             return Group(title, Text(""), diagram, Text(""))
         except ImportError:
             pass  # Silent degrade — termaid optional dependency missing.

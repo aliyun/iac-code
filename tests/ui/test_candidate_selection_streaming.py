@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from io import StringIO
+
 from iac_code.utils.json_utils import extract_json_string_value
 
 
@@ -72,6 +74,14 @@ class TestExtractJsonStringValue:
 
 
 class TestCandidateSelectionRendererStreaming:
+    @staticmethod
+    def _render_to_text(renderable) -> str:
+        from rich.console import Console
+
+        output = StringIO()
+        Console(file=output, force_terminal=True, no_color=True, width=120).print(renderable)
+        return output.getvalue()
+
     def test_update_streaming_summary_creates_tab(self):
         from rich.console import Console
 
@@ -120,3 +130,86 @@ class TestCandidateSelectionRendererStreaming:
         tab = renderer._tabs[0]
         assert tab.mermaid_source == "graph TD; A-->B"
         assert tab.summary == "streaming text"
+
+    def test_draft_diagram_keeps_optimization_status_until_optimized_views_arrive(self):
+        from rich.console import Console
+
+        from iac_code.ui.components.candidate_selection import CandidateSelectionRenderer
+
+        renderer = CandidateSelectionRenderer(console=Console(force_terminal=True, width=120))
+        renderer.add_diagram(
+            "方案A",
+            "graph TD; Draft-->B",
+            diagram_stage="draft",
+            views=[
+                {
+                    "id": "overview",
+                    "title": "架构概览",
+                    "mermaid_source": "graph TD; Draft-->B",
+                }
+            ],
+        )
+
+        rendered = self._render_to_text(renderer.render())
+
+        assert "架构图优化中" in rendered
+        tab = renderer._tabs[0]
+        assert tab.mermaid_source == "graph TD; Draft-->B"
+        assert tab.diagram_stage == "draft"
+        assert [view.title for view in tab.diagram_views] == ["架构概览"]
+
+        renderer.add_diagram(
+            "方案A",
+            "graph TD; Optimized-->B",
+            diagram_stage="optimized",
+            views=[
+                {
+                    "id": "overview",
+                    "title": "架构概览",
+                    "mermaid_source": "graph TD; Optimized-->B",
+                },
+                {
+                    "id": "detail_app",
+                    "title": "应用详情",
+                    "mermaid_source": "graph TD; App-->B",
+                },
+            ],
+        )
+
+        rendered_after_update = self._render_to_text(renderer.render())
+
+        assert "架构图优化中" not in rendered_after_update
+        assert "架构概览" in rendered_after_update
+        assert "应用详情" in rendered_after_update
+        assert renderer._tabs[0].diagram_stage == "optimized"
+
+    def test_bracket_keys_switch_diagram_views_inside_selected_candidate(self):
+        from rich.console import Console
+
+        from iac_code.ui.components.candidate_selection import CandidateSelectionRenderer
+        from iac_code.ui.core.key_event import KeyEvent
+
+        renderer = CandidateSelectionRenderer(console=Console(force_terminal=True, width=120))
+        renderer.add_diagram(
+            "方案A",
+            "graph TD; Overview-->B",
+            views=[
+                {
+                    "id": "overview",
+                    "title": "架构概览",
+                    "mermaid_source": "graph TD; Overview-->B",
+                },
+                {
+                    "id": "detail_app",
+                    "title": "应用详情",
+                    "mermaid_source": "graph TD; App-->B",
+                },
+            ],
+        )
+
+        assert renderer._tabs[0].selected_diagram_view_index == 0
+        assert renderer.handle_key(KeyEvent(key="]", char="]")) is True
+        assert renderer._tabs[0].selected_diagram_view_index == 1
+        assert "App" in self._render_to_text(renderer.render())
+        assert renderer.handle_key(KeyEvent(key="[", char="[")) is True
+        assert renderer._tabs[0].selected_diagram_view_index == 0

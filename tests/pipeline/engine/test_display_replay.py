@@ -251,7 +251,16 @@ def test_reducer_tracks_candidate_selection_phases(tmp_path):
     recorder.record(
         "candidate_diagram",
         step_id="confirm_and_select",
-        payload={"candidate_name": "低成本方案", "candidate_index": 0, "mermaid_source": "graph TD; A-->B"},
+        payload={
+            "candidate_name": "低成本方案",
+            "candidate_index": 0,
+            "mermaid_source": "graph TD; A-->B",
+            "diagram_stage": "optimized",
+            "views": [
+                {"id": "overview", "title": "架构概览", "mermaid_source": "graph TD; A-->B"},
+                {"id": "detail_app", "title": "应用详情", "mermaid_source": "graph TD; C-->D"},
+            ],
+        },
     )
     recorder.record(
         "candidate_detail",
@@ -267,6 +276,8 @@ def test_reducer_tracks_candidate_selection_phases(tmp_path):
 
     preparing = PipelineDisplayReducer().reduce(load_display_events(path)).attempts[-1].candidate_selection
     assert preparing.state == "preparing"
+    assert preparing.candidates[0].diagram_stage == "optimized"
+    assert [view["id"] for view in preparing.candidates[0].diagram_views] == ["overview", "detail_app"]
     assert preparing.candidates[0].summary == "单 ECS Nginx"
 
     options = [{"name": "低成本方案", "summary": "单 ECS Nginx", "candidate_index": 0}]

@@ -1,0 +1,1432 @@
+[
+  {
+    "ProductCode": "acms",
+    "RelevantCodes": {
+      "ROS": "ACM",
+      "PIP": "acms"
+    },
+    "Name": {
+      "zh": "应用配置管理",
+      "en": "Application Configuration Management"
+    }
+  },
+  {
+    "ProductCode": "acr",
+    "RelevantCodes": {
+      "ROS": "CR",
+      "PIP": "acr"
+    },
+    "Name": {
+      "zh": "容器镜像服务",
+      "en": "Container Registry"
+    }
+  },
+  {
+    "ProductCode": "acs",
+    "RelevantCodes": {
+      "ROS": "ACS",
+      "PIP": "acs"
+    },
+    "Name": {
+      "zh": "容器计算服务",
+      "en": "Container Compute Service"
+    }
+  },
+  {
+    "ProductCode": "acs",
+    "RelevantCodes": {
+      "ROS": "CS",
+      "PIP": "acs"
+    },
+    "Name": {
+      "zh": "容器计算服务",
+      "en": "Container Compute Service"
+    }
+  },
+  {
+    "ProductCode": "actiontrail",
+    "RelevantCodes": {
+      "ROS": "ACTIONTRAIL",
+      "PIP": "actiontrail"
+    },
+    "Name": {
+      "zh": "操作审计",
+      "en": "ActionTrail"
+    }
+  },
+  {
+    "ProductCode": "adb",
+    "RelevantCodes": {
+      "ROS": "ADB",
+      "PIP": "adb"
+    },
+    "Name": {
+      "zh": "云原生数据仓库 AnalyticDB",
+      "en": "AnalyticDB"
+    }
+  },
+  {
+    "ProductCode": "slb",
+    "RelevantCodes": {
+      "ROS": "ALB",
+      "PIP": "slb"
+    },
+    "Name": {
+      "zh": "应用负载均衡",
+      "en": "Application Load Balancer"
+    }
+  },
+  {
+    "ProductCode": "alidfs",
+    "RelevantCodes": {
+      "ROS": "DFS",
+      "PIP": "alidfs"
+    },
+    "Name": {
+      "zh": "文件存储HDFS版",
+      "en": "Apsara File Storage for HDFS"
+    }
+  },
+  {
+    "ProductCode": "alikafka",
+    "RelevantCodes": {
+      "ROS": "KAFKA",
+      "PIP": "alikafka"
+    },
+    "Name": {
+      "zh": "云消息队列 Kafka 版",
+      "en": "ApsaraMQ for Kafka"
+    }
+  },
+  {
+    "ProductCode": "apigateway",
+    "RelevantCodes": {
+      "ROS": "APIG",
+      "PIP": "apigateway"
+    },
+    "Name": {
+      "zh": "云原生API网关",
+      "en": "Cloud-native API Gateway"
+    }
+  },
+  {
+    "ProductCode": "apigateway",
+    "RelevantCodes": {
+      "ROS": "ApiGateway",
+      "PIP": "apigateway"
+    },
+    "Name": {
+      "zh": "API 网关",
+      "en": "API Gateway"
+    }
+  },
+  {
+    "ProductCode": "arms",
+    "RelevantCodes": {
+      "ROS": "ARMS",
+      "PIP": "arms"
+    },
+    "Name": {
+      "zh": "应用实时监控服务",
+      "en": "Application Real-Time Monitoring Service"
+    }
+  },
+  {
+    "ProductCode": "asm",
+    "RelevantCodes": {
+      "ROS": "ASM",
+      "PIP": "asm"
+    },
+    "Name": {
+      "zh": "应用运维平台",
+      "en": "Application Operation Platform"
+    }
+  },
+  {
+    "ProductCode": "bastionhost",
+    "RelevantCodes": {
+      "ROS": "BastionHost",
+      "PIP": "bastionhost"
+    },
+    "Name": {
+      "zh": "运维安全中心（堡垒机）",
+      "en": "Bastionhost"
+    }
+  },
+  {
+    "ProductCode": "bss",
+    "RelevantCodes": {
+      "ROS": "BSS",
+      "PIP": null
+    },
+    "Name": {
+      "zh": "交易和账单管理",
+      "en": "BSS"
+    }
+  },
+  {
+    "ProductCode": "bpstudio",
+    "RelevantCodes": {
+      "ROS": "BPStudio",
+      "PIP": "bpstudio"
+    },
+    "Name": {
+      "zh": "云速搭",
+      "en": "Cloud Architect Design Tool"
+    }
+  },
+  {
+    "ProductCode": "cas",
+    "RelevantCodes": {
+      "ROS": "CAS",
+      "PIP": "cas"
+    },
+    "Name": {
+      "zh": "数字证书管理服务（原SSL证书）",
+      "en": "Certificate Management Service (Original SSL Certificate)"
+    }
+  },
+  {
+    "ProductCode": "cbn",
+    "RelevantCodes": {
+      "ROS": "CEN",
+      "PIP": "cbn"
+    },
+    "Name": {
+      "zh": "云企业网",
+      "en": "Cloud Enterprise Network"
+    }
+  },
+  {
+    "ProductCode": "cbs",
+    "RelevantCodes": {
+      "ROS": "DBS",
+      "PIP": "cbs"
+    },
+    "Name": {
+      "zh": "数据库备份",
+      "en": "Database Backup"
+    }
+  },
+  {
+    "ProductCode": "cbwp",
+    "RelevantCodes": {
+      "ROS": "WAF",
+      "PIP": "cbwp"
+    },
+    "Name": {
+      "zh": "共享带宽",
+      "en": "Internet Shared Bandwidth"
+    }
+  },
+  {
+    "ProductCode": "cddc",
+    "RelevantCodes": {
+      "ROS": "CDDC",
+      "PIP": "cddc"
+    },
+    "Name": {
+      "zh": "云数据库专属集群",
+      "en": "ApsaraDB for MyBase"
+    }
+  },
+  {
+    "ProductCode": "cdn",
+    "RelevantCodes": {
+      "ROS": "CDN",
+      "PIP": "cdn"
+    },
+    "Name": {
+      "zh": "CDN",
+      "en": "CDN"
+    }
+  },
+  {
+    "ProductCode": "cds",
+    "RelevantCodes": {
+      "ROS": null,
+      "PIP": "cds"
+    },
+    "Name": {
+      "zh": "云数据库Cassandra版",
+      "en": "ApsaraDB for Cassandra"
+    }
+  },
+  {
+    "ProductCode": "cfw",
+    "RelevantCodes": {
+      "ROS": "CLOUDFW",
+      "PIP": "cfw"
+    },
+    "Name": {
+      "zh": "云防火墙",
+      "en": "Cloud Firewall"
+    }
+  },
+  {
+    "ProductCode": "clickhouse",
+    "RelevantCodes": {
+      "ROS": "ClickHouse",
+      "PIP": "clickhouse"
+    },
+    "Name": {
+      "zh": "云数据库 ClickHouse",
+      "en": "ApsaraDB for ClickHouse"
+    }
+  },
+  {
+    "ProductCode": "cloudphone",
+    "RelevantCodes": {
+      "ROS": "CloudPhone",
+      "PIP": "cloudphone"
+    },
+    "Name": {
+      "zh": "无影云手机",
+      "en": "Cloud Phone"
+    }
+  },
+  {
+    "ProductCode": "cms",
+    "RelevantCodes": {
+      "ROS": "CMS",
+      "PIP": "cms"
+    },
+    "Name": {
+      "zh": "云监控",
+      "en": "Cloud Monitor"
+    }
+  },
+  {
+    "ProductCode": "computenest",
+    "RelevantCodes": {
+      "ROS": "AppFlow",
+      "PIP": "computenest"
+    },
+    "Name": {
+      "zh": "计算巢服务",
+      "en": "Compute Nest"
+    }
+  },
+  {
+    "ProductCode": "computenest",
+    "RelevantCodes": {
+      "ROS": "ComputeNest",
+      "PIP": "computenest"
+    },
+    "Name": {
+      "zh": "计算巢服务",
+      "en": "Compute Nest"
+    }
+  },
+  {
+    "ProductCode": "config",
+    "RelevantCodes": {
+      "ROS": "Config",
+      "PIP": "config"
+    },
+    "Name": {
+      "zh": "配置审计",
+      "en": "CloudConfig"
+    }
+  },
+  {
+    "ProductCode": "dashvector",
+    "RelevantCodes": {
+      "ROS": "DashVector",
+      "PIP": "dashvector"
+    },
+    "Name": {
+      "zh": "向量检索服务",
+      "en": "Vector Retrieval Service"
+    }
+  },
+  {
+    "ProductCode": "datahub",
+    "RelevantCodes": {
+      "ROS": "DATAHUB",
+      "PIP": "datahub"
+    },
+    "Name": {
+      "zh": "数据总线 DataHub",
+      "en": "DataHub"
+    }
+  },
+  {
+    "ProductCode": "dcdn",
+    "RelevantCodes": {
+      "ROS": "DCDN",
+      "PIP": "dcdn"
+    },
+    "Name": {
+      "zh": "边缘安全加速",
+      "en": "Edge Security Acceleration"
+    }
+  },
+  {
+    "ProductCode": "ddos",
+    "RelevantCodes": {
+      "ROS": "DDoS",
+      "PIP": "ddos"
+    },
+    "Name": {
+      "zh": "DDoS防护",
+      "en": "Anti-DDoS"
+    }
+  },
+  {
+    "ProductCode": "ddos",
+    "RelevantCodes": {
+      "ROS": "DDoSPro",
+      "PIP": "ddos"
+    },
+    "Name": {
+      "zh": "DDoS防护",
+      "en": "Anti-DDoS"
+    }
+  },
+  {
+    "ProductCode": "devs",
+    "RelevantCodes": {
+      "ROS": "ServerlessDev",
+      "PIP": "devs"
+    },
+    "Name": {
+      "zh": "云原生应用开发平台 CAP",
+      "en": "Cloud Application Platform"
+    }
+  },
+  {
+    "ProductCode": "dide",
+    "RelevantCodes": {
+      "ROS": "DataWorks",
+      "PIP": "dide"
+    },
+    "Name": {
+      "zh": "大数据开发治理平台 DataWorks",
+      "en": "DataWorks"
+    }
+  },
+  {
+    "ProductCode": "dide",
+    "RelevantCodes": {
+      "ROS": "DataWorks",
+      "PIP": "dide"
+    },
+    "Name": {
+      "zh": "大数据开发治理平台 DataWorks",
+      "en": "DataWorks"
+    }
+  },
+  {
+    "ProductCode": "directmail",
+    "RelevantCodes": {
+      "ROS": "DirectMail",
+      "PIP": "directmail"
+    },
+    "Name": {
+      "zh": "邮件推送",
+      "en": "Direct Mail"
+    }
+  },
+  {
+    "ProductCode": "disk",
+    "RelevantCodes": {
+      "ROS": "EBS",
+      "PIP": "disk"
+    },
+    "Name": {
+      "zh": "块存储",
+      "en": "Elastic Block Storage"
+    }
+  },
+  {
+    "ProductCode": "dlf",
+    "RelevantCodes": {
+      "ROS": "DLF",
+      "PIP": "dlf"
+    },
+    "Name": {
+      "zh": "数据湖构建",
+      "en": "Data Lake Formation"
+    }
+  },
+  {
+    "ProductCode": "dms",
+    "RelevantCodes": {
+      "ROS": "DMS",
+      "PIP": "dms"
+    },
+    "Name": {
+      "zh": "数据管理",
+      "en": "Data Management"
+    }
+  },
+  {
+    "ProductCode": "dns",
+    "RelevantCodes": {
+      "ROS": "DNS",
+      "PIP": "dns"
+    },
+    "Name": {
+      "zh": "云解析DNS",
+      "en": "Alibaba Cloud DNS"
+    }
+  },
+  {
+    "ProductCode": "drds",
+    "RelevantCodes": {
+      "ROS": "DRDS",
+      "PIP": "drds"
+    },
+    "Name": {
+      "zh": "云原生分布式数据库 PolarDB-X",
+      "en": "PolarDB-X"
+    }
+  },
+  {
+    "ProductCode": "dts",
+    "RelevantCodes": {
+      "ROS": "DTS",
+      "PIP": "dts"
+    },
+    "Name": {
+      "zh": "数据传输服务",
+      "en": "Data Transmission Service"
+    }
+  },
+  {
+    "ProductCode": "eais",
+    "RelevantCodes": {
+      "ROS": "EAIS",
+      "PIP": "eais"
+    },
+    "Name": {
+      "zh": "弹性加速计算实例",
+      "en": "Elastic Accelerated Computing Instances"
+    }
+  },
+  {
+    "ProductCode": "ecd",
+    "RelevantCodes": {
+      "ROS": "ECD",
+      "PIP": "ecd"
+    },
+    "Name": {
+      "zh": "边缘云桌面",
+      "en": "Edge Cloud Desktop"
+    }
+  },
+  {
+    "ProductCode": "eci",
+    "RelevantCodes": {
+      "ROS": "ECI",
+      "PIP": "eci"
+    },
+    "Name": {
+      "zh": "弹性容器实例",
+      "en": "Elastic Container Instance"
+    }
+  },
+  {
+    "ProductCode": "ecs",
+    "RelevantCodes": {
+      "ROS": "ECS",
+      "PIP": "ecs"
+    },
+    "Name": {
+      "zh": "云服务器 ECS",
+      "en": "Elastic Compute Service"
+    }
+  },
+  {
+    "ProductCode": "edas",
+    "RelevantCodes": {
+      "ROS": "EDAS",
+      "PIP": "edas"
+    },
+    "Name": {
+      "zh": "企业级分布式应用服务",
+      "en": "Enterprise Distributed Application Service"
+    }
+  },
+  {
+    "ProductCode": "ehpc",
+    "RelevantCodes": {
+      "ROS": "EHPC",
+      "PIP": "ehpc"
+    },
+    "Name": {
+      "zh": "弹性高性能计算",
+      "en": "Elastic High Performance Computing"
+    }
+  },
+  {
+    "ProductCode": "eip",
+    "RelevantCodes": {
+      "ROS": "EIP",
+      "PIP": "eip"
+    },
+    "Name": {
+      "zh": "弹性公网IP",
+      "en": "Elastic IP Address"
+    }
+  },
+  {
+    "ProductCode": "eip",
+    "RelevantCodes": {
+      "ROS": "Eipanycast",
+      "PIP": "eip"
+    },
+    "Name": {
+      "zh": "弹性公网IP",
+      "en": "Elastic IP Address"
+    }
+  },
+  {
+    "ProductCode": "eip",
+    "RelevantCodes": {
+      "ROS": "VPC",
+      "PIP": "eip"
+    },
+    "Name": {
+      "zh": "弹性公网IP",
+      "en": "Elastic IP Address"
+    }
+  },
+  {
+    "ProductCode": "elasticsearch",
+    "RelevantCodes": {
+      "ROS": "ElasticSearch",
+      "PIP": "elasticsearch"
+    },
+    "Name": {
+      "zh": "检索分析服务 Elasticsearch版",
+      "en": "Elasticsearch"
+    }
+  },
+  {
+    "ProductCode": "elasticsearch",
+    "RelevantCodes": {
+      "ROS": "ElasticSearchServerless",
+      "PIP": "elasticsearch"
+    },
+    "Name": {
+      "zh": "检索分析服务 Elasticsearch版",
+      "en": "Elasticsearch"
+    }
+  },
+  {
+    "ProductCode": "emapreduce",
+    "RelevantCodes": {
+      "ROS": "EMR",
+      "PIP": "emapreduce"
+    },
+    "Name": {
+      "zh": "开源大数据平台 E-MapReduce",
+      "en": "E-MapReduce"
+    }
+  },
+  {
+    "ProductCode": "ens",
+    "RelevantCodes": {
+      "ROS": "ENS",
+      "PIP": "ens"
+    },
+    "Name": {
+      "zh": "边缘节点服务 ENS",
+      "en": "Edge Node Service"
+    }
+  },
+  {
+    "ProductCode": "entconsole",
+    "RelevantCodes": {
+      "ROS": "ResourceManager",
+      "PIP": "entconsole"
+    },
+    "Name": {
+      "zh": "资源管理",
+      "en": "Resource Management"
+    }
+  },
+  {
+    "ProductCode": "ess",
+    "RelevantCodes": {
+      "ROS": "ESS",
+      "PIP": "ess"
+    },
+    "Name": {
+      "zh": "弹性伸缩",
+      "en": "Auto Scaling"
+    }
+  },
+  {
+    "ProductCode": "eventbridge",
+    "RelevantCodes": {
+      "ROS": "EventBridge",
+      "PIP": "eventbridge"
+    },
+    "Name": {
+      "zh": "事件总线",
+      "en": "EventBridge"
+    }
+  },
+  {
+    "ProductCode": "fc",
+    "RelevantCodes": {
+      "ROS": "FC",
+      "PIP": "fc"
+    },
+    "Name": {
+      "zh": "函数计算",
+      "en": "Function Compute"
+    }
+  },
+  {
+    "ProductCode": "fc",
+    "RelevantCodes": {
+      "ROS": "FC3",
+      "PIP": "fc"
+    },
+    "Name": {
+      "zh": "函数计算",
+      "en": "Function Compute"
+    }
+  },
+  {
+    "ProductCode": "fnf",
+    "RelevantCodes": {
+      "ROS": "FNF",
+      "PIP": "fnf"
+    },
+    "Name": {
+      "zh": "云工作流",
+      "en": "CloudFlow"
+    }
+  },
+  {
+    "ProductCode": "ga",
+    "RelevantCodes": {
+      "ROS": "GA",
+      "PIP": "ga"
+    },
+    "Name": {
+      "zh": "全球加速",
+      "en": "Global Accelerator"
+    }
+  },
+  {
+    "ProductCode": "gds",
+    "RelevantCodes": {
+      "ROS": "GraphDatabase",
+      "PIP": "gds"
+    },
+    "Name": {
+      "zh": "图数据库",
+      "en": "Graph Database"
+    }
+  },
+  {
+    "ProductCode": "gpdb",
+    "RelevantCodes": {
+      "ROS": "GPDB",
+      "PIP": "gpdb"
+    },
+    "Name": {
+      "zh": "云原生数据仓库 AnalyticDB PostgreSQL版",
+      "en": "AnalyticDB for PostgreSQL"
+    }
+  },
+  {
+    "ProductCode": "gws",
+    "RelevantCodes": {
+      "ROS": "EdsUser",
+      "PIP": "gws"
+    },
+    "Name": {
+      "zh": "无影云电脑",
+      "en": "Elastic Desktop Service"
+    }
+  },
+  {
+    "ProductCode": "hbase",
+    "RelevantCodes": {
+      "ROS": "HBase",
+      "PIP": "hbase"
+    },
+    "Name": {
+      "zh": "云数据库HBase版",
+      "en": "ApsaraDB for Hbase"
+    }
+  },
+  {
+    "ProductCode": "hbr",
+    "RelevantCodes": {
+      "ROS": "HBR",
+      "PIP": "hbr"
+    },
+    "Name": {
+      "zh": "云备份",
+      "en": "Cloud Backup"
+    }
+  },
+  {
+    "ProductCode": "hcs_sgw",
+    "RelevantCodes": {
+      "ROS": "CloudStorageGateway",
+      "PIP": "hcs_sgw"
+    },
+    "Name": {
+      "zh": "云存储网关",
+      "en": "Cloud Storage Gateway"
+    }
+  },
+  {
+    "ProductCode": "hitsdb",
+    "RelevantCodes": {
+      "ROS": "Lindorm",
+      "PIP": "hitsdb"
+    },
+    "Name": {
+      "zh": "云原生多模数据库 Lindorm",
+      "en": "Lindorm"
+    }
+  },
+  {
+    "ProductCode": "hitsdb",
+    "RelevantCodes": {
+      "ROS": "TSDB",
+      "PIP": "hitsdb"
+    },
+    "Name": {
+      "zh": "云原生多模数据库 Lindorm",
+      "en": "Lindorm"
+    }
+  },
+  {
+    "ProductCode": "hologram",
+    "RelevantCodes": {
+      "ROS": "Hologram",
+      "PIP": "hologram"
+    },
+    "Name": {
+      "zh": "实时数仓 Hologres",
+      "en": "Hologres"
+    }
+  },
+  {
+    "ProductCode": "ice",
+    "RelevantCodes": {
+      "ROS": "ICE",
+      "PIP": "ice"
+    },
+    "Name": {
+      "zh": "智能媒体服务",
+      "en": "Intelligent Media Services"
+    }
+  },
+  {
+    "ProductCode": "imm",
+    "RelevantCodes": {
+      "ROS": "IMM",
+      "PIP": "imm"
+    },
+    "Name": {
+      "zh": "智能媒体管理",
+      "en": "Intelligent Media Management"
+    }
+  },
+  {
+    "ProductCode": "iot",
+    "RelevantCodes": {
+      "ROS": "IOT",
+      "PIP": "iot"
+    },
+    "Name": {
+      "zh": "物联网平台",
+      "en": "IoT Platform"
+    }
+  },
+  {
+    "ProductCode": "kms",
+    "RelevantCodes": {
+      "ROS": "KMS",
+      "PIP": "kms"
+    },
+    "Name": {
+      "zh": "密钥管理服务",
+      "en": "Key Management Service"
+    }
+  },
+  {
+    "ProductCode": "kvstore",
+    "RelevantCodes": {
+      "ROS": "REDIS",
+      "PIP": "kvstore"
+    },
+    "Name": {
+      "zh": "云数据库 Tair（兼容 Redis）",
+      "en": "Tair (Redis OSS-compatible)"
+    }
+  },
+  {
+    "ProductCode": "learn",
+    "RelevantCodes": {
+      "ROS": "PAI",
+      "PIP": "learn"
+    },
+    "Name": {
+      "zh": "人工智能平台 PAI",
+      "en": "Platform for AI"
+    }
+  },
+  {
+    "ProductCode": "learn",
+    "RelevantCodes": {
+      "ROS": "PAIDLC",
+      "PIP": "learn"
+    },
+    "Name": {
+      "zh": "人工智能平台 PAI",
+      "en": "Platform for AI"
+    }
+  },
+  {
+    "ProductCode": "learn",
+    "RelevantCodes": {
+      "ROS": "PAIDatasetAcc",
+      "PIP": "learn"
+    },
+    "Name": {
+      "zh": "人工智能平台 PAI",
+      "en": "Platform for AI"
+    }
+  },
+  {
+    "ProductCode": "learn",
+    "RelevantCodes": {
+      "ROS": "PAIPlugin",
+      "PIP": "learn"
+    },
+    "Name": {
+      "zh": "人工智能平台 PAI",
+      "en": "Platform for AI"
+    }
+  },
+  {
+    "ProductCode": "learn",
+    "RelevantCodes": {
+      "ROS": "PaiDswApi",
+      "PIP": "learn"
+    },
+    "Name": {
+      "zh": "人工智能平台 PAI",
+      "en": "Platform for AI"
+    }
+  },
+  {
+    "ProductCode": "lvwang",
+    "RelevantCodes": {
+      "ROS": "Aligreen",
+      "PIP": "lvwang"
+    },
+    "Name": {
+      "zh": "内容安全",
+      "en": "Content Moderation"
+    }
+  },
+  {
+    "ProductCode": "marketplace",
+    "RelevantCodes": {
+      "ROS": "MarketPlace",
+      "PIP": null
+    },
+    "Name": {
+      "zh": "云市场",
+      "en": "Marketplace"
+    }
+  },
+  {
+    "ProductCode": "miniappdev",
+    "RelevantCodes": {
+      "ROS": "MOBI",
+      "PIP": "miniappdev"
+    },
+    "Name": {
+      "zh": "多端低代码开发平台魔笔",
+      "en": "Low-Code Development Platform"
+    }
+  },
+  {
+    "ProductCode": "mns",
+    "RelevantCodes": {
+      "ROS": "MNS",
+      "PIP": "mns"
+    },
+    "Name": {
+      "zh": "轻量消息队列（原 MNS）",
+      "en": "Simple Message Queue (formerly MNS)"
+    }
+  },
+  {
+    "ProductCode": "mongodb",
+    "RelevantCodes": {
+      "ROS": "MONGODB",
+      "PIP": "mongodb"
+    },
+    "Name": {
+      "zh": "云数据库 MongoDB 版",
+      "en": "ApsaraDB for MongoDB"
+    }
+  },
+  {
+    "ProductCode": "mse",
+    "RelevantCodes": {
+      "ROS": "MSE",
+      "PIP": "mse"
+    },
+    "Name": {
+      "zh": "微服务引擎",
+      "en": "Microservices Engine"
+    }
+  },
+  {
+    "ProductCode": "mts",
+    "RelevantCodes": {
+      "ROS": "MPS",
+      "PIP": "mts"
+    },
+    "Name": {
+      "zh": "媒体处理",
+      "en": "ApsaraVideo Media Processing"
+    }
+  },
+  {
+    "ProductCode": "nas",
+    "RelevantCodes": {
+      "ROS": "NAS",
+      "PIP": "nas"
+    },
+    "Name": {
+      "zh": "文件存储 NAS",
+      "en": "File Storage NAS"
+    }
+  },
+  {
+    "ProductCode": "nat",
+    "RelevantCodes": {
+      "ROS": "VPC",
+      "PIP": "nat"
+    },
+    "Name": {
+      "zh": "NAT网关",
+      "en": "NAT Gateway"
+    }
+  },
+  {
+    "ProductCode": "nlb",
+    "RelevantCodes": {
+      "ROS": "NLB",
+      "PIP": "nlb"
+    },
+    "Name": {
+      "zh": "网络负载均衡",
+      "en": "Network Load Balancer"
+    }
+  },
+  {
+    "ProductCode": "nlp",
+    "RelevantCodes": {
+      "ROS": "NLPAUTOML",
+      "PIP": "nlp"
+    },
+    "Name": {
+      "zh": "自然语言处理",
+      "en": "Natural Language Processing"
+    }
+  },
+  {
+    "ProductCode": "nls",
+    "RelevantCodes": {
+      "ROS": "NLS",
+      "PIP": "nls"
+    },
+    "Name": {
+      "zh": "智能语音交互",
+      "en": "Intelligent Speech Interaction"
+    }
+  },
+  {
+    "ProductCode": "ocs",
+    "RelevantCodes": {
+      "ROS": "Memcache",
+      "PIP": "ocs"
+    },
+    "Name": {
+      "zh": "云数据库 Memcache 版",
+      "en": "ApsaraDB for Memcache"
+    }
+  },
+  {
+    "ProductCode": "odps",
+    "RelevantCodes": {
+      "ROS": "MaxCompute",
+      "PIP": "odps"
+    },
+    "Name": {
+      "zh": "云原生大数据计算服务 MaxCompute",
+      "en": "MaxCompute"
+    }
+  },
+  {
+    "ProductCode": "ons",
+    "RelevantCodes": {
+      "ROS": "AMQP",
+      "PIP": "ons"
+    },
+    "Name": {
+      "zh": "云消息队列 MQ",
+      "en": "ApsaraMQ"
+    }
+  },
+  {
+    "ProductCode": "ons",
+    "RelevantCodes": {
+      "ROS": "ROCKETMQ",
+      "PIP": "ons"
+    },
+    "Name": {
+      "zh": "云消息队列 MQ",
+      "en": "ApsaraMQ"
+    }
+  },
+  {
+    "ProductCode": "ons",
+    "RelevantCodes": {
+      "ROS": "ROCKETMQ5",
+      "PIP": "ons"
+    },
+    "Name": {
+      "zh": "云消息队列 MQ",
+      "en": "ApsaraMQ"
+    }
+  },
+  {
+    "ProductCode": "oos",
+    "RelevantCodes": {
+      "ROS": "OOS",
+      "PIP": "oos"
+    },
+    "Name": {
+      "zh": "系统运维管理",
+      "en": "CloudOps Orchestration Service"
+    }
+  },
+  {
+    "ProductCode": "openanalytics",
+    "RelevantCodes": {
+      "ROS": "ADBLake",
+      "PIP": "openanalytics"
+    },
+    "Name": {
+      "zh": "云原生数据湖分析",
+      "en": "Data Lake Analytics"
+    }
+  },
+  {
+    "ProductCode": "opensearch",
+    "RelevantCodes": {
+      "ROS": "SearchEngine",
+      "PIP": "opensearch"
+    },
+    "Name": {
+      "zh": "智能开放搜索 OpenSearch",
+      "en": "Open Search"
+    }
+  },
+  {
+    "ProductCode": "oss",
+    "RelevantCodes": {
+      "ROS": "OSS",
+      "PIP": "oss"
+    },
+    "Name": {
+      "zh": "对象存储",
+      "en": "Object Storage Service"
+    }
+  },
+  {
+    "ProductCode": "ots",
+    "RelevantCodes": {
+      "ROS": "OTS",
+      "PIP": "ots"
+    },
+    "Name": {
+      "zh": "表格存储",
+      "en": "Tablestore"
+    }
+  },
+  {
+    "ProductCode": "polardb",
+    "RelevantCodes": {
+      "ROS": "POLARDB",
+      "PIP": "polardb"
+    },
+    "Name": {
+      "zh": "云原生数据库 PolarDB",
+      "en": "PolarDB"
+    }
+  },
+  {
+    "ProductCode": "polardb",
+    "RelevantCodes": {
+      "ROS": "PolarDBX",
+      "PIP": "PolarDB"
+    },
+    "Name": {
+      "zh": "云原生数据库 PolarDB",
+      "en": "PolarDB"
+    }
+  },
+  {
+    "ProductCode": "privatelink",
+    "RelevantCodes": {
+      "ROS": "PrivateLink",
+      "PIP": "privatelink"
+    },
+    "Name": {
+      "zh": "私网连接",
+      "en": "PrivateLink"
+    }
+  },
+  {
+    "ProductCode": "pvtz",
+    "RelevantCodes": {
+      "ROS": "PVTZ",
+      "PIP": "pvtz"
+    },
+    "Name": {
+      "zh": "云解析 PrivateZone",
+      "en": "Alibaba Cloud DNS PrivateZone"
+    }
+  },
+  {
+    "ProductCode": "ram",
+    "RelevantCodes": {
+      "ROS": "CloudSSO",
+      "PIP": "ram"
+    },
+    "Name": {
+      "zh": "访问控制",
+      "en": "Resource Access Management"
+    }
+  },
+  {
+    "ProductCode": "ram",
+    "RelevantCodes": {
+      "ROS": "RAM",
+      "PIP": "ram"
+    },
+    "Name": {
+      "zh": "访问控制",
+      "en": "Resource Access Management"
+    }
+  },
+  {
+    "ProductCode": "rdc",
+    "RelevantCodes": {
+      "ROS": "DEVOPS",
+      "PIP": "rdc"
+    },
+    "Name": {
+      "zh": "云效",
+      "en": "Apsara Devops"
+    }
+  },
+  {
+    "ProductCode": "rds",
+    "RelevantCodes": {
+      "ROS": "RDS",
+      "PIP": "rds"
+    },
+    "Name": {
+      "zh": "云数据库 RDS",
+      "en": "ApsaraDB RDS"
+    }
+  },
+  {
+    "ProductCode": "ros",
+    "RelevantCodes": {
+      "ROS": "ROS",
+      "PIP": "ros"
+    },
+    "Name": {
+      "zh": "资源编排",
+      "en": "Resource Orchestration Service"
+    }
+  },
+  {
+    "ProductCode": "sae",
+    "RelevantCodes": {
+      "ROS": "SAE",
+      "PIP": "sae"
+    },
+    "Name": {
+      "zh": "Serverless 应用引擎",
+      "en": "Serverless App Engine"
+    }
+  },
+  {
+    "ProductCode": "sas",
+    "RelevantCodes": {
+      "ROS": "SAS",
+      "PIP": "sas"
+    },
+    "Name": {
+      "zh": "云安全中心",
+      "en": "Security Center"
+    }
+  },
+  {
+    "ProductCode": "sas",
+    "RelevantCodes": {
+      "ROS": "ThreatDetection",
+      "PIP": "sas"
+    },
+    "Name": {
+      "zh": "云安全中心",
+      "en": "Security Center"
+    }
+  },
+  {
+    "ProductCode": "sc",
+    "RelevantCodes": {
+      "ROS": "FOAS",
+      "PIP": "sc"
+    },
+    "Name": {
+      "zh": "实时计算 Flink版",
+      "en": "Realtime Compute for Apache Flink"
+    }
+  },
+  {
+    "ProductCode": "sc",
+    "RelevantCodes": {
+      "ROS": "Flink",
+      "PIP": "sc"
+    },
+    "Name": {
+      "zh": "实时计算 Flink版",
+      "en": "Realtime Compute for Apache Flink"
+    }
+  },
+  {
+    "ProductCode": "slb",
+    "RelevantCodes": {
+      "ROS": "SLB",
+      "PIP": "slb"
+    },
+    "Name": {
+      "zh": "负载均衡",
+      "en": "Server Load Balancer"
+    }
+  },
+  {
+    "ProductCode": "sls",
+    "RelevantCodes": {
+      "ROS": "SLS",
+      "PIP": "sls"
+    },
+    "Name": {
+      "zh": "日志服务",
+      "en": "Simple Log Service"
+    }
+  },
+  {
+    "ProductCode": "smartag",
+    "RelevantCodes": {
+      "ROS": "SAG",
+      "PIP": "smartag"
+    },
+    "Name": {
+      "zh": "智能接入网关",
+      "en": "Smart Access Gateway"
+    }
+  },
+  {
+    "ProductCode": "swas",
+    "RelevantCodes": {
+      "ROS": "SWAS",
+      "PIP": "swas"
+    },
+    "Name": {
+      "zh": "轻量应用服务器",
+      "en": "Simple Application Server"
+    }
+  },
+  {
+    "ProductCode": "vod",
+    "RelevantCodes": {
+      "ROS": "VOD",
+      "PIP": "vod"
+    },
+    "Name": {
+      "zh": "视频点播",
+      "en": "ApsaraVideo VOD"
+    }
+  },
+  {
+    "ProductCode": "vpc",
+    "RelevantCodes": {
+      "ROS": "VPC",
+      "PIP": "vpc"
+    },
+    "Name": {
+      "zh": "专有网络VPC",
+      "en": "Virtual Private Cloud"
+    }
+  },
+  {
+    "ProductCode": "vpn",
+    "RelevantCodes": {
+      "ROS": "VPC",
+      "PIP": "vpn"
+    },
+    "Name": {
+      "zh": "VPN网关",
+      "en": "VPN Gateway"
+    }
+  },
+  {
+    "ProductCode": "vs",
+    "RelevantCodes": {
+      "ROS": "VS",
+      "PIP": "vs"
+    },
+    "Name": {
+      "zh": "视图计算",
+      "en": "Visual Edge Computing Service"
+    }
+  },
+  {
+    "ProductCode": "waf",
+    "RelevantCodes": {
+      "ROS": "WAF",
+      "PIP": "waf"
+    },
+    "Name": {
+      "zh": "Web应用防火墙",
+      "en": "Web Application Firewall"
+    }
+  },
+  {
+    "ProductCode": "waf",
+    "RelevantCodes": {
+      "ROS": "WAF3",
+      "PIP": "waf"
+    },
+    "Name": {
+      "zh": "Web应用防火墙",
+      "en": "Web Application Firewall"
+    }
+  }
+]

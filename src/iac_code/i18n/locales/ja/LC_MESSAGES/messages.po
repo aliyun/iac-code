@@ -2849,6 +2849,63 @@ msgstr "ROS デプロイ"
 msgid "InfraGuard scan"
 msgstr "InfraGuard スキャン"
 
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "ECS instance"
+msgstr "ECS インスタンス"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "ECS instance group"
+msgstr "ECS インスタンスグループ"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Elastic IP address"
+msgstr "Elastic IP アドレス"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "SLB load balancer"
+msgstr "SLB ロードバランサー"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "NAT gateway"
+msgstr "NAT ゲートウェイ"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Shared bandwidth package"
+msgstr "共有帯域幅パッケージ"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Database instance"
+msgstr "データベースインスタンス"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "VPC"
+msgstr "VPC"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "VSwitch"
+msgstr "VSwitch"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Security group"
+msgstr "セキュリティグループ"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "YAML parse error"
+msgstr "YAML 解析エラー"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "related resource"
+msgstr "関連リソース"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "Architecture overview"
+msgstr "アーキテクチャ概要"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Show the complete architecture diagram."
+msgstr "完全なアーキテクチャ図を表示します。"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -3423,50 +3480,6 @@ msgid "{command} exited with {returncode}: {body}"
 msgstr "{command} は {returncode} で終了しました: {body}"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "ECS instance"
-msgstr "ECS インスタンス"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "ECS instance group"
-msgstr "ECS インスタンスグループ"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Elastic IP address"
-msgstr "Elastic IP アドレス"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "SLB load balancer"
-msgstr "SLB ロードバランサー"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "NAT gateway"
-msgstr "NAT ゲートウェイ"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Shared bandwidth package"
-msgstr "共有帯域幅パッケージ"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Database instance"
-msgstr "データベースインスタンス"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "VPC"
-msgstr "VPC"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "VSwitch"
-msgstr "VSwitch"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Security group"
-msgstr "セキュリティグループ"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "YAML parse error"
-msgstr "YAML 解析エラー"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid ""
 "Read a ROS template YAML file and generate an architecture diagram. Pass "
 "the template file path relative to the working directory and the "
@@ -3493,9 +3506,29 @@ msgid ""
 msgstr "evaluated_candidates 内の 0 始まりの候補インデックス。重複名の区別に使用します"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Use facts to emit an immediate draft diagram and internally optimize it "
+"with the LLM; use render to emit a diagram from an explicit "
+"semantic_plan."
+msgstr ""
+"facts を使うと即時にドラフト図を出力し、ツール内部で LLM により最適化します。render を使うと明示的な semantic_plan"
+" から図を出力します。"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Optional LLM-generated semantic graph plan. Edges must reference visible "
+"node ids from a prior facts response."
+msgstr "任意の LLM 生成セマンティックグラフ計画です。エッジは以前の facts 応答に含まれる表示ノード ID を参照する必要があります。"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
 #, python-brace-format
 msgid "Template file does not exist: {file_path}"
 msgstr "テンプレートファイルが存在しません: {file_path}"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+#, python-brace-format
+msgid "Generated and optimized the architecture diagram for \"{candidate_name}\"."
+msgstr "「{candidate_name}」のアーキテクチャ図を生成して最適化しました。"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 #, python-brace-format
@@ -5791,12 +5824,21 @@ msgid "Scroll down to view more"
 msgstr "下にスクロールしてさらに表示"
 
 #: src/iac_code/ui/components/candidate_selection.py
+msgid "架构图优化中..."
+msgstr "アーキテクチャ図を最適化中..."
+
+#: src/iac_code/ui/components/candidate_selection.py
 msgid "Loading architecture diagram..."
 msgstr "アーキテクチャ図を読み込み中..."
 
 #: src/iac_code/ui/components/candidate_selection.py
 msgid "Loading candidate details..."
 msgstr "候補の詳細を読み込み中..."
+
+#: src/iac_code/ui/components/candidate_selection.py
+#, python-brace-format
+msgid "Diagram {index}"
+msgstr "図 {index}"
 
 #: src/iac_code/ui/components/candidate_selection.py
 msgid ""
@@ -5818,6 +5860,10 @@ msgstr " | 1-{count} で直接移動"
 #: src/iac_code/ui/components/candidate_selection.py
 msgid "↑ ↓ scroll"
 msgstr "↑ ↓ スクロール"
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "switch diagrams"
+msgstr "図を切り替え"
 
 #: src/iac_code/ui/components/fuzzy_picker.py
 msgid "No matches found"
@@ -6376,4 +6422,34 @@ msgstr "通常ファイルではないファイルを開くことを拒否しま
 
 #~ msgid "feature"
 #~ msgstr "機能"
+
+#~ msgid "ECS instance"
+#~ msgstr "ECS インスタンス"
+
+#~ msgid "ECS instance group"
+#~ msgstr "ECS インスタンスグループ"
+
+#~ msgid "Elastic IP address"
+#~ msgstr "Elastic IP アドレス"
+
+#~ msgid "SLB load balancer"
+#~ msgstr "SLB ロードバランサー"
+
+#~ msgid "NAT gateway"
+#~ msgstr "NAT ゲートウェイ"
+
+#~ msgid "Shared bandwidth package"
+#~ msgstr "共有帯域幅パッケージ"
+
+#~ msgid "Database instance"
+#~ msgstr "データベースインスタンス"
+
+#~ msgid "VPC"
+#~ msgstr "VPC"
+
+#~ msgid "VSwitch"
+#~ msgstr "VSwitch"
+
+#~ msgid "Security group"
+#~ msgstr "セキュリティグループ"
 

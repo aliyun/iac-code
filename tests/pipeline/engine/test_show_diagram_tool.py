@@ -2,9 +2,22 @@ import asyncio
 
 import pytest
 
+from iac_code.pipeline.engine import show_diagram_tool
 from iac_code.pipeline.engine.show_diagram_tool import ShowArchitectureDiagramTool, ros_template_to_mermaid
-from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.stream_events import CandidateDetailEvent, DiagramEvent, ToolEmittedEvent
+
+
+def _assert_error_diagram_event(queue: asyncio.Queue, *, candidate_name: str, expected_text: str) -> None:
+    event = queue.get_nowait()
+    assert isinstance(event, DiagramEvent)
+    assert event.candidate_name == candidate_name
+    assert event.diagram_stage == "optimized"
+    assert expected_text in event.mermaid_source
+    assert event.views
+    assert expected_text in event.views[0]["mermaid_source"]
+
 
 SIMPLE_TEMPLATE = """\
 ROSTemplateFormatVersion: '2015-09-01'
@@ -117,6 +130,34 @@ Resources:
 """
 
 
+def _many_resource_template(count: int = 80) -> str:
+    resources = [
+        "ROSTemplateFormatVersion: '2015-09-01'",
+        "Resources:",
+        "  VPC:",
+        "    Type: ALIYUN::ECS::VPC",
+        "    Properties:",
+        "      CidrBlock: 10.0.0.0/8",
+        "  VSwitch:",
+        "    Type: ALIYUN::ECS::VSwitch",
+        "    Properties:",
+        "      VpcId:",
+        "        Ref: VPC",
+        "      CidrBlock: 10.0.0.0/24",
+    ]
+    for index in range(count):
+        resources.extend(
+            [
+                f"  ECS{index}:",
+                "    Type: ALIYUN::ECS::Instance",
+                "    Properties:",
+                "      VSwitchId:",
+                "        Ref: VSwitch",
+            ]
+        )
+    return "\n".join(resources) + "\n"
+
+
 class TestToolEmittedEvent:
     def test_diagram_event_is_tool_emitted(self):
         event = DiagramEvent(
@@ -179,9 +220,9 @@ class TestRosTemplateToMermaid:
     def test_layers_rendered_as_subgraphs(self):
         mermaid = ros_template_to_mermaid(SIMPLE_TEMPLATE)
         assert "graph TD" in mermaid
-        assert 'subgraph layer_VPC["VPC (172.16.0.0/12)"]' in mermaid
-        assert 'subgraph layer_VSwitch["VSwitch (172.16.0.0/24)"]' in mermaid
-        assert 'subgraph layer_SecurityGroup["Security group"]' in mermaid
+        assert "subgraph layer_VPC [VPC (172.16.0.0/12)]" in mermaid
+        assert "subgraph layer_VSwitch [VSwitch (172.16.0.0/24)]" in mermaid
+        assert "subgraph layer_SecurityGroup [Security group]" in mermaid
 
     def test_node_inside_security_group(self):
         mermaid = ros_template_to_mermaid(SIMPLE_TEMPLATE)
@@ -276,6 +317,12 @@ class TestShowArchitectureDiagramToolMeta:
         tool = ShowArchitectureDiagramTool()
         assert tool.needs_event_queue() is True
 
+    def test_timeout_allows_slow_semantic_planning(self):
+        tool = ShowArchitectureDiagramTool()
+
+        assert tool.timeout is not None
+        assert tool.timeout >= 600.0
+
 
 class TestShowArchitectureDiagramToolExecute:
     @pytest.mark.asyncio
@@ -302,6 +349,33 @@ class TestShowArchitectureDiagramToolExecute:
         assert "ROSTemplateFormatVersion" in event.template_content
 
     @pytest.mark.asyncio
+    async def test_uses_requested_template_file_path(self, tmp_path):
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        requested_template = SIMPLE_TEMPLATE.replace("172.16.0.0/12", "10.10.0.0/16")
+        debug_template = SIMPLE_TEMPLATE.replace("172.16.0.0/12", "192.168.99.0/24")
+        (template_dir / "requested.yml").write_text(requested_template, encoding="utf-8")
+        (template_dir / "public-network-architecture-design.yml").write_text(debug_template, encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowArchitectureDiagramTool()
+
+        result = await tool.execute(
+            tool_input={
+                "file_path": "templates/requested.yml",
+                "candidate_name": "requested candidate",
+                "candidate_index": 0,
+            },
+            context=ToolContext(cwd=str(tmp_path), event_queue=queue),
+        )
+
+        assert not result.is_error
+        event = queue.get_nowait()
+        assert isinstance(event, DiagramEvent)
+        assert event.template_content == requested_template
+        assert "10.10.0.0/16" in event.mermaid_source
+        assert "192.168.99.0/24" not in event.mermaid_source
+
+    @pytest.mark.asyncio
     async def test_show_architecture_diagram_emits_candidate_index(self, tmp_path):
         template = tmp_path / "template.yml"
         template.write_text("ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n", encoding="utf-8")
@@ -320,16 +394,386 @@ class TestShowArchitectureDiagramToolExecute:
         assert event.candidate_index == 1
 
     @pytest.mark.asyncio
-    async def test_file_not_found(self, tmp_path):
-        context = ToolContext(cwd=str(tmp_path))
+    async def test_facts_mode_emits_draft_then_optimized_diagram(self, tmp_path, monkeypatch):
+        template = tmp_path / "template.yml"
+        template.write_text(SLB_TEMPLATE, encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowArchitectureDiagramTool()
+
+        async def fake_create_semantic_plan_for_architecture_with_llm(
+            architecture_context: dict,
+            template_content: str,
+            **_: object,
+        ):
+            assert architecture_context
+            assert "SLB" in template_content
+            return {
+                "edges": [
+                    {
+                        "from": "SLB",
+                        "to": "ECS1",
+                        "kind": "traffic",
+                        "label": "后端转发",
+                        "confidence": "high",
+                    }
+                ]
+            }
+
+        monkeypatch.setattr(
+            show_diagram_tool,
+            "create_semantic_plan_for_architecture_with_llm",
+            fake_create_semantic_plan_for_architecture_with_llm,
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "file_path": "template.yml",
+                "candidate_name": "semantic plan candidate",
+                "candidate_index": 0,
+                "mode": "facts",
+            },
+            context=ToolContext(cwd=str(tmp_path), event_queue=queue),
+        )
+
+        assert not result.is_error
+        draft_event = queue.get_nowait()
+        optimized_event = queue.get_nowait()
+        assert isinstance(draft_event, DiagramEvent)
+        assert isinstance(optimized_event, DiagramEvent)
+        assert draft_event.diagram_stage == "draft"
+        assert optimized_event.diagram_stage == "optimized"
+        assert len(draft_event.views) == 1
+        assert draft_event.views[0]["id"] == "overview"
+        assert "graph TD" in draft_event.views[0]["mermaid_source"]
+        assert "后端转发" in optimized_event.mermaid_source
+        assert "Architecture semantic planning instructions" not in result.content
+        assert '"visible_nodes"' not in result.content
+
+    @pytest.mark.asyncio
+    async def test_facts_mode_uses_internal_preview_semantic_planning_for_large_templates(self, tmp_path, monkeypatch):
+        template = tmp_path / "template.yml"
+        template.write_text(_many_resource_template(), encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowArchitectureDiagramTool()
+        captured_contexts: list[dict] = []
+
+        async def fake_create_semantic_plan_for_architecture_with_llm(
+            architecture_context: dict,
+            template_content: str,
+            **_: object,
+        ):
+            captured_contexts.append(architecture_context)
+            assert "Resource0" in template_content
+            return {}
+
+        monkeypatch.setattr(
+            show_diagram_tool,
+            "create_semantic_plan_for_architecture_with_llm",
+            fake_create_semantic_plan_for_architecture_with_llm,
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "file_path": "template.yml",
+                "candidate_name": "large candidate",
+                "candidate_index": 0,
+                "mode": "facts",
+            },
+            context=ToolContext(cwd=str(tmp_path), event_queue=queue),
+        )
+
+        assert not result.is_error
+        assert captured_contexts
+        draft_event = queue.get_nowait()
+        optimized_event = queue.get_nowait()
+        assert isinstance(draft_event, DiagramEvent)
+        assert isinstance(optimized_event, DiagramEvent)
+        assert draft_event.diagram_stage == "draft"
+        assert optimized_event.diagram_stage == "optimized"
+        assert len(result.content) < 1000
+        assert "MUST call show_architecture_diagram again with mode=render" not in result.content
+        assert "Architecture semantic planning instructions" not in result.content
+        assert '"visible_nodes"' not in result.content
+        assert '"resources"' not in result.content
+
+    @pytest.mark.asyncio
+    async def test_facts_mode_emits_optimized_diagram_from_internal_llm_plan(self, tmp_path, monkeypatch):
+        template = tmp_path / "templates" / "public-network-architecture-design.yml"
+        template.parent.mkdir()
+        template.write_text(SLB_TEMPLATE, encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowArchitectureDiagramTool()
+        captured_contexts: list[dict] = []
+
+        async def fake_create_semantic_plan_for_architecture_with_llm(
+            architecture_context: dict,
+            template_content: str,
+            **_: object,
+        ):
+            captured_contexts.append(architecture_context)
+            assert "SLB" in template_content
+            return {
+                "edges": [
+                    {
+                        "from": "SLB",
+                        "to": "ECS1",
+                        "kind": "traffic",
+                        "label": "后端转发",
+                        "confidence": "high",
+                    }
+                ],
+                "views": [
+                    {
+                        "id": "detail_app",
+                        "title": "应用负载详情",
+                        "purpose": "展示负载均衡到后端服务器的流量路径",
+                        "layout": "flat",
+                        "anchors": ["SLB"],
+                        "groups": [],
+                        "nodes": ["SLB", "ECS1"],
+                        "edges": [
+                            {
+                                "from": "SLB",
+                                "to": "ECS1",
+                                "kind": "traffic",
+                                "label": "后端转发",
+                            }
+                        ],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr(
+            show_diagram_tool,
+            "create_semantic_plan_for_architecture_with_llm",
+            fake_create_semantic_plan_for_architecture_with_llm,
+            raising=False,
+        )
+
+        result = await tool.execute(
+            tool_input={
+                "file_path": "templates/public-network-architecture-design.yml",
+                "candidate_name": "semantic plan candidate",
+                "candidate_index": 0,
+                "mode": "facts",
+            },
+            context=ToolContext(cwd=str(tmp_path), event_queue=queue),
+        )
+
+        assert not result.is_error
+        draft_event = queue.get_nowait()
+        optimized_event = queue.get_nowait()
+        assert isinstance(draft_event, DiagramEvent)
+        assert isinstance(optimized_event, DiagramEvent)
+        assert draft_event.diagram_stage == "draft"
+        assert optimized_event.diagram_stage == "optimized"
+        assert optimized_event.views[0]["id"] == "detail_app"
+        assert "后端转发" in optimized_event.views[0]["mermaid_source"]
+        assert captured_contexts
+        assert "Architecture semantic planning instructions" not in result.content
+        assert '"visible_nodes"' not in result.content
+
+    @pytest.mark.asyncio
+    async def test_facts_mode_emits_fallback_optimized_event_when_executor_cancels_llm(self, tmp_path, monkeypatch):
+        class ShortTimeoutShowArchitectureDiagramTool(ShowArchitectureDiagramTool):
+            @property
+            def timeout(self) -> float | None:
+                return 0.05
+
+        template = tmp_path / "template.yml"
+        template.write_text(SLB_TEMPLATE, encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
+        registry = ToolRegistry()
+        registry.register(ShortTimeoutShowArchitectureDiagramTool())
+        executor = ToolExecutor(registry, tool_timeout=0.05)
+
+        async def slow_create_semantic_plan_for_architecture_with_llm(
+            architecture_context: dict,
+            template_content: str,
+            **_: object,
+        ):
+            assert architecture_context
+            assert template_content
+            await asyncio.sleep(10)
+            return {}
+
+        monkeypatch.setattr(
+            show_diagram_tool,
+            "create_semantic_plan_for_architecture_with_llm",
+            slow_create_semantic_plan_for_architecture_with_llm,
+        )
+
+        results = await executor.execute_batch(
+            [
+                ToolCallRequest(
+                    id="call_1",
+                    name="show_architecture_diagram",
+                    input={
+                        "file_path": "template.yml",
+                        "candidate_name": "semantic plan candidate",
+                        "candidate_index": 0,
+                        "mode": "facts",
+                    },
+                    event_queue=queue,
+                )
+            ],
+            ToolContext(cwd=str(tmp_path)),
+        )
+
+        assert results[0].is_error
+        draft_event = queue.get_nowait()
+        optimized_event = queue.get_nowait()
+        assert isinstance(draft_event, DiagramEvent)
+        assert isinstance(optimized_event, DiagramEvent)
+        assert draft_event.diagram_stage == "draft"
+        assert optimized_event.diagram_stage == "optimized"
+
+    @pytest.mark.asyncio
+    async def test_render_mode_applies_valid_semantic_plan(self, tmp_path):
+        template = tmp_path / "template.yml"
+        template.write_text(SLB_TEMPLATE, encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
         tool = ShowArchitectureDiagramTool()
 
         result = await tool.execute(
-            tool_input={"file_path": "templates/nonexistent.yml", "candidate_name": "不存在"},
+            tool_input={
+                "file_path": "template.yml",
+                "candidate_name": "semantic plan candidate",
+                "candidate_index": 0,
+                "semantic_plan": {
+                    "edges": [
+                        {
+                            "from": "SLB",
+                            "to": "ECS1",
+                            "kind": "traffic",
+                            "label": "forwards traffic",
+                            "confidence": "medium",
+                        }
+                    ]
+                },
+            },
+            context=ToolContext(cwd=str(tmp_path), event_queue=queue),
+        )
+
+        assert not result.is_error
+        event = queue.get_nowait()
+        assert isinstance(event, DiagramEvent)
+        assert event.diagram_stage == "optimized"
+        assert "SLB -->|forwards traffic| ECS1" in event.mermaid_source
+        assert "SLB --> ECS1" not in event.mermaid_source
+        assert event.architecture_context is not None
+        assert event.architecture_context["semantic_plan"]["accepted_edges"][0]["label"] == "forwards traffic"
+
+    @pytest.mark.asyncio
+    async def test_render_mode_emits_multiple_views_from_semantic_plan(self, tmp_path):
+        template = tmp_path / "template.yml"
+        template.write_text(SLB_TEMPLATE, encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowArchitectureDiagramTool()
+
+        result = await tool.execute(
+            tool_input={
+                "file_path": "template.yml",
+                "candidate_name": "multi view candidate",
+                "candidate_index": 0,
+                "mode": "render",
+                "semantic_plan": {
+                    "views": [
+                        {
+                            "id": "overview",
+                            "title": "总览",
+                            "purpose": "整体拓扑",
+                            "node_ids": ["SLB", "ECS1"],
+                            "edge_ids": [],
+                        },
+                        {
+                            "id": "detail_app",
+                            "title": "应用详情",
+                            "purpose": "应用层",
+                            "node_ids": ["SLB", "ECS1", "ECS2"],
+                            "edge_ids": [],
+                        },
+                    ]
+                },
+            },
+            context=ToolContext(cwd=str(tmp_path), event_queue=queue),
+        )
+
+        assert not result.is_error
+        event = queue.get_nowait()
+        assert isinstance(event, DiagramEvent)
+        assert event.diagram_stage == "optimized"
+        assert [(view["id"], view["title"]) for view in event.views] == [
+            ("overview", "总览"),
+            ("detail_app", "应用详情"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_render_mode_repairs_preview_semantic_plan_before_rendering(self, tmp_path):
+        template = tmp_path / "template.yml"
+        template.write_text(SLB_TEMPLATE, encoding="utf-8")
+        queue: asyncio.Queue = asyncio.Queue()
+        tool = ShowArchitectureDiagramTool()
+
+        result = await tool.execute(
+            tool_input={
+                "file_path": "template.yml",
+                "candidate_name": "repaired plan candidate",
+                "candidate_index": 0,
+                "mode": "render",
+                "semantic_plan": {
+                    "node_labels": [
+                        {"id": "SLB", "label": "入口负载均衡", "confidence": "high", "reason": "obvious"},
+                        {"id": "Missing", "label": "不存在", "confidence": "high", "reason": "bad"},
+                    ],
+                    "edges": [
+                        {"from": "SLB", "to": "ECS1", "kind": "traffic", "label": "后端转发"},
+                        {"from": "SLB", "to": "Missing", "kind": "traffic", "label": "错误关系"},
+                    ],
+                    "views": [
+                        {
+                            "id": "detail_app",
+                            "layout": "deep",
+                            "nodes": ["SLB", "Missing"],
+                            "edges": [{"from": "SLB", "to": "Missing", "kind": "traffic", "label": "错误关系"}],
+                        },
+                        {
+                            "id": "overview",
+                            "layout": "flat",
+                            "nodes": ["SLB", "ECS1"],
+                            "edges": [{"from": "SLB", "to": "ECS1", "kind": "traffic", "label": "后端转发"}],
+                        },
+                    ],
+                },
+            },
+            context=ToolContext(cwd=str(tmp_path), event_queue=queue),
+        )
+
+        assert not result.is_error
+        event = queue.get_nowait()
+        assert isinstance(event, DiagramEvent)
+        assert event.diagram_stage == "optimized"
+        assert [(view["id"], view["title"]) for view in event.views] == [
+            ("overview", "overview"),
+            ("detail_app", "detail_app"),
+        ]
+        accepted_labels = event.architecture_context["semantic_plan"]["accepted_node_labels"]
+        assert accepted_labels == [{"id": "SLB", "label": "入口负载均衡", "confidence": "high"}]
+        assert all("Missing" not in view["mermaid_source"] for view in event.views)
+
+    @pytest.mark.asyncio
+    async def test_file_not_found(self, tmp_path):
+        queue: asyncio.Queue = asyncio.Queue()
+        context = ToolContext(cwd=str(tmp_path), event_queue=queue)
+        tool = ShowArchitectureDiagramTool()
+
+        result = await tool.execute(
+            tool_input={"file_path": "templates/nonexistent.yml", "candidate_name": "不存在", "candidate_index": 0},
             context=context,
         )
 
         assert result.is_error
+        _assert_error_diagram_event(queue, candidate_name="不存在", expected_text="Template file does not exist")
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("file_path", ["../secret.yml", "../../secret.yml"])
@@ -346,7 +790,7 @@ class TestShowArchitectureDiagramToolExecute:
         )
 
         assert result.is_error
-        assert queue.empty()
+        _assert_error_diagram_event(queue, candidate_name="逃逸方案", expected_text="cannot escape")
 
     @pytest.mark.asyncio
     async def test_rejects_absolute_path(self, tmp_path):
@@ -363,7 +807,7 @@ class TestShowArchitectureDiagramToolExecute:
         )
 
         assert result.is_error
-        assert queue.empty()
+        _assert_error_diagram_event(queue, candidate_name="绝对路径方案", expected_text="must be relative")
 
     @pytest.mark.asyncio
     async def test_rejects_symlink_escape(self, tmp_path):
@@ -386,7 +830,7 @@ class TestShowArchitectureDiagramToolExecute:
         )
 
         assert result.is_error
-        assert queue.empty()
+        _assert_error_diagram_event(queue, candidate_name="链接逃逸方案", expected_text="cannot escape")
 
     @pytest.mark.asyncio
     async def test_no_event_queue(self, tmp_path):

@@ -108,9 +108,11 @@ def create_provider(
     base_url: str | None = None,
     provider_key_override: str | None = None,
     request_policy_override: ProviderRequestPolicy | None = None,
+    effort_override: str | None = None,
 ) -> Provider:
     from iac_code.providers.registry import PROVIDER_REGISTRY
 
+    request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
     provider_key = provider_key_override or _detect_provider_name(model)
     desc = PROVIDER_REGISTRY.get(provider_key)
     if desc is None:
@@ -262,6 +264,32 @@ def _active_request_policy(policy: ProviderRequestPolicy | None) -> ProviderRequ
     return policy
 
 
+_LEGACY_DISABLE_EFFORTS = {"none", "off", "disable", "disabled", "false", "0"}
+
+
+def _request_policy_with_effort_override(
+    policy: ProviderRequestPolicy | None,
+    effort_override: str | None,
+) -> ProviderRequestPolicy | None:
+    policy = _active_request_policy(policy)
+    if effort_override is None:
+        return policy
+    effort = effort_override.strip()
+    if not effort:
+        return policy
+    thinking_enabled = policy.thinking_enabled if policy is not None else None
+    if effort.lower() in _LEGACY_DISABLE_EFFORTS:
+        thinking_enabled = False
+    return _active_request_policy(
+        ProviderRequestPolicy(
+            thinking_enabled=thinking_enabled,
+            effort=effort,
+            thinking_budget=policy.thinking_budget if policy is not None else None,
+            max_completion_tokens=policy.max_completion_tokens if policy is not None else None,
+        )
+    )
+
+
 class ProviderManager:
     """Manages provider lifecycle, streaming fallback, and model degradation.
     When streaming fails mid-way:
@@ -279,6 +307,7 @@ class ProviderManager:
         provider_key_override: str | None = None,
         base_url_override: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
+        effort_override: str | None = None,
     ):
         self._model = model
         self._credentials = credentials
@@ -286,7 +315,7 @@ class ProviderManager:
         self._stream_idle_timeout = stream_idle_timeout
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
-        self._request_policy_override = _active_request_policy(request_policy_override)
+        self._request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
         # Lazy: first startup may have no active provider yet. Defer errors
         # until the user actually tries to send a message, so /auth is reachable.
         self._provider: Provider | None = None
@@ -345,6 +374,7 @@ class ProviderManager:
         provider_key_override: str | None = None,
         base_url_override: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
+        effort_override: str | None = None,
     ) -> None:
         """Switch model and credentials in place.
 
@@ -357,7 +387,7 @@ class ProviderManager:
         self._credentials = credentials
         self._provider_key_override = provider_key_override
         self._base_url_override = base_url_override
-        self._request_policy_override = _active_request_policy(request_policy_override)
+        self._request_policy_override = _request_policy_with_effort_override(request_policy_override, effort_override)
         self._provider = None
         try:
             self._provider = create_provider(

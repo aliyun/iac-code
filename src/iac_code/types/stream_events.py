@@ -282,6 +282,9 @@ class DiagramEvent(ToolEmittedEvent):
     template_content: str
     mermaid_source: str
     candidate_index: int | None = None
+    architecture_context: dict[str, Any] | None = None
+    diagram_stage: Literal["draft", "optimized"] = "optimized"
+    views: list[dict[str, str]] = field(default_factory=list)
     type: Literal["diagram"] = "diagram"
 
 

@@ -1,0 +1,2606 @@
+{
+  "attachment_label_prefix": "+ ",
+  "compact_attachment_edges": [
+    {
+      "edge_label": {
+        "en": "public bandwidth",
+        "zh": "公网带宽"
+      },
+      "edge_style": "dotted_open",
+      "marker_properties": [
+        "Eips"
+      ],
+      "marker_types": [
+        "ALIYUN::VPC::EIP"
+      ],
+      "resource_types": [
+        "ALIYUN::VPC::CommonBandwidthPackageIp"
+      ],
+      "source_properties": [
+        "BandwidthPackageId"
+      ],
+      "source_types": [
+        "ALIYUN::VPC::CommonBandwidthPackage"
+      ]
+    },
+    {
+      "edge_label": {
+        "en": "Add Replica Pair",
+        "zh": "添加复制对"
+      },
+      "edge_style": "dotted_open",
+      "marker_properties": [
+        "ReplicaPairId"
+      ],
+      "marker_types": [
+        "ALIYUN::EBS::DiskReplicaPair"
+      ],
+      "resource_types": [
+        "ALIYUN::EBS::DiskReplicaPairAddition"
+      ],
+      "source_properties": [
+        "ReplicaGroupId"
+      ],
+      "source_types": [
+        "ALIYUN::EBS::DiskReplicaGroup"
+      ]
+    }
+  ],
+  "compact_attachment_marker_types": [
+    "ALIYUN::ECS::NetworkInterface",
+    "ALIYUN::VPC::AnycastEIP",
+    "ALIYUN::VPC::EIP",
+    "ALIYUN::VPC::HaVip"
+  ],
+  "compact_bridge_attachments": [
+    {
+      "label": {
+        "en": "NAS permission group",
+        "zh": "NAS权限组"
+      },
+      "resource_types": [
+        "ALIYUN::NAS::AccessGroup"
+      ],
+      "target_types": [
+        "ALIYUN::NAS::FileSystem"
+      ],
+      "via_resource_types": [
+        "ALIYUN::NAS::MountTarget"
+      ],
+      "via_source_properties": [
+        "AccessGroupName"
+      ],
+      "via_target_properties": [
+        "FileSystemId"
+      ]
+    },
+    {
+      "label": {
+        "en": "NAS permission rule",
+        "zh": "NAS权限规则"
+      },
+      "resource_types": [
+        "ALIYUN::NAS::AccessRule"
+      ],
+      "source_properties": [
+        "AccessGroupName"
+      ],
+      "target_types": [
+        "ALIYUN::NAS::FileSystem"
+      ],
+      "via_resource_types": [
+        "ALIYUN::NAS::MountTarget"
+      ],
+      "via_source_properties": [
+        "AccessGroupName"
+      ],
+      "via_target_properties": [
+        "FileSystemId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Associate ACL",
+        "zh": "访问控制绑定"
+      },
+      "resource_types": [
+        "ALIYUN::SAG::ACL"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::SAG::SmartAccessGateway"
+      ],
+      "via_resource_types": [
+        "ALIYUN::SAG::ACLAssociation"
+      ],
+      "via_source_properties": [
+        "AclId"
+      ],
+      "via_target_properties": [
+        "SmartAGId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Attach QoS Policy",
+        "zh": "QoS策略实例绑定"
+      },
+      "resource_types": [
+        "ALIYUN::SAG::Qos"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::SAG::SmartAccessGateway"
+      ],
+      "via_resource_types": [
+        "ALIYUN::SAG::QosAssociation"
+      ],
+      "via_source_properties": [
+        "QosId"
+      ],
+      "via_target_properties": [
+        "SmartAGId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Backend Server",
+        "zh": "添加后端服务器"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::SLB::LoadBalancer"
+      ],
+      "via_resource_types": [
+        "ALIYUN::SLB::BackendServerAttachment"
+      ],
+      "via_source_properties": [
+        "ServerId"
+      ],
+      "via_target_properties": [
+        "LoadBalancerId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Bandwidth Plan",
+        "zh": "带宽包"
+      },
+      "resource_types": [
+        "ALIYUN::ECD::NetworkPackage"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::ECD::SimpleOfficeSite"
+      ],
+      "via_resource_types": [
+        "ALIYUN::ECD::NetworkPackageAssociation"
+      ],
+      "via_source_properties": [
+        "NetworkPackageId"
+      ],
+      "via_target_properties": [
+        "OfficeSiteId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Bind CCN",
+        "zh": "绑定CCN"
+      },
+      "resource_types": [
+        "ALIYUN::SAG::SmartAccessGateway"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::SAG::CloudConnectNetwork"
+      ],
+      "via_resource_types": [
+        "ALIYUN::SAG::SmartAccessGatewayBinding"
+      ],
+      "via_source_properties": [
+        "SmartAGId"
+      ],
+      "via_target_properties": [
+        "CcnId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Associate DHCP Options Set",
+        "zh": "关联DHCP选项集"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::DhcpOptionsSet"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::ECS::VPC"
+      ],
+      "via_resource_types": [
+        "ALIYUN::VPC::DhcpOptionsSetAttachment"
+      ],
+      "via_source_properties": [
+        "DhcpOptionsSetId"
+      ],
+      "via_target_properties": [
+        "VpcId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Bind Router Interfaces",
+        "zh": "绑定互联路由器接口"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::RouterInterface"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::VPC::RouterInterface"
+      ],
+      "via_resource_types": [
+        "ALIYUN::VPC::PeeringRouterInterfaceBinding"
+      ],
+      "via_source_properties": [
+        "RouterInterfaceId"
+      ],
+      "via_target_properties": [
+        "OppositeInterfaceId"
+      ]
+    },
+    {
+      "label": {
+        "en": "ALB server group",
+        "zh": "ALB服务器组"
+      },
+      "resource_types": [
+        "ALIYUN::ALB::ServerGroup"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::ALB::LoadBalancer"
+      ],
+      "via_resource_types": [
+        "ALIYUN::ALB::Listener"
+      ],
+      "via_source_properties": [
+        "ServerGroupId"
+      ],
+      "via_target_properties": [
+        "LoadBalancerId"
+      ]
+    },
+    {
+      "label": {
+        "en": "NLB server group",
+        "zh": "NLB服务器组"
+      },
+      "resource_types": [
+        "ALIYUN::NLB::ServerGroup"
+      ],
+      "source_properties": [],
+      "target_types": [
+        "ALIYUN::NLB::LoadBalancer"
+      ],
+      "via_resource_types": [
+        "ALIYUN::NLB::Listener"
+      ],
+      "via_source_properties": [
+        "ServerGroupId"
+      ],
+      "via_target_properties": [
+        "LoadBalancerId"
+      ]
+    },
+    {
+      "label": {
+        "en": "Shared bandwidth package",
+        "zh": "共享带宽包"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::CommonBandwidthPackage"
+      ],
+      "source_properties": [],
+      "target_self": true,
+      "target_types": [
+        "ALIYUN::NLB::LoadBalancer"
+      ],
+      "via_resource_types": [
+        "ALIYUN::NLB::LoadBalancer"
+      ],
+      "via_source_properties": [
+        "BandwidthPackageId"
+      ],
+      "via_target_properties": []
+    }
+  ],
+  "compact_child_attachments": [
+    {
+      "label": {
+        "en": "SNAT entry",
+        "zh": "SNAT条目"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::SnatEntry"
+      ],
+      "target_properties": [
+        "SnatTableId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "SNAT entry",
+        "zh": "SNAT条目"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::SNatEntry"
+      ],
+      "target_properties": [
+        "SNatTableId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "DNAT entry",
+        "zh": "DNAT条目"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::ForwardEntry",
+        "ALIYUN::ECS::ForwardEntry"
+      ],
+      "target_properties": [
+        "ForwardTableId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "FULLNAT entry",
+        "zh": "FULLNAT条目"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::FullNatEntry"
+      ],
+      "target_properties": [
+        "FullNatTableId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "NAT IP",
+        "zh": "NAT IP地址"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::NatIp"
+      ],
+      "target_properties": [
+        "NatGatewayId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "NAT IP CIDR",
+        "zh": "NAT IP地址段"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::NatIpCidr"
+      ],
+      "target_properties": [
+        "NatGatewayId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "DB node",
+        "zh": "数据库节点"
+      },
+      "resource_types": [
+        "ALIYUN::POLARDB::DBInstance",
+        "ALIYUN::POLARDB::DBNodes"
+      ],
+      "target_properties": [
+        "DBClusterId"
+      ],
+      "target_types": [
+        "ALIYUN::POLARDB::DBCluster"
+      ]
+    },
+    {
+      "label": {
+        "en": "Account privilege",
+        "zh": "账号权限"
+      },
+      "resource_types": [
+        "ALIYUN::POLARDB::AccountPrivilege"
+      ],
+      "target_properties": [
+        "DBClusterId"
+      ],
+      "target_types": [
+        "ALIYUN::POLARDB::DBCluster"
+      ]
+    },
+    {
+      "label": {
+        "en": "Access whitelist",
+        "zh": "访问白名单"
+      },
+      "resource_types": [
+        "ALIYUN::POLARDB::DBClusterAccessWhiteList"
+      ],
+      "target_properties": [
+        "DBClusterId"
+      ],
+      "target_types": [
+        "ALIYUN::POLARDB::DBCluster"
+      ]
+    },
+    {
+      "label": {
+        "en": "Database",
+        "zh": "数据库"
+      },
+      "resource_types": [
+        "ALIYUN::RDS::Database"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "DB account",
+        "zh": "数据库账号"
+      },
+      "resource_types": [
+        "ALIYUN::RDS::Account"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Account privilege",
+        "zh": "账号权限"
+      },
+      "resource_types": [
+        "ALIYUN::RDS::AccountPrivilege"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Access whitelist",
+        "zh": "访问白名单"
+      },
+      "resource_types": [
+        "ALIYUN::RDS::DBInstanceSecurityIps"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Read-only instance",
+        "zh": "只读实例"
+      },
+      "resource_types": [
+        "ALIYUN::RDS::ReadOnlyDBInstance"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Public endpoint",
+        "zh": "外网连接地址"
+      },
+      "resource_types": [
+        "ALIYUN::RDS::Connection"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "PostgreSQL extension",
+        "zh": "PostgreSQL扩展"
+      },
+      "resource_types": [
+        "ALIYUN::RDS::PostgresExtensions"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "ACK application config",
+        "zh": "ACK应用配置"
+      },
+      "resource_types": [
+        "ALIYUN::CS::ClusterApplication"
+      ],
+      "target_properties": [
+        "ClusterId"
+      ],
+      "target_types": [
+        "ALIYUN::CS::ManagedKubernetesCluster",
+        "ALIYUN::CS::KubernetesCluster",
+        "ALIYUN::CS::ManagedEdgeKubernetesCluster",
+        "ALIYUN::CS::ServerlessKubernetesCluster"
+      ]
+    },
+    {
+      "label": {
+        "en": "Logstore",
+        "zh": "日志库"
+      },
+      "resource_types": [
+        "ALIYUN::SLS::Logstore"
+      ],
+      "target_properties": [
+        "ProjectName"
+      ],
+      "target_types": [
+        "ALIYUN::SLS::Project"
+      ]
+    },
+    {
+      "label": {
+        "en": "AccessKey",
+        "zh": "AccessKey"
+      },
+      "resource_types": [
+        "ALIYUN::RAM::AccessKey"
+      ],
+      "target_properties": [
+        "UserName"
+      ],
+      "target_types": [
+        "ALIYUN::RAM::User"
+      ]
+    },
+    {
+      "label": {
+        "en": "User group",
+        "zh": "用户组"
+      },
+      "resource_types": [
+        "ALIYUN::RAM::UserToGroupAddition"
+      ],
+      "target_properties": [
+        "Users",
+        "GroupName"
+      ],
+      "target_types": [
+        "ALIYUN::RAM::User",
+        "ALIYUN::RAM::Group"
+      ]
+    },
+    {
+      "label": {
+        "en": "NAS mount target",
+        "zh": "NAS挂载点"
+      },
+      "resource_types": [
+        "ALIYUN::NAS::MountTarget"
+      ],
+      "target_properties": [
+        "FileSystemId"
+      ],
+      "target_types": [
+        "ALIYUN::NAS::FileSystem"
+      ]
+    },
+    {
+      "label": {
+        "en": "Shared bandwidth IP",
+        "zh": "共享带宽IP"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::CommonBandwidthPackageIp"
+      ],
+      "target_properties": [
+        "BandwidthPackageId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::CommonBandwidthPackage"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route",
+        "zh": "路由"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::Route"
+      ],
+      "target_properties": [
+        "RouteTableId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VPC"
+      ]
+    },
+    {
+      "label": {
+        "en": "VPC route table",
+        "zh": "VPC路由表"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::RouteTable"
+      ],
+      "target_properties": [
+        "VpcId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VPC"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route",
+        "zh": "路由"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::Route"
+      ],
+      "target_properties": [
+        "RouteTableId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::RouteTable"
+      ]
+    },
+    {
+      "label": {
+        "en": "CEN route table",
+        "zh": "CEN路由表"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::TransitRouterRouteTable"
+      ],
+      "target_properties": [
+        "TransitRouterId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::TransitRouter"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route Table Association",
+        "zh": "关联CEN转发关系"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::TransitRouterRouteTableAssociation"
+      ],
+      "target_properties": [
+        "TransitRouterRouteTableId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::TransitRouterRouteTable",
+        "ALIYUN::CEN::TransitRouter"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route Learning",
+        "zh": "路由学习"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::TransitRouterRouteTablePropagation"
+      ],
+      "target_properties": [
+        "TransitRouterRouteTableId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::TransitRouterRouteTable",
+        "ALIYUN::CEN::TransitRouter"
+      ]
+    },
+    {
+      "label": {
+        "en": "Disk Attachment",
+        "zh": "绑定云盘"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::DiskAttachment"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "ENI Attachment",
+        "zh": "绑定网卡"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::NetworkInterfaceAttachment"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "binds to",
+        "zh": "绑定密钥对"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::SSHKeyPairAttachment"
+      ],
+      "target_properties": [
+        "InstanceIds"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Disk attachment",
+        "zh": "挂载磁盘"
+      },
+      "resource_types": [
+        "ALIYUN::ENS::DiskInstanceAttachment"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ENS::Instance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Security Group",
+        "zh": "安全组"
+      },
+      "resource_types": [
+        "ALIYUN::ENS::InstanceSecurityGroupAttachment"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ENS::Instance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Networks",
+        "zh": "网络"
+      },
+      "resource_types": [
+        "ALIYUN::ENS::NetworkAclAssociation"
+      ],
+      "target_properties": [
+        "NetworkAclId"
+      ],
+      "target_types": [
+        "ALIYUN::ENS::NetworkAcl"
+      ]
+    },
+    {
+      "label": {
+        "en": "ECI Config",
+        "zh": "ECI伸缩配置"
+      },
+      "resource_types": [
+        "ALIYUN::ESS::EciScalingConfiguration"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ESS::ScalingGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "ACLs",
+        "zh": "ACL访问控制列表"
+      },
+      "resource_types": [
+        "ALIYUN::GA::AclsListenerAssociation"
+      ],
+      "target_properties": [
+        "ListenerId"
+      ],
+      "target_types": [
+        "ALIYUN::GA::Listener"
+      ]
+    },
+    {
+      "label": {
+        "en": "Bandwidth Package",
+        "zh": "绑定全球加速带宽包"
+      },
+      "resource_types": [
+        "ALIYUN::GA::BandwidthPackageAcceleratorAddition"
+      ],
+      "target_properties": [
+        "AcceleratorId"
+      ],
+      "target_types": [
+        "ALIYUN::GA::Accelerator"
+      ]
+    },
+    {
+      "label": {
+        "en": "Service Resources",
+        "zh": "添加服务资源"
+      },
+      "resource_types": [
+        "ALIYUN::PrivateLink::VpcEndpointServiceAttachment"
+      ],
+      "target_properties": [
+        "ServiceId"
+      ],
+      "target_types": [
+        "ALIYUN::PrivateLink::VpcEndpointService"
+      ]
+    },
+    {
+      "label": {
+        "en": "Targets",
+        "zh": "目标"
+      },
+      "resource_types": [
+        "ALIYUN::ResourceManager::ControlPolicyAttachment"
+      ],
+      "target_properties": [
+        "PolicyId"
+      ],
+      "target_types": [
+        "ALIYUN::ResourceManager::ControlPolicy"
+      ]
+    },
+    {
+      "label": {
+        "en": "Targets & Resources",
+        "zh": "目标与资源"
+      },
+      "resource_types": [
+        "ALIYUN::ResourceManager::ResourceShareAssociation"
+      ],
+      "target_properties": [
+        "ResourceShareId"
+      ],
+      "target_types": [
+        "ALIYUN::ResourceManager::ResourceShare"
+      ]
+    },
+    {
+      "label": {
+        "en": "Listener",
+        "zh": "SLB监听"
+      },
+      "resource_types": [
+        "ALIYUN::SLB::Listener"
+      ],
+      "target_properties": [
+        "LoadBalancerId"
+      ],
+      "target_types": [
+        "ALIYUN::SLB::LoadBalancer"
+      ]
+    },
+    {
+      "label": {
+        "en": "associates with",
+        "zh": "绑定任播弹性公网IP"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::AnycastEIPAssociation"
+      ],
+      "target_properties": [
+        "BindInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::SLB::LoadBalancer",
+        "ALIYUN::VPC::HaVip",
+        "ALIYUN::ECS::NetworkInterface"
+      ]
+    },
+    {
+      "label": {
+        "en": "Associate VPC",
+        "zh": "DHCP选项集关联"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::DhcpOptionsSetAttachment"
+      ],
+      "target_properties": [
+        "VpcId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VPC"
+      ]
+    },
+    {
+      "label": {
+        "en": "associates with",
+        "zh": "弹性公网IP关联"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::EIPAssociation"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::SLB::LoadBalancer",
+        "ALIYUN::VPC::HaVip",
+        "ALIYUN::ECS::InstanceGroup",
+        "ALIYUN::ECS::InstanceGroupClone",
+        "ALIYUN::ECS::NetworkInterface"
+      ]
+    },
+    {
+      "label": {
+        "en": "Associate Instance",
+        "zh": "绑定高可用虚拟IP"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::HaVipAssociation"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Associate vSwitch",
+        "zh": "网络ACL关联"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::NetworkAclAssociation"
+      ],
+      "target_properties": [
+        "Resources"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VSwitch"
+      ]
+    },
+    {
+      "label": {
+        "en": "Associate vSwitch",
+        "zh": "VPC路由表关联"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::RouteTableAssociation"
+      ],
+      "target_properties": [
+        "VSwitchId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VSwitch"
+      ]
+    },
+    {
+      "label": {
+        "en": "Add Mirror Source",
+        "zh": "镜像会话镜像源"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::TrafficMirrorSessionSourcesAddition"
+      ],
+      "target_properties": [
+        "TrafficMirrorSourceIds"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::NetworkInterface"
+      ]
+    },
+    {
+      "label": {
+        "en": "AScript Rule",
+        "zh": "AScript规则"
+      },
+      "resource_types": [
+        "ALIYUN::ALB::AScript"
+      ],
+      "target_properties": [
+        "ListenerId"
+      ],
+      "target_types": [
+        "ALIYUN::ALB::Listener"
+      ]
+    },
+    {
+      "label": {
+        "en": "Attach Backend Server",
+        "zh": "添加后端服务器"
+      },
+      "resource_types": [
+        "ALIYUN::ALB::BackendServerAttachment"
+      ],
+      "target_properties": [
+        "ServerGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ALB::ServerGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Forwarding Rule",
+        "zh": "转发规则"
+      },
+      "resource_types": [
+        "ALIYUN::ALB::Rule"
+      ],
+      "target_properties": [
+        "ListenerId"
+      ],
+      "target_types": [
+        "ALIYUN::ALB::Listener"
+      ]
+    },
+    {
+      "label": {
+        "en": "Listener",
+        "zh": "监听"
+      },
+      "keep_when_bridge_via": true,
+      "resource_types": [
+        "ALIYUN::ALB::Listener"
+      ],
+      "target_properties": [
+        "LoadBalancerId"
+      ],
+      "target_types": [
+        "ALIYUN::ALB::LoadBalancer"
+      ]
+    },
+    {
+      "label": {
+        "en": "Binding",
+        "zh": "绑定"
+      },
+      "resource_types": [
+        "ALIYUN::AMQP::Binding"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::AMQP::Instance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route",
+        "zh": "路由"
+      },
+      "resource_types": [
+        "ALIYUN::APIG::Route"
+      ],
+      "target_properties": [
+        "HttpApiId",
+        "GatewayId"
+      ],
+      "target_types": [
+        "ALIYUN::APIG::HttpApi",
+        "ALIYUN::APIG::Gateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "Custom Domain",
+        "zh": "自定义域名"
+      },
+      "resource_types": [
+        "ALIYUN::ApiGateway::CustomDomain"
+      ],
+      "target_properties": [
+        "GroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ApiGateway::Group"
+      ]
+    },
+    {
+      "label": {
+        "en": "Plugin Attachment",
+        "zh": "插件绑定"
+      },
+      "resource_types": [
+        "ALIYUN::ApiGateway::PluginAttachment"
+      ],
+      "target_properties": [
+        "ApiId",
+        "PluginId"
+      ],
+      "target_types": [
+        "ALIYUN::ApiGateway::Api",
+        "ALIYUN::ApiGateway::Plugin"
+      ]
+    },
+    {
+      "label": {
+        "en": "Stage Config",
+        "zh": "环境变量配置"
+      },
+      "resource_types": [
+        "ALIYUN::ApiGateway::StageConfig"
+      ],
+      "target_properties": [
+        "GroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ApiGateway::Group"
+      ]
+    },
+    {
+      "label": {
+        "en": "VPC Access Config",
+        "zh": "VPC授权配置"
+      },
+      "resource_types": [
+        "ALIYUN::ApiGateway::VpcAccessConfig"
+      ],
+      "target_properties": [
+        "InstanceId",
+        "VpcId"
+      ],
+      "target_types": [
+        "ALIYUN::ApiGateway::Instance",
+        "ALIYUN::ECS::VPC"
+      ]
+    },
+    {
+      "label": {
+        "en": "Domain Config",
+        "zh": "域名配置"
+      },
+      "resource_types": [
+        "ALIYUN::CDN::DomainConfig"
+      ],
+      "target_properties": [
+        "DomainNames"
+      ],
+      "target_types": [
+        "ALIYUN::CDN::Domain"
+      ]
+    },
+    {
+      "label": {
+        "en": "CEN Bandwidth Limit",
+        "zh": "跨地域带宽限制"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::CenBandwidthLimit"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Bandwidth Package",
+        "zh": "带宽包"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::CenBandwidthPackageAssociation"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Network Instance",
+        "zh": "网络实例"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::CenInstanceAttachment"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route Map",
+        "zh": "路由策略"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::CenRouteMap"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Cloud Service",
+        "zh": "云服务"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::CenRouteService"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Health Check",
+        "zh": "健康检查"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::CenVbrHealthCheck"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route Entry",
+        "zh": "路由条目"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::ChildInstanceRouteEntryToAttachment"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route Entry",
+        "zh": "路由条目"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::RouteEntry"
+      ],
+      "target_properties": [
+        "CenId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::CenInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Cross-region Connection",
+        "zh": "跨地域连接"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::TransitRouterPeerAttachment"
+      ],
+      "target_properties": [
+        "TransitRouterId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::TransitRouter"
+      ]
+    },
+    {
+      "label": {
+        "en": "Route Entry",
+        "zh": "路由条目"
+      },
+      "resource_types": [
+        "ALIYUN::CEN::TransitRouterRouteEntry"
+      ],
+      "target_properties": [
+        "TransitRouterRouteTableId"
+      ],
+      "target_types": [
+        "ALIYUN::CEN::TransitRouterRouteTable",
+        "ALIYUN::CEN::TransitRouter"
+      ]
+    },
+    {
+      "label": {
+        "en": "Website Forwarding Rule",
+        "zh": "网站转发规则"
+      },
+      "resource_types": [
+        "ALIYUN::DDoSPro::WebRule"
+      ],
+      "target_properties": [
+        "InstanceIds"
+      ],
+      "target_types": [
+        "ALIYUN::DDoSPro::ProInstance",
+        "ALIYUN::DDoSPro::PremiumInstance",
+        "ALIYUN::DDoS::OriginInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "DRDS Database",
+        "zh": "分布式数据库"
+      },
+      "resource_types": [
+        "ALIYUN::DRDS::DrdsDB"
+      ],
+      "target_properties": [
+        "DrdsInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::DRDS::DrdsInstance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Attach",
+        "zh": "绑定"
+      },
+      "resource_types": [
+        "ALIYUN::EAIS::ClientInstanceAttachment"
+      ],
+      "target_properties": [
+        "InstanceId",
+        "ClientInstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::EAIS::Instance",
+        "ALIYUN::ECS::Instance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Assign IP",
+        "zh": "分配IP"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::AssignPrivateIpAddresses"
+      ],
+      "target_properties": [
+        "NetworkInterfaceId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::NetworkInterface"
+      ]
+    },
+    {
+      "label": {
+        "en": "Snapshot",
+        "zh": "快照"
+      },
+      "resource_types": [
+        "ALIYUN::ECS::Snapshot"
+      ],
+      "target_properties": [
+        "DiskId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::Disk"
+      ]
+    },
+    {
+      "label": {
+        "en": "Deploy Group",
+        "zh": "部署分组"
+      },
+      "resource_types": [
+        "ALIYUN::EDAS::DeployGroup"
+      ],
+      "target_properties": [
+        "AppId"
+      ],
+      "target_types": [
+        "ALIYUN::EDAS::Application"
+      ]
+    },
+    {
+      "label": {
+        "en": "Auto Scale Config",
+        "zh": "自动伸缩配置"
+      },
+      "resource_types": [
+        "ALIYUN::EHPC::AutoScaleConfig"
+      ],
+      "target_properties": [
+        "ClusterId"
+      ],
+      "target_types": [
+        "ALIYUN::EHPC::Cluster"
+      ]
+    },
+    {
+      "label": {
+        "en": "Alarm Task",
+        "zh": "报警任务"
+      },
+      "resource_types": [
+        "ALIYUN::ESS::AlarmTask"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ESS::ScalingGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Lifecycle Hook",
+        "zh": "生命周期挂钩"
+      },
+      "resource_types": [
+        "ALIYUN::ESS::LifecycleHook"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ESS::ScalingGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Scaling Configuration",
+        "zh": "伸缩配置"
+      },
+      "resource_types": [
+        "ALIYUN::ESS::ScalingConfiguration"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ESS::ScalingGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Scaling Rule",
+        "zh": "伸缩规则"
+      },
+      "resource_types": [
+        "ALIYUN::ESS::ScalingRule"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ESS::ScalingGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Scheduled Task",
+        "zh": "定时任务"
+      },
+      "resource_types": [
+        "ALIYUN::ESS::ScheduledTask"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ESS::ScalingGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Attach Server Group",
+        "zh": "关联服务器组"
+      },
+      "resource_types": [
+        "ALIYUN::ESS::ServerGroupAttachment"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ],
+      "target_types": [
+        "ALIYUN::ESS::ScalingGroup"
+      ]
+    },
+    {
+      "label": {
+        "en": "Forwarding Rules",
+        "zh": "转发规则"
+      },
+      "resource_types": [
+        "ALIYUN::GA::ForwardingRules"
+      ],
+      "target_properties": [
+        "AcceleratorId",
+        "ListenerId"
+      ],
+      "target_types": [
+        "ALIYUN::GA::Accelerator",
+        "ALIYUN::GA::Listener"
+      ]
+    },
+    {
+      "label": {
+        "en": "Listener",
+        "zh": "监听"
+      },
+      "resource_types": [
+        "ALIYUN::GA::Listener"
+      ],
+      "target_properties": [
+        "AcceleratorId"
+      ],
+      "target_types": [
+        "ALIYUN::GA::Accelerator"
+      ]
+    },
+    {
+      "label": {
+        "en": "Rule Action",
+        "zh": "规则动作"
+      },
+      "resource_types": [
+        "ALIYUN::IOT::RuleAction"
+      ],
+      "target_properties": [
+        "RuleId"
+      ],
+      "target_types": [
+        "ALIYUN::IOT::Rule"
+      ]
+    },
+    {
+      "label": {
+        "en": "Namespace",
+        "zh": "命名空间"
+      },
+      "resource_types": [
+        "ALIYUN::MSE::EngineNamespace"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::MSE::Cluster"
+      ]
+    },
+    {
+      "label": {
+        "en": "Data Flow",
+        "zh": "数据流"
+      },
+      "resource_types": [
+        "ALIYUN::NAS::DataFlow"
+      ],
+      "target_properties": [
+        "FileSystemId"
+      ],
+      "target_types": [
+        "ALIYUN::NAS::FileSystem"
+      ]
+    },
+    {
+      "label": {
+        "en": "Protocol Export Directory",
+        "zh": "协议服务导出目录"
+      },
+      "resource_types": [
+        "ALIYUN::NAS::ProtocolMountTarget"
+      ],
+      "target_properties": [
+        "FileSystemId"
+      ],
+      "target_types": [
+        "ALIYUN::NAS::FileSystem"
+      ]
+    },
+    {
+      "label": {
+        "en": "Listener",
+        "zh": "监听"
+      },
+      "keep_when_bridge_via": true,
+      "resource_types": [
+        "ALIYUN::NLB::Listener"
+      ],
+      "target_properties": [
+        "LoadBalancerId"
+      ],
+      "target_types": [
+        "ALIYUN::NLB::LoadBalancer"
+      ]
+    },
+    {
+      "label": {
+        "en": "Website Hosting",
+        "zh": "静态网站托管"
+      },
+      "resource_types": [
+        "ALIYUN::OSS::Website"
+      ],
+      "target_properties": [
+        "BucketName"
+      ],
+      "target_types": [
+        "ALIYUN::OSS::Bucket"
+      ]
+    },
+    {
+      "label": {
+        "en": "Code Source",
+        "zh": "代码源"
+      },
+      "resource_types": [
+        "ALIYUN::PAI::CodeSource"
+      ],
+      "target_properties": [
+        "WorkspaceId"
+      ],
+      "target_types": [
+        "ALIYUN::PAI::Workspace"
+      ]
+    },
+    {
+      "label": {
+        "en": "Dataset",
+        "zh": "数据集"
+      },
+      "resource_types": [
+        "ALIYUN::PAI::Dataset"
+      ],
+      "target_properties": [
+        "WorkspaceId"
+      ],
+      "target_types": [
+        "ALIYUN::PAI::Workspace"
+      ]
+    },
+    {
+      "label": {
+        "en": "Experiment",
+        "zh": "实验"
+      },
+      "resource_types": [
+        "ALIYUN::PAI::Experiment"
+      ],
+      "target_properties": [
+        "WorkspaceId"
+      ],
+      "target_types": [
+        "ALIYUN::PAI::Workspace"
+      ]
+    },
+    {
+      "label": {
+        "en": "Public Endpoint",
+        "zh": "公网地址"
+      },
+      "resource_types": [
+        "ALIYUN::POLARDB::DBClusterEndpointAddress"
+      ],
+      "target_properties": [
+        "DBClusterId",
+        "DBEndpointId"
+      ],
+      "target_types": [
+        "ALIYUN::POLARDB::DBCluster",
+        "ALIYUN::POLARDB::DBClusterEndpoint"
+      ]
+    },
+    {
+      "label": {
+        "en": "Database",
+        "zh": "数据库"
+      },
+      "resource_types": [
+        "ALIYUN::POLARDB::Database"
+      ],
+      "target_properties": [
+        "DBClusterId"
+      ],
+      "target_types": [
+        "ALIYUN::POLARDB::DBCluster"
+      ]
+    },
+    {
+      "label": {
+        "en": "Consumer Group",
+        "zh": "消费者组"
+      },
+      "resource_types": [
+        "ALIYUN::ROCKETMQ5::ConsumerGroup"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::ROCKETMQ5::Instance"
+      ]
+    },
+    {
+      "label": {
+        "en": "Scaling Rule",
+        "zh": "扩缩容规则"
+      },
+      "resource_types": [
+        "ALIYUN::SAE::ApplicationScalingRule"
+      ],
+      "target_properties": [
+        "AppId"
+      ],
+      "target_types": [
+        "ALIYUN::SAE::Application"
+      ]
+    },
+    {
+      "label": {
+        "en": "Ingress Rule",
+        "zh": "路由规则"
+      },
+      "resource_types": [
+        "ALIYUN::SAE::Ingress"
+      ],
+      "target_properties": [
+        "SlbId"
+      ],
+      "target_types": [
+        "ALIYUN::SLB::LoadBalancer"
+      ]
+    },
+    {
+      "label": {
+        "en": "SLB Binding",
+        "zh": "绑定SLB"
+      },
+      "resource_types": [
+        "ALIYUN::SAE::SlbBinding"
+      ],
+      "target_properties": [
+        "AppId"
+      ],
+      "target_types": [
+        "ALIYUN::SAE::Application"
+      ]
+    },
+    {
+      "label": {
+        "en": "Device Binding",
+        "zh": "设备绑定"
+      },
+      "resource_types": [
+        "ALIYUN::SAG::SerialNumberBinding"
+      ],
+      "target_properties": [
+        "SmartAGId"
+      ],
+      "target_types": [
+        "ALIYUN::SAG::SmartAccessGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "Backend Server",
+        "zh": "后端服务器"
+      },
+      "resource_types": [
+        "ALIYUN::SLB::BackendServerAttachment"
+      ],
+      "target_properties": [
+        "LoadBalancerId"
+      ],
+      "target_types": [
+        "ALIYUN::SLB::LoadBalancer"
+      ]
+    },
+    {
+      "label": {
+        "en": "Forwarding Rule",
+        "zh": "转发规则"
+      },
+      "resource_types": [
+        "ALIYUN::SLB::Rule"
+      ],
+      "target_properties": [
+        "LoadBalancerId"
+      ],
+      "target_types": [
+        "ALIYUN::SLB::LoadBalancer"
+      ]
+    },
+    {
+      "label": {
+        "en": "vServer Group",
+        "zh": "虚拟服务器组"
+      },
+      "resource_types": [
+        "ALIYUN::SLB::VServerGroup"
+      ],
+      "target_properties": [
+        "LoadBalancerId"
+      ],
+      "target_types": [
+        "ALIYUN::SLB::LoadBalancer"
+      ]
+    },
+    {
+      "label": {
+        "en": "BGP Group",
+        "zh": "BGP组"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::BgpGroup"
+      ],
+      "target_properties": [
+        "RouterId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::VirtualBorderRouter"
+      ]
+    },
+    {
+      "label": {
+        "en": "Network ACL",
+        "zh": "网络ACL"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::NetworkAcl"
+      ],
+      "target_properties": [
+        "VpcId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VPC"
+      ]
+    },
+    {
+      "label": {
+        "en": "SSL-VPN Server",
+        "zh": "SSL-VPN服务端"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::SslVpnServer"
+      ],
+      "target_properties": [
+        "VpnGatewayId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::VpnGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "Reserved CIDR",
+        "zh": "预留网段"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::VSwitchCidrReservation"
+      ],
+      "target_properties": [
+        "VSwitchId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VSwitch"
+      ]
+    },
+    {
+      "label": {
+        "en": "Secondary CIDR",
+        "zh": "附加网段"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::VpcCidrBlockAssociation"
+      ],
+      "target_properties": [
+        "VpcId"
+      ],
+      "target_types": [
+        "ALIYUN::ECS::VPC"
+      ]
+    },
+    {
+      "label": {
+        "en": "PBR Route",
+        "zh": "策略路由"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::VpnPbrRouteEntry"
+      ],
+      "target_properties": [
+        "VpnGatewayId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::VpnGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "Destination Route",
+        "zh": "目的路由"
+      },
+      "resource_types": [
+        "ALIYUN::VPC::VpnRouteEntry"
+      ],
+      "target_properties": [
+        "VpnGatewayId"
+      ],
+      "target_types": [
+        "ALIYUN::VPC::VpnGateway"
+      ]
+    },
+    {
+      "label": {
+        "en": "Domain Config",
+        "zh": "域名配置"
+      },
+      "resource_types": [
+        "ALIYUN::WAF::DomainConfig"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ],
+      "target_types": [
+        "ALIYUN::WAF::Instance"
+      ]
+    }
+  ],
+  "compact_concept_nodes": [
+    {
+      "controller_edge": {
+        "label": {
+          "en": "scales",
+          "zh": "弹性伸缩"
+        },
+        "style": "solid_arrow",
+        "target": "concept"
+      },
+      "controller_property": "ScalingGroupId",
+      "group": {
+        "id_suffix": "ApplicationGroup",
+        "label": {
+          "en": "Application server group",
+          "zh": "应用服务组"
+        },
+        "members": [
+          "source",
+          "concept"
+        ],
+        "resource_type": "CONCEPT::Application::ServerGroup",
+        "rewrite_edge_kinds": [
+          "traffic",
+          "dependency",
+          "inferred"
+        ]
+      },
+      "id_suffix": "ScaledEcs",
+      "label": {
+        "en": "Scaled ECS instances",
+        "zh": "伸缩 ECS 实例"
+      },
+      "resource_type": "CONCEPT::ESS::ScaledECS",
+      "source_edge": {
+        "label": {
+          "en": "scaling config",
+          "zh": "伸缩配置"
+        },
+        "style": "dotted_arrow",
+        "target": "controller"
+      },
+      "source_property": "InstanceId",
+      "via_resource_types": [
+        "ALIYUN::ESS::ScalingConfiguration"
+      ]
+    }
+  ],
+  "compact_flatten_layer_roles": [
+    "security_group"
+  ],
+  "compact_hidden_short_types": [
+    "AssignPrivateIpAddresses",
+    "AutoEnableService",
+    "AccountPrivilege",
+    "CustomImage",
+    "DBClusterAccessWhiteList",
+    "DBNodes",
+    "DomainRecord",
+    "ScalingGroupEnable",
+    "ScalingRule",
+    "Sleep",
+    "Whitelist",
+    "WaitCondition",
+    "WaitConditionHandle"
+  ],
+  "compact_orchestration_actions": [
+    {
+      "evidence_properties": [
+        "CommandContent"
+      ],
+      "resource_types": [
+        "ALIYUN::ECS::Command"
+      ]
+    },
+    {
+      "command_properties": [
+        "CommandId"
+      ],
+      "resource_types": [
+        "ALIYUN::ECS::Invocation"
+      ],
+      "target_properties": [
+        "InstanceId",
+        "InstanceIds"
+      ]
+    },
+    {
+      "evidence_properties": [
+        "CommandContent"
+      ],
+      "resource_types": [
+        "ALIYUN::ECS::RunCommand"
+      ],
+      "target_properties": [
+        "InstanceId",
+        "InstanceIds"
+      ]
+    },
+    {
+      "command_properties": [
+        "Command"
+      ],
+      "evidence_properties": [
+        "RunAgainOn"
+      ],
+      "resource_types": [
+        "ALIYUN::CloudPhone::RunCommand"
+      ],
+      "target_properties": [
+        "InstanceIds"
+      ]
+    },
+    {
+      "command_properties": [
+        "CommandContent",
+        "CommandContentOnDeletion"
+      ],
+      "evidence_properties": [
+        "Name",
+        "Type"
+      ],
+      "resource_types": [
+        "ALIYUN::ECS::RunCommandOfLifespan"
+      ],
+      "target_properties": [
+        "InstanceIds"
+      ]
+    },
+    {
+      "command_properties": [
+        "CommandContent",
+        "Name"
+      ],
+      "evidence_properties": [
+        "Type",
+        "WorkingDir"
+      ],
+      "resource_types": [
+        "ALIYUN::SWAS::RunCommand"
+      ],
+      "target_properties": [
+        "InstanceId"
+      ]
+    },
+    {
+      "command_properties": [
+        "StageName"
+      ],
+      "evidence_properties": [
+        "HistoryVersion"
+      ],
+      "resource_types": [
+        "ALIYUN::ApiGateway::Deployment"
+      ],
+      "target_properties": [
+        "ApiId",
+        "GroupId"
+      ]
+    },
+    {
+      "command_properties": [
+        "Script"
+      ],
+      "evidence_properties": [
+        "Tid"
+      ],
+      "resource_types": [
+        "ALIYUN::DMS::ScriptExecution"
+      ],
+      "target_properties": [
+        "DbId"
+      ]
+    },
+    {
+      "command_properties": [
+        "Strategy"
+      ],
+      "evidence_properties": [
+        "DeploymentSetName"
+      ],
+      "resource_types": [
+        "ALIYUN::ECS::DeploymentSet"
+      ],
+      "target_properties": []
+    },
+    {
+      "command_properties": [
+        "ScheduledPreloadJobId"
+      ],
+      "evidence_properties": [
+        "StartTime",
+        "EndTime"
+      ],
+      "resource_types": [
+        "ALIYUN::ESA::ScheduledPreloadExecution"
+      ],
+      "target_properties": []
+    },
+    {
+      "command_properties": [
+        "Enable"
+      ],
+      "evidence_properties": [],
+      "resource_types": [
+        "ALIYUN::ESS::AlarmTaskEnable"
+      ],
+      "target_properties": [
+        "AlarmTaskId"
+      ]
+    },
+    {
+      "command_properties": [
+        "ScalingConfigurationId",
+        "InstanceIds"
+      ],
+      "evidence_properties": [],
+      "resource_types": [
+        "ALIYUN::ESS::ScalingGroupEnable"
+      ],
+      "target_properties": [
+        "ScalingGroupId"
+      ]
+    },
+    {
+      "command_properties": [
+        "DeployParameters",
+        "RevisionId"
+      ],
+      "evidence_properties": [
+        "ApplicationName",
+        "Name"
+      ],
+      "resource_types": [
+        "ALIYUN::OOS::ApplicationGroupDeployment"
+      ],
+      "target_properties": [
+        "ApplicationName",
+        "Name"
+      ]
+    },
+    {
+      "command_properties": [
+        "Hooks",
+        "Location",
+        "RevisionType"
+      ],
+      "evidence_properties": [
+        "ApplicationName"
+      ],
+      "resource_types": [
+        "ALIYUN::OOS::DeployRevision"
+      ],
+      "target_properties": [
+        "ApplicationName"
+      ]
+    },
+    {
+      "command_properties": [
+        "TemplateName",
+        "TemplateURL",
+        "Parameters"
+      ],
+      "evidence_properties": [
+        "TemplateName",
+        "TemplateURL"
+      ],
+      "resource_types": [
+        "ALIYUN::OOS::Execution"
+      ],
+      "target_properties": [
+        "ResourceGroupId"
+      ]
+    },
+    {
+      "command_properties": [
+        "RunName",
+        "SourceId",
+        "SourceType"
+      ],
+      "evidence_properties": [],
+      "resource_types": [
+        "ALIYUN::PAI::Run"
+      ],
+      "target_properties": [
+        "ExperimentId"
+      ]
+    },
+    {
+      "command_properties": [
+        "DBInstanceId",
+        "DBName"
+      ],
+      "evidence_properties": [
+        "OSSUrls",
+        "BackupMode"
+      ],
+      "resource_types": [
+        "ALIYUN::RDS::MigrateTask"
+      ],
+      "target_properties": [
+        "DBInstanceId"
+      ]
+    },
+    {
+      "command_properties": [
+        "ServiceName"
+      ],
+      "evidence_properties": [],
+      "resource_types": [
+        "ALIYUN::ROS::AutoEnableService"
+      ],
+      "target_properties": []
+    },
+    {
+      "command_properties": [
+        "Handle",
+        "Timeout",
+        "Count"
+      ],
+      "evidence_properties": [],
+      "resource_types": [
+        "ALIYUN::ROS::WaitCondition"
+      ],
+      "target_properties": []
+    }
+  ],
+  "compact_relation_folds": [
+    {
+      "edge_label": {
+        "en": "VPC connection",
+        "zh": "VPC连接"
+      },
+      "edge_style": "dotted_open",
+      "render_as": "source_attachment",
+      "source_property": "TransitRouterId",
+      "target_property": "VpcId",
+      "via_resource_types": [
+        "ALIYUN::CEN::TransitRouterVpcAttachment"
+      ]
+    }
+  ],
+  "compact_resource_labels": {
+    "ALIYUN::ECS::NetworkInterface": "ENI",
+    "ALIYUN::ESS::ScalingConfiguration": "ESS Config",
+    "ALIYUN::ESS::ScalingGroup": "ESS Group",
+    "ALIYUN::ESS::ScalingGroupEnable": "ESS Enable",
+    "ALIYUN::ESS::ScalingRule": "ESS Rule",
+    "ALIYUN::POLARDB::DBCluster": "PolarDB",
+    "ALIYUN::POLARDB::DBClusterAccessWhiteList": "PolarDB Whitelist",
+    "ALIYUN::REDIS::Instance": "Redis Instance",
+    "ALIYUN::REDIS::Whitelist": "Redis Whitelist",
+    "ALIYUN::VPC::AnycastEIP": "Anycast EIP",
+    "ALIYUN::VPC::CommonBandwidthPackageIp": "Bandwidth IP",
+    "ALIYUN::VPC::EIP": "EIP",
+    "ALIYUN::VPC::HaVip": "HA-VIP"
+  },
+  "containment_layer_types": {
+    "cloud_network": [
+      "ALIYUN::CEN::CenInstance"
+    ],
+    "security_group": [
+      "ALIYUN::ECS::SecurityGroup"
+    ],
+    "vpc": [
+      "ALIYUN::ECS::VPC"
+    ],
+    "vswitch": [
+      "ALIYUN::ECS::VSwitch"
+    ],
+    "workspace": [
+      "ALIYUN::PAI::Workspace"
+    ]
+  },
+  "edge_operators": {
+    "dotted_arrow": "-.->",
+    "dotted_open": "-.-",
+    "solid_arrow": "-->"
+  },
+  "edge_styles": {
+    "auxiliary_relation": "solid_arrow",
+    "direct_relation": "dotted_open"
+  },
+  "fallback_related_properties": {
+    "SecurityGroupId": [
+      "ALIYUN::ECS::SecurityGroup"
+    ],
+    "SecurityGroupIds": [
+      "ALIYUN::ECS::SecurityGroup"
+    ],
+    "VSwitchId": [
+      "ALIYUN::ECS::VSwitch"
+    ],
+    "VpcId": [
+      "ALIYUN::ECS::VPC"
+    ],
+    "ClusterId": [
+      "ALIYUN::CS::ManagedKubernetesCluster",
+      "ALIYUN::CS::KubernetesCluster",
+      "ALIYUN::CS::ManagedEdgeKubernetesCluster",
+      "ALIYUN::CS::ServerlessKubernetesCluster"
+    ]
+  },
+  "legacy_auxiliary_short_types": [
+    "SecurityGroupIngress",
+    "SecurityGroupEgress",
+    "EIPAssociation",
+    "BackendServerAttachment",
+    "Listener",
+    "VServerGroup",
+    "Account"
+  ],
+  "legacy_layer_labels": {
+    "ALIYUN::ECS::SecurityGroup": "Security group",
+    "ALIYUN::ECS::VPC": "VPC",
+    "ALIYUN::ECS::VSwitch": "VSwitch"
+  },
+  "legacy_resource_labels": {
+    "ALIYUN::ECS::Instance": "ECS instance",
+    "ALIYUN::ECS::InstanceGroup": "ECS instance group",
+    "ALIYUN::SLB::LoadBalancer": "SLB load balancer",
+    "ALIYUN::VPC::CommonBandwidthPackage": "Shared bandwidth package",
+    "ALIYUN::VPC::EIP": "Elastic IP address",
+    "ALIYUN::VPC::NatGateway": "NAT gateway"
+  },
+  "network_layer_types": [
+    "ALIYUN::ECS::VPC",
+    "ALIYUN::ECS::VSwitch",
+    "ALIYUN::ECS::SecurityGroup"
+  ],
+  "supplemental_related_properties": {
+    "ALIYUN::ALB::BackendServerAttachment": {
+      "Servers.ServerId": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup"
+      ]
+    },
+    "ALIYUN::ALB::Listener": {
+      "DefaultActions.ForwardGroupConfig.ServerGroupTuples.ServerGroupId": [
+        "ALIYUN::ALB::ServerGroup"
+      ]
+    },
+    "ALIYUN::CEN::TransitRouterRouteEntry": {
+      "TransitRouterRouteTableId": [
+        "ALIYUN::CEN::TransitRouter"
+      ],
+      "TransitRouterRouteEntryNextHopId": [
+        "ALIYUN::CEN::TransitRouterPeerAttachment",
+        "ALIYUN::CEN::TransitRouterRouteTableAssociation",
+        "ALIYUN::CEN::TransitRouterVbrAttachment",
+        "ALIYUN::CEN::TransitRouterVpcAttachment",
+        "ALIYUN::CEN::TransitRouterVpnAttachment"
+      ]
+    },
+    "ALIYUN::CEN::TransitRouterRouteTableAssociation": {
+      "TransitRouterRouteTableId": [
+        "ALIYUN::CEN::TransitRouter"
+      ]
+    },
+    "ALIYUN::CEN::TransitRouterRouteTablePropagation": {
+      "TransitRouterRouteTableId": [
+        "ALIYUN::CEN::TransitRouter"
+      ]
+    },
+    "ALIYUN::ECS::Route": {
+      "NextHopId": [
+        "ALIYUN::CEN::TransitRouterPeerAttachment",
+        "ALIYUN::CEN::TransitRouterVbrAttachment",
+        "ALIYUN::CEN::TransitRouterVpcAttachment",
+        "ALIYUN::CEN::TransitRouterVpnAttachment",
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup",
+        "ALIYUN::ECS::NetworkInterface",
+        "ALIYUN::VPC::HaVip",
+        "ALIYUN::VPC::IPv4Gateway",
+        "ALIYUN::VPC::NatGateway",
+        "ALIYUN::VPC::RouterInterface",
+        "ALIYUN::VPN::VpnGateway"
+      ],
+      "RouteTableId": [
+        "ALIYUN::VPC::RouteTable"
+      ]
+    },
+    "ALIYUN::NAS::MountTarget": {
+      "AccessGroupName": [
+        "ALIYUN::NAS::AccessGroup"
+      ]
+    },
+    "ALIYUN::NLB::ServerGroup": {
+      "Servers.ServerId": [
+        "ALIYUN::ALB::LoadBalancer",
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::InstanceGroup"
+      ]
+    },
+    "ALIYUN::POLARDB::DBCluster": {
+      "SourceResourceId": [
+        "ALIYUN::RDS::DBInstance",
+        "ALIYUN::RDS::PrepayDBInstance"
+      ]
+    },
+    "ALIYUN::POLARDB::DBInstance": {
+      "DBClusterId": [
+        "ALIYUN::POLARDB::DBCluster"
+      ]
+    },
+    "ALIYUN::POLARDB::DBNodes": {
+      "DBClusterId": [
+        "ALIYUN::POLARDB::DBCluster"
+      ]
+    },
+    "MODULE::ACS::ComputeNest::FluxOciHelmDeploy": {
+      "ClusterId": [
+        "ALIYUN::CS::ManagedKubernetesCluster",
+        "ALIYUN::CS::KubernetesCluster",
+        "ALIYUN::CS::ManagedEdgeKubernetesCluster",
+        "ALIYUN::CS::ServerlessKubernetesCluster"
+      ]
+    },
+    "ALIYUN::RAM::AccessKey": {
+      "UserName": [
+        "ALIYUN::RAM::User"
+      ]
+    },
+    "ALIYUN::RAM::UserToGroupAddition": {
+      "Users": [
+        "ALIYUN::RAM::User"
+      ],
+      "GroupName": [
+        "ALIYUN::RAM::Group"
+      ]
+    },
+    "ALIYUN::SLS::Logstore": {
+      "ProjectName": [
+        "ALIYUN::SLS::Project"
+      ]
+    },
+    "ALIYUN::VPC::AnycastEIPAssociation": {
+      "BindInstanceId": [
+        "ALIYUN::ECS::Instance",
+        "ALIYUN::ECS::NetworkInterface",
+        "ALIYUN::SLB::LoadBalancer",
+        "ALIYUN::VPC::HaVip"
+      ]
+    },
+    "ALIYUN::VPC::CommonBandwidthPackageIp": {
+      "Eips": [
+        "ALIYUN::VPC::EIP"
+      ]
+    },
+    "ALIYUN::VPC::EIPAssociation": {
+      "InstanceId": [
+        "ALIYUN::ECS::NetworkInterface",
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    "ALIYUN::VPC::FullNatEntry": {
+      "FullNatTableId": [
+        "ALIYUN::VPC::NatGateway"
+      ]
+    },
+    "ALIYUN::VPC::NetworkAclAssociation": {
+      "Resources": [
+        "ALIYUN::ECS::VSwitch"
+      ]
+    },
+    "ALIYUN::VPC::PeeringRouterInterfaceBinding": {
+      "OppositeInterfaceId": [
+        "ALIYUN::VPC::RouterInterface"
+      ]
+    }
+  }
+}

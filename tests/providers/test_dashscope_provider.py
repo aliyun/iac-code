@@ -75,6 +75,10 @@ class TestDashScopeBuildThinkingKwargs:
         p = DashScopeProvider(model="qwen3.6-plus", api_key="k", effort="high")
         assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
 
+    def test_qwen_with_effort_none_disables_thinking(self):
+        p = DashScopeProvider(model="qwen3.7-max", api_key="k", effort="none")
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": False}}
+
     def test_kimi(self):
         p = DashScopeProvider(model="kimi-k2.6", api_key="k")
         assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
@@ -415,6 +419,38 @@ class TestDashScopeExplicitCache:
         assert isinstance(last_user["content"], list)
         assert last_user["content"][0]["text"] == "second"
         assert last_user["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_last_user_message_dynamic_boundary_caches_only_static_prefix(self):
+        """Supported model: user message dynamic boundary keeps changing retry text outside the cache marker."""
+        p = DashScopeProvider(model="qwen3.5-plus", api_key="k")
+        msg = Message.user(f"FACT BUNDLE\n\n{DYNAMIC_BOUNDARY}\n\nATTEMPT INSTRUCTION")
+        api = p._build_api_messages([msg], "sys")
+
+        last_user = api[-1]
+        assert last_user["role"] == "user"
+        assert last_user["content"] == [
+            {"type": "text", "text": "FACT BUNDLE", "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "ATTEMPT INSTRUCTION"},
+        ]
+
+    def test_non_last_user_message_with_dynamic_boundary_gets_cache_control(self):
+        """Append-style retries keep first-turn facts cacheable even after later user turns are appended."""
+        p = DashScopeProvider(model="qwen3.5-plus", api_key="k")
+        msgs = [
+            Message.user(f"FACT BUNDLE\n\n{DYNAMIC_BOUNDARY}\n\nATTEMPT 1"),
+            Message.assistant_text('{"node_labels":[]}'),
+            Message.user("ATTEMPT 2"),
+        ]
+        api = p._build_api_messages(msgs, "sys")
+
+        first_user = api[1]
+        last_user = api[-1]
+        assert first_user["role"] == "user"
+        assert first_user["content"] == [
+            {"type": "text", "text": "FACT BUNDLE", "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "ATTEMPT 1"},
+        ]
+        assert last_user["content"] == [{"type": "text", "text": "ATTEMPT 2", "cache_control": {"type": "ephemeral"}}]
 
     def test_first_user_not_tagged_when_multiple(self):
         """Only the *last* user message gets cache_control, not earlier ones."""

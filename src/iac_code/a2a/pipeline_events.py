@@ -1477,9 +1477,13 @@ def _diagram_data(event: DiagramEvent) -> dict[str, Any]:
         "templateContent": event.template_content,
         "mermaidSource": event.mermaid_source,
         "format": "mermaid",
+        "diagramStage": event.diagram_stage,
+        "views": event.views,
     }
     if event.candidate_index is not None:
         data["candidateIndex"] = event.candidate_index
+    if event.architecture_context is not None:
+        data["architectureContext"] = event.architecture_context
     return data
 
 

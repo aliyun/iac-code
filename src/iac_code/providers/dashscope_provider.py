@@ -30,6 +30,7 @@ _EXPLICIT_CACHE_MODEL_PREFIXES: tuple[str, ...] = (
 )
 
 _RECALLED_MEMORY_REMINDER_PREFIX = f"<system-reminder>\n{RECALLED_MEMORY_MARKER}:"
+_DISABLE_THINKING_EFFORTS = {"none", "off", "disable", "disabled", "false", "0"}
 
 
 class DashScopeProvider(OpenAIProvider):
@@ -93,36 +94,32 @@ class DashScopeProvider(OpenAIProvider):
         api_messages.extend(self._convert_messages(messages))
 
         if explicit_cache_enabled:
-            self._mark_last_user_message_cacheable(api_messages)
+            self._mark_user_messages_cacheable(api_messages)
 
         return api_messages
 
     @staticmethod
-    def _mark_last_user_message_cacheable(api_messages: list[dict[str, Any]]) -> None:
-        """Add ``cache_control`` to the last user message in *api_messages*.
+    def _mark_user_messages_cacheable(api_messages: list[dict[str, Any]]) -> None:
+        """Add ``cache_control`` to cacheable user message prefixes.
 
         This extends the cache prefix to cover all conversation history up to
-        and including the most recent user turn, so that successive rounds hit
-        the cached prefix.  DashScope allows up to 4 ``cache_control`` markers;
-        we use one for system-static and one here.
+        marked user turns. User messages with DYNAMIC_BOUNDARY get their static
+        prefix marked even when they are not the last user turn. For ordinary
+        conversations, only the last user message is marked.
         """
-        for msg in reversed(api_messages):
+        last_plain_user_message: dict[str, Any] | None = None
+        for msg in api_messages:
             if msg.get("role") != "user":
                 continue
             content = msg.get("content")
             if _is_recalled_memory_reminder(content):
                 continue
-            if isinstance(content, str):
-                msg["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
-            elif isinstance(content, list):
-                # Content is already a list of blocks — tag the last text block.
-                for block in reversed(content):
-                    if isinstance(block, dict):
-                        block_dict: dict[str, Any] = cast(dict[str, Any], block)
-                        if block_dict.get("type") == "text":
-                            block_dict["cache_control"] = {"type": "ephemeral"}
-                            break
-            break
+            if _content_has_dynamic_boundary(content):
+                _mark_message_content_cacheable(msg)
+            else:
+                last_plain_user_message = msg
+        if last_plain_user_message is not None:
+            _mark_message_content_cacheable(last_plain_user_message)
 
     # -- Thinking kwargs -------------------------------------------------------
 
@@ -130,7 +127,8 @@ class DashScopeProvider(OpenAIProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}
-        if self._thinking_disabled():
+        effort = normalize_effort(self._effort)
+        if self._thinking_disabled() or effort in _DISABLE_THINKING_EFFORTS:
             return {"extra_body": {"enable_thinking": False}}
         extra_body: dict[str, Any] = {"enable_thinking": True}
         thinking_budget = self._effective_thinking_budget()
@@ -140,7 +138,6 @@ class DashScopeProvider(OpenAIProvider):
         kwargs: dict[str, Any] = {"extra_body": extra_body}
         if not spec.uses_reasoning_effort_param:
             return kwargs
-        effort = normalize_effort(self._effort)
         if effort is None or effort == "auto":
             return kwargs
         allowed = {e.value for e in spec.allowed_efforts}
@@ -151,6 +148,25 @@ class DashScopeProvider(OpenAIProvider):
         return kwargs
 
 
+def _mark_message_content_cacheable(msg: dict[str, Any]) -> None:
+    content = msg.get("content")
+    if isinstance(content, str):
+        msg["content"] = _cacheable_text_blocks(content)
+    elif isinstance(content, list):
+        # Content is already a list of blocks — tag the last text block.
+        for index in range(len(content) - 1, -1, -1):
+            block = content[index]
+            if isinstance(block, dict):
+                block_dict: dict[str, Any] = cast(dict[str, Any], block)
+                if block_dict.get("type") == "text":
+                    text = block_dict.get("text")
+                    if isinstance(text, str):
+                        content[index : index + 1] = _cacheable_text_blocks(text)
+                    else:
+                        block_dict["cache_control"] = {"type": "ephemeral"}
+                    break
+
+
 def _is_recalled_memory_reminder(content: Any) -> bool:
     if isinstance(content, str):
         return content.startswith(_RECALLED_MEMORY_REMINDER_PREFIX)
@@ -159,3 +175,25 @@ def _is_recalled_memory_reminder(content: Any) -> bool:
             if isinstance(block, dict) and str(block.get("text") or "").startswith(_RECALLED_MEMORY_REMINDER_PREFIX):
                 return True
     return False
+
+
+def _content_has_dynamic_boundary(content: Any) -> bool:
+    if isinstance(content, str):
+        return bool(split_by_dynamic_boundary(content)[1])
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and bool(split_by_dynamic_boundary(str(block.get("text") or ""))[1]):
+                return True
+    return False
+
+
+def _cacheable_text_blocks(text: str) -> list[dict[str, Any]]:
+    static_part, dynamic_part = split_by_dynamic_boundary(text)
+    blocks: list[dict[str, Any]] = []
+    if static_part:
+        blocks.append({"type": "text", "text": static_part, "cache_control": {"type": "ephemeral"}})
+    if dynamic_part:
+        blocks.append({"type": "text", "text": dynamic_part})
+    if not blocks:
+        blocks.append({"type": "text", "text": text, "cache_control": {"type": "ephemeral"}})
+    return blocks
