@@ -82,6 +82,37 @@ async def test_create_records_failed_stack_as_owned_for_recovery(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_preserves_pipeline_mode_for_internal_ros_stack(monkeypatch):
+    tool, fake_stack = _deploy_tool(
+        monkeypatch,
+        results=[ToolResult.success(json.dumps({"stack_id": "stack-new", "is_success": True}))],
+    )
+
+    result = await tool.execute(
+        tool_input={
+            "action": "create",
+            "stack_name": "demo",
+            "template_url": "templates/demo.yml",
+            "region_id": "cn-hangzhou",
+        },
+        context=ToolContext(cwd="/workspace", pipeline_mode=True),
+    )
+
+    assert result.is_error is False
+    assert fake_stack.calls[0][1].pipeline_mode is True
+
+
+def test_internal_ros_stack_allows_deployment_guard_without_clearing_pipeline_mode():
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    stack = RosDeployTool()._new_stack_tool()
+    kwargs = stack._call_action_kwargs(ToolContext(cwd="/workspace", pipeline_mode=True))
+
+    assert kwargs["pipeline_mode"] is True
+    assert kwargs["allow_pipeline_deployment_actions"] is True
+
+
+@pytest.mark.asyncio
 async def test_create_records_started_stack_as_owned_when_polling_fails(monkeypatch):
     guard_state = {}
     tool, _fake_stack = _deploy_tool(

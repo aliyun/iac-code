@@ -156,7 +156,7 @@ class RosDeployTool(Tool):
         return True
 
     def _new_stack_tool(self) -> RosStack:
-        return RosStack()
+        return RosStack(allow_pipeline_deployment_actions=True)
 
     def _owned_stacks(self) -> dict[str, Any]:
         stacks = self._completion_guard_state.setdefault(_OWNED_STACKS_KEY, {})
@@ -339,8 +339,8 @@ class RosDeployTool(Tool):
                     rule_source=rule_source,
                     rule=rule,
                     reason=reason,
-                    ),
-                )
+                ),
+            )
 
         if template_permission := self._local_template_url_permission_error(input, context):
             return template_permission

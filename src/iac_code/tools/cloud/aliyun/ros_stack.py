@@ -238,6 +238,9 @@ class RosStack(BaseCloudStack):
 
     poll_interval: int = 5
 
+    def __init__(self, *, allow_pipeline_deployment_actions: bool = False) -> None:
+        self._allow_pipeline_deployment_actions = allow_pipeline_deployment_actions
+
     @property
     def provider_name(self) -> str:
         return "ros"
@@ -478,7 +481,11 @@ class RosStack(BaseCloudStack):
         return RosClientFactory.create(cred, region_id=region)
 
     def _call_action_kwargs(self, context: ToolContext) -> dict[str, Any]:
-        return {"pipeline_mode": context.pipeline_mode, "cwd": context.cwd}
+        return {
+            "pipeline_mode": context.pipeline_mode,
+            "cwd": context.cwd,
+            "allow_pipeline_deployment_actions": self._allow_pipeline_deployment_actions,
+        }
 
     async def call_action(
         self,
@@ -488,8 +495,12 @@ class RosStack(BaseCloudStack):
         *,
         pipeline_mode: bool = False,
         cwd: str | None = None,
+        allow_pipeline_deployment_actions: bool = False,
     ) -> str:
-        if error := reject_pipeline_dedicated_ros_deployment_action(action, pipeline_mode=pipeline_mode):
+        deployment_guard_pipeline_mode = pipeline_mode and not allow_pipeline_deployment_actions
+        if error := reject_pipeline_dedicated_ros_deployment_action(
+            action, pipeline_mode=deployment_guard_pipeline_mode
+        ):
             raise ValueError(error)
         if error := reject_pipeline_template_source_params(action, params, pipeline_mode=pipeline_mode):
             raise ValueError(error)

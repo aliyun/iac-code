@@ -1653,6 +1653,34 @@ class TestRosStackExtra:
             await stack.call_action(action, dict(params), "cn-hangzhou", pipeline_mode=True)
 
     @pytest.mark.asyncio
+    async def test_pipeline_deployment_wrapper_flag_allows_template_url(self, stack):
+        result = await stack.call_action(
+            "CreateStack",
+            {"StackName": "n", "TemplateURL": _REMOTE_TEMPLATE_URL},
+            "cn-hangzhou",
+            pipeline_mode=True,
+            allow_pipeline_deployment_actions=True,
+        )
+
+        assert result == "stack-fake"
+
+    @pytest.mark.asyncio
+    async def test_pipeline_deployment_wrapper_flag_keeps_template_body_rejected(self, stack, monkeypatch):
+        def fail_client(region):
+            raise AssertionError("TemplateBody should be rejected before client creation")
+
+        monkeypatch.setattr(stack, "_get_client", fail_client)
+
+        with pytest.raises(ValueError, match="TemplateURL"):
+            await stack.call_action(
+                "CreateStack",
+                {"StackName": "n", "TemplateBody": {"ROSTemplateFormatVersion": "2015-09-01"}},
+                "cn-hangzhou",
+                pipeline_mode=True,
+                allow_pipeline_deployment_actions=True,
+            )
+
+    @pytest.mark.asyncio
     async def test_template_body_dict_to_json_outside_pipeline(self, stack):
         result = await stack.call_action(
             "CreateStack",
