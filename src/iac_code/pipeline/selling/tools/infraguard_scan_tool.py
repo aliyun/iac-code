@@ -179,7 +179,7 @@ async def _run_infraguard_command(
     )
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except TimeoutError as exc:
+    except asyncio.TimeoutError as exc:
         stdout_bytes, stderr_bytes = await _terminate_infraguard_process(process)
         raise subprocess.TimeoutExpired(
             command,
@@ -211,7 +211,7 @@ async def _terminate_infraguard_process(process: asyncio.subprocess.Process) -> 
     _terminate_infraguard_process_tree(process)
     try:
         return await asyncio.wait_for(process.communicate(), timeout=3)
-    except TimeoutError:
+    except asyncio.TimeoutError:
         _terminate_infraguard_process_tree(process, force=True)
         with suppress(Exception):
             return await asyncio.wait_for(process.communicate(), timeout=3)

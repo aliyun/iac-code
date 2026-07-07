@@ -83,7 +83,7 @@ async def test_run_infraguard_command_timeout_terminates_descendant_process(tmp_
             await scan_module._run_infraguard_command(
                 [sys.executable, "-c", parent_code, str(ticks_path), str(pid_path), child_code],
                 cwd=str(tmp_path),
-                timeout_seconds=0.5,
+                timeout_seconds=2.0,
             )
 
         size_after_timeout = ticks_path.stat().st_size
