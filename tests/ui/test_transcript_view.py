@@ -10,6 +10,12 @@ from rich.text import Text
 from iac_code.pipeline.selling.tools import InfraGuardScanTool
 from iac_code.tools.base import ToolRegistry
 from iac_code.tools.read_file import ReadFileTool
+from iac_code.types.stream_events import (
+    TOOL_RENDER_METADATA_KEY,
+    TOOL_RENDER_RESULT_COMPACT_KEY,
+    TOOL_RENDER_RESULT_VERBOSE_KEY,
+    TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
+)
 from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.renderer import RenderedTurn, Renderer, _Segment, _ToolCallRecord
 from iac_code.ui.transcript_view import TranscriptView
@@ -129,10 +135,7 @@ class TestTranscriptView:
         result_pos = output.index("RESULT")
         assert head_pos < prompt_pos < child_pos < result_pos
 
-    def test_render_tool_uses_verbose_result_for_pipeline_renderer_tool(self):
-        class TranscriptVerboseTool:
-            render_verbose_result_in_transcript = True
-
+    def test_render_tool_uses_verbose_result_for_pipeline_render_metadata(self):
         renderer = make_renderer()
         renderer._render_tool_result = lambda rec: Text("VERBOSE" if renderer._verbose else "COMPACT")
         renderer._has_verbose_content = lambda rec: True
@@ -142,7 +145,7 @@ class TestTranscriptView:
             tool_input={},
             done=True,
             result="raw",
-            renderer_tool=TranscriptVerboseTool(),
+            metadata={TOOL_RENDER_METADATA_KEY: {TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY: True}},
         )
 
         view._render_tool(rec)
@@ -151,7 +154,7 @@ class TestTranscriptView:
         assert "VERBOSE" in output
         assert "COMPACT" not in output
 
-    def test_render_tool_keeps_compact_result_without_pipeline_renderer_tool(self):
+    def test_render_tool_keeps_compact_result_without_render_metadata_opt_in(self):
         renderer = make_renderer()
         renderer._render_tool_result = lambda rec: Text("VERBOSE" if renderer._verbose else "COMPACT")
         renderer._has_verbose_content = lambda rec: True
@@ -164,7 +167,7 @@ class TestTranscriptView:
         assert "COMPACT" in output
         assert "VERBOSE" not in output
 
-    def test_render_tool_keeps_read_file_compact_even_with_renderer_tool(self):
+    def test_render_tool_keeps_read_file_compact_without_render_metadata_opt_in(self):
         renderer = make_real_renderer()
         view = TranscriptView(renderer)
         rec = _ToolCallRecord(
@@ -172,7 +175,6 @@ class TestTranscriptView:
             tool_input={"path": "config.yaml"},
             done=True,
             result="     1\tsecret: value\n     2\tanother: value\n",
-            renderer_tool=ReadFileTool(),
         )
 
         view._render_tool(rec)
@@ -199,7 +201,15 @@ class TestTranscriptView:
             tool_input={"file_path": "templates/demo.yml"},
             done=True,
             result=__import__("json").dumps(result),
-            renderer_tool=InfraGuardScanTool(),
+            metadata={
+                TOOL_RENDER_METADATA_KEY: {
+                    TOOL_RENDER_RESULT_COMPACT_KEY: "passed · 0 blocking findings",
+                    TOOL_RENDER_RESULT_VERBOSE_KEY: InfraGuardScanTool().render_tool_result_message(
+                        __import__("json").dumps(result), verbose=True
+                    ),
+                    TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY: True,
+                }
+            },
         )
 
         view._render_tool(rec)

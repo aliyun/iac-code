@@ -6,6 +6,11 @@ import pytest
 from iac_code.services.telemetry.names import Events
 from iac_code.tools.base import ToolRegistry
 from iac_code.types.stream_events import (
+    TOOL_RENDER_DISPLAY_NAME_KEY,
+    TOOL_RENDER_METADATA_KEY,
+    TOOL_RENDER_RESULT_COMPACT_KEY,
+    TOOL_RENDER_RESULT_VERBOSE_KEY,
+    TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
@@ -366,28 +371,29 @@ async def _idle_key_listener(*_args, **_kwargs):
 
 class TestRendererToolResultFallback:
     @pytest.mark.asyncio
-    async def test_uses_renderer_tool_when_tool_registry_missing(self, monkeypatch):
+    async def test_uses_render_metadata_when_tool_registry_missing(self, monkeypatch):
         monkeypatch.setattr(Renderer, "_key_listener", _idle_key_listener)
         renderer = _make_renderer_for_tool_result_fallback_test()
-        renderer_tool = MagicMock()
-        renderer_tool.user_facing_name.return_value = "InfraGuard scan"
-        renderer_tool.render_tool_use_message.return_value = None
-        renderer_tool.render_tool_result_message.side_effect = lambda output, *, is_error=False, verbose=False: (
-            "Command: infraguard scan\nStatus: passed" if verbose else "passed · 0 findings"
-        )
 
         await renderer.run_streaming_output(
             _tool_result_events(
                 ToolUseStartEvent(
                     tool_use_id="tool-a",
                     name="infraguard_scan",
-                    renderer_tool=renderer_tool,
+                    metadata={TOOL_RENDER_METADATA_KEY: {TOOL_RENDER_DISPLAY_NAME_KEY: "InfraGuard scan"}},
                 ),
                 ToolUseEndEvent(tool_use_id="tool-a", name="infraguard_scan", input={}),
                 ToolResultEvent(
                     tool_use_id="tool-a",
                     tool_name="infraguard_scan",
                     result='{"command": ["infraguard", "scan"]}',
+                    metadata={
+                        TOOL_RENDER_METADATA_KEY: {
+                            TOOL_RENDER_RESULT_COMPACT_KEY: "passed · 0 findings",
+                            TOOL_RENDER_RESULT_VERBOSE_KEY: "Command: infraguard scan\nStatus: passed",
+                            TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY: True,
+                        }
+                    },
                 ),
             ),
             _allow_permission,
@@ -396,6 +402,41 @@ class TestRendererToolResultFallback:
         output = renderer.console.file.getvalue()
         assert "passed · 0 findings" in output
         assert '{"command"' not in output
+
+    @pytest.mark.asyncio
+    async def test_archives_render_metadata_without_runtime_renderer_object(self, monkeypatch):
+        monkeypatch.setattr(Renderer, "_key_listener", _idle_key_listener)
+        renderer = _make_renderer_for_tool_result_fallback_test()
+
+        await renderer.run_streaming_output(
+            _tool_result_events(
+                ToolUseStartEvent(
+                    tool_use_id="tool-a",
+                    name="runtime_tool",
+                    metadata={TOOL_RENDER_METADATA_KEY: {TOOL_RENDER_DISPLAY_NAME_KEY: "Runtime tool"}},
+                ),
+                ToolUseEndEvent(tool_use_id="tool-a", name="runtime_tool", input={}),
+                ToolResultEvent(
+                    tool_use_id="tool-a",
+                    tool_name="runtime_tool",
+                    result="{}",
+                    metadata={TOOL_RENDER_METADATA_KEY: {TOOL_RENDER_RESULT_COMPACT_KEY: "runtime summary"}},
+                ),
+            ),
+            _allow_permission,
+        )
+
+        output = renderer.console.file.getvalue()
+        assert "runtime summary" in output
+        archived_tool = renderer.message_history[-1].segments[0].tool
+        assert archived_tool is not None
+        assert not hasattr(archived_tool, "renderer_tool")
+        assert archived_tool.metadata == {
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_DISPLAY_NAME_KEY: "Runtime tool",
+                TOOL_RENDER_RESULT_COMPACT_KEY: "runtime summary",
+            }
+        }
 
     @pytest.mark.asyncio
     async def test_does_not_fallback_stale_tool_result_id_to_same_named_tool(self, monkeypatch):

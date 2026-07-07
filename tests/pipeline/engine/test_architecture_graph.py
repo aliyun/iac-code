@@ -2331,9 +2331,7 @@ Resources:
         result = render_ros_template_architecture(template)
         context = result.architecture_context
         visible_ids = {node["id"] for node in context["visible_nodes"]}
-        visible_edges = {
-            (edge["from"], edge["to"], edge["label"], edge["style"]) for edge in context["visible_edges"]
-        }
+        visible_edges = {(edge["from"], edge["to"], edge["label"], edge["style"]) for edge in context["visible_edges"]}
 
         assert {
             "AckApplicationWorkload",

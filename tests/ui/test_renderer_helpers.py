@@ -12,7 +12,14 @@ from iac_code.agent.message import ImageBlock, Message, TextBlock, create_recall
 from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.read_file import ReadFileTool
-from iac_code.types.stream_events import PermissionRequestEvent, StackInstancesProgressEvent, StackProgressEvent
+from iac_code.types.stream_events import (
+    TOOL_RENDER_METADATA_KEY,
+    TOOL_RENDER_RESULT_COMPACT_KEY,
+    TOOL_RENDER_RESULT_VERBOSE_KEY,
+    PermissionRequestEvent,
+    StackInstancesProgressEvent,
+    StackProgressEvent,
+)
 from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.renderer import (
     RenderedTurn,
@@ -273,18 +280,19 @@ class TestRendererHelpers:
         assert line is not None
         assert "done" in str(line)
 
-    def test_render_tool_result_uses_record_renderer_tool_when_registry_missing(self):
+    def test_render_tool_result_uses_record_render_metadata_when_registry_missing(self):
         renderer = Renderer(make_console(), ToolRegistry(), status_callback=lambda: "ready")
-        renderer_tool = MagicMock()
-        renderer_tool.render_tool_result_message.side_effect = lambda output, *, is_error=False, verbose=False: (
-            "Command: infraguard scan\nStatus: passed" if verbose else "passed · 0 findings"
-        )
         rec = _ToolCallRecord(
             tool_name="infraguard_scan",
             tool_input={},
             done=True,
             result='{"command": ["infraguard", "scan"]}',
-            renderer_tool=renderer_tool,
+            metadata={
+                TOOL_RENDER_METADATA_KEY: {
+                    TOOL_RENDER_RESULT_COMPACT_KEY: "passed · 0 findings",
+                    TOOL_RENDER_RESULT_VERBOSE_KEY: "Command: infraguard scan\nStatus: passed",
+                }
+            },
         )
 
         compact = renderer._render_tool_result(rec)

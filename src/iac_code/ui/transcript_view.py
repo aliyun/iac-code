@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from rich.text import Text
 
 from iac_code.i18n import _
+from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY, TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY
 from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.core.raw_input import RawInputCapture
 from iac_code.ui.core.screen import ScreenManager
@@ -140,8 +141,7 @@ class TranscriptView:
             self._console.print(line)
 
         # Most tool results stay compact so we never dump full file contents.
-        # Pipeline-only tools can carry their real Tool renderer on the record;
-        # if that renderer has curated verbose output, use it generically.
+        # Tools that have curated verbose output opt in through render metadata.
         if self._should_render_result_verbose(rec):
             saved = r._verbose
             r._verbose = True
@@ -155,10 +155,16 @@ class TranscriptView:
             self._console.print(result_line)
 
     def _should_render_result_verbose(self, rec: "_ToolCallRecord") -> bool:
-        renderer_tool = getattr(rec, "renderer_tool", None)
-        if renderer_tool is None:
-            return False
-        if not bool(getattr(renderer_tool, "render_verbose_result_in_transcript", False)):
+        metadata = getattr(rec, "metadata", None)
+        render_metadata = metadata.get(TOOL_RENDER_METADATA_KEY) if isinstance(metadata, dict) else None
+        if isinstance(render_metadata, dict) and bool(
+            render_metadata.get(TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY)
+        ):
+            return bool(self._renderer._has_verbose_content(rec))
+
+        tool_for_record = getattr(self._renderer, "_tool_for_record", None)
+        tool = tool_for_record(rec) if callable(tool_for_record) else None
+        if not bool(getattr(tool, "render_verbose_result_in_transcript", False)):
             return False
         return bool(self._renderer._has_verbose_content(rec))
 

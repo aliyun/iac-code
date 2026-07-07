@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from types import SimpleNamespace
 
 from iac_code.cli.output_formats import (
     JsonWriter,
@@ -18,6 +17,8 @@ from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings, PermissionResult
 from iac_code.types.stream_events import (
+    TOOL_RENDER_METADATA_KEY,
+    TOOL_RENDER_RESULT_COMPACT_KEY,
     ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -255,14 +256,14 @@ class TestStreamJsonWriter:
         assert second["type"] == "tool_result"
         assert "signature-secret" not in stream.getvalue()
 
-    def test_tool_use_start_omits_renderer_tool(self) -> None:
+    def test_tool_use_start_omits_internal_render_metadata(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         writer.handle(
             ToolUseStartEvent(
                 tool_use_id="tu_1",
                 name="infraguard_scan",
-                renderer_tool=SimpleNamespace(name="infraguard_scan"),
+                metadata={TOOL_RENDER_METADATA_KEY: {"display_name": "InfraGuard scan"}},
             )
         )
 
@@ -487,6 +488,45 @@ class TestStreamJsonWriter:
         assert EXTERNALIZED_RESULT_PATH_METADATA_KEY not in rendered
         assert "/Users/alice" not in rendered
         assert data["metadata"] == {"step_result": {"step_id": "x"}}
+
+    def test_tool_result_omits_internal_render_metadata(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="infraguard_scan",
+                result="preview",
+                metadata={
+                    TOOL_RENDER_METADATA_KEY: {TOOL_RENDER_RESULT_COMPACT_KEY: "passed · 0 findings"},
+                    "step_result": {"step_id": "x"},
+                },
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert TOOL_RENDER_METADATA_KEY not in rendered
+        assert "passed · 0 findings" not in rendered
+        assert data["metadata"] == {"step_result": {"step_id": "x"}}
+
+    def test_tool_result_omits_metadata_when_only_internal_render_metadata_remains(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="infraguard_scan",
+                result="preview",
+                metadata={TOOL_RENDER_METADATA_KEY: {TOOL_RENDER_RESULT_COMPACT_KEY: "passed · 0 findings"}},
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert TOOL_RENDER_METADATA_KEY not in rendered
+        assert "passed · 0 findings" not in rendered
+        assert "metadata" not in data
 
     def test_failed_tool_result_redacts_encoded_malformed_artifact_uri(self) -> None:
         stream = io.StringIO()

@@ -7,6 +7,7 @@ and the parallel tab UI to avoid duplicating event handling logic.
 
 from __future__ import annotations
 
+import copy
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -48,7 +49,7 @@ class ToolCallRecord:
     children: list[SubAgentChild] | None = None
     start_time: float = 0.0
     progress_renderable: Any = None
-    renderer_tool: Any = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass
@@ -60,6 +61,29 @@ class RenderSegment:
     text: str = ""
     tool: ToolCallRecord | None = None
     elapsed_seconds: float = 0.0
+
+
+def merge_tool_metadata(
+    current: dict[str, Any] | None,
+    update: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Merge tool event metadata while preserving nested internal metadata."""
+
+    if not current:
+        return copy.deepcopy(update) if update else None
+    if not update:
+        return copy.deepcopy(current)
+
+    merged = copy.deepcopy(current)
+    for key, value in update.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            nested = copy.deepcopy(existing)
+            nested.update(copy.deepcopy(value))
+            merged[key] = nested
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
 
 
 class StreamAccumulator:
@@ -116,7 +140,7 @@ class StreamAccumulator:
                 tool_name=event.name,
                 tool_input={},
                 start_time=time.monotonic(),
-                renderer_tool=event.renderer_tool,
+                metadata=event.metadata,
             )
             self.tool_records[event.tool_use_id] = rec
             self.segments.append(RenderSegment(kind="tool", tool=rec))
@@ -144,6 +168,7 @@ class StreamAccumulator:
                 rec.result = event.result
                 rec.is_error = event.is_error
                 rec.done = True
+                rec.metadata = merge_tool_metadata(rec.metadata, event.metadata)
             return "tool_done"
 
         if isinstance(event, SubAgentToolEvent):
