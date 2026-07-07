@@ -28,7 +28,7 @@ from iac_code.services.permissions.audit import (
 )
 from iac_code.services.session_usage import SessionUsageStore, SessionUsageTotals
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
-from iac_code.tools.result_storage import ResultStorage
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import PermissionAuditSettings, PermissionResult
 from iac_code.types.stream_events import (
@@ -215,6 +215,7 @@ class AgentLoop:
         tool_context_trusted_read_directories: list[str] | None = None,
         tool_context_relative_read_directories: list[str] | None = None,
         pipeline_mode: bool = False,
+        tool_context_env_overrides: dict[str, str] | None = None,
         root_session_id: str | None = None,
         transcript_id: str | None = None,
         result_storage_dir: str | Path | None = None,
@@ -238,6 +239,7 @@ class AgentLoop:
         self._tool_context_trusted_read_directories = list(tool_context_trusted_read_directories or [])
         self._tool_context_relative_read_directories = list(tool_context_relative_read_directories or [])
         self._pipeline_mode = pipeline_mode
+        self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._auto_trigger_skills = auto_trigger_skills or []
         self._auto_loaded_skills: set[str] = set()
         self._current_git_branch: str | None = None
@@ -922,6 +924,8 @@ class AgentLoop:
                     system=system_prompt,
                     tools=provider_tools,
                 ):
+                    if isinstance(event, ToolUseStartEvent):
+                        event = replace(event, renderer_tool=self.tool_registry.get(event.name))
                     yield event  # Forward all provider events to UI
 
                     # Collect data from events
@@ -1019,6 +1023,7 @@ class AgentLoop:
                     trusted_read_directories=list(self._tool_context_trusted_read_directories),
                     relative_read_directories=list(self._tool_context_relative_read_directories),
                     pipeline_mode=self._pipeline_mode,
+                    env_overrides=dict(self._tool_context_env_overrides),
                 )
 
                 allowed_requests: list[ToolCallRequest] = []
@@ -1228,14 +1233,15 @@ class AgentLoop:
                         terminal_step_result = True
                     processed = self._result_storage.process(req.id, result.content)
                     self._mark_read_memory_tool_result(req, result)
+                    result_metadata = self._tool_result_event_metadata(result.metadata, processed)
 
                     yield ToolResultEvent(
                         tool_use_id=req.id,
                         tool_name=req.name,
                         result=processed.content,
                         is_error=result.is_error,
-                        metadata=result.metadata,
                         public_path_roots=public_path_roots,
+                        metadata=result_metadata,
                     )
 
                     tool_result_blocks.append(
@@ -1243,6 +1249,7 @@ class AgentLoop:
                             tool_use_id=req.id,
                             content=processed.content,
                             is_error=result.is_error,
+                            metadata=self._tool_result_block_metadata(processed),
                         )
                     )
 
@@ -1296,6 +1303,20 @@ class AgentLoop:
                     git_branch=self._current_git_branch,
                 )
             yield QueuedInputSubmittedEvent(text=text)
+
+    @staticmethod
+    def _tool_result_event_metadata(metadata: dict[str, Any] | None, processed: Any) -> dict[str, Any] | None:
+        if not getattr(processed, "is_externalized", False) or not getattr(processed, "file_path", None):
+            return metadata
+        event_metadata = dict(metadata or {})
+        event_metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] = str(processed.file_path)
+        return event_metadata
+
+    @staticmethod
+    def _tool_result_block_metadata(processed: Any) -> dict[str, Any]:
+        if not getattr(processed, "is_externalized", False) or not getattr(processed, "file_path", None):
+            return {}
+        return {EXTERNALIZED_RESULT_PATH_METADATA_KEY: str(processed.file_path)}
 
     def _mark_read_memory_tool_result(self, request: ToolCallRequest, result: ToolResult) -> None:
         if request.name != "read_memory" or result.is_error or self._memory_recall_service is None:

@@ -139,10 +139,28 @@ class TranscriptView:
         for line in header_lines[1:]:
             self._console.print(line)
 
-        # Result stays compact so we never dump full file contents.
-        result_line = r._render_tool_result(rec)
+        # Most tool results stay compact so we never dump full file contents.
+        # Pipeline-only tools can carry their real Tool renderer on the record;
+        # if that renderer has curated verbose output, use it generically.
+        if self._should_render_result_verbose(rec):
+            saved = r._verbose
+            r._verbose = True
+            try:
+                result_line = r._render_tool_result(rec)
+            finally:
+                r._verbose = saved
+        else:
+            result_line = r._render_tool_result(rec)
         if result_line:
             self._console.print(result_line)
+
+    def _should_render_result_verbose(self, rec: "_ToolCallRecord") -> bool:
+        renderer_tool = getattr(rec, "renderer_tool", None)
+        if renderer_tool is None:
+            return False
+        if not bool(getattr(renderer_tool, "render_verbose_result_in_transcript", False)):
+            return False
+        return bool(self._renderer._has_verbose_content(rec))
 
     def _render_subagent_prompt(self, rec: "_ToolCallRecord") -> None:
         """For agent-style tools, print the prompt handed to the subagent."""

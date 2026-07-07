@@ -76,6 +76,7 @@ class SubPipelineExecutor:
         auto_trigger_skills: list[Any] | None = None,
         surface: str = "repl",
         backup_service: Any | None = None,
+        tool_context_env_overrides: dict[str, str] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -89,6 +90,7 @@ class SubPipelineExecutor:
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
         self._surface = surface
+        self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._active_step_executor = None
         self._telemetry_correlation: dict[str, str] = {}
         pipeline_name = getattr(pipeline, "name", "")
@@ -168,6 +170,7 @@ class SubPipelineExecutor:
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
+            tool_context_env_overrides=self._tool_context_env_overrides,
         )
         self._apply_telemetry_correlation(step_executor)
 
@@ -186,6 +189,7 @@ class SubPipelineExecutor:
             )
 
         conclusions: dict[str, Any] = {}
+        step_conclusions: dict[str, Any] = {}
 
         try:
             while not state_machine.is_complete:
@@ -251,6 +255,7 @@ class SubPipelineExecutor:
 
                 # Accumulate conclusions
                 if step_result.conclusion:
+                    step_conclusions[step.step_id] = step_result.conclusion
                     conclusions[step.conclusion_field] = step_result.conclusion
 
                 if event_callback:
@@ -272,7 +277,9 @@ class SubPipelineExecutor:
                     target, reason = step_result.rollback_request
                     try:
                         state_machine.rollback(target, reason)
-                        conclusions = self._conclusions_before_step(sub_spec, target, conclusions)
+                        step_conclusions = self._step_conclusions_before_step(sub_spec, target, step_conclusions)
+                        conclusions = self._field_conclusions_from_step_conclusions(sub_spec, step_conclusions)
+                        self._restore_conclusions_to_context(sub_context, conclusions)
                         self._mark_rolled_back_fields_stale(sub_context, sub_spec, target)
                     except ValueError as e:
                         valid_targets = [s.step_id for s in sub_spec.steps]
@@ -345,6 +352,7 @@ class SubPipelineExecutor:
             memory_content_getter=self._memory_content_getter,
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
+            tool_context_env_overrides=self._tool_context_env_overrides,
         )
         self._apply_telemetry_correlation(executor)
         return executor
@@ -359,6 +367,7 @@ class SubPipelineExecutor:
         *,
         start_from_step: str | None = None,
         preserved_conclusions: dict[str, Any] | None = None,
+        preserved_step_conclusions: dict[str, Any] | None = None,
         user_message: str | list[ContentBlock] | None = None,
         resume_messages: list[Message] | None = None,
         parent_step_id: str | None = None,
@@ -374,16 +383,26 @@ class SubPipelineExecutor:
             if resume_state and resume_state.get("sub_pipeline_id")
             else f"{sub_spec.name}_{uuid.uuid4().hex[:8]}"
         )
+        sub_context = self._build_sub_context(sub_spec, candidate, parent_context)
         if resume_state and isinstance(resume_state.get("context"), dict):
+            merged_context_snapshot = sub_context.to_snapshot()
+            merged_context_snapshot.update(resume_state["context"])
             sub_context = PipelineContext.from_snapshot(
-                resume_state["context"],
+                merged_context_snapshot,
                 self._sub_context_dependencies(sub_spec),
             )
-        else:
-            sub_context = self._build_sub_context(sub_spec, candidate, parent_context)
-        if preserved_conclusions and not resume_state:
-            for field_name, value in preserved_conclusions.items():
+        replay_conclusions: dict[str, Any] = {}
+        if preserved_step_conclusions:
+            replay_conclusions.update(
+                self._field_conclusions_from_step_conclusions(sub_spec, preserved_step_conclusions)
+            )
+        if preserved_conclusions:
+            replay_conclusions.update(preserved_conclusions)
+        for field_name, value in replay_conclusions.items():
+            try:
                 sub_context.set_conclusion(field_name, value)
+            except KeyError:
+                continue
         if resume_state and isinstance(resume_state.get("state_machine"), dict):
             state_machine = StateMachine.from_snapshot(
                 resume_state["state_machine"],
@@ -428,14 +447,22 @@ class SubPipelineExecutor:
             data=sub_pipeline_event_data(),
         )
 
-        if resume_state and isinstance(resume_state.get("conclusions"), dict):
+        if resume_state and isinstance(resume_state.get("step_conclusions"), dict):
+            step_conclusions = dict(resume_state["step_conclusions"])
+            conclusions = self._field_conclusions_from_step_conclusions(sub_spec, step_conclusions)
+        elif preserved_step_conclusions:
+            step_conclusions = dict(preserved_step_conclusions)
+            conclusions = self._field_conclusions_from_step_conclusions(sub_spec, step_conclusions)
+        elif resume_state and isinstance(resume_state.get("conclusions"), dict):
             conclusions = dict(resume_state["conclusions"])
+            step_conclusions = self._infer_legacy_step_conclusions(sub_spec, conclusions)
         else:
             conclusions: dict[str, Any] = {}
             for existing_step in sub_spec.steps:
                 field = sub_context.get_field(existing_step.conclusion_field)
                 if field.value is not None and not field.stale:
                     conclusions[existing_step.conclusion_field] = field.value
+            step_conclusions = self._infer_legacy_step_conclusions(sub_spec, conclusions)
         is_first_step = True
         terminal_event: PipelineEvent | None = None
         current_step_attrs: dict[str, Any] | None = None
@@ -468,6 +495,7 @@ class SubPipelineExecutor:
                 "active_attempt_id": attempt_info.get("attempt_id"),
                 "transcript_id": attempt_info.get("transcript_id"),
                 "conclusions": dict(conclusions),
+                "step_conclusions": dict(step_conclusions),
             }
             result = sub_step_state_callback(payload)
             if asyncio.iscoroutine(result):
@@ -700,13 +728,23 @@ class SubPipelineExecutor:
                             emit_sub_pipeline_failed(error_summary, "StepFailed", failure.error_id)
                             break
 
+                        step_conclusions[step.step_id] = step_result.conclusion
                         conclusions[step.conclusion_field] = step_result.conclusion
 
                         if step_result.rollback_request:
                             target, reason = step_result.rollback_request
                             try:
                                 state_machine.rollback(target, reason)
-                                conclusions = self._conclusions_before_step(sub_spec, target, conclusions)
+                                step_conclusions = self._step_conclusions_before_step(
+                                    sub_spec,
+                                    target,
+                                    step_conclusions,
+                                )
+                                conclusions = self._field_conclusions_from_step_conclusions(
+                                    sub_spec,
+                                    step_conclusions,
+                                )
+                                self._restore_conclusions_to_context(sub_context, conclusions)
                                 self._observability.sub_step_completed(
                                     duration_ms=self._observability.duration_ms(sub_step_started_at),
                                     **current_step_attrs,
@@ -929,6 +967,7 @@ class SubPipelineExecutor:
                 {
                     "failed": False,
                     "conclusions": conclusions,
+                    "step_conclusions": step_conclusions,
                 },
             ),
         )
@@ -972,14 +1011,26 @@ class SubPipelineExecutor:
         sub_spec: SubPipelineSpec,
         target_step_id: str,
         conclusions: dict[str, Any],
+        step_conclusions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Keep only conclusions produced before a rollback target."""
+        if step_conclusions is not None:
+            return self._field_conclusions_from_step_conclusions(
+                sub_spec,
+                self._step_conclusions_before_step(sub_spec, target_step_id, step_conclusions),
+            )
         try:
-            target_index = [step.step_id for step in sub_spec.steps].index(target_step_id)
+            target_index = self._step_index(sub_spec, target_step_id)
         except ValueError:
             return dict(conclusions)
-        preserved_fields = {step.conclusion_field for step in sub_spec.steps[:target_index]}
-        return {field: value for field, value in conclusions.items() if field in preserved_fields}
+        result: dict[str, Any] = {}
+        for conclusion_field, value in conclusions.items():
+            writer_indices = [
+                idx for idx, step in enumerate(sub_spec.steps) if step.conclusion_field == conclusion_field
+            ]
+            if writer_indices and max(writer_indices) < target_index:
+                result[conclusion_field] = value
+        return result
 
     def _mark_rolled_back_fields_stale(
         self,
@@ -989,8 +1040,56 @@ class SubPipelineExecutor:
     ) -> None:
         """Mark the rollback target and later sub-step fields stale in the persisted sub-context."""
         try:
-            target_index = [step.step_id for step in sub_spec.steps].index(target_step_id)
+            target_index = self._step_index(sub_spec, target_step_id)
         except ValueError:
             return
         for step in sub_spec.steps[target_index:]:
             context.mark_stale(step.conclusion_field)
+
+    @staticmethod
+    def _step_index(sub_spec: SubPipelineSpec, step_id: str) -> int:
+        return [step.step_id for step in sub_spec.steps].index(step_id)
+
+    def _step_conclusions_before_step(
+        self,
+        sub_spec: SubPipelineSpec,
+        target_step_id: str,
+        step_conclusions: dict[str, Any],
+    ) -> dict[str, Any]:
+        target_index = self._step_index(sub_spec, target_step_id)
+        return {
+            step.step_id: step_conclusions[step.step_id]
+            for step in sub_spec.steps[:target_index]
+            if step.step_id in step_conclusions
+        }
+
+    @staticmethod
+    def _field_conclusions_from_step_conclusions(
+        sub_spec: SubPipelineSpec,
+        step_conclusions: dict[str, Any],
+    ) -> dict[str, Any]:
+        conclusions: dict[str, Any] = {}
+        for step in sub_spec.steps:
+            if step.step_id in step_conclusions:
+                conclusions[step.conclusion_field] = step_conclusions[step.step_id]
+        return conclusions
+
+    @staticmethod
+    def _infer_legacy_step_conclusions(
+        sub_spec: SubPipelineSpec,
+        conclusions: dict[str, Any],
+    ) -> dict[str, Any]:
+        step_conclusions: dict[str, Any] = {}
+        for conclusion_field, value in conclusions.items():
+            writers = [step for step in sub_spec.steps if step.conclusion_field == conclusion_field]
+            if len(writers) == 1:
+                step_conclusions[writers[0].step_id] = value
+        return step_conclusions
+
+    @staticmethod
+    def _restore_conclusions_to_context(context: PipelineContext, conclusions: dict[str, Any]) -> None:
+        for field_name, value in conclusions.items():
+            try:
+                context.set_conclusion(field_name, value)
+            except KeyError:
+                continue

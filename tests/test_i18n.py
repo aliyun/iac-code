@@ -69,6 +69,82 @@ PIPELINE_USER_VISIBLE_MSGIDS = {
     "Ask user question",
     "Show architecture diagram",
     "Show candidate details",
+    "InfraGuard scan",
+    "Run InfraGuard static scan and return structured JSON results.",
+    "review step",
+    "configured feature",
+    "Direct binary download",
+    "Go install",
+    "Homebrew",
+    "Installing prerequisites...",
+    "Downloading prerequisites...",
+    "Initializing prerequisites...",
+    "Installing prerequisites with {installer}...",
+    (
+        "Pipeline prerequisite {name} is missing and no configured installer is usable; "
+        "{feature} will be skipped for this run."
+    ),
+    (
+        "Pipeline prerequisite {name} is missing; it is required for {feature}. "
+        "Choose an installer or skip this feature for this run."
+    ),
+    "Skip {feature} for this run",
+    "command timed out after {seconds} seconds",
+    "Version check failed for {name}: {reason}",
+    "Could not determine {name} version from output.",
+    "{name} version {version} is lower than required {minimum}.",
+    "error",
+    "passed",
+    "failed",
+    "completed",
+    "1 finding",
+    "{count} findings",
+    "blocking {count}",
+    "line {line}",
+    "Reason: {reason}",
+    "Recommendation: {recommendation}",
+    "Snippet: {snippet}",
+    "Command: {command}",
+    "Status: {status}",
+    "Error: {error}",
+    "File: {file_path}",
+    "Mode: {mode}",
+    "Exit code: {exit_code}",
+    "Ignore waivers: {value}",
+    "Blocking severities: {severities}",
+    "Blocking findings: {count}",
+    "Aspects: {aspects}",
+    "Policies:",
+    "Summary:",
+    "Severity counts: {counts}",
+    "Stderr: {stderr}",
+    "Findings:",
+    "No findings.",
+    (
+        "reviewing ran write_file/edit_file after ros_validate_template; "
+        "rerun ros_validate_template and infraguard_scan for the same file_path."
+    ),
+    "reviewing must validate the repaired template with ros_validate_template for the same file_path.",
+    (
+        "reviewing ran write_file/edit_file after the final InfraGuard scan; "
+        "rerun ros_validate_template and infraguard_scan for the same file_path."
+    ),
+    "reviewing must finish with a passing InfraGuard scan for the same file_path.",
+    (
+        "This input still lacks a clear cloud resource, deployment target, or operations constraint; "
+        "clarify with the user first."
+    ),
+    (
+        "The current flow only supports Alibaba Cloud deployment requests; ask the user to change the target "
+        "to Alibaba Cloud or confirm that it should not be handled for now."
+    ),
+    "Low-confidence intent cannot be completed directly; clarify with the user first.",
+    (
+        "This input is not a deployment or cloud resource request; ask the user to provide a deployment target "
+        "or confirm that it should not be handled for now."
+    ),
+    "A successful deployment must wait until ros_deploy returns CREATE_COMPLETE.",
+    ("{feature} skipped\nPrerequisite {name} failed, so {feature} is disabled for this run.\nReason: {reason}"),
     'Generated the architecture diagram for "{candidate_name}".',
     'Displayed details for "{candidate_name}".',
 }

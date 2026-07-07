@@ -12,6 +12,7 @@ from iac_code.pipeline.engine.recovery import (
     reconstruct_step_result,
 )
 from iac_code.pipeline.engine.types import StepStatus
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 
 
 def test_reconstruct_step_result_from_successful_complete_step():
@@ -271,6 +272,130 @@ def test_reconstruct_completion_guard_state_records_ros_deploy_results_for_compl
     ]
 
 
+def test_reconstruct_completion_guard_state_records_structured_tool_results_for_completion_guards():
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_scan",
+                    name="infraguard_scan",
+                    input={"file_path": "template.yaml", "blocking_severities": ["high"]},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_scan",
+                    content=json.dumps(
+                        {
+                            "file_path": "template.yaml",
+                            "passed": True,
+                            "blocking_findings": 0,
+                            "summary": {},
+                        }
+                    ),
+                    is_error=False,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["successful_tools"] == {"infraguard_scan"}
+    assert state["tool_results"]["infraguard_scan"]["passed"] is True
+    assert state["tool_result_records"] == [
+        {
+            "tool_name": "infraguard_scan",
+            "input": {"file_path": "template.yaml", "blocking_severities": ["high"]},
+            "result": {
+                "file_path": "template.yaml",
+                "passed": True,
+                "blocking_findings": 0,
+                "summary": {},
+            },
+            "is_error": False,
+        }
+    ]
+
+
+def test_reconstruct_completion_guard_state_reads_externalized_tool_result_metadata(tmp_path):
+    stored_result_path = tmp_path / "scan.json"
+    payload = {
+        "file_path": "template.yaml",
+        "passed": True,
+        "blocking_findings": 0,
+        "file_content": "x" * 60_000,
+        "file_sha256": "abc123",
+    }
+    stored_result_path.write_text(json.dumps(payload), encoding="utf-8")
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_scan",
+                    name="infraguard_scan",
+                    input={"file_path": "template.yaml", "include_file_content": True},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_scan",
+                    content='{"file_path": "template.yaml"',
+                    metadata={EXTERNALIZED_RESULT_PATH_METADATA_KEY: str(stored_result_path)},
+                    is_error=False,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert state["successful_tools"] == {"infraguard_scan"}
+    assert state["tool_results"]["infraguard_scan"] == payload
+
+
+def test_reconstruct_completion_guard_state_falls_back_when_externalized_tool_result_is_missing(tmp_path, caplog):
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.recovery")
+    missing_result_path = tmp_path / "missing-scan.json"
+    messages = [
+        Message(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="tu_scan",
+                    name="infraguard_scan",
+                    input={"file_path": "template.yaml", "include_file_content": True},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_scan",
+                    content='{"file_path": "template.yaml"',
+                    metadata={EXTERNALIZED_RESULT_PATH_METADATA_KEY: str(missing_result_path)},
+                    is_error=False,
+                )
+            ],
+        ),
+    ]
+
+    state = reconstruct_completion_guard_state(messages)
+
+    assert "Failed to read externalized tool result while rebuilding completion guard state" in caplog.text
+    assert state["successful_tools"] == set()
+    assert state["tool_results"] == {}
+
+
 def test_reconstruct_completion_guard_state_records_ros_deploy_owned_failed_create_stack():
     messages = [
         Message(
@@ -320,6 +445,46 @@ def test_completion_guard_state_logs_json_parse_failures(caplog):
     )
 
     assert "Failed to parse completion guard state" in caplog.text
+
+
+def test_completion_guard_state_does_not_warn_for_plain_text_unstructured_tool_results(caplog):
+    caplog.set_level(logging.WARNING, logger="iac_code.pipeline.engine.completion_guard_state")
+    state = {}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="read_file",
+        tool_input={"path": "/tmp/template.yaml"},
+        content="plain template content",
+        is_error=False,
+    )
+
+    assert "Failed to parse completion guard state" not in caplog.text
+    assert state["successful_tools"] == set()
+    assert state["tool_results"] == {}
+
+
+def test_completion_guard_state_records_file_mutations_with_plain_text_results():
+    state = {}
+
+    record_completion_guard_tool_result(
+        state,
+        tool_name="edit_file",
+        tool_input={"path": "/tmp/template.yaml"},
+        content="Successfully edited /tmp/template.yaml",
+        is_error=False,
+    )
+
+    assert state["successful_tools"] == {"edit_file"}
+    assert state["tool_results"]["edit_file"]["file_path"] == "/tmp/template.yaml"
+    assert state["tool_result_records"] == [
+        {
+            "tool_name": "edit_file",
+            "input": {"path": "/tmp/template.yaml"},
+            "result": {"file_path": "/tmp/template.yaml"},
+            "is_error": False,
+        }
+    ]
 
 
 def test_completion_guard_state_logs_rebuild_failures(monkeypatch, caplog):

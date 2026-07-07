@@ -166,6 +166,35 @@ class TestToolExecutor:
         await executor.execute_batch(calls, ToolContext())
         assert order == [0, 1, 2]
 
+    async def test_read_after_write_runs_after_write_in_same_batch(self):
+        state = {"value": "before"}
+
+        class StateWrite(FakeWriteTool):
+            async def execute(self, *, tool_input, context):
+                state["value"] = tool_input["value"]
+                return ToolResult.success("written")
+
+        class StateRead(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                return ToolResult.success(state["value"])
+
+        write_tool = StateWrite()
+        read_tool = StateRead()
+        registry = MagicMock()
+        registry.get = lambda name: write_tool if name == "write" else read_tool
+        executor = ToolExecutor(registry=registry)
+
+        results = await executor.execute_batch(
+            [
+                ToolCallRequest(id="write-1", name="write", input={"value": "after"}),
+                ToolCallRequest(id="read-1", name="read", input={}),
+            ],
+            ToolContext(),
+        )
+
+        assert results[0].content == "written"
+        assert results[1].content == "after"
+
     async def test_error_no_block(self):
         class ErrorTool(FakeReadTool):
             async def execute(self, *, tool_input, context):
@@ -240,6 +269,21 @@ class TestToolExecutor:
         results = await executor.execute_batch(calls, ToolContext(pipeline_mode=True))
 
         assert results[0].content == "True"
+
+    async def test_env_overrides_are_preserved_in_derived_tool_context(self):
+        class ContextAwareTool(FakeReadTool):
+            async def execute(self, *, tool_input, context):
+                return ToolResult.success(context.env_overrides.get("PATH", ""))
+
+        tool = ContextAwareTool()
+        registry = MagicMock()
+        registry.get = lambda name: tool
+        executor = ToolExecutor(registry=registry)
+        calls = [ToolCallRequest(id="a", name="read", input={})]
+
+        results = await executor.execute_batch(calls, ToolContext(env_overrides={"PATH": "/tmp/bin"}))
+
+        assert results[0].content == "/tmp/bin"
 
 
 class FakeStrictTool(Tool):

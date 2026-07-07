@@ -23,6 +23,11 @@ from iac_code.services.session_layout import (
 from iac_code.utils.public_errors import sanitize_public_text
 from iac_code.utils.public_paths import relativize_public_file_uri
 from iac_code.utils.state_io import atomic_write_bytes
+from iac_code.utils.tool_result_redaction import (
+    REDACTED_TOOL_RESULT_VALUE,
+    is_file_content_key,
+    redact_file_content_from_json_string,
+)
 
 PUBLIC_ARTIFACT_URI_PREFIX = "iac-code-artifact://"
 _PUBLIC_ARTIFACT_URI_SCHEME = "iac-code-artifact"
@@ -137,6 +142,9 @@ def sanitize_public_artifact_data(
         if not key_is_public_path and _is_sensitive_output_key(key_name):
             sanitized[output_key] = "[REDACTED]"
             continue
+        if not key_is_public_path and is_file_content_key(key_name):
+            sanitized[output_key] = REDACTED_TOOL_RESULT_VALUE
+            continue
         if _is_artifact_uri_key(key_name):
             if isinstance(raw_value, str):
                 sanitized_value = _sanitize_artifact_string(key_name, raw_value, public_path_roots=public_path_roots)
@@ -159,6 +167,7 @@ def sanitize_public_tool_output_data(
     public_path_roots: Iterable[Mapping[str, str]] | None = None,
 ) -> Any:
     if isinstance(value, str):
+        value = redact_file_content_from_json_string(value)
         return sanitize_public_artifact_text(value, fallback_summary="", public_path_roots=public_path_roots)
     if isinstance(value, list):
         return [sanitize_public_tool_output_data(item, public_path_roots=public_path_roots) for item in value]
@@ -177,6 +186,8 @@ def sanitize_public_tool_output_data(
             sanitized[output_key] = sanitize_public_artifact_data(raw_value, public_path_roots=public_path_roots)
         elif not key_is_public_path and _is_sensitive_output_key(key_name):
             sanitized[output_key] = "[REDACTED]"
+        elif not key_is_public_path and is_file_content_key(key_name):
+            sanitized[output_key] = REDACTED_TOOL_RESULT_VALUE
         else:
             sanitized[output_key] = sanitize_public_tool_output_data(raw_value, public_path_roots=public_path_roots)
     return sanitized

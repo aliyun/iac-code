@@ -905,6 +905,100 @@ async def test_publish_candidate_step_completed_externalizes_configured_conclusi
 
 
 @pytest.mark.asyncio
+async def test_publish_externalized_conclusion_artifact_preserves_final_metadata(tmp_path: Path) -> None:
+    store = A2AArtifactStore(tmp_path / "artifacts")
+    raw_superseded_path = str(tmp_path / "generated" / "template.yaml")
+    supersedes_key = fingerprint_text(raw_superseded_path)
+    publisher, queue = _publisher(
+        tmp_path,
+        artifact_store=store,
+        exposure_types=[A2AExposureType.TOOL_TRACE],
+        a2a_artifacts_by_step_id={
+            "template_generating": [
+                {
+                    "path": "conclusion.file_path",
+                    "content": "conclusion.template",
+                    "media_type": "auto",
+                    "role": "final",
+                    "supersedes_path": "conclusion.original_file_path",
+                }
+            ]
+        },
+    )
+
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=1717821600.0,
+            data={
+                "sub_pipeline_id": "eval-abcd",
+                "candidate_index": 0,
+                "candidate_name": "candidate",
+                "parent_step_id": "evaluate_candidates",
+                "total_steps": 1,
+            },
+        )
+    )
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.SUB_STEP_COMPLETED,
+            step_id="template_generating",
+            timestamp=1717821601.0,
+            data={
+                "sub_pipeline_id": "eval-abcd",
+                "candidate_index": 0,
+                "step_id": "template_generating",
+                "step_index": 0,
+                "total_steps": 1,
+                "conclusion": {
+                    "file_path": "templates/reviewed-template.yaml",
+                    "original_file_path": raw_superseded_path,
+                    "template": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n",
+                },
+            },
+        )
+    )
+
+    status_events = [
+        dump(event)["metadata"]["iac_code"]["pipeline"]
+        for event in queue.events
+        if dump(event).get("metadata", {}).get("iac_code", {}).get("pipeline", {}).get("eventType")
+    ]
+    artifact_status = status_events[-1]
+    assert artifact_status["eventType"] == "artifact_created"
+    assert artifact_status["artifact"]["role"] == "final"
+    assert artifact_status["artifact"]["supersedesPath"] == "[PATH]"
+    assert artifact_status["artifact"]["supersedesKey"] == supersedes_key
+    assert artifact_status["data"]["role"] == "final"
+    assert artifact_status["data"]["supersedesPath"] == "[PATH]"
+    assert artifact_status["data"]["supersedesKey"] == supersedes_key
+
+    journal_event = publisher.journal.read_all()[-1]
+    assert journal_event["artifact"]["role"] == "final"
+    assert journal_event["artifact"]["supersedesPath"] == "[PATH]"
+    assert journal_event["artifact"]["supersedesKey"] == supersedes_key
+    assert journal_event["data"]["role"] == "final"
+    assert journal_event["data"]["supersedesPath"] == "[PATH]"
+    assert journal_event["data"]["supersedesKey"] == supersedes_key
+
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    artifact = snapshot["display"]["artifacts"][0]
+    assert artifact["role"] == "final"
+    assert artifact["supersedesPath"] == "[PATH]"
+    assert artifact["supersedesKey"] == supersedes_key
+    artifact_metadata = (
+        artifact_status["artifact"],
+        artifact_status["data"],
+        journal_event["artifact"],
+        journal_event["data"],
+        artifact,
+    )
+    assert raw_superseded_path not in str(artifact_metadata)
+
+
+@pytest.mark.asyncio
 async def test_publish_artifact_created_omits_tool_metadata_when_tool_trace_disabled(tmp_path: Path) -> None:
     store = A2AArtifactStore(tmp_path / "artifacts")
     publisher, queue = _publisher(tmp_path, artifact_store=store, exposure_types=[])

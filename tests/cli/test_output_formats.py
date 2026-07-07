@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from types import SimpleNamespace
 
 from iac_code.cli.output_formats import (
     JsonWriter,
@@ -14,6 +15,7 @@ from iac_code.cli.output_formats import (
     create_writer,
 )
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings, PermissionResult
 from iac_code.types.stream_events import (
     ErrorEvent,
@@ -253,6 +255,24 @@ class TestStreamJsonWriter:
         assert second["type"] == "tool_result"
         assert "signature-secret" not in stream.getvalue()
 
+    def test_tool_use_start_omits_renderer_tool(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolUseStartEvent(
+                tool_use_id="tu_1",
+                name="infraguard_scan",
+                renderer_tool=SimpleNamespace(name="infraguard_scan"),
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        assert data == {
+            "tool_use_id": "tu_1",
+            "name": "infraguard_scan",
+            "type": "tool_use_start",
+        }
+
     def test_tool_result_omits_null_metadata_for_field_stability(self) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
@@ -281,6 +301,59 @@ class TestStreamJsonWriter:
         assert "public_path_roots" not in data
         assert "publicPathRoots" not in rendered
         assert "/Users/alice" not in rendered
+
+    def test_tool_result_redacts_embedded_file_content_json_string(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="infraguard_scan",
+                result=json.dumps(
+                    {
+                        "file_path": "templates/demo.yml",
+                        "file_sha256": "sha256-value",
+                        "file_content": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n",
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert "ROSTemplateFormatVersion" not in rendered
+        assert "file_content" in rendered
+        assert "sha256-value" in rendered
+
+    def test_tool_result_redacts_externalized_file_content_preview(self, tmp_path) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        raw_result = json.dumps(
+            {
+                "file_path": "templates/demo.yml",
+                "file_sha256": "sha256-value",
+                "file_content": "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n" + ("X" * 500),
+            },
+            ensure_ascii=False,
+        )
+        preview = (
+            ResultStorage(
+                storage_dir=str(tmp_path / "tool-results"),
+                max_inline_chars=10,
+                preview_chars=180,
+            )
+            .process("tu_1", raw_result)
+            .content
+        )
+        assert "ROSTemplateFormatVersion" in preview
+        writer.handle(ToolResultEvent(tool_use_id="tu_1", tool_name="infraguard_scan", result=preview))
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert "ROSTemplateFormatVersion" not in rendered
+        assert "file_content" in rendered
+        assert "sha256-value" in rendered
 
     def test_subagent_tool_event_omits_raw_child_input(self) -> None:
         stream = io.StringIO()
@@ -392,6 +465,27 @@ class TestStreamJsonWriter:
 
         data = json.loads(stream.getvalue())
         assert data["type"] == "tool_result"
+        assert data["metadata"] == {"step_result": {"step_id": "x"}}
+
+    def test_tool_result_omits_internal_externalized_result_path_metadata(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="infraguard_scan",
+                result="preview",
+                metadata={
+                    EXTERNALIZED_RESULT_PATH_METADATA_KEY: "/Users/alice/.iac-code/tool-results/raw.txt",
+                    "step_result": {"step_id": "x"},
+                },
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert EXTERNALIZED_RESULT_PATH_METADATA_KEY not in rendered
+        assert "/Users/alice" not in rendered
         assert data["metadata"] == {"step_result": {"step_id": "x"}}
 
     def test_failed_tool_result_redacts_encoded_malformed_artifact_uri(self) -> None:

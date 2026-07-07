@@ -826,6 +826,11 @@ def test_metadata_unaware_running_save_preserves_existing_dict_metadata(session)
     execution = {"kind": "step", "step_id": "intent", "active_attempt_id": "att_0001"}
     attempts = {"next_attempt_number": 2, "items": {"att_0001": {"status": "running"}}}
     normal_handoff = {"status": "pending", "switched_to_normal": False}
+    prerequisites = {
+        "feature_flags": {"enable_reviewing": False},
+        "decisions": {"infraguard": {"status": "missing"}},
+        "env_overrides": {},
+    }
 
     session.save_running_sync(
         "intent",
@@ -840,6 +845,7 @@ def test_metadata_unaware_running_save_preserves_existing_dict_metadata(session)
         execution=execution,
         attempts=attempts,
         normal_handoff=normal_handoff,
+        prerequisites=prerequisites,
     )
 
     session.save_running_sync(
@@ -860,12 +866,14 @@ def test_metadata_unaware_running_save_preserves_existing_dict_metadata(session)
     assert meta["execution"] == execution
     assert meta["attempts"] == attempts
     assert meta["normal_handoff"] == normal_handoff
+    assert meta["prerequisites"] == prerequisites
 
     restored = session.restore_sync(identity)
     assert restored.ok is True
     assert restored.execution == execution
     assert restored.attempts == attempts
     assert restored.normal_handoff == normal_handoff
+    assert restored.prerequisites == prerequisites
 
 
 def test_explicit_none_execution_clears_existing_execution_metadata(session):
@@ -932,6 +940,11 @@ def test_completed_sidecar_is_terminal_but_preserves_attempts(session):
             "att_0002": {"scope": "parent", "step_id": "plan", "status": "completed"},
         },
     }
+    prerequisites = {
+        "feature_flags": {"enable_reviewing": False},
+        "decisions": {"infraguard": {"status": "missing"}},
+        "env_overrides": {},
+    }
 
     session.save_completed_sync(
         "plan",
@@ -942,6 +955,7 @@ def test_completed_sidecar_is_terminal_but_preserves_attempts(session):
         execution=execution,
         attempts=attempts,
         normal_handoff={"status": "succeeded", "switched_to_normal": True},
+        prerequisites=prerequisites,
     )
 
     meta = yaml.safe_load(session.meta_path.read_text(encoding="utf-8"))
@@ -951,6 +965,7 @@ def test_completed_sidecar_is_terminal_but_preserves_attempts(session):
     assert meta["execution"] == execution
     assert meta["attempts"] == attempts
     assert meta["normal_handoff"] == {"status": "succeeded", "switched_to_normal": True}
+    assert meta["prerequisites"] == prerequisites
     assert session.has_resumable_status() is False
 
     restored = session.restore_sync(identity)
@@ -959,6 +974,7 @@ def test_completed_sidecar_is_terminal_but_preserves_attempts(session):
     assert restored.execution == execution
     assert restored.attempts == attempts
     assert restored.normal_handoff == {"status": "succeeded", "switched_to_normal": True}
+    assert restored.prerequisites == prerequisites
 
 
 def test_metadata_unaware_completed_save_preserves_existing_dict_metadata(session):

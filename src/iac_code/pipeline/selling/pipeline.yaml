@@ -38,6 +38,81 @@ feature_flags:
   enable_reviewing:
     default: false
     env: IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING
+    display_key: review_step
+
+prerequisites:
+  infraguard:
+    command: infraguard
+    required_by_flags: [enable_reviewing]
+    on_missing:
+      repl: prompt_install
+      non_interactive: disable_feature
+    version_check:
+      command: [infraguard, version]
+      minimum: "0.10.1"
+      pattern: 'InfraGuard:\s*(?P<version>\d+\.\d+\.\d+)'
+      timeout_seconds: 30
+    installers:
+      - id: direct-binary
+        display_key: direct_binary_download
+        platforms: [darwin, linux, windows]
+        download:
+          install_dir: ~/bin
+          installed_name: infraguard
+          timeout_seconds: 1800
+          assets:
+            - platforms: [darwin]
+              architectures: [arm64]
+              filename: infraguard-v0.10.1-darwin-arm64
+              sha256: cda2ba2eab1076a5f8b6c66654295a9b9aa8e9b302407e9580a4d75b7872b76f
+              urls:
+                - env: IAC_CODE_INFRAGUARD_DARWIN_ARM64_URL
+                - https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/infraguard/0.10.1/infraguard-v0.10.1-darwin-arm64
+                - https://github.com/aliyun/infraguard/releases/download/v0.10.1/infraguard-v0.10.1-darwin-arm64
+            - platforms: [darwin]
+              architectures: [amd64]
+              filename: infraguard-v0.10.1-darwin-amd64
+              sha256: d9e8963250de8a13bbe4a6e9e528ad638f6b8fb4ad6928e2bfc27771a1db3260
+              urls:
+                - env: IAC_CODE_INFRAGUARD_DARWIN_AMD64_URL
+                - https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/infraguard/0.10.1/infraguard-v0.10.1-darwin-amd64
+                - https://github.com/aliyun/infraguard/releases/download/v0.10.1/infraguard-v0.10.1-darwin-amd64
+            - platforms: [linux]
+              architectures: [amd64]
+              filename: infraguard-v0.10.1-linux-amd64
+              sha256: a0f66d5390df1746b10bdd0e87dfe68b6418c22d43add22a4ca9cc99f22ef66b
+              urls:
+                - env: IAC_CODE_INFRAGUARD_LINUX_AMD64_URL
+                - https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/infraguard/0.10.1/infraguard-v0.10.1-linux-amd64
+                - https://github.com/aliyun/infraguard/releases/download/v0.10.1/infraguard-v0.10.1-linux-amd64
+            - platforms: [linux]
+              architectures: [arm64]
+              filename: infraguard-v0.10.1-linux-arm64
+              sha256: 5d929b89ff6ef5e8d6cd95ce3d84cb1747452f055706037b972463126065e262
+              urls:
+                - env: IAC_CODE_INFRAGUARD_LINUX_ARM64_URL
+                - https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/infraguard/0.10.1/infraguard-v0.10.1-linux-arm64
+                - https://github.com/aliyun/infraguard/releases/download/v0.10.1/infraguard-v0.10.1-linux-arm64
+            - platforms: [windows]
+              architectures: [amd64]
+              filename: infraguard-v0.10.1-windows-amd64.exe
+              sha256: 48dd98cec9cc825fd273280e3ca8502fc65ab31170394b18d6e388ccb4c80332
+              urls:
+                - env: IAC_CODE_INFRAGUARD_WINDOWS_AMD64_URL
+                - https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/infraguard/0.10.1/infraguard-v0.10.1-windows-amd64.exe
+                - https://github.com/aliyun/infraguard/releases/download/v0.10.1/infraguard-v0.10.1-windows-amd64.exe
+            - platforms: [windows]
+              architectures: [arm64]
+              filename: infraguard-v0.10.1-windows-arm64.exe
+              sha256: 7ab067e0af3e59173bf04d8a2624a2cf6b42eda0fe578bc0be2540394d49636e
+              urls:
+                - env: IAC_CODE_INFRAGUARD_WINDOWS_ARM64_URL
+                - https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/infraguard/0.10.1/infraguard-v0.10.1-windows-arm64.exe
+                - https://github.com/aliyun/infraguard/releases/download/v0.10.1/infraguard-v0.10.1-windows-arm64.exe
+    post_install:
+      timeout_seconds: 300
+      commands:
+        - [infraguard, policy, update]
 
 context_dependencies:
   intent: []
@@ -67,6 +142,7 @@ sub_pipelines:
           - path: conclusion.file_path
             content: conclusion.template
             media_type: auto
+            supersedes_path: conclusion.file_path
         forward: reviewing
         skill: iac-aliyun-template-generating
         prompt: prompts/template_generating.md
@@ -79,23 +155,184 @@ sub_pipelines:
       - id: reviewing
         description: "审查模板的安全性和最佳实践"
         enabled_when: enable_reviewing
-        conclusion_field: review
+        conclusion_field: template
         forward: cost_estimating
         skill: iac-aliyun-review
         prompt: prompts/reviewing.md
-        context_fields: [template]
+        context_fields: [intent, candidate, template]
+        a2a_artifacts:
+          - path: conclusion.file_path
+            content: conclusion.template
+            media_type: auto
+            role: final
+            supersedes_path: conclusion.file_path
+        config:
+          infraguard:
+            mode: static
+            aspects:
+              security:
+                name: "安全性"
+                selection_guidance: "包含公网入口、安全组、访问控制、身份权限或任何可被外部访问的资源时选择；安全基线通常默认选择。"
+                policies:
+                  - pack:aliyun:security
+              high_availability:
+                name: "高可用"
+                selection_guidance: "用户要求生产级、容灾、多可用区、SLA，或 candidate 明确设计为高可用方案时选择；低成本单机方案通常跳过。"
+                policies:
+                  - pack:aliyun:high-availability
+              cost_optimization:
+                name: "成本优化"
+                selection_guidance: "用户有预算约束、低成本偏好，或方案包含可能闲置/过期的资源时选择。"
+                policies:
+                  - pack:aliyun:cost-optimization
+              compliance:
+                name: "合规性"
+                selection_guidance: "用户提出行业合规、等保、审计、企业治理或监管要求时选择；普通实验/个人项目通常跳过。"
+                policies:
+                  - pack:aliyun:compliance
+              best_practice:
+                name: "最佳实践"
+                selection_guidance: "所有可部署 ROS 模板的通用质量基线，通常默认选择。"
+                policies:
+                  - pack:aliyun:best-practice
+              operations:
+                name: "可运维性"
+                selection_guidance: "生产环境、长期运行服务，或需要变更管理、备份、稳定性保障时选择。"
+                policies:
+                  - pack:aliyun:operations
+              network_architecture:
+                name: "网络架构"
+                selection_guidance: "模板包含 VPC、VSwitch、SLB/ALB、EIP、公网访问、跨资源网络路径或网络隔离要求时选择。"
+                policies:
+                  - pack:aliyun:network-architecture
+              elasticity:
+                name: "弹性能力"
+                selection_guidance: "用户提到突发流量、秒杀、自动扩缩容，或方案包含弹性伸缩/负载均衡/动态容量设计时选择。"
+                policies:
+                  - pack:aliyun:elasticity
+            ignore_waivers: true
+            max_fix_rounds: 5
+            blocking_severities: [critical, high]
+        completion_guards:
+          - when_conclusion_field_equals:
+              validated: true
+            when_tool_result_exists:
+              tools: [write_file, edit_file]
+              match_conclusion_field: file_path
+              match_result_field: result.file_path
+            require_tool_result:
+              tool: ros_validate_template
+              match_conclusion_field: file_path
+              match_result_field: input.template_url
+              disallow_tool_results_after_match:
+                - tools: [write_file, edit_file]
+                  match_conclusion_field: file_path
+                  match_result_field: result.file_path
+                  message_key: reviewing_rerun_after_validate_template_write
+            message_key: reviewing_validate_template_required
+          - when_conclusion_field_equals:
+              review_passed: true
+            require_tool_result:
+              tool: infraguard_scan
+              latest_match: true
+              match_conclusion_field: file_path
+              match_result_field: file_path
+              match_fields:
+                - conclusion_field: template_sha256
+                  result_field: file_sha256
+              result_field_equals:
+                passed: true
+                blocking_findings: 0
+              required_result_fields: [file_content, file_sha256, selected_aspects, expanded_policies]
+              disallow_tool_results_after_match:
+                - tools: [write_file, edit_file]
+                  match_conclusion_field: file_path
+                  match_result_field: result.file_path
+                  message_key: reviewing_rerun_after_final_infraguard_write
+            require_conclusion_sha256:
+              content_field: template
+              sha256_field: template_sha256
+            message_key: reviewing_final_infraguard_required
+          - when_conclusion_field_equals:
+              review_passed: true
+            when_tool_result_exists:
+              tools: [write_file, edit_file]
+              match_conclusion_field: file_path
+              match_result_field: result.file_path
+            require_tool_result:
+              tool: infraguard_scan
+              latest_match: true
+              after_tool_result:
+                tool: ros_validate_template
+                match_conclusion_field: file_path
+                match_result_field: input.template_url
+              match_conclusion_field: file_path
+              match_result_field: file_path
+              match_fields:
+                - conclusion_field: template_sha256
+                  result_field: file_sha256
+              result_field_equals:
+                passed: true
+                blocking_findings: 0
+              required_result_fields: [file_content, file_sha256, selected_aspects, expanded_policies]
+              disallow_tool_results_after_match:
+                - tools: [write_file, edit_file]
+                  match_conclusion_field: file_path
+                  match_result_field: result.file_path
+                  message_key: reviewing_rerun_after_final_infraguard_write
+            message_key: reviewing_final_infraguard_required
+        conclusion_schema:
+          type: object
+          required:
+            - template
+            - template_sha256
+            - file_path
+            - region
+            - description
+            - validated
+            - review_passed
+            - review_issues
+            - selected_review_aspects
+            - skipped_review_aspects
+            - resolved_infraguard_policies
+            - infraguard_summary
+            - fix_summary
+          additionalProperties: false
+          properties:
+            template:
+              type: string
+            template_sha256:
+              type: string
+            file_path:
+              type: string
+            region:
+              type: string
+            description:
+              type: string
+            validated:
+              const: true
+            review_passed:
+              const: true
+            review_issues:
+              type: array
+            selected_review_aspects:
+              type: array
+            skipped_review_aspects:
+              type: array
+            resolved_infraguard_policies:
+              type: array
+            infraguard_summary:
+              type: object
+            fix_summary:
+              type: string
         tools:
-          include: [ros_validate_template]
-          exclude: []
+          include: [read_file, write_file, edit_file, infraguard_scan, ros_validate_template, aliyun_doc_search]
+          exclude: [write_memory]
         inject_tools: [ros_validate_template]
 
       - id: cost_estimating
         description: "评估模板的资源成本"
         conclusion_field: cost
-        a2a_artifacts:
-          - path: conclusion.file_path
-            content: conclusion.template
-            media_type: auto
         forward: null
         skill: iac-aliyun-cost
         prompt: prompts/cost_estimating.md
@@ -135,7 +372,7 @@ steps:
         copy_tool_result_to_conclusion:
           selected_id: clarification_choice
           free_text: clarification_text
-        message: "这个输入仍缺少明确的云资源、部署目标或运维约束，需要先向用户澄清。"
+        message_key: intent_cloud_resource_clarification_required
       - require_tool: ask_user_question
         when_user_message_matches_any:
           - "(AWS|Amazon Web Services|Azure|GCP|Google Cloud|GoogleCloud|腾讯云|华为云|火山引擎|UCloud|EC2|S3|Lambda|CloudFormation|EKS|AKS|GKE)"
@@ -143,7 +380,7 @@ steps:
         copy_tool_result_to_conclusion:
           selected_id: clarification_choice
           free_text: clarification_text
-        message: "当前流程只支持阿里云部署需求；非阿里云需求需要先让用户改成阿里云目标或确认暂不处理。"
+        message_key: intent_alibaba_cloud_only
       - require_tool: ask_user_question
         when_conclusion_field_equals:
           confidence: low
@@ -151,7 +388,7 @@ steps:
         copy_tool_result_to_conclusion:
           selected_id: clarification_choice
           free_text: clarification_text
-        message: "low 置信度意图不能直接完成，需要先向用户澄清。"
+        message_key: intent_low_confidence_clarification_required
       - require_tool: ask_user_question
         when_conclusion_field_equals:
           category: chat
@@ -159,7 +396,7 @@ steps:
         copy_tool_result_to_conclusion:
           selected_id: clarification_choice
           free_text: clarification_text
-        message: "这个输入不是部署/云资源需求，需要先让用户重新输入部署目标或确认暂不处理。"
+        message_key: intent_not_deployment_request
       - require_tool: ask_user_question
         when_conclusion_field_equals:
           category: code_request
@@ -167,7 +404,7 @@ steps:
         copy_tool_result_to_conclusion:
           selected_id: clarification_choice
           free_text: clarification_text
-        message: "这个输入不是部署/云资源需求，需要先让用户重新输入部署目标或确认暂不处理。"
+        message_key: intent_not_deployment_request
       - require_tool: ask_user_question
         when_conclusion_field_equals:
           category: knowledge_question
@@ -175,7 +412,7 @@ steps:
         copy_tool_result_to_conclusion:
           selected_id: clarification_choice
           free_text: clarification_text
-        message: "这个输入不是部署/云资源需求，需要先让用户重新输入部署目标或确认暂不处理。"
+        message_key: intent_not_deployment_request
     base_prompt_sections:
       include: [identity, system, env, cloud_config, runtime_context, output_style]
       exclude: []
@@ -269,7 +506,7 @@ steps:
           is_success: true
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id
-        message: "部署成功必须等待 ros_deploy 返回 CREATE_COMPLETE。"
+        message_key: deploy_wait_create_complete
     tools:
       include: []
       exclude: [write_memory, ros_stack]

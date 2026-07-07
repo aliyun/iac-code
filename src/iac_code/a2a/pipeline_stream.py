@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 PENDING_BACKUP_VISIBILITY = "pending_backup"
 COMMITTED_BACKUP_VISIBILITY = "committed"
 BACKUP_COMMITTED_EVENT_TYPE = "backup_committed"
+_ARTIFACT_SEMANTIC_METADATA_KEYS = ("role", "supersedesPath", "supersedesKey", "supersedesFingerprint")
 _RECOVERY_SEMANTIC_EVENT_TYPES = {
     "pipeline_started",
     "pipeline_resumed",
@@ -748,11 +749,14 @@ class PipelineA2AEventPublisher:
 
         try:
             if event_type == "artifact_created":
-                result = {"artifact": envelope.get("artifact")}
+                original_artifact = envelope.get("artifact")
+                result = {"artifact": original_artifact}
             elif tool_result is not None:
+                original_artifact = None
                 result = tool_result.result
             else:
                 return None
+            artifact_semantic_metadata = _artifact_semantic_metadata(original_artifact, envelope.get("data"))
             artifact_metadata = _extract_artifact_metadata(result, self.artifact_store)
         except Exception:
             logger.warning("Failed to externalize A2A pipeline tool artifact", exc_info=True)
@@ -763,7 +767,7 @@ class PipelineA2AEventPublisher:
         envelope["eventType"] = "artifact_created"
         envelope["scope"] = envelope.get("scope") or "pipeline"
         envelope["status"] = "working"
-        envelope["artifact"] = artifact_metadata
+        envelope["artifact"] = {**artifact_metadata, **artifact_semantic_metadata}
         base_data: dict[str, Any] = {}
         envelope_data = envelope.get("data")
         if event_type == "artifact_created" and isinstance(envelope_data, dict):
@@ -776,6 +780,7 @@ class PipelineA2AEventPublisher:
             "byteSize": artifact_metadata.get("byteSize"),
             "sha256": artifact_metadata.get("sha256"),
             "uri": artifact_metadata.get("uri"),
+            **artifact_semantic_metadata,
         }
         if tool_result is not None and A2AExposureType.TOOL_TRACE in self.exposure_types:
             envelope["data"].update(
@@ -846,6 +851,18 @@ def _permission_request_from(event: Any) -> PermissionRequestEvent | None:
 def _tool_result_from(event: Any) -> ToolResultEvent | None:
     inner = _unwrap_stream_event(event)
     return inner if isinstance(inner, ToolResultEvent) else None
+
+
+def _artifact_semantic_metadata(*sources: Any) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key in _ARTIFACT_SEMANTIC_METADATA_KEYS:
+            value = source.get(key)
+            if isinstance(value, str) and value:
+                metadata.setdefault(key, value)
+    return metadata
 
 
 def _unwrap_stream_event(event: Any) -> Any:

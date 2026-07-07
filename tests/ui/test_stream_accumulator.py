@@ -32,6 +32,15 @@ def test_orphan_tool_result_fallback_allows_single_pending_tool_name() -> None:
     assert acc.tool_records["tool-a"].result == "ok"
 
 
+def test_tool_use_start_records_renderer_tool() -> None:
+    acc = StreamAccumulator()
+    renderer_tool = object()
+
+    acc.process(ToolUseStartEvent(tool_use_id="tool-a", name="infraguard_scan", renderer_tool=renderer_tool))
+
+    assert acc.tool_records["tool-a"].renderer_tool is renderer_tool
+
+
 def test_mcp_progress_updates_matching_tool_record() -> None:
     acc = StreamAccumulator()
     acc.process(ToolUseStartEvent(tool_use_id="tool-a", name="mcp__live__echo"))

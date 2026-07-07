@@ -273,6 +273,31 @@ class TestRendererHelpers:
         assert line is not None
         assert "done" in str(line)
 
+    def test_render_tool_result_uses_record_renderer_tool_when_registry_missing(self):
+        renderer = Renderer(make_console(), ToolRegistry(), status_callback=lambda: "ready")
+        renderer_tool = MagicMock()
+        renderer_tool.render_tool_result_message.side_effect = lambda output, *, is_error=False, verbose=False: (
+            "Command: infraguard scan\nStatus: passed" if verbose else "passed · 0 findings"
+        )
+        rec = _ToolCallRecord(
+            tool_name="infraguard_scan",
+            tool_input={},
+            done=True,
+            result='{"command": ["infraguard", "scan"]}',
+            renderer_tool=renderer_tool,
+        )
+
+        compact = renderer._render_tool_result(rec)
+        assert compact is not None
+        assert "passed · 0 findings" in compact.plain
+        assert '{"command"' not in compact.plain
+
+        renderer._verbose = True
+        verbose = renderer._render_tool_result(rec)
+        assert verbose is not None
+        assert "Command: infraguard scan" in verbose.plain
+        assert '{"command"' not in verbose.plain
+
     def test_render_progress_groups_include_resource_rows(self):
         renderer = make_renderer()
 
@@ -411,6 +436,15 @@ class TestRendererHelpers:
         assert line is not None
         assert "single-vswitch-20260706-k7m3x9 creation failed: CIDR block overlapped (a463b158)" in line.plain
         assert "status_reason" not in line.plain
+
+    def test_render_tool_header_localizes_infraguard_scan_tool_name(self):
+        renderer = make_renderer()
+        record = _ToolCallRecord(tool_name="infraguard_scan", tool_input={}, done=True)
+
+        header = renderer._render_tool_header(record)
+
+        assert "InfraGuard scan" in header.plain
+        assert "infraguard_scan" not in header.plain
 
     def test_print_segments_to_scrollback_archives_and_merges_assistant_turns(self):
         renderer = make_renderer()

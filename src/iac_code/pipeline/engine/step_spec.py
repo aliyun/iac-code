@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from iac_code.pipeline.engine.context import PipelineContext
 
@@ -24,6 +25,8 @@ class A2AArtifactSpec:
     path: str
     content: str
     media_type: str = "auto"
+    role: str = "final"
+    supersedes_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,7 @@ class StepSpec:
     exit_condition: dict | None = None
     a2a_artifacts: list[A2AArtifactSpec] = field(default_factory=list)
     surface_overrides: dict[str, StepSurfaceOverride] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
 
     def prompt_file_for_surface(self, surface: str | None) -> str:
         override = self.surface_overrides.get(surface or "")
@@ -136,6 +140,8 @@ class LoadedPipeline:
     on_complete: OnCompletePolicy | None = None
     skill_roots: dict[str, str] = field(default_factory=dict)
     emit_stack_events: bool = False
+    prerequisites: dict[str, Any] = field(default_factory=dict)
+    prerequisite_resolution: dict[str, Any] = field(default_factory=dict)
 
 
 def _resolve_dotted(value: object, path: str) -> object:
@@ -153,7 +159,13 @@ def _resolve_dotted(value: object, path: str) -> object:
     return value
 
 
-def render_prompt(template: str, ctx: PipelineContext, context_fields: list[str]) -> str:
+def render_prompt(
+    template: str,
+    ctx: PipelineContext,
+    context_fields: list[str],
+    *,
+    extra_context: dict[str, Any] | None = None,
+) -> str:
     """Render a prompt template by replacing {field_name} placeholders with context JSON.
 
     Supports dot-notation: {field.sub_key} resolves into the conclusion dict.
@@ -163,19 +175,41 @@ def render_prompt(template: str, ctx: PipelineContext, context_fields: list[str]
     result = template
     for field_name in context_fields:
         value = ctx.get_conclusion(field_name)
-        replacement = json.dumps(value, ensure_ascii=False, indent=2) if value else "{}"
-        result = result.replace("{" + field_name + "}", replacement)
+        result = _render_prompt_value(result, field_name, value, empty_object_when_missing=True)
 
-        if value and isinstance(value, dict):
-            for key in _collect_dotted_refs(result, field_name):
-                sub_value = _resolve_dotted(value, key)
-                if sub_value is None:
-                    sub_replacement = ""
-                elif isinstance(sub_value, str):
-                    sub_replacement = sub_value
-                else:
-                    sub_replacement = json.dumps(sub_value, ensure_ascii=False, indent=2)
-                result = result.replace("{" + field_name + "." + key + "}", sub_replacement)
+    for field_name, value in (extra_context or {}).items():
+        result = _render_prompt_value(result, field_name, value, empty_object_when_missing=False)
+    return result
+
+
+def _render_prompt_value(
+    template: str,
+    field_name: str,
+    value: object,
+    *,
+    empty_object_when_missing: bool,
+) -> str:
+    if empty_object_when_missing and not value:
+        replacement = "{}"
+    elif value is None:
+        replacement = ""
+    elif isinstance(value, str):
+        replacement = value
+    else:
+        replacement = json.dumps(value, ensure_ascii=False, indent=2)
+
+    result = template.replace("{" + field_name + "}", replacement)
+
+    if isinstance(value, dict):
+        for key in _collect_dotted_refs(result, field_name):
+            sub_value = _resolve_dotted(value, key)
+            if sub_value is None:
+                sub_replacement = ""
+            elif isinstance(sub_value, str):
+                sub_replacement = sub_value
+            else:
+                sub_replacement = json.dumps(sub_value, ensure_ascii=False, indent=2)
+            result = result.replace("{" + field_name + "." + key + "}", sub_replacement)
     return result
 
 

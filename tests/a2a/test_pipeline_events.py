@@ -8,7 +8,9 @@ import pytest
 
 from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI, PipelineA2AContext, PipelineEventTranslator
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.step_spec import A2AArtifactSpec
 from iac_code.services.permissions.audit import fingerprint_text
+from iac_code.tools.result_storage import ResultStorage
 from iac_code.types.stream_events import (
     CandidateDetailEvent,
     DiagramEvent,
@@ -91,6 +93,72 @@ def test_mcp_progress_event_has_tool_progress_envelope() -> None:
     assert envelope["data"]["progress"] == 1
     assert envelope["data"]["total"] == 2
     assert envelope["data"]["message"] == "halfway"
+
+
+def test_tool_result_redacts_embedded_infraguard_file_content() -> None:
+    translator = PipelineEventTranslator(_ctx())
+    raw_template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
+    result = json.dumps(
+        {
+            "file_path": "templates/demo.yml",
+            "file_sha256": "sha256-value",
+            "file_content": raw_template,
+            "passed": True,
+        },
+        ensure_ascii=False,
+    )
+
+    [envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-1",
+            tool_name="infraguard_scan",
+            result=result,
+            is_error=False,
+        )
+    )
+
+    rendered = json.dumps(envelope, ensure_ascii=False)
+    assert "ROSTemplateFormatVersion" not in rendered
+    assert "file_content" in rendered
+    assert "sha256-value" in rendered
+
+
+def test_tool_result_redacts_externalized_infraguard_file_content_preview(tmp_path) -> None:
+    translator = PipelineEventTranslator(_ctx())
+    raw_template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n" + ("X" * 500)
+    raw_result = json.dumps(
+        {
+            "file_path": "templates/demo.yml",
+            "file_sha256": "sha256-value",
+            "file_content": raw_template,
+            "passed": True,
+        },
+        ensure_ascii=False,
+    )
+    preview = (
+        ResultStorage(
+            storage_dir=str(tmp_path / "tool-results"),
+            max_inline_chars=10,
+            preview_chars=180,
+        )
+        .process("toolu-1", raw_result)
+        .content
+    )
+    assert "ROSTemplateFormatVersion" in preview
+
+    [envelope] = translator.translate(
+        ToolResultEvent(
+            tool_use_id="toolu-1",
+            tool_name="infraguard_scan",
+            result=preview,
+            is_error=False,
+        )
+    )
+
+    rendered = json.dumps(envelope, ensure_ascii=False)
+    assert "ROSTemplateFormatVersion" not in rendered
+    assert "file_content" in rendered
+    assert "sha256-value" in rendered
 
 
 def test_pipeline_warning_translates_to_non_terminal_envelope() -> None:
@@ -789,6 +857,75 @@ def test_completion_artifact_windows_path_does_not_leak_in_filename() -> None:
     assert r"C:\\" not in rendered
     assert "%5CUsers" not in rendered
     assert ".iac-code" not in rendered
+
+
+def test_completion_artifact_includes_role_and_resolved_supersedes_path_from_spec() -> None:
+    context = _ctx()
+    context.a2a_artifacts_by_step_id = {
+        "reviewing": [
+            A2AArtifactSpec(
+                path="conclusion.file_path",
+                content="conclusion.content",
+                role="final",
+                supersedes_path="conclusion.file_path",
+            )
+        ]
+    }
+    translator = PipelineEventTranslator(context)
+
+    envelopes = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_STEP_COMPLETED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "step_id": "reviewing",
+                "conclusion_field": "review",
+                "conclusion": {
+                    "file_path": "templates/main.yaml",
+                    "content": "reviewed ROSTemplate",
+                },
+            },
+        )
+    )
+
+    artifact = envelopes[1]["artifact"]
+    assert artifact["role"] == "final"
+    assert artifact["supersedesPath"] == "templates/main.yaml"
+    assert artifact["supersedesKey"] == fingerprint_text("templates/main.yaml")
+
+
+def test_completion_artifact_defaults_to_final_and_supersedes_its_own_path() -> None:
+    context = _ctx()
+    context.a2a_artifacts_by_step_id = {
+        "template_generating": [{"path": "conclusion.file_path", "content": "conclusion.content"}]
+    }
+    translator = PipelineEventTranslator(context)
+
+    envelopes = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_STEP_COMPLETED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "step_id": "template_generating",
+                "conclusion_field": "template",
+                "conclusion": {
+                    "file_path": "templates/generated.yaml",
+                    "content": "generated ROSTemplate",
+                },
+            },
+        )
+    )
+
+    artifact = envelopes[1]["artifact"]
+    assert artifact["role"] == "final"
+    assert artifact["supersedesPath"] == "templates/generated.yaml"
+    assert artifact["supersedesKey"] == fingerprint_text("templates/generated.yaml")
 
 
 def test_candidate_step_failure_keeps_global_task_status_working() -> None:

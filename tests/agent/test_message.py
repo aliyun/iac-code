@@ -72,6 +72,21 @@ class TestToolResultBlock:
         )
         assert block.is_error is True
 
+    def test_tool_result_block_persists_internal_metadata_but_omits_from_api(self):
+        """Test ToolResultBlock metadata can be stored without reaching provider APIs."""
+        block = ToolResultBlock(
+            tool_use_id="toolu_789",
+            content="preview",
+            metadata={"_iac_code_externalized_result_path": "/tmp/full-result.json"},
+        )
+        msg = Message(role="user", content=[block])
+
+        assert block.metadata == {"_iac_code_externalized_result_path": "/tmp/full-result.json"}
+        assert msg.to_dict()["content"][0]["metadata"] == {
+            "_iac_code_externalized_result_path": "/tmp/full-result.json"
+        }
+        assert "metadata" not in msg.to_api_format()["content"][0]
+
 
 class TestMessage:
     """Tests for Message."""

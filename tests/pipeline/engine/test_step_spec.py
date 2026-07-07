@@ -223,3 +223,23 @@ class TestRenderPrompt:
         result = render_prompt(template, ctx, ["intent"])
         assert '{"literal": true}' in result
         assert '"k": "v"' in result
+
+    def test_renders_extra_context_with_dotted_refs(self):
+        ctx = PipelineContext({"intent": []})
+        template = "InfraGuard:\n{step_config.infraguard}"
+        result = render_prompt(
+            template,
+            ctx,
+            [],
+            extra_context={
+                "step_config": {
+                    "infraguard": {
+                        "mode": "static",
+                        "policies": ["rule:aliyun:ecs-instance-no-public-ip"],
+                    }
+                }
+            },
+        )
+
+        assert '"mode": "static"' in result
+        assert '"rule:aliyun:ecs-instance-no-public-ip"' in result

@@ -42,9 +42,17 @@ def test_pipeline_steps_do_not_offer_write_memory_by_default() -> None:
     assert "write_memory" in deploying.tools.exclude
 
 
-def test_reviewing_step_exposes_template_validation_tool_when_enabled(monkeypatch) -> None:
+def test_reviewing_step_exposes_infraguard_review_tools_when_enabled(monkeypatch) -> None:
     monkeypatch.setenv("IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING", "true")
     reviewing = _sub_step_by_id("evaluate_candidate", "reviewing")
 
     assert reviewing.tools is not None
-    assert "ros_validate_template" in reviewing.tools.include
+    assert {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "infraguard_scan",
+        "ros_validate_template",
+        "aliyun_doc_search",
+    }.issubset(reviewing.tools.include)
+    assert "aliyun_api" not in reviewing.tools.include

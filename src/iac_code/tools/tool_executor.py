@@ -74,6 +74,7 @@ class ToolExecutor:
             relative_read_directories=list(context.relative_read_directories),
             tool_use_id=call.id,
             pipeline_mode=context.pipeline_mode,
+            env_overrides=dict(context.env_overrides),
         )
 
         timeout = tool.timeout if tool.timeout is not None else self._tool_timeout
@@ -155,13 +156,29 @@ class ToolExecutor:
     async def execute_batch(self, calls: list[ToolCallRequest], context: ToolContext) -> list[ToolResult]:
         """Execute tool calls with read/write partitioning.
 
-        1. Partition into concurrent (read-only) and serial (write) batches
-        2. Execute concurrent batch in parallel (up to max_concurrency)
-        3. Execute serial batch sequentially
-        4. Return results in original request order
+        Consecutive concurrency-safe read-only calls run in parallel. Calls that
+        are not concurrency-safe form ordering barriers: earlier reads finish
+        before the write, and later reads start after it.
         """
-        concurrent, serial = self.partition(calls)
-        concurrent_results = await self._execute_concurrent(concurrent, context)
-        serial_results = await self._execute_serial(serial, context)
-        result_map = {call_id: result for call_id, result in concurrent_results + serial_results}
+        result_map: dict[str, ToolResult] = {}
+        concurrent_batch: list[ToolCallRequest] = []
+
+        async def flush_concurrent_batch() -> None:
+            nonlocal concurrent_batch
+            if not concurrent_batch:
+                return
+            for call_id, result in await self._execute_concurrent(concurrent_batch, context):
+                result_map[call_id] = result
+            concurrent_batch = []
+
+        for call in calls:
+            tool = self._registry.get(call.name)
+            if tool and tool.is_concurrency_safe(call.input):
+                concurrent_batch.append(call)
+                continue
+            await flush_concurrent_batch()
+            result = await self._validate_and_execute(call, context)
+            result_map[call.id] = result
+
+        await flush_concurrent_batch()
         return [result_map[call.id] for call in calls]

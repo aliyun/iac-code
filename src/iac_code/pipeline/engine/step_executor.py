@@ -34,6 +34,7 @@ from iac_code.services.session_layout import (
 )
 from iac_code.services.session_usage import SessionUsageStore
 from iac_code.tools.base import ToolRegistry
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.types.stream_events import StreamEvent, ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,18 @@ def _content_blocks_text(content: str | list[ContentBlock]) -> str:
         if isinstance(result, str):
             parts.append(result)
     return "\n".join(parts)
+
+
+def _completion_guard_tool_result_content(event: ToolResultEvent) -> str:
+    metadata = event.metadata if isinstance(event.metadata, dict) else {}
+    raw_path = metadata.get(EXTERNALIZED_RESULT_PATH_METADATA_KEY)
+    if not isinstance(raw_path, str) or not raw_path:
+        return event.result
+    try:
+        return Path(raw_path).read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("Failed to read externalized tool result for completion guard", exc_info=True)
+        return event.result
 
 
 @dataclass
@@ -82,6 +95,7 @@ class StepExecutor:
         memory_content_getter: Callable[[], str] | None = None,
         auto_trigger_skills: list[Any] | None = None,
         surface: str = "repl",
+        tool_context_env_overrides: dict[str, str] | None = None,
     ) -> None:
         self._provider_manager = provider_manager
         self._base_tool_registry = base_tool_registry
@@ -95,6 +109,7 @@ class StepExecutor:
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
         self._surface = surface
+        self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._current_agent_loop = None
         pipeline_name = getattr(pipeline, "name", "")
         if not isinstance(pipeline_name, str):
@@ -191,7 +206,10 @@ class StepExecutor:
                 if isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
                     complete_step_ids.add(event.tool_use_id)
                 elif isinstance(event, ToolUseEndEvent):
-                    pending_tool_inputs[event.tool_use_id] = {"tool_name": event.name, "input": dict(event.input)}
+                    pending_tool_inputs[event.tool_use_id] = {
+                        "tool_name": event.name,
+                        "input": copy.deepcopy(event.input),
+                    }
                     if event.tool_use_id in complete_step_ids:
                         pending_complete_input[event.tool_use_id] = event.input
                 elif isinstance(event, ToolResultEvent):
@@ -203,8 +221,9 @@ class StepExecutor:
                             completion_guard_state,
                             tool_name=str(tool_record.get("tool_name") or event.tool_name),
                             tool_input=tool_input,
-                            content=event.result,
+                            content=_completion_guard_tool_result_content(event),
                             is_error=event.is_error,
+                            cwd=self._cwd,
                         )
                     if event.tool_use_id in complete_step_ids:
                         step_result = (event.metadata or {}).get("step_result")
@@ -345,6 +364,8 @@ class StepExecutor:
         completion_guard_state: dict[str, Any] = ensure_completion_guard_state(
             reconstruct_completion_guard_state(repaired_messages)
         )
+        if self._cwd:
+            completion_guard_state["cwd"] = self._cwd
         if precompleted_tools:
             completion_guard_state["successful_tools"].update(precompleted_tools.keys())
             completion_guard_state["tool_results"].update(precompleted_tools)
@@ -435,6 +456,7 @@ class StepExecutor:
             tool_context_trusted_read_directories=step_skill_roots,
             tool_context_relative_read_directories=step_skill_roots,
             pipeline_mode=True,
+            tool_context_env_overrides=self._tool_context_env_overrides,
         )
         return StepAgentLoopContext(
             agent_loop=agent_loop,
@@ -489,7 +511,12 @@ class StepExecutor:
         prompt_file = step.prompt_file_for_surface(self._surface)
         prompt_path = self._pipeline_dir / prompt_file
         step_prompt = prompt_path.read_text(encoding="utf-8") if prompt_file else ""
-        rendered_step_prompt = render_prompt(step_prompt, context, step.context_fields)
+        rendered_step_prompt = render_prompt(
+            step_prompt,
+            context,
+            step.context_fields,
+            extra_context={"step_config": step.config},
+        )
 
         skill_content = ""
         if step.skill:
@@ -738,6 +765,12 @@ class StepExecutor:
         else:
             if step.tools.include:
                 registry = self._base_tool_registry.filter(step.tools.include)
+                for name in step.tools.include:
+                    if registry.get(name) is not None:
+                        continue
+                    tool_cls = self._pipeline.pipeline_tools.get(name)
+                    if tool_cls is not None:
+                        registry.register(self._instantiate_pipeline_tool(tool_cls, step))
             else:
                 registry = self._base_tool_registry.clone()
             if step.tools.exclude:
@@ -793,7 +826,17 @@ class StepExecutor:
                 elif name == "ros_deploy":
                     registry.register(tool_cls(completion_guard_state=completion_guard_state))
                 else:
-                    registry.register(tool_cls())
+                    registry.register(self._instantiate_pipeline_tool(tool_cls, step=None))
+
+    @staticmethod
+    def _instantiate_pipeline_tool(tool_cls: type, step: StepSpec | None) -> Any:
+        try:
+            parameters = inspect.signature(tool_cls).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if step is not None and "step_config" in parameters:
+            return tool_cls(step_config=step.config)
+        return tool_cls()
 
     @staticmethod
     def _resolve_include_exclude(config: IncludeExcludeConfig, all_available: list[str]) -> list[str]:

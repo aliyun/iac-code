@@ -298,6 +298,39 @@ class TestSelectExtras:
 
         assert result == "a"
 
+    def test_run_uses_supplied_console_and_clears_to_screen_end(self):
+        """run() should share the caller's console and clear leftover picker rows."""
+        options = make_text_options()
+        sel = Select(options)
+
+        enter_event = KeyEvent(key="enter", char="enter", ctrl=False)
+        mock_cap = MagicMock()
+        mock_cap.__enter__ = MagicMock(return_value=mock_cap)
+        mock_cap.__exit__ = MagicMock(return_value=False)
+        mock_cap.read_key.side_effect = [enter_event, None]
+        supplied_console = MagicMock()
+        renderers = []
+        clear_kwargs = []
+
+        class FakeRenderer:
+            def __init__(self, console):
+                self.console = console
+                renderers.append(self)
+
+            def render(self, _renderable):
+                return None
+
+            def clear(self, **kwargs):
+                clear_kwargs.append(kwargs)
+
+        with patch("iac_code.ui.core.raw_input.RawInputCapture", return_value=mock_cap):
+            with patch("iac_code.ui.core.in_place_render.InPlaceRenderer", FakeRenderer):
+                result = sel.run(console=supplied_console)
+
+        assert result == "a"
+        assert renderers[0].console is supplied_console
+        assert clear_kwargs == [{"clear_to_screen_end": True}]
+
     # ---------------------------------------------------------------
     # Lines 158-167: input-mode enter and delegate-to-search-box
     # ---------------------------------------------------------------

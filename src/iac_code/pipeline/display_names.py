@@ -62,6 +62,7 @@ def _known_tool_names() -> dict[str, str]:
         "ros_preview_template": _("ROS Preview Stack"),
         "ros_estimate_template_cost": _("ROS Estimate Cost"),
         "ros_deploy": _("ROS Deploy"),
+        "infraguard_scan": _("InfraGuard scan"),
     }
 
 

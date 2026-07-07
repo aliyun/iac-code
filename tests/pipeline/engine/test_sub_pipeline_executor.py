@@ -63,6 +63,20 @@ def _make_single_step_sub_spec() -> SubPipelineSpec:
     )
 
 
+def _duplicate_template_sub_spec() -> SubPipelineSpec:
+    return SubPipelineSpec(
+        name="evaluate_candidate",
+        max_rollbacks=3,
+        iterate_over="architecture.candidates",
+        steps=[
+            StepSpec("template_generating", "template", "reviewing", "prompts/template.md"),
+            StepSpec("reviewing", "template", "cost_estimating", "prompts/review.md"),
+            StepSpec("cost_estimating", "cost", None, "prompts/cost.md", context_fields=["template"]),
+        ],
+        context_fields_from_parent=["intent"],
+    )
+
+
 class RecordingBackupService:
     def __init__(self, *, block_on: BackupReason | None = None):
         self.block_on = block_on
@@ -221,6 +235,263 @@ class TestSubPipelineExecutor:
             and event.data.get("failed", False)
             for event in events
         )
+
+    @pytest.mark.asyncio
+    async def test_repeated_conclusion_field_overwrites_with_later_step(self, tmp_path, monkeypatch):
+        """Later duplicate conclusion_field writes should be what downstream steps read."""
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={"intent": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        sub_spec = _duplicate_template_sub_spec()
+        parent_ctx = PipelineContext({"intent": []})
+        parent_ctx.set_conclusion("intent", {"type": "e-commerce"})
+        seen_templates = []
+
+        class FakeStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                if step.step_id == "template_generating":
+                    conclusion = {"template": "old", "file_path": "/tmp/t.yaml"}
+                elif step.step_id == "reviewing":
+                    conclusion = {"template": "reviewed", "file_path": "/tmp/t.yaml"}
+                else:
+                    seen_templates.append(context.get_conclusion("template"))
+                    conclusion = {"total": 1}
+                context.set_conclusion(step.conclusion_field, conclusion)
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: FakeStepExecutor())
+
+        events = []
+        async for event in executor.execute_streaming(
+            sub_spec=sub_spec,
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=parent_ctx,
+            session_id="test_session",
+        ):
+            events.append(event)
+
+        completed = [
+            event
+            for event in events
+            if isinstance(event, PipelineEvent) and event.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+        ][-1]
+        assert seen_templates == [{"template": "reviewed", "file_path": "/tmp/t.yaml"}]
+        assert completed.data["conclusions"]["template"] == {"template": "reviewed", "file_path": "/tmp/t.yaml"}
+        assert completed.data["conclusions"]["cost"] == {"total": 1}
+
+    @pytest.mark.asyncio
+    async def test_repeated_conclusion_field_rollback_to_second_writer_restores_first_value(
+        self, tmp_path, monkeypatch
+    ):
+        """Rollback to a later duplicate writer must recover the previous writer's value."""
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={"intent": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        sub_spec = _duplicate_template_sub_spec()
+        parent_ctx = PipelineContext({"intent": []})
+        parent_ctx.set_conclusion("intent", {"type": "e-commerce"})
+        review_inputs = []
+        review_calls = 0
+        cost_calls = 0
+
+        class FakeStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                nonlocal cost_calls, review_calls
+                if step.step_id == "template_generating":
+                    conclusion = {"template": "generated", "file_path": "/tmp/t.yaml"}
+                    context.set_conclusion(step.conclusion_field, conclusion)
+                    yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+                    return
+                if step.step_id == "reviewing":
+                    review_inputs.append(context.get_conclusion("template"))
+                    review_calls += 1
+                    conclusion = {"template": f"reviewed-{review_calls}", "file_path": "/tmp/t.yaml"}
+                    context.set_conclusion(step.conclusion_field, conclusion)
+                    yield StepResult(
+                        step_id=step.step_id,
+                        status=StepStatus.COMPLETED,
+                        conclusion=conclusion,
+                    )
+                    return
+                cost_calls += 1
+                rollback_request = ("reviewing", "review again") if cost_calls == 1 else None
+                yield StepResult(
+                    step_id=step.step_id,
+                    status=StepStatus.COMPLETED,
+                    conclusion={"total": cost_calls},
+                    rollback_request=rollback_request,
+                )
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: FakeStepExecutor())
+
+        events = []
+        async for event in executor.execute_streaming(
+            sub_spec=sub_spec,
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=parent_ctx,
+            session_id="test_session",
+        ):
+            events.append(event)
+
+        completed = [
+            event
+            for event in events
+            if isinstance(event, PipelineEvent) and event.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+        ][-1]
+        assert review_inputs == [
+            {"template": "generated", "file_path": "/tmp/t.yaml"},
+            {"template": "generated", "file_path": "/tmp/t.yaml"},
+        ]
+        assert completed.data["conclusions"]["template"] == {"template": "reviewed-2", "file_path": "/tmp/t.yaml"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("resume_context_kind", ["empty", "template_only"])
+    async def test_restart_with_incomplete_resume_context_hydrates_base_and_preserved_values(
+        self, tmp_path, monkeypatch, resume_context_kind
+    ):
+        """Pending restarts must keep base seeds and replayed values with incomplete resume context."""
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={"intent": []},
+            max_rollbacks=3,
+            skills={},
+        )
+        sub_spec = _duplicate_template_sub_spec()
+        parent_ctx = PipelineContext({"intent": []})
+        parent_ctx.set_conclusion("intent", {"type": "e-commerce"})
+        candidate = {"name": "Plan A"}
+        generated = {"template": "generated", "file_path": "/tmp/t.yaml"}
+        review_inputs = []
+        if resume_context_kind == "template_only":
+            resume_context = {
+                "template": {
+                    "value": generated,
+                    "version": 1,
+                    "stale": False,
+                    "updated_at": None,
+                    "history": [],
+                }
+            }
+        else:
+            resume_context = {}
+
+        class FakeStepExecutor:
+            current_agent_loop = None
+
+            async def execute(self, step, context, session_id, **kwargs):
+                if step.step_id == "reviewing":
+                    review_inputs.append(
+                        {
+                            "candidate": context.get_conclusion("candidate"),
+                            "intent": context.get_conclusion("intent"),
+                            "template": context.get_conclusion("template"),
+                        }
+                    )
+                    conclusion = {"template": "reviewed", "file_path": "/tmp/t.yaml"}
+                    context.set_conclusion(step.conclusion_field, conclusion)
+                    yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+                    return
+                yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"total": 1})
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        monkeypatch.setattr(executor, "_make_step_executor", lambda: FakeStepExecutor())
+
+        events = []
+        async for event in executor.execute_streaming(
+            sub_spec=sub_spec,
+            candidate=candidate,
+            candidate_index=0,
+            parent_context=parent_ctx,
+            session_id="test_session",
+            start_from_step="reviewing",
+            preserved_conclusions={"template": generated},
+            preserved_step_conclusions={"template_generating": generated},
+            resume_state={
+                "sub_pipeline_id": "evaluate_candidate_existing",
+                "context": resume_context,
+                "current_sub_step": "reviewing",
+                "current_index": 1,
+            },
+        ):
+            events.append(event)
+
+        completed = [
+            event
+            for event in events
+            if isinstance(event, PipelineEvent) and event.type == PipelineEventType.SUB_PIPELINE_COMPLETED
+        ][-1]
+        assert review_inputs == [
+            {
+                "candidate": candidate,
+                "intent": {"type": "e-commerce"},
+                "template": generated,
+            }
+        ]
+        assert completed.data["conclusions"]["template"] == {"template": "reviewed", "file_path": "/tmp/t.yaml"}
+
+    def test_repeated_conclusion_field_marks_template_stale_when_rolled_back_to_reviewing(self, tmp_path):
+        sub_spec = _duplicate_template_sub_spec()
+        ctx = PipelineContext({"candidate": [], "template": ["candidate"], "cost": ["template"]})
+        ctx.set_conclusion("template", {"template": "reviewed"})
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=LoadedPipeline(name="test", steps=[], context_dependencies={}, max_rollbacks=3, skills={}),
+            pipeline_dir=tmp_path,
+        )
+
+        executor._mark_rolled_back_fields_stale(ctx, sub_spec, "reviewing")
+
+        assert ctx.get_field("template").stale is True
+
+    def test_repeated_conclusion_field_drops_template_when_rolled_back_to_first_writer(self, tmp_path):
+        sub_spec = _duplicate_template_sub_spec()
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=LoadedPipeline(name="test", steps=[], context_dependencies={}, max_rollbacks=3, skills={}),
+            pipeline_dir=tmp_path,
+        )
+
+        preserved = executor._conclusions_before_step(
+            sub_spec,
+            "template_generating",
+            {"template": {"template": "reviewed"}, "cost": {"total": 1}},
+        )
+
+        assert preserved == {}
 
     @pytest.mark.asyncio
     async def test_execute_streaming_resumes_current_sub_step_with_attempt_data(self, tmp_path, monkeypatch):

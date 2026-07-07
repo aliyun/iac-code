@@ -9,6 +9,7 @@ import pytest
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.tools.base import ToolResult
 from iac_code.tools.tool_executor import ToolExecutor
+from iac_code.types.permissions import PermissionResult
 from iac_code.types.stream_events import (
     CompactionEvent,
     MessageEndEvent,
@@ -1752,6 +1753,100 @@ class TestAgentLoopStreaming:
         loop.context_manager.add_raw_message.assert_called_once_with({"role": "system", "content": "injected"})
         assert modifier_called
         assert loop._allowed_tool_rules == ["read:*"]
+
+    async def test_externalized_tool_result_event_carries_internal_result_path(
+        self, mock_provider, mock_registry, tmp_path
+    ):
+        call_count = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield MessageStartEvent(message_id="m1")
+                yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
+                yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+            yield MessageStartEvent(message_id="m2")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        stored_result = tmp_path / "toolu_1.txt"
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [SimpleNamespace(name="read_file", description="Read", input_schema={})]
+
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(
+            content="preview result",
+            is_externalized=True,
+            file_path=str(stored_result),
+        )
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_api_messages.return_value = []
+        loop.context_manager.needs_compaction.return_value = False
+        loop._tool_executor.execute_batch = AsyncMock(
+            return_value=[ToolResult(content="raw result", metadata={"existing": "metadata"})]
+        )
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        tool_results = [e for e in events if isinstance(e, ToolResultEvent)]
+        assert len(tool_results) == 1
+        assert tool_results[0].result == "preview result"
+        assert tool_results[0].metadata == {
+            "existing": "metadata",
+            "_iac_code_externalized_result_path": str(stored_result),
+        }
+        tool_blocks = loop.context_manager.add_tool_results.call_args.args[0]
+        assert tool_blocks[0].content == "preview result"
+        assert tool_blocks[0].metadata == {"_iac_code_externalized_result_path": str(stored_result)}
+
+    async def test_tool_use_start_event_carries_renderer_tool(self, mock_provider, mock_registry):
+        call_count = 0
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                yield MessageStartEvent(message_id="msg2")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+                return
+            yield MessageStartEvent(message_id="msg1")
+            yield ToolUseStartEvent(tool_use_id="tool1", name="rendered_tool")
+            yield ToolUseEndEvent(tool_use_id="tool1", name="rendered_tool", input={})
+            yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+
+        tool = SimpleNamespace(
+            name="rendered_tool",
+            description="Rendered tool",
+            input_schema={},
+            needs_event_queue=lambda: False,
+            check_permissions=AsyncMock(return_value=PermissionResult(behavior="allow")),
+            render_tool_result_message=lambda output, *, is_error=False, verbose=False: (
+                "verbose result" if verbose else "compact result"
+            ),
+        )
+        mock_provider.stream = fake_stream
+        mock_registry.list_tools.return_value = [tool]
+        mock_registry.get.side_effect = lambda name: tool if name == "rendered_tool" else None
+
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._result_storage = MagicMock()
+        loop._result_storage.process.return_value = SimpleNamespace(content="processed result")
+        loop.context_manager = MagicMock()
+        loop.context_manager.get_api_messages.return_value = []
+        loop.context_manager.needs_compaction.return_value = False
+        loop._tool_executor.execute_batch = AsyncMock(return_value=[ToolResult(content="raw result")])
+
+        events = [e async for e in loop.run_streaming("Hi")]
+
+        tool_results = [e for e in events if isinstance(e, ToolResultEvent)]
+        assert len(tool_results) == 1
+        assert tool_results[0].metadata is None
+        tool_starts = [e for e in events if isinstance(e, ToolUseStartEvent)]
+        assert len(tool_starts) == 1
+        assert tool_starts[0].renderer_tool is tool
 
     async def test_terminal_error_step_result_metadata_stops_streaming(self, mock_provider, mock_registry):
         from iac_code.pipeline.engine.types import StepResult, StepStatus

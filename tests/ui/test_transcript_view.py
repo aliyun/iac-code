@@ -7,8 +7,11 @@ from unittest.mock import MagicMock
 from rich.console import Console
 from rich.text import Text
 
+from iac_code.pipeline.selling.tools import InfraGuardScanTool
+from iac_code.tools.base import ToolRegistry
+from iac_code.tools.read_file import ReadFileTool
 from iac_code.ui.core.key_event import KeyEvent
-from iac_code.ui.renderer import RenderedTurn, _Segment, _ToolCallRecord
+from iac_code.ui.renderer import RenderedTurn, Renderer, _Segment, _ToolCallRecord
 from iac_code.ui.transcript_view import TranscriptView
 
 
@@ -33,7 +36,15 @@ def make_renderer(height: int = 8):
         _render_text_block=lambda text, continuation=False: [Text(f"TXT:{text}")],
         _render_tool_header=lambda rec: Text("HEAD\n  CHILD"),
         _render_tool_result=lambda rec: Text("RESULT"),
+        _has_verbose_content=lambda rec: False,
     )
+
+
+def make_real_renderer(height: int = 8) -> Renderer:
+    registry = ToolRegistry()
+    registry.register(InfraGuardScanTool())
+    registry.register(ReadFileTool())
+    return Renderer(make_console(height=height), registry, status_callback=lambda: "ready")
 
 
 class TestTranscriptView:
@@ -117,6 +128,87 @@ class TestTranscriptView:
         child_pos = output.index("CHILD")
         result_pos = output.index("RESULT")
         assert head_pos < prompt_pos < child_pos < result_pos
+
+    def test_render_tool_uses_verbose_result_for_pipeline_renderer_tool(self):
+        class TranscriptVerboseTool:
+            render_verbose_result_in_transcript = True
+
+        renderer = make_renderer()
+        renderer._render_tool_result = lambda rec: Text("VERBOSE" if renderer._verbose else "COMPACT")
+        renderer._has_verbose_content = lambda rec: True
+        view = TranscriptView(renderer)
+        rec = _ToolCallRecord(
+            tool_name="custom_pipeline_tool",
+            tool_input={},
+            done=True,
+            result="raw",
+            renderer_tool=TranscriptVerboseTool(),
+        )
+
+        view._render_tool(rec)
+
+        output = renderer.console.file.getvalue()
+        assert "VERBOSE" in output
+        assert "COMPACT" not in output
+
+    def test_render_tool_keeps_compact_result_without_pipeline_renderer_tool(self):
+        renderer = make_renderer()
+        renderer._render_tool_result = lambda rec: Text("VERBOSE" if renderer._verbose else "COMPACT")
+        renderer._has_verbose_content = lambda rec: True
+        view = TranscriptView(renderer)
+        rec = _ToolCallRecord(tool_name="read_file", tool_input={}, done=True, result="raw")
+
+        view._render_tool(rec)
+
+        output = renderer.console.file.getvalue()
+        assert "COMPACT" in output
+        assert "VERBOSE" not in output
+
+    def test_render_tool_keeps_read_file_compact_even_with_renderer_tool(self):
+        renderer = make_real_renderer()
+        view = TranscriptView(renderer)
+        rec = _ToolCallRecord(
+            tool_name="read_file",
+            tool_input={"path": "config.yaml"},
+            done=True,
+            result="     1\tsecret: value\n     2\tanother: value\n",
+            renderer_tool=ReadFileTool(),
+        )
+
+        view._render_tool(rec)
+
+        output = renderer.console.file.getvalue()
+        assert "Read " in output
+        assert " lines" in output
+        assert "secret: value" not in output
+
+    def test_render_tool_uses_verbose_result_for_infraguard_scan(self):
+        renderer = make_real_renderer()
+        view = TranscriptView(renderer)
+        result = {
+            "passed": True,
+            "blocking_findings": 0,
+            "findings": [{"severity": "low", "rule_id": "rule:demo", "line": 5, "reason": "reason text"}],
+            "summary": {"severity_counts": {"low": 1}},
+            "file_path": "templates/demo.yml",
+            "selected_aspects": ["best_practice"],
+            "expanded_policies": ["pack:demo"],
+        }
+        rec = _ToolCallRecord(
+            tool_name="infraguard_scan",
+            tool_input={"file_path": "templates/demo.yml"},
+            done=True,
+            result=__import__("json").dumps(result),
+            renderer_tool=InfraGuardScanTool(),
+        )
+
+        view._render_tool(rec)
+
+        output = renderer.console.file.getvalue()
+        assert "Status: passed" in output
+        assert "Findings:" in output
+        assert "low · rule:demo · line 5" in output
+        assert '"findings"' not in output
 
     def test_draw_crops_oldest_lines_and_renders_footer(self):
         renderer = make_renderer(height=6)

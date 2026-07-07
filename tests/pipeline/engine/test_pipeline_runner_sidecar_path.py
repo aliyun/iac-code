@@ -10,6 +10,7 @@ import yaml
 
 from iac_code.agent.message import ImageBlock, Message, TextBlock, ToolResultBlock
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.session import PipelineSession
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
@@ -41,15 +42,64 @@ def _stub_session_storage(tmp_path: Path):
     return storage
 
 
-def _build_runner(tmp_path: Path, *, resume_from_sidecar: bool = False):
-    pipeline_dir = tmp_path / "pipe"
+def _build_runner(
+    tmp_path: Path,
+    *,
+    resume_from_sidecar: bool = False,
+    prerequisite_resolution: dict | None = None,
+    pipeline_dir: Path | None = None,
+):
+    if pipeline_dir is None:
+        pipeline_dir = tmp_path / "pipe"
+        pipeline_dir.mkdir(exist_ok=True)
+        (pipeline_dir / "pipeline.yaml").write_text(
+            yaml.dump(
+                {
+                    "name": "t",
+                    "context_dependencies": {"x": []},
+                    "steps": [{"id": "s1", "conclusion_field": "x", "forward": None, "prompt": "prompts/s1.md"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        prompts_dir = pipeline_dir / "prompts"
+        prompts_dir.mkdir(exist_ok=True)
+        (prompts_dir / "s1.md").write_text("step 1", encoding="utf-8")
+    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+    kwargs = {
+        "pipeline_dir": pipeline_dir,
+        "provider_manager": MagicMock(),
+        "base_tool_registry": MagicMock(),
+        "session_storage": _stub_session_storage(tmp_path),
+        "session_id": "sess123",
+        "cwd": "/proj",
+        "resume_from_sidecar": resume_from_sidecar,
+    }
+    if prerequisite_resolution is not None:
+        kwargs["prerequisite_resolution"] = prerequisite_resolution
+    return PipelineRunner(**kwargs)
+
+
+def _build_feature_gated_review_pipeline(tmp_path: Path) -> Path:
+    pipeline_dir = tmp_path / "feature_gated_pipe"
     pipeline_dir.mkdir(exist_ok=True)
     (pipeline_dir / "pipeline.yaml").write_text(
         yaml.dump(
             {
                 "name": "t",
-                "context_dependencies": {"x": []},
-                "steps": [{"id": "s1", "conclusion_field": "x", "forward": None, "prompt": "prompts/s1.md"}],
+                "feature_flags": {"enable_reviewing": {"default": True}},
+                "context_dependencies": {"x": [], "review": ["x"]},
+                "steps": [
+                    {"id": "s1", "conclusion_field": "x", "forward": "review", "prompt": "prompts/s1.md"},
+                    {
+                        "id": "review",
+                        "conclusion_field": "review",
+                        "forward": None,
+                        "prompt": "prompts/review.md",
+                        "enabled_when": "enable_reviewing",
+                    },
+                ],
             }
         ),
         encoding="utf-8",
@@ -57,17 +107,8 @@ def _build_runner(tmp_path: Path, *, resume_from_sidecar: bool = False):
     prompts_dir = pipeline_dir / "prompts"
     prompts_dir.mkdir(exist_ok=True)
     (prompts_dir / "s1.md").write_text("step 1", encoding="utf-8")
-    from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
-
-    return PipelineRunner(
-        pipeline_dir=pipeline_dir,
-        provider_manager=MagicMock(),
-        base_tool_registry=MagicMock(),
-        session_storage=_stub_session_storage(tmp_path),
-        session_id="sess123",
-        cwd="/proj",
-        resume_from_sidecar=resume_from_sidecar,
-    )
+    (prompts_dir / "review.md").write_text("review", encoding="utf-8")
+    return pipeline_dir
 
 
 def _pipeline_dir(tmp_path: Path) -> Path:
@@ -419,6 +460,47 @@ def test_legacy_sidecar_path_not_used(tmp_path):
     assert ".pipeline" not in sidecar_str  # 旧后缀不能出现
 
 
+def test_save_running_sync_persists_prerequisite_resolution_metadata(tmp_path):
+    prerequisite_resolution = {
+        "feature_flags": {"enable_reviewing": False},
+        "decisions": {"infraguard": {"status": "missing"}},
+        "env_overrides": {"PATH": "/tmp/tools"},
+    }
+    runner = _build_runner(tmp_path, prerequisite_resolution=prerequisite_resolution)
+
+    runner._save_running_sync("s1", reason="test prerequisites")
+
+    meta = yaml.safe_load(runner.session.meta_path.read_text(encoding="utf-8"))
+    assert meta["prerequisites"] == prerequisite_resolution
+
+
+def test_pipeline_session_peek_prerequisites_sync_returns_stored_dict_and_ignores_invalid(tmp_path):
+    missing_session = PipelineSession(tmp_path / "missing")
+    assert missing_session.peek_prerequisites_sync() == {}
+
+    session = PipelineSession(tmp_path / "pipeline")
+    session.session_dir.mkdir()
+    prerequisites = {
+        "feature_flags": {"enable_reviewing": False},
+        "decisions": {"infraguard": {"status": "missing"}},
+        "env_overrides": {},
+    }
+    session.meta_path.write_text(
+        yaml.dump({"status": "running", "prerequisites": prerequisites}),
+        encoding="utf-8",
+    )
+    assert session.peek_prerequisites_sync() == prerequisites
+
+    session.meta_path.write_text(yaml.dump({"prerequisites": ["invalid"]}), encoding="utf-8")
+    assert session.peek_prerequisites_sync() == {}
+
+    session.meta_path.write_text("[not, metadata]", encoding="utf-8")
+    assert session.peek_prerequisites_sync() == {}
+
+    session.meta_path.write_text(":\n", encoding="utf-8")
+    assert session.peek_prerequisites_sync() == {}
+
+
 @pytest.mark.asyncio
 async def test_resume_from_sidecar_kwarg_restores_state(tmp_path):
     """问题 4：PipelineRunner(resume_from_sidecar=True) 应在 __init__ 后自动 restore。"""
@@ -457,6 +539,103 @@ async def test_resume_from_sidecar_kwarg_restores_state(tmp_path):
 
     runner2 = _build_runner(tmp_path, resume_from_sidecar=True)
     assert runner2.state_machine.current_step.step_id == "s1"
+
+
+def test_resume_from_sidecar_uses_stored_feature_flags_before_identity_validation(monkeypatch, tmp_path):
+    import iac_code.pipeline as pipeline_module
+
+    pipeline_dir = _build_feature_gated_review_pipeline(tmp_path)
+    storage = _stub_session_storage(tmp_path)
+    sidecar_dir = storage.session_dir("/proj", "sess123") / "pipeline"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    prerequisite_resolution = {
+        "feature_flags": {"enable_reviewing": False},
+        "decisions": {"infraguard": {"status": "missing"}},
+        "env_overrides": {},
+    }
+    (sidecar_dir / "meta.yaml").write_text(
+        yaml.dump(
+            {
+                "pipeline_name": "t",
+                "status": "running",
+                "current_step": "s1",
+                "step_ids": ["s1"],
+                "sub_pipeline_step_ids": {},
+                "pipeline_fingerprint": hashlib.sha256((pipeline_dir / "pipeline.yaml").read_bytes()).hexdigest(),
+                "state_machine": {
+                    "current_index": 0,
+                    "rollback_count": 0,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {"s1": "running"},
+                },
+                "updated_at": 0.0,
+                "reason": "seeded with review disabled",
+                "prerequisites": prerequisite_resolution,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (sidecar_dir / "context.yaml").write_text(yaml.dump({}), encoding="utf-8")
+    monkeypatch.setattr(pipeline_module, "discover_pipelines", lambda: {"feature_review": pipeline_dir})
+
+    runner = pipeline_module.create_pipeline(
+        "feature_review",
+        provider_manager=MagicMock(),
+        base_tool_registry=MagicMock(),
+        session_storage=storage,
+        session_id="sess123",
+        cwd="/proj",
+        resume_from_sidecar=True,
+    )
+
+    assert [step.step_id for step in runner._loaded.steps] == ["s1"]
+    assert runner._loaded.feature_flags["enable_reviewing"] is False
+    assert runner.sidecar_restore_result is not None
+    assert runner.sidecar_restore_result.ok is True
+    assert runner.sidecar_restore_result.reason != "pipeline_identity_mismatch"
+
+
+def test_direct_resume_from_sidecar_uses_stored_feature_flags_before_identity_validation(tmp_path):
+    pipeline_dir = _build_feature_gated_review_pipeline(tmp_path)
+    storage = _stub_session_storage(tmp_path)
+    sidecar_dir = storage.session_dir("/proj", "sess123") / "pipeline"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    prerequisite_resolution = {
+        "feature_flags": {"enable_reviewing": False},
+        "decisions": {"infraguard": {"status": "missing"}},
+        "env_overrides": {},
+    }
+    (sidecar_dir / "meta.yaml").write_text(
+        yaml.dump(
+            {
+                "pipeline_name": "t",
+                "status": "running",
+                "current_step": "s1",
+                "step_ids": ["s1"],
+                "sub_pipeline_step_ids": {},
+                "pipeline_fingerprint": hashlib.sha256((pipeline_dir / "pipeline.yaml").read_bytes()).hexdigest(),
+                "state_machine": {
+                    "current_index": 0,
+                    "rollback_count": 0,
+                    "interrupt_rollback_count": 0,
+                    "step_statuses": {"s1": "running"},
+                },
+                "updated_at": 0.0,
+                "reason": "seeded with review disabled",
+                "prerequisites": prerequisite_resolution,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (sidecar_dir / "context.yaml").write_text(yaml.dump({}), encoding="utf-8")
+
+    runner = _build_runner(tmp_path, pipeline_dir=pipeline_dir, resume_from_sidecar=True)
+
+    assert [step.step_id for step in runner._loaded.steps] == ["s1"]
+    assert runner._loaded.feature_flags["enable_reviewing"] is False
+    assert runner.sidecar_restore_result is not None
+    assert runner.sidecar_restore_result.ok is True
+    assert runner.sidecar_restore_result.reason != "pipeline_identity_mismatch"
 
 
 def test_resume_from_sidecar_kwarg_exposes_failed_restore_result(tmp_path):

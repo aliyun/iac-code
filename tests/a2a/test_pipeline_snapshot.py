@@ -1042,6 +1042,149 @@ def test_reduce_artifact_created_keeps_opaque_artifact_uri() -> None:
     assert snapshot["display"]["artifacts"][0]["uri"] == "iac-code-artifact://artifact-1/template.yaml"
 
 
+def test_reduce_final_artifact_supersedes_intermediate_for_same_candidate_path() -> None:
+    parent = {"runId": "step-evaluate-1", "id": "evaluate", "index": 1, "total": 1, "attempt": 1}
+    candidate_a = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    candidate_b = {"runId": "candidate-eval-1-1", "id": "eval", "index": 1, "attempt": 1}
+    generated_step_a = {
+        "runId": "candidate-eval-0-1-template_generating-1",
+        "id": "template_generating",
+        "index": 1,
+        "total": 2,
+        "attempt": 1,
+    }
+    review_step_a = {
+        "runId": "candidate-eval-0-1-reviewing-1",
+        "id": "reviewing",
+        "index": 2,
+        "total": 2,
+        "attempt": 1,
+    }
+    generated_step_b = {
+        "runId": "candidate-eval-1-1-template_generating-1",
+        "id": "template_generating",
+        "index": 1,
+        "total": 2,
+        "attempt": 1,
+    }
+    generated_a = _base("evt-generated-a", 1, "artifact_created", scope="candidate_step")
+    generated_a["step"] = parent
+    generated_a["candidate"] = candidate_a
+    generated_a["candidateStep"] = generated_step_a
+    generated_a["artifact"] = {
+        "artifactId": "generated-a",
+        "filename": "main.yaml",
+        "role": "intermediate",
+        "supersedesPath": "templates/main.yaml",
+        "content": "generated A",
+    }
+    generated_b = _base("evt-generated-b", 2, "artifact_created", scope="candidate_step")
+    generated_b["step"] = parent
+    generated_b["candidate"] = candidate_b
+    generated_b["candidateStep"] = generated_step_b
+    generated_b["artifact"] = {
+        "artifactId": "generated-b",
+        "filename": "main.yaml",
+        "role": "intermediate",
+        "supersedesPath": "templates/main.yaml",
+        "content": "generated B",
+    }
+    reviewed_a = _base("evt-reviewed-a", 3, "artifact_created", scope="candidate_step")
+    reviewed_a["step"] = parent
+    reviewed_a["candidate"] = candidate_a
+    reviewed_a["candidateStep"] = review_step_a
+    reviewed_a["artifact"] = {
+        "artifactId": "reviewed-a",
+        "filename": "main.yaml",
+        "role": "final",
+        "supersedesPath": "templates/main.yaml",
+        "content": "reviewed A",
+    }
+
+    snapshot = reduce_pipeline_events([generated_a, generated_b, reviewed_a])
+
+    assert len(snapshot["display"]["artifacts"]) == 2
+    artifacts = {artifact["candidate"]["runId"]: artifact for artifact in snapshot["display"]["artifacts"]}
+    assert set(artifacts) == {"candidate-eval-0-1", "candidate-eval-1-1"}
+    assert artifacts["candidate-eval-0-1"]["artifactId"] == "reviewed-a"
+    assert artifacts["candidate-eval-0-1"]["role"] == "final"
+    assert artifacts["candidate-eval-0-1"]["sequence"] == 3
+    assert artifacts["candidate-eval-0-1"]["candidateStep"]["id"] == "reviewing"
+    assert artifacts["candidate-eval-1-1"]["artifactId"] == "generated-b"
+    assert artifacts["candidate-eval-1-1"]["role"] == "intermediate"
+
+
+def test_reduce_artifact_replacement_prefers_stable_supersedes_key_over_public_path() -> None:
+    candidate = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    key_a = "sha256:1111111111111111"
+    key_b = "sha256:2222222222222222"
+    generated_a = _base("evt-generated-a", 1, "artifact_created", scope="candidate")
+    generated_a["candidate"] = candidate
+    generated_a["artifact"] = {
+        "artifactId": "generated-a",
+        "filename": "a.yaml",
+        "role": "intermediate",
+        "supersedesPath": "[PATH]",
+        "supersedesKey": key_a,
+    }
+    generated_b = _base("evt-generated-b", 2, "artifact_created", scope="candidate")
+    generated_b["candidate"] = candidate
+    generated_b["artifact"] = {
+        "artifactId": "generated-b",
+        "filename": "b.yaml",
+        "role": "intermediate",
+        "supersedesPath": "[PATH]",
+        "supersedesKey": key_b,
+    }
+    reviewed_a = _base("evt-reviewed-a", 3, "artifact_created", scope="candidate")
+    reviewed_a["candidate"] = candidate
+    reviewed_a["artifact"] = {
+        "artifactId": "reviewed-a",
+        "filename": "a.yaml",
+        "role": "final",
+        "supersedesPath": "[PATH]",
+        "supersedesKey": key_a,
+    }
+
+    snapshot = reduce_pipeline_events([generated_a, generated_b, reviewed_a])
+
+    artifacts = {artifact["supersedesKey"]: artifact for artifact in snapshot["display"]["artifacts"]}
+    assert set(artifacts) == {key_a, key_b}
+    assert artifacts[key_a]["artifactId"] == "reviewed-a"
+    assert artifacts[key_a]["role"] == "final"
+    assert artifacts[key_b]["artifactId"] == "generated-b"
+    assert artifacts[key_b]["role"] == "intermediate"
+
+
+def test_reduce_generated_template_remains_final_when_review_is_disabled() -> None:
+    artifact = _base("evt-generated", 1, "artifact_created", scope="candidate")
+    artifact["candidate"] = {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1}
+    artifact["artifact"] = {
+        "artifactId": "generated",
+        "filename": "main.yaml",
+        "role": "final",
+        "supersedesPath": "templates/main.yaml",
+    }
+
+    snapshot = reduce_pipeline_events([artifact])
+
+    assert snapshot["display"]["artifacts"] == [
+        {
+            "artifactId": "generated",
+            "filename": "main.yaml",
+            "role": "final",
+            "supersedesPath": "templates/main.yaml",
+            "id": "generated",
+            "scope": "candidate",
+            "runId": "candidate-eval-0-1",
+            "sequence": 1,
+            "createdAt": "2026-06-08T10:00:00Z",
+            "eventId": "evt-generated",
+            "candidate": {"runId": "candidate-eval-0-1", "id": "eval", "index": 0, "attempt": 1},
+        }
+    ]
+
+
 def test_reduce_deduplicates_existing_display_items_and_rollbacks() -> None:
     existing = reduce_pipeline_events([])
     existing["display"]["diagrams"] = [

@@ -55,6 +55,16 @@ class TestInPlaceRenderer:
         assert out.count("\x1b[A\x1b[2K") == last - 1
         assert renderer.last_height == 0
 
+    def test_clear_can_erase_to_screen_end(self):
+        renderer, buf, _ = make_renderer()
+        renderer.render(Text("a\nb\nc"))
+        buf.seek(0)
+        buf.truncate()
+        renderer.clear(clear_to_screen_end=True)
+        out = buf.getvalue()
+        assert out.endswith("\x1b[J")
+        assert renderer.last_height == 0
+
     def test_clear_is_idempotent(self):
         renderer, buf, _ = make_renderer()
         renderer.render(Text("a\nb"))

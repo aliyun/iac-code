@@ -1,0 +1,284 @@
+{
+  "skill_name": "iac-aliyun-review",
+  "description": "非 CI 评估用例：验证 review step 使用 InfraGuard 审查 ROS 模板；初始扫描干净时直接完成，发生修复时通过 ros_validate_template 和最终扫描后输出 template 结论。",
+  "non_ci": true,
+  "shared_step_config": {
+    "infraguard": {
+      "mode": "static",
+      "aspects": {
+        "security": {
+          "policies": ["pack:aliyun:security"]
+        },
+        "high_availability": {
+          "policies": ["pack:aliyun:high-availability"]
+        },
+        "cost_optimization": {
+          "policies": ["pack:aliyun:cost-optimization"]
+        },
+        "compliance": {
+          "policies": ["pack:aliyun:compliance"]
+        },
+        "best_practice": {
+          "policies": ["pack:aliyun:best-practice"]
+        },
+        "operations": {
+          "policies": ["pack:aliyun:operations"]
+        },
+        "network_architecture": {
+          "policies": ["pack:aliyun:network-architecture"]
+        },
+        "elasticity": {
+          "policies": ["pack:aliyun:elasticity"]
+        }
+      },
+      "ignore_waivers": true,
+      "max_fix_rounds": 5,
+      "blocking_severities": ["critical", "high"]
+    }
+  },
+  "last_local_real_run": {
+    "date": "2026-07-01",
+    "ci": false,
+    "runner": "local manual verification",
+    "infraguard": {
+      "version": "0.10.0",
+      "opa_version": "1.12.1",
+      "asset": "cli/v0.10.0/infraguard-v0.10.0-darwin-arm64",
+      "sha256": "a19c6d755ec0ed1789e47019e3df6e81cdee1677d5b47674a6acfc678d34d76b"
+    },
+    "policy_update": {
+      "command": "infraguard policy update",
+      "status": "interrupted_after_network_stall",
+      "note": "The command started a git clone from github.com/aliyun/infraguard and was interrupted after the clone stalled for more than 9 minutes in this local network. The bundled policy catalog was still available via policy list."
+    },
+    "policy_catalog_observed": {
+      "packs": 35,
+      "rules": 317,
+      "required_policy_ids_present": [
+        "pack:aliyun:security",
+        "pack:aliyun:operations",
+        "pack:aliyun:high-availability"
+      ]
+    },
+    "scan_observations": [
+      {
+        "name": "insecure-public-ecs",
+        "fixture": "{TMPDIR}/insecure-public-ecs.yml",
+        "command": "infraguard scan {fixture} --format json --mode static --policy pack:aliyun:security --policy pack:aliyun:operations --policy pack:aliyun:high-availability --no-waivers",
+        "exit_code": 2,
+        "summary": {
+          "total_violations": 1,
+          "severity_counts": {"high": 1, "medium": 0, "low": 0},
+          "files_scanned": 1,
+          "files_with_violations": 1
+        },
+        "first_violation": {
+          "id": "rule:aliyun:ecs-instance-no-public-ip",
+          "severity": "high",
+          "resource_id": "EcsGroup",
+          "violation_path": ["Properties", "AllocatePublicIP"],
+          "reason": "ECS instance has a public IP bound",
+          "recommendation": "Use NAT Gateway or SLB for internet access instead of direct public IP binding"
+        },
+        "json_shape": "schema_version=2.0 with results[].violations[]"
+      },
+      {
+        "name": "repaired-private-ecs",
+        "fixture": "{TMPDIR}/repaired-private-ecs.yml",
+        "command": "infraguard scan {fixture} --format json --mode static --policy pack:aliyun:security --policy pack:aliyun:operations --policy pack:aliyun:high-availability --no-waivers",
+        "exit_code": 0,
+        "summary": {
+          "total_violations": 0,
+          "severity_counts": {"high": 0, "medium": 0, "low": 0},
+          "files_scanned": 1,
+          "files_with_violations": 0
+        },
+        "json_shape": "schema_version=2.0 with results[].violations=null for clean files"
+      }
+    ],
+    "validate_template": {
+      "status": "not_run_missing_credentials",
+      "credential_env_checked": [
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABA_CLOUD_REGION_ID",
+        "ALICLOUD_ACCESS_KEY_ID",
+        "ALICLOUD_ACCESS_KEY_SECRET",
+        "ALICLOUD_REGION_ID"
+      ],
+      "note": "All checked credential environment variables were unset; no credential values were read or printed."
+    }
+  },
+  "evals": [
+    {
+      "id": 1,
+      "name": "public-ecs-high-finding-is-fixed-in-place",
+      "prompt": "审查上一步生成的 ROS 模板。模板创建一台 ECS，ECSGroup 设置 AllocatePublicIP: true，SecurityGroupIngress 对 0.0.0.0/0 开放 22 端口。",
+      "intent_context": {
+        "business_type": "demo",
+        "non_functional": {
+          "availability": "低成本单机",
+          "compliance": "未提出"
+        }
+      },
+      "candidate_context": {
+        "name": "低成本单机 ECS 方案",
+        "topology": "单可用区 VPC 内 ECS",
+        "tradeoffs": ["成本优先", "不承诺多可用区高可用"]
+      },
+      "template_context": {
+        "file_path": "{TMPDIR}/insecure-public-ecs.yml",
+        "region": "cn-hangzhou",
+        "description": "VPC + VSwitch + SecurityGroup + ECS InstanceGroup，ECS 直接绑定公网 IP。",
+        "template_contains": [
+          "Type: ALIYUN::ECS::InstanceGroup",
+          "AllocatePublicIP: true",
+          "InternetMaxBandwidthOut: 5",
+          "SourceCidrIp: 0.0.0.0/0"
+        ]
+      },
+      "observed_infraguard_baseline": {
+        "exit_code": 2,
+        "blocking_findings": 1,
+        "finding": {
+          "id": "rule:aliyun:ecs-instance-no-public-ip",
+          "severity": "high",
+          "resource_id": "EcsGroup",
+          "violation_path": ["Properties", "AllocatePublicIP"]
+        }
+      },
+      "expected_behavior": "先读取同一个 file_path，使用 step config 调用 infraguard_scan，发现 high/blocking finding 后只针对 InfraGuard 返回的 finding 修复原模板文件；修复后调用 ros_validate_template 校验同一个 template_url；ros_validate_template 成功后再次调用 infraguard_scan，最终 blocking_findings=0 才 complete_step。",
+      "expected_tool_sequence": [
+        "read_file(template.file_path)",
+        "select configured aspect keys from intent + candidate + template",
+        "infraguard_scan(initial, selected_aspects + aspect_policy_map=step_config.infraguard.aspects)",
+        "edit_file or write_file(same template.file_path)",
+        "ros_validate_template(template_url=template.file_path)",
+        "infraguard_scan(final, same selected_aspects, after ros_validate_template, same template.file_path)",
+        "read_file(same template.file_path)",
+        "complete_step(conclusion_field=template)"
+      ],
+      "assertions": [
+        {"name": "selects_aspects_from_context", "check": "根据 intent、candidate 和模板资源选择 step_config.infraguard.aspects 中存在的 aspect key"},
+        {"name": "records_aspect_decisions", "check": "complete_step.conclusion 包含 selected_review_aspects、skipped_review_aspects 和 resolved_infraguard_policies"},
+        {"name": "uses_aspect_policy_map", "check": "infraguard_scan 使用 selected_aspects 和 aspect_policy_map 展开 policies，不让模型手写或编造 policy id"},
+        {"name": "fixes_reported_public_ip_finding", "check": "修复 InfraGuard 返回的 ecs-instance-no-public-ip finding；不要因为硬编码安全规则额外改写未被 finding 或校验错误覆盖的内容"},
+        {"name": "same_file_path", "check": "所有 read/write/ros_validate_template/final scan 都使用输入的 template.file_path"},
+        {"name": "validates_after_edit", "check": "模板写回后调用 ros_validate_template，参数使用 template_url=file_path，不把大模板内容塞进工具参数"},
+        {"name": "final_scan_after_validation", "check": "最终 infraguard_scan 发生在 ros_validate_template 成功之后"},
+        {"name": "final_scan_blocks_completion", "check": "final infraguard_scan 返回 passed=true 且 blocking_findings=0 后才能 complete_step"},
+        {"name": "conclusion_template_matches_file", "check": "complete_step.conclusion.template 与最终文件内容一致"},
+        {"name": "no_policy_update_inside_skill", "check": "review skill 不调用 infraguard policy update，策略更新只属于 pipeline prerequisites"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "clean-template-skips-validate-and-rescan",
+      "prompt": "审查上一步生成的 ROS 模板。模板只创建 VPC、VSwitch、SecurityGroup 和一台无公网 IP 的 ECS，SSH 入口只允许 10.0.0.0/8。",
+      "intent_context": {
+        "business_type": "demo",
+        "non_functional": {"availability": "低成本单机"}
+      },
+      "candidate_context": {
+        "name": "私网 ECS 低成本方案",
+        "topology": "single-zone ECS without public IP"
+      },
+      "template_context": {
+        "file_path": "{TMPDIR}/repaired-private-ecs.yml",
+        "region": "cn-hangzhou",
+        "description": "初始 InfraGuard 扫描无 high finding 的私网 ECS 模板。",
+        "template_contains": [
+          "Type: ALIYUN::ECS::InstanceGroup",
+          "SourceCidrIp: 10.0.0.0/8"
+        ],
+        "template_not_contains": [
+          "AllocatePublicIP: true",
+          "InternetMaxBandwidthOut: 5"
+        ]
+      },
+      "observed_infraguard_baseline": {
+        "exit_code": 0,
+        "blocking_findings": 0,
+        "summary": {"total_violations": 0}
+      },
+      "expected_behavior": "初始 InfraGuard 扫描无 blocking finding 且没有需要修复的 finding 时，不应修改模板，不应调用 ros_validate_template，也不应再次执行最终 infraguard_scan；应直接使用初始扫描返回的 file_content、file_sha256、expanded_policies 完成。",
+      "assertions": [
+        {"name": "skips_unneeded_aspects_with_reason", "check": "低成本单机方案应跳过 high_availability 和 elasticity，并在 skipped_review_aspects 说明原因"},
+        {"name": "does_not_make_unneeded_edits", "check": "无 finding 时不做无关模板改写"},
+        {"name": "skips_validate_template_when_unchanged", "check": "初始扫描通过且模板未修改时，不调用 ros_validate_template"},
+        {"name": "skips_final_rescan_when_unchanged", "check": "初始扫描通过且模板未修改时，不第二次调用 infraguard_scan"},
+        {"name": "empty_review_issues", "check": "如果没有发现和修复的问题，review_issues 为空数组"},
+        {"name": "fix_summary_says_no_fix_needed", "check": "fix_summary 说明初始 InfraGuard 扫描通过且无需修复"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "validate-template-failure-repair-loop",
+      "prompt": "审查模板。InfraGuard 扫描返回需要修复的 finding；修复后 ros_validate_template 返回错误：ImageId 引用了不存在的参数 NonExistentParam，或 VSwitch 缺少必填 CidrBlock。",
+      "template_context": {
+        "file_path": "{TMPDIR}/validation-broken.yml",
+        "region": "cn-hangzhou",
+        "description": "InfraGuard 修复后触发 ROS schema 校验失败的模板。",
+        "validation_error": "Template format error: unresolved Ref NonExistentParam; Resource VSwitch property CidrBlock is required."
+      },
+      "expected_behavior": "只要本步骤修改过模板，就必须调用 ros_validate_template；ros_validate_template 失败时，必须根据错误修复同一个模板文件，必要时调用 aliyun_doc_search 查询 schema，重新 ros_validate_template，成功后再做最终 infraguard_scan。",
+      "assertions": [
+        {"name": "validate_template_is_gate", "check": "ros_validate_template 失败时不得 complete_step"},
+        {"name": "uses_schema_lookup_when_needed", "check": "对资源属性不确定时调用 aliyun_doc_search"},
+        {"name": "edits_same_file", "check": "修复 NonExistentParam/CidrBlock 等错误时写回同一个 template.file_path"},
+        {"name": "revalidates_after_fix", "check": "每次模板修复后重新调用 ros_validate_template"},
+        {"name": "final_scan_after_successful_validation", "check": "只有 ros_validate_template 成功后才执行最终 infraguard_scan"}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "infraguard-v010-json-normalization",
+      "prompt": "review step 调用 infraguard_scan 时，底层 InfraGuard 0.10.x 返回 schema_version=2.0，findings 位于 results[].violations[]；无问题文件返回 results[].violations=null。",
+      "expected_behavior": "infraguard_scan 工具必须把 results[].violations[] 归一化为 findings 数组，并按 violation.severity 计算 blocking_findings；对于 violations=null 的干净文件，findings 应为空数组。",
+      "assertions": [
+        {"name": "expands_selected_aspects", "check": "工具根据 selected_aspects 和 aspect_policy_map 展开 expanded_policies，并用这些 policies 调用 InfraGuard"},
+        {"name": "flattens_nested_violations", "check": "高危 violation rule:aliyun:ecs-instance-no-public-ip 被暴露为 findings[0]"},
+        {"name": "counts_nested_severity", "check": "blocking_severities=[high] 时 blocking_findings=1 且 passed=false"},
+        {"name": "ignores_empty_violation_group", "check": "violations=null 时 findings=[]、blocking_findings=0、passed=true"},
+        {"name": "keeps_repair_context", "check": "归一化后的 finding 保留 resource_id、violation_path、reason、recommendation、file/line/snippet 等修复上下文"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "tool-error-or-policy-missing-does-not-complete",
+      "prompt": "审查模板时 infraguard_scan 返回 command_not_found、timeout、malformed_json、unexpected_exit_code，或策略 ID 不可用导致扫描失败。",
+      "expected_behavior": "review step 必须把扫描失败视为步骤失败或可恢复前置条件问题，不能伪造 review_passed=true，也不能在缺少必要 InfraGuard 扫描结果时 complete_step。",
+      "assertions": [
+        {"name": "no_complete_on_scan_error", "check": "infraguard_scan is_error=true 时不得调用 complete_step"},
+        {"name": "reports_actionable_error", "check": "向 pipeline/session 记录 InfraGuard 命令、错误类型和 stderr 摘要，便于 prerequisite 或用户处理"},
+        {"name": "does_not_run_policy_update", "check": "即使策略缺失，skill 内也不运行 infraguard policy update；应由 prerequisites 负责"},
+        {"name": "does_not_claim_validated", "check": "扫描失败时不得输出 validated=true 或 review_passed=true 的 conclusion"}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "max-fix-rounds-prevents-fake-pass",
+      "prompt": "审查模板时，每轮修复后 InfraGuard 仍返回 high finding，或 ros_validate_template 仍失败，直到达到 step config 的 max_fix_rounds=5。",
+      "expected_behavior": "达到 max_fix_rounds 后必须停止并如实失败，不得调用 complete_step 输出通过结论；不得 rollback 到 template_generating 来规避 review 责任。",
+      "assertions": [
+        {"name": "honors_max_fix_rounds", "check": "修复轮数不超过 step_config.infraguard.max_fix_rounds"},
+        {"name": "no_fake_review_passed", "check": "修改过模板但未通过 ros_validate_template 或最终 scan 时不输出 review_passed=true"},
+        {"name": "no_fake_validated", "check": "ros_validate_template 未成功时不输出 validated=true"},
+        {"name": "no_default_rollback", "check": "不默认 rollback_request 到 template_generating"},
+        {"name": "records_remaining_issues", "check": "失败结果记录剩余 findings 或 ros_validate_template 错误"}
+      ]
+    },
+    {
+      "id": 7,
+      "name": "nonblocking-findings-are-recorded-not-blocking",
+      "prompt": "审查模板时 InfraGuard 扫描没有 high/blocking finding，但仍存在 medium 或 low finding，blocking_severities 只配置为 [high]。",
+      "expected_behavior": "可以在 blocking_findings=0 后完成，但必须在 review_issues 或 infraguard_summary 中记录非阻塞 finding；若修复简单且低风险，可以一并修复，修复后必须再验证和最终扫描。",
+      "assertions": [
+        {"name": "uses_configured_blocking_severities", "check": "只按 step config 的 blocking_severities 判定是否阻塞完成"},
+        {"name": "records_nonblocking_findings", "check": "medium/low finding 不被丢弃，出现在 review_issues 或 infraguard_summary 中"},
+        {"name": "validate_template_required_after_edit", "check": "如果为非阻塞 finding 修改了模板，仍需 ros_validate_template 成功"},
+        {"name": "final_scan_required_after_edit", "check": "如果为非阻塞 finding 修改了模板，complete_step 前仍需最终 infraguard_scan"}
+      ]
+    }
+  ]
+}

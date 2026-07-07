@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
 
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
@@ -10,6 +12,9 @@ from iac_code.pipeline.engine.completion_guard_state import (
     record_completion_guard_tool_result,
 )
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
+
+logger = logging.getLogger(__name__)
 
 
 def _tool_uses_by_id(messages: list[Message]) -> dict[str, ToolUseBlock]:
@@ -76,7 +81,19 @@ def reconstruct_completion_guard_state(messages: list[Message]) -> dict[str, Any
                 state,
                 tool_name=tool_use.name,
                 tool_input=tool_use.input,
-                content=block.content,
+                content=_tool_result_content_for_recovery(block),
                 is_error=block.is_error,
             )
     return state
+
+
+def _tool_result_content_for_recovery(block: ToolResultBlock) -> str:
+    metadata = block.metadata if isinstance(block.metadata, dict) else {}
+    raw_path = metadata.get(EXTERNALIZED_RESULT_PATH_METADATA_KEY)
+    if not isinstance(raw_path, str) or not raw_path:
+        return block.content
+    try:
+        return Path(raw_path).read_text(encoding="utf-8")
+    except OSError:
+        logger.warning("Failed to read externalized tool result while rebuilding completion guard state", exc_info=True)
+        return block.content
