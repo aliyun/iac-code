@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 import webbrowser
+from importlib import import_module
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -4520,7 +4521,7 @@ def _svg_to_png_command(svg_path: Path, png_path: Path) -> list[str] | None:
 
 
 def _render_terminal_rich(mermaid_source: str) -> Any:
-    from termaid import render_rich
+    render_rich = import_module("termaid").render_rich
 
     return style_attachment_lines(render_rich(mermaid_source))
 
