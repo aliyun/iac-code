@@ -21,7 +21,7 @@ Pipeline 本身是通用能力；当前内置实现的是 `selling` pipeline。`
 
 ## 启动 Pipeline 模式
 
-Pipeline 模式目前需要交互式 REPL，不能和 `--prompt` 一起使用。
+Pipeline 模式可以通过交互式 REPL 或 SDK process 模式运行，不能和 `--prompt` 一起使用。
 
 在 macOS 或 Linux 上：
 
@@ -40,6 +40,12 @@ iac-code
 
 ```bash
 IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
+```
+
+对于 SDK 子进程客户端，可以用 stream-json 输入和输出启动 process 模式：
+
+```bash
+IAC_CODE_MODE=pipeline iac-code --input-format stream-json --output-format stream-json
 ```
 
 ## Pipeline 与 selling 的关系
@@ -89,14 +95,16 @@ Pipeline 运行时可能会暂停等待用户输入，例如：
 
 ## 自动化集成
 
-Pipeline 模式目前主要面向交互式 REPL。A2A 服务模式可以对外暴露 pipeline 进度、产物、权限结果和恢复信息，适合把 pipeline 接入外部控制台或任务系统。
+Pipeline 模式可以通过 A2A 服务模式或 SDK process 模式集成。A2A 服务模式会对外暴露 pipeline 进度、产物、权限结果和恢复信息，适合把 pipeline 接入外部控制台或任务系统。SDK process 模式会把 `iac-code` 保持为本地子进程，并通过 stdin/stdout 交换按行分隔的 JSON。
+
+在 SDK process 模式中，pipeline 事件会以 `stream_event` frame 发出，事件 payload 的 `type` 为 `"pipeline_event"`。最终 `result` frame 会包含 `pipeline` 对象，其中有 `contextId`、`taskId`、`iacCodeSessionId`、`status` 和 `sidecarStatus`。暂停中的 pipeline 应使用相同的 `contextId` 和活跃 `taskId` 恢复。如果某个 context 存在可恢复 task 但客户端省略 task id，process 会返回可重试的 `pipeline_task_required` 错误，并携带 `recoverableTaskId`。
 
 ACP 目前不支持 Pipeline 模式。`--prompt` / [非交互模式](./non-interactive-mode.md) 会走普通一次性调用，不会执行 Pipeline 步骤。
 
 ## 当前限制
 
 - 当前内置 pipeline 只有 `selling`，主要面向阿里云基础设施工作流。
-- Pipeline 模式需要交互式 REPL；当 `IAC_CODE_MODE=pipeline` 时，`--prompt` 会被拒绝。
+- Pipeline 模式支持交互式 REPL 和 SDK process 模式；当 `IAC_CODE_MODE=pipeline` 时，`--prompt` 会被拒绝。
 - Pipeline 模式支持文本输入。Pipeline 激活时，粘贴到 REPL 的图片会被忽略。
 - Pipeline 运行期间，shell escape、技能触发器和大多数 slash command 会被限制，除非 pipeline 定义显式允许。`/help`、`/status`、`/resume`、`/exit` 等基础命令仍然可用。
 

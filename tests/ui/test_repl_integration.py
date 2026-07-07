@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -466,6 +466,20 @@ def test_session_dir_for_artifacts_returns_none_for_legacy_directory_without_lay
 
     assert repl._session_dir_for_artifacts() is None
     assert repl._result_storage_dir_for_session() is None
+
+
+def test_session_dir_for_artifacts_ignores_mock_storage_paths(tmp_path, monkeypatch):
+    from iac_code.ui.repl import InlineREPL
+
+    monkeypatch.chdir(tmp_path)
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._session_storage = MagicMock()
+    repl._original_cwd = str(tmp_path)
+    repl._session_id = "mock-session"
+
+    assert repl._session_dir_for_artifacts() is None
+    assert repl._raw_session_dir_for_trusted_roots() is None
+    assert not (tmp_path / "MagicMock").exists()
 
 
 def test_history_search_uses_agent_context_messages():

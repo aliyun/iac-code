@@ -13,7 +13,8 @@ Command line options change how IaC Code starts. Use them before entering the in
 | `-v`, `-V`, `--version` | Print the installed IaC Code version and exit. |
 | `-m <model>`, `--model <model>` | Start with a specific LLM model. This overrides the saved model for the current run. |
 | `-p <prompt>`, `--prompt <prompt>` | Run a single prompt and exit. This enables non-interactive mode. Use `--prompt -` to read the prompt from standard input. |
-| `--output-format <format>` | Set output format for non-interactive mode. Supported values are `text`, `json`, and `stream-json`. The default is `text`. |
+| `--output-format <format>` | Set output format for one-shot or process automation. Supported values are `text`, `json`, and `stream-json`. The default is `text`. |
+| `--input-format <format>` | Set input format. Supported values are `text` and `stream-json`. `stream-json` starts SDK process mode and must be combined with `--output-format stream-json`; it cannot be combined with `--prompt`. |
 | `--max-turns <number>` | Limit the maximum number of agent turns in non-interactive mode. The default is `100`. |
 | `--thinking-enabled`, `--no-thinking-enabled` | Control whether one-shot non-interactive requests explicitly enable thinking. The default is `--thinking-enabled`; use `--no-thinking-enabled` to send `thinking_enabled=false` for this run without rewriting `settings.yml`. |
 | `-d`, `--debug` | Enable debug logging for the current run. In interactive mode, use `/debug` to inspect or change debug logging after startup. |
@@ -91,3 +92,11 @@ Run in automation with no interactive prompts:
 ```bash
 iac-code --prompt "Create a VPC" --permission-mode bypass_permissions
 ```
+
+Start SDK process mode for a long-running subprocess client:
+
+```bash
+iac-code --input-format stream-json --output-format stream-json
+```
+
+In process mode the caller writes one JSON frame per line to stdin and reads one JSON frame per line from stdout. Send an `initialize` control request before user messages. This mode supports `interrupt`, `set_model`, `end_session`, `close`, `keep_alive`, and `update_environment_variables` control flows. When `IAC_CODE_MODE=pipeline`, the same process entry point runs Pipeline mode and returns pipeline status in stream and result frames.

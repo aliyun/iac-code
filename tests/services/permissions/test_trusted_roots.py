@@ -1,5 +1,6 @@
 import importlib
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -32,6 +33,21 @@ def test_build_session_trusted_read_directories_includes_session_scoped_artifact
         str(session_dir / "tool-results"),
         str(session_dir / "image-cache"),
     ]
+
+
+def test_build_session_trusted_read_directories_ignores_mock_session_dir(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("iac_code.config.get_config_dir", lambda: tmp_path / ".iac-code")
+
+    from iac_code.services.permissions.trusted_roots import build_session_trusted_read_directories
+
+    roots = build_session_trusted_read_directories("abc123", session_dir=MagicMock())
+
+    assert roots == [
+        str(Path(tmp_path / ".iac-code" / "tool-results" / "abc123")),
+        str(Path(tmp_path / ".iac-code" / "image-cache" / "abc123")),
+    ]
+    assert not (tmp_path / "MagicMock").exists()
 
 
 def test_build_session_trusted_read_directories_rejects_symlinked_session_artifact_dir(monkeypatch, tmp_path):

@@ -103,6 +103,7 @@ def main(
     model: str = typer.Option("", "--model", "-m", help=_("LLM model to use")),
     prompt: str = typer.Option("", "--prompt", "-p", help=_("Non-interactive mode: run a single prompt and exit")),
     output_format: str = typer.Option("text", "--output-format", help=_("Output format: text, json, stream-json")),
+    input_format: str = typer.Option("text", "--input-format", help=_("Input format: text, stream-json")),
     max_turns: int = typer.Option(100, "--max-turns", help=_("Maximum agent turns in headless mode")),
     debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
     verbose: bool = typer.Option(False, "--verbose", help=_("Show headless progress on stderr")),
@@ -176,6 +177,59 @@ def main(
     if resume and continue_session:
         typer.echo(_("Error: --resume and --continue cannot be used together."), err=True)
         raise typer.Exit(1)
+
+    normalized_input_format = (input_format or "text").strip().lower()
+    if normalized_input_format not in {"text", "stream-json"}:
+        typer.echo(_("Invalid --input-format '{}'. Valid values: text, stream-json").format(input_format), err=True)
+        raise typer.Exit(1)
+
+    if normalized_input_format == "stream-json":
+        normalized_output_format = (output_format or "text").strip().lower()
+        if prompt:
+            typer.echo(_("--prompt cannot be used with --input-format stream-json."), err=True)
+            raise typer.Exit(1)
+        if normalized_output_format != "stream-json":
+            typer.echo(_("--input-format stream-json requires --output-format stream-json."), err=True)
+            raise typer.Exit(1)
+
+        from iac_code.pipeline.config import get_run_mode
+
+        run_mode = get_run_mode()
+
+        if not model:
+            try:
+                model = load_saved_model() or DEFAULT_MODEL
+            except ValueError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(1)
+
+        if permission_mode:
+            from iac_code.services.permissions.loader import parse_cli_permission_mode
+
+            try:
+                parse_cli_permission_mode(permission_mode)
+            except ValueError as exc:
+                typer.echo(str(exc), err=True)
+                raise typer.Exit(1) from exc
+
+        setup_logging(session_id="process-mode", debug=debug)
+
+        from iac_code.cli.process_mode import ProcessModeOptions, ProcessModeRunner
+
+        cli_allowed = [s.strip() for s in allowed_tools.split(",") if s.strip()] if allowed_tools else None
+        cli_disallowed = [s.strip() for s in disallowed_tools.split(",") if s.strip()] if disallowed_tools else None
+        runner = ProcessModeRunner(
+            ProcessModeOptions(
+                model=model,
+                cwd=os.getcwd(),
+                run_mode=run_mode.value,
+                max_turns=max_turns,
+                cli_allowed_tools=cli_allowed,
+                cli_disallowed_tools=cli_disallowed,
+                cli_permission_mode=permission_mode or None,
+            )
+        )
+        raise SystemExit(asyncio.run(runner.run()))
 
     fmt = None
     if prompt:

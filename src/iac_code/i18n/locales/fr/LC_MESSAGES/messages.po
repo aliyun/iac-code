@@ -709,6 +709,10 @@ msgid "Output format: text, json, stream-json"
 msgstr "Format de sortie : text, json, stream-json"
 
 #: src/iac_code/cli/main.py
+msgid "Input format: text, stream-json"
+msgstr "Format d'entrée : text, stream-json"
+
+#: src/iac_code/cli/main.py
 msgid "Maximum agent turns in headless mode"
 msgstr "Nombre maximal de tours d’agent en mode headless"
 
@@ -769,6 +773,19 @@ msgstr ""
 #: src/iac_code/cli/main.py
 msgid "Error: --resume and --continue cannot be used together."
 msgstr "Erreur : --resume et --continue ne peuvent pas être utilisés ensemble."
+
+#: src/iac_code/cli/main.py
+#, python-brace-format
+msgid "Invalid --input-format '{}'. Valid values: text, stream-json"
+msgstr "--input-format '{}' invalide. Valeurs valides : text, stream-json"
+
+#: src/iac_code/cli/main.py
+msgid "--prompt cannot be used with --input-format stream-json."
+msgstr "--prompt ne peut pas être utilisé avec --input-format stream-json."
+
+#: src/iac_code/cli/main.py
+msgid "--input-format stream-json requires --output-format stream-json."
+msgstr "--input-format stream-json nécessite --output-format stream-json."
 
 #: src/iac_code/cli/main.py
 #, python-brace-format
@@ -6871,4 +6888,7 @@ msgstr "Refus d’ouvrir un fichier non ordinaire : {path}"
 
 #~ msgid "feature"
 #~ msgstr "fonctionnalité"
+
+#~ msgid "Pipeline mode does not support --input-format stream-json."
+#~ msgstr "Le mode pipeline ne prend pas en charge --input-format stream-json."
 

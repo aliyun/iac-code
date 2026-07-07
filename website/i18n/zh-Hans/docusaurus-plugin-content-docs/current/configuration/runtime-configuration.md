@@ -206,3 +206,12 @@ v2 session 的关键路径如下：
 <config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl
 <config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/tool-results/
 ```
+
+SDK process 模式还会把跨进程 Pipeline 恢复快照存放在：
+
+```text
+<config-dir>/process-pipeline/contexts/<encoded-context-id>.json
+<config-dir>/process-pipeline/contexts/<encoded-context-id>.lock
+```
+
+每个快照会记录 `contextId`、`taskId`、`iacCodeSessionId`、`cwd`、`sidecarStatus` 和 `activeTaskId`。这些文件让后续 SDK process 能恢复某个 Pipeline context 对应的 task，并在调用方省略活跃 task id 时返回带有 `recoverableTaskId` 的 `pipeline_task_required`。它们不会替代上面的 session 内 Pipeline 状态，只是一个小型路由和恢复索引；为支持多进程客户端，每个 context 都会使用独立文件锁保护。process 模式的 Pipeline 后续请求如果发现已保存 context 属于不同 `cwd`，会被拒绝。

@@ -206,3 +206,12 @@ Key v2 session paths are:
 <config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/permission-audit.jsonl
 <config-dir>/projects/<project>/<session-id>/pipeline/transcripts/<transcript-id>/tool-results/
 ```
+
+SDK process mode also stores cross-process Pipeline recovery snapshots under:
+
+```text
+<config-dir>/process-pipeline/contexts/<encoded-context-id>.json
+<config-dir>/process-pipeline/contexts/<encoded-context-id>.lock
+```
+
+Each snapshot records `contextId`, `taskId`, `iacCodeSessionId`, `cwd`, `sidecarStatus`, and `activeTaskId`. These files let a later SDK process recover which task belongs to a Pipeline context and return `pipeline_task_required` with a `recoverableTaskId` when the caller omits the active task id. They do not replace the session-owned Pipeline state above; they are a small routing and recovery index, protected with per-context file locks for multi-process clients. A process-mode Pipeline follow-up is rejected if the stored context belongs to a different `cwd`.

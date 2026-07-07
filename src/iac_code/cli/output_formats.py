@@ -81,7 +81,8 @@ def _sanitize_public_value(value: Any, *, public_path_roots: list[dict[str, str]
     return value
 
 
-def _stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
+def stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
+    """Return the public stream-json representation for a stream event."""
     if isinstance(event, ToolUseStartEvent):
         return {
             "tool_use_id": event.tool_use_id,
@@ -120,7 +121,7 @@ def _stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
     if isinstance(event, SubPipelineStreamEvent):
         return {
             "candidate_index": event.candidate_index,
-            "inner": _stream_json_event_data(event.inner),
+            "inner": stream_json_event_data(event.inner),
             "sub_pipeline_id": event.sub_pipeline_id,
             "type": event.type,
         }
@@ -138,6 +139,10 @@ def _stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
                 data.pop("metadata", None)
         data["result"] = _public_tool_result(event)
     return data
+
+
+def _stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
+    return stream_json_event_data(event)
 
 
 class TextWriter:
@@ -231,7 +236,7 @@ class StreamJsonWriter:
         self._stream = stream or sys.stdout
 
     def handle(self, event: StreamEvent) -> None:
-        data = _stream_json_event_data(event)
+        data = stream_json_event_data(event)
         self._stream.write(json.dumps(data, ensure_ascii=False, default=str))
         self._stream.write("\n")
         self._stream.flush()
