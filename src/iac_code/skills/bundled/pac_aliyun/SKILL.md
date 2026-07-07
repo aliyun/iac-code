@@ -25,10 +25,18 @@ auto_trigger:
 核心命令：
 ```bash
 infraguard version
-go install github.com/aliyun/infraguard/cmd/infraguard@latest
+infraguard update --check
+GOPROXY=https://mirrors.aliyun.com/goproxy/,direct go install github.com/aliyun/infraguard/cmd/infraguard@latest
+infraguard update
 infraguard policy update
 infraguard policy list
 ```
+
+版本处理：
+- 如果本地没有 `infraguard`，使用带阿里云 Go Proxy 的 `go install` 命令安装。
+- 如果本地 `infraguard` 不是最新版本，先提醒用户需要升级到最新版本。
+- 如果本地版本小于 `0.10.1`，使用带阿里云 Go Proxy 的重装命令升级。
+- 如果本地版本大于等于 `0.10.1`，使用 `infraguard update` 升级。
 
 若用户只是咨询概念，可先简短回答；一旦需要生成、查询、校验或扫描策略，必须先完成懒加载检查。
 
