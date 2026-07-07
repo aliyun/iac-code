@@ -627,6 +627,150 @@ class TestCLIFlags:
         call_kwargs = mock_runner.call_args[1]
         assert call_kwargs["verbose"] is True
 
+    def test_thinking_enabled_passed_to_headless(self):
+        from iac_code.cli.main import app
+
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value=0)
+            mock_runner.return_value = mock_instance
+
+            result = runner_cli.invoke(app, ["-p", "hello", "--no-thinking-enabled"])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_runner.call_args[1]
+        assert call_kwargs["thinking_enabled"] is False
+
+    def test_thinking_enabled_defaults_to_enabled_for_headless(self):
+        from iac_code.cli.main import app
+
+        with patch("iac_code.cli.headless.HeadlessRunner") as mock_runner:
+            mock_instance = MagicMock()
+            mock_instance.run = AsyncMock(return_value=0)
+            mock_runner.return_value = mock_instance
+
+            result = runner_cli.invoke(app, ["-p", "hello"])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_runner.call_args[1]
+        assert call_kwargs["thinking_enabled"] is True
+
+    @pytest.mark.parametrize(
+        ("flag", "expected"),
+        [
+            ("--thinking-enabled", True),
+            ("--no-thinking-enabled", False),
+        ],
+    )
+    def test_headless_cli_thinking_enabled_reaches_agent_runtime(self, monkeypatch, flag, expected):
+        from iac_code.cli.main import app
+
+        captured = {}
+
+        class FakeLoop:
+            async def run_streaming(self, prompt):
+                captured["prompt"] = prompt
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRuntime:
+            agent_loop = FakeLoop()
+            mcp_config_warnings = []
+
+            async def aclose(self):
+                captured["closed"] = True
+
+        def fake_create_agent_runtime(options):
+            captured["options"] = options
+            return FakeRuntime()
+
+        monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", fake_create_agent_runtime)
+
+        result = runner_cli.invoke(app, ["-p", "hello", flag])
+
+        assert result.exit_code == 0
+        assert captured["prompt"] == "hello"
+        assert captured["options"].request_policy_override.thinking_enabled is expected
+        assert captured["closed"] is True
+
+    def test_headless_cli_without_thinking_flag_enables_thinking_by_default(self, monkeypatch):
+        from iac_code.cli.main import app
+
+        captured = {}
+
+        class FakeLoop:
+            async def run_streaming(self, prompt):
+                captured["prompt"] = prompt
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRuntime:
+            agent_loop = FakeLoop()
+            mcp_config_warnings = []
+
+            async def aclose(self):
+                captured["closed"] = True
+
+        def fake_create_agent_runtime(options):
+            captured["options"] = options
+            return FakeRuntime()
+
+        monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", fake_create_agent_runtime)
+
+        result = runner_cli.invoke(
+            app,
+            [
+                "-p",
+                "hello",
+                "--output-format",
+                "json",
+                "--max-turns",
+                "3",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert captured["prompt"] == "hello"
+        assert captured["options"].request_policy_override.thinking_enabled is True
+        assert captured["options"].max_turns == 3
+        assert captured["closed"] is True
+
+    def test_headless_cli_without_thinking_flag_keeps_dashscope_default_thinking_enabled(self, monkeypatch):
+        from iac_code.cli.main import app
+        from iac_code.providers.manager import create_provider
+
+        captured = {}
+
+        class FakeLoop:
+            async def run_streaming(self, prompt):
+                captured["prompt"] = prompt
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        class FakeRuntime:
+            agent_loop = FakeLoop()
+            mcp_config_warnings = []
+
+            async def aclose(self):
+                captured["closed"] = True
+
+        def fake_create_agent_runtime(options):
+            captured["options"] = options
+            return FakeRuntime()
+
+        monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", fake_create_agent_runtime)
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda provider_key: {})
+
+        result = runner_cli.invoke(app, ["-p", "hello", "--model", "glm-5.2"])
+
+        assert result.exit_code == 0
+        assert captured["options"].model == "glm-5.2"
+        assert captured["options"].request_policy_override.thinking_enabled is True
+        provider = create_provider(
+            captured["options"].model,
+            credentials={"dashscope": "key"},
+            provider_key_override="dashscope",
+            request_policy_override=captured["options"].request_policy_override,
+        )
+        assert provider._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "thinking_budget": 8192}}
+
     def test_max_turns_passed_to_headless(self):
         from iac_code.cli.main import app
 
@@ -965,8 +1109,20 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
     fake_session_dir = Path("/tmp/iac-config")
 
     class FakeProviderManager:
-        def __init__(self, *, model, credentials, provider_key_override=None, base_url_override=None):
-            captured["provider_manager"] = {"model": model, "credentials": credentials}
+        def __init__(
+            self,
+            *,
+            model,
+            credentials,
+            provider_key_override=None,
+            base_url_override=None,
+            request_policy_override=None,
+        ):
+            captured["provider_manager"] = {
+                "model": model,
+                "credentials": credentials,
+                "request_policy_override": request_policy_override,
+            }
 
     class FakeSessionStorage:
         def __init__(self, projects_dir=None):
@@ -1132,6 +1288,37 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
     assert captured["agent_loop_kwargs"]["session_storage"] is not None
     assert captured["agent_loop_kwargs"]["memory_recall_service"] is captured["memory_recall_service"]
     assert fake_command_registry.registered == []
+
+
+def test_create_agent_loop_passes_headless_thinking_policy(monkeypatch):
+    runner = HeadlessRunner(model="test-model", thinking_enabled=False)
+    captured, _fake_registry, _fake_command_registry = _install_headless_fakes(
+        monkeypatch,
+        creds={"openai": "ok"},
+        skills=[],
+    )
+
+    runner._create_agent_loop()
+
+    policy = captured["provider_manager"]["request_policy_override"]
+    assert policy is not None
+    assert policy.thinking_enabled is False
+    assert policy.effort is None
+
+
+def test_create_agent_loop_enables_thinking_by_default(monkeypatch):
+    runner = HeadlessRunner(model="test-model")
+    captured, _fake_registry, _fake_command_registry = _install_headless_fakes(
+        monkeypatch,
+        creds={"openai": "ok"},
+        skills=[],
+    )
+
+    runner._create_agent_loop()
+
+    policy = captured["provider_manager"]["request_policy_override"]
+    assert policy is not None
+    assert policy.thinking_enabled is True
 
 
 def test_create_agent_loop_handles_credential_load_failure_and_skill_conflict(monkeypatch):

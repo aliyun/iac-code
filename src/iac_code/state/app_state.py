@@ -67,6 +67,7 @@ class AppState:
     spinner_text: str = ""
     context_usage_percent: float = 0.0
     effort_level: Any | None = None  # EffortLevel enum or None (avoid circular import)
+    thinking_enabled: bool | None = None
 
 
 class AppStateStore:

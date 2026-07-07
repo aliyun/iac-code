@@ -93,6 +93,8 @@ Model-level values under `providers.<provider>.models.<model>` override provider
 
 For Alibaba Cloud DashScope and DashScope Token Plan, IaC Code has a built-in `thinkingBudget` of `8192` for `glm-5.2` and `kimi-k2.7-code`. When `maxCompletionTokens` is not set, the request limit is computed as the normal answer token limit plus the effective thinking budget.
 
+Interactive REPL users can persist the provider-level `thinkingEnabled` value with `/thinking_enabled on` or `/thinking_enabled off`; running `/thinking_enabled` without an argument opens the Enable/Disable picker when a console UI is available. One-shot headless runs can override thinking for that request with `--thinking-enabled` or `--no-thinking-enabled` without rewriting `settings.yml`.
+
 A2A requests may override these settings for a single message turn through `message.metadata.iac_code.thinking` or the `iac-code a2a-client call` flags `--thinking-enabled`, `--thinking-effort`, and `--thinking-budget`. If no explicit A2A thinking metadata is sent, the runtime uses the settings above and the provider's normal defaults. For generic `openai_compatible` providers with a DashScope compatible-mode base URL, iac-code switches to the DashScope native thinking wire format only when an explicit thinking policy is present.
 
 ## Tool Permission Configuration

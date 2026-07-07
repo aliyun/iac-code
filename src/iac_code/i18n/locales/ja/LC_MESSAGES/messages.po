@@ -683,6 +683,10 @@ msgid "Show headless progress on stderr"
 msgstr "ヘッドレス進行状況を stderr に表示"
 
 #: src/iac_code/cli/main.py
+msgid "Headless mode: whether to enable thinking for this request"
+msgstr "ヘッドレスモード: このリクエストで thinking を有効にするか"
+
+#: src/iac_code/cli/main.py
 msgid "Show version and exit"
 msgstr "バージョンを表示して終了する"
 
@@ -1037,6 +1041,10 @@ msgstr "モデルを表示または切り替えます"
 #: src/iac_code/commands/__init__.py
 msgid "Show or switch thinking effort"
 msgstr "思考の負荷（effort）を表示または切り替えます"
+
+#: src/iac_code/commands/__init__.py
+msgid "Show or switch whether thinking is enabled"
+msgstr "thinking の有効/無効を表示または切り替えます"
 
 #: src/iac_code/commands/__init__.py
 msgid "Compact conversation context"
@@ -1414,10 +1422,11 @@ msgid "No active session."
 msgstr "アクティブなセッションがありません。"
 
 #: src/iac_code/commands/effort.py src/iac_code/commands/model.py
+#: src/iac_code/commands/thinking_enabled.py
 msgid "No configured providers. Run /auth first."
 msgstr "設定済みのプロバイダーがありません。先に /auth を実行してください。"
 
-#: src/iac_code/commands/effort.py
+#: src/iac_code/commands/effort.py src/iac_code/commands/thinking_enabled.py
 msgid "No model selected. Run /model first."
 msgstr "モデルが選択されていません。先に /model を実行してください。"
 
@@ -1437,6 +1446,7 @@ msgid "Current effort: {effort}"
 msgstr "現在の effort：{effort}"
 
 #: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+#: src/iac_code/commands/thinking_enabled.py
 msgid "not configured"
 msgstr "未設定"
 
@@ -2078,6 +2088,38 @@ msgstr "{session_id}（再開済み）"
 #, python-brace-format
 msgid "{percent} used ({total} / {window})"
 msgstr "{percent} 使用済み（{total} / {window}）"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "Invalid thinking_enabled. Allowed: on, off."
+msgstr "thinking_enabled が無効です。指定可能な値: on, off。"
+
+#: src/iac_code/commands/thinking_enabled.py src/iac_code/ui/dialogs/memory.py
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "on"
+msgstr "有効"
+
+#: src/iac_code/commands/thinking_enabled.py src/iac_code/ui/dialogs/memory.py
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "off"
+msgstr "無効"
+
+#: src/iac_code/commands/thinking_enabled.py
+#, python-brace-format
+msgid "thinking_enabled switched to: {state}"
+msgstr "thinking_enabled を {state} に切り替えました"
+
+#: src/iac_code/commands/thinking_enabled.py
+#, python-brace-format
+msgid "Current thinking_enabled: {state}"
+msgstr "現在の thinking_enabled: {state}"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "enabled"
+msgstr "有効"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "disabled"
+msgstr "無効"
 
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py
@@ -5946,14 +5988,6 @@ msgstr "メモリ"
 msgid "Auto-memory: {state}"
 msgstr "自動メモリ: {state}"
 
-#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
-msgid "on"
-msgstr "有効"
-
-#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
-msgid "off"
-msgstr "無効"
-
 #: src/iac_code/ui/dialogs/memory.py
 msgid "Enter to confirm · Esc to cancel"
 msgstr "Enter で確定 · Esc でキャンセル"
@@ -6422,34 +6456,4 @@ msgstr "通常ファイルではないファイルを開くことを拒否しま
 
 #~ msgid "feature"
 #~ msgstr "機能"
-
-#~ msgid "ECS instance"
-#~ msgstr "ECS インスタンス"
-
-#~ msgid "ECS instance group"
-#~ msgstr "ECS インスタンスグループ"
-
-#~ msgid "Elastic IP address"
-#~ msgstr "Elastic IP アドレス"
-
-#~ msgid "SLB load balancer"
-#~ msgstr "SLB ロードバランサー"
-
-#~ msgid "NAT gateway"
-#~ msgstr "NAT ゲートウェイ"
-
-#~ msgid "Shared bandwidth package"
-#~ msgstr "共有帯域幅パッケージ"
-
-#~ msgid "Database instance"
-#~ msgstr "データベースインスタンス"
-
-#~ msgid "VPC"
-#~ msgstr "VPC"
-
-#~ msgid "VSwitch"
-#~ msgstr "VSwitch"
-
-#~ msgid "Security group"
-#~ msgstr "セキュリティグループ"
 

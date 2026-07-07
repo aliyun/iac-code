@@ -17,6 +17,7 @@ class AgentFactoryOptions:
     session_id: str | None = None
     cwd: str | None = None
     max_turns: int = 100
+    request_policy_override: Any = None
     cli_allowed_tools: list[str] | None = None
     cli_disallowed_tools: list[str] | None = None
     cli_permission_mode: str | None = None
@@ -119,6 +120,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         credentials=credentials,
         provider_key_override=provider_key_override,
         base_url_override=base_url_override,
+        request_policy_override=options.request_policy_override,
     )
 
     tool_registry = ToolRegistry()

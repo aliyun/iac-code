@@ -62,6 +62,13 @@ class TestSaveActiveProviderConfig:
 
         assert get_provider_config("openai").get("effort") == "high"
 
+    def test_thinking_enabled_override(self):
+        provider = {"name": "OpenAI", "key_name": "openai", "api_base": None}
+        save_active_provider_config(provider, "gpt-5.5", thinking_enabled=False)
+        from iac_code.config import get_provider_config
+
+        assert get_provider_config("openai").get("thinkingEnabled") is False
+
     def test_api_base_override(self):
         provider = {"name": "X", "key_name": "custom", "api_base": None}
         save_active_provider_config(provider, "m", api_base="https://override/")

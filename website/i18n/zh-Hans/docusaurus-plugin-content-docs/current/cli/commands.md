@@ -18,6 +18,7 @@ Slash 命令用于在交互式会话中控制 IaC Code。输入 `/` 可以查看
 | `/compact` | 将当前对话总结压缩，以降低上下文占用，同时保留最近几轮内容。长会话后仍想继续工作时使用。如果对话为空或太短，命令会提示没有可压缩内容。 |
 | `/debug [on\|off\|status]` | 查看或调整当前会话的运行时 debug 日志。`/debug` 和 `/debug status` 会显示日志是否开启；开启时还会显示日志文件路径。`/debug on` 开启当前会话日志，`/debug off` 关闭日志。 |
 | `/effort [level]` | 在当前模型支持 effort 控制时，查看或切换 thinking effort。带 `level` 时，如果该值对当前模型有效就会直接应用；不带参数时，在 REPL 中打开交互式选择器，在无控制台 UI 的场景中显示当前 effort。 |
+| `/thinking_enabled [on\|off]` | 查看或切换当前 provider 是否请求 thinking。带 `on` 或 `off` 时，会为当前 provider 持久化 `thinkingEnabled` 并重新配置正在运行的 REPL provider；不带参数时，在 REPL 中打开“启用/禁用”交互式选择器，在无控制台 UI 的场景中显示当前值。 |
 | `/exit` | 退出交互式 REPL。别名：`/quit`、`/q`。 |
 | `/help` | 在 REPL 中显示可用命令和常用快捷键。别名：`/?`。 |
 | `/memory` | 打开记忆选择器。可以编辑项目或用户的 `AGENTS.md` 文件，切换 auto-memory，并在 auto-memory 开启时打开项目 auto-memory 文件夹。 |

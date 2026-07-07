@@ -15,6 +15,7 @@ description: IaC Code の起動オプションとワンショット実行パラ�
 | `-p <prompt>`, `--prompt <prompt>` | 単一のプロンプトを実行して終了します。非対話モードが有効になります。`--prompt -` で標準入力からプロンプトを読み取ります。 |
 | `--output-format <format>` | 非対話モードの出力形式を設定します。サポートされる値は `text`、`json`、`stream-json` です。デフォルトは `text` です。 |
 | `--max-turns <number>` | 非対話モードでのエージェントの最大ターン数を制限します。デフォルトは `100` です。 |
+| `--thinking-enabled`, `--no-thinking-enabled` | ワンショットの非対話リクエストで thinking を明示的に有効化するかどうかを制御します。デフォルトは `--thinking-enabled` です。`--no-thinking-enabled` はこの実行だけ `thinking_enabled=false` を送信し、`settings.yml` は書き換えません。 |
 | `-d`, `--debug` | 今回の実行でデバッグログを有効にします。対話モードでは、起動後に `/debug` を使用してデバッグログを確認または変更できます。 |
 | `-r <セッションIDまたは名前>`, `--resume <セッションIDまたは名前>` | 正確なセッション ID、一意な ID プレフィックス、または一意なセッション名で以前のセッションを再開します。別プロジェクトとして解決されたセッションは、現在のプロジェクトをその場で切り替えず、`cd ... && iac-code --resume <id>` コマンドを表示します。 |
 | `-c`, `--continue` | 最新のセッションを再開します。`--resume` と同時に使用できません。 |
@@ -53,6 +54,12 @@ iac-code --model qwen3.6-plus
 
 ```bash
 iac-code --prompt "Create an OSS Bucket"
+```
+
+このリクエストだけ thinking を無効にしてワンショットプロンプトを実行する：
+
+```bash
+iac-code --prompt "Create an OSS Bucket" --no-thinking-enabled
 ```
 
 標準入力からプロンプトを読み取る：

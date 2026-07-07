@@ -106,6 +106,11 @@ def main(
     max_turns: int = typer.Option(100, "--max-turns", help=_("Maximum agent turns in headless mode")),
     debug: bool = typer.Option(False, "--debug", "-d", help=_("Enable debug logging")),
     verbose: bool = typer.Option(False, "--verbose", help=_("Show headless progress on stderr")),
+    thinking_enabled: bool | None = typer.Option(
+        True,
+        "--thinking-enabled/--no-thinking-enabled",
+        help=_("Headless mode: whether to enable thinking for this request"),
+    ),
     version: bool = typer.Option(False, "--version", "-v", "-V", is_eager=True, help=_("Show version and exit")),
     resume: str = typer.Option("", "--resume", "-r", help=_("Resume a session by ID or name")),
     continue_session: bool = typer.Option(False, "--continue", "-c", help=_("Resume the most recent session")),
@@ -282,6 +287,7 @@ def main(
                 cli_permission_mode=permission_mode or None,
                 verbose=verbose,
                 resume_session_id=True if continue_session else (resume or None),
+                thinking_enabled=thinking_enabled,
             )
             exit_code = asyncio.run(_run_with_handler(runner.run(prompt)))
         except _QwenPawError as exc:

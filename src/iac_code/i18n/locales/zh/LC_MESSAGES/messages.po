@@ -677,6 +677,10 @@ msgid "Show headless progress on stderr"
 msgstr "在 stderr 显示无头模式进度"
 
 #: src/iac_code/cli/main.py
+msgid "Headless mode: whether to enable thinking for this request"
+msgstr "无头模式：是否为此请求启用 thinking"
+
+#: src/iac_code/cli/main.py
 msgid "Show version and exit"
 msgstr "显示版本号并退出"
 
@@ -1027,6 +1031,10 @@ msgstr "显示或切换模型"
 #: src/iac_code/commands/__init__.py
 msgid "Show or switch thinking effort"
 msgstr "显示或切换思考强度"
+
+#: src/iac_code/commands/__init__.py
+msgid "Show or switch whether thinking is enabled"
+msgstr "显示或切换是否启用 thinking"
 
 #: src/iac_code/commands/__init__.py
 msgid "Compact conversation context"
@@ -1402,10 +1410,11 @@ msgid "No active session."
 msgstr "没有活动的会话。"
 
 #: src/iac_code/commands/effort.py src/iac_code/commands/model.py
+#: src/iac_code/commands/thinking_enabled.py
 msgid "No configured providers. Run /auth first."
 msgstr "没有已配置的提供商。请先运行 /auth。"
 
-#: src/iac_code/commands/effort.py
+#: src/iac_code/commands/effort.py src/iac_code/commands/thinking_enabled.py
 msgid "No model selected. Run /model first."
 msgstr "没有选择模型。请先运行 /model。"
 
@@ -1425,6 +1434,7 @@ msgid "Current effort: {effort}"
 msgstr "当前思考强度：{effort}"
 
 #: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+#: src/iac_code/commands/thinking_enabled.py
 msgid "not configured"
 msgstr "未配置"
 
@@ -2064,6 +2074,38 @@ msgstr "{session_id}（已恢复）"
 #, python-brace-format
 msgid "{percent} used ({total} / {window})"
 msgstr "已使用 {percent}（{total} / {window}）"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "Invalid thinking_enabled. Allowed: on, off."
+msgstr "无效的 thinking_enabled。允许值：on、off。"
+
+#: src/iac_code/commands/thinking_enabled.py src/iac_code/ui/dialogs/memory.py
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "on"
+msgstr "启用"
+
+#: src/iac_code/commands/thinking_enabled.py src/iac_code/ui/dialogs/memory.py
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "off"
+msgstr "禁用"
+
+#: src/iac_code/commands/thinking_enabled.py
+#, python-brace-format
+msgid "thinking_enabled switched to: {state}"
+msgstr "thinking_enabled 已切换为：{state}"
+
+#: src/iac_code/commands/thinking_enabled.py
+#, python-brace-format
+msgid "Current thinking_enabled: {state}"
+msgstr "当前 thinking_enabled：{state}"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "enabled"
+msgstr "已启用"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "disabled"
+msgstr "已禁用"
 
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py
@@ -5871,14 +5913,6 @@ msgstr "记忆"
 msgid "Auto-memory: {state}"
 msgstr "自动记忆：{state}"
 
-#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
-msgid "on"
-msgstr "启用"
-
-#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
-msgid "off"
-msgstr "禁用"
-
 #: src/iac_code/ui/dialogs/memory.py
 msgid "Enter to confirm · Esc to cancel"
 msgstr "Enter 确认 · Esc 取消"
@@ -6325,34 +6359,4 @@ msgstr "拒绝打开非常规文件：{path}"
 
 #~ msgid "feature"
 #~ msgstr "功能"
-
-#~ msgid "ECS instance"
-#~ msgstr "ECS 实例"
-
-#~ msgid "ECS instance group"
-#~ msgstr "ECS 实例组"
-
-#~ msgid "Elastic IP address"
-#~ msgstr "弹性公网 IP"
-
-#~ msgid "SLB load balancer"
-#~ msgstr "SLB 负载均衡"
-
-#~ msgid "NAT gateway"
-#~ msgstr "NAT 网关"
-
-#~ msgid "Shared bandwidth package"
-#~ msgstr "共享带宽包"
-
-#~ msgid "Database instance"
-#~ msgstr "数据库实例"
-
-#~ msgid "VPC"
-#~ msgstr "专有网络 VPC"
-
-#~ msgid "VSwitch"
-#~ msgstr "交换机"
-
-#~ msgid "Security group"
-#~ msgstr "安全组"
 

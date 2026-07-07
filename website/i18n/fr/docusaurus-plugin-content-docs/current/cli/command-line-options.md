@@ -15,6 +15,7 @@ Les options de ligne de commande modifient le démarrage d'IaC Code. Utilisez-le
 | `-p <prompt>`, `--prompt <prompt>` | Exécuter un seul prompt et quitter. Ceci active le mode non interactif. Utilisez `--prompt -` pour lire le prompt depuis l'entrée standard. |
 | `--output-format <format>` | Définir le format de sortie pour le mode non interactif. Les valeurs prises en charge sont `text`, `json` et `stream-json`. La valeur par défaut est `text`. |
 | `--max-turns <number>` | Limiter le nombre maximum de tours de l'agent en mode non interactif. La valeur par défaut est `100`. |
+| `--thinking-enabled`, `--no-thinking-enabled` | Contrôler si les requêtes non interactives ponctuelles activent explicitement le thinking. La valeur par défaut est `--thinking-enabled` ; utilisez `--no-thinking-enabled` pour envoyer `thinking_enabled=false` pour cette exécution sans réécrire `settings.yml`. |
 | `-d`, `--debug` | Activer la journalisation de débogage pour l'exécution en cours. En mode interactif, utilisez `/debug` pour inspecter ou modifier la journalisation de débogage après le démarrage. |
 | `-r <id-ou-nom-de-session>`, `--resume <id-ou-nom-de-session>` | Reprendre une session précédente par identifiant exact, préfixe d'identifiant unique ou nom de session unique. Les sessions résolues dans un autre projet affichent une commande `cd ... && iac-code --resume <id>` au lieu de basculer le projet courant à chaud. |
 | `-c`, `--continue` | Reprendre la session la plus récente. Ne peut pas être utilisé avec `--resume`. |
@@ -53,6 +54,12 @@ Exécuter un prompt unique :
 
 ```bash
 iac-code --prompt "Create an OSS Bucket"
+```
+
+Exécuter un prompt unique avec le thinking désactivé pour cette requête :
+
+```bash
+iac-code --prompt "Create an OSS Bucket" --no-thinking-enabled
 ```
 
 Lire le prompt depuis l'entrée standard :

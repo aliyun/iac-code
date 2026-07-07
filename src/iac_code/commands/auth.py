@@ -132,7 +132,11 @@ def save_llm_key(key_name: str, api_key: str) -> None:
 
 
 def save_active_provider_config(
-    provider: LLMProvider | dict, model: str, effort: str | None = None, api_base: str | None = None
+    provider: LLMProvider | dict,
+    model: str,
+    effort: str | None = None,
+    api_base: str | None = None,
+    thinking_enabled: bool | None = None,
 ) -> None:
     """Persist the provider's per-provider config and mark it active."""
     settings_path = get_settings_path()
@@ -152,6 +156,8 @@ def save_active_provider_config(
         entry["apiBase"] = effective_api_base
     if effort is not None:
         entry["effort"] = effort
+    if thinking_enabled is not None:
+        entry["thinkingEnabled"] = thinking_enabled
 
     providers[key_name] = entry
     for legacy, canonical in _LEGACY_KEY_NAME_ALIASES.items():

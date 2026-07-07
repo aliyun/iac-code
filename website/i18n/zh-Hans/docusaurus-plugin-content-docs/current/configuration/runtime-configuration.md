@@ -93,6 +93,8 @@ providers:
 
 对阿里云百炼 DashScope 和 DashScope Token Plan，IaC Code 为 `glm-5.2` 和 `kimi-k2.7-code` 内置了 `thinkingBudget=8192`。未设置 `maxCompletionTokens` 时，请求上限会按普通回答 token 上限加上有效 thinking budget 计算。
 
+交互式 REPL 用户可以通过 `/thinking_enabled on` 或 `/thinking_enabled off` 持久化 provider 级 `thinkingEnabled` 值；直接运行 `/thinking_enabled` 时，如果有控制台 UI，会打开“启用/禁用”选择器。一次性 headless 运行可以用 `--thinking-enabled` 或 `--no-thinking-enabled` 只覆盖本次请求的 thinking 行为，不会改写 `settings.yml`。
+
 A2A 请求可以通过 `message.metadata.iac_code.thinking` 或 `iac-code a2a-client call` 的 `--thinking-enabled`、`--thinking-effort`、`--thinking-budget` flag 在单次 message turn 覆盖这些设置。如果没有发送显式 A2A thinking metadata，runtime 会使用上述配置和 provider 自身默认行为。对于 base URL 指向 DashScope compatible-mode 的通用 `openai_compatible` provider，只有存在显式 thinking 策略时，iac-code 才会切换到 DashScope 原生 thinking wire format。
 
 ## 工具权限配置
