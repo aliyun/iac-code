@@ -3558,6 +3558,8 @@ class InlineREPL:
                         candidate_index=candidate.candidate_index,
                         template_content="",
                         mermaid_source=candidate.mermaid_source,
+                        diagram_stage=candidate.diagram_stage,
+                        views=candidate.diagram_views,
                     )
                 if candidate.summary or candidate.cost_items or candidate.total_monthly_cost:
                     yield CandidateDetailEvent(
@@ -4480,6 +4482,8 @@ class InlineREPL:
                         event.candidate_name,
                         event.mermaid_source,
                         candidate_index=event.candidate_index,
+                        views=event.views,
+                        diagram_stage=event.diagram_stage,
                     )
 
                 elif isinstance(event, CandidateDetailEvent):

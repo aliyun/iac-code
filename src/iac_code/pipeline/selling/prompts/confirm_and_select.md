@@ -18,16 +18,23 @@
 
 ### 展示候选方案
 
-对每个 `failed` 为 `false` 的方案，依次调用以下两个工具：
+对每个 `failed` 为 `false` 的方案，先让界面尽快拿到可展示内容；架构图工具会在内部先推送草图，再推送 LLM 优化后的架构图：
 
-#### 1. 生成架构图
-调用 `show_architecture_diagram` 工具：
+#### 1. 并行展示架构图和方案详情
+
+在同一个工具调用轮次中，同时调用以下两个只读展示工具。不要等待架构图 LLM 优化完成后再展示方案详情。
+
+调用一次 `show_architecture_diagram`：
 - `file_path`：取 `candidate.output_path`
 - `candidate_name`：取 `candidate.name`
 - `candidate_index`：该方案在 `evaluated_candidates` 数组中的 0 基下标
+- `mode`：固定为 `"facts"`
 
-#### 2. 展示方案详情
-调用 `show_candidate_detail` 工具：
+`facts` 模式会立即向界面推送一版无 LLM 语义优化的架构草图，并在工具内部使用同一份模板事实包调用 LLM 生成语义规划；LLM 完成后工具会再次推送优化后的多视图架构图。不要根据工具返回内容自行生成 `semantic_plan`，也不要为同一候选方案再调用第二次 `show_architecture_diagram`。
+
+在 `show_architecture_diagram` 工具返回之前，不要调用 `complete_step`；工具返回表示优化架构图已经推送，或 LLM 失败时已经推送最终回退图。
+
+同时调用 `show_candidate_detail` 工具：
 - `candidate_name`：取 `candidate.name`（必须与架构图的 candidate_name 一致）
 - `candidate_index`：该方案在 `evaluated_candidates` 数组中的 0 基下标
 - `summary`：根据方案内容撰写简洁的方案描述（2-3句话，包含核心产品组合和架构特点）
@@ -37,7 +44,8 @@
   - `monthly_cost`：月费用（如 "¥200/月"）
 - `total_monthly_cost`：月度总费用（如 "¥1,234/月"）
 
-- 先为所有方案调用 `show_architecture_diagram`，再为所有方案调用 `show_candidate_detail`
+如果多个方案都需要展示，必须对每个方案都调用一次“架构图 + 方案详情”的并行展示；不要为了架构图优化额外阻塞方案详情展示。
+
 - 不要用文字输出对比表格或方案信息 — 所有展示数据通过上述工具传递
 
 ### 待选择结论

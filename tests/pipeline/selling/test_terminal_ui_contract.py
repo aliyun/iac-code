@@ -43,6 +43,59 @@ def test_confirm_prompt_tells_model_to_output_candidate_index():
     assert "`options[].candidate_index`" in prompt
 
 
+def test_confirm_prompt_shows_candidate_detail_in_same_round_as_architecture_diagram():
+    prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
+
+    diagram_pos = prompt.index("调用一次 `show_architecture_diagram`")
+    detail_pos = prompt.index("调用 `show_candidate_detail` 工具")
+
+    assert diagram_pos < detail_pos
+    assert "在同一个工具调用轮次中，同时调用以下两个只读展示工具" in prompt
+    assert "先为所有方案调用 `show_architecture_diagram`，再为所有方案调用 `show_candidate_detail`" not in prompt
+
+
+def test_confirm_prompt_forbids_completion_before_optimized_architecture_diagram():
+    prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
+
+    assert "在 `show_architecture_diagram` 工具返回之前，不要调用 `complete_step`" in prompt
+
+
+def test_confirm_prompt_does_not_ask_main_model_to_generate_semantic_plan():
+    prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
+
+    assert "不要根据工具返回内容自行生成 `semantic_plan`" in prompt
+    assert "不要为同一候选方案再调用第二次 `show_architecture_diagram`" in prompt
+    assert "随后第二次调用 `show_architecture_diagram`" not in prompt
+    assert "`semantic_plan_scaffold`" not in prompt
+    assert "非平凡架构" not in prompt
+
+
+def test_confirm_step_only_exposes_selection_display_tools():
+    from unittest.mock import MagicMock
+
+    from iac_code.pipeline.engine.context import PipelineContext
+    from iac_code.pipeline.engine.step_executor import StepExecutor
+    from iac_code.tools.base import ToolRegistry
+
+    loaded = load_pipeline_dir(_selling_pipeline_dir())
+    confirm = next(step for step in loaded.steps if step.step_id == "confirm_and_select")
+    registry = ToolRegistry()
+    registry.register_default_tools()
+    executor = StepExecutor(
+        provider_manager=MagicMock(),
+        base_tool_registry=registry,
+        pipeline=loaded,
+        pipeline_dir=_selling_pipeline_dir(),
+    )
+
+    tool_reg = executor._build_step_tools(confirm, PipelineContext({"evaluated_candidates": []}))
+
+    assert tool_reg.get("complete_step") is not None
+    assert tool_reg.get("show_architecture_diagram") is not None
+    assert tool_reg.get("show_candidate_detail") is not None
+    assert tool_reg.get("read_file") is None
+
+
 def test_confirm_prompt_tells_model_to_preserve_parameter_overrides():
     prompt = (_selling_pipeline_dir() / "prompts" / "confirm_and_select.md").read_text(encoding="utf-8")
 

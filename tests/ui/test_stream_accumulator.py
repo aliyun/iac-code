@@ -1,4 +1,4 @@
-from iac_code.types.stream_events import MCPProgressEvent, ToolResultEvent, ToolUseStartEvent
+from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY, MCPProgressEvent, ToolResultEvent, ToolUseStartEvent
 from iac_code.ui.stream_accumulator import StreamAccumulator
 
 
@@ -32,13 +32,14 @@ def test_orphan_tool_result_fallback_allows_single_pending_tool_name() -> None:
     assert acc.tool_records["tool-a"].result == "ok"
 
 
-def test_tool_use_start_records_renderer_tool() -> None:
+def test_tool_use_start_records_render_metadata() -> None:
     acc = StreamAccumulator()
-    renderer_tool = object()
+    metadata = {TOOL_RENDER_METADATA_KEY: {"display_name": "InfraGuard scan"}}
 
-    acc.process(ToolUseStartEvent(tool_use_id="tool-a", name="infraguard_scan", renderer_tool=renderer_tool))
+    acc.process(ToolUseStartEvent(tool_use_id="tool-a", name="infraguard_scan", metadata=metadata))
 
-    assert acc.tool_records["tool-a"].renderer_tool is renderer_tool
+    assert acc.tool_records["tool-a"].metadata == metadata
+    assert not hasattr(acc.tool_records["tool-a"], "renderer_tool")
 
 
 def test_mcp_progress_updates_matching_tool_record() -> None:

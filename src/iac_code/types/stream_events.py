@@ -10,6 +10,12 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Literal, Union
 
+TOOL_RENDER_METADATA_KEY = "_iac_code_tool_render"
+TOOL_RENDER_DISPLAY_NAME_KEY = "display_name"
+TOOL_RENDER_RESULT_COMPACT_KEY = "result_compact"
+TOOL_RENDER_RESULT_VERBOSE_KEY = "result_verbose"
+TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY = "render_verbose_result_in_transcript"
+
 
 @dataclass
 class Usage:
@@ -58,7 +64,7 @@ class ToolUseStartEvent:
 
     tool_use_id: str
     name: str
-    renderer_tool: Any | None = field(default=None, repr=False, compare=False)
+    metadata: dict[str, Any] | None = None
     type: Literal["tool_use_start"] = "tool_use_start"
 
 
@@ -282,6 +288,9 @@ class DiagramEvent(ToolEmittedEvent):
     template_content: str
     mermaid_source: str
     candidate_index: int | None = None
+    architecture_context: dict[str, Any] | None = None
+    diagram_stage: Literal["draft", "optimized"] = "optimized"
+    views: list[dict[str, str]] = field(default_factory=list)
     type: Literal["diagram"] = "diagram"
 
 

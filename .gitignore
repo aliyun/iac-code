@@ -157,6 +157,7 @@ cython_debug/
 # Project specific
 *.local
 .local-observe/
+src/iac_code/pipeline/engine/architecture_rules.json.backup-*
 
 # Docs
 /docs/

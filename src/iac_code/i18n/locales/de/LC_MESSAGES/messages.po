@@ -2958,6 +2958,63 @@ msgstr "ROS-Bereitstellung"
 msgid "InfraGuard scan"
 msgstr "InfraGuard-Scan"
 
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "ECS instance"
+msgstr "ECS-Instanz"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "ECS instance group"
+msgstr "ECS-Instanzgruppe"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Elastic IP address"
+msgstr "Elastische IP-Adresse"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "SLB load balancer"
+msgstr "SLB-Load-Balancer"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "NAT gateway"
+msgstr "NAT-Gateway"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Shared bandwidth package"
+msgstr "Paket für gemeinsam genutzte Bandbreite"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Database instance"
+msgstr "Datenbankinstanz"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "VPC"
+msgstr "VPC"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "VSwitch"
+msgstr "VSwitch"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Security group"
+msgstr "Sicherheitsgruppe"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "YAML parse error"
+msgstr "YAML-Analysefehler"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "related resource"
+msgstr "zugehörige Ressource"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "Architecture overview"
+msgstr "Architekturübersicht"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Show the complete architecture diagram."
+msgstr "Vollständiges Architekturdiagramm anzeigen."
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -3627,50 +3684,6 @@ msgid "{command} exited with {returncode}: {body}"
 msgstr "{command} wurde mit {returncode} beendet: {body}"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "ECS instance"
-msgstr "ECS-Instanz"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "ECS instance group"
-msgstr "ECS-Instanzgruppe"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Elastic IP address"
-msgstr "Elastische IP-Adresse"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "SLB load balancer"
-msgstr "SLB-Load-Balancer"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "NAT gateway"
-msgstr "NAT-Gateway"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Shared bandwidth package"
-msgstr "Paket für gemeinsam genutzte Bandbreite"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Database instance"
-msgstr "Datenbankinstanz"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "VPC"
-msgstr "VPC"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "VSwitch"
-msgstr "VSwitch"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Security group"
-msgstr "Sicherheitsgruppe"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "YAML parse error"
-msgstr "YAML-Analysefehler"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid ""
 "Read a ROS template YAML file and generate an architecture diagram. Pass "
 "the template file path relative to the working directory and the "
@@ -3702,9 +3715,32 @@ msgstr ""
 "Unterscheidung doppelter Namen"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Use facts to emit an immediate draft diagram and internally optimize it "
+"with the LLM; use render to emit a diagram from an explicit "
+"semantic_plan."
+msgstr ""
+"Mit facts sofort einen Diagrammentwurf ausgeben und intern mit dem LLM "
+"optimieren; mit render ein Diagramm aus einem expliziten semantic_plan "
+"ausgeben."
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Optional LLM-generated semantic graph plan. Edges must reference visible "
+"node ids from a prior facts response."
+msgstr ""
+"Optionaler vom LLM generierter semantischer Graphplan. Kanten müssen "
+"sichtbare Knoten-IDs aus einer vorherigen facts-Antwort referenzieren."
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
 #, python-brace-format
 msgid "Template file does not exist: {file_path}"
 msgstr "Template-Datei existiert nicht: {file_path}"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+#, python-brace-format
+msgid "Generated and optimized the architecture diagram for \"{candidate_name}\"."
+msgstr "Architekturdiagramm für „{candidate_name}“ wurde generiert und optimiert."
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 #, python-brace-format
@@ -6097,12 +6133,21 @@ msgid "Scroll down to view more"
 msgstr "Nach unten scrollen, um mehr zu sehen"
 
 #: src/iac_code/ui/components/candidate_selection.py
+msgid "架构图优化中..."
+msgstr "Architekturdiagramm wird optimiert..."
+
+#: src/iac_code/ui/components/candidate_selection.py
 msgid "Loading architecture diagram..."
 msgstr "Architekturdiagramm wird geladen..."
 
 #: src/iac_code/ui/components/candidate_selection.py
 msgid "Loading candidate details..."
 msgstr "Kandidatendetails werden geladen..."
+
+#: src/iac_code/ui/components/candidate_selection.py
+#, python-brace-format
+msgid "Diagram {index}"
+msgstr "Diagramm {index}"
 
 #: src/iac_code/ui/components/candidate_selection.py
 msgid ""
@@ -6126,6 +6171,10 @@ msgstr " | 1-{count} direkt springen"
 #: src/iac_code/ui/components/candidate_selection.py
 msgid "↑ ↓ scroll"
 msgstr "↑ ↓ scrollen"
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "switch diagrams"
+msgstr "Diagramme wechseln"
 
 #: src/iac_code/ui/components/fuzzy_picker.py
 msgid "No matches found"
@@ -6754,4 +6803,34 @@ msgstr "Öffnen einer nicht regulären Datei verweigert: {path}"
 
 #~ msgid "feature"
 #~ msgstr "Funktion"
+
+#~ msgid "ECS instance"
+#~ msgstr "ECS-Instanz"
+
+#~ msgid "ECS instance group"
+#~ msgstr "ECS-Instanzgruppe"
+
+#~ msgid "Elastic IP address"
+#~ msgstr "Elastische IP-Adresse"
+
+#~ msgid "SLB load balancer"
+#~ msgstr "SLB-Load-Balancer"
+
+#~ msgid "NAT gateway"
+#~ msgstr "NAT-Gateway"
+
+#~ msgid "Shared bandwidth package"
+#~ msgstr "Paket für gemeinsam genutzte Bandbreite"
+
+#~ msgid "Database instance"
+#~ msgstr "Datenbankinstanz"
+
+#~ msgid "VPC"
+#~ msgstr "VPC"
+
+#~ msgid "VSwitch"
+#~ msgstr "VSwitch"
+
+#~ msgid "Security group"
+#~ msgstr "Sicherheitsgruppe"
 

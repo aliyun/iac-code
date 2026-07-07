@@ -47,6 +47,10 @@ from iac_code.services.permissions.audit import (
 )
 from iac_code.tools.cloud.types import translate_status
 from iac_code.types.stream_events import (
+    TOOL_RENDER_DISPLAY_NAME_KEY,
+    TOOL_RENDER_METADATA_KEY,
+    TOOL_RENDER_RESULT_COMPACT_KEY,
+    TOOL_RENDER_RESULT_VERBOSE_KEY,
     AskUserQuestionEvent,
     CompactionEvent,
     DiagramEvent,
@@ -72,7 +76,9 @@ from iac_code.types.stream_events import (
 )
 from iac_code.ui.components.select import OptionType, Select, SelectLayout, TextOption
 from iac_code.ui.core.key_event import KeyEvent
+from iac_code.ui.diagram_rendering import style_attachment_lines
 from iac_code.ui.spinner import ShimmerSpinner
+from iac_code.ui.stream_accumulator import merge_tool_metadata
 from iac_code.utils.json_utils import extract_partial_string_fields
 
 if TYPE_CHECKING:
@@ -103,6 +109,22 @@ def _known_tool_result_message(
     from iac_code.tools.cloud.aliyun.ros_template_tools import render_ros_template_tool_result_message
 
     return render_ros_template_tool_result_message(tool_name, output, is_error=is_error, verbose=verbose)
+
+
+def _tool_render_metadata(rec: "_ToolCallRecord") -> dict[str, Any]:
+    metadata = rec.metadata if isinstance(rec.metadata, dict) else {}
+    render_metadata = metadata.get(TOOL_RENDER_METADATA_KEY)
+    return render_metadata if isinstance(render_metadata, dict) else {}
+
+
+def _tool_render_metadata_text(rec: "_ToolCallRecord", key: str) -> str | None:
+    value = _tool_render_metadata(rec).get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _metadata_tool_result_message(rec: "_ToolCallRecord", *, verbose: bool) -> str | None:
+    key = TOOL_RENDER_RESULT_VERBOSE_KEY if verbose else TOOL_RENDER_RESULT_COMPACT_KEY
+    return _tool_render_metadata_text(rec, key)
 
 
 def _permission_detail_text(tool_name: str, tool_input: dict[str, Any], tool: Any | None) -> str | None:
@@ -291,6 +313,56 @@ class StreamingInputBuffer:
         self._queued_inputs.append(text)
         self._chars.clear()
         return True
+
+
+def _archive_segments_for_scrollback(segments: list[_Segment]) -> list[_Segment]:
+    """Create scrollback-safe segment copies.
+
+    Streaming segments may reference runtime-only renderables such as progress
+    widgets. Some of those objects own locks, so a blind ``deepcopy`` can fail
+    while finalizing the turn. Scrollback only needs the stable display data;
+    live render helpers are resolved again from the registry when possible.
+    """
+
+    return [_archive_segment_for_scrollback(segment) for segment in segments]
+
+
+def _archive_segment_for_scrollback(segment: _Segment) -> _Segment:
+    if segment.kind == "tool" and segment.tool is not None:
+        return _Segment(
+            kind=segment.kind,
+            text=segment.text,
+            tool=_archive_tool_record_for_scrollback(segment.tool),
+            elapsed_seconds=segment.elapsed_seconds,
+        )
+    return _Segment(kind=segment.kind, text=segment.text, elapsed_seconds=segment.elapsed_seconds)
+
+
+def _archive_tool_record_for_scrollback(record: _ToolCallRecord) -> _ToolCallRecord:
+    children = None
+    if record.children is not None:
+        children = [
+            _SubAgentChild(
+                tool_name=child.tool_name,
+                tool_input=copy.deepcopy(child.tool_input),
+                is_done=child.is_done,
+                is_error=child.is_error,
+            )
+            for child in record.children
+        ]
+
+    return _ToolCallRecord(
+        tool_name=record.tool_name,
+        tool_input=copy.deepcopy(record.tool_input),
+        partial_input=record.partial_input,
+        result=record.result,
+        is_error=record.is_error,
+        done=record.done,
+        children=children,
+        start_time=record.start_time,
+        progress_renderable=None,
+        metadata=copy.deepcopy(record.metadata),
+    )
 
 
 class Renderer:
@@ -642,7 +714,7 @@ class Renderer:
             from importlib import import_module
 
             render_rich = import_module("termaid").render_rich
-            diagram = render_rich(event.mermaid_source)
+            diagram = style_attachment_lines(render_rich(event.mermaid_source))
             return Group(title, Text(""), diagram, Text(""))
         except ImportError:
             pass  # Silent degrade — termaid optional dependency missing.
@@ -663,6 +735,10 @@ class Renderer:
         if rec.children:
             return True
         tool = self._tool_for_record(rec)
+        compact_metadata = _metadata_tool_result_message(rec, verbose=False)
+        verbose_metadata = _metadata_tool_result_message(rec, verbose=True)
+        if verbose_metadata is not None and compact_metadata != verbose_metadata:
+            return True
         if tool is None:
             return False
         if tool.render_tool_use_message(rec.tool_input, verbose=False) != tool.render_tool_use_message(
@@ -679,7 +755,7 @@ class Renderer:
         return any(s.kind == "tool" and s.tool and self._has_verbose_content(s.tool) for s in segments)
 
     def _tool_for_record(self, rec: _ToolCallRecord):
-        return rec.renderer_tool or self._tool_registry.get(rec.tool_name)
+        return self._tool_registry.get(rec.tool_name)
 
     def _render_tool_header(self, rec: _ToolCallRecord) -> Text:
         """Render ``● ToolName(detail)`` line with optional child tool tree."""
@@ -695,7 +771,12 @@ class Renderer:
                 effective_input = extract_partial_string_fields(rec.partial_input, set(preview_fields))
 
         raw_tool_name = rec.tool_name
-        tool_name = _display_tool_name(raw_tool_name, tool.user_facing_name(effective_input) if tool else raw_tool_name)
+        candidate_name = (
+            tool.user_facing_name(effective_input)
+            if tool
+            else _tool_render_metadata_text(rec, TOOL_RENDER_DISPLAY_NAME_KEY)
+        )
+        tool_name = _display_tool_name(raw_tool_name, candidate_name)
         detail = tool.render_tool_use_message(effective_input, verbose=self._verbose) if tool else None
 
         line = Text()
@@ -784,6 +865,8 @@ class Renderer:
             result_text = tool.render_tool_result_message(
                 rec.result or "", is_error=rec.is_error, verbose=self._verbose
             )
+        if result_text is None:
+            result_text = _metadata_tool_result_message(rec, verbose=self._verbose)
         if result_text is None and rec.result:
             result_text = _known_tool_result_message(
                 rec.tool_name,
@@ -1244,7 +1327,7 @@ class Renderer:
                         tool_name=event.name,
                         tool_input={},
                         start_time=time.monotonic(),
-                        renderer_tool=event.renderer_tool,
+                        metadata=event.metadata,
                     )
                     tool_records[event.tool_use_id] = rec
                     segments.append(_Segment(kind="tool", tool=rec))
@@ -1293,6 +1376,7 @@ class Renderer:
                         rec.result = event.result
                         rec.is_error = event.is_error
                         rec.done = True
+                        rec.metadata = merge_tool_metadata(rec.metadata, event.metadata)
                     spinner = None
                     _ensure_live()
                     _update_live()
@@ -1847,7 +1931,7 @@ class Renderer:
 
     def _print_segments_to_scrollback(self, segments: list[_Segment], trailing_text: str) -> None:
         """Print finalized segments to terminal scrollback."""
-        archived = copy.deepcopy(segments)
+        archived = _archive_segments_for_scrollback(segments)
         if trailing_text:
             archived.append(_Segment(kind="text", text=trailing_text))
         if not archived:

@@ -6,7 +6,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -27,6 +27,8 @@ class DisplayCandidate:
     name: str
     candidate_index: int | None = None
     mermaid_source: str = ""
+    diagram_stage: str = "optimized"
+    diagram_views: list[dict[str, str]] = field(default_factory=list)
     summary: str = ""
     cost_items: list[dict[str, Any]] = field(default_factory=list)
     total_monthly_cost: str = ""
@@ -158,6 +160,8 @@ class PipelineDisplayRecorder:
                 "candidate_name": getattr(event, "candidate_name", ""),
                 "candidate_index": getattr(event, "candidate_index", None),
                 "mermaid_source": getattr(event, "mermaid_source", ""),
+                "diagram_stage": getattr(event, "diagram_stage", "optimized"),
+                "views": getattr(event, "views", []),
             },
         )
 
@@ -322,6 +326,8 @@ class PipelineDisplayReducer:
             if event_type == "candidate_diagram" and attempt is not None:
                 candidate = self._candidate(attempt, payload)
                 candidate.mermaid_source = str(payload.get("mermaid_source") or "")
+                candidate.diagram_stage = self._diagram_stage(payload.get("diagram_stage"))
+                candidate.diagram_views = self._diagram_views(payload.get("views"), candidate.mermaid_source)
                 if attempt.candidate_selection.state == "none":
                     attempt.candidate_selection.state = "preparing"
                 continue
@@ -458,6 +464,43 @@ class PipelineDisplayReducer:
             except (TypeError, ValueError):
                 pass
         return str(payload.get("candidate_name") or "")
+
+    @staticmethod
+    def _diagram_stage(value: Any) -> str:
+        return "draft" if value == "draft" else "optimized"
+
+    @staticmethod
+    def _diagram_views(value: Any, fallback_mermaid_source: str) -> list[dict[str, str]]:
+        views: list[dict[str, str]] = []
+        if isinstance(value, list):
+            for index, raw in enumerate(value, start=1):
+                if not isinstance(raw, dict):
+                    continue
+                raw_view = cast(dict[str, Any], raw)
+                mermaid_source = raw_view.get("mermaid_source") or raw_view.get("mermaidSource")
+                if not isinstance(mermaid_source, str) or not mermaid_source:
+                    continue
+                view_id = raw_view.get("id")
+                title = raw_view.get("title")
+                purpose = raw_view.get("purpose")
+                views.append(
+                    {
+                        "id": str(view_id or f"view_{index}"),
+                        "title": str(title or view_id or f"Diagram {index}"),
+                        "purpose": str(purpose or ""),
+                        "mermaid_source": mermaid_source,
+                    }
+                )
+        if not views and fallback_mermaid_source:
+            views.append(
+                {
+                    "id": "overview",
+                    "title": "Architecture overview",
+                    "purpose": "",
+                    "mermaid_source": fallback_mermaid_source,
+                }
+            )
+        return views
 
     def _candidate(self, attempt: DisplayAttempt, payload: dict[str, Any]) -> DisplayCandidate:
         key = self._candidate_key(payload)

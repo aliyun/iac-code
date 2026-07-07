@@ -23,6 +23,7 @@ from iac_code.pipeline.engine.display_replay import (
     DisplaySubPipeline,
     DisplaySubStepAttempt,
 )
+from iac_code.ui.diagram_rendering import style_attachment_lines
 from iac_code.ui.pipeline_styles import pipeline_step_header, pipeline_title
 
 
@@ -224,6 +225,8 @@ class PipelineDisplayReplayRenderer:
                     candidate_name,
                     candidate.mermaid_source,
                     candidate_index=candidate.candidate_index,
+                    views=candidate.diagram_views,
+                    diagram_stage=candidate.diagram_stage,
                 )
             if candidate.summary or candidate.cost_items or candidate.total_monthly_cost:
                 renderer.add_detail(
@@ -291,7 +294,7 @@ class PipelineDisplayReplayRenderer:
             from importlib import import_module
 
             render_rich = import_module("termaid").render_rich
-            return render_rich(mermaid_source)
+            return style_attachment_lines(render_rich(mermaid_source))
         except Exception:
             return Markdown(f"```mermaid\n{mermaid_source}\n```")
 

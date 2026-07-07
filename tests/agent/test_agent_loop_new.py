@@ -11,6 +11,9 @@ from iac_code.tools.base import ToolResult
 from iac_code.tools.tool_executor import ToolExecutor
 from iac_code.types.permissions import PermissionResult
 from iac_code.types.stream_events import (
+    TOOL_RENDER_DISPLAY_NAME_KEY,
+    TOOL_RENDER_METADATA_KEY,
+    TOOL_RENDER_RESULT_COMPACT_KEY,
     CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -1802,7 +1805,7 @@ class TestAgentLoopStreaming:
         assert tool_blocks[0].content == "preview result"
         assert tool_blocks[0].metadata == {"_iac_code_externalized_result_path": str(stored_result)}
 
-    async def test_tool_use_start_event_carries_renderer_tool(self, mock_provider, mock_registry):
+    async def test_tool_events_carry_render_metadata_not_renderer_tool(self, mock_provider, mock_registry):
         call_count = 0
 
         async def fake_stream(messages, system, tools=None, max_tokens=8192):
@@ -1823,6 +1826,7 @@ class TestAgentLoopStreaming:
             input_schema={},
             needs_event_queue=lambda: False,
             check_permissions=AsyncMock(return_value=PermissionResult(behavior="allow")),
+            user_facing_name=lambda input=None: "Rendered tool",
             render_tool_result_message=lambda output, *, is_error=False, verbose=False: (
                 "verbose result" if verbose else "compact result"
             ),
@@ -1843,10 +1847,19 @@ class TestAgentLoopStreaming:
 
         tool_results = [e for e in events if isinstance(e, ToolResultEvent)]
         assert len(tool_results) == 1
-        assert tool_results[0].metadata is None
+        assert tool_results[0].metadata == {
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_RESULT_COMPACT_KEY: "compact result",
+            }
+        }
         tool_starts = [e for e in events if isinstance(e, ToolUseStartEvent)]
         assert len(tool_starts) == 1
-        assert tool_starts[0].renderer_tool is tool
+        assert not hasattr(tool_starts[0], "renderer_tool")
+        assert tool_starts[0].metadata == {
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_DISPLAY_NAME_KEY: "Rendered tool",
+            }
+        }
 
     async def test_terminal_error_step_result_metadata_stops_streaming(self, mock_provider, mock_registry):
         from iac_code.pipeline.engine.types import StepResult, StepStatus

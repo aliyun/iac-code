@@ -450,7 +450,7 @@ steps:
         prompt: prompts/confirm_and_select.a2a.md
         inject_tools: []
     tools:
-      include: [read_file]
+      include: [complete_step]
       exclude: []
     conclusion_schema:
       type: object

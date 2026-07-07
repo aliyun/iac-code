@@ -32,6 +32,11 @@ from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY,
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import PermissionAuditSettings, PermissionResult
 from iac_code.types.stream_events import (
+    TOOL_RENDER_DISPLAY_NAME_KEY,
+    TOOL_RENDER_METADATA_KEY,
+    TOOL_RENDER_RESULT_COMPACT_KEY,
+    TOOL_RENDER_RESULT_VERBOSE_KEY,
+    TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
     CompactionEvent,
     MessageEndEvent,
     PermissionRequestEvent,
@@ -925,7 +930,13 @@ class AgentLoop:
                     tools=provider_tools,
                 ):
                     if isinstance(event, ToolUseStartEvent):
-                        event = replace(event, renderer_tool=self.tool_registry.get(event.name))
+                        event = replace(
+                            event,
+                            metadata=self._tool_use_start_metadata(
+                                event.metadata,
+                                self.tool_registry.get(event.name),
+                            ),
+                        )
                     yield event  # Forward all provider events to UI
 
                     # Collect data from events
@@ -1234,6 +1245,12 @@ class AgentLoop:
                     processed = self._result_storage.process(req.id, result.content)
                     self._mark_read_memory_tool_result(req, result)
                     result_metadata = self._tool_result_event_metadata(result.metadata, processed)
+                    result_metadata = self._tool_result_render_metadata(
+                        result_metadata,
+                        self.tool_registry.get(req.name),
+                        processed.content,
+                        is_error=result.is_error,
+                    )
 
                     yield ToolResultEvent(
                         tool_use_id=req.id,
@@ -1311,6 +1328,72 @@ class AgentLoop:
         event_metadata = dict(metadata or {})
         event_metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] = str(processed.file_path)
         return event_metadata
+
+    @staticmethod
+    def _merge_tool_render_metadata(
+        metadata: dict[str, Any] | None,
+        render_metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not render_metadata:
+            return metadata
+        merged = dict(metadata or {})
+        existing = merged.get(TOOL_RENDER_METADATA_KEY)
+        if isinstance(existing, dict):
+            render_metadata = {**existing, **render_metadata}
+        merged[TOOL_RENDER_METADATA_KEY] = render_metadata
+        return merged
+
+    @classmethod
+    def _tool_use_start_metadata(cls, metadata: dict[str, Any] | None, tool: Any | None) -> dict[str, Any] | None:
+        if tool is None:
+            return metadata
+
+        render_metadata: dict[str, Any] = {}
+        user_facing_name = getattr(tool, "user_facing_name", None)
+        if callable(user_facing_name):
+            try:
+                display_name = user_facing_name({})
+            except Exception:
+                display_name = None
+            if isinstance(display_name, str) and display_name and display_name != getattr(tool, "name", None):
+                render_metadata[TOOL_RENDER_DISPLAY_NAME_KEY] = display_name
+
+        if bool(getattr(tool, "render_verbose_result_in_transcript", False)):
+            render_metadata[TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY] = True
+
+        return cls._merge_tool_render_metadata(metadata, render_metadata)
+
+    @classmethod
+    def _tool_result_render_metadata(
+        cls,
+        metadata: dict[str, Any] | None,
+        tool: Any | None,
+        output: str,
+        *,
+        is_error: bool,
+    ) -> dict[str, Any] | None:
+        render_result = getattr(tool, "render_tool_result_message", None)
+        if not callable(render_result):
+            return metadata
+
+        render_metadata: dict[str, Any] = {}
+        try:
+            compact = render_result(output, is_error=is_error, verbose=False)
+        except Exception:
+            compact = None
+        if isinstance(compact, str) and compact:
+            render_metadata[TOOL_RENDER_RESULT_COMPACT_KEY] = compact
+
+        if bool(getattr(tool, "render_verbose_result_in_transcript", False)):
+            render_metadata[TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY] = True
+            try:
+                verbose = render_result(output, is_error=is_error, verbose=True)
+            except Exception:
+                verbose = None
+            if isinstance(verbose, str) and verbose:
+                render_metadata[TOOL_RENDER_RESULT_VERBOSE_KEY] = verbose
+
+        return cls._merge_tool_render_metadata(metadata, render_metadata)
 
     @staticmethod
     def _tool_result_block_metadata(processed: Any) -> dict[str, Any]:

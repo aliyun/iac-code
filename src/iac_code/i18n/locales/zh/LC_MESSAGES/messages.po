@@ -2825,6 +2825,63 @@ msgstr "ROS 部署"
 msgid "InfraGuard scan"
 msgstr "InfraGuard 扫描"
 
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "ECS instance"
+msgstr "ECS 实例"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "ECS instance group"
+msgstr "ECS 实例组"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Elastic IP address"
+msgstr "弹性公网 IP"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "SLB load balancer"
+msgstr "SLB 负载均衡"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "NAT gateway"
+msgstr "NAT 网关"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Shared bandwidth package"
+msgstr "共享带宽包"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Database instance"
+msgstr "数据库实例"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "VPC"
+msgstr "专有网络 VPC"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "VSwitch"
+msgstr "交换机"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Security group"
+msgstr "安全组"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "YAML parse error"
+msgstr "YAML 解析错误"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "related resource"
+msgstr "相关资源"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "Architecture overview"
+msgstr "架构概览"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "Show the complete architecture diagram."
+msgstr "显示完整架构图。"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -3376,50 +3433,6 @@ msgid "{command} exited with {returncode}: {body}"
 msgstr "{command} 退出，返回码 {returncode}：{body}"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "ECS instance"
-msgstr "ECS 实例"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "ECS instance group"
-msgstr "ECS 实例组"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Elastic IP address"
-msgstr "弹性公网 IP"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "SLB load balancer"
-msgstr "SLB 负载均衡"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "NAT gateway"
-msgstr "NAT 网关"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Shared bandwidth package"
-msgstr "共享带宽包"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Database instance"
-msgstr "数据库实例"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "VPC"
-msgstr "专有网络 VPC"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "VSwitch"
-msgstr "交换机"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "Security group"
-msgstr "安全组"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
-msgid "YAML parse error"
-msgstr "YAML 解析错误"
-
-#: src/iac_code/pipeline/engine/show_diagram_tool.py
 msgid ""
 "Read a ROS template YAML file and generate an architecture diagram. Pass "
 "the template file path relative to the working directory and the "
@@ -3444,9 +3457,27 @@ msgid ""
 msgstr "候选方案在 evaluated_candidates 中的 0 基下标；用于区分重名方案"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Use facts to emit an immediate draft diagram and internally optimize it "
+"with the LLM; use render to emit a diagram from an explicit "
+"semantic_plan."
+msgstr "使用 facts 立即发出草稿架构图，并由 LLM 在工具内部优化；使用 render 根据显式 semantic_plan 发出架构图。"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+msgid ""
+"Optional LLM-generated semantic graph plan. Edges must reference visible "
+"node ids from a prior facts response."
+msgstr "可选的 LLM 生成语义图计划。边必须引用前一次 facts 响应中的可见节点 ID。"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
 #, python-brace-format
 msgid "Template file does not exist: {file_path}"
 msgstr "模板文件不存在: {file_path}"
+
+#: src/iac_code/pipeline/engine/show_diagram_tool.py
+#, python-brace-format
+msgid "Generated and optimized the architecture diagram for \"{candidate_name}\"."
+msgstr "已生成并优化“{candidate_name}”的架构图。"
 
 #: src/iac_code/pipeline/engine/show_diagram_tool.py
 #, python-brace-format
@@ -5718,12 +5749,21 @@ msgid "Scroll down to view more"
 msgstr "向下滚动查看更多"
 
 #: src/iac_code/ui/components/candidate_selection.py
+msgid "架构图优化中..."
+msgstr "架构图优化中..."
+
+#: src/iac_code/ui/components/candidate_selection.py
 msgid "Loading architecture diagram..."
 msgstr "架构图加载中..."
 
 #: src/iac_code/ui/components/candidate_selection.py
 msgid "Loading candidate details..."
 msgstr "方案详情加载中..."
+
+#: src/iac_code/ui/components/candidate_selection.py
+#, python-brace-format
+msgid "Diagram {index}"
+msgstr "架构图 {index}"
 
 #: src/iac_code/ui/components/candidate_selection.py
 msgid ""
@@ -5745,6 +5785,10 @@ msgstr " | 1-{count} 直接跳转"
 #: src/iac_code/ui/components/candidate_selection.py
 msgid "↑ ↓ scroll"
 msgstr "↑ ↓ 滚动"
+
+#: src/iac_code/ui/components/candidate_selection.py
+msgid "switch diagrams"
+msgstr "切换架构图"
 
 #: src/iac_code/ui/components/fuzzy_picker.py
 msgid "No matches found"
@@ -6281,4 +6325,34 @@ msgstr "拒绝打开非常规文件：{path}"
 
 #~ msgid "feature"
 #~ msgstr "功能"
+
+#~ msgid "ECS instance"
+#~ msgstr "ECS 实例"
+
+#~ msgid "ECS instance group"
+#~ msgstr "ECS 实例组"
+
+#~ msgid "Elastic IP address"
+#~ msgstr "弹性公网 IP"
+
+#~ msgid "SLB load balancer"
+#~ msgstr "SLB 负载均衡"
+
+#~ msgid "NAT gateway"
+#~ msgstr "NAT 网关"
+
+#~ msgid "Shared bandwidth package"
+#~ msgstr "共享带宽包"
+
+#~ msgid "Database instance"
+#~ msgstr "数据库实例"
+
+#~ msgid "VPC"
+#~ msgstr "专有网络 VPC"
+
+#~ msgid "VSwitch"
+#~ msgstr "交换机"
+
+#~ msgid "Security group"
+#~ msgstr "安全组"
 
