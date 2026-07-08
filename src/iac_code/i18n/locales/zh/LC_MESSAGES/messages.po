@@ -3701,6 +3701,16 @@ msgstr "{name} 创建失败：{reason}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
+msgid "Fields are not supported for action '{action}': {fields}"
+msgstr "操作 '{action}' 不支持这些字段：{fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Missing required field(s) for action '{action}': {fields}"
+msgstr "操作 '{action}' 缺少必填字段：{fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
 msgid "Create ROS stack: {target}"
 msgstr "创建 ROS 资源栈：{target}"
 
@@ -3708,6 +3718,11 @@ msgstr "创建 ROS 资源栈：{target}"
 #, python-brace-format
 msgid "Continue ROS stack creation: {target}"
 msgstr "继续创建 ROS 资源栈：{target}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Wait for ROS stack creation: {target}"
+msgstr "等待 ROS 资源栈创建：{target}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format

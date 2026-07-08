@@ -23,7 +23,19 @@ from iac_code.types.permissions import (
 )
 
 _OWNED_STACKS_KEY = "ros_deploy_owned_stack_ids"
-_ACTIONS = ("create", "continue_create", "delete_and_create")
+_ACTIONS = ("create", "continue_create", "delete_and_create", "wait")
+_ACTION_ALLOWED_FIELDS = {
+    "create": frozenset(("action", "stack_name", "template_url", "parameters", "region_id")),
+    "continue_create": frozenset(("action", "stack_id", "template_url", "parameters", "region_id")),
+    "delete_and_create": frozenset(("action", "stack_id", "stack_name", "template_url", "parameters", "region_id")),
+    "wait": frozenset(("action", "stack_id", "region_id")),
+}
+_ACTION_REQUIRED_FIELDS = {
+    "create": ("stack_name", "template_url"),
+    "continue_create": ("stack_id", "template_url"),
+    "delete_and_create": ("stack_id", "stack_name", "template_url"),
+    "wait": ("stack_id",),
+}
 _SAFE_RULE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$")
 _ROS_ERROR_CODE_RE = re.compile(r"\bcode:\s*([A-Za-z0-9_.-]+)")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -100,10 +112,15 @@ class RosDeployTool(Tool):
         return "ros_deploy"
 
     @property
+    def timeout(self) -> float | None:
+        return 3600.0
+
+    @property
     def description(self) -> str:
         return (
             "Deploy a ROS template in the selling pipeline. Use create for the initial stack, continue_create for "
-            "failed stacks created by this step, and delete_and_create only after ContinueCreateStackValidationFailed."
+            "failed stacks created by this step, delete_and_create only after ContinueCreateStackValidationFailed, "
+            "and wait to resume polling an already-started stack creation."
         )
 
     @property
@@ -122,7 +139,7 @@ class RosDeployTool(Tool):
                 },
                 "stack_id": {
                     "type": "string",
-                    "description": "Failed stack ID for continue_create or delete_and_create.",
+                    "description": "Stack ID for wait, or failed stack ID for continue_create/delete_and_create.",
                 },
                 "template_url": {
                     "type": "string",
@@ -145,6 +162,9 @@ class RosDeployTool(Tool):
     @property
     def supports_blanket_allow(self) -> bool:
         return False
+
+    def is_read_only(self, input: dict | None = None) -> bool:
+        return isinstance(input, dict) and input.get("action") == "wait"
 
     def user_facing_name(self, input: dict | None = None) -> str:
         return _("ROS Deploy")
@@ -212,10 +232,40 @@ class RosDeployTool(Tool):
         return False
 
     def is_destructive(self, input: dict | None = None) -> bool:
-        return True
+        return not self.is_read_only(input)
 
     def _new_stack_tool(self) -> RosStack:
         return RosStack(allow_pipeline_deployment_actions=True)
+
+    def validate_input(self, tool_input: dict[str, Any]) -> tuple[bool, str]:
+        valid, error = super().validate_input(tool_input)
+        if not valid:
+            return valid, error
+        if action_error := self._action_input_error(tool_input):
+            return False, action_error
+        return True, ""
+
+    @staticmethod
+    def _action_input_error(input: dict[str, Any]) -> str | None:
+        action = _string_value(input.get("action"))
+        if action not in _ACTIONS:
+            return None
+
+        unsupported_fields = sorted(set(input) - _ACTION_ALLOWED_FIELDS[action])
+        if unsupported_fields:
+            return _("Fields are not supported for action '{action}': {fields}").format(
+                action=action,
+                fields=", ".join(unsupported_fields),
+            )
+
+        missing_fields = [field for field in _ACTION_REQUIRED_FIELDS[action] if not _string_value(input.get(field))]
+        if missing_fields:
+            return _("Missing required field(s) for action '{action}': {fields}").format(
+                action=action,
+                fields=", ".join(missing_fields),
+            )
+
+        return None
 
     def _owned_stacks(self) -> dict[str, Any]:
         stacks = self._completion_guard_state.setdefault(_OWNED_STACKS_KEY, {})
@@ -236,7 +286,7 @@ class RosDeployTool(Tool):
         action = _string_value(input.get("action"))
         if action == "create":
             return _string_value(input.get("stack_name"))
-        if action in {"continue_create", "delete_and_create"}:
+        if action in {"continue_create", "delete_and_create", "wait"}:
             return _string_value(input.get("stack_id"))
         return ""
 
@@ -256,6 +306,8 @@ class RosDeployTool(Tool):
             return _("Create ROS stack: {target}").format(target=target)
         if action == "continue_create":
             return _("Continue ROS stack creation: {target}").format(target=target)
+        if action == "wait":
+            return _("Wait for ROS stack creation: {target}").format(target=target)
         return _("Delete failed ROS stack and create replacement: {target}").format(target=target)
 
     def _operation_metadata(self, input: dict) -> dict[str, object]:
@@ -287,7 +339,7 @@ class RosDeployTool(Tool):
             rule=rule,
             reason_type=reason.type if reason else None,
             reason_detail=reason.detail if reason else None,
-            is_read_only=False,
+            is_read_only=self.is_read_only(input),
             operation=self._operation_metadata(input),
         )
 
@@ -400,6 +452,9 @@ class RosDeployTool(Tool):
                     reason=reason,
                 ),
             )
+
+        if self.is_read_only(input):
+            return PermissionResult(behavior="allow", audit=self._audit(input, scope="once"))
 
         if template_permission := self._local_template_url_permission_error(input, context):
             return template_permission
@@ -526,6 +581,15 @@ class RosDeployTool(Tool):
             tool_input["region_id"] = region_id
         return tool_input
 
+    def _wait_stack_input(self, input: dict) -> ToolResult | dict[str, Any]:
+        stack_id = _string_value(input.get("stack_id"))
+        if error := self._require(stack_id, "stack_id"):
+            return error
+        tool_input: dict[str, Any] = {"action": "CreateStack", "params": {"StackId": stack_id}, "stack_id": stack_id}
+        if region_id := _string_value(input.get("region_id")):
+            tool_input["region_id"] = region_id
+        return tool_input
+
     @staticmethod
     def _preflight_local_template(input: dict, context: ToolContext) -> ToolResult | None:
         template_url = _string_value(input.get("template_url"))
@@ -575,10 +639,25 @@ class RosDeployTool(Tool):
     async def _call_stack(self, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         return await self._new_stack_tool().execute(tool_input=tool_input, context=context)
 
+    async def _wait_stack(self, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        stack = self._new_stack_tool()
+        region = _string_value(tool_input.get("region_id"))
+        if not region:
+            region = stack._resolve_region(tool_input)
+        return await stack.wait_for_stack_operation(
+            tool_input["action"],
+            tool_input["params"],
+            region,
+            tool_input["stack_id"],
+            context,
+        )
+
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         action = _string_value(tool_input.get("action"))
         if action not in _ACTIONS:
             return ToolResult.error(_("Invalid action '{}'. Supported actions: {}").format(action, list(_ACTIONS)))
+        if action_error := self._action_input_error(tool_input):
+            return ToolResult.error(action_error)
 
         if action == "create":
             create_input = self._create_stack_input(tool_input, context)
@@ -598,6 +677,14 @@ class RosDeployTool(Tool):
                     _string_value(tool_input.get("stack_id")), result.content
                 )
             self._record_result_stack(result, action="continue_create")
+            return result
+
+        if action == "wait":
+            wait_input = self._wait_stack_input(tool_input)
+            if isinstance(wait_input, ToolResult):
+                return wait_input
+            result = await self._wait_stack(wait_input, context)
+            self._record_result_stack(result, action="wait")
             return result
 
         create_input = self._create_stack_input(tool_input, context)

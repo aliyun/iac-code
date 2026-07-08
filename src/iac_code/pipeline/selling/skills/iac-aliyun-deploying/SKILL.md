@@ -68,6 +68,7 @@ conclusion_schema:
 - `selected_plan.preview_ready_for_create` 为 `true` 时，表示成本步骤已对同一模板路径完成预览验证，且没有完整部署参数缺口；部署时直接调用 `ros_deploy` 的 `create`，跳过例行 `ros_validate_template`，并跳过例行可用性查询。用户覆盖后的最终部署参数由 `ros_deploy` 的部署调用做最终校验。
 - 否则，部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），修复模板文件后重试（最多 5 轮）。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
 - `ros_deploy` 的 `create` 失败后，如果需要修改模板，成本步骤的预览验证已失效；修复后必须重新调用 `ros_validate_template`，通过后再调用 `ros_deploy` 的 `continue_create`。只调整部署参数时，不需要为了参数变化补跑 `ros_validate_template`；最终参数由 `ros_deploy` 的部署调用校验。
+- `ros_deploy` 的 `create` / `continue_create` / `delete_and_create` 已经发起 ROS 操作但工具调用超时或中断时，不要再次调用创建类动作。使用同一 `stack_id` 调用 `ros_deploy` 的 `wait`，它只轮询已有 Stack 的创建进度，不会调用 CreateStack 或 ContinueCreateStack。
 
 ## 可用性查询
 
@@ -78,6 +79,7 @@ conclusion_schema:
 | ros_deploy create | 全量查询所有库存相关 Parameters |
 | ros_deploy continue_create | 查询失败资源相关的 Parameters |
 | ros_deploy delete_and_create | 按替代创建参数全量查询库存相关 Parameters |
+| ros_deploy wait | 不查询库存；仅等待已发起创建的 Stack 达到终态 |
 
 查询步骤：
 1. 解析模板 Parameters，识别库存相关参数及对应产品
@@ -104,19 +106,22 @@ conclusion_schema:
 - `ros_deploy` 的 `create` 必须传 `stack_name`，不要省略，不要使用容易重复的固定名称。
 - `ros_deploy` 的 `continue_create` 面向已有失败 Stack 时，使用 `create` 失败结果中的 Stack 标识，不要生成新的 StackName。
 - `ros_deploy` 的 `delete_and_create` 面向已有失败 Stack 时，`stack_id` 使用旧失败 Stack 标识；`stack_name` 使用替代创建目标的名称。
+- `ros_deploy` 的 `wait` 面向已有创建中 Stack 时，只传 `stack_id` 和 `region_id`；不要传 `template_url`、`parameters`，不要生成新的 StackName。
 
 ## 执行部署
 
-- 使用 `ros_deploy` 工具执行 `create` / `continue_create` / `delete_and_create`，禁止用 Bash
+- 使用 `ros_deploy` 工具执行 `create` / `continue_create` / `delete_and_create` / `wait`，禁止用 Bash
 - `ros_deploy` 的 `create` 会使用 `DisableRollback: true`
-- `ros_deploy` 使用装配后的 `parameters` 字典；不要手动展开为 `Parameters.N.ParameterKey`
+- `ros_deploy` 的 `wait` 只等待已有 Stack 创建完成，不发起创建、继续创建、删除或更新
+- `ros_deploy` 的创建类动作使用装配后的 `parameters` 字典；不要手动展开为 `Parameters.N.ParameterKey`
 
-> **template_url 支持本地文件路径**：`ros_deploy` 中 `template_url` 可传本地文件路径（如 `/tmp/template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
+> **template_url 支持本地文件路径**：`ros_deploy` 的创建类动作中，`template_url` 可传本地文件路径（如 `/tmp/template.yml`），工具会自动读取文件内容。避免将大模板内容直接作为参数传递。
 
 ## 错误处理
 
 ### 部署失败
 分析错误原因：
+- 工具调用超时但已有 `stack_id`，且 Stack 仍在创建 → 调用 `ros_deploy` 的 `wait`
 - 权限/配额 → 告知用户处理
 - 模板/参数 → 修复后调用 `ros_deploy` 的 `continue_create`
 - `continue_create` 返回 `ContinueCreateStackValidationFailed` → 告知用户需要重建本步骤创建的失败 Stack，再调用 `ros_deploy` 的 `delete_and_create`

@@ -3961,6 +3961,16 @@ msgstr "Échec de la création de {name} : {reason}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
+msgid "Fields are not supported for action '{action}': {fields}"
+msgstr "Les champs ne sont pas pris en charge pour l'action '{action}' : {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Missing required field(s) for action '{action}': {fields}"
+msgstr "Champs obligatoires manquants pour l'action '{action}' : {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
 msgid "Create ROS stack: {target}"
 msgstr "Créer la pile ROS : {target}"
 
@@ -3968,6 +3978,11 @@ msgstr "Créer la pile ROS : {target}"
 #, python-brace-format
 msgid "Continue ROS stack creation: {target}"
 msgstr "Continuer la création de la pile ROS : {target}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Wait for ROS stack creation: {target}"
+msgstr "Attendre la création de la pile ROS : {target}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format

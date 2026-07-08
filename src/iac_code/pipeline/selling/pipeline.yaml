@@ -502,7 +502,7 @@ steps:
         required_conclusion_field: stack_id
         require_tool_result:
           tool: ros_deploy
-          action_in: [create, continue_create, delete_and_create]
+          action_in: [create, continue_create, delete_and_create, wait]
           is_success: true
           status_in: [CREATE_COMPLETE]
           match_conclusion_field: stack_id

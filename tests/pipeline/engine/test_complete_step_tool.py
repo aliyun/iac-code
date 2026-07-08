@@ -504,6 +504,57 @@ class TestCompletionGuards:
         assert not result.is_error
 
     @pytest.mark.asyncio
+    async def test_required_tool_result_accepts_matching_ros_deploy_wait_success(self):
+        config = StepConfig(
+            step_id="deploying",
+            conclusion_field="deployment",
+            forward=None,
+            conclusion_schema={
+                "type": "object",
+                "required": ["status", "stack_id"],
+                "properties": {
+                    "stack_id": {"type": "string"},
+                    "status": {"type": "string", "enum": ["success", "failed", "cancelled"]},
+                },
+            },
+        )
+        tool = CompleteStepTool(
+            config,
+            completion_guards=[
+                {
+                    "when_conclusion_field_equals": {"status": "success"},
+                    "required_conclusion_field": "stack_id",
+                    "require_tool_result": {
+                        "tool": "ros_deploy",
+                        "action_in": ["create", "continue_create", "delete_and_create", "wait"],
+                        "is_success": True,
+                        "status_in": ["CREATE_COMPLETE"],
+                        "match_conclusion_field": "stack_id",
+                    },
+                }
+            ],
+            completion_guard_state={
+                "successful_tools": {"ros_deploy"},
+                "tool_results": {},
+                "tool_result_records": [
+                    {
+                        "tool_name": "ros_deploy",
+                        "input": {"action": "wait", "stack_id": "stack-123"},
+                        "result": {"stack_id": "stack-123", "status": "CREATE_COMPLETE", "is_success": True},
+                        "is_error": False,
+                    }
+                ],
+            },
+        )
+
+        result = await tool.execute(
+            tool_input={"conclusion": {"status": "success", "stack_id": "stack-123"}},
+            context=ToolContext(),
+        )
+
+        assert not result.is_error
+
+    @pytest.mark.asyncio
     async def test_required_tool_result_rejects_non_matching_stack_action(self):
         tool = self._deploying_tool(
             [

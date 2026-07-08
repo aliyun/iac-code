@@ -7,10 +7,11 @@ from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.types.permissions import PermissionMode, ToolPermissionContext
 
 
-def _permission_ctx(*, allow=None, mode=PermissionMode.DEFAULT):
+def _permission_ctx(*, allow=None, deny=None, mode=PermissionMode.DEFAULT):
     return ToolPermissionContext(
         cwd="/tmp",
         allow_rules=allow or {},
+        deny_rules=deny or {},
         mode=mode,
     )
 
@@ -19,11 +20,18 @@ class FakeRosStack:
     def __init__(self, results):
         self.results = list(results)
         self.calls = []
+        self.wait_calls = []
 
     async def execute(self, *, tool_input, context):
         self.calls.append((tool_input, context))
         if not self.results:
             raise AssertionError("unexpected ros stack call")
+        return self.results.pop(0)
+
+    async def wait_for_stack_operation(self, action, params, region, stack_id, context):
+        self.wait_calls.append((action, params, region, stack_id, context))
+        if not self.results:
+            raise AssertionError("unexpected ros stack wait call")
         return self.results.pop(0)
 
 
@@ -112,6 +120,78 @@ def test_internal_ros_stack_allows_deployment_guard_without_clearing_pipeline_mo
     assert kwargs["allow_pipeline_deployment_actions"] is True
 
 
+def test_ros_deploy_uses_long_running_stack_timeout():
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    assert RosDeployTool().timeout == 3600.0
+
+
+@pytest.mark.parametrize(
+    ("tool_input", "expected_fields"),
+    [
+        (
+            {
+                "action": "wait",
+                "stack_id": "stack-slow",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+                "parameters": {"ZoneId": "cn-hangzhou-k"},
+            },
+            ("parameters", "stack_name", "template_url"),
+        ),
+        (
+            {
+                "action": "create",
+                "stack_id": "stack-existing",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+            },
+            ("stack_id",),
+        ),
+        (
+            {
+                "action": "continue_create",
+                "stack_id": "stack-failed",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+            },
+            ("stack_name",),
+        ),
+    ],
+)
+def test_ros_deploy_validate_input_rejects_fields_not_used_by_action(tool_input, expected_fields):
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    valid, error = RosDeployTool().validate_input(tool_input)
+
+    assert valid is False
+    assert "not supported for action" in error
+    for field in expected_fields:
+        assert field in error
+
+
+@pytest.mark.parametrize(
+    ("tool_input", "expected_fields"),
+    [
+        ({"action": "create", "template_url": "templates/demo.yml"}, ("stack_name",)),
+        ({"action": "create", "stack_name": "demo"}, ("template_url",)),
+        ({"action": "continue_create", "template_url": "templates/demo.yml"}, ("stack_id",)),
+        ({"action": "continue_create", "stack_id": "stack-failed"}, ("template_url",)),
+        ({"action": "delete_and_create", "stack_name": "demo", "template_url": "templates/demo.yml"}, ("stack_id",)),
+        ({"action": "wait"}, ("stack_id",)),
+    ],
+)
+def test_ros_deploy_validate_input_requires_action_fields(tool_input, expected_fields):
+    from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
+
+    valid, error = RosDeployTool().validate_input(tool_input)
+
+    assert valid is False
+    assert "Missing required field" in error
+    for field in expected_fields:
+        assert field in error
+
+
 @pytest.mark.asyncio
 async def test_create_records_started_stack_as_owned_when_polling_fails(monkeypatch):
     guard_state = {}
@@ -196,6 +276,67 @@ async def test_continue_create_defaults_to_recreate_with_auto_recreating_resourc
         },
         "region_id": "cn-hangzhou",
     }
+
+
+@pytest.mark.asyncio
+async def test_wait_action_polls_existing_stack_without_starting_lifecycle_action(monkeypatch):
+    tool, fake_stack = _deploy_tool(
+        monkeypatch,
+        results=[
+            ToolResult.success(
+                json.dumps(
+                    {
+                        "stack_id": "stack-slow",
+                        "stack_name": "demo",
+                        "status": "CREATE_COMPLETE",
+                        "is_success": True,
+                    }
+                )
+            )
+        ],
+    )
+
+    result = await tool.execute(
+        tool_input={
+            "action": "wait",
+            "stack_id": "stack-slow",
+            "region_id": "cn-hangzhou",
+        },
+        context=ToolContext(cwd="/workspace", pipeline_mode=True),
+    )
+
+    assert result.is_error is False
+    assert fake_stack.calls == []
+    assert fake_stack.wait_calls[0][:4] == (
+        "CreateStack",
+        {"StackId": "stack-slow"},
+        "cn-hangzhou",
+        "stack-slow",
+    )
+
+
+@pytest.mark.asyncio
+async def test_wait_action_rejects_create_only_fields_without_polling(monkeypatch):
+    tool, fake_stack = _deploy_tool(monkeypatch, results=[])
+
+    result = await tool.execute(
+        tool_input={
+            "action": "wait",
+            "stack_id": "stack-slow",
+            "stack_name": "demo",
+            "template_url": "templates/demo.yml",
+            "parameters": {"ZoneId": "cn-hangzhou-k"},
+        },
+        context=ToolContext(cwd="/workspace", pipeline_mode=True),
+    )
+
+    assert result.is_error is True
+    assert "not supported for action" in result.content
+    assert "parameters" in result.content
+    assert "stack_name" in result.content
+    assert "template_url" in result.content
+    assert fake_stack.calls == []
+    assert fake_stack.wait_calls == []
 
 
 @pytest.mark.asyncio
@@ -383,6 +524,32 @@ async def test_permission_allows_matching_continue_create_stack_rule(monkeypatch
     )
 
     assert result.behavior == "allow"
+
+
+@pytest.mark.asyncio
+async def test_permission_allows_wait_without_stack_ownership(monkeypatch):
+    tool, _fake_stack = _deploy_tool(monkeypatch, guard_state={})
+
+    result = await tool.check_permissions(
+        {"action": "wait", "stack_id": "stack-from-progress"},
+        _permission_ctx(),
+    )
+
+    assert result.behavior == "allow"
+    assert result.audit is not None
+    assert result.audit.is_read_only is True
+
+
+@pytest.mark.asyncio
+async def test_permission_deny_rule_still_blocks_wait(monkeypatch):
+    tool, _fake_stack = _deploy_tool(monkeypatch, guard_state={})
+
+    result = await tool.check_permissions(
+        {"action": "wait", "stack_id": "stack-from-progress"},
+        _permission_ctx(deny={"session": ["ros_deploy(wait:stack-from-progress)"]}),
+    )
+
+    assert result.behavior == "deny"
 
 
 @pytest.mark.asyncio

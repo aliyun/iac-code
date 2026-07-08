@@ -3966,6 +3966,16 @@ msgstr "Erstellung von {name} fehlgeschlagen: {reason}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
+msgid "Fields are not supported for action '{action}': {fields}"
+msgstr "Felder werden für Aktion '{action}' nicht unterstützt: {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Missing required field(s) for action '{action}': {fields}"
+msgstr "Erforderliche Felder für Aktion '{action}' fehlen: {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
 msgid "Create ROS stack: {target}"
 msgstr "ROS-Stack erstellen: {target}"
 
@@ -3973,6 +3983,11 @@ msgstr "ROS-Stack erstellen: {target}"
 #, python-brace-format
 msgid "Continue ROS stack creation: {target}"
 msgstr "Erstellung des ROS-Stacks fortsetzen: {target}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Wait for ROS stack creation: {target}"
+msgstr "Auf Erstellung des ROS-Stacks warten: {target}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
