@@ -23,6 +23,7 @@ from iac_code.pipeline.engine.display_replay import (
     DisplaySubPipeline,
     DisplaySubStepAttempt,
 )
+from iac_code.tools.cloud.types import translate_status
 from iac_code.ui.diagram_rendering import style_attachment_lines
 from iac_code.ui.pipeline_styles import pipeline_step_header, pipeline_title
 
@@ -74,6 +75,9 @@ class PipelineDisplayReplayRenderer:
         if not transcript_replayed and not uses_structured_ui:
             for tool in attempt.tools:
                 self.console.print(f"   ● {display_tool_name(tool.name)}")
+
+        for progress in attempt.stack_progresses:
+            self._render_stack_progress(progress)
 
         if attempt.step_type == "parallel_sub_pipeline" or attempt.sub_pipelines:
             self._render_sub_pipelines(attempt)
@@ -192,6 +196,42 @@ class PipelineDisplayReplayRenderer:
             message += f": {sub_step.error}"
         self.console.print(message)
         self._replay_transcript(sub_step.transcript_id)
+
+    def _render_stack_progress(self, progress: Any) -> None:
+        stack_status = translate_status(str(getattr(progress, "status", "") or ""))
+        stack_name = str(getattr(progress, "stack_name", "") or "")
+        stack_id = str(getattr(progress, "stack_id", "") or "")
+        progress_percentage = float(getattr(progress, "progress_percentage", 0.0) or 0.0)
+        label = stack_name or stack_id
+        if stack_name and stack_id:
+            label = f"{stack_name}({stack_id})"
+        if label:
+            self.console.print(
+                _("   Last observed stack: {label} [{status}] {progress:.0f}%").format(
+                    label=label,
+                    status=stack_status,
+                    progress=progress_percentage,
+                )
+            )
+
+        resources = getattr(progress, "resources", [])
+        if not isinstance(resources, list) or not resources:
+            return
+        table = Table(show_header=True, border_style="dim")
+        table.add_column(_("Resource"))
+        table.add_column(_("Type"))
+        table.add_column(_("Status"))
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            status_icon = str(resource.get("status_icon") or "")
+            status = str(resource.get("status") or "")
+            table.add_row(
+                str(resource.get("name") or ""),
+                str(resource.get("resource_type") or ""),
+                f"{status_icon} {translate_status(status)}".strip(),
+            )
+        self.console.print(table)
 
     def _render_candidate_selection(self, selection: DisplayCandidateSelection) -> None:
         if selection.state in {"preparing", "waiting"}:

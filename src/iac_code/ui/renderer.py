@@ -1511,9 +1511,17 @@ class Renderer:
                         self._quiet_stop_live(live)
                         live = None
                     spinner = None
-                    # Print current state to scrollback
-                    self._print_segments_to_scrollback(segments, text_buffer)
+                    flush_segments: list[_Segment] = []
+                    pending_tool_segments: list[_Segment] = []
+                    for segment in segments:
+                        if segment.kind == "tool" and segment.tool is not None and not segment.tool.done:
+                            pending_tool_segments.append(segment)
+                        else:
+                            flush_segments.append(segment)
+                    if flush_segments or text_buffer:
+                        self._print_segments_to_scrollback(flush_segments, text_buffer)
                     segments.clear()
+                    segments.extend(pending_tool_segments)
                     text_buffer = ""
                     # Handle permission
                     allowed = await permission_handler(event)
@@ -1522,6 +1530,23 @@ class Renderer:
                     # defensive pattern in agent_tool / acp/session.
                     if event.response_future is not None and not event.response_future.done():
                         event.response_future.set_result(allowed)
+                    if segments:
+                        _ensure_live()
+                        _update_live()
+                        if live is not None:
+                            refresh_task = asyncio.create_task(
+                                self._refresh_loop(
+                                    live,
+                                    segments,
+                                    spinner,
+                                    lambda: text_buffer,
+                                    lambda: task_spinner,
+                                    lambda: thinking_buffer,
+                                    live_header=live_header,
+                                )
+                            )
+                            key_task = _new_key_task()
+                            await asyncio.sleep(0)
 
                 # ── User question request ─────────────────────
                 elif isinstance(event, AskUserQuestionEvent):

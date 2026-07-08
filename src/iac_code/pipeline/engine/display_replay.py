@@ -14,12 +14,30 @@ DISPLAY_REPLAY_VERSION = 1
 DISPLAY_TRANSCRIPT_FILENAME = "display.jsonl"
 
 TERMINAL_ATTEMPT_STATUSES = {"completed", "failed", "rolled_back", "interrupted"}
+STACK_PROGRESS_RECORD_DELTA = 5.0
+
+
+@dataclass(frozen=True)
+class _StackProgressRecordSnapshot:
+    status: str
+    progress_percentage: float
+    resources_signature: tuple[tuple[str, str, str, str], ...]
 
 
 @dataclass
 class DisplayToolUse:
     name: str
     tool_use_id: str = ""
+
+
+@dataclass
+class DisplayStackProgress:
+    stack_id: str = ""
+    stack_name: str = ""
+    status: str = ""
+    progress_percentage: float = 0.0
+    resources: list[dict[str, Any]] = field(default_factory=list)
+    elapsed_seconds: int = 0
 
 
 @dataclass
@@ -83,6 +101,7 @@ class DisplayAttempt:
     rollback_reason: str = ""
     error: str = ""
     tools: list[DisplayToolUse] = field(default_factory=list)
+    stack_progresses: list[DisplayStackProgress] = field(default_factory=list)
     sub_pipelines: dict[str, DisplaySubPipeline] = field(default_factory=dict)
     candidate_selection: DisplayCandidateSelection = field(default_factory=DisplayCandidateSelection)
 
@@ -102,6 +121,7 @@ class PipelineDisplayRecorder:
 
     def __init__(self, path: str | Path | None) -> None:
         self.path = Path(path) if path is not None else None
+        self._stack_progress_snapshots: dict[tuple[str, str], _StackProgressRecordSnapshot] = {}
 
     @property
     def enabled(self) -> bool:
@@ -151,6 +171,83 @@ class PipelineDisplayRecorder:
         if sub_pipeline_id:
             payload["sub_pipeline_id"] = sub_pipeline_id
         self.record("tool_used", step_id=step_id, payload=payload)
+
+    def record_stack_progress(self, event: Any, *, step_id: str | None = None) -> None:
+        resources = getattr(event, "resources", [])
+        payload = {
+            "stack_id": getattr(event, "stack_id", ""),
+            "stack_name": getattr(event, "stack_name", ""),
+            "status": getattr(event, "status", ""),
+            "progress_percentage": getattr(event, "progress_percentage", 0.0),
+            "elapsed_seconds": getattr(event, "elapsed_seconds", 0),
+            "resources": resources if isinstance(resources, list) else [],
+        }
+        if not self._should_record_stack_progress(step_id, payload):
+            return
+        self.record(
+            "stack_progress",
+            step_id=step_id,
+            payload=payload,
+        )
+
+    def _should_record_stack_progress(self, step_id: str | None, payload: dict[str, Any]) -> bool:
+        key = self._stack_progress_record_key(step_id, payload)
+        if key is None:
+            return True
+
+        current = _StackProgressRecordSnapshot(
+            status=str(payload.get("status") or ""),
+            progress_percentage=self._payload_float(payload.get("progress_percentage")),
+            resources_signature=self._resources_signature(payload.get("resources")),
+        )
+        previous = self._stack_progress_snapshots.get(key)
+        if previous is None:
+            self._stack_progress_snapshots[key] = current
+            return True
+
+        should_record = (
+            current.status != previous.status
+            or current.resources_signature != previous.resources_signature
+            or abs(current.progress_percentage - previous.progress_percentage) >= STACK_PROGRESS_RECORD_DELTA
+        )
+        if should_record:
+            self._stack_progress_snapshots[key] = current
+        return should_record
+
+    @staticmethod
+    def _stack_progress_record_key(step_id: str | None, payload: dict[str, Any]) -> tuple[str, str] | None:
+        stack_key = str(payload.get("stack_id") or "")
+        if not stack_key:
+            stack_name = str(payload.get("stack_name") or "")
+            stack_key = f"name:{stack_name}" if stack_name else ""
+        if not stack_key:
+            return None
+        return (step_id or "", stack_key)
+
+    @staticmethod
+    def _payload_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _resources_signature(resources: Any) -> tuple[tuple[str, str, str, str], ...]:
+        if not isinstance(resources, list):
+            return ()
+        signature = []
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            signature.append(
+                (
+                    str(resource.get("name") or ""),
+                    str(resource.get("resource_type") or ""),
+                    str(resource.get("status") or ""),
+                    str(resource.get("status_reason") or ""),
+                )
+            )
+        return tuple(sorted(signature))
 
     def record_candidate_diagram(self, event: Any, *, step_id: str | None = None) -> None:
         self.record(
@@ -312,6 +409,34 @@ class PipelineDisplayReducer:
                 name = str(payload.get("name") or "")
                 if name:
                     attempt.tools.append(DisplayToolUse(name=name, tool_use_id=str(payload.get("tool_use_id") or "")))
+                continue
+
+            if event_type == "stack_progress" and attempt is not None:
+                resources = payload.get("resources")
+                progress = DisplayStackProgress(
+                    stack_id=str(payload.get("stack_id") or ""),
+                    stack_name=str(payload.get("stack_name") or ""),
+                    status=str(payload.get("status") or ""),
+                    progress_percentage=self._optional_float(payload.get("progress_percentage")) or 0.0,
+                    elapsed_seconds=self._optional_int(payload.get("elapsed_seconds")) or 0,
+                    resources=[
+                        dict(resource)
+                        for resource in (resources if isinstance(resources, list) else [])
+                        if isinstance(resource, dict)
+                    ],
+                )
+                existing_index = next(
+                    (
+                        index
+                        for index, item in enumerate(attempt.stack_progresses)
+                        if item.stack_id and item.stack_id == progress.stack_id
+                    ),
+                    None,
+                )
+                if existing_index is None:
+                    attempt.stack_progresses.append(progress)
+                else:
+                    attempt.stack_progresses[existing_index] = progress
                 continue
 
             if event_type == "user_input_required" and attempt is not None:

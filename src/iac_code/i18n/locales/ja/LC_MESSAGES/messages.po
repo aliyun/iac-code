@@ -5036,6 +5036,23 @@ msgid "Rolled back"
 msgstr "ロールバック済み"
 
 #: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   Last observed stack: {label} [{status}] {progress:.0f}%"
+msgstr "   最後に観測したスタック: {label} [{status}] {progress:.0f}%"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Resource"
+msgstr "リソース"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Type"
+msgstr "種類"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Status"
+msgstr "状態"
+
+#: src/iac_code/ui/pipeline_display_replay.py
 msgid "Candidate"
 msgstr "候補"
 
@@ -5119,18 +5136,6 @@ msgstr "{seconds:.1f} 秒考えました"
 #: src/iac_code/ui/renderer.py
 msgid "(ctrl+o to expand)"
 msgstr "（ctrl+o で展開）"
-
-#: src/iac_code/ui/renderer.py
-msgid "Resource"
-msgstr "リソース"
-
-#: src/iac_code/ui/renderer.py
-msgid "Type"
-msgstr "種類"
-
-#: src/iac_code/ui/renderer.py
-msgid "Status"
-msgstr "状態"
 
 #: src/iac_code/ui/renderer.py
 msgid "Account ID"

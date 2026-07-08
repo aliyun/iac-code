@@ -4967,6 +4967,23 @@ msgid "Rolled back"
 msgstr "已回滚"
 
 #: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   Last observed stack: {label} [{status}] {progress:.0f}%"
+msgstr "   最后观测到的栈: {label} [{status}] {progress:.0f}%"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Resource"
+msgstr "资源"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Type"
+msgstr "类型"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Status"
+msgstr "状态"
+
+#: src/iac_code/ui/pipeline_display_replay.py
 msgid "Candidate"
 msgstr "候选方案"
 
@@ -5050,18 +5067,6 @@ msgstr "思考完成（耗时 {seconds:.1f}s）"
 #: src/iac_code/ui/renderer.py
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o 展开)"
-
-#: src/iac_code/ui/renderer.py
-msgid "Resource"
-msgstr "资源"
-
-#: src/iac_code/ui/renderer.py
-msgid "Type"
-msgstr "类型"
-
-#: src/iac_code/ui/renderer.py
-msgid "Status"
-msgstr "状态"
 
 #: src/iac_code/ui/renderer.py
 msgid "Account ID"

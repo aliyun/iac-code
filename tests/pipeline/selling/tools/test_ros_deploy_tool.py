@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -5,6 +6,7 @@ import pytest
 
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.types.permissions import PermissionMode, ToolPermissionContext
+from iac_code.types.stream_events import StackProgressEvent
 
 
 def _permission_ctx(*, allow=None, deny=None, mode=PermissionMode.DEFAULT):
@@ -17,28 +19,35 @@ def _permission_ctx(*, allow=None, deny=None, mode=PermissionMode.DEFAULT):
 
 
 class FakeRosStack:
-    def __init__(self, results):
+    def __init__(self, results, progress_events=None):
         self.results = list(results)
+        self.progress_events = list(progress_events or [])
         self.calls = []
         self.wait_calls = []
 
+    async def _emit_next_progress(self, context):
+        if context.event_queue is not None and self.progress_events:
+            await context.event_queue.put(self.progress_events.pop(0))
+
     async def execute(self, *, tool_input, context):
         self.calls.append((tool_input, context))
+        await self._emit_next_progress(context)
         if not self.results:
             raise AssertionError("unexpected ros stack call")
         return self.results.pop(0)
 
     async def wait_for_stack_operation(self, action, params, region, stack_id, context):
         self.wait_calls.append((action, params, region, stack_id, context))
+        await self._emit_next_progress(context)
         if not self.results:
             raise AssertionError("unexpected ros stack wait call")
         return self.results.pop(0)
 
 
-def _deploy_tool(monkeypatch, *, guard_state=None, results=None):
+def _deploy_tool(monkeypatch, *, guard_state=None, results=None, progress_events=None):
     from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
 
-    fake_stack = FakeRosStack(results or [])
+    fake_stack = FakeRosStack(results or [], progress_events=progress_events)
     tool = RosDeployTool(completion_guard_state=guard_state if guard_state is not None else {})
     monkeypatch.setattr(tool, "_new_stack_tool", lambda: fake_stack)
     return tool, fake_stack
@@ -337,6 +346,97 @@ async def test_wait_action_rejects_create_only_fields_without_polling(monkeypatc
     assert "template_url" in result.content
     assert fake_stack.calls == []
     assert fake_stack.wait_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_input", "guard_state", "expected_progress_stack_ids", "uses_wait"),
+    [
+        (
+            {"action": "create", "stack_name": "demo", "template_url": "templates/demo.yml"},
+            {},
+            ["stack-created"],
+            False,
+        ),
+        (
+            {"action": "continue_create", "stack_id": "stack-failed", "template_url": "templates/demo.yml"},
+            {"ros_deploy_owned_stack_ids": {"stack-failed": {"action": "create"}}},
+            ["stack-failed"],
+            False,
+        ),
+        (
+            {"action": "wait", "stack_id": "stack-slow", "region_id": "cn-hangzhou"},
+            {},
+            ["stack-slow"],
+            True,
+        ),
+        (
+            {
+                "action": "delete_and_create",
+                "stack_id": "stack-old",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+            },
+            {"ros_deploy_owned_stack_ids": {"stack-old": {"action": "create"}}},
+            ["stack-old", "stack-new"],
+            False,
+        ),
+    ],
+)
+async def test_ros_deploy_preserves_event_queue_for_all_progress_actions(
+    monkeypatch,
+    tmp_path,
+    tool_input,
+    guard_state,
+    expected_progress_stack_ids,
+    uses_wait,
+):
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "demo.yml").write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+    progress_events = [
+        StackProgressEvent(
+            stack_id=stack_id,
+            stack_name="demo",
+            status="DELETE_COMPLETE" if stack_id == "stack-old" else "CREATE_COMPLETE",
+            progress_percentage=100.0,
+            resources=[],
+            elapsed_seconds=index + 1,
+        )
+        for index, stack_id in enumerate(expected_progress_stack_ids)
+    ]
+    results = [
+        ToolResult.success(
+            json.dumps(
+                {
+                    "stack_id": stack_id,
+                    "stack_name": "demo",
+                    "status": "DELETE_COMPLETE" if stack_id == "stack-old" else "CREATE_COMPLETE",
+                    "is_success": True,
+                }
+            )
+        )
+        for stack_id in expected_progress_stack_ids
+    ]
+    tool, fake_stack = _deploy_tool(
+        monkeypatch,
+        guard_state=guard_state,
+        results=results,
+        progress_events=progress_events,
+    )
+    event_queue: asyncio.Queue = asyncio.Queue()
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True, event_queue=event_queue)
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert result.is_error is False
+    contexts = [call[-1] for call in (fake_stack.wait_calls if uses_wait else fake_stack.calls)]
+    assert len(contexts) == len(expected_progress_stack_ids)
+    assert all(call_context.event_queue is event_queue for call_context in contexts)
+    emitted_events = []
+    while not event_queue.empty():
+        emitted_events.append(event_queue.get_nowait())
+    assert [event.stack_id for event in emitted_events] == expected_progress_stack_ids
 
 
 @pytest.mark.asyncio

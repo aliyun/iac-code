@@ -5301,6 +5301,23 @@ msgid "Rolled back"
 msgstr "Zurückgesetzt"
 
 #: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   Last observed stack: {label} [{status}] {progress:.0f}%"
+msgstr "   Zuletzt beobachteter Stack: {label} [{status}] {progress:.0f}%"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Resource"
+msgstr "Ressource"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Type"
+msgstr "Typ"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Status"
+msgstr "Status"
+
+#: src/iac_code/ui/pipeline_display_replay.py
 msgid "Candidate"
 msgstr "Kandidat"
 
@@ -5384,18 +5401,6 @@ msgstr "Nachgedacht für {seconds:.1f}s"
 #: src/iac_code/ui/renderer.py
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o zum Aufklappen)"
-
-#: src/iac_code/ui/renderer.py
-msgid "Resource"
-msgstr "Ressource"
-
-#: src/iac_code/ui/renderer.py
-msgid "Type"
-msgstr "Typ"
-
-#: src/iac_code/ui/renderer.py
-msgid "Status"
-msgstr "Status"
 
 #: src/iac_code/ui/renderer.py
 msgid "Account ID"
