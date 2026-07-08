@@ -23,6 +23,16 @@ class DisplayToolUse:
 
 
 @dataclass
+class DisplayStackProgress:
+    stack_id: str = ""
+    stack_name: str = ""
+    status: str = ""
+    progress_percentage: float = 0.0
+    resources: list[dict[str, Any]] = field(default_factory=list)
+    elapsed_seconds: int = 0
+
+
+@dataclass
 class DisplayCandidate:
     name: str
     candidate_index: int | None = None
@@ -83,6 +93,7 @@ class DisplayAttempt:
     rollback_reason: str = ""
     error: str = ""
     tools: list[DisplayToolUse] = field(default_factory=list)
+    stack_progress: DisplayStackProgress | None = None
     sub_pipelines: dict[str, DisplaySubPipeline] = field(default_factory=dict)
     candidate_selection: DisplayCandidateSelection = field(default_factory=DisplayCandidateSelection)
 
@@ -151,6 +162,21 @@ class PipelineDisplayRecorder:
         if sub_pipeline_id:
             payload["sub_pipeline_id"] = sub_pipeline_id
         self.record("tool_used", step_id=step_id, payload=payload)
+
+    def record_stack_progress(self, event: Any, *, step_id: str | None = None) -> None:
+        resources = getattr(event, "resources", [])
+        self.record(
+            "stack_progress",
+            step_id=step_id,
+            payload={
+                "stack_id": getattr(event, "stack_id", ""),
+                "stack_name": getattr(event, "stack_name", ""),
+                "status": getattr(event, "status", ""),
+                "progress_percentage": getattr(event, "progress_percentage", 0.0),
+                "elapsed_seconds": getattr(event, "elapsed_seconds", 0),
+                "resources": resources if isinstance(resources, list) else [],
+            },
+        )
 
     def record_candidate_diagram(self, event: Any, *, step_id: str | None = None) -> None:
         self.record(
@@ -312,6 +338,22 @@ class PipelineDisplayReducer:
                 name = str(payload.get("name") or "")
                 if name:
                     attempt.tools.append(DisplayToolUse(name=name, tool_use_id=str(payload.get("tool_use_id") or "")))
+                continue
+
+            if event_type == "stack_progress" and attempt is not None:
+                resources = payload.get("resources")
+                attempt.stack_progress = DisplayStackProgress(
+                    stack_id=str(payload.get("stack_id") or ""),
+                    stack_name=str(payload.get("stack_name") or ""),
+                    status=str(payload.get("status") or ""),
+                    progress_percentage=self._optional_float(payload.get("progress_percentage")) or 0.0,
+                    elapsed_seconds=self._optional_int(payload.get("elapsed_seconds")) or 0,
+                    resources=[
+                        dict(resource)
+                        for resource in (resources if isinstance(resources, list) else [])
+                        if isinstance(resource, dict)
+                    ],
+                )
                 continue
 
             if event_type == "user_input_required" and attempt is not None:

@@ -5305,6 +5305,18 @@ msgstr "  ✓ {name} : terminé"
 msgid "Rolled back"
 msgstr "Revenu en arrière"
 
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Resource"
+msgstr "Ressource"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Type"
+msgstr "Type"
+
+#: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
+msgid "Status"
+msgstr "État"
+
 #: src/iac_code/ui/pipeline_display_replay.py
 msgid "Candidate"
 msgstr "Candidat"
@@ -5389,18 +5401,6 @@ msgstr "Réflexion pendant {seconds:.1f}s"
 #: src/iac_code/ui/renderer.py
 msgid "(ctrl+o to expand)"
 msgstr "(ctrl+o pour développer)"
-
-#: src/iac_code/ui/renderer.py
-msgid "Resource"
-msgstr "Ressource"
-
-#: src/iac_code/ui/renderer.py
-msgid "Type"
-msgstr "Type"
-
-#: src/iac_code/ui/renderer.py
-msgid "Status"
-msgstr "État"
 
 #: src/iac_code/ui/renderer.py
 msgid "Account ID"

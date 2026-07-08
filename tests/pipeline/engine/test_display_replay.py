@@ -52,6 +52,39 @@ def test_display_replay_ignores_pipeline_warning_without_terminal_change(tmp_pat
     assert model.attempts[-1].status == "running"
 
 
+def test_reducer_tracks_latest_stack_progress_for_attempt(tmp_path) -> None:
+    path = tmp_path / "display.jsonl"
+    recorder = PipelineDisplayRecorder(path)
+
+    recorder.record("step_started", step_id="deploying", payload={"index": 1, "total": 1})
+    recorder.record("tool_used", step_id="deploying", payload={"name": "ros_deploy", "tool_use_id": "tu_deploy"})
+    recorder.record(
+        "stack_progress",
+        step_id="deploying",
+        payload={
+            "stack_id": "stack-123",
+            "stack_name": "demo",
+            "status": "CREATE_IN_PROGRESS",
+            "progress_percentage": 50.0,
+            "elapsed_seconds": 30,
+            "resources": [
+                {
+                    "name": "EcsInstance",
+                    "resource_type": "ALIYUN::ECS::Instance",
+                    "status": "CREATE_IN_PROGRESS",
+                }
+            ],
+        },
+    )
+
+    model = PipelineDisplayReducer().reduce(load_display_events(path))
+    attempt = model.attempts[-1]
+
+    assert attempt.stack_progress is not None
+    assert attempt.stack_progress.stack_name == "demo"
+    assert attempt.stack_progress.resources[0]["name"] == "EcsInstance"
+
+
 def test_reducer_attaches_transcript_ids_from_event_payload_and_attempt_metadata(tmp_path):
     path = tmp_path / "display.jsonl"
     recorder = PipelineDisplayRecorder(path)

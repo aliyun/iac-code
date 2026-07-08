@@ -1,7 +1,9 @@
 import asyncio
+from io import StringIO
 from unittest.mock import MagicMock
 
 import pytest
+from rich.console import Console
 
 from iac_code.services.telemetry.names import Events
 from iac_code.tools.base import ToolRegistry
@@ -14,6 +16,7 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
+    StackProgressEvent,
     TaskNotificationEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -125,6 +128,76 @@ class TestRendererStreamEvents:
 
         assert future.result() is allowed
         assert legacy_event not in [event_name for event_name, _payload in logged_events]
+
+    async def test_stack_progress_remains_visible_after_permission_prompt(self, monkeypatch):
+        updates = []
+
+        async def idle_key_listener(*_args, **_kwargs):
+            await asyncio.Event().wait()
+
+        def fake_live_factory(*args, **kwargs):
+            live = MagicMock()
+            live._started = False
+            live.start = MagicMock()
+            live.stop = MagicMock()
+
+            def record_update(renderable, *_update_args, **_update_kwargs):
+                updates.append(renderable)
+
+            live.update.side_effect = record_update
+            return live
+
+        def render_plain(renderable) -> str:
+            console = Console(file=StringIO(), force_terminal=True, width=120, color_system=None, _environ={})
+            console.print(renderable)
+            return console.file.getvalue()
+
+        future = asyncio.get_running_loop().create_future()
+        permission_event = PermissionRequestEvent(
+            tool_name="ros_deploy",
+            tool_input={"action": "create"},
+            tool_use_id="toolu-deploy",
+            response_future=future,
+        )
+
+        async def events():
+            yield MessageStartEvent(message_id="m1")
+            yield ToolUseStartEvent(tool_use_id="toolu-deploy", name="ros_deploy")
+            yield ToolUseEndEvent(tool_use_id="toolu-deploy", name="ros_deploy", input={"action": "create"})
+            yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+            yield permission_event
+            yield StackProgressEvent(
+                stack_id="stack-123",
+                stack_name="demo",
+                status="CREATE_IN_PROGRESS",
+                progress_percentage=50.0,
+                resources=[
+                    {
+                        "name": "EcsInstance",
+                        "resource_type": "ALIYUN::ECS::Instance",
+                        "status": "CREATE_IN_PROGRESS",
+                    }
+                ],
+                elapsed_seconds=30,
+            )
+            yield ToolResultEvent(
+                tool_use_id="toolu-deploy",
+                tool_name="ros_deploy",
+                result='{"stack_id": "stack-123", "status": "CREATE_COMPLETE", "is_success": true}',
+            )
+
+        monkeypatch.setattr(Renderer, "_key_listener", idle_key_listener)
+        monkeypatch.setattr("iac_code.ui.renderer.Live", fake_live_factory)
+        renderer = Renderer(
+            Console(file=StringIO(), force_terminal=True, width=120, color_system=None, _environ={}),
+            ToolRegistry(),
+            status_callback=lambda: "test",
+        )
+
+        await renderer.run_streaming_output(events(), permission_handler=lambda _event: asyncio.sleep(0, result=True))
+
+        assert future.result() is True
+        assert any("EcsInstance" in render_plain(update) for update in updates)
 
 
 def _make_renderer_for_thinking_test():

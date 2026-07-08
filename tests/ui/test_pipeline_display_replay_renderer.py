@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from rich.console import Console
 from rich.text import Text
@@ -117,6 +118,38 @@ def test_renderer_prints_generic_pipeline_history():
     assert "Waiting for output" not in text
     assert "   - 低成本方案" not in text
     assert "Interrupted" in text
+
+
+def test_renderer_prints_stack_progress_snapshot():
+    attempt = DisplayAttempt(
+        step_id="deploying",
+        attempt_no=1,
+        index=5,
+        total=5,
+        status="running",
+        tools=[DisplayToolUse(name="ros_deploy", tool_use_id="tu_deploy")],
+    )
+    attempt.stack_progress = SimpleNamespace(
+        stack_id="stack-123",
+        stack_name="demo",
+        status="CREATE_IN_PROGRESS",
+        progress_percentage=50.0,
+        elapsed_seconds=30,
+        resources=[
+            {
+                "name": "EcsInstance",
+                "resource_type": "ALIYUN::ECS::Instance",
+                "status": "CREATE_IN_PROGRESS",
+            }
+        ],
+    )
+    model = DisplayReplayModel(pipeline_name="selling", attempts=[attempt])
+
+    text = _render_text(model)
+
+    assert "ROS Deploy" in text
+    assert "demo" in text
+    assert "EcsInstance" in text
 
 
 def test_renderer_prints_candidate_selection_waiting_state_with_candidate_selection_ui():

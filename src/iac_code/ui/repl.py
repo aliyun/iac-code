@@ -77,6 +77,7 @@ from iac_code.types.stream_events import (
     CandidateDetailEvent,
     DiagramEvent,
     PermissionRequestEvent,
+    StackProgressEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
     ToolInputDeltaEvent,
@@ -2971,7 +2972,7 @@ class InlineREPL:
         step_id: str | None = None,
         sub_pipeline_id: str | None = None,
     ) -> None:
-        if getattr(event, "name", "") != "complete_step":
+        if getattr(event, "name", "") not in {"complete_step", "ros_deploy", "ros_stack", "ros_stack_instances"}:
             return
         recorder = getattr(self, "_pipeline_display_recorder", None)
         if recorder is None:
@@ -2984,6 +2985,18 @@ class InlineREPL:
             )
         except Exception as exc:
             logger.warning("Failed to record pipeline display tool use: {}", exc)
+
+    def _record_pipeline_display_stack_progress(self, event, *, step_id: str | None = None) -> None:
+        recorder = getattr(self, "_pipeline_display_recorder", None)
+        if recorder is None:
+            return
+        try:
+            recorder.record_stack_progress(
+                event,
+                step_id=step_id or getattr(self, "_pipeline_display_current_step_id", None),
+            )
+        except Exception as exc:
+            logger.warning("Failed to record pipeline display stack progress: {}", exc)
 
     def _record_pipeline_display_candidate_diagram(self, event, *, step_id: str | None = None) -> None:
         recorder = getattr(self, "_pipeline_display_recorder", None)
@@ -4223,6 +4236,8 @@ class InlineREPL:
                     else:
                         if isinstance(event, ToolUseStartEvent):
                             self._record_pipeline_display_tool_use(event)
+                        if isinstance(event, StackProgressEvent):
+                            self._record_pipeline_display_stack_progress(event)
                         if renderer_task is not None and not renderer_task.done() and agent_events_queue is not None:
                             await agent_events_queue.put(event)
                         else:

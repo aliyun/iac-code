@@ -16,7 +16,7 @@ from iac_code.pipeline.engine.display_replay import (
     load_display_events,
 )
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
-from iac_code.types.stream_events import CandidateDetailEvent, DiagramEvent, ToolUseStartEvent
+from iac_code.types.stream_events import CandidateDetailEvent, DiagramEvent, StackProgressEvent, ToolUseStartEvent
 
 
 async def _drain_streaming_output(events_iter, **_kwargs):
@@ -73,6 +73,49 @@ async def _simple_pipeline_stream():
     )
 
 
+async def _deploying_pipeline_stream():
+    yield PipelineEvent(
+        type=PipelineEventType.PIPELINE_STARTED,
+        step_id=None,
+        timestamp=time.time(),
+        data={"pipeline_type": "selling", "step_names": ["deploying"]},
+    )
+    yield PipelineEvent(
+        type=PipelineEventType.STEP_STARTED,
+        step_id="deploying",
+        timestamp=time.time(),
+        data={"index": 1, "total": 1, "name": "deploying"},
+    )
+    yield ToolUseStartEvent(tool_use_id="tu_deploy", name="ros_deploy")
+    yield StackProgressEvent(
+        stack_id="stack-123",
+        stack_name="demo",
+        status="CREATE_IN_PROGRESS",
+        progress_percentage=50.0,
+        resources=[
+            {
+                "name": "EcsInstance",
+                "resource_type": "ALIYUN::ECS::Instance",
+                "status": "CREATE_IN_PROGRESS",
+            }
+        ],
+        elapsed_seconds=30,
+    )
+    yield ToolUseStartEvent(tool_use_id="tu_complete", name="complete_step")
+    yield PipelineEvent(
+        type=PipelineEventType.STEP_COMPLETED,
+        step_id="deploying",
+        timestamp=time.time(),
+        data={"duration_s": 1.0},
+    )
+    yield PipelineEvent(
+        type=PipelineEventType.PIPELINE_COMPLETED,
+        step_id=None,
+        timestamp=time.time(),
+        data={"total_steps": 1},
+    )
+
+
 @pytest.mark.asyncio
 async def test_pipeline_stream_records_display_transcript(tmp_path):
     repl = _make_repl_with_display_recorder(tmp_path)
@@ -90,6 +133,28 @@ async def test_pipeline_stream_records_display_transcript(tmp_path):
     assert events[0]["pipeline_name"] == "selling"
     assert events[2]["step_id"] == "intent_parsing"
     assert events[2]["payload"]["name"] == "complete_step"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_stream_records_deploy_tool_and_stack_progress(tmp_path):
+    repl = _make_repl_with_display_recorder(tmp_path)
+
+    await repl._render_pipeline_stream(_deploying_pipeline_stream())
+
+    events = load_display_events(tmp_path / "pipeline" / "display.jsonl")
+    event_types = [event["type"] for event in events]
+    assert event_types == [
+        "pipeline_started",
+        "step_started",
+        "tool_used",
+        "stack_progress",
+        "tool_used",
+        "step_completed",
+        "pipeline_completed",
+    ]
+    assert events[2]["payload"]["name"] == "ros_deploy"
+    assert events[3]["payload"]["stack_name"] == "demo"
+    assert events[3]["payload"]["resources"][0]["name"] == "EcsInstance"
 
 
 def test_user_aborted_pipeline_records_display_terminal_event(tmp_path):
