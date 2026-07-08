@@ -124,6 +124,7 @@ class HeadlessRunner:
         verbose: bool = False,
         progress_stream: IO[str] | None = None,
         resume_session_id: str | bool | None = None,
+        thinking_enabled: bool | None = True,
     ) -> None:
         self._model = model
         self._output_format = output_format
@@ -135,6 +136,7 @@ class HeadlessRunner:
         self._verbose = verbose
         self._progress_stream = progress_stream or sys.stderr
         self._resume_session_id = resume_session_id
+        self._thinking_enabled = thinking_enabled
         self._mcp_config_warnings: list[Any] = []
         self._mcp_warnings_printed_count = 0
         self._runtime: Any | None = None
@@ -162,10 +164,16 @@ class HeadlessRunner:
 
     def _create_agent_loop(self) -> Any:
         """Create and return a fully configured AgentLoop."""
+        from iac_code.providers.request_policy import ProviderRequestPolicy
         from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 
         cwd = os.getcwd()
         session_id, resume_messages = self._resolve_resume_options()
+        request_policy_override = (
+            ProviderRequestPolicy(thinking_enabled=self._thinking_enabled)
+            if self._thinking_enabled is not None
+            else None
+        )
 
         runtime = create_agent_runtime(
             AgentFactoryOptions(
@@ -173,6 +181,7 @@ class HeadlessRunner:
                 session_id=session_id,
                 cwd=cwd,
                 max_turns=self._max_turns,
+                request_policy_override=request_policy_override,
                 cli_allowed_tools=self._cli_allowed_tools,
                 cli_disallowed_tools=self._cli_disallowed_tools,
                 cli_permission_mode=self._cli_permission_mode,

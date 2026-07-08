@@ -15,6 +15,7 @@ from iac_code.commands.rename import rename_command
 from iac_code.commands.resume import resume_command
 from iac_code.commands.skills import skills_command
 from iac_code.commands.status import status_command
+from iac_code.commands.thinking_enabled import thinking_enabled_command
 from iac_code.i18n import _
 
 
@@ -53,6 +54,15 @@ def create_default_registry() -> CommandRegistry:
             description=_("Show or switch thinking effort"),
             handler=effort_command,
             arg_names=["level"],
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="thinking_enabled",
+            description=_("Show or switch whether thinking is enabled"),
+            handler=thinking_enabled_command,
+            arg_names=["on|off"],
             history_mode="session",
         )
     )

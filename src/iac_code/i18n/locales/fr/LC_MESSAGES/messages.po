@@ -721,6 +721,10 @@ msgid "Show headless progress on stderr"
 msgstr "Afficher la progression headless sur stderr"
 
 #: src/iac_code/cli/main.py
+msgid "Headless mode: whether to enable thinking for this request"
+msgstr "Mode sans interface : active ou non thinking pour cette requete"
+
+#: src/iac_code/cli/main.py
 msgid "Show version and exit"
 msgstr "Afficher la version et quitter"
 
@@ -1085,6 +1089,10 @@ msgstr "Afficher ou changer de modèle"
 #: src/iac_code/commands/__init__.py
 msgid "Show or switch thinking effort"
 msgstr "Afficher ou modifier l’effort de raisonnement"
+
+#: src/iac_code/commands/__init__.py
+msgid "Show or switch whether thinking is enabled"
+msgstr "Afficher ou modifier si thinking est active"
 
 #: src/iac_code/commands/__init__.py
 msgid "Compact conversation context"
@@ -1466,10 +1474,11 @@ msgid "No active session."
 msgstr "Aucune session active."
 
 #: src/iac_code/commands/effort.py src/iac_code/commands/model.py
+#: src/iac_code/commands/thinking_enabled.py
 msgid "No configured providers. Run /auth first."
 msgstr "Aucun fournisseur configuré. Exécutez d’abord /auth."
 
-#: src/iac_code/commands/effort.py
+#: src/iac_code/commands/effort.py src/iac_code/commands/thinking_enabled.py
 msgid "No model selected. Run /model first."
 msgstr "Aucun modèle sélectionné. Exécutez d’abord /model."
 
@@ -1489,6 +1498,7 @@ msgid "Current effort: {effort}"
 msgstr "Effort de raisonnement actuel : {effort}"
 
 #: src/iac_code/commands/effort.py src/iac_code/commands/status.py
+#: src/iac_code/commands/thinking_enabled.py
 msgid "not configured"
 msgstr "non configuré"
 
@@ -2148,6 +2158,38 @@ msgstr "{session_id} (reprise)"
 #, python-brace-format
 msgid "{percent} used ({total} / {window})"
 msgstr "{percent} utilisé ({total} / {window})"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "Invalid thinking_enabled. Allowed: on, off."
+msgstr "Valeur thinking_enabled invalide. Valeurs autorisees : on, off."
+
+#: src/iac_code/commands/thinking_enabled.py src/iac_code/ui/dialogs/memory.py
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "on"
+msgstr "activée"
+
+#: src/iac_code/commands/thinking_enabled.py src/iac_code/ui/dialogs/memory.py
+#: src/iac_code/ui/dialogs/skills_picker.py
+msgid "off"
+msgstr "désactivée"
+
+#: src/iac_code/commands/thinking_enabled.py
+#, python-brace-format
+msgid "thinking_enabled switched to: {state}"
+msgstr "thinking_enabled defini sur : {state}"
+
+#: src/iac_code/commands/thinking_enabled.py
+#, python-brace-format
+msgid "Current thinking_enabled: {state}"
+msgstr "thinking_enabled actuel : {state}"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "enabled"
+msgstr "active"
+
+#: src/iac_code/commands/thinking_enabled.py
+msgid "disabled"
+msgstr "desactive"
 
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py
@@ -6267,14 +6309,6 @@ msgstr "Mémoire"
 msgid "Auto-memory: {state}"
 msgstr "Mémoire automatique : {state}"
 
-#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
-msgid "on"
-msgstr "activée"
-
-#: src/iac_code/ui/dialogs/memory.py src/iac_code/ui/dialogs/skills_picker.py
-msgid "off"
-msgstr "désactivée"
-
 #: src/iac_code/ui/dialogs/memory.py
 msgid "Enter to confirm · Esc to cancel"
 msgstr "Entrée pour confirmer · Échap pour annuler"
@@ -6801,34 +6835,4 @@ msgstr "Refus d’ouvrir un fichier non ordinaire : {path}"
 
 #~ msgid "feature"
 #~ msgstr "fonctionnalité"
-
-#~ msgid "ECS instance"
-#~ msgstr "Instance ECS"
-
-#~ msgid "ECS instance group"
-#~ msgstr "Groupe d’instances ECS"
-
-#~ msgid "Elastic IP address"
-#~ msgstr "Adresse IP élastique"
-
-#~ msgid "SLB load balancer"
-#~ msgstr "Équilibreur de charge SLB"
-
-#~ msgid "NAT gateway"
-#~ msgstr "Passerelle NAT"
-
-#~ msgid "Shared bandwidth package"
-#~ msgstr "Forfait de bande passante partagée"
-
-#~ msgid "Database instance"
-#~ msgstr "Instance de base de données"
-
-#~ msgid "VPC"
-#~ msgstr "VPC"
-
-#~ msgid "VSwitch"
-#~ msgstr "VSwitch"
-
-#~ msgid "Security group"
-#~ msgstr "Groupe de sécurité"
 

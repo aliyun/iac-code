@@ -214,11 +214,11 @@ class TestCreateDefaultRegistry:
         registry = create_default_registry()
         assert isinstance(registry, CommandRegistry)
 
-    def test_create_default_registry_has_13_visible_commands(self):
-        """Test create_default_registry has 13 visible commands."""
+    def test_create_default_registry_has_14_visible_commands(self):
+        """Test create_default_registry has 14 visible commands."""
         registry = create_default_registry()
         all_cmds = registry.get_all()
-        assert len(all_cmds) == 13
+        assert len(all_cmds) == 14
 
     def test_create_default_registry_command_names(self):
         """Test create_default_registry has expected command names."""
@@ -234,6 +234,7 @@ class TestCreateDefaultRegistry:
             "auth",
             "debug",
             "effort",
+            "thinking_enabled",
             "resume",
             "memory",
             "skills",

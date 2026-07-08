@@ -61,6 +61,77 @@ def _current_time_line(prompt: str) -> str:
     return next(line for line in prompt.splitlines() if line.startswith("- Current time: "))
 
 
+@pytest.mark.asyncio
+async def test_thinking_enabled_command_reconfigures_active_repl_provider(tmp_path, monkeypatch):
+    from iac_code.commands.thinking_enabled import thinking_enabled_command
+    from iac_code.config import get_settings_path, load_active_provider_config
+    from iac_code.state.app_state import AppState, AppStateStore
+    from iac_code.ui.repl import InlineREPL
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    settings_path = get_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        "activeProvider: openai\nproviders:\n  openai:\n    name: OpenAI\n    model: gpt-5.5\n",
+        encoding="utf-8",
+    )
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.store = AppStateStore(AppState(model="gpt-5.5"))
+    repl._current_model = "gpt-5.5"
+    repl._current_provider_config = load_active_provider_config()
+    repl._provider_key_override = None
+    repl._base_url_override = None
+    repl._load_credentials = Mock(return_value={"openai": "key"})
+    repl._provider_manager = Mock()
+    repl._refresh_system_prompt = Mock()
+    repl.store.subscribe(repl._on_state_change)
+    context = SimpleNamespace(store=repl.store, console=None, repl=repl)
+
+    result = await thinking_enabled_command(context=context, args=["off"])
+
+    assert "disabled" in result
+    assert load_active_provider_config()["thinkingEnabled"] is False
+    repl._provider_manager.reconfigure.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_repl_handle_command_routes_thinking_enabled_toggle(tmp_path, monkeypatch):
+    from iac_code.commands import create_default_registry
+    from iac_code.config import get_settings_path, load_active_provider_config
+    from iac_code.state.app_state import AppState, AppStateStore
+    from iac_code.ui.repl import InlineREPL
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    settings_path = get_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        "activeProvider: openai\nproviders:\n  openai:\n    name: OpenAI\n    model: gpt-5.5\n",
+        encoding="utf-8",
+    )
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = create_default_registry()
+    repl._disabled_skill_commands = {}
+    repl._command_log = []
+    repl.console = None
+    repl.store = AppStateStore(AppState(model="gpt-5.5"))
+    repl._current_model = "gpt-5.5"
+    repl._current_provider_config = load_active_provider_config()
+    repl._provider_key_override = None
+    repl._base_url_override = None
+    repl._load_credentials = Mock(return_value={"openai": "key"})
+    repl._provider_manager = Mock()
+    repl._refresh_system_prompt = Mock()
+    repl.renderer = SimpleNamespace(print_system_message=Mock(), print_command_result=Mock())
+    repl.store.subscribe(repl._on_state_change)
+
+    queued = await repl._handle_command("/thinking_enabled off")
+
+    assert queued == []
+    assert load_active_provider_config()["thinkingEnabled"] is False
+    repl._provider_manager.reconfigure.assert_called_once()
+    repl.renderer.print_command_result.assert_called_once()
+
+
 class TestREPLProviderIntegration:
     @patch("iac_code.ui.repl.ProviderManager")
     @patch("iac_code.ui.repl.SessionStorage")
