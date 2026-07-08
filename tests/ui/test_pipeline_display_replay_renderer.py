@@ -160,6 +160,7 @@ def test_renderer_prints_stack_progress_snapshot():
     text = _render_text(model)
 
     assert "ROS Deploy" in text
+    assert "Last observed stack:" in text
     assert "demo-old" in text
     assert "demo" in text
     assert "EcsInstance" in text

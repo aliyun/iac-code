@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from iac_code.pipeline.engine.display_replay import (
     PipelineDisplayRecorder,
@@ -113,6 +114,51 @@ def test_reducer_tracks_stack_progress_snapshots_per_stack_for_attempt(tmp_path)
     assert [progress.stack_id for progress in attempt.stack_progresses] == ["stack-123", "stack-new"]
     assert attempt.stack_progresses[0].status == "DELETE_COMPLETE"
     assert attempt.stack_progresses[1].resources[0]["name"] == "ReplacementEcsInstance"
+
+
+def test_recorder_coalesces_repeated_stack_progress_snapshots(tmp_path) -> None:
+    path = tmp_path / "display.jsonl"
+    recorder = PipelineDisplayRecorder(path)
+
+    in_progress_resource = [
+        {
+            "name": "EcsInstance",
+            "resource_type": "ALIYUN::ECS::Instance",
+            "status": "CREATE_IN_PROGRESS",
+            "status_reason": "",
+        }
+    ]
+    complete_resource = [
+        {
+            "name": "EcsInstance",
+            "resource_type": "ALIYUN::ECS::Instance",
+            "status": "CREATE_COMPLETE",
+            "status_reason": "",
+        }
+    ]
+
+    def event(status: str, progress: float, resources: list[dict]):
+        return SimpleNamespace(
+            stack_id="stack-123",
+            stack_name="demo",
+            status=status,
+            progress_percentage=progress,
+            elapsed_seconds=30,
+            resources=resources,
+        )
+
+    for _ in range(10):
+        recorder.record_stack_progress(event("CREATE_IN_PROGRESS", 50.0, in_progress_resource), step_id="deploying")
+    recorder.record_stack_progress(event("CREATE_IN_PROGRESS", 52.0, in_progress_resource), step_id="deploying")
+    recorder.record_stack_progress(event("CREATE_IN_PROGRESS", 55.0, in_progress_resource), step_id="deploying")
+    recorder.record_stack_progress(event("CREATE_IN_PROGRESS", 55.0, complete_resource), step_id="deploying")
+    recorder.record_stack_progress(event("CREATE_COMPLETE", 100.0, complete_resource), step_id="deploying")
+    recorder.record_stack_progress(event("CREATE_COMPLETE", 100.0, complete_resource), step_id="deploying")
+
+    events = [item for item in load_display_events(path) if item["type"] == "stack_progress"]
+
+    assert [item["payload"]["progress_percentage"] for item in events] == [50.0, 55.0, 55.0, 100.0]
+    assert events[-1]["payload"]["status"] == "CREATE_COMPLETE"
 
 
 def test_reducer_attaches_transcript_ids_from_event_payload_and_attempt_metadata(tmp_path):

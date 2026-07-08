@@ -206,7 +206,13 @@ class PipelineDisplayReplayRenderer:
         if stack_name and stack_id:
             label = f"{stack_name}({stack_id})"
         if label:
-            self.console.print(f"   Stack: {label} [{stack_status}] {progress_percentage:.0f}%")
+            self.console.print(
+                _("   Last observed stack: {label} [{status}] {progress:.0f}%").format(
+                    label=label,
+                    status=stack_status,
+                    progress=progress_percentage,
+                )
+            )
 
         resources = getattr(progress, "resources", [])
         if not isinstance(resources, list) or not resources:

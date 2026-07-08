@@ -5300,6 +5300,11 @@ msgstr "  ✓ {name}: abgeschlossen"
 msgid "Rolled back"
 msgstr "Zurückgesetzt"
 
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   Last observed stack: {label} [{status}] {progress:.0f}%"
+msgstr "   Zuletzt beobachteter Stack: {label} [{status}] {progress:.0f}%"
+
 #: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
 msgid "Resource"
 msgstr "Ressource"

@@ -5241,6 +5241,11 @@ msgstr "  ✓ {name}: concluído"
 msgid "Rolled back"
 msgstr "Revertido"
 
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   Last observed stack: {label} [{status}] {progress:.0f}%"
+msgstr "   Última pilha observada: {label} [{status}] {progress:.0f}%"
+
 #: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
 msgid "Resource"
 msgstr "Recurso"

@@ -4966,6 +4966,11 @@ msgstr "  ✓ {name}: 已完成"
 msgid "Rolled back"
 msgstr "已回滚"
 
+#: src/iac_code/ui/pipeline_display_replay.py
+#, python-brace-format
+msgid "   Last observed stack: {label} [{status}] {progress:.0f}%"
+msgstr "   最后观测到的栈: {label} [{status}] {progress:.0f}%"
+
 #: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
 msgid "Resource"
 msgstr "资源"

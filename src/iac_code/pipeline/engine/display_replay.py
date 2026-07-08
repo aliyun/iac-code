@@ -14,6 +14,14 @@ DISPLAY_REPLAY_VERSION = 1
 DISPLAY_TRANSCRIPT_FILENAME = "display.jsonl"
 
 TERMINAL_ATTEMPT_STATUSES = {"completed", "failed", "rolled_back", "interrupted"}
+STACK_PROGRESS_RECORD_DELTA = 5.0
+
+
+@dataclass(frozen=True)
+class _StackProgressRecordSnapshot:
+    status: str
+    progress_percentage: float
+    resources_signature: tuple[tuple[str, str, str, str], ...]
 
 
 @dataclass
@@ -113,6 +121,7 @@ class PipelineDisplayRecorder:
 
     def __init__(self, path: str | Path | None) -> None:
         self.path = Path(path) if path is not None else None
+        self._stack_progress_snapshots: dict[tuple[str, str], _StackProgressRecordSnapshot] = {}
 
     @property
     def enabled(self) -> bool:
@@ -165,18 +174,80 @@ class PipelineDisplayRecorder:
 
     def record_stack_progress(self, event: Any, *, step_id: str | None = None) -> None:
         resources = getattr(event, "resources", [])
+        payload = {
+            "stack_id": getattr(event, "stack_id", ""),
+            "stack_name": getattr(event, "stack_name", ""),
+            "status": getattr(event, "status", ""),
+            "progress_percentage": getattr(event, "progress_percentage", 0.0),
+            "elapsed_seconds": getattr(event, "elapsed_seconds", 0),
+            "resources": resources if isinstance(resources, list) else [],
+        }
+        if not self._should_record_stack_progress(step_id, payload):
+            return
         self.record(
             "stack_progress",
             step_id=step_id,
-            payload={
-                "stack_id": getattr(event, "stack_id", ""),
-                "stack_name": getattr(event, "stack_name", ""),
-                "status": getattr(event, "status", ""),
-                "progress_percentage": getattr(event, "progress_percentage", 0.0),
-                "elapsed_seconds": getattr(event, "elapsed_seconds", 0),
-                "resources": resources if isinstance(resources, list) else [],
-            },
+            payload=payload,
         )
+
+    def _should_record_stack_progress(self, step_id: str | None, payload: dict[str, Any]) -> bool:
+        key = self._stack_progress_record_key(step_id, payload)
+        if key is None:
+            return True
+
+        current = _StackProgressRecordSnapshot(
+            status=str(payload.get("status") or ""),
+            progress_percentage=self._payload_float(payload.get("progress_percentage")),
+            resources_signature=self._resources_signature(payload.get("resources")),
+        )
+        previous = self._stack_progress_snapshots.get(key)
+        if previous is None:
+            self._stack_progress_snapshots[key] = current
+            return True
+
+        should_record = (
+            current.status != previous.status
+            or current.resources_signature != previous.resources_signature
+            or abs(current.progress_percentage - previous.progress_percentage) >= STACK_PROGRESS_RECORD_DELTA
+        )
+        if should_record:
+            self._stack_progress_snapshots[key] = current
+        return should_record
+
+    @staticmethod
+    def _stack_progress_record_key(step_id: str | None, payload: dict[str, Any]) -> tuple[str, str] | None:
+        stack_key = str(payload.get("stack_id") or "")
+        if not stack_key:
+            stack_name = str(payload.get("stack_name") or "")
+            stack_key = f"name:{stack_name}" if stack_name else ""
+        if not stack_key:
+            return None
+        return (step_id or "", stack_key)
+
+    @staticmethod
+    def _payload_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _resources_signature(resources: Any) -> tuple[tuple[str, str, str, str], ...]:
+        if not isinstance(resources, list):
+            return ()
+        signature = []
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            signature.append(
+                (
+                    str(resource.get("name") or ""),
+                    str(resource.get("resource_type") or ""),
+                    str(resource.get("status") or ""),
+                    str(resource.get("status_reason") or ""),
+                )
+            )
+        return tuple(sorted(signature))
 
     def record_candidate_diagram(self, event: Any, *, step_id: str | None = None) -> None:
         self.record(
