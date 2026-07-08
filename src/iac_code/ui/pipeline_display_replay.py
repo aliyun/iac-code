@@ -76,8 +76,8 @@ class PipelineDisplayReplayRenderer:
             for tool in attempt.tools:
                 self.console.print(f"   ● {display_tool_name(tool.name)}")
 
-        if attempt.stack_progress is not None:
-            self._render_stack_progress(attempt.stack_progress)
+        for progress in attempt.stack_progresses:
+            self._render_stack_progress(progress)
 
         if attempt.step_type == "parallel_sub_pipeline" or attempt.sub_pipelines:
             self._render_sub_pipelines(attempt)

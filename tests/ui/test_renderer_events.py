@@ -131,9 +131,16 @@ class TestRendererStreamEvents:
 
     async def test_stack_progress_remains_visible_after_permission_prompt(self, monkeypatch):
         updates = []
+        key_listener_calls = 0
 
-        async def idle_key_listener(*_args, **_kwargs):
-            await asyncio.Event().wait()
+        def idle_key_listener(*_args, **_kwargs):
+            nonlocal key_listener_calls
+            key_listener_calls += 1
+
+            async def wait_forever():
+                await asyncio.Event().wait()
+
+            return wait_forever()
 
         def fake_live_factory(*args, **kwargs):
             live = MagicMock()
@@ -161,7 +168,6 @@ class TestRendererStreamEvents:
         )
 
         async def events():
-            yield MessageStartEvent(message_id="m1")
             yield ToolUseStartEvent(tool_use_id="toolu-deploy", name="ros_deploy")
             yield ToolUseEndEvent(tool_use_id="toolu-deploy", name="ros_deploy", input={"action": "create"})
             yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
@@ -197,6 +203,7 @@ class TestRendererStreamEvents:
         await renderer.run_streaming_output(events(), permission_handler=lambda _event: asyncio.sleep(0, result=True))
 
         assert future.result() is True
+        assert key_listener_calls >= 2
         assert any("EcsInstance" in render_plain(update) for update in updates)
 
 

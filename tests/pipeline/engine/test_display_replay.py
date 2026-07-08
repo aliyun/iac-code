@@ -52,7 +52,7 @@ def test_display_replay_ignores_pipeline_warning_without_terminal_change(tmp_pat
     assert model.attempts[-1].status == "running"
 
 
-def test_reducer_tracks_latest_stack_progress_for_attempt(tmp_path) -> None:
+def test_reducer_tracks_stack_progress_snapshots_per_stack_for_attempt(tmp_path) -> None:
     path = tmp_path / "display.jsonl"
     recorder = PipelineDisplayRecorder(path)
 
@@ -76,13 +76,43 @@ def test_reducer_tracks_latest_stack_progress_for_attempt(tmp_path) -> None:
             ],
         },
     )
+    recorder.record(
+        "stack_progress",
+        step_id="deploying",
+        payload={
+            "stack_id": "stack-new",
+            "stack_name": "demo-replacement",
+            "status": "CREATE_IN_PROGRESS",
+            "progress_percentage": 25.0,
+            "elapsed_seconds": 45,
+            "resources": [
+                {
+                    "name": "ReplacementEcsInstance",
+                    "resource_type": "ALIYUN::ECS::Instance",
+                    "status": "CREATE_IN_PROGRESS",
+                }
+            ],
+        },
+    )
+    recorder.record(
+        "stack_progress",
+        step_id="deploying",
+        payload={
+            "stack_id": "stack-123",
+            "stack_name": "demo",
+            "status": "DELETE_COMPLETE",
+            "progress_percentage": 100.0,
+            "elapsed_seconds": 60,
+            "resources": [],
+        },
+    )
 
     model = PipelineDisplayReducer().reduce(load_display_events(path))
     attempt = model.attempts[-1]
 
-    assert attempt.stack_progress is not None
-    assert attempt.stack_progress.stack_name == "demo"
-    assert attempt.stack_progress.resources[0]["name"] == "EcsInstance"
+    assert [progress.stack_id for progress in attempt.stack_progresses] == ["stack-123", "stack-new"]
+    assert attempt.stack_progresses[0].status == "DELETE_COMPLETE"
+    assert attempt.stack_progresses[1].resources[0]["name"] == "ReplacementEcsInstance"
 
 
 def test_reducer_attaches_transcript_ids_from_event_payload_and_attempt_metadata(tmp_path):

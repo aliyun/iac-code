@@ -93,7 +93,7 @@ class DisplayAttempt:
     rollback_reason: str = ""
     error: str = ""
     tools: list[DisplayToolUse] = field(default_factory=list)
-    stack_progress: DisplayStackProgress | None = None
+    stack_progresses: list[DisplayStackProgress] = field(default_factory=list)
     sub_pipelines: dict[str, DisplaySubPipeline] = field(default_factory=dict)
     candidate_selection: DisplayCandidateSelection = field(default_factory=DisplayCandidateSelection)
 
@@ -342,7 +342,7 @@ class PipelineDisplayReducer:
 
             if event_type == "stack_progress" and attempt is not None:
                 resources = payload.get("resources")
-                attempt.stack_progress = DisplayStackProgress(
+                progress = DisplayStackProgress(
                     stack_id=str(payload.get("stack_id") or ""),
                     stack_name=str(payload.get("stack_name") or ""),
                     status=str(payload.get("status") or ""),
@@ -354,6 +354,18 @@ class PipelineDisplayReducer:
                         if isinstance(resource, dict)
                     ],
                 )
+                existing_index = next(
+                    (
+                        index
+                        for index, item in enumerate(attempt.stack_progresses)
+                        if item.stack_id and item.stack_id == progress.stack_id
+                    ),
+                    None,
+                )
+                if existing_index is None:
+                    attempt.stack_progresses.append(progress)
+                else:
+                    attempt.stack_progresses[existing_index] = progress
                 continue
 
             if event_type == "user_input_required" and attempt is not None:

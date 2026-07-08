@@ -129,25 +129,38 @@ def test_renderer_prints_stack_progress_snapshot():
         status="running",
         tools=[DisplayToolUse(name="ros_deploy", tool_use_id="tu_deploy")],
     )
-    attempt.stack_progress = SimpleNamespace(
-        stack_id="stack-123",
-        stack_name="demo",
-        status="CREATE_IN_PROGRESS",
-        progress_percentage=50.0,
-        elapsed_seconds=30,
-        resources=[
-            {
-                "name": "EcsInstance",
-                "resource_type": "ALIYUN::ECS::Instance",
-                "status": "CREATE_IN_PROGRESS",
-            }
-        ],
+    attempt.stack_progresses.extend(
+        [
+            SimpleNamespace(
+                stack_id="stack-old",
+                stack_name="demo-old",
+                status="DELETE_COMPLETE",
+                progress_percentage=100.0,
+                elapsed_seconds=30,
+                resources=[],
+            ),
+            SimpleNamespace(
+                stack_id="stack-new",
+                stack_name="demo",
+                status="CREATE_IN_PROGRESS",
+                progress_percentage=50.0,
+                elapsed_seconds=45,
+                resources=[
+                    {
+                        "name": "EcsInstance",
+                        "resource_type": "ALIYUN::ECS::Instance",
+                        "status": "CREATE_IN_PROGRESS",
+                    }
+                ],
+            ),
+        ]
     )
     model = DisplayReplayModel(pipeline_name="selling", attempts=[attempt])
 
     text = _render_text(model)
 
     assert "ROS Deploy" in text
+    assert "demo-old" in text
     assert "demo" in text
     assert "EcsInstance" in text
 

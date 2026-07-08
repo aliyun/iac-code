@@ -2972,7 +2972,7 @@ class InlineREPL:
         step_id: str | None = None,
         sub_pipeline_id: str | None = None,
     ) -> None:
-        if getattr(event, "name", "") not in {"complete_step", "ros_deploy", "ros_stack", "ros_stack_instances"}:
+        if getattr(event, "name", "") not in {"complete_step", "ros_deploy", "ros_stack"}:
             return
         recorder = getattr(self, "_pipeline_display_recorder", None)
         if recorder is None:

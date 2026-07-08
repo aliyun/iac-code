@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -337,6 +338,77 @@ async def test_wait_action_rejects_create_only_fields_without_polling(monkeypatc
     assert "template_url" in result.content
     assert fake_stack.calls == []
     assert fake_stack.wait_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_input", "guard_state", "expected_call_count", "uses_wait"),
+    [
+        (
+            {"action": "create", "stack_name": "demo", "template_url": "templates/demo.yml"},
+            {},
+            1,
+            False,
+        ),
+        (
+            {"action": "continue_create", "stack_id": "stack-failed", "template_url": "templates/demo.yml"},
+            {"ros_deploy_owned_stack_ids": {"stack-failed": {"action": "create"}}},
+            1,
+            False,
+        ),
+        (
+            {"action": "wait", "stack_id": "stack-slow", "region_id": "cn-hangzhou"},
+            {},
+            1,
+            True,
+        ),
+        (
+            {
+                "action": "delete_and_create",
+                "stack_id": "stack-old",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+            },
+            {"ros_deploy_owned_stack_ids": {"stack-old": {"action": "create"}}},
+            2,
+            False,
+        ),
+    ],
+)
+async def test_ros_deploy_preserves_event_queue_for_all_progress_actions(
+    monkeypatch,
+    tmp_path,
+    tool_input,
+    guard_state,
+    expected_call_count,
+    uses_wait,
+):
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "demo.yml").write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+    results = [
+        ToolResult.success(
+            json.dumps(
+                {
+                    "stack_id": tool_input.get("stack_id") if index == 0 else "stack-new",
+                    "stack_name": "demo",
+                    "status": "CREATE_COMPLETE",
+                    "is_success": True,
+                }
+            )
+        )
+        for index in range(expected_call_count)
+    ]
+    tool, fake_stack = _deploy_tool(monkeypatch, guard_state=guard_state, results=results)
+    event_queue: asyncio.Queue = asyncio.Queue()
+    context = ToolContext(cwd=str(tmp_path), pipeline_mode=True, event_queue=event_queue)
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert result.is_error is False
+    contexts = [call[-1] for call in (fake_stack.wait_calls if uses_wait else fake_stack.calls)]
+    assert len(contexts) == expected_call_count
+    assert all(call_context.event_queue is event_queue for call_context in contexts)
 
 
 @pytest.mark.asyncio

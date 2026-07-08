@@ -1545,6 +1545,8 @@ class Renderer:
                                     live_header=live_header,
                                 )
                             )
+                            key_task = _new_key_task()
+                            await asyncio.sleep(0)
 
                 # ── User question request ─────────────────────
                 elif isinstance(event, AskUserQuestionEvent):
