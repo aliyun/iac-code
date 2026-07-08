@@ -3752,6 +3752,16 @@ msgstr "{name} の作成に失敗しました: {reason}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
+msgid "Fields are not supported for action '{action}': {fields}"
+msgstr "アクション '{action}' ではサポートされていないフィールドです: {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Missing required field(s) for action '{action}': {fields}"
+msgstr "アクション '{action}' に必須フィールドがありません: {fields}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
 msgid "Create ROS stack: {target}"
 msgstr "ROS スタックを作成: {target}"
 
@@ -3759,6 +3769,11 @@ msgstr "ROS スタックを作成: {target}"
 #, python-brace-format
 msgid "Continue ROS stack creation: {target}"
 msgstr "ROS スタックの作成を続行: {target}"
+
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#, python-brace-format
+msgid "Wait for ROS stack creation: {target}"
+msgstr "ROS スタックの作成を待機: {target}"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format

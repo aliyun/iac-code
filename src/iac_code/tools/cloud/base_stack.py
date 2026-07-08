@@ -266,8 +266,18 @@ class BaseCloudStack(Tool):
                 )
             )
 
-        start_time = time.monotonic()
+        return await self.wait_for_stack_operation(action, params, region, stack_id, context)
 
+    async def wait_for_stack_operation(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        stack_id: str,
+        context: ToolContext,
+    ) -> ToolResult:
+        """Poll an already-started stack operation until it reaches a terminal state."""
+        start_time = time.monotonic()
         try:
             while True:
                 await asyncio.sleep(self._poll_interval)

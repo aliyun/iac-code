@@ -176,7 +176,7 @@ def test_deploying_success_requires_create_stack_complete_guard():
     assert guard["required_conclusion_field"] == "stack_id"
     assert guard["require_tool_result"] == {
         "tool": "ros_deploy",
-        "action_in": ["create", "continue_create", "delete_and_create"],
+        "action_in": ["create", "continue_create", "delete_and_create", "wait"],
         "is_success": True,
         "status_in": ["CREATE_COMPLETE"],
         "match_conclusion_field": "stack_id",
