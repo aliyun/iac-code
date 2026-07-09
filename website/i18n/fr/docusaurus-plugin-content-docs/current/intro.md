@@ -10,8 +10,8 @@ IaC Code est un assistant d'Infrastructure as Code alimenté par l'IA pour l'inf
 
 Capacités principales :
 
-- **Décrivez, déployez** -- décrivez ce dont vous avez besoin en langage naturel et obtenez des templates ROS ou Terraform validés, prêts au déploiement.
-- **Une commande pour la production** -- passez du template à l'infrastructure et aux applications en production en un seul flux ; créez, mettez à jour, supprimez et surveillez les stacks dans toutes les régions.
+- **Décrivez, déployez** -- décrivez ce dont vous avez besoin en langage naturel et obtenez des templates ROS validés, prêts au déploiement, ou des templates Terraform générés.
+- **Du template à l'infrastructure** -- pour Alibaba Cloud ROS, passez du template à l'infrastructure en cours d'exécution ; créez, mettez à jour, supprimez et surveillez les stacks dans toutes les régions. La prise en charge de Terraform couvre la génération et la conversion de templates, pas le déploiement.
 - **Intelligence cloud intégrée** -- recherchez dans la documentation, vérifiez la disponibilité des ressources et estimez les coûts avant de déployer ; chaque décision est étayée par des données cloud réelles.
 
 La documentation est organisée autour des tâches utilisateur. Commencez par l'installation et le démarrage rapide, puis configurez les fournisseurs et les identifiants, puis utilisez la référence CLI lorsque vous avez besoin de détails sur les commandes.

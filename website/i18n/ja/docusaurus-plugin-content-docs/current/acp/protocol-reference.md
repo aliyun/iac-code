@@ -64,6 +64,8 @@ ACP セッションは、対話実行および headless 実行と同じ v2 セ�
 | `promptCapabilities.embeddedContext` | `true` | プロンプトに埋め込みリソースコンテンツを受け入れ |
 | `promptCapabilities.image` | `false` | 画像入力は未サポート（テキストマーカーにフォールバック） |
 | `promptCapabilities.audio` | `false` | 音声入力は未サポート（テキストマーカーにフォールバック） |
+| `mcpCapabilities.http` | `true` | セッション作成時に HTTP（streamable）MCP サーバーを受け入れ |
+| `mcpCapabilities.sse` | `true` | セッション作成時に SSE MCP サーバーを受け入れ |
 | `sessionCapabilities.list` | `{}` | セッション一覧をサポート |
 | `sessionCapabilities.close` | `{}` | セッションのクローズをサポート |
 
@@ -78,7 +80,7 @@ ACP セッションは、対話実行および headless 実行と同じ v2 セ�
 | フィールド | 型 | 必須 | 説明 |
 |-------|------|----------|-------------|
 | `cwd` | string | はい | 作業ディレクトリの絶対パス |
-| `mcpServers` | object | いいえ | MCP サーバー設定（受け入れられますがまだ機能しません） |
+| `mcpServers` | object | いいえ | MCP サーバー設定。HTTP（streamable）と SSE サーバーはそのセッションで接続されます |
 
 **レスポンスフィールド**
 
@@ -189,7 +191,7 @@ ACP セッションは、対話実行および headless 実行と同じ v2 セ�
 | フィールド | 型 | 説明 |
 |-------|------|-------------|
 | `stopReason` | string | プロンプトが完了した理由（停止理由を参照） |
-| `usage` | object | トークン使用量：`inputTokens`、`outputTokens`、`totalTokens` |
+| `_meta.usage` | object | トークン使用量。レスポンスの `_meta` オブジェクト配下に `input_tokens`、`output_tokens`、`total_tokens` のキーで配信されます |
 
 **停止理由**
 
@@ -243,7 +245,7 @@ ACP セッションは、対話実行および headless 実行と同じ v2 セ�
 
 ---
 
-### sessions/list
+### session/list
 
 指定された作業ディレクトリのすべての永続化されたセッションを一覧表示します。
 
@@ -261,7 +263,7 @@ ACP セッションは、対話実行および headless 実行と同じ v2 セ�
 
 ---
 
-### config/set
+### session/set_config_option
 
 セッションの設定オプションを動的に設定します。
 
@@ -371,8 +373,8 @@ ToolCallStart (status=in_progress)
 
 ```json
 {
-  "outcome": "allowed",
-  "option_id": "allow_once"
+  "outcome": "selected",
+  "optionId": "allow_once"
 }
 ```
 
@@ -380,7 +382,7 @@ ToolCallStart (status=in_progress)
 
 ```json
 {
-  "outcome": "denied"
+  "outcome": "cancelled"
 }
 ```
 

@@ -64,6 +64,8 @@ Protokoll-Handshake. Muss der erste Aufruf bei jeder Verbindung sein.
 | `promptCapabilities.embeddedContext` | `true` | Akzeptiert eingebettete Ressourceninhalte in Eingaben |
 | `promptCapabilities.image` | `false` | Bildeingabe nicht unterstuetzt (wird zu Textmarker degradiert) |
 | `promptCapabilities.audio` | `false` | Audioeingabe nicht unterstuetzt (wird zu Textmarker degradiert) |
+| `mcpCapabilities.http` | `true` | Akzeptiert HTTP-/Streamable-MCP-Server bei der Sitzungserstellung |
+| `mcpCapabilities.sse` | `true` | Akzeptiert SSE-MCP-Server bei der Sitzungserstellung |
 | `sessionCapabilities.list` | `{}` | Unterstuetzt das Auflisten von Sitzungen |
 | `sessionCapabilities.close` | `{}` | Unterstuetzt das Schliessen von Sitzungen |
 
@@ -78,7 +80,7 @@ Erstellen Sie eine neue Sitzung mit einer unabhaengigen Agenten-Laufzeitumgebung
 | Feld | Typ | Erforderlich | Beschreibung |
 |-------|------|----------|-------------|
 | `cwd` | string | Ja | Absoluter Pfad zum Arbeitsverzeichnis |
-| `mcpServers` | object | Nein | MCP-Serverkonfiguration (akzeptiert, aber noch nicht funktional) |
+| `mcpServers` | object | Nein | MCP-Serverkonfiguration; HTTP- (Streamable) und SSE-Server werden fuer die Sitzung verbunden |
 
 **Antwortfelder**
 
@@ -189,7 +191,7 @@ Senden Sie Benutzereingaben und loesen Sie Streaming-Agentenantworten aus.
 | Feld | Typ | Beschreibung |
 |-------|------|-------------|
 | `stopReason` | string | Warum die Eingabe abgeschlossen wurde (siehe Abschlussgruende) |
-| `usage` | object | Token-Nutzung: `inputTokens`, `outputTokens`, `totalTokens` |
+| `_meta.usage` | object | Token-Nutzung unter dem `_meta`-Objekt der Antwort: `input_tokens`, `output_tokens`, `total_tokens` |
 
 **Abschlussgruende**
 
@@ -243,7 +245,7 @@ Schliessen Sie eine Sitzung und geben Sie ihre Ressourcen frei.
 
 ---
 
-### sessions/list
+### session/list
 
 Listen Sie alle gespeicherten Sitzungen fuer ein gegebenes Arbeitsverzeichnis auf.
 
@@ -261,7 +263,7 @@ Listen Sie alle gespeicherten Sitzungen fuer ein gegebenes Arbeitsverzeichnis au
 
 ---
 
-### config/set
+### session/set_config_option
 
 Setzen Sie dynamisch eine Konfigurationsoption fuer eine Sitzung.
 
@@ -371,8 +373,8 @@ Fuer `aliyun_api` werden Nur-Lese-Aktionen automatisch erlaubt. Nicht nur lesend
 
 ```json
 {
-  "outcome": "allowed",
-  "option_id": "allow_once"
+  "outcome": "selected",
+  "optionId": "allow_once"
 }
 ```
 
@@ -380,7 +382,7 @@ Oder zum Verweigern:
 
 ```json
 {
-  "outcome": "denied"
+  "outcome": "cancelled"
 }
 ```
 

@@ -85,7 +85,7 @@ Headless 和 protocol server 模式会跳过未批准的项目 servers，而不�
 IaC Code 通过多种方式保护 secrets：
 
 - `iac-code mcp get` 的 config 输出会对看起来像 token、secret、password、API key 和 authorization header 的字段脱敏。
-- 敏感 header 或 env 的 plaintext values 会被拒绝，除非使用环境变量引用。
+- 只有在通过 `iac-code mcp add` / `mcp add-json` 添加 server 时，敏感 header 或 env 的 plaintext values 才会被拒绝（除非使用环境变量引用）；手动编辑的配置文件在加载时不会被重新校验，因此请避免直接存储 plaintext secrets。
 - MCP stdio servers 只会继承安全环境变量 allowlist 以及显式 server env。
 - 带 username 或 password 的 proxy 环境变量不会被 stdio MCP servers 继承。
 - MCP artifact files 会写入私有的 IaC Code runtime configuration directory。

@@ -43,7 +43,7 @@ Use MCP quando quiser que o IaC Code chame uma capacidade local ou remota que n�
 
 Em tempo de execução, o IaC Code:
 
-1. Carrega configuração MCP de fontes de usuário, locais, de projeto e de sessão.
+1. Carrega configuração MCP de fontes de usuário, de projeto, locais e de sessão.
 2. Expande referências `${VAR}` e `${VAR:-default}`.
 3. Ignora servidores inseguros ou inválidos com avisos visíveis ao usuário.
 4. Conecta servidores aprovados com concorrência limitada.

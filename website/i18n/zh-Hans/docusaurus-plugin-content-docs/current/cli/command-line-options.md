@@ -17,6 +17,7 @@ description: IaC Code 启动选项和一次性执行参数参考。
 | `--max-turns <number>` | 限制非交互模式中的最大代理轮次，默认值为 `100`。 |
 | `--thinking-enabled`, `--no-thinking-enabled` | 控制一次性非交互请求是否显式启用 thinking。默认值为 `--thinking-enabled`；使用 `--no-thinking-enabled` 会在本次运行中发送 `thinking_enabled=false`，但不会改写 `settings.yml`。 |
 | `-d`, `--debug` | 为本次运行启用调试日志。交互模式启动后，可以使用 `/debug` 查看或调整调试日志。 |
+| `--verbose` | 在标准错误输出上显示 headless（非交互）模式的进度。 |
 | `-r <session-id-or-name>`, `--resume <session-id-or-name>` | 按精确会话 ID、唯一 ID 前缀或唯一会话名称恢复历史会话。解析到跨项目会话时，会打印 `cd ... && iac-code --resume <id>` 命令，而不是直接热切换当前项目。 |
 | `-c`, `--continue` | 恢复最近一次会话。不能与 `--resume` 同时使用。 |
 | `--allowed-tools <patterns>` | 逗号分隔的工具权限允许模式，例如 `'bash(git *),write_file'`。 |
@@ -47,7 +48,7 @@ iac-code
 为本次运行指定模型：
 
 ```bash
-iac-code --model qwen3.6-plus
+iac-code --model qwen3.7-max
 ```
 
 执行一次性提示词：

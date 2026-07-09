@@ -64,6 +64,8 @@ Handshake del protocolo. Debe ser la primera llamada en cada conexion.
 | `promptCapabilities.embeddedContext` | `true` | Acepta contenido de recursos incrustados en prompts |
 | `promptCapabilities.image` | `false` | Entrada de imagen no soportada (degrada a marcador de texto) |
 | `promptCapabilities.audio` | `false` | Entrada de audio no soportada (degrada a marcador de texto) |
+| `mcpCapabilities.http` | `true` | Acepta servidores MCP HTTP/streamable en la creación de la sesión |
+| `mcpCapabilities.sse` | `true` | Acepta servidores MCP SSE en la creación de la sesión |
 | `sessionCapabilities.list` | `{}` | Soporta listar sesiones |
 | `sessionCapabilities.close` | `{}` | Soporta cerrar sesiones |
 
@@ -78,7 +80,7 @@ Crea una nueva sesion con un runtime de agente independiente, registro de herram
 | Campo | Tipo | Requerido | Descripcion |
 |-------|------|----------|-------------|
 | `cwd` | string | Si | Ruta absoluta al directorio de trabajo |
-| `mcpServers` | object | No | Configuracion de servidores MCP (aceptada pero aun no funcional) |
+| `mcpServers` | object | No | Configuracion de servidores MCP; los servidores HTTP (streamable) y SSE se conectan para la sesion |
 
 **Campos de respuesta**
 
@@ -189,7 +191,7 @@ Envia entrada del usuario y activa respuestas de streaming del agente.
 | Campo | Tipo | Descripcion |
 |-------|------|-------------|
 | `stopReason` | string | Por que se completo el prompt (ver Razones de parada) |
-| `usage` | object | Uso de tokens: `inputTokens`, `outputTokens`, `totalTokens` |
+| `_meta.usage` | object | Uso de tokens bajo el objeto `_meta` de la respuesta: `input_tokens`, `output_tokens`, `total_tokens` |
 
 **Razones de parada**
 
@@ -243,7 +245,7 @@ Cierra una sesion y libera sus recursos.
 
 ---
 
-### sessions/list
+### session/list
 
 Lista todas las sesiones persistidas para un directorio de trabajo dado.
 
@@ -261,7 +263,7 @@ Lista todas las sesiones persistidas para un directorio de trabajo dado.
 
 ---
 
-### config/set
+### session/set_config_option
 
 Establece dinamicamente una opcion de configuracion para una sesion.
 
@@ -371,8 +373,8 @@ Para `aliyun_api`, las acciones de solo lectura se permiten automáticamente. La
 
 ```json
 {
-  "outcome": "allowed",
-  "option_id": "allow_once"
+  "outcome": "selected",
+  "optionId": "allow_once"
 }
 ```
 
@@ -380,7 +382,7 @@ O para denegar:
 
 ```json
 {
-  "outcome": "denied"
+  "outcome": "cancelled"
 }
 ```
 

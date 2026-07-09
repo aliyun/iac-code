@@ -64,6 +64,8 @@ Handshake do protocolo. Deve ser a primeira chamada em cada conexao.
 | `promptCapabilities.embeddedContext` | `true` | Aceita conteudo de recurso incorporado em prompts |
 | `promptCapabilities.image` | `false` | Entrada de imagem nao suportada (degrada para marcador de texto) |
 | `promptCapabilities.audio` | `false` | Entrada de audio nao suportada (degrada para marcador de texto) |
+| `mcpCapabilities.http` | `true` | Aceita servidores MCP HTTP/streamable na criacao da sessao |
+| `mcpCapabilities.sse` | `true` | Aceita servidores MCP SSE na criacao da sessao |
 | `sessionCapabilities.list` | `{}` | Suporta listagem de sessoes |
 | `sessionCapabilities.close` | `{}` | Suporta fechamento de sessoes |
 
@@ -78,7 +80,7 @@ Cria uma nova sessao com um runtime de agente independente, registro de ferramen
 | Campo | Tipo | Obrigatorio | Descricao |
 |-------|------|----------|-------------|
 | `cwd` | string | Sim | Caminho absoluto para o diretorio de trabalho |
-| `mcpServers` | object | Nao | Configuracao de servidor MCP (aceito mas ainda nao funcional) |
+| `mcpServers` | object | Nao | Configuracao de servidor MCP; servidores HTTP (streamable) e SSE sao conectados para a sessao |
 
 **Campos da resposta**
 
@@ -189,7 +191,7 @@ Envia entrada do utilizador e aciona respostas do agente em streaming.
 | Campo | Tipo | Descricao |
 |-------|------|-------------|
 | `stopReason` | string | Por que o prompt foi concluido (veja Motivos de parada) |
-| `usage` | object | Uso de tokens: `inputTokens`, `outputTokens`, `totalTokens` |
+| `_meta.usage` | object | Uso de tokens sob o objeto `_meta` da resposta: `input_tokens`, `output_tokens`, `total_tokens` |
 
 **Motivos de parada**
 
@@ -243,7 +245,7 @@ Fecha uma sessao e libera seus recursos.
 
 ---
 
-### sessions/list
+### session/list
 
 Lista todas as sessoes persistidas para um determinado diretorio de trabalho.
 
@@ -261,7 +263,7 @@ Lista todas as sessoes persistidas para um determinado diretorio de trabalho.
 
 ---
 
-### config/set
+### session/set_config_option
 
 Define dinamicamente uma opcao de configuracao para uma sessao.
 
@@ -371,8 +373,8 @@ Para `aliyun_api`, ações somente leitura são permitidas automaticamente. Aç�
 
 ```json
 {
-  "outcome": "allowed",
-  "option_id": "allow_once"
+  "outcome": "selected",
+  "optionId": "allow_once"
 }
 ```
 
@@ -380,7 +382,7 @@ Ou para negar:
 
 ```json
 {
-  "outcome": "denied"
+  "outcome": "cancelled"
 }
 ```
 

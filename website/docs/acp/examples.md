@@ -265,7 +265,7 @@ async def main():
             "params": {
                 "protocolVersion": 1,
                 "clientInfo": {"name": "http-client", "version": "1.0"},
-                "capabilities": {}
+                "clientCapabilities": {}
             }
         }, headers=HEADERS)
         resp.raise_for_status()

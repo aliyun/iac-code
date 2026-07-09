@@ -10,8 +10,8 @@ IaC Code ist ein KI-gestuetzter Infrastructure-as-Code-Assistent fuer Cloud-Infr
 
 Kernfunktionen:
 
-- **Sagen Sie es, liefern Sie es** -- beschreiben Sie Ihren Bedarf in natuerlicher Sprache und erhalten Sie validierte, einsatzbereite ROS- oder Terraform-Vorlagen.
-- **Ein Befehl bis zur Produktion** -- gehen Sie in einem Ablauf von der Vorlage zur laufenden Infrastruktur und Anwendungen; erstellen, aktualisieren, loeschen und ueberwachen Sie Stacks ueber Regionen hinweg.
+- **Sagen Sie es, liefern Sie es** -- beschreiben Sie Ihren Bedarf in natuerlicher Sprache und erhalten Sie validierte, einsatzbereite ROS-Vorlagen oder generierte Terraform-Vorlagen.
+- **Von der Vorlage zur laufenden Infrastruktur** -- fuer Alibaba Cloud ROS gehen Sie von der Vorlage bis zur laufenden Infrastruktur: erstellen, aktualisieren, loeschen und ueberwachen Sie Stacks ueber Regionen hinweg. Die Terraform-Unterstuetzung umfasst die Generierung und Konvertierung von Vorlagen, nicht jedoch die Bereitstellung.
 - **Integrierte Cloud-Intelligenz** -- durchsuchen Sie Dokumentation, pruefen Sie die Ressourcenverfuegbarkeit und schaetzen Sie Kosten, bevor Sie bereitstellen; jede Entscheidung wird durch echte Cloud-Daten gestuetzt.
 
 Die Dokumentation ist nach Benutzeraufgaben organisiert. Beginnen Sie mit Installation und Schnellstart, konfigurieren Sie dann Anbieter und Anmeldedaten und verwenden Sie die CLI-Referenz, wenn Sie Befehlsdetails benoetigen.

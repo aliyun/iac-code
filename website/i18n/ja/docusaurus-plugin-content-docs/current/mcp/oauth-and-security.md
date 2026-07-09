@@ -85,7 +85,7 @@ Headless と protocol server modes は、未承認の project servers を確認�
 IaC Code は複数の方法で secrets を保護します。
 
 - `iac-code mcp get` の config 出力では、token、secret、password、API key、authorization header に見える keys を秘匿化します。
-- 機密性の高い header または env 値の plaintext は、環境変数参照でない限り拒否されます。
+- 機密性の高い header または env 値の plaintext は、`iac-code mcp add` / `mcp add-json` でサーバーを追加する場合にのみ拒否されます（環境変数参照を使う場合を除く）。手動で編集した config ファイルは読み込み時に再検証されないため、plaintext の secret を直接保存しないでください。
 - MCP stdio servers は、安全な環境変数 allowlist と明示的な server env だけを継承します。
 - username または password を含む proxy 環境変数は stdio MCP servers に継承されません。
 - MCP artifact files は非公開の IaC Code runtime configuration directory に書き込まれます。

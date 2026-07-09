@@ -102,7 +102,7 @@ Nachfolgend eine vollstaendige Interaktion mit `curl`:
 # Step 1: Initialize — creates a connection and returns the Connection ID
 CONN_ID=$(curl -s -D - -X POST http://localhost:8765/acp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' \
   | grep -i 'acp-connection-id' | awk '{print $2}' | tr -d '\r')
 
 echo "Connection ID: $CONN_ID"

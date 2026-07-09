@@ -85,7 +85,7 @@ Headless and protocol server modes skip unapproved project servers rather than p
 IaC Code protects secrets in several ways:
 
 - Config output from `iac-code mcp get` redacts keys that look like tokens, secrets, passwords, API keys, and authorization headers.
-- Plaintext sensitive header or env values are rejected unless they use an environment-variable reference.
+- Plaintext sensitive header or env values are rejected when adding servers via `iac-code mcp add` or `mcp add-json` unless they use an environment-variable reference. Configuration files edited by hand are not re-validated on load, so avoid storing plaintext secrets directly.
 - MCP stdio servers inherit only an allowlist of safe environment variables plus the explicit server env.
 - Proxy environment variables with embedded usernames or passwords are not inherited by stdio MCP servers.
 - MCP artifact files are written under the private IaC Code runtime configuration directory.

@@ -43,7 +43,7 @@ Verwenden Sie MCP, wenn IaC Code lokale oder entfernte Funktionen aufrufen soll,
 
 Zur Laufzeit führt IaC Code diese Schritte aus:
 
-1. Lädt MCP-Konfiguration aus Benutzer-, lokalen, Projekt- und Sitzungsquellen.
+1. Lädt MCP-Konfiguration aus Benutzer-, Projekt-, lokalen und Sitzungsquellen.
 2. Erweitert `${VAR}`- und `${VAR:-default}`-Referenzen.
 3. Überspringt unsichere oder ungültige Server mit sichtbaren Warnungen.
 4. Verbindet genehmigte Server mit begrenzter Parallelität.

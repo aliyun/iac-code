@@ -64,6 +64,8 @@ ACP session 使用与交互式和 headless 运行相同的 v2 session 备份行�
 | `promptCapabilities.embeddedContext` | `true` | 接受在提示中嵌入资源内容 |
 | `promptCapabilities.image` | `false` | 不支持图片输入（降级为文本标记） |
 | `promptCapabilities.audio` | `false` | 不支持音频输入（降级为文本标记） |
+| `mcpCapabilities.http` | `true` | 在会话创建时接受 HTTP/streamable MCP 服务器 |
+| `mcpCapabilities.sse` | `true` | 在会话创建时接受 SSE MCP 服务器 |
 | `sessionCapabilities.list` | `{}` | 支持列出会话 |
 | `sessionCapabilities.close` | `{}` | 支持关闭会话 |
 
@@ -78,7 +80,7 @@ ACP session 使用与交互式和 headless 运行相同的 v2 session 备份行�
 | 字段 | 类型 | 必填 | 描述 |
 |-------|------|----------|-------------|
 | `cwd` | string | 是 | 工作目录的绝对路径 |
-| `mcpServers` | object | 否 | MCP 服务器配置（已接受但尚未生效） |
+| `mcpServers` | object | 否 | MCP 服务器配置；HTTP（streamable）和 SSE 服务器会在该会话中建立连接 |
 
 **响应字段**
 
@@ -189,7 +191,7 @@ Fork 一个现有会话，创建一个具有相同历史记录的独立分支。
 | 字段 | 类型 | 描述 |
 |-------|------|-------------|
 | `stopReason` | string | 提示完成的原因（见停止原因） |
-| `usage` | object | Token 用量：`inputTokens`、`outputTokens`、`totalTokens` |
+| `_meta.usage` | object | Token 用量，通过响应的 `_meta` 对象返回，包含 `input_tokens`、`output_tokens`、`total_tokens` 键 |
 
 **停止原因**
 
@@ -243,7 +245,7 @@ Fork 一个现有会话，创建一个具有相同历史记录的独立分支。
 
 ---
 
-### sessions/list
+### session/list
 
 列出给定工作目录下所有已持久化的会话。
 
@@ -261,7 +263,7 @@ Fork 一个现有会话，创建一个具有相同历史记录的独立分支。
 
 ---
 
-### config/set
+### session/set_config_option
 
 动态设置会话的配置选项。
 
@@ -371,8 +373,8 @@ ToolCallStart (status=in_progress)
 
 ```json
 {
-  "outcome": "allowed",
-  "option_id": "allow_once"
+  "outcome": "selected",
+  "optionId": "allow_once"
 }
 ```
 
@@ -380,7 +382,7 @@ ToolCallStart (status=in_progress)
 
 ```json
 {
-  "outcome": "denied"
+  "outcome": "cancelled"
 }
 ```
 

@@ -102,7 +102,7 @@ Authorization: Bearer your-secret-token
 # 第 1 步：初始化 — 创建连接并获取连接 ID
 CONN_ID=$(curl -s -D - -X POST http://localhost:8765/acp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' \
   | grep -i 'acp-connection-id' | awk '{print $2}' | tr -d '\r')
 
 echo "Connection ID: $CONN_ID"

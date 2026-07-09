@@ -85,7 +85,7 @@ Modos headless e servidor de protocolo ignoram servidores de projeto não aprova
 O IaC Code protege segredos de várias formas:
 
 - A saída de `iac-code mcp get` mascara chaves que parecem tokens, secrets, passwords, API keys e authorization headers.
-- Valores sensíveis de headers ou env em texto claro são rejeitados, a menos que usem referência a variável de ambiente.
+- Valores sensíveis de headers ou env em texto claro são rejeitados apenas ao adicionar servidores via `iac-code mcp add` / `mcp add-json` (a menos que usem referência a variável de ambiente); arquivos de configuração editados manualmente NÃO são revalidados no carregamento, então evite armazenar segredos em texto claro diretamente.
 - Servidores MCP stdio herdam apenas uma allowlist de variáveis de ambiente seguras mais o env explícito do servidor.
 - Variáveis de proxy com usernames ou passwords não são herdadas por servidores MCP stdio.
 - Arquivos de artefato MCP são escritos no diretório privado de configuração runtime do IaC Code.

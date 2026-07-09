@@ -43,7 +43,7 @@ Use MCP when you want IaC Code to call a local or remote capability that is not 
 
 At runtime IaC Code:
 
-1. Loads MCP configuration from user, local, project, and session sources.
+1. Loads MCP configuration from user, project, local, and session sources.
 2. Expands `${VAR}` and `${VAR:-default}` references.
 3. Skips unsafe or invalid servers with user-visible warnings.
 4. Connects approved servers with bounded concurrency.
