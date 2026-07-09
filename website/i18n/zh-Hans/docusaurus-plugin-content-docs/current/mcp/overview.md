@@ -43,7 +43,7 @@ IaC Code 可以作为 Model Context Protocol (MCP) host 运行。MCP 服务器�
 
 运行时 IaC Code 会：
 
-1. 从用户、本地、项目和会话来源加载 MCP 配置。
+1. 从用户、项目、本地和会话来源加载 MCP 配置。
 2. 展开 `${VAR}` 和 `${VAR:-default}` 引用。
 3. 通过用户可见 warning 跳过不安全或无效的 server。
 4. 以有界并发连接已批准的 server。

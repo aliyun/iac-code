@@ -9,24 +9,12 @@ description: 创建和使用可复用的提示词模板作为 Slash 命令。
 
 ## 技能文件格式
 
-技能以 Markdown 文件定义，包含 YAML frontmatter。支持两种格式：
-
-### 单文件
-
-以技能名称命名的独立 Markdown 文件：
+技能是一个包含 `SKILL.md` 文件的目录，`SKILL.md` 以 YAML frontmatter 开头。目录名即技能的默认名称，目录中还可以存放技能所需的额外参考文件：
 
 ```text
 skills/
-  deploy-check.md
-  code-review.md
-```
-
-### 目录
-
-包含 `SKILL.md` 的目录，适用于技能需要附带额外参考文件的场景：
-
-```text
-skills/
+  deploy-check/
+    SKILL.md
   my-skill/
     SKILL.md
     references/
@@ -35,16 +23,16 @@ skills/
 
 ## 发现与优先级
 
-IaC Code 从多个位置发现技能。同名技能按后者覆盖前者的规则处理：
+IaC Code 从多个位置发现技能。同名技能按优先级高者覆盖低者的规则处理：
 
 | 优先级 | 位置 | 说明 |
 |--------|------|------|
-| 1（最低） | 内置 | IaC Code 自带的内置技能 |
-| 2 | `~/.iac-code/skills/` | 用户全局技能（跟随 `IAC_CODE_CONFIG_DIR`） |
-| 3 | `skills/` | 项目级技能目录 |
-| 4（最高） | `.iac-code/skills/` | 项目配置级技能目录 |
+| 1（最低） | `~/.iac-code/skills/` | 用户全局技能（跟随 `IAC_CODE_CONFIG_DIR`） |
+| 2 | `skills/` | 项目级技能目录 |
+| 3 | `.iac-code/skills/` | 项目配置级技能目录 |
+| 4（最高） | 内置 | IaC Code 自带的内置技能；不会被同名的用户或项目技能覆盖 |
 
-项目技能目录会从当前工作目录向上搜索至文件系统根目录。
+项目技能目录会从 git 仓库根目录向下搜索至当前工作目录。当当前目录不在 git 仓库中时，仅搜索当前目录。
 
 ## Frontmatter 参考
 
@@ -81,7 +69,7 @@ paths:
 | `when_to_use` | 否 | `""` | 提示模型何时自动调用此技能 |
 | `argument_hint` | 否 | `""` | 命令名后显示的占位符提示 |
 | `arguments` | 否 | `[]` | 用于位置替换的命名参数列表 |
-| `allowed_tools` | 否 | `[]` | 技能允许使用的工具（适用于 fork 模式） |
+| `allowed_tools` | 否 | `[]` | 技能允许使用的工具（inline 和 fork 模式均适用） |
 | `user_invocable` | 否 | `true` | 用户是否可以通过 `/name`（或 `$name`）直接调用 |
 | `model` | 否 | `"inherit"` | 技能执行时的模型覆盖 |
 | `effort` | 否 | `""` | 思考 effort 覆盖 |
@@ -189,7 +177,7 @@ user_invocable: true
 如果提供了资源栈名称，还需检查当前资源栈状态。
 ```
 
-将此文件保存为 `~/.iac-code/skills/checklist.md` 或项目中的 `.iac-code/skills/checklist.md`，然后在 REPL 中通过 `/checklist` 调用 —— 也可以使用 `$checklist`，效果完全相同，但 `$` 触发器只会筛选 skill 候选项。
+将此文件保存为 `~/.iac-code/skills/checklist/SKILL.md` 或项目中的 `.iac-code/skills/checklist/SKILL.md`，然后在 REPL 中通过 `/checklist` 调用 —— 也可以使用 `$checklist`，效果完全相同，但 `$` 触发器只会筛选 skill 候选项。
 
 ## 权限
 

@@ -74,5 +74,5 @@ CLI 参数 > 环境变量 > 配置文件
 |---|---|
 | `IAC_CODE_PROVIDER` | 模型提供商名称（大小写不敏感），有效值见上表 |
 | `IAC_CODE_MODEL` | 模型名称 |
-| `IAC_CODE_BASE_URL` | `OpenAPI Compatible` 和 `Anthropic Compatible` 使用的 API 端点；其他提供商会忽略此值 |
+| `IAC_CODE_BASE_URL` | 仅 `OpenAI Compatible` 使用的 API 端点；其他提供商会忽略此值（并给出 warning） |
 | `IAC_CODE_API_KEY` | 提供商 API Key |

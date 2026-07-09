@@ -19,7 +19,7 @@ Las variables de entorno son utiles para pipelines de CI/CD, contenedores y sobr
 |---|---|
 | `IAC_CODE_PROVIDER` | Nombre del proveedor de modelos (sin distincion de mayusculas/minusculas). Valores validos: `DashScope`, `DashScope Token Plan`, `OpenAI`, `Anthropic`, `DeepSeek`, `Gemini`, `Azure OpenAI`, `ModelScope`, `Kimi CN`, `Kimi Intl`, `MiniMax CN`, `MiniMax Intl`, `ZhiPu CN`, `ZhiPu Intl`, `Volcengine CN`, `SiliconFlow CN`, `SiliconFlow Intl`, `Aliyun CodingPlan`, `Aliyun CodingPlan Intl`, `ZhiPu CN CodingPlan`, `ZhiPu Intl CodingPlan`, `Volcengine CodingPlan`, `OpenAPI Compatible`, `Anthropic Compatible`, `OpenRouter`, `Ollama`, `LM Studio` |
 | `IAC_CODE_MODEL` | Nombre del modelo |
-| `IAC_CODE_BASE_URL` | Endpoint de API para `OpenAPI Compatible` y `Anthropic Compatible` solamente; se ignora para otros proveedores |
+| `IAC_CODE_BASE_URL` | Endpoint de API que se aplica únicamente a `OpenAPI Compatible`; se ignora (con una advertencia) para otros proveedores |
 | `IAC_CODE_API_KEY` | Clave API del proveedor; sobreescribe la clave del proveedor activo en `.credentials.yml` |
 
 Consulta [Proveedores de LLM](./llm-providers.md) para mas detalles sobre los proveedores.

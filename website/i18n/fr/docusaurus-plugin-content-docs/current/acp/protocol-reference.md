@@ -64,6 +64,8 @@ Poignée de main du protocole. Doit être le premier appel sur chaque connexion.
 | `promptCapabilities.embeddedContext` | `true` | Accepte le contenu de ressources embarquées dans les requêtes |
 | `promptCapabilities.image` | `false` | Entrée image non prise en charge (dégradée en marqueur texte) |
 | `promptCapabilities.audio` | `false` | Entrée audio non prise en charge (dégradée en marqueur texte) |
+| `mcpCapabilities.http` | `true` | Accepte les serveurs MCP HTTP/streamable lors de la création de session |
+| `mcpCapabilities.sse` | `true` | Accepte les serveurs MCP SSE lors de la création de session |
 | `sessionCapabilities.list` | `{}` | Prend en charge le listage des sessions |
 | `sessionCapabilities.close` | `{}` | Prend en charge la fermeture des sessions |
 
@@ -78,7 +80,7 @@ Créer une nouvelle session avec un runtime d'agent indépendant, un registre d'
 | Champ | Type | Requis | Description |
 |-------|------|----------|-------------|
 | `cwd` | string | Oui | Chemin absolu vers le répertoire de travail |
-| `mcpServers` | object | Non | Configuration du serveur MCP (acceptée mais pas encore fonctionnelle) |
+| `mcpServers` | object | Non | Configuration du serveur MCP ; les serveurs HTTP (streamable) et SSE sont connectés pour la session |
 
 **Champs de réponse**
 
@@ -189,7 +191,7 @@ Envoyer l'entrée utilisateur et déclencher les réponses de l'agent en streami
 | Champ | Type | Description |
 |-------|------|-------------|
 | `stopReason` | string | Raison de la fin de la requête (voir Raisons d'arrêt) |
-| `usage` | object | Utilisation des tokens : `inputTokens`, `outputTokens`, `totalTokens` |
+| `_meta.usage` | object | Utilisation des tokens sous l'objet `_meta` de la réponse : `input_tokens`, `output_tokens`, `total_tokens` |
 
 **Raisons d'arrêt**
 
@@ -243,7 +245,7 @@ Fermer une session et libérer ses ressources.
 
 ---
 
-### sessions/list
+### session/list
 
 Lister toutes les sessions persistées pour un répertoire de travail donné.
 
@@ -261,7 +263,7 @@ Lister toutes les sessions persistées pour un répertoire de travail donné.
 
 ---
 
-### config/set
+### session/set_config_option
 
 Définir dynamiquement une option de configuration pour une session.
 
@@ -371,8 +373,8 @@ Pour `aliyun_api`, les actions en lecture seule sont autorisées automatiquement
 
 ```json
 {
-  "outcome": "allowed",
-  "option_id": "allow_once"
+  "outcome": "selected",
+  "optionId": "allow_once"
 }
 ```
 
@@ -380,7 +382,7 @@ Ou pour refuser :
 
 ```json
 {
-  "outcome": "denied"
+  "outcome": "cancelled"
 }
 ```
 

@@ -64,6 +64,8 @@ Protocol handshake. Must be the first call on every connection.
 | `promptCapabilities.embeddedContext` | `true` | Accepts embedded resource content in prompts |
 | `promptCapabilities.image` | `false` | Image input not supported (degrades to text marker) |
 | `promptCapabilities.audio` | `false` | Audio input not supported (degrades to text marker) |
+| `mcpCapabilities.http` | `true` | Accepts HTTP (streamable) MCP servers at session creation |
+| `mcpCapabilities.sse` | `true` | Accepts SSE MCP servers at session creation |
 | `sessionCapabilities.list` | `{}` | Supports listing sessions |
 | `sessionCapabilities.close` | `{}` | Supports closing sessions |
 
@@ -78,7 +80,7 @@ Create a new session with an independent agent runtime, tool registry, and LLM c
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cwd` | string | Yes | Absolute path to the working directory |
-| `mcpServers` | object | No | MCP server configuration (accepted but not yet functional) |
+| `mcpServers` | object | No | MCP server configuration; HTTP (streamable) and SSE servers are connected for the session |
 
 **Response Fields**
 
@@ -189,7 +191,7 @@ Send user input and trigger streaming agent responses.
 | Field | Type | Description |
 |-------|------|-------------|
 | `stopReason` | string | Why the prompt completed (see Stop Reasons) |
-| `usage` | object | Token usage: `inputTokens`, `outputTokens`, `totalTokens` |
+| `_meta.usage` | object | Token usage delivered under the response `_meta` object: `input_tokens`, `output_tokens`, `total_tokens` |
 
 **Stop Reasons**
 
@@ -243,7 +245,7 @@ Close a session and release its resources.
 
 ---
 
-### sessions/list
+### session/list
 
 List all persisted sessions for a given working directory.
 
@@ -261,7 +263,7 @@ List all persisted sessions for a given working directory.
 
 ---
 
-### config/set
+### session/set_config_option
 
 Dynamically set a configuration option for a session.
 
@@ -371,8 +373,8 @@ For `aliyun_api`, read-only actions are auto-allowed. Non-read-only RPC and ROA 
 
 ```json
 {
-  "outcome": "allowed",
-  "option_id": "allow_once"
+  "outcome": "selected",
+  "optionId": "allow_once"
 }
 ```
 
@@ -380,7 +382,7 @@ Or to deny:
 
 ```json
 {
-  "outcome": "denied"
+  "outcome": "cancelled"
 }
 ```
 

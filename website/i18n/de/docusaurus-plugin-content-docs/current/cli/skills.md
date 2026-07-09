@@ -7,26 +7,14 @@ description: Create and use reusable prompt templates as slash commands.
 
 Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
 
-## Skill File Formats
+## Skill-Dateiformat
 
-Skills are defined as Markdown files with YAML frontmatter. Two formats are supported:
-
-### Single File
-
-A standalone Markdown file named after the skill:
+Ein Skill ist ein Verzeichnis, das eine `SKILL.md`-Datei enthält. Der Verzeichnisname ist der Standard-Skill-Name. Das Verzeichnis kann zusätzliche Referenzdateien enthalten:
 
 ```text
 skills/
-  deploy-check.md
-  code-review.md
-```
-
-### Directory
-
-A directory containing a `SKILL.md` file, useful when the skill needs additional reference files:
-
-```text
-skills/
+  deploy-check/
+    SKILL.md
   my-skill/
     SKILL.md
     references/
@@ -35,16 +23,16 @@ skills/
 
 ## Discovery and Priority
 
-IaC Code discovers skills from multiple locations. When skills share the same name, later sources override earlier ones:
+IaC Code entdeckt Skills aus mehreren Quellen. Wenn Skills denselben Namen haben, überschreiben Quellen mit höherer Priorität die mit niedrigerer Priorität:
 
-| Priority | Location | Description |
+| Priorität | Quelle | Beschreibung |
 |----------|----------|-------------|
-| 1 (lowest) | Bundled | Built-in skills shipped with IaC Code |
-| 2 | `~/.iac-code/skills/` | User-global skills (follows `IAC_CODE_CONFIG_DIR`) |
-| 3 | `skills/` | Project-level skills directory |
-| 4 (highest) | `.iac-code/skills/` | Project config-level skills directory |
+| 1 (niedrigste) | `~/.iac-code/skills/` | Benutzerweite Skills (folgt `IAC_CODE_CONFIG_DIR`) |
+| 2 | `skills/` | Skills-Verzeichnis auf Projektebene |
+| 3 | `.iac-code/skills/` | Skills-Verzeichnis auf Projektkonfigurationsebene |
+| 4 (höchste) | Gebündelt | Eingebaute Skills, die mit IaC Code ausgeliefert werden. Können nicht durch gleichnamige Benutzer- oder Projekt-Skills überschattet werden |
 
-Project skill directories are searched upward from the current working directory to the filesystem root.
+Projekt-Skill-Verzeichnisse werden von der Wurzel des Git-Repositorys abwärts bis zum aktuellen Arbeitsverzeichnis durchsucht. Wenn Sie sich nicht in einem Git-Repository befinden, wird nur das aktuelle Verzeichnis durchsucht.
 
 ## Frontmatter Reference
 
@@ -81,7 +69,7 @@ paths:
 | `when_to_use` | No | `""` | Hint for the model on when to invoke this skill automatically |
 | `argument_hint` | No | `""` | Placeholder shown after the command name |
 | `arguments` | No | `[]` | Named argument list for positional substitution |
-| `allowed_tools` | No | `[]` | Tools the skill is allowed to use (applies to fork mode) |
+| `allowed_tools` | No | `[]` | Tools the skill is allowed to use (applies to both inline and fork modes) |
 | `user_invocable` | No | `true` | Whether the user can invoke this skill directly via `/name` (or `$name`) |
 | `model` | No | `"inherit"` | Model override for this skill execution |
 | `effort` | No | `""` | Thinking effort override |
@@ -189,7 +177,7 @@ Review the current project and generate a pre-deployment checklist covering:
 If a stack name is provided, also check the current stack status.
 ```
 
-Save this as `~/.iac-code/skills/checklist.md` or `.iac-code/skills/checklist.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
+Save this as `~/.iac-code/skills/checklist/SKILL.md` or `.iac-code/skills/checklist/SKILL.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
 
 ## Permissions
 

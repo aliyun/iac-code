@@ -17,6 +17,7 @@ Command line options change how IaC Code starts. Use them before entering the in
 | `--max-turns <number>` | Limit the maximum number of agent turns in non-interactive mode. The default is `100`. |
 | `--thinking-enabled`, `--no-thinking-enabled` | Control whether one-shot non-interactive requests explicitly enable thinking. The default is `--thinking-enabled`; use `--no-thinking-enabled` to send `thinking_enabled=false` for this run without rewriting `settings.yml`. |
 | `-d`, `--debug` | Enable debug logging for the current run. In interactive mode, use `/debug` to inspect or change debug logging after startup. |
+| `--verbose` | Show headless (non-interactive) progress on standard error. |
 | `-r <session-id-or-name>`, `--resume <session-id-or-name>` | Resume a previous session by exact session ID, unique ID prefix, or unique session name. Cross-project resolved sessions print a `cd ... && iac-code --resume <id>` command instead of hot-swapping the current project. |
 | `-c`, `--continue` | Resume the most recent session. This cannot be used together with `--resume`. |
 | `--allowed-tools <patterns>` | Comma-separated tool permission patterns to allow, e.g. `'bash(git *),write_file'`. |
@@ -47,7 +48,7 @@ iac-code
 Start with a specific model for this run:
 
 ```bash
-iac-code --model qwen3.6-plus
+iac-code --model qwen3.7-max
 ```
 
 Run a one-shot prompt:

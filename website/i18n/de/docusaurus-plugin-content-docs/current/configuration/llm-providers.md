@@ -74,5 +74,5 @@ CLI-Argumente > Umgebungsvariablen > Konfigurationsdateien
 |---|---|
 | `IAC_CODE_PROVIDER` | Name des Modellanbieters (Gross-/Kleinschreibung wird nicht beachtet). Gueltige Werte siehe obige Tabellen |
 | `IAC_CODE_MODEL` | Modellname |
-| `IAC_CODE_BASE_URL` | API-Endpunkt nur fuer `OpenAPI Compatible` und `Anthropic Compatible`; wird fuer andere Anbieter ignoriert |
+| `IAC_CODE_BASE_URL` | API-Endpunkt nur fuer `OpenAI Compatible`; wird fuer andere Anbieter ignoriert (mit einer Warnung) |
 | `IAC_CODE_API_KEY` | API-Schluessel des Anbieters |

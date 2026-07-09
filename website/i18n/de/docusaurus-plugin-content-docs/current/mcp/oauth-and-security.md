@@ -85,7 +85,7 @@ Headless- und Protokollservermodi überspringen nicht genehmigte Projektserver, 
 IaC Code schützt Secrets auf mehrere Arten:
 
 - Die Ausgabe von `iac-code mcp get` schwärzt Keys, die wie Tokens, Secrets, Passwörter, API-Keys oder Authorization-Headers aussehen.
-- Klartextwerte in sensiblen Headers oder env-Einträgen werden abgelehnt, sofern sie keine Umgebungsvariablen-Referenz nutzen.
+- Klartextwerte in sensiblen Headers oder env-Einträgen werden nur beim Hinzufügen von Servern über `iac-code mcp add` / `mcp add-json` abgelehnt, sofern sie keine Umgebungsvariablen-Referenz nutzen. Von Hand bearbeitete Konfigurationsdateien werden beim Laden nicht erneut validiert; speichern Sie daher keine Klartext-Secrets direkt darin.
 - MCP-stdio-Server erben nur eine Allowlist sicherer Umgebungsvariablen plus explizites Server-env.
 - Proxy-Umgebungsvariablen mit Benutzernamen oder Passwörtern werden nicht an stdio-MCP-Server vererbt.
 - MCP-Artefaktdateien werden im privaten Runtime-Konfigurationsverzeichnis von IaC Code geschrieben.

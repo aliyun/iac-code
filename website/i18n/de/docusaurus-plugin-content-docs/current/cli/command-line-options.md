@@ -17,6 +17,7 @@ Befehlszeilenoptionen steuern, wie IaC Code gestartet wird. Sie können vor dem 
 | `--max-turns <number>` | Maximale Anzahl der Agenten-Runden im nicht-interaktiven Modus begrenzen. Standard ist `100`. |
 | `--thinking-enabled`, `--no-thinking-enabled` | Steuert, ob einmalige nicht-interaktive Anfragen Thinking explizit aktivieren. Standard ist `--thinking-enabled`; verwenden Sie `--no-thinking-enabled`, um fuer diesen Lauf `thinking_enabled=false` zu senden, ohne `settings.yml` umzuschreiben. |
 | `-d`, `--debug` | Debug-Protokollierung für den aktuellen Lauf aktivieren. Im interaktiven Modus verwenden Sie `/debug`, um die Debug-Protokollierung nach dem Start zu prüfen oder zu ändern. |
+| `--verbose` | Headless-Fortschritt (nicht-interaktiv) auf der Standardfehlerausgabe anzeigen. |
 | `-r <session-id-oder-name>`, `--resume <session-id-oder-name>` | Eine vorherige Sitzung über die exakte Sitzungs-ID, ein eindeutiges ID-Präfix oder einen eindeutigen Sitzungsnamen fortsetzen. Projektübergreifend aufgelöste Sitzungen geben einen `cd ... && iac-code --resume <id>`-Befehl aus, statt das aktuelle Projekt direkt zu wechseln. |
 | `-c`, `--continue` | Die letzte Sitzung fortsetzen. Kann nicht zusammen mit `--resume` verwendet werden. |
 | `--allowed-tools <patterns>` | Kommagetrennte Werkzeug-Berechtigungsmuster zum Erlauben, z.B. `'bash(git *),write_file'`. |
@@ -47,7 +48,7 @@ iac-code
 Für diesen Lauf ein bestimmtes Modell angeben:
 
 ```bash
-iac-code --model qwen3.6-plus
+iac-code --model qwen3.7-max
 ```
 
 Einen einmaligen Prompt ausführen:

@@ -74,5 +74,5 @@ CLI arguments > environment variables > configuration files
 |---|---|
 | `IAC_CODE_PROVIDER` | Nombre del proveedor de modelos (sin distincion de mayusculas/minusculas). Consulta las tablas anteriores para valores validos |
 | `IAC_CODE_MODEL` | Nombre del modelo |
-| `IAC_CODE_BASE_URL` | Endpoint de API para `OpenAPI Compatible` y `Anthropic Compatible` solamente; se ignora para otros proveedores |
+| `IAC_CODE_BASE_URL` | Endpoint de API que se aplica únicamente a `OpenAPI Compatible`; se ignora (con una advertencia) para otros proveedores |
 | `IAC_CODE_API_KEY` | Clave API del proveedor |

@@ -17,6 +17,7 @@ As opções de linha de comando alteram como o IaC Code é iniciado. Use-as ante
 | `--max-turns <number>` | Limitar o número máximo de turnos do agente no modo não interativo. O padrão é `100`. |
 | `--thinking-enabled`, `--no-thinking-enabled` | Controla se solicitações nao interativas de execucao unica habilitam thinking explicitamente. O padrão é `--thinking-enabled`; use `--no-thinking-enabled` para enviar `thinking_enabled=false` nesta execução sem reescrever `settings.yml`. |
 | `-d`, `--debug` | Ativar o registro de depuração para a execução atual. No modo interativo, use `/debug` para inspecionar ou alterar o registro de depuração após a inicialização. |
+| `--verbose` | Mostrar o progresso do modo headless (não interativo) na saída de erro padrão. |
 | `-r <id-ou-nome-da-sessao>`, `--resume <id-ou-nome-da-sessao>` | Retomar uma sessão anterior por ID exato, prefixo único de ID ou nome único de sessão. Sessões resolvidas em outro projeto imprimem um comando `cd ... && iac-code --resume <id>` em vez de trocar o projeto atual em tempo real. |
 | `-c`, `--continue` | Retomar a sessão mais recente. Não pode ser usado junto com `--resume`. |
 | `--allowed-tools <patterns>` | Padrões de permissão de ferramentas separados por vírgulas para permitir, ex. `'bash(git *),write_file'`. |
@@ -47,7 +48,7 @@ iac-code
 Iniciar com um modelo específico para esta execução:
 
 ```bash
-iac-code --model qwen3.6-plus
+iac-code --model qwen3.7-max
 ```
 
 Executar um prompt único:
