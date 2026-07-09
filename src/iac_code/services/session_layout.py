@@ -198,3 +198,6 @@ class SessionPaths:
 
     def transcript_tool_results_dir(self, transcript_id: str) -> Path:
         return self.transcript_dir(transcript_id) / "tool-results"
+
+    def transcript_image_cache_dir(self, transcript_id: str) -> Path:
+        return self.transcript_dir(transcript_id) / "image-cache"

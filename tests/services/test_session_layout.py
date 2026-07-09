@@ -55,6 +55,9 @@ def test_layout_v2_paths_are_session_scoped(tmp_path: Path) -> None:
     assert paths.transcript_tool_results_dir("transcript_att_0001") == (
         session_dir / "pipeline" / "transcripts" / "transcript_att_0001" / "tool-results"
     )
+    assert paths.transcript_image_cache_dir("transcript_att_0001") == (
+        session_dir / "pipeline" / "transcripts" / "transcript_att_0001" / "image-cache"
+    )
 
 
 @pytest.mark.parametrize(

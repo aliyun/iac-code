@@ -15,11 +15,13 @@ from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, StepSpec
 from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
+from iac_code.services.permissions.pipeline import check_tool_permission
 from iac_code.services.session_layout import SessionPaths, UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.session_usage import SessionUsageStore
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.tools.bash.bash_tool import BashTool
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult, ToolPermissionContext
 from iac_code.types.stream_events import (
     MessageEndEvent,
@@ -395,6 +397,80 @@ async def test_step_executor_routes_transcript_runtime_paths(tmp_path: Path):
     assert permission_event.audit_context["root_session_id"] == "root-session"
     assert permission_event.audit_context["transcript_id"] == "transcript_att_0001"
     assert permission_event.audit_context["audit_log_path"] == str(transcript_dir / "permission-audit.jsonl")
+
+
+@pytest.mark.asyncio
+async def test_step_executor_trusts_current_transcript_artifacts_for_bash_reads(tmp_path: Path):
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts" / "step.md").write_text("Run step.", encoding="utf-8")
+    root_storage = SessionStorage(projects_dir=tmp_path / "projects")
+    root_session_dir = root_storage.session_dir("/repo", "root-session")
+    write_session_metadata(
+        root_session_dir,
+        SessionMetadata(session_id="root-session", cwd="/repo", layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    transcript_storage = PipelineTranscriptStorage(tmp_path / "detached-pipeline")
+    step = StepSpec(step_id="step", conclusion_field="out", forward=None, prompt_file="prompts/step.md")
+    pipeline = LoadedPipeline(
+        name="test",
+        steps=[step],
+        context_dependencies={"out": []},
+        max_rollbacks=1,
+        skills={},
+    )
+    executor = StepExecutor(
+        provider_manager=_FakeProvider(),
+        base_tool_registry=ToolRegistry(),
+        pipeline=pipeline,
+        pipeline_dir=tmp_path,
+        session_storage=transcript_storage,
+        root_session_storage=root_storage,
+        cwd="/repo",
+        permission_context_getter=lambda: ToolPermissionContext(cwd="/repo"),
+    )
+
+    agent_context = executor.build_agent_loop_context(
+        step,
+        PipelineContext({"out": []}),
+        "root-session",
+        transcript_id="transcript_att_0001",
+    )
+
+    loop = agent_context.agent_loop
+    assert loop is not None
+    session_paths = SessionPaths.require_supported(root_session_dir)
+    transcript_tool_results_dir = session_paths.transcript_tool_results_dir("transcript_att_0001")
+    transcript_image_cache_dir = session_paths.transcript_image_cache_dir("transcript_att_0001")
+    result_file = transcript_tool_results_dir / "tool-1.txt"
+    result_file.parent.mkdir(parents=True, exist_ok=True)
+    result_file.write_text("saved result", encoding="utf-8")
+    image_file = transcript_image_cache_dir / "1.png"
+    image_file.parent.mkdir(parents=True, exist_ok=True)
+    image_file.write_bytes(b"png")
+
+    result_permission = await check_tool_permission(
+        BashTool(),
+        {"command": f"cat {result_file}"},
+        ToolPermissionContext(
+            cwd="/repo",
+            trusted_read_directories=list(loop._tool_context_trusted_read_directories),
+        ),
+    )
+    image_permission = await check_tool_permission(
+        BashTool(),
+        {"command": f"cat {image_file}"},
+        ToolPermissionContext(
+            cwd="/repo",
+            trusted_read_directories=list(loop._tool_context_trusted_read_directories),
+        ),
+    )
+
+    assert str(transcript_tool_results_dir) in loop._tool_context_trusted_read_directories
+    assert str(transcript_image_cache_dir) in loop._tool_context_trusted_read_directories
+    assert str(root_session_dir) not in loop._tool_context_trusted_read_directories
+    assert str(transcript_tool_results_dir.parent) not in loop._tool_context_trusted_read_directories
+    assert result_permission.behavior == "allow"
+    assert image_permission.behavior == "allow"
 
 
 def test_step_executor_keeps_legacy_root_on_legacy_runtime_paths(tmp_path: Path):
