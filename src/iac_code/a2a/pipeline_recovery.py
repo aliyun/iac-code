@@ -13,6 +13,7 @@ from iac_code.a2a.pipeline_snapshot import (
     reduce_pipeline_events,
     sanitize_pipeline_artifact_uris,
     sanitize_pipeline_cleanup_private_fields,
+    snapshot_needs_backup_commit_repair,
 )
 from iac_code.i18n import _
 
@@ -70,6 +71,11 @@ class A2APipelineRecoveryService:
             )
         else:
             replay_events = _events_for_task(events, task_id=recovery_task_id, context_id=context_id)
+
+        if snapshot_needs_backup_commit_repair(snapshot, replay_events):
+            snapshot = reduce_pipeline_events(replay_events)
+            snapshot_store.save(snapshot)
+            snapshot = snapshot_store.load() or snapshot
 
         if (
             snapshot is not None

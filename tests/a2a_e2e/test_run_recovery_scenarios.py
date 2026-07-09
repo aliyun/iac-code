@@ -18,7 +18,12 @@ def _load_runner():
     return module
 
 
-def _input_required_event(kind: str) -> dict:
+def _input_required_event(kind: str = "", *, step_id: str = "") -> dict:
+    data = {}
+    if kind:
+        data["kind"] = kind
+    if step_id:
+        data["stepId"] = step_id
     return {
         "result": {
             "statusUpdate": {
@@ -26,7 +31,8 @@ def _input_required_event(kind: str) -> dict:
                     "iac_code": {
                         "pipeline": {
                             "eventType": "input_required",
-                            "data": {"kind": kind},
+                            "step": {"id": step_id} if step_id else {},
+                            "data": data,
                         }
                     }
                 }
@@ -66,6 +72,38 @@ def test_normal_running_recovery_prompt_ignores_continue() -> None:
     assert "内容等于“继续”" in runner.DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT
     assert "请完成当前步骤" in runner.DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT
     assert "更早的方案选择消息" in runner.DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT
+
+
+def test_a2a_session_contains_user_message_reads_persisted_context(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    from iac_code.agent.message import Message
+    from iac_code.services.session_storage import SessionStorage
+
+    cwd = str(tmp_path / "workspace")
+    Path(cwd).mkdir()
+    run_dir = tmp_path / "run"
+    context_dir = run_dir / "a2a-persistence" / "contexts"
+    context_dir.mkdir(parents=True)
+    (context_dir / "ctx-1.json").write_text(
+        json.dumps({"context_id": "ctx-1", "cwd": cwd, "session_id": "session-1"}),
+        encoding="utf-8",
+    )
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    storage.save(
+        cwd,
+        "session-1",
+        [
+            Message(role="user", content="[Pipeline Handoff Context]\n..."),
+            Message(role="user", content="你刚才创建了什么"),
+            Message(role="assistant", content="没有实际部署任何云资源。"),
+        ],
+    )
+    monkeypatch.setattr(runner, "SessionStorage", lambda: storage)
+    harness = SimpleNamespace(run_dir=run_dir, context_id="ctx-1", cwd=cwd, notes=[])
+
+    assert runner._a2a_session_contains_user_message(harness, "你刚才创建了什么") is True
+    assert runner._a2a_session_contains_user_message(harness, "不存在的问题") is False
+    assert harness.notes == []
 
 
 def test_text_image_fixture_store_writes_png_and_manifest(tmp_path: Path) -> None:
@@ -229,6 +267,182 @@ def test_hydrated_task_checks_require_omitted_request_task_id() -> None:
     }
 
 
+def test_all_evidence_includes_workspace_text_files(tmp_path: Path) -> None:
+    runner = _load_runner()
+    workspace = tmp_path / "workspace"
+    template_dir = workspace / "templates"
+    template_dir.mkdir(parents=True)
+    (template_dir / "main.yml").write_text(
+        "Resources:\n  VSwitch:\n    Type: ALIYUN::ECS::VSwitch\n",
+        encoding="utf-8",
+    )
+    (workspace / "ignored.bin").write_bytes(b"ALIYUN::ECS::VSwitch")
+    harness = SimpleNamespace(
+        summaries={},
+        snapshots={},
+        workspace_dir=workspace,
+    )
+
+    evidence = runner._all_evidence(harness)
+
+    assert "templates/main.yml" in evidence
+    assert "ALIYUN::ECS::VSwitch" in evidence
+    assert "ignored.bin" not in evidence
+
+
+def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_input() -> None:
+    runner = _load_runner()
+    prompts: list[str] = []
+    initial = runner.StreamSummary(
+        name="resume",
+        prompt="继续",
+        status_states=["TASK_STATE_INPUT_REQUIRED"],
+        pipeline_event_types=["input_required"],
+        last_input_required_step_id="intent_parsing",
+    )
+
+    def stream(*, prompt: str, name: str):
+        prompts.append(prompt)
+        assert name == "continue-after-input-1"
+        return runner.StreamSummary(
+            name=name,
+            prompt=prompt,
+            status_states=["TASK_STATE_COMPLETED"],
+            pipeline_event_types=["pipeline_completed"],
+        )
+
+    harness = SimpleNamespace(stream=stream)
+    args = SimpleNamespace(selection_prompt="选择第一个方案")
+
+    runner._finish_pipeline_after_possible_input(
+        harness,
+        initial,
+        args,
+        input_prompt=runner.ROLLBACK_PROMPT,
+    )
+
+    assert prompts == [runner.ROLLBACK_PROMPT]
+
+
+def test_wait_for_with_intervening_ask_inputs_uses_custom_answer_prompt() -> None:
+    runner = _load_runner()
+    prompts: list[str] = []
+    initial_summary = runner.StreamSummary(
+        name="initial",
+        prompt="",
+        pipeline_event_types=["input_required"],
+    )
+
+    class InitialStream:
+        name = "initial"
+        events = [_input_required_event("ask_user_question")]
+
+        def wait_for(self, *_args, **_kwargs):
+            raise RuntimeError("initial ended")
+
+    class AnswerStream:
+        name = "answer"
+        events: list[dict] = []
+
+        def wait_for(self, predicate, *, description: str, timeout: float):
+            event = {
+                "result": {
+                    "statusUpdate": {
+                        "metadata": {
+                            "iac_code": {
+                                "pipeline": {
+                                    "eventType": "input_required",
+                                    "step": {"id": "confirm_and_select"},
+                                    "data": {},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if predicate(event, initial_summary):
+                return runner.EventMatch(description=description, event=event, summary=initial_summary)
+            raise TimeoutError(description)
+
+    def start_stream(*, prompt: str, name: str):
+        prompts.append(prompt)
+        assert name == "rollback-answer-ask-1"
+        return AnswerStream()
+
+    harness = SimpleNamespace(notes=[], start_stream=start_stream)
+
+    streams = runner._wait_for_with_intervening_ask_inputs(
+        harness,
+        [InitialStream()],
+        runner._input_required_step("confirm_and_select"),
+        description="selection",
+        timeout=1,
+        name_prefix="rollback",
+        answer_prompt=runner.ROLLBACK_PROMPT,
+    )
+
+    assert prompts == [runner.ROLLBACK_PROMPT]
+    assert len(streams) == 2
+
+
+def test_wait_for_with_intervening_inputs_answers_allowed_step_with_custom_prompt() -> None:
+    runner = _load_runner()
+    prompts: list[str] = []
+    initial_summary = runner.StreamSummary(name="initial", prompt="", pipeline_event_types=["input_required"])
+
+    class InitialStream:
+        name = "initial"
+        events = [_input_required_event(step_id="intent_parsing")]
+
+        def wait_for(self, *_args, **_kwargs):
+            raise RuntimeError("initial ended")
+
+    class AnswerStream:
+        name = "answer"
+        events: list[dict] = []
+
+        def wait_for(self, predicate, *, description: str, timeout: float):
+            event = {
+                "result": {
+                    "statusUpdate": {
+                        "metadata": {
+                            "iac_code": {
+                                "pipeline": {
+                                    "eventType": "step_started",
+                                    "step": {"id": "confirm_and_select"},
+                                    "data": {},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if predicate(event, initial_summary):
+                return runner.EventMatch(description=description, event=event, summary=initial_summary)
+            raise TimeoutError(description)
+
+    def start_stream(*, prompt: str, name: str):
+        prompts.append(prompt)
+        assert name == "rollback-answer-intent_parsing-1"
+        return AnswerStream()
+
+    harness = SimpleNamespace(notes=[], start_stream=start_stream)
+
+    streams = runner._wait_for_with_intervening_ask_inputs(
+        harness,
+        [InitialStream()],
+        runner._step_started("confirm_and_select"),
+        description="confirm step",
+        timeout=1,
+        name_prefix="rollback",
+        answer_prompt=runner.ROLLBACK_PROMPT,
+        answer_input_steps={"intent_parsing"},
+    )
+
+    assert prompts == [runner.ROLLBACK_PROMPT]
+    assert len(streams) == 2
+
+
 def test_fault_after_snapshot_continuation_uses_context_only_hydration(
     monkeypatch,
     tmp_path: Path,
@@ -332,6 +546,28 @@ def test_fault_after_snapshot_continuation_uses_context_only_hydration(
     assert fake_harnesses[0].checks["continue hydrated recovered taskId"] is True
 
 
+def test_fault_after_snapshot_defaults_crash_point(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = SimpleNamespace(
+        server_cwd=str(tmp_path),
+        run_dir=str(tmp_path / "run"),
+        run_root=str(tmp_path),
+        cwd="",
+        host="127.0.0.1",
+        port=0,
+        no_auto_approve_permissions=False,
+        provider="",
+        model="",
+        api_base="",
+        deterministic=True,
+        fault_at="",
+    )
+
+    harness = runner.ScenarioHarness(args, scenario="fault-after-snapshot")
+
+    assert harness.server_env["IAC_CODE_TEST_CRASH_AT"] == runner.FAULT_AFTER_SNAPSHOT_POINT
+
+
 def test_fault_after_snapshot_requires_real_cloud_opt_in_even_when_deterministic() -> None:
     runner = _load_runner()
     args = SimpleNamespace(deterministic=True, allow_real_cloud=False)
@@ -413,8 +649,19 @@ def _stack_current_changed_event(
     stack_id: str,
     status: str,
     is_success: bool,
+    stack_name: str = "",
     cleared: bool = False,
 ) -> dict:
+    data = {
+        "provider": "ros",
+        "action": action,
+        "stackId": stack_id,
+        "stackStatus": status,
+        "isSuccess": is_success,
+        "cleared": cleared,
+    }
+    if stack_name:
+        data["stackName"] = stack_name
     return {
         "result": {
             "statusUpdate": {
@@ -422,13 +669,41 @@ def _stack_current_changed_event(
                     "iac_code": {
                         "pipeline": {
                             "eventType": "stack_current_changed",
+                            "data": data,
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+def _ros_deploy_tool_result_event(
+    *,
+    stack_id: str,
+    stack_name: str = "",
+    status: str = "CREATE_COMPLETE",
+    is_success: bool = True,
+    is_error: bool = False,
+) -> dict:
+    result = {
+        "stack_id": stack_id,
+        "status": status,
+        "is_success": is_success,
+    }
+    if stack_name:
+        result["stack_name"] = stack_name
+    return {
+        "result": {
+            "statusUpdate": {
+                "metadata": {
+                    "iac_code": {
+                        "pipeline": {
+                            "eventType": "tool_result",
                             "data": {
-                                "provider": "ros",
-                                "action": action,
-                                "stackId": stack_id,
-                                "stackStatus": status,
-                                "isSuccess": is_success,
-                                "cleared": cleared,
+                                "toolName": "ros_deploy",
+                                "isError": is_error,
+                                "result": json.dumps(result),
                             },
                         }
                     }
@@ -475,6 +750,96 @@ def test_wait_for_created_stack_uses_successful_stack_event() -> None:
     assert runner._wait_for_created_stack(FakeStream(), exclude=set(), timeout=1) == "created-stack"
 
 
+def test_wait_for_created_stack_accepts_successful_continue_create_stack() -> None:
+    runner = _load_runner()
+    summary = runner.StreamSummary(name="02-create-first-stack", prompt="deploy")
+    events = [
+        _stack_current_changed_event(
+            action="CreateStack",
+            stack_id="created-stack",
+            status="CREATE_FAILED",
+            is_success=False,
+        ),
+        _stack_current_changed_event(
+            action="ContinueCreateStack",
+            stack_id="created-stack",
+            status="CREATE_COMPLETE",
+            is_success=True,
+        ),
+    ]
+
+    class FakeStream:
+        name = "02-create-first-stack"
+
+        def wait_for(self, predicate, *, description: str, timeout: float):
+            for event in events:
+                if predicate(event, summary):
+                    return runner.EventMatch(description=description, event=event, summary=summary)
+            raise TimeoutError(description)
+
+    assert runner._wait_for_created_stack(FakeStream(), exclude=set(), timeout=1) == "created-stack"
+
+
+def test_wait_for_created_stack_accepts_successful_ros_deploy_tool_result() -> None:
+    runner = _load_runner()
+    summary = runner.StreamSummary(name="02-create-first-stack", prompt="deploy")
+    events = [
+        _ros_deploy_tool_result_event(stack_id="failed-stack", is_success=False),
+        _ros_deploy_tool_result_event(stack_id="created-stack"),
+    ]
+
+    class FakeStream:
+        name = "02-create-first-stack"
+
+        def wait_for(self, predicate, *, description: str, timeout: float):
+            for event in events:
+                if predicate(event, summary):
+                    return runner.EventMatch(description=description, event=event, summary=summary)
+            raise TimeoutError(description)
+
+    assert runner._wait_for_created_stack(FakeStream(), exclude=set(), timeout=1) == "created-stack"
+
+
+def test_wait_for_created_stack_ignores_unexpected_stack_name() -> None:
+    runner = _load_runner()
+    summary = runner.StreamSummary(name="02-create-first-stack", prompt="deploy")
+    events = [
+        _stack_current_changed_event(
+            action="CreateStack",
+            stack_id="wrong-stack",
+            stack_name="wrong-name",
+            status="CREATE_COMPLETE",
+            is_success=True,
+        ),
+        _stack_current_changed_event(
+            action="CreateStack",
+            stack_id="created-stack",
+            stack_name="expected-name",
+            status="CREATE_COMPLETE",
+            is_success=True,
+        ),
+    ]
+
+    class FakeStream:
+        name = "02-create-first-stack"
+
+        def wait_for(self, predicate, *, description: str, timeout: float):
+            for event in events:
+                if predicate(event, summary):
+                    return runner.EventMatch(description=description, event=event, summary=summary)
+            raise TimeoutError(description)
+
+    assert (
+        runner._wait_for_created_stack(
+            FakeStream(),
+            exclude=set(),
+            timeout=1,
+            expected_stack_name="expected-name",
+        )
+        == "created-stack"
+    )
+
+
 def test_created_stack_id_from_stream_uses_only_that_stream_successes() -> None:
     runner = _load_runner()
 
@@ -502,6 +867,58 @@ def test_created_stack_id_from_stream_uses_only_that_stream_successes() -> None:
     )
 
     assert runner._created_stack_id_from_stream(stream, exclude={"rollback-stack"}) == "second-stack"
+
+
+def test_created_stack_id_from_stream_accepts_continue_create_stack_success() -> None:
+    runner = _load_runner()
+
+    stream = SimpleNamespace(
+        events=[
+            _stack_current_changed_event(
+                action="CreateStack",
+                stack_id="created-stack",
+                status="CREATE_FAILED",
+                is_success=False,
+            ),
+            _stack_current_changed_event(
+                action="ContinueCreateStack",
+                stack_id="created-stack",
+                status="CREATE_COMPLETE",
+                is_success=True,
+            ),
+        ]
+    )
+
+    assert runner._created_stack_id_from_stream(stream, exclude=set()) == "created-stack"
+
+
+def test_created_stack_id_from_stream_accepts_ros_deploy_tool_result_success() -> None:
+    runner = _load_runner()
+
+    stream = SimpleNamespace(
+        events=[
+            _ros_deploy_tool_result_event(stack_id="failed-stack", is_error=True),
+            _ros_deploy_tool_result_event(stack_id="created-stack"),
+        ]
+    )
+
+    assert runner._created_stack_id_from_stream(stream, exclude=set()) == "created-stack"
+
+
+def test_created_stack_id_from_stream_ignores_ros_deploy_tool_result_with_wrong_stack_name() -> None:
+    runner = _load_runner()
+
+    stream = SimpleNamespace(
+        events=[
+            _ros_deploy_tool_result_event(stack_id="wrong-stack", stack_name="wrong-name"),
+            _ros_deploy_tool_result_event(stack_id="created-stack", stack_name="expected-name"),
+        ]
+    )
+
+    assert (
+        runner._created_stack_id_from_stream(stream, exclude=set(), expected_stack_name="expected-name")
+        == "created-stack"
+    )
 
 
 def test_post_rollback_timeout_allows_step_regeneration_time() -> None:
@@ -594,7 +1011,29 @@ def test_cleanup_activity_snapshot_helper_ignores_empty_default_cleanup() -> Non
         runner._snapshot_has_cleanup_activity({"snapshot": {"cleanup": {"resources": [{"resourceId": "stack-1"}]}}})
         is True
     )
-    assert runner._snapshot_has_cleanup_activity({"snapshot": {"cleanup": {"history": [{"eventType": "x"}]}}}) is True
+    cleanup_started_snapshot = {"snapshot": {"cleanup": {"history": [{"eventType": "cleanup_started"}]}}}
+    assert runner._snapshot_has_cleanup_activity(cleanup_started_snapshot) is True
+    assert (
+        runner._snapshot_has_cleanup_activity(
+            {
+                "snapshot": {
+                    "cleanup": {
+                        "status": "unavailable",
+                        "resourceCount": 0,
+                        "resources": [],
+                        "history": [
+                            {
+                                "eventType": "pipeline_handoff_ready",
+                                "status": "unavailable",
+                                "data": {"status": "unavailable"},
+                            }
+                        ],
+                    }
+                }
+            }
+        )
+        is False
+    )
 
 
 def test_cleanup_activity_event_helper_detects_cleanup_events_and_handoff_data(tmp_path: Path) -> None:
@@ -709,6 +1148,7 @@ def test_cleanup_deployment_prompts_use_distinct_run_scoped_stack_names(tmp_path
 
     first = runner._cleanup_deployment_prompt("你随便选一个方案。", harness, "first")
     second = runner._cleanup_deployment_prompt("你随便选一个方案。", harness, "second")
+    intent = runner._cleanup_intent_prompt("创建一个 vswitch。", "iac-e2e-abcdef12-first")
 
     assert "唯一成功条件是新建一个 ROS stack" in first
     assert "任何已有 stack" in first
@@ -721,6 +1161,9 @@ def test_cleanup_deployment_prompts_use_distinct_run_scoped_stack_names(tmp_path
     assert "iac-e2e-abcdef12-second" in second
     assert "complete_step 前必须" in second
     assert first != second
+    assert "创建一个 vswitch。" in intent
+    assert "StackName 必须精确等于 `iac-e2e-abcdef12-first`" in intent
+    assert "后续选择、模板生成、参数确认和部署步骤" in intent
 
 
 def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeypatch, tmp_path: Path) -> None:
@@ -789,12 +1232,13 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                    _stack_current_changed_event(
-                        action="CreateStack",
-                        stack_id="stack-2",
-                        status="CREATE_COMPLETE",
-                        is_success=True,
-                    )
+                        _stack_current_changed_event(
+                            action="CreateStack",
+                            stack_id="stack-2",
+                            stack_name=runner._cleanup_stack_name(self, "second"),
+                            status="CREATE_COMPLETE",
+                            is_success=True,
+                        )
                 )
             return FakeStream(summary, events=events)
 
@@ -871,6 +1315,10 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
 
     assert runner.run_rollback_step5_cleanup(args, "rollback-step5-cleanup") == 0
     harness = fake_harnesses[0]
+    first_stack_name = runner._cleanup_stack_name(harness, "first")
+    second_stack_name = runner._cleanup_stack_name(harness, "second")
+    assert first_stack_name in harness.stream_calls[0]["prompt"]
+    assert second_stack_name in harness.summaries["03-rollback-after-first-stack"].prompt
     assert harness.stream_calls[-1]["task_id"] == ""
     assert harness.checks["first rollback stack cleanup completed in snapshot"] is True
     assert harness.checks["rollback cleanup stacks completed in snapshot"] is True
@@ -943,12 +1391,13 @@ def test_rollback_step5_cleanup_recovery_uses_tool_safe_recovery_prompt(monkeypa
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                    _stack_current_changed_event(
-                        action="CreateStack",
-                        stack_id="stack-2",
-                        status="CREATE_COMPLETE",
-                        is_success=True,
-                    )
+                        _stack_current_changed_event(
+                            action="CreateStack",
+                            stack_id="stack-2",
+                            stack_name=runner._cleanup_stack_name(self, "second"),
+                            status="CREATE_COMPLETE",
+                            is_success=True,
+                        )
                 )
             return FakeStream(summary, events=events)
 
@@ -1101,12 +1550,13 @@ def test_rollback_step5_cleanup_flow_fails_when_any_cleanup_stack_is_left(monkey
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                    _stack_current_changed_event(
-                        action="CreateStack",
-                        stack_id="stack-2",
-                        status="CREATE_COMPLETE",
-                        is_success=True,
-                    )
+                        _stack_current_changed_event(
+                            action="CreateStack",
+                            stack_id="stack-2",
+                            stack_name=runner._cleanup_stack_name(self, "second"),
+                            status="CREATE_COMPLETE",
+                            is_success=True,
+                        )
                 )
             return FakeStream(summary, events=events)
 
@@ -1266,12 +1716,13 @@ def test_rollback_step5_cleanup_recovery_kills_and_retriggers_cleanup(monkeypatc
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                    _stack_current_changed_event(
-                        action="CreateStack",
-                        stack_id="stack-2",
-                        status="CREATE_COMPLETE",
-                        is_success=True,
-                    )
+                        _stack_current_changed_event(
+                            action="CreateStack",
+                            stack_id="stack-2",
+                            stack_name=runner._cleanup_stack_name(self, "second"),
+                            status="CREATE_COMPLETE",
+                            is_success=True,
+                        )
                 )
             return FakeStream(summary, events=events)
 
@@ -1412,11 +1863,16 @@ def test_rollback_accepts_security_group_deployment_from_handoff(monkeypatch) ->
         callback(harness)
         return 0 if all(harness.checks.values()) else 1
 
+    finish_kwargs: list[dict] = []
+
+    def fake_finish_pipeline_after_possible_input(*_args, **kwargs):
+        finish_kwargs.append(kwargs)
+
     monkeypatch.setattr(runner, "_run_with_harness", fake_run_with_harness)
     monkeypatch.setattr(runner, "_wait_for_with_intervening_ask_inputs", lambda *args, **kwargs: [args[1][0]])
     monkeypatch.setattr(runner, "_wait_any", lambda *args, **kwargs: None)
     monkeypatch.setattr(runner, "_join_after_kill", lambda *args, **kwargs: None)
-    monkeypatch.setattr(runner, "_finish_pipeline_after_possible_input", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "_finish_pipeline_after_possible_input", fake_finish_pipeline_after_possible_input)
     monkeypatch.setattr(runner, "_completed_snapshot_or_stream", lambda *args, **kwargs: True)
 
     args = SimpleNamespace(
@@ -1426,3 +1882,144 @@ def test_rollback_accepts_security_group_deployment_from_handoff(monkeypatch) ->
     )
 
     assert runner.run_rollback(args, "rollback-step1") == 0
+    assert finish_kwargs == [{"input_prompt": runner.ROLLBACK_PROMPT}]
+
+
+def test_final_deployment_evidence_uses_handoff_target_when_deploy_failed() -> None:
+    runner = _load_runner()
+    handoff_context = {
+        "intent": {
+            "core_requirements": ["VPC", "VSwitch"],
+            "resource_intents": [
+                {"product": "VPC", "action": "use_existing"},
+                {"product": "VSwitch", "action": "create"},
+            ],
+        },
+        "architecture": {
+            "candidates": [
+                {
+                    "name": "已有VPC创建安全组",
+                    "products": ["VPC", "SecurityGroup"],
+                    "resource_intents": [
+                        {
+                            "resource_type": "ALIYUN::ECS::SecurityGroup",
+                            "action": "create",
+                        }
+                    ],
+                    "cons": ["不提供 VSwitch 等网络基础设施"],
+                }
+            ]
+        },
+        "evaluated_candidates": [{"template_path": "templates/1-existing-vpc-security-group.yml"}],
+        "selected_plan": {
+            "selected_candidate": {
+                "products": ["SecurityGroup"],
+                "resource_intents": [
+                    {"product": "VPC", "action": "use_existing"},
+                    {"product": "SecurityGroup", "action": "create"},
+                    {"product": "VSwitch", "action": "forbid"},
+                ],
+            },
+            "resource_types": ["ALIYUN::ECS::SecurityGroup"],
+        },
+        "deployment": {"status": "failed", "error": "STS token exchange denied"},
+    }
+    handoff_summary = (
+        "[Pipeline Handoff Context]\n"
+        "This is injected context for the assistant, not a user request.\n"
+        "Pipeline: selling\n"
+        "Outcome: completed\n\n"
+        "Included context:\n"
+        f"{json.dumps(handoff_context, ensure_ascii=False)}\n\n"
+        "Use this context when answering follow-up questions after the pipeline handoff."
+    )
+    final_state = {
+        "snapshot": {
+            "steps": [
+                {
+                    "id": "deploying",
+                    "status": "completed",
+                    "conclusion": {"status": "failed", "error": "STS token exchange denied"},
+                }
+            ],
+            "normalHandoff": {"summary": handoff_summary},
+        }
+    }
+
+    evidence = runner._final_deployment_evidence(final_state)
+
+    assert "SecurityGroup" in evidence
+    assert "VSwitch" not in evidence
+
+
+def test_final_deployment_evidence_prefers_realized_target_over_stale_candidate() -> None:
+    runner = _load_runner()
+    stale_candidate = {
+        "name": "已有 VPC 中创建 VSwitch",
+        "output_path": "templates/1-existing-vpc-create-vswitch.yml",
+        "products": ["VPC", "VSwitch"],
+        "resource_intents": [
+            {"product": "VPC", "action": "use_existing"},
+            {"product": "VSwitch", "action": "create"},
+        ],
+        "topology": "在已有 VPC 中创建一个 VSwitch。",
+    }
+    handoff_context = {
+        "selected_plan": {
+            "selected_candidate_name": stale_candidate["name"],
+            "selected_candidate": stale_candidate,
+            "selected_candidate_result": {
+                "candidate": stale_candidate,
+                "failed": False,
+                "template": {
+                    "template": (
+                        "ROSTemplateFormatVersion: '2015-09-01'\n"
+                        "Resources:\n"
+                        "  SecurityGroup:\n"
+                        "    Type: ALIYUN::ECS::SecurityGroup\n"
+                    ),
+                    "file_path": "templates/1-existing-vpc-create-security-group.yml",
+                    "region": "cn-hangzhou",
+                    "description": "在已有 VPC 中创建安全组",
+                },
+                "cost": {
+                    "resources": [{"type": "ALIYUN::ECS::SecurityGroup", "cost": "¥0"}],
+                    "deployment_parameters": {
+                        "RegionId": "cn-hangzhou",
+                        "VpcId": "vpc-test",
+                        "SecurityGroupName": "sg-test",
+                    },
+                    "preview_validation": {
+                        "succeeded": True,
+                        "template_url": "templates/1-existing-vpc-create-security-group.yml",
+                    },
+                },
+            },
+        },
+        "deployment": {
+            "resources_created": ["ALIYUN::ECS::SecurityGroup"],
+            "stack_id": "stack-test",
+            "status": "success",
+            "outputs": {"SecurityGroupId": "sg-test"},
+        },
+    }
+    handoff_summary = (
+        "[Pipeline Handoff Context]\n"
+        "This is injected context for the assistant, not a user request.\n"
+        "Pipeline: selling\n"
+        "Outcome: completed\n\n"
+        "Included context:\n"
+        f"{json.dumps(handoff_context, ensure_ascii=False)}\n\n"
+        "Use this context when answering follow-up questions after the pipeline handoff."
+    )
+    final_state = {
+        "snapshot": {
+            "steps": [{"id": "deploying", "status": "completed", "conclusion": {"status": "success"}}],
+            "normalHandoff": {"summary": handoff_summary},
+        }
+    }
+
+    evidence = runner._final_deployment_evidence(final_state)
+
+    assert "SecurityGroup" in evidence
+    assert "VSwitch" not in evidence

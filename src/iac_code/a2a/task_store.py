@@ -431,6 +431,28 @@ class A2ATaskStore(TaskStore):
             record.active_task.cancel()
             return True
 
+    async def cancel_task_and_wait(self, task_id: str, *, timeout: float | None = None) -> bool:
+        async with self._mutation_lock:
+            record = self._tasks.get(validate_protocol_id(task_id))
+            if record is None or record.active_task is None or record.active_task.done():
+                return False
+            active_task = record.active_task
+            active_task.cancel()
+
+        if active_task is asyncio.current_task():
+            return True
+        try:
+            if timeout is None:
+                await asyncio.shield(active_task)
+            else:
+                await asyncio.wait_for(asyncio.shield(active_task), timeout=timeout)
+        except asyncio.CancelledError:
+            if not active_task.done():
+                raise
+        except TimeoutError:
+            logger.warning("Timed out waiting for canceled A2A task %s to finish", task_id)
+        return True
+
     async def is_task_active(self, task_id: str) -> bool:
         async with self._mutation_lock:
             record = self._tasks.get(validate_protocol_id(task_id))

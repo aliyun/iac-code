@@ -2976,6 +2976,7 @@ msgid "The user-facing question to ask."
 msgstr "ユーザーに表示する質問です。"
 
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
+#: src/iac_code/ui/renderer.py
 msgid "ask_user_question validation failed."
 msgstr "ask_user_question の検証に失敗しました。"
 
@@ -3427,6 +3428,11 @@ msgstr "conclusion の検証に失敗しました。修正して complete_step �
 #, python-brace-format
 msgid "Step {step_id} completed. Conclusion submitted."
 msgstr "ステップ {step_id} が完了しました。結論を送信しました。"
+
+#: src/iac_code/pipeline/engine/pipeline_runner.py
+#, python-brace-format
+msgid "用户反馈：{}"
+msgstr "ユーザーからのフィードバック：{}"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 msgid "Pipeline state persistence failed."

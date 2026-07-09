@@ -52,6 +52,30 @@ def test_normalize_selected_plan_falls_back_to_result_template_file_path():
     assert normalized["template_url"] == "templates/generated.yml"
 
 
+def test_normalize_selected_plan_prefers_result_template_file_path_over_stale_candidate_path():
+    evaluated_candidates = [
+        {
+            "candidate": {"name": "Restarted", "output_path": "templates/old-vswitch.yml"},
+            "template": {"file_path": "templates/new-security-group.yml"},
+            "failed": False,
+            "cost": {
+                "preview_validation": {
+                    "succeeded": True,
+                    "template_url": "templates/new-security-group.yml",
+                    "parameters": {"VpcId": "vpc-123"},
+                },
+            },
+        }
+    ]
+    selected_plan = {"user_input": encode_selected_candidate("Restarted", 0), "options": []}
+
+    normalized = normalize_selected_plan(selected_plan, evaluated_candidates)
+
+    assert normalized["selection_valid"] is True
+    assert normalized["template_url"] == "templates/new-security-group.yml"
+    assert normalized["preview_ready_for_create"] is True
+
+
 def test_normalize_selected_plan_preserves_cost_deployment_parameters():
     evaluated_candidates = [
         {

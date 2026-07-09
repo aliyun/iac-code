@@ -36,9 +36,9 @@
   },
   "rollback-interrupt": {
     "filename": "rollback-interrupt.png",
-    "text": "回退到 intent_parsing，选择一个已有vpc，创建一个安全组",
+    "text": "我改需求了：使用已有 VPC 创建一个安全组，不创建 VSwitch。请基于这个新需求重新规划。",
     "mediaType": "image/png",
-    "byteSize": 20967,
-    "sha256": "1dfa25bba58757704b27a7ee8f44a42f4e69045730bba5320986194c873a5937"
+    "byteSize": 33436,
+    "sha256": "99399b761853dd9a9188349549933de6cdd074051697ecbb23cd687769222ca3"
   }
 }

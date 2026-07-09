@@ -76,11 +76,13 @@ from debugger import (  # noqa: E402
     build_task_get_payload,
 )
 
+from iac_code.services.session_storage import SessionStorage  # noqa: E402
+
 ASK_TRIGGER_PROMPT = "我有个产品要上线"
 ASK_FIRST_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
 ASK_SECOND_ANSWER = "选择一个已有 VPC，创建一个 VSwitch；地域、可用区和网段你按低成本默认值推荐。"
 INTERVENING_ASK_ANSWER = "使用默认配置（可用区和网段自动规划），继续。"
-ROLLBACK_PROMPT = "回退到 intent_parsing，选择一个已有vpc，创建一个安全组"
+ROLLBACK_PROMPT = "我改需求了：使用已有 VPC 创建一个安全组，不创建 VSwitch。请基于这个新需求重新规划。"
 CONTINUE_PROMPT = "继续"
 CLEANUP_RECOVERY_PROMPT = (
     "请只回复“OK，继续”。不要调用任何工具，不要查询任何云资源，不要删除任何资源。"
@@ -96,6 +98,7 @@ CLEANUP_EVENT_TYPES = frozenset(
     }
 )
 CLEANUP_ACTIVE_STATUSES = frozenset({"pending", "started", "in_progress", "failed"})
+FAULT_AFTER_SNAPSHOT_POINT = "after_a2a_pipeline_snapshot_saved"
 IMAGE_TEXT_PROMPT = "请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"
 STATIC_TEXT_IMAGE_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "text-images"
 STATIC_TEXT_IMAGE_FIXTURES = {
@@ -108,6 +111,97 @@ STATIC_TEXT_IMAGE_FIXTURES = {
 }
 
 VSWITCH_MARKERS = ("ALIYUN::ECS::VSwitch", "VSwitchId", "vsw-", "VSwitch", "交换机")
+FINAL_TARGET_EVIDENCE_KEYS = frozenset(
+    {
+        "action",
+        "candidate",
+        "candidates",
+        "conclusions",
+        "cost",
+        "core_requirements",
+        "deployment_parameters",
+        "file_path",
+        "missing_deployment_parameters",
+        "name",
+        "output_path",
+        "outputs",
+        "parameters",
+        "preview_validation",
+        "product",
+        "products",
+        "region",
+        "region_id",
+        "regionId",
+        "resource_id",
+        "resource_intents",
+        "resource_type",
+        "resourceId",
+        "resourceType",
+        "resource_types",
+        "resources",
+        "resources_created",
+        "role",
+        "selected_candidate",
+        "stack_id",
+        "stackId",
+        "status",
+        "template",
+        "template_path",
+        "template_url",
+        "type",
+    }
+)
+FINAL_TARGET_EXCLUDED_ACTIONS = frozenset(
+    {
+        "avoid",
+        "exclude",
+        "forbid",
+        "not_create",
+        "skip",
+    }
+)
+FINAL_SELECTED_PLAN_REALIZED_KEYS = frozenset(
+    {
+        "deployment_parameters",
+        "effective_deployment_parameters",
+        "missing_deployment_parameters",
+        "parameters",
+        "preview_validation",
+        "resource_types",
+        "selected_candidate_result",
+    }
+)
+FINAL_CANDIDATE_RESULT_EVIDENCE_KEYS = frozenset(
+    {
+        "cost",
+        "deployment_parameters",
+        "effective_deployment_parameters",
+        "failed",
+        "missing_deployment_parameters",
+        "outputs",
+        "parameters",
+        "preview_validation",
+        "resource_types",
+        "resources",
+        "resources_created",
+        "stackId",
+        "stack_id",
+        "status",
+        "template",
+    }
+)
+STACK_CREATION_SUCCESS_ACTIONS = {"CreateStack", "ContinueCreateStack"}
+EVIDENCE_TEXT_FILE_SUFFIXES = {
+    ".json",
+    ".md",
+    ".ros",
+    ".tf",
+    ".tfvars",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+MAX_EVIDENCE_FILE_BYTES = 256 * 1024
 SECURITY_GROUP_MARKERS = ("ALIYUN::ECS::SecurityGroup", "SecurityGroupId", "sg-", "安全组")
 TERMINAL_STATES = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_INPUT_REQUIRED"}
 ROS_STACK_DELETED_STATUSES = {"DELETE_COMPLETE"}
@@ -407,8 +501,9 @@ class ScenarioHarness:
             self.server_env["IAC_CODE_A2A_DETERMINISTIC_RECOVERY"] = "1"
             self.server_env["IAC_CODE_TEST_FAULT_INJECTION"] = "1"
             self.server_env["IAC_CODE_TEST_FAULT_INJECTION_MODE"] = "exit"
-            if args.fault_at:
-                self.server_env["IAC_CODE_TEST_CRASH_AT"] = args.fault_at
+            fault_at = args.fault_at or (FAULT_AFTER_SNAPSHOT_POINT if scenario == "fault-after-snapshot" else "")
+            if fault_at:
+                self.server_env["IAC_CODE_TEST_CRASH_AT"] = fault_at
         self.server: ManagedServer | None = None
         self.server_index = 0
         self.context_id = ""
@@ -796,7 +891,12 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
             normal.task_id,
         }
         h.checks["recovery finished turn"] = _normal_turn_finished(recovery)
-        h.checks["recovery answer mentions previous question"] = args.expected_text in recovery.text
+        h.checks["normal follow-up persisted in session"] = _a2a_session_contains_user_message(
+            h, args.normal_followup_prompt
+        )
+        h.checks["recovery question persisted in session"] = _a2a_session_contains_user_message(
+            h, args.recovery_prompt
+        )
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
         h.checks["scenario1 emitted no cleanup events"] = not _run_dir_has_cleanup_events(h.run_dir)
         h.checks["scenario1 persisted no cleanup prompt"] = not _session_has_cleanup_prompt(h)
@@ -842,7 +942,7 @@ def run_running_step(args: argparse.Namespace, scenario: str) -> int:
         h.checks["state endpoint returned snapshot after restart"] = _snapshot(snapshot) is not None
         h.checks["pipeline taskId persisted"] = _snapshot_value(snapshot, "taskId") == h.pipeline_task_id
         resumed = h.stream(prompt=CONTINUE_PROMPT, name="03-continue-after-restart")
-        _finish_pipeline_after_possible_input(h, resumed, args)
+        _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
         h.checks["pipeline completed after recovery"] = _completed_snapshot_or_stream(h, resumed)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
@@ -860,7 +960,12 @@ def run_normal_running(args: argparse.Namespace, scenario: str) -> int:
         h.checks["normal continue stayed in same context"] = resumed.context_id == h.context_id
         final = h.stream(prompt=DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT, name="05-normal-history-check", task_id="")
         h.checks["history check stayed in same context"] = final.context_id == h.context_id
-        h.checks["history answer mentions previous question"] = args.normal_followup_prompt in final.text
+        h.checks["normal follow-up persisted in session"] = _a2a_session_contains_user_message(
+            h, args.normal_followup_prompt
+        )
+        h.checks["history check persisted in session"] = _a2a_session_contains_user_message(
+            h, DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT
+        )
 
     return _run_with_harness(args, scenario, callback)
 
@@ -903,7 +1008,7 @@ def run_selection_waiting(args: argparse.Namespace, scenario: str) -> int:
         h.checks["pending input is confirm_and_select"] = _pending_step_id(snapshot) == "confirm_and_select"
         selection = h.stream(prompt=args.selection_prompt, name="02-select-after-restart", task_id="")
         _add_hydrated_task_checks(h, selection, "selection answer")
-        h.checks["selection completed pipeline"] = _pipeline_completed(selection)
+        h.checks["selection accepted and advanced past waiting step"] = _selection_advanced_past_waiting_step(selection)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)
@@ -1054,7 +1159,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
         snapshot = h.fetch_state("after-restart")
         h.checks["state endpoint returned snapshot after image interrupt restart"] = _snapshot(snapshot) is not None
         resumed = h.stream(prompt=CONTINUE_PROMPT, name="03-continue-after-restart")
-        _finish_pipeline_after_possible_input(h, resumed, args)
+        _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
         h.checks["pipeline completed after image interrupt recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-image-interrupt-completion")
         final_deploying = _final_deployment_evidence(final_state)
@@ -1089,12 +1194,17 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
         )
         streams_to_join = [*observed_streams, rollback]
         if target_step == "deploying":
-            _wait_any(
-                [*observed_streams, rollback],
+            observed_streams = _wait_for_with_intervening_ask_inputs(
+                h,
+                streams_to_join,
                 _input_required_step("confirm_and_select"),
                 description="post-rollback input_required(confirm_and_select)",
                 timeout=args.event_timeout,
+                name_prefix="post-rollback",
+                answer_prompt=ROLLBACK_PROMPT,
+                answer_input_steps={"intent_parsing"},
             )
+            streams_to_join = observed_streams
             selection = h.start_stream(prompt=args.selection_prompt, name="03-select-after-rollback")
             streams_to_join.append(selection)
             _wait_any(
@@ -1104,11 +1214,15 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
                 timeout=args.event_timeout,
             )
         else:
-            _wait_any(
-                [*observed_streams, rollback],
+            streams_to_join = _wait_for_with_intervening_ask_inputs(
+                h,
+                streams_to_join,
                 _step_started(target_step),
                 description=f"post-rollback step_started({target_step})",
                 timeout=args.event_timeout,
+                name_prefix="post-rollback",
+                answer_prompt=ROLLBACK_PROMPT,
+                answer_input_steps={"intent_parsing"},
             )
         h.fetch_state("before-kill")
         h.kill9_and_restart()
@@ -1120,7 +1234,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
             prompt=CONTINUE_PROMPT,
             name="04-continue-after-restart" if target_step == "deploying" else "03-continue-after-restart",
         )
-        _finish_pipeline_after_possible_input(h, resumed, args)
+        _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
         h.checks["pipeline completed after rollback recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-rollback-completion")
         final_deploying = _final_deployment_evidence(final_state)
@@ -1172,8 +1286,10 @@ def run_cancel(args: argparse.Namespace, scenario: str) -> int:
         h.kill9_and_restart()
         snapshot = h.fetch_state("after-restart")
         h.checks["snapshot remains canceled after restart"] = _snapshot_value(snapshot, "status") == "canceled"
-        final = h.stream(prompt=args.recovery_prompt, name="04-normal-history-check", task_id="")
-        h.checks["history answer after cancel mentions previous question"] = args.normal_followup_prompt in final.text
+        h.checks["normal chat after cancel persisted in session"] = _a2a_session_contains_user_message(
+            h,
+            args.normal_followup_prompt,
+        )
 
     return _run_with_harness(args, scenario, callback)
 
@@ -1265,7 +1381,15 @@ def _run_rollback_step5_cleanup(
     kill_during_cleanup: bool,
 ) -> int:
     def callback(h: ScenarioHarness) -> None:
-        initial = h.stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
+        first_stack_name = _cleanup_stack_name(h, "first")
+        second_stack_name = _cleanup_stack_name(h, "second")
+
+        initial = h.stream(
+            prompt=_cleanup_intent_prompt(args.initial_prompt, first_stack_name),
+            name="01-initial",
+            context_id="",
+            task_id="",
+        )
         initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
         h.checks["initial reached step4 selection"] = initial.last_input_required_step_id == "confirm_and_select"
 
@@ -1277,10 +1401,14 @@ def _run_rollback_step5_cleanup(
             first_deploy,
             exclude=set(),
             timeout=args.event_timeout,
+            expected_stack_name=first_stack_name,
         )
         h.checks["first rollback stack observed before rollback"] = bool(first_stack_id)
 
-        rollback = h.start_stream(prompt=ROLLBACK_PROMPT, name="03-rollback-after-first-stack")
+        rollback = h.start_stream(
+            prompt=_cleanup_intent_prompt(ROLLBACK_PROMPT, second_stack_name),
+            name="03-rollback-after-first-stack",
+        )
         _wait_any(
             [first_deploy, rollback],
             _event_type("rollback_completed"),
@@ -1315,7 +1443,11 @@ def _run_rollback_step5_cleanup(
         _finish_pipeline_after_possible_input(h, second_deploy.summary, args)
         h.checks["pipeline completed after second deployment"] = _completed_snapshot_or_stream(h, second_deploy.summary)
         h.fetch_state("after-second-stack")
-        second_stack_id = _created_stack_id_from_stream(second_deploy, exclude=set(cleanup_stack_ids))
+        second_stack_id = _created_stack_id_from_stream(
+            second_deploy,
+            exclude=set(cleanup_stack_ids),
+            expected_stack_name=second_stack_name,
+        )
         h.checks["second stack created after rollback"] = bool(second_stack_id)
         h.checks["second stack differs from first rollback stack"] = bool(second_stack_id) and (
             second_stack_id != first_stack_id
@@ -1392,7 +1524,13 @@ def _complete_pipeline(h: ScenarioHarness, args: argparse.Namespace) -> None:
     h.snapshots["after_pipeline"] = h.fetch_state("after-pipeline")
 
 
-def _finish_pipeline_after_possible_input(h: ScenarioHarness, summary: StreamSummary, args: argparse.Namespace) -> None:
+def _finish_pipeline_after_possible_input(
+    h: ScenarioHarness,
+    summary: StreamSummary,
+    args: argparse.Namespace,
+    *,
+    input_prompt: str = CONTINUE_PROMPT,
+) -> None:
     current = summary
     for idx in range(1, 5):
         if _pipeline_completed(current):
@@ -1401,7 +1539,7 @@ def _finish_pipeline_after_possible_input(h: ScenarioHarness, summary: StreamSum
             current = h.stream(prompt=args.selection_prompt, name=f"select-after-resume-{idx}")
             continue
         if _reached_input_required(current):
-            current = h.stream(prompt=CONTINUE_PROMPT, name=f"continue-after-input-{idx}")
+            current = h.stream(prompt=input_prompt, name=f"continue-after-input-{idx}")
             continue
         if current.last_status_state in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
             return
@@ -1414,7 +1552,7 @@ def _finish_pipeline_after_possible_input(h: ScenarioHarness, summary: StreamSum
         ):
             current = h.stream(prompt=args.selection_prompt, name=f"select-from-snapshot-{idx}")
             continue
-        current = h.stream(prompt=CONTINUE_PROMPT, name=f"continue-loop-{idx}")
+        current = h.stream(prompt=input_prompt, name=f"continue-loop-{idx}")
 
 
 def _apply_event(summary: StreamSummary, payload: Any) -> None:
@@ -1542,10 +1680,13 @@ def _wait_for_with_intervening_ask_inputs(
     description: str,
     timeout: float,
     name_prefix: str,
+    answer_prompt: str = INTERVENING_ASK_ANSWER,
+    answer_input_steps: set[str] | None = None,
 ) -> list[BackgroundStream]:
     active_streams = list(streams)
     handled_finished_streams: set[int] = set()
     answered_count = 0
+    answer_input_steps = set(answer_input_steps or ())
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
@@ -1561,15 +1702,21 @@ def _wait_for_with_intervening_ask_inputs(
                 if stream_id in handled_finished_streams:
                     continue
                 handled_finished_streams.add(stream_id)
-                if _latest_input_required_kind_from_events(stream.events) != "ask_user_question":
+                kind = _latest_input_required_kind_from_events(stream.events)
+                step_id = _latest_input_required_step_id_from_events(stream.events)
+                should_answer = kind == "ask_user_question" or step_id in answer_input_steps
+                if not should_answer:
                     continue
                 answered_count += 1
                 if answered_count > 4:
-                    raise RuntimeError(f"too many intervening ask_user_question inputs before {description}") from exc
-                h.notes.append(f"answered intervening ask_user_question while waiting for {description}: {stream.name}")
+                    raise RuntimeError(f"too many intervening inputs before {description}") from exc
+                input_name = "ask" if kind == "ask_user_question" else step_id
+                h.notes.append(
+                    f"answered intervening input_required({input_name}) while waiting for {description}: {stream.name}"
+                )
                 answer = h.start_stream(
-                    prompt=INTERVENING_ASK_ANSWER,
-                    name=f"{name_prefix}-answer-ask-{answered_count}",
+                    prompt=answer_prompt,
+                    name=f"{name_prefix}-answer-{input_name}-{answered_count}",
                 )
                 active_streams.append(answer)
                 break
@@ -1636,6 +1783,16 @@ def _reached_input_required(summary: StreamSummary) -> bool:
 
 def _pipeline_completed(summary: StreamSummary) -> bool:
     return summary.last_status_state == "TASK_STATE_COMPLETED" or "pipeline_completed" in summary.pipeline_event_types
+
+
+def _selection_advanced_past_waiting_step(summary: StreamSummary) -> bool:
+    event_types = summary.pipeline_event_types
+    try:
+        received_index = event_types.index("input_received")
+        completed_index = event_types.index("step_completed", received_index + 1)
+    except ValueError:
+        return False
+    return "step_started" in event_types[completed_index + 1 :] or _pipeline_completed(summary)
 
 
 def _add_same_task_checks(h: ScenarioHarness, summary: StreamSummary, prefix: str) -> None:
@@ -1822,8 +1979,69 @@ def _final_deployment_evidence(response: Any) -> str:
     evidence: dict[str, Any] = {"deploying_step": _step_evidence(response, "deploying")}
     handoff_context = _handoff_context(response)
     if isinstance(handoff_context, dict):
-        evidence["deployment"] = handoff_context.get("deployment")
+        selected_plan = _final_selected_plan_evidence_value(handoff_context.get("selected_plan"))
+        deployment = _final_target_evidence_value(handoff_context.get("deployment"))
+        handoff_target = {"selected_plan": selected_plan, "deployment": deployment}
+        if not selected_plan:
+            handoff_target["evaluated_candidates"] = _final_target_evidence_value(
+                handoff_context.get("evaluated_candidates")
+            )
+        evidence["handoff_target"] = handoff_target
     return json.dumps(evidence, ensure_ascii=False, default=str)
+
+
+def _final_selected_plan_evidence_value(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return _final_target_evidence_value(value)
+
+    realized: dict[str, Any] = {}
+    for key, nested in value.items():
+        if key not in FINAL_SELECTED_PLAN_REALIZED_KEYS:
+            continue
+        if key == "selected_candidate_result":
+            projected_value = _final_candidate_result_evidence_value(nested)
+        else:
+            projected_value = _final_target_evidence_value(nested)
+        if projected_value not in (None, {}, []):
+            realized[key] = projected_value
+    if realized:
+        return realized
+    return _final_target_evidence_value(value)
+
+
+def _final_candidate_result_evidence_value(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return _final_target_evidence_value(value)
+
+    realized: dict[str, Any] = {}
+    for key, nested in value.items():
+        if key not in FINAL_CANDIDATE_RESULT_EVIDENCE_KEYS:
+            continue
+        projected_value = _final_target_evidence_value(nested)
+        if projected_value not in (None, {}, []):
+            realized[key] = projected_value
+    return realized
+
+
+def _final_target_evidence_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        action = str(value.get("action") or "").strip().lower().replace("-", "_")
+        if action in FINAL_TARGET_EXCLUDED_ACTIONS:
+            return {}
+        projected: dict[str, Any] = {}
+        for key, nested in value.items():
+            if key not in FINAL_TARGET_EVIDENCE_KEYS:
+                continue
+            if key == "template" and isinstance(nested, str):
+                continue
+            projected_value = _final_target_evidence_value(nested)
+            if projected_value not in (None, {}, []):
+                projected[key] = projected_value
+        return projected
+    if isinstance(value, list):
+        projected_items = [_final_target_evidence_value(item) for item in value]
+        return [item for item in projected_items if item not in (None, {}, [])]
+    return value
 
 
 def _handoff_context(response: Any) -> dict[str, Any] | None:
@@ -1849,6 +2067,67 @@ def _handoff_context(response: Any) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, dict) else None
+
+
+def _a2a_session_contains_user_message(h: Any, text: str) -> bool:
+    context_id = str(getattr(h, "context_id", "") or "")
+    if not context_id:
+        _append_harness_note(h, "cannot inspect A2A session: context id is unknown")
+        return False
+    context_path = Path(getattr(h, "run_dir", "")) / "a2a-persistence" / "contexts" / f"{context_id}.json"
+    try:
+        context_record = json.loads(context_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        _append_harness_note(h, f"cannot inspect A2A session: {type(exc).__name__} reading {context_path}")
+        return False
+    except json.JSONDecodeError:
+        _append_harness_note(h, f"cannot inspect A2A session: invalid JSON in {context_path}")
+        return False
+    if not isinstance(context_record, dict):
+        _append_harness_note(h, f"cannot inspect A2A session: invalid context record in {context_path}")
+        return False
+
+    session_id = str(context_record.get("session_id") or "")
+    cwd = str(context_record.get("cwd") or getattr(h, "cwd", "") or "")
+    if not session_id or not cwd:
+        _append_harness_note(h, f"cannot inspect A2A session: missing cwd/session_id in {context_path}")
+        return False
+    try:
+        messages = SessionStorage().load(cwd, session_id)
+    except Exception as exc:
+        _append_harness_note(h, f"cannot inspect A2A session: {type(exc).__name__} loading {session_id}")
+        return False
+    return any(
+        getattr(message, "role", "") == "user" and text in _agent_message_text(message)
+        for message in messages
+    )
+
+
+def _agent_message_text(message: Any) -> str:
+    to_dict = getattr(message, "to_dict", None)
+    data = to_dict() if callable(to_dict) else {}
+    content = data.get("content") if isinstance(data, dict) else None
+    return _message_content_text(content)
+
+
+def _message_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return ""
+
+
+def _append_harness_note(h: Any, note: str) -> None:
+    notes = getattr(h, "notes", None)
+    if isinstance(notes, list):
+        notes.append(note)
 
 
 def _pending_kind(response: Any) -> str:
@@ -1894,15 +2173,59 @@ def _latest_input_required_kind_from_events(events: Iterable[Any]) -> str:
     return kind
 
 
+def _latest_input_required_step_id_from_events(events: Iterable[Any]) -> str:
+    step_id = ""
+    for value in events:
+        envelope = _extract_pipeline_envelope(value)
+        if not isinstance(envelope, dict) or envelope.get("eventType") != "input_required":
+            continue
+        step = envelope.get("step")
+        if isinstance(step, dict) and step.get("id"):
+            step_id = str(step.get("id") or "")
+        data = envelope.get("data")
+        if isinstance(data, dict) and data.get("stepId"):
+            step_id = str(data.get("stepId") or "")
+    return step_id
+
+
 def _all_evidence(h: ScenarioHarness) -> str:
     return json.dumps(
         {
             "summaries": {name: asdict(summary) for name, summary in h.summaries.items()},
             "snapshots": h.snapshots,
+            "workspace": _workspace_text_evidence(h),
         },
         ensure_ascii=False,
         default=str,
     )
+
+
+def _workspace_text_evidence(h: ScenarioHarness) -> dict[str, str]:
+    workspace_dir = getattr(h, "workspace_dir", None)
+    if workspace_dir is None:
+        return {}
+    root = Path(workspace_dir)
+    if not root.is_dir():
+        return {}
+
+    evidence: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in EVIDENCE_TEXT_FILE_SUFFIXES:
+            continue
+        try:
+            relative_path = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        try:
+            if path.stat().st_size > MAX_EVIDENCE_FILE_BYTES:
+                evidence[relative_path] = "<skipped: file too large>"
+                continue
+            evidence[relative_path] = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            evidence[relative_path] = f"<skipped: {type(exc).__name__}>"
+        except UnicodeDecodeError:
+            evidence[relative_path] = "<skipped: non-utf8 text file>"
+    return evidence
 
 
 def _has_any_marker(text: str, markers: Iterable[str]) -> bool:
@@ -1935,7 +2258,7 @@ def _cleanup_deployment_prompt(base_prompt: str, h: ScenarioHarness, label: str)
         "E2E 强制部署约束：\n"
         f"- 本轮唯一成功条件是新建一个 ROS stack，StackName 必须精确等于 `{stack_name}`。\n"
         "- 任何已有 stack（即使是 CREATE_COMPLETE）都必须视为失败结果，不能作为部署成功依据。\n"
-        f"- 调用 ros_stack 或 aliyun_api CreateStack 前，必须复核工具参数里的 StackName 精确等于 `{stack_name}`。\n"
+        f"- 调用 ros_deploy create 或 ROS CreateStack 前，必须复核工具参数里的 StackName 精确等于 `{stack_name}`。\n"
         f"- 如果模板、文件名、候选方案或默认值给出了其他 StackName，必须覆盖为 `{stack_name}` 后再调用 CreateStack。\n"
         f"- 如果已经用其他 StackName 调用失败，不能 GetStack 或复用那个 stack，必须改用 `{stack_name}` "
         "重新 CreateStack。\n"
@@ -1943,6 +2266,15 @@ def _cleanup_deployment_prompt(base_prompt: str, h: ScenarioHarness, label: str)
         f"{completion_instruction}"
         "创建 VSwitch 时请先检查目标 VPC 已有 VSwitch CIDR，选择未占用且属于 VPC CIDR 的网段；"
         "如果 CIDR 冲突，请选择另一个未占用网段并继续使用上述指定 StackName。"
+    )
+
+
+def _cleanup_intent_prompt(base_prompt: str, stack_name: str) -> str:
+    return (
+        f"{base_prompt}\n\n"
+        "E2E 部署约束："
+        f"本轮部署的 ROS StackName 必须精确等于 `{stack_name}`；"
+        "后续选择、模板生成、参数确认和部署步骤都必须保留这个 StackName。"
     )
 
 
@@ -1972,55 +2304,113 @@ def _wait_for_created_stack(
     *,
     exclude: set[str],
     timeout: float,
+    expected_stack_name: str | None = None,
 ) -> str:
     match = _wait_any(
         [stream],
-        _created_stack_event(exclude),
-        description="successful CreateStack stack_current_changed",
+        _created_stack_event(exclude, expected_stack_name=expected_stack_name),
+        description="successful stack creation event",
         timeout=timeout,
     )
-    envelope = _extract_pipeline_envelope(match.event)
-    data = envelope.get("data") if isinstance(envelope, dict) else None
-    stack_id = _string_from_mapping(data, "stackId", "stack_id", "StackId")
+    stack_id = _created_stack_id_from_event(match.event, exclude=exclude, expected_stack_name=expected_stack_name)
     if not stack_id:
         raise RuntimeError("successful CreateStack event did not include a stack id")
     return stack_id
 
 
-def _created_stack_id_from_stream(stream: Any, *, exclude: set[str]) -> str | None:
+def _created_stack_id_from_stream(
+    stream: Any,
+    *,
+    exclude: set[str],
+    expected_stack_name: str | None = None,
+) -> str | None:
     for event in getattr(stream, "events", []) or []:
-        envelope = _extract_pipeline_envelope(event)
-        if not isinstance(envelope, dict) or envelope.get("eventType") != "stack_current_changed":
-            continue
-        data = envelope.get("data")
-        if not isinstance(data, dict):
-            continue
-        if str(data.get("provider") or "").lower() != "ros":
-            continue
-        if data.get("action") != "CreateStack" or data.get("isSuccess") is not True:
-            continue
-        stack_id = _string_from_mapping(data, "stackId", "stack_id", "StackId")
-        if stack_id and stack_id not in exclude:
+        stack_id = _created_stack_id_from_event(event, exclude=exclude, expected_stack_name=expected_stack_name)
+        if stack_id:
             return stack_id
     return None
 
 
-def _created_stack_event(exclude: set[str]) -> Callable[[Any, StreamSummary], bool]:
+def _created_stack_event(
+    exclude: set[str],
+    *,
+    expected_stack_name: str | None = None,
+) -> Callable[[Any, StreamSummary], bool]:
     def predicate(event: Any, _summary: StreamSummary) -> bool:
-        envelope = _extract_pipeline_envelope(event)
-        if not isinstance(envelope, dict) or envelope.get("eventType") != "stack_current_changed":
-            return False
-        data = envelope.get("data")
-        if not isinstance(data, dict):
-            return False
-        if str(data.get("provider") or "").lower() != "ros":
-            return False
-        if data.get("action") != "CreateStack" or data.get("isSuccess") is not True:
-            return False
-        stack_id = _string_from_mapping(data, "stackId", "stack_id", "StackId")
-        return bool(stack_id and stack_id not in exclude)
+        return _created_stack_id_from_event(
+            event,
+            exclude=exclude,
+            expected_stack_name=expected_stack_name,
+        ) is not None
 
     return predicate
+
+
+def _created_stack_id_from_event(
+    event: Any,
+    *,
+    exclude: set[str],
+    expected_stack_name: str | None = None,
+) -> str | None:
+    envelope = _extract_pipeline_envelope(event)
+    if not isinstance(envelope, dict):
+        return None
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        return None
+    event_type = envelope.get("eventType")
+    if event_type == "stack_current_changed":
+        if str(data.get("provider") or "").lower() != "ros":
+            return None
+        if data.get("action") not in STACK_CREATION_SUCCESS_ACTIONS or data.get("isSuccess") is not True:
+            return None
+        if not _stack_name_matches(data, expected_stack_name):
+            return None
+        stack_id = _string_from_mapping(data, "stackId", "stack_id", "StackId")
+        return stack_id if stack_id and stack_id not in exclude else None
+    if event_type == "tool_result":
+        return _created_stack_id_from_ros_deploy_tool_result(
+            data,
+            exclude=exclude,
+            expected_stack_name=expected_stack_name,
+        )
+    return None
+
+
+def _created_stack_id_from_ros_deploy_tool_result(
+    data: dict[str, Any],
+    *,
+    exclude: set[str],
+    expected_stack_name: str | None = None,
+) -> str | None:
+    if str(data.get("toolName") or data.get("tool_name") or "") != "ros_deploy":
+        return None
+    if data.get("isError") is True or data.get("is_error") is True:
+        return None
+    result = data.get("result")
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(result, dict):
+        return None
+    if result.get("is_success") is not True:
+        return None
+    status = str(result.get("status") or result.get("stack_status") or "")
+    if status and status != "CREATE_COMPLETE":
+        return None
+    if not _stack_name_matches(result, expected_stack_name):
+        return None
+    stack_id = _string_from_mapping(result, "stackId", "stack_id", "StackId")
+    return stack_id if stack_id and stack_id not in exclude else None
+
+
+def _stack_name_matches(mapping: dict[str, Any], expected_stack_name: str | None) -> bool:
+    if not expected_stack_name:
+        return True
+    stack_name = _string_from_mapping(mapping, "stackName", "stack_name", "StackName", "name")
+    return stack_name == expected_stack_name
 
 
 def _latest_observed_stack_id(h: ScenarioHarness, *, exclude: set[str]) -> str | None:
@@ -2221,16 +2611,50 @@ def _snapshot_has_cleanup_activity(response: Any) -> bool:
 
 def _cleanup_payload_has_targets(cleanup: dict[str, Any]) -> bool:
     resources = cleanup.get("resources")
-    if isinstance(resources, list) and any(isinstance(item, dict) for item in resources):
+    if isinstance(resources, list) and any(_cleanup_resource_has_target(item) for item in resources):
         return True
     history = cleanup.get("history")
-    if isinstance(history, list) and history:
+    if isinstance(history, list) and any(_cleanup_history_item_has_activity(item) for item in history):
         return True
     resource_count = cleanup.get("resourceCount", cleanup.get("resource_count"))
     if _positive_int(resource_count):
         return True
     status = str(cleanup.get("status") or "")
     return status in CLEANUP_ACTIVE_STATUSES
+
+
+def _cleanup_resource_has_target(resource: Any) -> bool:
+    if not isinstance(resource, dict):
+        return False
+    target_keys = (
+        "resourceId",
+        "resource_id",
+        "stackId",
+        "stack_id",
+        "physicalResourceId",
+        "physical_resource_id",
+    )
+    return any(str(resource.get(key) or "").strip() for key in target_keys)
+
+
+def _cleanup_history_item_has_activity(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    event_type = str(item.get("eventType") or item.get("event_type") or "")
+    if event_type in CLEANUP_EVENT_TYPES:
+        return True
+    if str(item.get("status") or "") in CLEANUP_ACTIVE_STATUSES:
+        return True
+    resource_count = item.get("resourceCount", item.get("resource_count"))
+    if _positive_int(resource_count):
+        return True
+    resources = item.get("resources")
+    if isinstance(resources, list) and any(_cleanup_resource_has_target(resource) for resource in resources):
+        return True
+    data = item.get("data")
+    if isinstance(data, dict) and (_cleanup_resource_has_target(data) or _cleanup_payload_has_targets(data)):
+        return True
+    return False
 
 
 def _positive_int(value: Any) -> bool:

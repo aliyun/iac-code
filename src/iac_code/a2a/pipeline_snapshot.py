@@ -1122,6 +1122,78 @@ def _backup_ack_authoritative_events(events: list[dict[str, Any]]) -> list[dict[
     return authoritative
 
 
+def snapshot_needs_backup_commit_repair(snapshot: dict[str, Any] | None, events: list[dict[str, Any]]) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    pending_publications = _pending_backup_publications_from_snapshot(snapshot)
+    if not pending_publications:
+        return False
+
+    matching_events = [
+        event
+        for event in events
+        if isinstance(event, dict) and _event_matches_snapshot_task_context(event, snapshot)
+    ]
+    committed_by_id: dict[str, dict[str, Any]] = {}
+    committed_by_sequence_type: dict[tuple[int, str], dict[str, Any]] = {}
+    for event in matching_events:
+        if not _is_committed_backup_publication(event):
+            continue
+        event_id = _string_or_none(event.get("eventId"))
+        event_type = _string_or_none(event.get("eventType")) or ""
+        sequence = _sequence_value(event)
+        if event_id:
+            committed_by_id[event_id] = event
+        committed_by_sequence_type[(sequence, event_type)] = event
+
+    if not committed_by_id and not committed_by_sequence_type:
+        return False
+
+    for event in matching_events:
+        if event.get("eventType") != _BACKUP_COMMITTED_EVENT_TYPE:
+            continue
+        data = _dict_or_empty(event.get("data"))
+        committed_event = None
+        committed_event_id = _string_or_none(data.get("committedEventId"))
+        if committed_event_id:
+            committed_event = committed_by_id.get(committed_event_id)
+        if committed_event is None:
+            committed_event_type = _string_or_none(data.get("committedEventType")) or ""
+            committed_event = committed_by_sequence_type.get(
+                (_sequence_number(data.get("committedSequence")), committed_event_type),
+            )
+        if committed_event is None:
+            continue
+        committed_event_type = _string_or_none(committed_event.get("eventType"))
+        committed_sequence = _sequence_value(committed_event)
+        for pending in pending_publications:
+            if (
+                committed_event_type == _string_or_none(pending.get("eventType"))
+                and committed_sequence >= _sequence_value(pending)
+            ):
+                return True
+    return False
+
+
+def _pending_backup_publications_from_snapshot(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    publications: list[dict[str, Any]] = []
+    for key in ("pendingTerminal", "pendingNormalHandoff"):
+        publication = snapshot.get(key)
+        if isinstance(publication, dict) and _publication_visibility(publication) == _PENDING_BACKUP_VISIBILITY:
+            publications.append(publication)
+    return publications
+
+
+def _event_matches_snapshot_task_context(event: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    context_id = _string_or_none(snapshot.get("contextId"))
+    if context_id is not None and event.get("contextId") != context_id:
+        return False
+    task_id = _string_or_none(snapshot.get("taskId"))
+    if task_id is None:
+        return True
+    return event.get("taskId") == task_id or event.get("deliveryTaskId") == task_id
+
+
 def _publication_visibility(event: dict[str, Any]) -> str | None:
     value = _string_or_none(event.get("visibility"))
     if value is not None:
@@ -1685,4 +1757,5 @@ __all__ = [
     "SNAPSHOT_SCHEMA_VERSION",
     "reduce_pipeline_events",
     "sanitize_pipeline_cleanup_private_fields",
+    "snapshot_needs_backup_commit_repair",
 ]
