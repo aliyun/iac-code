@@ -3335,6 +3335,10 @@ msgid "<fill according to the current step requirements>"
 msgstr "<preencher conforme os requisitos da etapa atual>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "complete_step validation failed."
+msgstr "A validação de complete_step falhou."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
 msgstr "É necessário esclarecimento antes de concluir a etapa atual."
 

@@ -32,6 +32,20 @@ class TestCompleteStepToolMeta:
         assert "conclusion" in schema["properties"]
         assert "conclusion" in schema["required"]
 
+    def test_error_result_renders_compact_summary(self, tool):
+        long_error = (
+            "Invalid input for tool 'complete_step': 'conclusion' is a required property\n"
+            "Current step: intent_parsing\n"
+            "conclusion must match this schema summary:\n"
+            '{"type": "object", "required": ["is_infra_intent", "confidence"]}'
+        )
+
+        compact = tool.render_tool_result_message(long_error, is_error=True)
+
+        assert compact == "complete_step validation failed."
+        assert "'conclusion' is a required property" not in compact
+        assert "schema summary" not in compact
+
     @pytest.mark.asyncio
     async def test_completion_guard_message_key_renders_translated_message(self, step_config):
         tool = CompleteStepTool(

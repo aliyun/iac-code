@@ -8,7 +8,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
-from iac_code.agent.message import ImageBlock, Message, TextBlock, create_recalled_memory_message
+from iac_code.agent.message import (
+    ImageBlock,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    create_recalled_memory_message,
+)
 from iac_code.pipeline.engine.cleanup import CLEANUP_PROMPT_METADATA_TYPE
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.read_file import ReadFileTool
@@ -305,6 +312,69 @@ class TestRendererHelpers:
         assert verbose is not None
         assert "Command: infraguard scan" in verbose.plain
         assert '{"command"' not in verbose.plain
+
+    def test_replay_history_uses_tool_result_block_render_metadata_when_registry_missing(self):
+        renderer = Renderer(make_console(), ToolRegistry(), status_callback=lambda: "ready")
+        long_error = (
+            "Invalid input for tool 'complete_step': 'conclusion' is a required property\n"
+            "Current step: intent_parsing\n"
+            "conclusion must match this schema summary:\n"
+            '{"type": "object", "required": ["is_infra_intent", "confidence"]}'
+        )
+        messages = [
+            Message(
+                role="assistant",
+                content=[ToolUseBlock(id="tu_bad", name="complete_step", input={})],
+            ),
+            Message(
+                role="user",
+                content=[
+                    ToolResultBlock(
+                        tool_use_id="tu_bad",
+                        content=long_error,
+                        is_error=True,
+                        metadata={
+                            TOOL_RENDER_METADATA_KEY: {
+                                TOOL_RENDER_RESULT_COMPACT_KEY: "complete_step validation failed."
+                            }
+                        },
+                    )
+                ],
+            ),
+        ]
+
+        renderer.replay_history(messages)
+
+        output = renderer.console.file.getvalue()
+        assert "complete_step validation failed." in output
+        assert "'conclusion' is a required property" not in output
+        assert "schema summary" not in output
+
+    def test_replay_history_summarizes_legacy_complete_step_error_without_metadata(self):
+        renderer = Renderer(make_console(), ToolRegistry(), status_callback=lambda: "ready")
+        long_error = (
+            "Invalid input for tool 'complete_step': 'conclusion' is a required property\n"
+            "Current step: intent_parsing\n"
+            "conclusion must match this schema summary:\n"
+            '{"type": "object", "required": ["is_infra_intent", "confidence"]}'
+        )
+        messages = [
+            Message(
+                role="assistant",
+                content=[ToolUseBlock(id="tu_bad", name="complete_step", input={})],
+            ),
+            Message(
+                role="user",
+                content=[ToolResultBlock(tool_use_id="tu_bad", content=long_error, is_error=True)],
+            ),
+        ]
+
+        renderer.replay_history(messages)
+
+        output = renderer.console.file.getvalue()
+        assert "complete_step validation failed." in output
+        assert "'conclusion' is a required property" not in output
+        assert "schema summary" not in output
 
     def test_render_progress_groups_include_resource_rows(self):
         renderer = make_renderer()

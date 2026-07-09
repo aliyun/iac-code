@@ -101,6 +101,11 @@ def _known_tool_result_message(
     is_error: bool = False,
     verbose: bool = False,
 ) -> str | None:
+    if tool_name == "complete_step" and is_error:
+        if verbose:
+            return output.strip()
+        return _("complete_step validation failed.")
+
     if tool_name == "ros_deploy":
         from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
 
@@ -2090,6 +2095,7 @@ class Renderer:
                                 result=result.content if result else None,
                                 is_error=result.is_error if result else False,
                                 done=True,
+                                metadata=copy.deepcopy(result.metadata) if result else None,
                             )
                             segments.append(_Segment(kind="tool", tool=rec))
                 if segments:

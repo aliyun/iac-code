@@ -1852,6 +1852,12 @@ class TestAgentLoopStreaming:
                 TOOL_RENDER_RESULT_COMPACT_KEY: "compact result",
             }
         }
+        result_blocks = loop.context_manager.add_tool_results.call_args.args[0]
+        assert result_blocks[0].metadata == {
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_RESULT_COMPACT_KEY: "compact result",
+            }
+        }
         tool_starts = [e for e in events if isinstance(e, ToolUseStartEvent)]
         assert len(tool_starts) == 1
         assert not hasattr(tool_starts[0], "renderer_tool")

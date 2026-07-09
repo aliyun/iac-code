@@ -1276,7 +1276,7 @@ class AgentLoop:
                             tool_use_id=req.id,
                             content=processed.content,
                             is_error=result.is_error,
-                            metadata=self._tool_result_block_metadata(processed),
+                            metadata=self._tool_result_block_metadata(processed, result_metadata),
                         )
                     )
 
@@ -1406,10 +1406,17 @@ class AgentLoop:
         return cls._merge_tool_render_metadata(metadata, render_metadata)
 
     @staticmethod
-    def _tool_result_block_metadata(processed: Any) -> dict[str, Any]:
-        if not getattr(processed, "is_externalized", False) or not getattr(processed, "file_path", None):
-            return {}
-        return {EXTERNALIZED_RESULT_PATH_METADATA_KEY: str(processed.file_path)}
+    def _tool_result_block_metadata(processed: Any, result_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        if getattr(processed, "is_externalized", False) and getattr(processed, "file_path", None):
+            metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] = str(processed.file_path)
+
+        if isinstance(result_metadata, dict):
+            render_metadata = result_metadata.get(TOOL_RENDER_METADATA_KEY)
+            if isinstance(render_metadata, dict):
+                metadata[TOOL_RENDER_METADATA_KEY] = dict(render_metadata)
+
+        return metadata
 
     def _mark_read_memory_tool_result(self, request: ToolCallRequest, result: ToolResult) -> None:
         if request.name != "read_memory" or result.is_error or self._memory_recall_service is None:

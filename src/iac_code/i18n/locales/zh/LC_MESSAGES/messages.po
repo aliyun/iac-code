@@ -3167,6 +3167,10 @@ msgid "<fill according to the current step requirements>"
 msgstr "<按当前步骤要求填写>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+msgid "complete_step validation failed."
+msgstr "complete_step 校验失败。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."
 msgstr "完成当前步骤前需要先澄清。"
 
