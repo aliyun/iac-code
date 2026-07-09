@@ -54,5 +54,7 @@ def test_reviewing_step_exposes_infraguard_review_tools_when_enabled(monkeypatch
         "infraguard_scan",
         "ros_validate_template",
         "aliyun_doc_search",
+        "grep",
+        "web_fetch",
+        "aliyun_api",
     }.issubset(reviewing.tools.include)
-    assert "aliyun_api" not in reviewing.tools.include

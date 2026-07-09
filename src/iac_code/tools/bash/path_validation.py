@@ -200,6 +200,8 @@ def check_read_path_constraints(
     cwd: str,
     additional_directories: list[str],
     trusted_read_directories: list[str],
+    strict_read_directories: list[str] | None = None,
+    read_path_violation_behavior: Literal["ask", "deny"] = "ask",
     compound_has_cd: bool = False,
 ) -> PermissionResult:
     """Validate read path operands for commands that inspect file contents."""
@@ -237,8 +239,10 @@ def check_read_path_constraints(
             cwd=cwd,
             additional_directories=additional_directories,
             trusted_read_directories=trusted_read_directories,
+            strict_read_directories=strict_read_directories,
+            read_path_violation_behavior=read_path_violation_behavior,
         )
-        if decision.behavior == "ask":
+        if decision.behavior != "allow":
             return decision.to_permission_result()
 
     return PermissionResult(behavior="passthrough")

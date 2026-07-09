@@ -902,7 +902,7 @@ class TestAliyunApiHooks:
 
         with (
             patch("iac_code.tools.cloud.aliyun.aliyun_api.OpenApiClient", return_value=mock_client),
-            patch("iac_code.tools.cloud.aliyun.aliyun_api.Path.read_text") as read_text,
+            patch("iac_code.tools.cloud.aliyun.template_source.Path.read_text") as read_text,
         ):
             read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
             result = await api.execute(

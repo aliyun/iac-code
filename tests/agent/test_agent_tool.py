@@ -8,6 +8,7 @@ import pytest
 from iac_code.agent.agent_tool import AgentProgress, AgentTool, run_sub_agent
 from iac_code.tasks.task_state import TaskManager, TaskStatus
 from iac_code.tools.base import ToolContext
+from iac_code.types.permissions import ToolPermissionContext
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
 
 
@@ -178,6 +179,37 @@ class TestRunSubAgent:
         assert text.endswith("[... truncated to 500 words]")
         assert len(text.split()) > 500
         assert progress.token_count == 10
+
+    async def test_passes_cwd_and_permission_context_to_agent_loop(self, monkeypatch, tmp_path):
+        captured_kwargs = {}
+
+        async def fake_stream(_prompt):
+            yield TextDeltaEvent(text="done")
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                self.context_manager = SimpleNamespace(get_total_tokens=lambda: 1)
+
+            def run_streaming(self, prompt):
+                return fake_stream(prompt)
+
+        monkeypatch.setattr(
+            "iac_code.agent.agent_tool.get_agent_definition", lambda agent_type: SimpleNamespace(max_turns=3)
+        )
+        monkeypatch.setattr("iac_code.agent.system_prompt.build_system_prompt", lambda cwd=None: "built prompt")
+        monkeypatch.setattr("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop)
+
+        permission_context = ToolPermissionContext(
+            cwd=str(tmp_path),
+            strict_read_directories=[str(tmp_path)],
+            read_path_violation_behavior="deny",
+        )
+
+        await run_sub_agent(prompt="demo", cwd=str(tmp_path), permission_context=permission_context)
+
+        assert captured_kwargs["cwd"] == str(tmp_path)
+        assert captured_kwargs["permission_context"] is permission_context
 
 
 @pytest.mark.asyncio

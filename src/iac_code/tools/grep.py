@@ -129,6 +129,17 @@ def _contains_directory_symlink(path: str) -> bool:
     return False
 
 
+def _effective_allowed_roots(path: str, context: ToolContext) -> list[str]:
+    if context.strict_read_directories:
+        return list(context.strict_read_directories)
+    return [
+        path,
+        *context.additional_directories,
+        *context.trusted_read_directories,
+        str(get_iac_code_application_root()),
+    ]
+
+
 async def _run_rg(
     pattern: str,
     path: str,
@@ -207,7 +218,7 @@ def _python_grep(
     results: list[str] = []
     files_matched = 0
     search_root = os.path.realpath(path)
-    safe_roots = [search_root, *(allowed_roots or [])]
+    safe_roots = list(allowed_roots) if allowed_roots is not None else [search_root]
     visited_dirs: set[str] = set()
 
     for dirpath, dirnames, filenames in os.walk(path, followlinks=True):
@@ -327,12 +338,7 @@ class GrepTool(Tool):
         if not os.path.exists(path):
             return ToolResult.error(f"Path not found: {path}")
 
-        allowed_roots = [
-            path,
-            *context.additional_directories,
-            *context.trusted_read_directories,
-            str(get_iac_code_application_root()),
-        ]
+        allowed_roots = _effective_allowed_roots(path, context)
         if _is_rg_available() and not resolution.used_relative_root and not _contains_directory_symlink(path):
             returncode, stdout, stderr = await _run_rg(
                 pattern,
@@ -377,6 +383,8 @@ class GrepTool(Tool):
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
             relative_read_directories=context.relative_read_directories,
+            strict_read_directories=context.strict_read_directories,
+            read_path_violation_behavior=context.read_path_violation_behavior,
         )
         if decision.behavior == "allow":
             return PermissionResult(behavior="allow")

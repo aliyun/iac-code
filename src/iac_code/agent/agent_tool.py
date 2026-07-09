@@ -65,6 +65,7 @@ async def run_sub_agent(
         system_prompt=system_prompt,
         tool_registry=sub_registry or parent_tool_registry,
         max_turns=defn.max_turns,
+        cwd=cwd,
         permission_context=permission_context,
     )
 

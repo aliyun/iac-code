@@ -87,6 +87,8 @@ class ListFilesTool(Tool):
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
             relative_read_directories=context.relative_read_directories,
+            strict_read_directories=context.strict_read_directories,
+            read_path_violation_behavior=context.read_path_violation_behavior,
         )
         if decision.behavior == "allow":
             return PermissionResult(behavior="allow")

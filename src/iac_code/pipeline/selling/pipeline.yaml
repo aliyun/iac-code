@@ -149,7 +149,7 @@ sub_pipelines:
         context_fields: [candidate]
         tools:
           include: []
-          exclude: [write_memory]
+          exclude: [write_memory, ros_stack, ros_stack_instances]
         inject_tools: [ros_validate_template]
 
       - id: reviewing
@@ -326,7 +326,7 @@ sub_pipelines:
             fix_summary:
               type: string
         tools:
-          include: [read_file, write_file, edit_file, infraguard_scan, ros_validate_template, aliyun_doc_search]
+          include: [read_file, write_file, edit_file, grep, infraguard_scan, ros_validate_template, aliyun_doc_search, web_fetch, aliyun_api]
           exclude: [write_memory]
         inject_tools: [ros_validate_template]
 
@@ -339,7 +339,7 @@ sub_pipelines:
         context_fields: [template]
         tools:
           include: []
-          exclude: [bash, write_memory]
+          exclude: [bash, write_memory, ros_stack, ros_stack_instances]
         inject_tools:
           - ros_validate_template
           - ros_get_template_parameter_constraints
@@ -509,5 +509,5 @@ steps:
         message_key: deploy_wait_create_complete
     tools:
       include: []
-      exclude: [write_memory, ros_stack]
+      exclude: [write_memory, ros_stack, ros_stack_instances]
     inject_tools: [ros_validate_template, ros_deploy]

@@ -19,6 +19,15 @@ def _glob_pattern_may_escape_root(pattern: str) -> bool:
     return os.path.isabs(normalized) or any(part == ".." for part in normalized.split("/"))
 
 
+def _glob_path_constraint_result(detail: str, context: ToolPermissionContext) -> PermissionResult:
+    behavior = context.read_path_violation_behavior if context.strict_read_directories else "ask"
+    return PermissionResult(
+        behavior=behavior,
+        message=detail,
+        reason=PermissionDecisionReason(type="path_constraint", detail=detail),
+    )
+
+
 def _search_root(path: str, cwd: str, *, relative_read_directories: list[str] | None = None) -> Path:
     root = Path(normalize_user_path(path))
     if not root.is_absolute():
@@ -83,6 +92,16 @@ def _allowed_roots(
         *trusted_read_directories,
         str(get_iac_code_application_root()),
     ]
+
+
+def _effective_allowed_roots(search_root: Path, context: ToolContext | ToolPermissionContext) -> list[str]:
+    if context.strict_read_directories:
+        return list(context.strict_read_directories)
+    return _allowed_roots(
+        search_root,
+        additional_directories=context.additional_directories,
+        trusted_read_directories=context.trusted_read_directories,
+    )
 
 
 def _glob_matches(
@@ -169,12 +188,9 @@ class GlobTool(Tool):
             return ToolResult.error(f"Not a directory: {path}")
 
         try:
-            allowed_roots = _allowed_roots(
-                search_root,
-                additional_directories=context.additional_directories,
-                trusted_read_directories=context.trusted_read_directories,
-            )
+            allowed_roots = _effective_allowed_roots(search_root, context)
             matches, _ = _glob_matches(search_root, pattern, allowed_roots=allowed_roots)
+            matches = [match for match in matches if _path_is_under_any_real_root(str(match), allowed_roots)]
         except Exception as e:
             return ToolResult.error(f"Error during glob: {e}")
 
@@ -199,16 +215,14 @@ class GlobTool(Tool):
             additional_directories=context.additional_directories,
             trusted_read_directories=context.trusted_read_directories,
             relative_read_directories=context.relative_read_directories,
+            strict_read_directories=context.strict_read_directories,
+            read_path_violation_behavior=context.read_path_violation_behavior,
         )
         if decision.behavior == "allow":
             pattern = input.get("pattern", "")
             if _glob_pattern_may_escape_root(pattern):
                 detail = _("glob pattern outside allowed directories")
-                return PermissionResult(
-                    behavior="ask",
-                    message=detail,
-                    reason=PermissionDecisionReason(type="path_constraint", detail=detail),
-                )
+                return _glob_path_constraint_result(detail, context)
             try:
                 search_root = _search_root(
                     path,
@@ -218,26 +232,14 @@ class GlobTool(Tool):
                 matches, unsafe_directories = _glob_matches(
                     search_root,
                     pattern,
-                    allowed_roots=_allowed_roots(
-                        search_root,
-                        additional_directories=context.additional_directories,
-                        trusted_read_directories=context.trusted_read_directories,
-                    ),
+                    allowed_roots=_effective_allowed_roots(search_root, context),
                 )
             except Exception:
                 detail = _("glob pattern outside allowed directories")
-                return PermissionResult(
-                    behavior="ask",
-                    message=detail,
-                    reason=PermissionDecisionReason(type="path_constraint", detail=detail),
-                )
+                return _glob_path_constraint_result(detail, context)
             if unsafe_directories:
                 detail = _("glob pattern outside allowed directories")
-                return PermissionResult(
-                    behavior="ask",
-                    message=detail,
-                    reason=PermissionDecisionReason(type="path_constraint", detail=detail),
-                )
+                return _glob_path_constraint_result(detail, context)
             for match in matches:
                 match_decision = check_read_path(
                     str(match),
@@ -245,8 +247,10 @@ class GlobTool(Tool):
                     additional_directories=context.additional_directories,
                     trusted_read_directories=context.trusted_read_directories,
                     relative_read_directories=context.relative_read_directories,
+                    strict_read_directories=context.strict_read_directories,
+                    read_path_violation_behavior=context.read_path_violation_behavior,
                 )
-                if match_decision.behavior == "ask":
+                if match_decision.behavior != "allow":
                     return match_decision.to_permission_result()
             return PermissionResult(behavior="allow")
         return decision.to_permission_result()

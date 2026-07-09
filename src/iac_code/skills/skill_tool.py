@@ -181,6 +181,7 @@ class SkillTool(Tool):
                 parent_provider_manager=self._provider_manager,
                 parent_tool_registry=self._tool_registry,
                 parent_system_prompt=self._system_prompt,
+                permission_context=tool_context.permission_context,
             )
             if safe_name is not None and started is not None:
                 log_event(

@@ -91,10 +91,16 @@ logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
 _ERROR_TEXT_MAX_CHARS = 1000
 _DEFERRED_CLEANUP_PROMPTS_FILENAME = "cleanup-deferred-prompts.json"
+_A2A_SAFE_MODE_ENV = "IAC_CODE_A2A_SAFE_MODE"
+_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
 
 
 def _format_exception(exc: BaseException) -> str:
     return public_exception_summary(exc, max_chars=_ERROR_TEXT_MAX_CHARS)
+
+
+def _a2a_safe_mode_enabled() -> bool:
+    return os.environ.get(_A2A_SAFE_MODE_ENV, "").strip().lower() in _TRUTHY_ENV_VALUES
 
 
 A2APermissionResolver: TypeAlias = Callable[[Any], "bool | Awaitable[bool]"]
@@ -1001,6 +1007,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     session_id=session_id,
                     cwd=cwd,
                     resume_messages=resume_messages,
+                    a2a_safe_mode=_a2a_safe_mode_enabled(),
                 )
             )
 

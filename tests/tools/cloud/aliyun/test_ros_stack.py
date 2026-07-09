@@ -11,6 +11,8 @@ import pytest
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
+from iac_code.tools.path_safety import get_iac_code_application_root
+from iac_code.types.permissions import ToolPermissionContext
 from iac_code.types.stream_events import StackProgressEvent
 
 _REMOTE_TEMPLATE_URL = "oss://iac-code-test/template.json"
@@ -59,6 +61,38 @@ class TestRosStackProperties:
     def test_is_destructive(self, tool: RosStack) -> None:
         assert tool.is_destructive({"action": "DeleteStack"}) is True
         assert tool.is_destructive({"action": "CreateStack"}) is True
+
+
+class TestRosStackPermissions:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["CreateStack", "UpdateStack"])
+    async def test_local_template_url_outside_strict_roots_denied(self, tool: RosStack, tmp_path, action: str) -> None:
+        project = tmp_path / "project"
+        session_dir = tmp_path / "session"
+        outside = tmp_path / "outside"
+        project.mkdir()
+        session_dir.mkdir()
+        outside.mkdir()
+        template = outside / "template.yml"
+        template.write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+        params = {"TemplateURL": str(template)}
+        if action == "CreateStack":
+            params["StackName"] = "demo"
+        else:
+            params["StackId"] = "stack-123"
+
+        result = await tool.check_permissions(
+            {"action": action, "params": params},
+            ToolPermissionContext(
+                cwd=str(project),
+                strict_read_directories=[str(project), str(session_dir), str(get_iac_code_application_root())],
+                read_path_violation_behavior="deny",
+            ),
+        )
+
+        assert result.behavior == "deny"
+        assert result.reason is not None
+        assert result.reason.type == "path_constraint"
 
 
 class TestRosStackExecute:
@@ -553,7 +587,7 @@ class TestRosStackExecute:
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
             patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
-            patch("iac_code.tools.cloud.aliyun.ros_stack.Path.read_text") as read_text,
+            patch("iac_code.tools.cloud.aliyun.template_source.Path.read_text") as read_text,
         ):
             read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
             mock_factory.create.return_value = mock_client
@@ -1020,7 +1054,7 @@ class TestRosStackExecute:
         with (
             patch("iac_code.tools.cloud.aliyun.ros_stack.RosClientFactory") as mock_factory,
             patch("iac_code.tools.cloud.aliyun.api_hooks.run_hooks", return_value=None),
-            patch("iac_code.tools.cloud.aliyun.ros_stack.Path.read_text") as read_text,
+            patch("iac_code.tools.cloud.aliyun.template_source.Path.read_text") as read_text,
         ):
             read_text.side_effect = AssertionError("remote TemplateURL should not be read as a local file")
             mock_factory.create.return_value = mock_client

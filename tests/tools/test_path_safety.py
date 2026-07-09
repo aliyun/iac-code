@@ -122,6 +122,30 @@ def test_read_path_ask_decision_converts_to_ask_permission_result():
     )
 
 
+def test_strict_read_path_violation_message_is_translatable(tmp_path, monkeypatch):
+    import iac_code.tools.path_safety as path_safety
+
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    target = outside / "notes.txt"
+    target.write_text("outside", encoding="utf-8")
+    monkeypatch.setattr(path_safety, "_", lambda message: f"translated:{message}", raising=False)
+
+    result = path_safety.check_read_path(
+        str(target),
+        cwd=str(project),
+        additional_directories=[],
+        trusted_read_directories=[],
+        strict_read_directories=[str(project)],
+        read_path_violation_behavior="deny",
+    )
+
+    assert result.detail == "translated:path outside allowed read directories"
+    assert result.to_permission_result().message == "translated:path outside allowed read directories"
+
+
 def test_iac_code_credential_files_are_explicit_sensitive_entries():
     assert ".iac-code/.credentials.yml" in SENSITIVE_PATHS
     assert ".iac-code/.cloud-credentials.yml" in SENSITIVE_PATHS

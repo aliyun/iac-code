@@ -4619,6 +4619,22 @@ msgstr "{path} wird aufgelistet"
 msgid "Listing files..."
 msgstr "Dateien werden aufgelistet …"
 
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed read directories"
+msgstr "Pfad außerhalb erlaubter Leseverzeichnisse"
+
+#: src/iac_code/tools/path_safety.py
+msgid "read touches a sensitive path"
+msgstr "Lesezugriff betrifft einen sensiblen Pfad"
+
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed directories"
+msgstr "Pfad außerhalb erlaubter Verzeichnisse"
+
+#: src/iac_code/tools/path_safety.py
+msgid "write touches a sensitive path"
+msgstr "Schreibzugriff betrifft einen sensiblen Pfad"
+
 #: src/iac_code/tools/read_file.py
 msgid "Read file path is required."
 msgstr "Pfad der zu lesenden Datei ist erforderlich."
