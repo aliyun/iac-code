@@ -224,6 +224,8 @@ def bash_tool_check_permission(
         context.cwd,
         context.additional_directories,
         context.trusted_read_directories,
+        strict_read_directories=context.strict_read_directories,
+        read_path_violation_behavior=context.read_path_violation_behavior,
         compound_has_cd=compound_has_cd,
     )
     if read_path_res.behavior != "passthrough":

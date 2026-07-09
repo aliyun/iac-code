@@ -7,7 +7,7 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from iac_code.i18n import _
 
@@ -32,9 +32,12 @@ class ToolContext:
     additional_directories: list[str] = field(default_factory=list)
     trusted_read_directories: list[str] = field(default_factory=list)
     relative_read_directories: list[str] = field(default_factory=list)
+    strict_read_directories: list[str] = field(default_factory=list)
+    read_path_violation_behavior: Literal["ask", "deny"] = "ask"
     # True when this tool call is being executed as part of a pipeline step.
     pipeline_mode: bool = False
     env_overrides: dict[str, str] = field(default_factory=dict)
+    permission_context: Any = None
 
     def __init__(
         self,
@@ -44,8 +47,11 @@ class ToolContext:
         additional_directories: list[str] | None = None,
         trusted_read_directories: list[str] | str | None = None,
         relative_read_directories: list[str] | None = None,
+        strict_read_directories: list[str] | None = None,
+        read_path_violation_behavior: Literal["ask", "deny"] = "ask",
         pipeline_mode: bool = False,
         env_overrides: dict[str, str] | None = None,
+        permission_context: Any = None,
     ) -> None:
         if isinstance(tool_use_id, list) and isinstance(additional_directories, list):
             old_additional_directories = tool_use_id
@@ -64,8 +70,11 @@ class ToolContext:
             list(trusted_read_directories or []) if isinstance(trusted_read_directories, list) else []
         )
         self.relative_read_directories = list(relative_read_directories or [])
+        self.strict_read_directories = list(strict_read_directories or [])
+        self.read_path_violation_behavior = read_path_violation_behavior
         self.pipeline_mode = pipeline_mode
         self.env_overrides = {str(key): str(value) for key, value in (env_overrides or {}).items() if value is not None}
+        self.permission_context = permission_context
 
 
 @dataclass

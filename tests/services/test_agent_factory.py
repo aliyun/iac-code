@@ -298,6 +298,129 @@ def test_create_agent_runtime_respects_disabled_skills(tmp_path, monkeypatch) ->
     assert "disabled-skill" in skill_tool._disabled_skills
 
 
+def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(
+        "iac_code.services.cloud_credentials.CloudCredentials.has_provider",
+        lambda self, provider: provider == "aliyun",
+    )
+    mcp_factory_called = False
+
+    def mcp_manager_factory(configs, roots):
+        nonlocal mcp_factory_called
+        mcp_factory_called = True
+        raise AssertionError("safe mode must not connect MCP servers")
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id="safe-session",
+            cwd=str(tmp_path),
+            mcp_configs=[{"name": "ros", "command": "uvx"}],
+            mcp_manager_factory=mcp_manager_factory,
+            a2a_safe_mode=True,
+        )
+    )
+
+    names = {tool.name for tool in runtime.tool_registry.list_tools()}
+    assert {
+        "read_file",
+        "list_files",
+        "glob",
+        "grep",
+        "aliyun_api",
+        "aliyun_doc_search",
+        "ros_stack",
+        "skill",
+        "read_memory",
+        "write_memory",
+    }.issubset(names)
+    assert not {
+        "bash",
+        "write_file",
+        "edit_file",
+        "web_fetch",
+        "agent",
+        "task_list",
+        "task_get",
+        "task_stop",
+        "ros_stack_instances",
+        "list_mcp_resources",
+        "read_mcp_resource",
+    }.intersection(names)
+    assert not any(name.startswith("mcp__") for name in names)
+    assert runtime.mcp_manager is None
+    assert mcp_factory_called is False
+
+    permission_context = runtime.agent_loop._permission_context
+    session_dir = runtime.agent_loop._session_storage.session_dir(str(tmp_path), "safe-session")
+    assert permission_context.read_path_violation_behavior == "deny"
+    assert str(tmp_path) in permission_context.strict_read_directories
+    assert str(session_dir) in permission_context.strict_read_directories
+
+
+def test_a2a_safe_mode_keeps_cloud_tool_refresh_filtered(tmp_path, monkeypatch) -> None:
+    from iac_code.a2a.runtime_overrides import refresh_runtime_cloud_tools
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(
+        "iac_code.services.cloud_credentials.CloudCredentials.has_provider",
+        lambda self, provider: provider == "aliyun",
+    )
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id="safe-session",
+            cwd=str(tmp_path),
+            a2a_safe_mode=True,
+        )
+    )
+
+    assert runtime.tool_registry.get("ros_stack") is not None
+    assert runtime.tool_registry.get("ros_stack_instances") is None
+
+    refresh_runtime_cloud_tools(runtime)
+
+    assert runtime.tool_registry.get("ros_stack") is not None
+    assert runtime.tool_registry.get("ros_stack_instances") is None
+
+
+@pytest.mark.asyncio
+async def test_a2a_safe_mode_allows_existing_legacy_session_dir(tmp_path, monkeypatch) -> None:
+    from iac_code.services.permissions.pipeline import check_tool_permission
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    session_id = "legacy-safe-session"
+    storage = SessionStorage()
+    session_dir = storage.session_dir(str(tmp_path), session_id)
+    session_dir.mkdir(parents=True)
+    (session_dir / "session.jsonl").write_text("", encoding="utf-8")
+    session_file = session_dir / "artifact.txt"
+    session_file.write_text("artifact", encoding="utf-8")
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            session_id=session_id,
+            cwd=str(tmp_path),
+            a2a_safe_mode=True,
+        )
+    )
+
+    permission_context = runtime.agent_loop._permission_context
+    assert str(session_dir) in permission_context.strict_read_directories
+    permission = await check_tool_permission(
+        runtime.tool_registry.get("read_file"),
+        {"path": str(session_file)},
+        permission_context,
+    )
+
+    assert permission.behavior == "allow"
+
+
 def test_create_agent_runtime_uses_project_memory_context(tmp_path, monkeypatch) -> None:
     from iac_code.memory.memory_manager import MemoryManager
     from iac_code.memory.project_memory import get_project_memory_dir

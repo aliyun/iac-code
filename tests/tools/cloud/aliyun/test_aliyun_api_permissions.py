@@ -2,6 +2,7 @@ import pytest
 
 from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
+from iac_code.tools.path_safety import get_iac_code_application_root
 from iac_code.types.permissions import PermissionMode, ToolPermissionContext
 
 
@@ -12,6 +13,14 @@ def _ctx(*, allow=None, deny=None, ask=None, mode=PermissionMode.DEFAULT):
         deny_rules=deny or {},
         ask_rules=ask or {},
         mode=mode,
+    )
+
+
+def _strict_ctx(project, session_dir) -> ToolPermissionContext:
+    return ToolPermissionContext(
+        cwd=str(project),
+        strict_read_directories=[str(project), str(session_dir), str(get_iac_code_application_root())],
+        read_path_violation_behavior="deny",
     )
 
 
@@ -28,6 +37,56 @@ async def test_read_api_allows() -> None:
 async def test_ros_preview_stack_is_readonly_case_insensitive() -> None:
     result = await AliyunApi().check_permissions({"product": "ROS", "action": "PreviewStack"}, _ctx())
     assert result.behavior == "allow"
+
+
+@pytest.mark.asyncio
+async def test_readonly_ros_local_template_url_outside_strict_roots_denied(tmp_path) -> None:
+    project = tmp_path / "project"
+    session_dir = tmp_path / "session"
+    outside = tmp_path / "outside"
+    project.mkdir()
+    session_dir.mkdir()
+    outside.mkdir()
+    template = outside / "template.yml"
+    template.write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+
+    result = await AliyunApi().check_permissions(
+        {
+            "product": "ros",
+            "action": "ValidateTemplate",
+            "params": {"TemplateURL": str(template)},
+        },
+        _strict_ctx(project, session_dir),
+    )
+
+    assert result.behavior == "deny"
+    assert result.reason is not None
+    assert result.reason.type == "path_constraint"
+
+
+@pytest.mark.asyncio
+async def test_write_ros_local_template_url_outside_strict_roots_denied_before_ask(tmp_path) -> None:
+    project = tmp_path / "project"
+    session_dir = tmp_path / "session"
+    outside = tmp_path / "outside"
+    project.mkdir()
+    session_dir.mkdir()
+    outside.mkdir()
+    template = outside / "template.yml"
+    template.write_text("ROSTemplateFormatVersion: '2015-09-01'\n", encoding="utf-8")
+
+    result = await AliyunApi().check_permissions(
+        {
+            "product": "ros",
+            "action": "CreateStack",
+            "params": {"StackName": "demo", "TemplateURL": str(template)},
+        },
+        _strict_ctx(project, session_dir),
+    )
+
+    assert result.behavior == "deny"
+    assert result.reason is not None
+    assert result.reason.type == "path_constraint"
 
 
 @pytest.mark.asyncio

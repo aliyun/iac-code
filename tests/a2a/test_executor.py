@@ -201,6 +201,56 @@ async def test_executor_runs_prompt_and_finishes_input_required(
 
 
 @pytest.mark.asyncio
+async def test_executor_enables_a2a_safe_mode_for_normal_runtime_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    captured_options = {}
+
+    def fake_create_agent_runtime(options):
+        captured_options["a2a_safe_mode"] = getattr(options, "a2a_safe_mode", False)
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_create_agent_runtime)
+
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert captured_options["a2a_safe_mode"] is True
+
+
+@pytest.mark.asyncio
+async def test_executor_does_not_enable_a2a_safe_mode_for_unknown_env_value(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    captured_options = {}
+
+    def fake_create_agent_runtime(options):
+        captured_options["a2a_safe_mode"] = getattr(options, "a2a_safe_mode", False)
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "definitely")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fake_create_agent_runtime)
+
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert captured_options["a2a_safe_mode"] is False
+
+
+@pytest.mark.asyncio
 async def test_executor_restores_backup_only_session_for_persisted_context(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

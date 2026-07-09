@@ -4563,6 +4563,22 @@ msgstr "Listando {path}"
 msgid "Listing files..."
 msgstr "Listando arquivos..."
 
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed read directories"
+msgstr "Caminho fora dos diretórios de leitura permitidos"
+
+#: src/iac_code/tools/path_safety.py
+msgid "read touches a sensitive path"
+msgstr "A leitura afeta um caminho sensível"
+
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed directories"
+msgstr "Caminho fora dos diretórios permitidos"
+
+#: src/iac_code/tools/path_safety.py
+msgid "write touches a sensitive path"
+msgstr "A escrita afeta um caminho sensível"
+
 #: src/iac_code/tools/read_file.py
 msgid "Read file path is required."
 msgstr "O caminho do arquivo a ler é obrigatório."

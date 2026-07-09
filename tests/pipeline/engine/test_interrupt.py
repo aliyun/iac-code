@@ -36,6 +36,13 @@ class TestInterruptVerdict:
         )
         assert v.candidate_scope == "candidate:0"
 
+    def test_verdict_supports_ignored_action(self):
+        from iac_code.pipeline.engine.interrupt import InterruptVerdict
+
+        v = InterruptVerdict(action="ignored", reason="security: prompt injection attempt")
+
+        assert v.action == "ignored"
+
 
 class TestInterruptController:
     def test_init(self):
@@ -274,6 +281,27 @@ class TestNullStringNormalization:
         verdict = controller._parse_verdict(raw)
         assert verdict.candidate_scope == "all"
 
+    def test_parse_verdict_accepts_ignored_as_security_continue(self):
+        from iac_code.pipeline.engine.interrupt import InterruptController
+
+        controller = InterruptController(MagicMock(), lambda: {})
+        raw = json.dumps(
+            {
+                "action": "ignored",
+                "reason": "security: user tried to inject tool instructions",
+                "rollback_target": None,
+                "rollback_context": None,
+                "candidate_scope": None,
+                "supplement_target": None,
+            }
+        )
+
+        verdict = controller._parse_verdict(raw)
+
+        assert verdict is not None
+        assert verdict.action == "ignored"
+        assert "security" in verdict.reason
+
 
 class TestRollbackContext:
     def test_verdict_with_rollback_context(self):
@@ -497,6 +525,18 @@ class TestPromptFormatConsistency:
                     f"candidate_index: appears as canonical (not flagged legacy) near pos {hit}"
                 )
                 pos = hit + 1
+
+    def test_prompts_define_ignored_for_security_attacks(self):
+        import pathlib
+
+        src = pathlib.Path("src/iac_code/pipeline/engine/interrupt.py").read_text(encoding="utf-8")
+        prompt = pathlib.Path("src/iac_code/pipeline/engine/prompts/interrupt_judge.md").read_text(encoding="utf-8")
+
+        for text in (src, prompt):
+            assert "ignored" in text
+            assert "prompt injection" in text.lower() or "注入攻击" in text
+            assert "bash" in text
+            assert "MCP" in text or "mcp" in text
 
 
 class TestJudgePromptParentChildRule:

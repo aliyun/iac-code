@@ -10,6 +10,7 @@ from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.skills.skill_tool import SkillTool
 from iac_code.tools.base import ToolContext
+from iac_code.types.permissions import ToolPermissionContext
 from iac_code.types.skill_source import SkillSource
 
 
@@ -148,6 +149,37 @@ class TestSkillTool:
         assert "sub-agent result" in result.content
         assert "3 tool calls" in result.content
         assert "1200 tokens" in result.content
+
+    @pytest.mark.asyncio
+    async def test_execute_fork_mode_propagates_permission_context(self, monkeypatch):
+        registry = _make_registry_with_skill(source=SkillSource.PROJECT, context="fork")
+        tool = SkillTool(
+            command_registry=registry,
+            session_id="sess-1",
+            provider_manager=object(),
+            tool_registry=object(),
+            system_prompt="system prompt",
+        )
+        permission_context = ToolPermissionContext(
+            cwd="/tmp/work",
+            strict_read_directories=["/tmp/work"],
+            read_path_violation_behavior="deny",
+        )
+        run_sub_agent = AsyncMock(return_value=("sub-agent result", SimpleNamespace(tool_use_count=0, token_count=0)))
+
+        monkeypatch.setattr(
+            "iac_code.skills.processor.process_prompt_command",
+            AsyncMock(return_value=SimpleNamespace(prompt_content="expanded prompt")),
+        )
+        monkeypatch.setattr("iac_code.agent.agent_tool.run_sub_agent", run_sub_agent)
+
+        result = await tool.execute(
+            tool_input={"skill": "test-skill", "args": "abc"},
+            context=ToolContext(cwd="/tmp/work", permission_context=permission_context),
+        )
+
+        assert not result.is_error
+        assert run_sub_agent.await_args.kwargs["permission_context"] is permission_context
 
     @pytest.mark.asyncio
     async def test_execute_inline_failure_returns_error(self, monkeypatch):

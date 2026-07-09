@@ -25,6 +25,7 @@ class AgentFactoryOptions:
     mcp_configs: list[dict[str, Any]] | None = None
     mcp_manager_factory: Any = None
     mcp_interactive_project_approval: bool = False
+    a2a_safe_mode: bool = False
 
 
 @dataclass
@@ -37,6 +38,7 @@ class AgentRuntime:
     task_manager: Any
     memory_manager: Any
     legacy_memory_manager: Any
+    _cloud_tools_refresher: Any | None = field(default=None, repr=False)
     mcp_manager: Any | None = None
     mcp_config_warnings: list[Any] | None = None
     _mcp_change_listeners: list[Any] = field(default_factory=list, repr=False)
@@ -51,6 +53,26 @@ class AgentRuntime:
 
     def add_mcp_change_listener(self, listener: Any) -> None:
         self._mcp_change_listeners.append(listener)
+
+    def refresh_cloud_tools(self) -> None:
+        if callable(self._cloud_tools_refresher):
+            self._cloud_tools_refresher()
+
+
+_A2A_SAFE_NORMAL_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "list_files",
+        "glob",
+        "grep",
+        "aliyun_api",
+        "aliyun_doc_search",
+        "ros_stack",
+        "skill",
+        "read_memory",
+        "write_memory",
+    }
+)
 
 
 def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
@@ -127,6 +149,11 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     tool_registry.register_default_tools()
     register_cloud_tools(tool_registry, CloudCredentials())
 
+    def refresh_cloud_tools() -> None:
+        register_cloud_tools(tool_registry, CloudCredentials())
+        if options.a2a_safe_mode:
+            _filter_tool_registry_for_a2a_safe_mode(tool_registry)
+
     session_storage = SessionStorage()
     session_dir = _prepare_session_dir_for_artifacts(session_storage, cwd, session_id)
 
@@ -197,26 +224,33 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             disabled_skills=skill_state.disabled_commands,
         )
     )
+    if options.a2a_safe_mode:
+        _filter_tool_registry_for_a2a_safe_mode(tool_registry)
 
     mcp_manager = None
     mcp_config_warnings: list[Any] = []
     runtime_mcp_change_listeners: list[Any] = []
     mcp_auth_tasks: set[asyncio.Task[Any]] = set()
     mcp_auth_flows: set[Any] = set()
-    from iac_code.mcp.config import load_mcp_configs, resolve_mcp_workspace_root
-    from iac_code.mcp.manager import MCPManager
-
-    mcp_workspace_root = resolve_mcp_workspace_root(Path(cwd))
-    mcp_load_result = load_mcp_configs(
-        cwd=Path(cwd),
-        workspace_root=mcp_workspace_root,
-        session_configs=_session_mcp_configs(options.mcp_configs),
-        include_pending_project=options.mcp_interactive_project_approval,
-    )
-    mcp_config_warnings = mcp_load_result.warnings
+    mcp_workspace_root: Path | None = None
     setup_complete = False
     try:
-        if mcp_load_result.servers:
+        if not options.a2a_safe_mode:
+            from iac_code.mcp.config import load_mcp_configs, resolve_mcp_workspace_root
+            from iac_code.mcp.manager import MCPManager
+
+            mcp_workspace_root = resolve_mcp_workspace_root(Path(cwd))
+            mcp_load_result = load_mcp_configs(
+                cwd=Path(cwd),
+                workspace_root=mcp_workspace_root,
+                session_configs=_session_mcp_configs(options.mcp_configs),
+                include_pending_project=options.mcp_interactive_project_approval,
+            )
+            mcp_config_warnings = mcp_load_result.warnings
+        else:
+            mcp_load_result = None
+
+        if mcp_load_result is not None and mcp_load_result.servers and mcp_workspace_root is not None:
             if options.mcp_manager_factory is not None:
                 mcp_manager = options.mcp_manager_factory(mcp_load_result.servers, [mcp_workspace_root])
             else:
@@ -296,6 +330,13 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
         permission_context.trusted_read_directories.extend(
             build_session_trusted_read_directories(session_id, session_dir=session_dir)
         )
+        if options.a2a_safe_mode:
+            permission_context.strict_read_directories = _a2a_safe_read_directories(
+                cwd,
+                session_dir=session_dir,
+                current_session_dir=_current_session_dir(session_storage, cwd, session_id),
+            )
+            permission_context.read_path_violation_behavior = "deny"
 
         if hasattr(tool_registry, "get"):
             agent_tool = tool_registry.get("agent")
@@ -343,6 +384,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             task_manager=task_manager,
             memory_manager=memory_manager,
             legacy_memory_manager=legacy_memory_manager,
+            _cloud_tools_refresher=refresh_cloud_tools,
             mcp_manager=mcp_manager,
             mcp_config_warnings=mcp_config_warnings,
             _mcp_change_listeners=runtime_mcp_change_listeners,
@@ -354,6 +396,51 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     finally:
         if not setup_complete:
             _cleanup_mcp_runtime_setup(mcp_manager, mcp_auth_tasks, mcp_auth_flows)
+
+
+def _filter_tool_registry_for_a2a_safe_mode(tool_registry: Any) -> None:
+    for tool in list(tool_registry.list_tools()):
+        if tool.name not in _A2A_SAFE_NORMAL_TOOL_NAMES:
+            tool_registry.unregister(tool.name)
+
+
+def _a2a_safe_read_directories(
+    cwd: str,
+    *,
+    session_dir: Path | None,
+    current_session_dir: Path | None = None,
+) -> list[str]:
+    from iac_code.tools.path_safety import get_iac_code_application_root
+
+    roots = [cwd]
+    if session_dir is not None:
+        roots.append(str(session_dir))
+    if current_session_dir is not None:
+        roots.append(str(current_session_dir))
+    roots.append(str(get_iac_code_application_root()))
+
+    unique_roots: list[str] = []
+    seen: set[str] = set()
+    for root in roots:
+        if root and root not in seen:
+            unique_roots.append(root)
+            seen.add(root)
+    return unique_roots
+
+
+def _current_session_dir(session_storage: Any, cwd: str, session_id: str) -> Path | None:
+    session_dir_factory = getattr(session_storage, "session_dir", None)
+    if not callable(session_dir_factory):
+        return None
+    try:
+        raw_session_dir = session_dir_factory(cwd, session_id)
+    except (AttributeError, TypeError):
+        return None
+    if isinstance(raw_session_dir, Path):
+        return raw_session_dir
+    if isinstance(raw_session_dir, str):
+        return Path(raw_session_dir)
+    return None
 
 
 def _session_mcp_configs(configs: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]] | None:

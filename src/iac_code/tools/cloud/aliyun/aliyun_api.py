@@ -26,7 +26,9 @@ from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.services.telemetry.sanitize import sanitize_error_message
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.template_source import (
-    is_remote_template_url,
+    check_local_template_url_read_permission,
+    is_local_template_url,
+    read_local_template_url,
     reject_pipeline_dedicated_ros_deployment_action,
     reject_pipeline_dedicated_ros_template_action,
     reject_pipeline_template_source_params,
@@ -444,6 +446,9 @@ class AliyunApi(BaseCloudApi):
         if not isinstance(context, ToolPermissionContext):
             context = ToolPermissionContext(cwd=context.get("cwd", "") if isinstance(context, dict) else "")
 
+        if path_result := self._check_local_template_url_read_permission(input, context):
+            return path_result
+
         is_read_only = _safe_operation_identifiers(input) is not None and self.is_read_only(input)
         supports_persistent_allow = self._supports_persistent_allow(input, is_read_only=is_read_only)
         for behavior, rules_by_source in (
@@ -492,6 +497,23 @@ class AliyunApi(BaseCloudApi):
             suggestions=self._suggestion(input, is_read_only=is_read_only),
             audit=self._audit(input, scope="once", reason=reason, is_read_only=False),
         )
+
+    def _check_local_template_url_read_permission(
+        self,
+        input: dict[str, Any],
+        context: ToolPermissionContext,
+    ) -> PermissionResult | None:
+        product = input.get("product", "")
+        product = _PRODUCT_CANONICAL.get(str(product).lower(), product)
+        if product != "ros":
+            return None
+        params = input.get("params") or {}
+        if not isinstance(params, dict):
+            return None
+        template_url = params.get("TemplateURL", "")
+        if not isinstance(template_url, str) or not is_local_template_url(template_url):
+            return None
+        return check_local_template_url_read_permission(template_url, context)
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -723,8 +745,11 @@ class AliyunApi(BaseCloudApi):
             if error := reject_pipeline_template_source_params(action, params, pipeline_mode=context.pipeline_mode):
                 return ToolResult.error(error)
             template_url = params.get("TemplateURL", "")
-            if template_url and not is_remote_template_url(template_url):
-                params["TemplateBody"] = Path(template_url).read_text(encoding="utf-8")
+            if isinstance(template_url, str) and template_url and is_local_template_url(template_url):
+                if path_result := check_local_template_url_read_permission(template_url, context):
+                    if path_result.behavior == "deny":
+                        return ToolResult.error(path_result.message)
+                params["TemplateBody"] = read_local_template_url(template_url, context)
                 del params["TemplateURL"]
 
         # Pre-call hooks (e.g. resource type validation)

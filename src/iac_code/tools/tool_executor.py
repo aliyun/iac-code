@@ -72,9 +72,12 @@ class ToolExecutor:
             additional_directories=list(context.additional_directories),
             trusted_read_directories=list(context.trusted_read_directories),
             relative_read_directories=list(context.relative_read_directories),
+            strict_read_directories=list(context.strict_read_directories),
+            read_path_violation_behavior=context.read_path_violation_behavior,
             tool_use_id=call.id,
             pipeline_mode=context.pipeline_mode,
             env_overrides=dict(context.env_overrides),
+            permission_context=context.permission_context,
         )
 
         timeout = tool.timeout if tool.timeout is not None else self._tool_timeout

@@ -38,9 +38,12 @@ def test_review_enabled_loads_infraguard_repair_step_before_cost() -> None:
         "read_file",
         "write_file",
         "edit_file",
+        "grep",
         "infraguard_scan",
         "ros_validate_template",
         "aliyun_doc_search",
+        "web_fetch",
+        "aliyun_api",
     ]
     assert review_step.tools.exclude == ["write_memory"]
     assert review_step.inject_tools == ["ros_validate_template"]

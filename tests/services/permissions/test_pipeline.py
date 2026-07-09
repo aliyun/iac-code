@@ -8,6 +8,7 @@ from iac_code.tools.edit_file import EditFileTool
 from iac_code.tools.glob import GlobTool
 from iac_code.tools.grep import GrepTool
 from iac_code.tools.list_files import ListFilesTool
+from iac_code.tools.path_safety import get_iac_code_application_root
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.tools.web_fetch import WebFetchTool
 from iac_code.tools.write_file import WriteFileTool
@@ -128,6 +129,89 @@ class TestPipeline:
         assert r.reason is not None
         assert r.reason.type == "path_constraint"
 
+    @pytest.mark.parametrize(
+        ("tool", "tool_input"),
+        [
+            (ReadFileTool(), {}),
+            (ListFilesTool(), {}),
+            (GlobTool(), {"pattern": "**/*"}),
+            (GrepTool(), {"pattern": "needle"}),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_strict_read_policy_denies_outside_roots_without_prompt(self, tool, tool_input, tmp_path):
+        project = tmp_path / "project"
+        outside = tmp_path / "outside"
+        session_dir = tmp_path / "session"
+        project.mkdir()
+        outside.mkdir()
+        session_dir.mkdir()
+        target = outside / "notes.txt"
+        target.write_text("outside", encoding="utf-8")
+
+        r = await check_tool_permission(
+            tool,
+            {**tool_input, "path": str(target)},
+            ToolPermissionContext(
+                cwd=str(project),
+                strict_read_directories=[str(project), str(session_dir), str(get_iac_code_application_root())],
+                read_path_violation_behavior="deny",
+            ),
+        )
+
+        assert r.behavior == "deny"
+        assert r.reason is not None
+        assert r.reason.type == "path_constraint"
+
+    @pytest.mark.asyncio
+    async def test_strict_read_policy_allows_cwd_session_and_iac_code_roots(self, tmp_path):
+        project = tmp_path / "project"
+        session_dir = tmp_path / "session"
+        project.mkdir()
+        session_dir.mkdir()
+        project_file = project / "main.tf"
+        session_file = session_dir / "artifact.txt"
+        package_file = get_iac_code_application_root() / "tools" / "path_safety.py"
+        project_file.write_text("resource x", encoding="utf-8")
+        session_file.write_text("artifact", encoding="utf-8")
+        context = ToolPermissionContext(
+            cwd=str(project),
+            strict_read_directories=[str(project), str(session_dir), str(get_iac_code_application_root())],
+            read_path_violation_behavior="deny",
+        )
+
+        for target in (project_file, session_file, package_file):
+            r = await check_tool_permission(ReadFileTool(), {"path": str(target)}, context)
+            assert r.behavior == "allow"
+
+    @pytest.mark.asyncio
+    async def test_strict_read_policy_denies_symlink_escape_from_cwd(self, tmp_path):
+        project = tmp_path / "project"
+        outside = tmp_path / "outside"
+        session_dir = tmp_path / "session"
+        project.mkdir()
+        outside.mkdir()
+        session_dir.mkdir()
+        (outside / "secret.txt").write_text("secret", encoding="utf-8")
+        try:
+            (project / "link-out").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        r = await check_tool_permission(
+            ReadFileTool(),
+            {"path": str(project / "link-out" / "secret.txt")},
+            ToolPermissionContext(
+                cwd=str(project),
+                strict_read_directories=[str(project), str(session_dir), str(get_iac_code_application_root())],
+                read_path_violation_behavior="deny",
+            ),
+        )
+
+        assert r.behavior == "deny"
+        assert r.reason is not None
+        assert r.reason.type == "path_constraint"
+
     @pytest.mark.asyncio
     async def test_glob_pattern_cannot_escape_search_root(self, tmp_path):
         project = tmp_path / "project"
@@ -143,6 +227,30 @@ class TestPipeline:
         )
 
         assert r.behavior == "ask"
+        assert r.reason is not None
+        assert r.reason.type == "path_constraint"
+
+    @pytest.mark.asyncio
+    async def test_strict_glob_pattern_escape_denies_without_prompt(self, tmp_path):
+        project = tmp_path / "project"
+        session_dir = tmp_path / "session"
+        outside = tmp_path / "outside"
+        project.mkdir()
+        session_dir.mkdir()
+        outside.mkdir()
+        (outside / "secret.txt").write_text("secret", encoding="utf-8")
+
+        r = await check_tool_permission(
+            GlobTool(),
+            {"pattern": "../outside/*", "path": str(project)},
+            ToolPermissionContext(
+                cwd=str(project),
+                strict_read_directories=[str(project), str(session_dir), str(get_iac_code_application_root())],
+                read_path_violation_behavior="deny",
+            ),
+        )
+
+        assert r.behavior == "deny"
         assert r.reason is not None
         assert r.reason.type == "path_constraint"
 

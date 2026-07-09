@@ -137,6 +137,30 @@ class TestGlobBasics:
         assert "outside allowed directories" in result.message
 
     @pytest.mark.asyncio
+    async def test_strict_roots_do_not_follow_symlink_into_additional_directory(self, tool, tmp_path):
+        project = tmp_path / "project"
+        outside = tmp_path / "outside"
+        project.mkdir()
+        outside.mkdir()
+        (outside / "secret.txt").write_text("classified", encoding="utf-8")
+        try:
+            (project / "link-outside").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"Cannot create symlink on this platform: {exc}")
+
+        context = ToolContext(
+            cwd=str(project),
+            additional_directories=[str(outside)],
+            strict_read_directories=[str(project)],
+            read_path_violation_behavior="deny",
+        )
+        result = await tool.execute(tool_input={"pattern": "**/*.txt", "path": str(project)}, context=context)
+
+        assert result.is_error is False
+        assert result.content == "No files found"
+        assert "secret.txt" not in result.content
+
+    @pytest.mark.asyncio
     async def test_glob_exception_returned(self, tool, tmp_path, monkeypatch):
         from pathlib import Path
 

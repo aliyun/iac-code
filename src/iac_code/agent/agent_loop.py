@@ -1067,6 +1067,16 @@ class AgentLoop:
                             context.relative_read_directories,
                             list(effective_perm_ctx.relative_read_directories),
                         )
+                        _extend_unique(
+                            context.strict_read_directories,
+                            list(getattr(effective_perm_ctx, "strict_read_directories", [])),
+                        )
+                        context.read_path_violation_behavior = getattr(
+                            effective_perm_ctx,
+                            "read_path_violation_behavior",
+                            context.read_path_violation_behavior,
+                        )
+                        context.permission_context = effective_perm_ctx
                         permission = await check_tool_permission(tool, request.input, effective_perm_ctx)
                     else:
                         permission = await tool.check_permissions(request.input, {"cwd": context.cwd})

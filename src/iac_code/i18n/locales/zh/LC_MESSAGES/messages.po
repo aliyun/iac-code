@@ -4311,6 +4311,22 @@ msgstr "正在列出 {path}"
 msgid "Listing files..."
 msgstr "正在列出文件..."
 
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed read directories"
+msgstr "路径不在允许读取的目录范围内"
+
+#: src/iac_code/tools/path_safety.py
+msgid "read touches a sensitive path"
+msgstr "读取涉及敏感路径"
+
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed directories"
+msgstr "路径不在允许的目录范围内"
+
+#: src/iac_code/tools/path_safety.py
+msgid "write touches a sensitive path"
+msgstr "写入涉及敏感路径"
+
 #: src/iac_code/tools/read_file.py
 msgid "Read file path is required."
 msgstr "需要提供读取文件路径。"

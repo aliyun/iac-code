@@ -104,6 +104,8 @@ class ToolPermissionContext:
     additional_directories: list[str] = field(default_factory=list)
     trusted_read_directories: list[str] = field(default_factory=list)
     relative_read_directories: list[str] = field(default_factory=list)
+    strict_read_directories: list[str] = field(default_factory=list)
+    read_path_violation_behavior: Literal["ask", "deny"] = "ask"
     audit_settings: PermissionAuditSettings = field(default_factory=PermissionAuditSettings)
 
 

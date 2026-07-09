@@ -4372,6 +4372,22 @@ msgstr "{path} を一覧表示中"
 msgid "Listing files..."
 msgstr "ファイルを一覧表示しています…"
 
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed read directories"
+msgstr "許可された読み取りディレクトリの外のパスです"
+
+#: src/iac_code/tools/path_safety.py
+msgid "read touches a sensitive path"
+msgstr "読み取りが機密パスに触れています"
+
+#: src/iac_code/tools/path_safety.py
+msgid "path outside allowed directories"
+msgstr "許可されたディレクトリの外のパスです"
+
+#: src/iac_code/tools/path_safety.py
+msgid "write touches a sensitive path"
+msgstr "書き込みが機密パスに触れています"
+
 #: src/iac_code/tools/read_file.py
 msgid "Read file path is required."
 msgstr "読み取るファイルのパスが必要です。"

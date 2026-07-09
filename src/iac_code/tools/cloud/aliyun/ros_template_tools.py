@@ -9,8 +9,11 @@ from typing import Any
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
-from iac_code.tools.cloud.aliyun.template_source import is_remote_template_url
-from iac_code.tools.path_safety import check_read_path, resolve_read_path
+from iac_code.tools.cloud.aliyun.template_source import (
+    check_local_template_url_read_permission,
+    is_local_template_url,
+    resolve_template_url_for_api,
+)
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
 
 _TEMPLATE_URL_PROPERTY = {
@@ -59,22 +62,15 @@ def _copy_delegate_context(context: ToolContext) -> ToolContext:
         additional_directories=context.additional_directories,
         trusted_read_directories=context.trusted_read_directories,
         relative_read_directories=context.relative_read_directories,
+        strict_read_directories=context.strict_read_directories,
+        read_path_violation_behavior=context.read_path_violation_behavior,
         pipeline_mode=False,
+        permission_context=context.permission_context,
     )
 
 
-def _is_local_template_url(template_url: str) -> bool:
-    return not is_remote_template_url(template_url)
-
-
 def _resolve_template_url_for_api(template_url: str, context: ToolContext) -> str:
-    if _is_local_template_url(template_url):
-        return resolve_read_path(
-            template_url,
-            context.cwd,
-            relative_read_directories=context.relative_read_directories,
-        )
-    return template_url
+    return resolve_template_url_for_api(template_url, context)
 
 
 def render_ros_template_tool_result_message(
@@ -143,19 +139,10 @@ class _RosTemplateTool(Tool):
         context: ToolPermissionContext,
     ) -> PermissionResult | None:
         template_url = input.get("template_url")
-        if not isinstance(template_url, str) or not template_url or not _is_local_template_url(template_url):
+        if not isinstance(template_url, str) or not template_url or not is_local_template_url(template_url):
             return None
 
-        decision = check_read_path(
-            template_url,
-            cwd=context.cwd,
-            additional_directories=context.additional_directories,
-            trusted_read_directories=context.trusted_read_directories,
-            relative_read_directories=context.relative_read_directories,
-        )
-        if decision.behavior == "allow":
-            return None
-        return decision.to_permission_result()
+        return check_local_template_url_read_permission(template_url, context)
 
     @staticmethod
     def _with_aliyun_audit(path_result: PermissionResult, aliyun_result: PermissionResult) -> PermissionResult:

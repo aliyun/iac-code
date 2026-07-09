@@ -7,7 +7,6 @@ import json
 import logging
 import re
 import time
-from pathlib import Path
 from typing import Any, Literal
 
 from alibabacloud_ros20190910 import models as ros_models
@@ -25,13 +24,15 @@ from iac_code.services.telemetry.sanitize import (
 from iac_code.tools.base import ToolContext
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
 from iac_code.tools.cloud.aliyun.template_source import (
-    is_remote_template_url,
+    check_local_template_url_read_permission,
+    is_local_template_url,
+    read_local_template_url,
     reject_pipeline_dedicated_ros_deployment_action,
     reject_pipeline_template_source_params,
 )
 from iac_code.tools.cloud.base_stack import BaseCloudStack
 from iac_code.tools.cloud.types import ResourceStatus, StackStatus
-from iac_code.tools.path_safety import resolve_candidate
+from iac_code.types.permissions import ToolPermissionContext
 
 # Telemetry helpers
 _TERRAFORM_TRANSFORM_PREFIXES = ("Aliyun::Terraform-", "Aliyun::OpenTofu-")
@@ -485,7 +486,31 @@ class RosStack(BaseCloudStack):
             "pipeline_mode": context.pipeline_mode,
             "cwd": context.cwd,
             "allow_pipeline_deployment_actions": self._allow_pipeline_deployment_actions,
+            "additional_directories": context.additional_directories,
+            "trusted_read_directories": context.trusted_read_directories,
+            "relative_read_directories": context.relative_read_directories,
+            "strict_read_directories": context.strict_read_directories,
+            "read_path_violation_behavior": context.read_path_violation_behavior,
         }
+
+    async def check_permissions(self, input: dict, context=None):
+        if isinstance(context, ToolPermissionContext):
+            if path_result := self._check_local_template_url_read_permission(input, context):
+                return path_result
+        return await super().check_permissions(input, context)
+
+    def _check_local_template_url_read_permission(
+        self,
+        input: dict[str, Any],
+        context: ToolPermissionContext,
+    ):
+        params = input.get("params") or {}
+        if not isinstance(params, dict):
+            return None
+        template_url = params.get("TemplateURL", "")
+        if not isinstance(template_url, str) or not is_local_template_url(template_url):
+            return None
+        return check_local_template_url_read_permission(template_url, context)
 
     async def call_action(
         self,
@@ -496,6 +521,11 @@ class RosStack(BaseCloudStack):
         pipeline_mode: bool = False,
         cwd: str | None = None,
         allow_pipeline_deployment_actions: bool = False,
+        additional_directories: list[str] | None = None,
+        trusted_read_directories: list[str] | None = None,
+        relative_read_directories: list[str] | None = None,
+        strict_read_directories: list[str] | None = None,
+        read_path_violation_behavior: Literal["ask", "deny"] = "ask",
     ) -> str:
         deployment_guard_pipeline_mode = pipeline_mode and not allow_pipeline_deployment_actions
         if error := reject_pipeline_dedicated_ros_deployment_action(
@@ -510,8 +540,25 @@ class RosStack(BaseCloudStack):
             params.setdefault("RegionId", region)
         # TemplateURL as local file path → read into TemplateBody
         template_url = params.get("TemplateURL", "")
-        if template_url and not is_remote_template_url(template_url):
-            params["TemplateBody"] = Path(resolve_candidate(template_url, cwd or ".")).read_text(encoding="utf-8")
+        if isinstance(template_url, str) and template_url and is_local_template_url(template_url):
+            if path_result := check_local_template_url_read_permission(
+                template_url,
+                None,
+                cwd=cwd,
+                additional_directories=additional_directories,
+                trusted_read_directories=trusted_read_directories,
+                relative_read_directories=relative_read_directories,
+                strict_read_directories=strict_read_directories,
+                read_path_violation_behavior=read_path_violation_behavior,
+            ):
+                if path_result.behavior == "deny":
+                    raise ValueError(path_result.message)
+            params["TemplateBody"] = read_local_template_url(
+                template_url,
+                None,
+                cwd=cwd,
+                relative_read_directories=relative_read_directories,
+            )
             del params["TemplateURL"]
         # TemplateBody must be a JSON string; non-pipeline callers may still pass a dict.
         if isinstance(params.get("TemplateBody"), dict):
