@@ -3054,6 +3054,10 @@ msgid "The user-facing question to ask."
 msgstr "A pergunta a ser exibida ao usuário."
 
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
+msgid "ask_user_question validation failed."
+msgstr "A validação de ask_user_question falhou."
+
+#: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid "ask_user_question requires a pipeline event queue."
 msgstr "ask_user_question requer uma fila de eventos do pipeline."
 
@@ -3335,6 +3339,7 @@ msgid "<fill according to the current step requirements>"
 msgstr "<preencher conforme os requisitos da etapa atual>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+#: src/iac_code/ui/renderer.py
 msgid "complete_step validation failed."
 msgstr "A validação de complete_step falhou."
 

@@ -2959,6 +2959,10 @@ msgid "The user-facing question to ask."
 msgstr "ユーザーに表示する質問です。"
 
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
+msgid "ask_user_question validation failed."
+msgstr "ask_user_question の検証に失敗しました。"
+
+#: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid "ask_user_question requires a pipeline event queue."
 msgstr "ask_user_question にはパイプラインイベントキューが必要です。"
 
@@ -3201,6 +3205,7 @@ msgid "<fill according to the current step requirements>"
 msgstr "<現在のステップ要件に従って入力>"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
+#: src/iac_code/ui/renderer.py
 msgid "complete_step validation failed."
 msgstr "complete_step の検証に失敗しました。"
 

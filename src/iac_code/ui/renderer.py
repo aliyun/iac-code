@@ -106,6 +106,15 @@ def _known_tool_result_message(
             return output.strip()
         return _("complete_step validation failed.")
 
+    if (
+        tool_name == "ask_user_question"
+        and is_error
+        and output.startswith("Invalid input for tool 'ask_user_question':")
+    ):
+        if verbose:
+            return output.strip()
+        return _("ask_user_question validation failed.")
+
     if tool_name == "ros_deploy":
         from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
 

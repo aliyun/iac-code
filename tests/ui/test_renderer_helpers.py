@@ -376,6 +376,31 @@ class TestRendererHelpers:
         assert "'conclusion' is a required property" not in output
         assert "schema summary" not in output
 
+    def test_replay_history_summarizes_legacy_ask_user_question_error_without_metadata(self):
+        renderer = Renderer(make_console(), ToolRegistry(), status_callback=lambda: "ready")
+        long_error = (
+            "Invalid input for tool 'ask_user_question': "
+            "[{'id': 'tech_stack_nodejs', 'label': 'Node.js'}] is not of type 'object'. "
+            "Please provide all required parameters as defined in the tool schema."
+        )
+        messages = [
+            Message(
+                role="assistant",
+                content=[ToolUseBlock(id="tu_bad", name="ask_user_question", input={})],
+            ),
+            Message(
+                role="user",
+                content=[ToolResultBlock(tool_use_id="tu_bad", content=long_error, is_error=True)],
+            ),
+        ]
+
+        renderer.replay_history(messages)
+
+        output = renderer.console.file.getvalue()
+        assert "ask_user_question validation failed." in output
+        assert "tech_stack_nodejs" not in output
+        assert "not of type" not in output
+
     def test_render_progress_groups_include_resource_rows(self):
         renderer = make_renderer()
 
