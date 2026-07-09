@@ -301,6 +301,13 @@ class CompleteStepTool(Tool):
     def is_read_only(self, input: dict | None = None) -> bool:
         return True
 
+    def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str | None:
+        if not output or not is_error:
+            return None
+        if verbose:
+            return output.strip()
+        return _("complete_step validation failed.")
+
     def _validate_conclusion(self, conclusion: dict) -> str | None:
         """Validate conclusion against schema. Returns error message or None."""
         schema = self._step_config.conclusion_schema

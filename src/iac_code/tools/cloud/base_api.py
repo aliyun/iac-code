@@ -139,7 +139,15 @@ class BaseCloudApi(Tool):
         if verbose:
             return output.strip()
         action = getattr(self, "_last_action", "")
-        result = getattr(self, "_last_result", None)
+        result = None
+        try:
+            parsed = json.loads(output)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            result = parsed
+        else:
+            result = getattr(self, "_last_result", None)
         if action and result is not None:
             return self._summarize_success_result(action, result)
         lines = output.strip().splitlines()

@@ -415,6 +415,7 @@ class StepExecutor:
         agent_session_id = transcript_id or session_id
         session_usage_store = None
         result_storage_dir = None
+        transcript_image_cache_dir = None
         audit_log_path = None
         if (
             transcript_id
@@ -429,6 +430,10 @@ class StepExecutor:
                     root_session_dir,
                     session_paths.transcript_tool_results_dir(transcript_id),
                 )
+                transcript_image_cache_dir = ensure_session_owned_dir(
+                    root_session_dir,
+                    session_paths.transcript_image_cache_dir(transcript_id),
+                )
                 audit_log_path = session_paths.transcript_permission_audit_path(transcript_id)
                 usage_path = session_paths.transcript_usage_path(transcript_id)
                 ensure_session_owned_parent(root_session_dir, audit_log_path)
@@ -436,6 +441,11 @@ class StepExecutor:
                 assert transcript_dir == session_paths.transcript_dir(transcript_id)
                 session_usage_store = SessionUsageStore(path_provider=lambda _cwd, _sid, path=usage_path: path)
         step_skill_roots = self._resolve_step_skill_roots(step)
+        trusted_read_roots = list(step_skill_roots)
+        if result_storage_dir is not None:
+            trusted_read_roots.append(str(result_storage_dir))
+        if transcript_image_cache_dir is not None:
+            trusted_read_roots.append(str(transcript_image_cache_dir))
         agent_loop = AgentLoop(
             provider_manager=self._provider_manager,
             system_prompt=system_prompt,
@@ -453,7 +463,7 @@ class StepExecutor:
             pause_event=self._pause_event,
             permission_context_getter=self._permission_context_getter,
             auto_trigger_skills=self._resolve_auto_trigger_skills(step),
-            tool_context_trusted_read_directories=step_skill_roots,
+            tool_context_trusted_read_directories=trusted_read_roots,
             tool_context_relative_read_directories=step_skill_roots,
             pipeline_mode=True,
             tool_context_env_overrides=self._tool_context_env_overrides,

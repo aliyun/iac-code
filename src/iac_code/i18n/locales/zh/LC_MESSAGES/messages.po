@@ -2935,6 +2935,10 @@ msgid "The user-facing question to ask."
 msgstr "要询问用户的问题。"
 
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
+msgid "ask_user_question validation failed."
+msgstr "ask_user_question 校验失败。"
+
+#: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid "ask_user_question requires a pipeline event queue."
 msgstr "ask_user_question 需要 pipeline 事件队列。"
 
@@ -3165,6 +3169,11 @@ msgstr "conclusion 必须符合以下 schema 摘要:\n"
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "<fill according to the current step requirements>"
 msgstr "<按当前步骤要求填写>"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#: src/iac_code/ui/renderer.py
+msgid "complete_step validation failed."
+msgstr "complete_step 校验失败。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "Clarification is required before completing the current step."

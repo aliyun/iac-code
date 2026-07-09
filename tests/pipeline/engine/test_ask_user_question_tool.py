@@ -42,6 +42,19 @@ class TestAskUserQuestionToolMeta:
         assert option_schema["required"] == ["id", "label"]
         assert schema["additionalProperties"] is False
 
+    def test_validation_error_renders_compact_summary(self):
+        long_error = (
+            "Invalid input for tool 'ask_user_question': "
+            "[{'id': 'tech_stack_nodejs', 'label': 'Node.js'}] is not of type 'object'. "
+            "Please provide all required parameters as defined in the tool schema."
+        )
+
+        compact = AskUserQuestionTool().render_tool_result_message(long_error, is_error=True)
+
+        assert compact == "ask_user_question validation failed."
+        assert "tech_stack_nodejs" not in compact
+        assert "not of type" not in compact
+
 
 class TestAskUserQuestionToolExecute:
     @pytest.mark.asyncio

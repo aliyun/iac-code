@@ -191,3 +191,12 @@ class TestBaseCloudApiRenderToolResultMessage:
         api._last_result = {"Things": [{"Id": "1"}]}
         result = api.render_tool_result_message('{\n  "Things": [{"Id": "1"}]\n}')
         assert result == "ListThings -> 1 fields"
+
+    def test_success_summary_uses_current_output_over_cached_last_result(self) -> None:
+        api = MockCloudApiWithSummary()
+        api._last_action = "ListThings"
+        api._last_result = {"Stale": "last call"}
+
+        result = api.render_tool_result_message('{"Current": true, "RequestId": "REQ-1"}')
+
+        assert result == "ListThings -> 2 fields"

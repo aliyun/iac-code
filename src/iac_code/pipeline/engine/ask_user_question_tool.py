@@ -68,6 +68,15 @@ class AskUserQuestionTool(Tool):
     def needs_event_queue(self) -> bool:
         return True
 
+    def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False) -> str | None:
+        if not output or not is_error:
+            return None
+        if output.startswith("Invalid input for tool 'ask_user_question':"):
+            if verbose:
+                return output.strip()
+            return _("ask_user_question validation failed.")
+        return output.strip()
+
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         if context.event_queue is None:
             return ToolResult.error(_("ask_user_question requires a pipeline event queue."))

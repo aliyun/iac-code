@@ -14,6 +14,8 @@ from iac_code.types.stream_events import (
     TOOL_RENDER_DISPLAY_NAME_KEY,
     TOOL_RENDER_METADATA_KEY,
     TOOL_RENDER_RESULT_COMPACT_KEY,
+    TOOL_RENDER_RESULT_VERBOSE_KEY,
+    TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
     CompactionEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -99,6 +101,32 @@ def test_replace_session_syncs_recalled_memory_from_loaded_messages(mock_provide
 
     assert recall_service.reset_called is True
     assert recall_service.surfaced == {"ros-yaml.md"}
+
+
+def test_tool_result_block_metadata_filters_render_metadata_to_json_safe_fields():
+    sentinel = object()
+
+    metadata = AgentLoop._tool_result_block_metadata(
+        SimpleNamespace(is_externalized=False),
+        {
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_DISPLAY_NAME_KEY: "Custom tool",
+                TOOL_RENDER_RESULT_COMPACT_KEY: sentinel,
+                TOOL_RENDER_RESULT_VERBOSE_KEY: "Verbose output",
+                TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY: True,
+                "plugin_payload": sentinel,
+            }
+        },
+    )
+
+    assert metadata == {
+        TOOL_RENDER_METADATA_KEY: {
+            TOOL_RENDER_DISPLAY_NAME_KEY: "Custom tool",
+            TOOL_RENDER_RESULT_VERBOSE_KEY: "Verbose output",
+            TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY: True,
+        }
+    }
+    json.dumps(metadata)
 
 
 class TestAgentLoopInit:
@@ -1848,6 +1876,12 @@ class TestAgentLoopStreaming:
         tool_results = [e for e in events if isinstance(e, ToolResultEvent)]
         assert len(tool_results) == 1
         assert tool_results[0].metadata == {
+            TOOL_RENDER_METADATA_KEY: {
+                TOOL_RENDER_RESULT_COMPACT_KEY: "compact result",
+            }
+        }
+        result_blocks = loop.context_manager.add_tool_results.call_args.args[0]
+        assert result_blocks[0].metadata == {
             TOOL_RENDER_METADATA_KEY: {
                 TOOL_RENDER_RESULT_COMPACT_KEY: "compact result",
             }
