@@ -1414,7 +1414,20 @@ class AgentLoop:
         if isinstance(result_metadata, dict):
             render_metadata = result_metadata.get(TOOL_RENDER_METADATA_KEY)
             if isinstance(render_metadata, dict):
-                metadata[TOOL_RENDER_METADATA_KEY] = dict(render_metadata)
+                safe_render_metadata: dict[str, Any] = {}
+                for key in (
+                    TOOL_RENDER_DISPLAY_NAME_KEY,
+                    TOOL_RENDER_RESULT_COMPACT_KEY,
+                    TOOL_RENDER_RESULT_VERBOSE_KEY,
+                ):
+                    value = render_metadata.get(key)
+                    if isinstance(value, str):
+                        safe_render_metadata[key] = value
+                value = render_metadata.get(TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY)
+                if isinstance(value, bool):
+                    safe_render_metadata[TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY] = value
+                if safe_render_metadata:
+                    metadata[TOOL_RENDER_METADATA_KEY] = safe_render_metadata
 
         return metadata
 
