@@ -13,7 +13,8 @@ description: IaC Code 启动选项和一次性执行参数参考。
 | `-v`, `-V`, `--version` | 输出已安装的 IaC Code 版本并退出。 |
 | `-m <model>`, `--model <model>` | 使用指定的 LLM 模型启动。本次运行会覆盖已保存的模型设置。 |
 | `-p <prompt>`, `--prompt <prompt>` | 执行单条提示词并退出。这会进入非交互模式。使用 `--prompt -` 可以从标准输入读取提示词。 |
-| `--output-format <format>` | 设置非交互模式的输出格式。支持 `text`、`json` 和 `stream-json`，默认值为 `text`。 |
+| `--output-format <format>` | 设置一次性调用或 process 自动化的输出格式。支持 `text`、`json` 和 `stream-json`，默认值为 `text`。 |
+| `--input-format <format>` | 设置输入格式。支持 `text` 和 `stream-json`。`stream-json` 会启动 SDK process 模式，必须与 `--output-format stream-json` 一起使用，且不能与 `--prompt` 组合。 |
 | `--max-turns <number>` | 限制非交互模式中的最大代理轮次，默认值为 `100`。 |
 | `--thinking-enabled`, `--no-thinking-enabled` | 控制一次性非交互请求是否显式启用 thinking。默认值为 `--thinking-enabled`；使用 `--no-thinking-enabled` 会在本次运行中发送 `thinking_enabled=false`，但不会改写 `settings.yml`。 |
 | `-d`, `--debug` | 为本次运行启用调试日志。交互模式启动后，可以使用 `/debug` 查看或调整调试日志。 |
@@ -92,3 +93,11 @@ iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```bash
 iac-code --prompt "创建一个 VPC" --permission-mode bypass_permissions
 ```
+
+为长期运行的子进程客户端启动 SDK process 模式：
+
+```bash
+iac-code --input-format stream-json --output-format stream-json
+```
+
+在 process 模式下，调用方向 stdin 写入一行一个 JSON frame，并从 stdout 读取一行一个 JSON frame。发送用户消息前需要先发送 `initialize` control request。该模式支持 `interrupt`、`set_model`、`end_session`、`close`、`keep_alive` 和 `update_environment_variables` 等控制流程。当 `IAC_CODE_MODE=pipeline` 时，同一个 process 入口会运行 Pipeline 模式，并在 stream 和 result frame 中返回 pipeline 状态。

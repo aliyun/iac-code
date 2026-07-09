@@ -29,8 +29,14 @@ def build_session_trusted_read_directories(
         str(config_dir / "tool-results" / session_id),
         str(config_dir / "image-cache" / session_id),
     ]
-    if session_dir is not None:
-        session_paths = SessionPaths.from_session_dir(session_dir)
+    if isinstance(session_dir, Path):
+        session_path = session_dir
+    elif isinstance(session_dir, str):
+        session_path = Path(session_dir)
+    else:
+        session_path = None
+    if session_path is not None:
+        session_paths = SessionPaths.from_session_dir(session_path)
         for path in (session_paths.tool_results_dir, session_paths.image_cache_dir):
             try:
                 roots.append(str(ensure_session_owned_dir(session_paths.session_dir, path)))

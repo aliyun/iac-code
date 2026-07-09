@@ -727,7 +727,7 @@ class InlineREPL:
             return None
         if isinstance(raw_session_dir, Path):
             return raw_session_dir
-        if isinstance(raw_session_dir, (str, os.PathLike)):
+        if isinstance(raw_session_dir, str):
             return Path(raw_session_dir)
         return None
 

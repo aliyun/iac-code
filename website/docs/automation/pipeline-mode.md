@@ -21,7 +21,7 @@ Design a low-cost Alibaba Cloud web application deployment and generate a templa
 
 ## Start Pipeline Mode
 
-Pipeline mode currently requires the interactive REPL. It cannot be combined with `--prompt`.
+Pipeline mode can run through the interactive REPL or through SDK process mode. It cannot be combined with `--prompt`.
 
 On macOS or Linux:
 
@@ -40,6 +40,12 @@ The default pipeline name is `selling`. To be explicit:
 
 ```bash
 IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
+```
+
+For SDK subprocess clients, start process mode with stream-json input and output:
+
+```bash
+IAC_CODE_MODE=pipeline iac-code --input-format stream-json --output-format stream-json
 ```
 
 ## Pipeline and selling
@@ -89,14 +95,16 @@ After the pipeline completes, fails, exits early, or is canceled, IaC Code switc
 
 ## Automation Integrations
 
-Pipeline mode is currently primarily designed for the interactive REPL. A2A server mode can expose pipeline progress, artifacts, permission results, and recovery information, which is useful when connecting a pipeline to an external console or task system.
+Pipeline mode can be integrated through A2A server mode or SDK process mode. A2A server mode exposes pipeline progress, artifacts, permission results, and recovery information for external consoles or task systems. SDK process mode keeps `iac-code` as a local subprocess and exchanges line-delimited JSON over stdin/stdout.
+
+In SDK process mode, pipeline events are emitted as `stream_event` frames whose event payload has `type: "pipeline_event"`. Final `result` frames include a `pipeline` object with `contextId`, `taskId`, `iacCodeSessionId`, `status`, and `sidecarStatus`. A paused pipeline should be resumed by sending the same `contextId` and active `taskId`. If a context has a recoverable task and the client omits the task id, the process returns a retryable `pipeline_task_required` error with `recoverableTaskId`.
 
 ACP does not currently support Pipeline mode. `--prompt` / [Non-interactive Mode](./non-interactive-mode.md) runs a normal one-shot request and does not execute Pipeline steps.
 
 ## Current Limitations
 
 - The current release includes only the `selling` pipeline, mainly for Alibaba Cloud infrastructure workflows.
-- Pipeline mode requires the interactive REPL. `--prompt` is rejected when `IAC_CODE_MODE=pipeline`.
+- Pipeline mode supports the interactive REPL and SDK process mode. `--prompt` is rejected when `IAC_CODE_MODE=pipeline`.
 - Pipeline mode supports text input. Images pasted into the REPL are ignored while the pipeline is active.
 - Mid-pipeline shell escapes, skill triggers, and most slash commands are restricted unless the pipeline definition explicitly allows them. Basic commands such as `/help`, `/status`, `/resume`, and `/exit` remain available.
 
