@@ -275,6 +275,106 @@ def test_pipeline_state_endpoint_returns_recovery_state(tmp_path) -> None:
     assert [event["eventId"] for event in data["events"]] == ["evt-2"]
 
 
+def test_pipeline_state_endpoint_repairs_pending_backup_snapshot_after_committed_ack(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="canceled"))
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(tmp_path)))
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), "session-1") / "pipeline"
+    started = _pipeline_event(1, "evt-started")
+    pending_terminal = {
+        **_pipeline_event(2, "evt-pending-terminal"),
+        "eventType": "pipeline_canceled",
+        "status": "canceled",
+        "visibility": "pending_backup",
+        "data": {"source": "executor"},
+    }
+    pending_handoff = {
+        **_pipeline_event(3, "evt-pending-handoff"),
+        "eventType": "pipeline_handoff_ready",
+        "status": "canceled",
+        "visibility": "pending_backup",
+        "data": {
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "canceled",
+            "summary": "[Pipeline Handoff Context]\nOutcome: canceled",
+        },
+    }
+    committed_terminal = {
+        **_pipeline_event(4, "evt-committed-terminal"),
+        "eventType": "pipeline_canceled",
+        "status": "canceled",
+        "visibility": "committed",
+        "data": {"source": "executor"},
+    }
+    committed_handoff = {
+        **_pipeline_event(5, "evt-committed-handoff"),
+        "eventType": "pipeline_handoff_ready",
+        "status": "canceled",
+        "visibility": "committed",
+        "data": {
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "canceled",
+            "summary": "[Pipeline Handoff Context]\nOutcome: canceled",
+        },
+    }
+    terminal_ack = {
+        **_pipeline_event(6, "evt-terminal-ack"),
+        "eventType": "backup_committed",
+        "data": {
+            "committedEventId": committed_terminal["eventId"],
+            "committedEventType": "pipeline_canceled",
+            "committedSequence": committed_terminal["sequence"],
+        },
+    }
+    terminal_ack.pop("status", None)
+    handoff_ack = {
+        **_pipeline_event(7, "evt-handoff-ack"),
+        "eventType": "backup_committed",
+        "data": {
+            "committedEventId": committed_handoff["eventId"],
+            "committedEventType": "pipeline_handoff_ready",
+            "committedSequence": committed_handoff["sequence"],
+        },
+    }
+    handoff_ack.pop("status", None)
+    A2APipelineJournal(pipeline_dir).append_many(
+        [
+            started,
+            pending_terminal,
+            pending_handoff,
+            committed_terminal,
+            committed_handoff,
+            terminal_ack,
+            handoff_ack,
+        ],
+        durable=True,
+    )
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot_store.save(reduce_pipeline_events([started, pending_terminal, pending_handoff, terminal_ack, handoff_ack]))
+    assert snapshot_store.load()["normalHandoff"] is None
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/iac-code/pipeline/state?taskId=task-1")
+
+    assert response.status_code == 200
+    snapshot = response.json()["snapshot"]
+    assert snapshot["status"] == "canceled"
+    assert snapshot["pendingTerminal"] is None
+    assert snapshot["pendingNormalHandoff"] is None
+    assert snapshot["normalHandoff"]["summary"] == "[Pipeline Handoff Context]\nOutcome: canceled"
+    assert snapshot_store.load()["normalHandoff"]["outcome"] == "canceled"
+
+
 def test_pipeline_state_endpoint_resolves_recovery_state_from_task_id(tmp_path) -> None:
     persistence_dir = tmp_path / "a2a"
     persistence = A2APersistenceStore(persistence_dir)

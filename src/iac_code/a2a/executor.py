@@ -39,7 +39,11 @@ from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTransl
 from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor, recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session
-from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.a2a.pipeline_snapshot import (
+    A2APipelineSnapshotStore,
+    reduce_pipeline_events,
+    snapshot_needs_backup_commit_repair,
+)
 from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
@@ -89,6 +93,7 @@ from iac_code.utils.public_paths import build_public_path_roots
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
+_CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS = 30
 _ERROR_TEXT_MAX_CHARS = 1000
 _DEFERRED_CLEANUP_PROMPTS_FILENAME = "cleanup-deferred-prompts.json"
 _A2A_SAFE_MODE_ENV = "IAC_CODE_A2A_SAFE_MODE"
@@ -434,7 +439,12 @@ def _a2a_pipeline_state_for_session(
         (_a2a_pipeline_sequence_number(event.get("sequence")) for event in journal_events if isinstance(event, dict)),
         default=0,
     )
-    if journal_events and (not isinstance(snapshot, dict) or journal_sequence != snapshot_sequence):
+    needs_backup_commit_repair = (
+        isinstance(snapshot, dict) and snapshot_needs_backup_commit_repair(snapshot, journal_events)
+    )
+    if journal_events and (
+        not isinstance(snapshot, dict) or journal_sequence != snapshot_sequence or needs_backup_commit_repair
+    ):
         snapshot = reduce_pipeline_events(journal_events)
         if not isinstance(snapshot, dict):
             return None
@@ -1336,7 +1346,10 @@ class IacCodeA2AExecutor(AgentExecutor):
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         task_id = context.task_id
         context_id = context.context_id or "unknown"
-        if task_id and await self._task_store.cancel_task(task_id):
+        if task_id and await self._task_store.cancel_task_and_wait(
+            task_id,
+            timeout=_CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS,
+        ):
             await self._publish_status(
                 event_queue,
                 task_id=task_id,

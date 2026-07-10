@@ -2405,6 +2405,107 @@ async def test_committed_handoff_routes_to_normal_after_backup_visibility_commit
 
 
 @pytest.mark.asyncio
+async def test_pending_handoff_snapshot_with_committed_backup_ack_repairs_before_normal_route(tmp_path: Path) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: _fake_runtime(),
+    )
+    pipeline_dir = SessionStorage().session_dir(str(tmp_path), ctx.session_id) / "a2a" / "pipeline"
+    translator = PipelineEventTranslator(
+        PipelineA2AContext(
+            pipeline_run_id="ctx-1",
+            task_id="task-1",
+            context_id="ctx-1",
+            pipeline_name="selling",
+            iac_code_session_id=ctx.session_id,
+        )
+    )
+    started = translator.manual_event("pipeline_started", "pipeline", status="working", data={"totalSteps": 1})
+    pending_terminal = translator.manual_event("pipeline_canceled", "pipeline", status="canceled", data={})
+    pending_terminal["visibility"] = "pending_backup"
+    pending_handoff = translator.manual_event(
+        "pipeline_handoff_ready",
+        "pipeline",
+        status="canceled",
+        data={
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "canceled",
+            "summary": "[Pipeline Handoff Context]\nPipeline: selling",
+        },
+    )
+    pending_handoff["visibility"] = "pending_backup"
+    committed_terminal = translator.manual_event("pipeline_canceled", "pipeline", status="canceled", data={})
+    committed_terminal["visibility"] = "committed"
+    committed_handoff = translator.manual_event(
+        "pipeline_handoff_ready",
+        "pipeline",
+        status="canceled",
+        data={
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "canceled",
+            "summary": "[Pipeline Handoff Context]\nPipeline: selling",
+        },
+    )
+    committed_handoff["visibility"] = "committed"
+    terminal_ack = translator.manual_event(
+        "backup_committed",
+        "pipeline",
+        data={
+            "committedEventId": committed_terminal["eventId"],
+            "committedEventType": "pipeline_canceled",
+            "committedSequence": committed_terminal["sequence"],
+        },
+    )
+    terminal_ack.pop("status", None)
+    handoff_ack = translator.manual_event(
+        "backup_committed",
+        "pipeline",
+        data={
+            "committedEventId": committed_handoff["eventId"],
+            "committedEventType": "pipeline_handoff_ready",
+            "committedSequence": committed_handoff["sequence"],
+        },
+    )
+    handoff_ack.pop("status", None)
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append_many(
+        [
+            started,
+            pending_terminal,
+            pending_handoff,
+            committed_terminal,
+            committed_handoff,
+            terminal_ack,
+            handoff_ack,
+        ],
+        durable=True,
+    )
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot_store.save(reduce_pipeline_events([started, pending_terminal, pending_handoff, terminal_ack, handoff_ack]))
+    stale = snapshot_store.load()
+    assert stale is not None
+    assert stale["lastSequence"] == handoff_ack["sequence"]
+    assert stale["normalHandoff"] is None
+    assert stale["pendingNormalHandoff"]["summary"] == "[Pipeline Handoff Context]\nPipeline: selling"
+
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    assert await executor._should_route_pipeline_handoff_to_normal(context_id="ctx-1", cwd=str(tmp_path)) is True
+    repaired = snapshot_store.load()
+    assert repaired is not None
+    assert repaired["status"] == "canceled"
+    assert repaired["pendingTerminal"] is None
+    assert repaired["pendingNormalHandoff"] is None
+    assert repaired["normalHandoff"]["summary"] == "[Pipeline Handoff Context]\nPipeline: selling"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("publish_failure", ["none", "raise"])
 async def test_handoff_backup_blocked_publish_failure_does_not_expose_terminal_or_normal_handoff(
     monkeypatch: pytest.MonkeyPatch,
@@ -5499,6 +5600,29 @@ def test_ask_user_question_answer_accepts_one_based_option_index() -> None:
     assert answer == {"selected_id": "nginx", "selected_label": "Nginx 网站", "free_text": ""}
 
 
+def test_ask_user_question_answer_keeps_partial_option_label_as_free_text() -> None:
+    from iac_code.a2a.pipeline_executor import _ask_user_question_answer_from_prompt
+
+    answer = _ask_user_question_answer_from_prompt(
+        AskUserQuestionEvent(
+            tool_use_id="ask-1",
+            question="是否继续处理部署需求？",
+            options=[
+                {"id": "skip", "label": "暂不处理，我只是随便测试一下"},
+                {"id": "describe", "label": "补充部署需求"},
+            ],
+            allow_free_text=True,
+        ),
+        "暂不处理",
+    )
+
+    assert answer == {
+        "selected_id": "",
+        "selected_label": "",
+        "free_text": "暂不处理",
+    }
+
+
 @pytest.mark.asyncio
 async def test_pipeline_executor_does_not_resolve_pending_question_when_input_received_publish_fails(
     tmp_path: Path,
@@ -5945,6 +6069,115 @@ async def test_executor_routes_waiting_input_sidecar_pending_ask_to_ask_resume(
     task_record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert "nginx selected" in "".join(task_record.output_text)
     assert "input_received" in [event["eventType"] for event in A2APipelineJournal(session_dir).read_all()]
+
+
+@pytest.mark.asyncio
+async def test_pending_ask_resume_that_leaves_running_sidecar_allows_next_message_to_continue(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    class SuspendedResumePipeline(FakePipeline):
+        def __init__(self, *, session_dir: Path) -> None:
+            super().__init__([], session_dir=session_dir)
+            self.ask_answers: list[dict[str, str]] = []
+            self.interrupts: list[str] = []
+
+        async def resume_ask_user_question(self, answer: dict[str, str], *, tool_use_id: str):
+            self.ask_answers.append(answer)
+            assert tool_use_id == "ask-1"
+            self.sidecar_status = "running"
+            if False:
+                yield
+
+        def continue_from_sidecar(self, user_input: str | None = None):
+            self.continue_calls += 1
+            self.continue_inputs.append(_display_text(user_input))
+
+            async def stream():
+                yield TextDeltaEvent(text="continued after suspended ask")
+                self.sidecar_status = "completed"
+                yield PipelineEvent(
+                    type=PipelineEventType.PIPELINE_COMPLETED,
+                    step_id=None,
+                    timestamp=1717821601.0,
+                    data={},
+                )
+
+            return stream()
+
+        async def handle_user_interrupt(self, message: str) -> SimpleNamespace:
+            self.interrupts.append(message)
+            return SimpleNamespace(action="supplement", reason="wrong route")
+
+    session_dir = tmp_path / "sidecar"
+    pending = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-ask",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-intent_parsing-1", "id": "intent_parsing", "attempt": 1},
+        "data": {"kind": "ask_user_question", "toolUseId": "ask-1"},
+        "input": {
+            "inputId": "ask-ask-1",
+            "kind": "ask_user_question",
+            "toolUseId": "ask-1",
+            "question": "请选择部署目标",
+            "options": [{"id": "skip", "label": "暂不处理，我只是随便测试一下"}],
+            "allowFreeText": True,
+        },
+    }
+    A2APipelineJournal(session_dir).append(pending)
+    A2APipelineSnapshotStore(session_dir).save(reduce_pipeline_events([pending]))
+    fake_pipeline = SuspendedResumePipeline(session_dir=session_dir)
+    fake_pipeline.sidecar_status = "waiting_input"
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: _fake_runtime())
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            text="skip",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: _fake_runtime(),
+    )
+    assert ctx.active_task_id is None
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            text="继续",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert fake_pipeline.ask_answers == [
+        {"selected_id": "skip", "selected_label": "暂不处理，我只是随便测试一下", "free_text": ""}
+    ]
+    assert fake_pipeline.continue_inputs == ["继续"]
+    assert fake_pipeline.interrupts == []
 
 
 @pytest.mark.asyncio
@@ -7244,6 +7477,7 @@ async def test_parent_hard_interrupt_closes_active_stream_and_restarts(
             )
             self.interrupts: list[str] = []
             self.applied_verdicts: list[SimpleNamespace] = []
+            self.applied_source_inputs: list[str] = []
             self.continue_after_interrupt_calls = 0
 
         def run(self, prompt: str):
@@ -7263,8 +7497,10 @@ async def test_parent_hard_interrupt_closes_active_stream_and_restarts(
                 candidate_scope=None,
             )
 
-        def apply_hard_interrupt(self, verdict: SimpleNamespace) -> bool:
+        def apply_hard_interrupt(self, verdict: SimpleNamespace, *, source_input: str | None = None) -> bool:
             self.applied_verdicts.append(verdict)
+            if source_input is not None:
+                self.applied_source_inputs.append(source_input)
             return True
 
     pipeline = RestartablePipeline(session_dir=tmp_path / "sidecar")
@@ -7316,10 +7552,139 @@ async def test_parent_hard_interrupt_closes_active_stream_and_restarts(
         assert pipeline.primary_stream.closed is True
         await asyncio.wait_for(runner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         assert pipeline.continue_after_interrupt_calls == 1
+        assert pipeline.applied_source_inputs == ["please change cpu"]
         assert "".join(active_task.output_text) == "before interruptafter interrupt"
     finally:
         if not pipeline.primary_stream.closed:
             await pipeline.primary_stream.aclose()
+        if not runner.done():
+            runner.cancel()
+            try:
+                await runner
+            except asyncio.CancelledError:
+                pass
+
+
+@pytest.mark.asyncio
+async def test_parent_hard_interrupt_waits_before_publishing_racing_terminal_event(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+
+    class RacingTerminalPipeline(FakePipeline):
+        def __init__(self, *, session_dir: Path) -> None:
+            super().__init__([], session_dir=session_dir)
+            self.restart_stream = CloseableEventStream(
+                [
+                    TextDeltaEvent(text="after interrupt"),
+                    PipelineEvent(
+                        type=PipelineEventType.PIPELINE_COMPLETED,
+                        step_id=None,
+                        timestamp=1717821602.0,
+                        data={},
+                    ),
+                ],
+                wait_until_closed=False,
+            )
+            self.interrupt_started = asyncio.Event()
+            self.allow_interrupt = asyncio.Event()
+            self.allow_terminal = asyncio.Event()
+            self.continue_after_interrupt_calls = 0
+
+        def run(self, prompt: str):
+            self.run_prompts.append(prompt)
+            return self._primary_stream()
+
+        async def _primary_stream(self):
+            yield TextDeltaEvent(text="before interrupt")
+            await self.allow_terminal.wait()
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={},
+            )
+
+        def continue_after_interrupt(self):
+            self.continue_after_interrupt_calls += 1
+            return self.restart_stream
+
+        async def handle_user_interrupt(self, message: str) -> SimpleNamespace:
+            self.interrupt_started.set()
+            await self.allow_interrupt.wait()
+            return SimpleNamespace(
+                action="hard_interrupt",
+                reason="changed parent plan",
+                rollback_target="architecture_planning",
+                candidate_scope=None,
+            )
+
+        def apply_hard_interrupt(self, verdict: SimpleNamespace) -> bool:
+            return True
+
+    pipeline = RacingTerminalPipeline(session_dir=tmp_path / "sidecar")
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    active_task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    queue = FakeEventQueue()
+    runner = asyncio.create_task(
+        executor.execute(
+            context=FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+            event_queue=queue,
+            task=active_task,
+            task_id="task-1",
+            context_id="ctx-1",
+            cwd=str(tmp_path),
+            prompt="build ecs",
+        )
+    )
+    await _wait_for_output_text(active_task, "before interrupt")
+
+    try:
+        interrupt = asyncio.create_task(
+            executor.execute(
+                context=FakeRequestContext(
+                    text="please change cpu",
+                    metadata={"iac_code": {"cwd": str(tmp_path)}},
+                ),
+                event_queue=FakeEventQueue(),
+                task=active_task,
+                task_id="task-1",
+                context_id="ctx-1",
+                cwd=str(tmp_path),
+                prompt="please change cpu",
+            )
+        )
+        await asyncio.wait_for(pipeline.interrupt_started.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        pipeline.allow_terminal.set()
+        await asyncio.sleep(0.05)
+
+        assert runner.done() is False
+
+        pipeline.allow_interrupt.set()
+        await asyncio.wait_for(interrupt, timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        await asyncio.wait_for(runner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
+
+        event_types = [event["eventType"] for event in _pipeline_status_events(queue)]
+        assert event_types.count("pipeline_completed") == 1
+        assert pipeline.continue_after_interrupt_calls == 1
+        assert "".join(active_task.output_text) == "before interruptafter interrupt"
+    finally:
+        pipeline.allow_interrupt.set()
+        pipeline.allow_terminal.set()
         if not runner.done():
             runner.cancel()
             try:
@@ -7468,10 +7833,21 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
                 self.primary_closed.set()
             yield TextDeltaEvent(text="stale")
 
-    pipeline = CancellablePipeline(session_dir=tmp_path / "sidecar")
-    pipeline.handoff_enabled = True
-    pipeline.handoff_summary = "[Pipeline Handoff Context]\nOutcome: canceled"
-    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    pipeline_holder: dict[str, CancellablePipeline] = {}
+    pipeline_created = asyncio.Event()
+
+    def fake_create_pipeline(*args, **kwargs):
+        session_dir = SessionStorage().session_dir(str(cwd), kwargs["session_id"]) / "pipeline"
+        pipeline = CancellablePipeline(session_dir=session_dir)
+        pipeline.handoff_enabled = True
+        pipeline.handoff_summary = "[Pipeline Handoff Context]\nOutcome: canceled"
+        pipeline_holder["pipeline"] = pipeline
+        pipeline_created.set()
+        return pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
@@ -7493,10 +7869,12 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
             task=active_task,
             task_id="task-1",
             context_id="ctx-1",
-            cwd=str(tmp_path),
+            cwd=str(cwd),
             prompt="build ecs",
         )
     )
+    await asyncio.wait_for(pipeline_created.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
+    pipeline = pipeline_holder["pipeline"]
     await asyncio.wait_for(pipeline.generator_blocked.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
 
     try:
@@ -7509,7 +7887,11 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
         assert "Event.wait" not in pending_coro_names
         assert pipeline.primary_cancelled.is_set()
         assert pipeline.primary_closed.is_set()
-        events = A2APipelineJournal(tmp_path / "sidecar").read_all()
+        session_id = store._contexts["ctx-1"].session_id
+        session_dir = SessionStorage().session_dir(str(cwd), session_id)
+        assert pipeline.session.session_dir == session_dir / "pipeline"
+        a2a_pipeline_dir = session_dir / "a2a" / "pipeline"
+        events = A2APipelineJournal(a2a_pipeline_dir).read_all()
         assert [event["eventType"] for event in events[-4:]] == [
             "pipeline_canceled",
             "pipeline_handoff_ready",
@@ -7524,7 +7906,7 @@ async def test_canceled_pipeline_run_closes_blocked_stream_without_child_task_le
             "pipeline_canceled",
             "pipeline_handoff_ready",
         ]
-        snapshot = A2APipelineSnapshotStore(tmp_path / "sidecar").load()
+        snapshot = A2APipelineSnapshotStore(a2a_pipeline_dir).load()
         assert snapshot is not None
         assert snapshot["status"] == "canceled"
         assert snapshot["normalHandoff"]["outcome"] == "canceled"

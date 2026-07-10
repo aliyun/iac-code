@@ -830,6 +830,7 @@ async def test_executor_persists_working_state_for_interrupted_restoration(
     assert context_snapshot.active_task_id == "task-1"
 
     await executor.cancel(context, queue)
+    assert running.done()
     await running
 
 
@@ -1370,6 +1371,7 @@ async def test_cancel_bypasses_context_lock(monkeypatch: pytest.MonkeyPatch, tmp
     await asyncio.wait_for(started.wait(), timeout=5.0)
 
     await executor.cancel(context, queue)
+    assert running.done()
     await running
 
     assert dump(queue.events[-1])["status"]["state"] == "TASK_STATE_CANCELED"

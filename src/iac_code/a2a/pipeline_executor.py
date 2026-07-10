@@ -90,6 +90,13 @@ _TERMINAL_EVENT_BY_SIDECAR_STATUS = {
 _PENDING_QUESTION_NOT_ROUTED = "not_routed"
 _PENDING_QUESTION_ANSWERED = "answered"
 _PENDING_QUESTION_STALE_FINISHED = "stale_finished"
+_ACTIVE_INTERRUPT_TERMINAL_WAIT_TIMEOUT_SECONDS = 30.0
+
+
+def _new_set_asyncio_event() -> asyncio.Event:
+    event = asyncio.Event()
+    event.set()
+    return event
 
 
 class WaitingInputCancelResult(str, Enum):
@@ -143,6 +150,7 @@ class A2APipelineRuntime:
     restart_after_interrupt: bool = False
     pause_after_interrupt: bool = False
     restart_requested: asyncio.Event = field(default_factory=asyncio.Event)
+    interrupt_settled: asyncio.Event = field(default_factory=_new_set_asyncio_event)
 
 
 @dataclass(frozen=True)
@@ -574,7 +582,7 @@ class IacCodeA2APipelineExecutor:
                     ctx.active_task_id = task.task_id
                 elif task.active_task is owner_task:
                     task.active_task = None
-                    if ctx.active_task_id == task.task_id and getattr(pipeline, "sidecar_status", None) != "running":
+                    if ctx.active_task_id == task.task_id:
                         ctx.active_task_id = None
                     if replacement_owner is owner_task and hasattr(ctx.runtime, "active_owner_task"):
                         ctx.runtime.active_owner_task = None
@@ -725,6 +733,8 @@ class IacCodeA2APipelineExecutor:
         paused = False
         verdict: Any | None = None
         interrupt_received_published = False
+        interrupt_settled = _interrupt_settled_event(runtime)
+        interrupt_settled.clear()
         try:
             publish_interrupt_received = getattr(publisher, "publish_interrupt_received", None)
             if callable(publish_interrupt_received):
@@ -743,9 +753,8 @@ class IacCodeA2APipelineExecutor:
                 apply_hard_interrupt = getattr(pipeline, "apply_hard_interrupt", None)
                 if callable(apply_hard_interrupt):
                     parameters = inspect.signature(apply_hard_interrupt).parameters
-                    if pipeline_input.has_images and (
-                        "source_input" in parameters
-                        or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
+                    if "source_input" in parameters or any(
+                        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
                     ):
                         applied = apply_hard_interrupt(verdict, source_input=runner_input)
                     else:
@@ -818,6 +827,7 @@ class IacCodeA2APipelineExecutor:
                 await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             return True
         finally:
+            interrupt_settled.set()
             if paused and not bool(getattr(verdict, "paused", False)):
                 resume_agent_loops = getattr(pipeline, "resume_agent_loops", None)
                 if callable(resume_agent_loops):
@@ -1147,6 +1157,22 @@ class IacCodeA2APipelineExecutor:
                     )
                 finally:
                     next_task = None
+
+                interrupt_action = await _consume_active_interrupt_action_before_terminal(runtime, event)
+                if interrupt_action == "restart":
+                    close_stream_on_exit = True
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=True,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
+                if interrupt_action == "pause":
+                    close_stream_on_exit = True
+                    return _StreamConsumeResult(
+                        had_events=had_events,
+                        restart_requested=False,
+                        terminal_handoff_unavailable=terminal_handoff_unavailable,
+                    )
 
                 had_events = True
                 await publish_mcp_warnings(
@@ -3408,6 +3434,72 @@ def _restart_requested_event(runtime: Any) -> asyncio.Event:
     restart_requested = asyncio.Event()
     runtime.restart_requested = restart_requested
     return restart_requested
+
+
+def _interrupt_settled_event(runtime: Any) -> asyncio.Event:
+    interrupt_settled = getattr(runtime, "interrupt_settled", None)
+    if isinstance(interrupt_settled, asyncio.Event):
+        return interrupt_settled
+    interrupt_settled = _new_set_asyncio_event()
+    runtime.interrupt_settled = interrupt_settled
+    return interrupt_settled
+
+
+async def _consume_active_interrupt_action_before_terminal(runtime: Any, event: Any) -> str | None:
+    if not _is_pipeline_terminal_stream_event(event):
+        return None
+
+    action = _consume_requested_interrupt_action(runtime)
+    if action is not None:
+        return action
+
+    interrupt_settled = _interrupt_settled_event(runtime)
+    if interrupt_settled.is_set():
+        return None
+
+    restart_event = _restart_requested_event(runtime)
+    settled_task = asyncio.create_task(interrupt_settled.wait())
+    restart_task = asyncio.create_task(restart_event.wait())
+    try:
+        done, _pending = await asyncio.wait(
+            {settled_task, restart_task},
+            timeout=_ACTIVE_INTERRUPT_TERMINAL_WAIT_TIMEOUT_SECONDS,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    finally:
+        await _cancel_task_safely(settled_task)
+        await _cancel_task_safely(restart_task)
+
+    action = _consume_requested_interrupt_action(runtime)
+    if action is not None:
+        return action
+
+    if not done and not interrupt_settled.is_set():
+        logger.warning(
+            "Timed out waiting for active A2A pipeline interrupt before publishing terminal pipeline event"
+        )
+    return None
+
+
+def _consume_requested_interrupt_action(runtime: Any) -> str | None:
+    restart_event = _restart_requested_event(runtime)
+    if bool(getattr(runtime, "restart_after_interrupt", False)) and restart_event.is_set():
+        restart_event.clear()
+        runtime.restart_after_interrupt = False
+        return "restart"
+    if bool(getattr(runtime, "pause_after_interrupt", False)) and restart_event.is_set():
+        restart_event.clear()
+        runtime.pause_after_interrupt = False
+        return "pause"
+    return None
+
+
+def _is_pipeline_terminal_stream_event(event: Any) -> bool:
+    return isinstance(event, PipelineEvent) and event.type in {
+        PipelineEventType.PIPELINE_COMPLETED,
+        PipelineEventType.PIPELINE_ERROR,
+        PipelineEventType.BACKUP_BLOCKED,
+    }
 
 
 def _is_active_task_record(task: Any, active_task_id: str | None) -> bool:

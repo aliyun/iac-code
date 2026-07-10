@@ -109,17 +109,17 @@ def _template_url_from_resolution(
     selected_candidate: dict[str, Any] | None,
     selected_candidate_result: dict[str, Any] | None,
 ) -> str:
-    if isinstance(selected_candidate, dict):
-        output_path = selected_candidate.get("output_path")
-        if isinstance(output_path, str) and output_path:
-            return output_path
-
     if isinstance(selected_candidate_result, dict):
         template = selected_candidate_result.get("template")
         if isinstance(template, dict):
             file_path = template.get("file_path")
             if isinstance(file_path, str) and file_path:
                 return file_path
+
+    if isinstance(selected_candidate, dict):
+        output_path = selected_candidate.get("output_path")
+        if isinstance(output_path, str) and output_path:
+            return output_path
     return ""
 
 

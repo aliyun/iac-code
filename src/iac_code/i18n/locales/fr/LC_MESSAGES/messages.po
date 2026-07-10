@@ -3095,6 +3095,7 @@ msgid "The user-facing question to ask."
 msgstr "Question à poser à l’utilisateur."
 
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
+#: src/iac_code/ui/renderer.py
 msgid "ask_user_question validation failed."
 msgstr "La validation de ask_user_question a échoué."
 
@@ -3617,6 +3618,11 @@ msgstr ""
 #, python-brace-format
 msgid "Step {step_id} completed. Conclusion submitted."
 msgstr "Étape {step_id} terminée. Conclusion soumise."
+
+#: src/iac_code/pipeline/engine/pipeline_runner.py
+#, python-brace-format
+msgid "用户反馈：{}"
+msgstr "Retour de l’utilisateur : {}"
 
 #: src/iac_code/pipeline/engine/pipeline_runner.py
 msgid "Pipeline state persistence failed."

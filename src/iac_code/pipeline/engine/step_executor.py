@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import inspect
 import json
@@ -202,39 +203,47 @@ class StepExecutor:
             nonlocal last_complete_step_error
             nonlocal last_complete_step_input
             nonlocal terminal_failed_step_result
-            async for event in stream:
-                if isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
-                    complete_step_ids.add(event.tool_use_id)
-                elif isinstance(event, ToolUseEndEvent):
-                    pending_tool_inputs[event.tool_use_id] = {
-                        "tool_name": event.name,
-                        "input": copy.deepcopy(event.input),
-                    }
-                    if event.tool_use_id in complete_step_ids:
-                        pending_complete_input[event.tool_use_id] = event.input
-                elif isinstance(event, ToolResultEvent):
-                    tool_record = pending_tool_inputs.get(event.tool_use_id)
-                    if isinstance(tool_record, dict):
-                        tool_input_raw = tool_record.get("input")
-                        tool_input: dict[str, Any] = tool_input_raw if isinstance(tool_input_raw, dict) else {}
-                        record_completion_guard_tool_result(
-                            completion_guard_state,
-                            tool_name=str(tool_record.get("tool_name") or event.tool_name),
-                            tool_input=tool_input,
-                            content=_completion_guard_tool_result_content(event),
-                            is_error=event.is_error,
-                            cwd=self._cwd,
-                        )
-                    if event.tool_use_id in complete_step_ids:
-                        step_result = (event.metadata or {}).get("step_result")
-                        if isinstance(step_result, StepResult) and step_result.status == StepStatus.FAILED:
-                            terminal_failed_step_result = step_result
-                        if not event.is_error:
-                            complete_step_input = pending_complete_input.get(event.tool_use_id)
-                        else:
-                            last_complete_step_error = event.result
-                            last_complete_step_input = pending_complete_input.get(event.tool_use_id)
-                yield event
+            try:
+                async for event in stream:
+                    if isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
+                        complete_step_ids.add(event.tool_use_id)
+                    elif isinstance(event, ToolUseEndEvent):
+                        pending_tool_inputs[event.tool_use_id] = {
+                            "tool_name": event.name,
+                            "input": copy.deepcopy(event.input),
+                        }
+                        if event.tool_use_id in complete_step_ids:
+                            pending_complete_input[event.tool_use_id] = event.input
+                    elif isinstance(event, ToolResultEvent):
+                        tool_record = pending_tool_inputs.get(event.tool_use_id)
+                        if isinstance(tool_record, dict):
+                            tool_input_raw = tool_record.get("input")
+                            tool_input: dict[str, Any] = tool_input_raw if isinstance(tool_input_raw, dict) else {}
+                            record_completion_guard_tool_result(
+                                completion_guard_state,
+                                tool_name=str(tool_record.get("tool_name") or event.tool_name),
+                                tool_input=tool_input,
+                                content=_completion_guard_tool_result_content(event),
+                                is_error=event.is_error,
+                                cwd=self._cwd,
+                            )
+                        if event.tool_use_id in complete_step_ids:
+                            step_result = (event.metadata or {}).get("step_result")
+                            if isinstance(step_result, StepResult) and step_result.status == StepStatus.FAILED:
+                                terminal_failed_step_result = step_result
+                            if not event.is_error:
+                                if self._pause_event is not None and not self._pause_event.is_set():
+                                    return
+                                complete_step_input = pending_complete_input.get(event.tool_use_id)
+                            else:
+                                last_complete_step_error = event.result
+                                last_complete_step_input = pending_complete_input.get(event.tool_use_id)
+                    yield event
+            finally:
+                aclose = getattr(stream, "aclose", None)
+                if callable(aclose):
+                    with contextlib.suppress(Exception):
+                        await aclose()
 
         try:
             first_stream_had_event = False

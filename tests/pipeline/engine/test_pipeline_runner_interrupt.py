@@ -1646,6 +1646,42 @@ class TestRollbackContextPropagation:
         pipeline_runner.apply_hard_interrupt(verdict)
         assert pipeline_runner._rollback_context == "用户要求改为WordPress网站"
 
+    def test_apply_hard_interrupt_uses_reason_when_rollback_context_missing(self, pipeline_runner):
+        verdict = InterruptVerdict(
+            action="hard_interrupt",
+            reason="用户业务需求已变更：使用已有 VPC 创建一个安全组，不创建 VSwitch",
+            rollback_target="a",
+            rollback_context=None,
+        )
+
+        pipeline_runner.apply_hard_interrupt(verdict)
+
+        assert pipeline_runner._rollback_context == (
+            "用户反馈：用户业务需求已变更：使用已有 VPC 创建一个安全组，不创建 VSwitch"
+        )
+
+    def test_apply_hard_interrupt_translates_reason_fallback_prefix(self, monkeypatch, pipeline_runner):
+        from iac_code.pipeline.engine import pipeline_runner as pipeline_runner_module
+
+        seen_messages: list[str] = []
+
+        def fake_gettext(message: str) -> str:
+            seen_messages.append(message)
+            return "Translated user feedback: {}"
+
+        monkeypatch.setattr(pipeline_runner_module, "_", fake_gettext)
+        verdict = InterruptVerdict(
+            action="hard_interrupt",
+            reason="changed mind",
+            rollback_target="a",
+            rollback_context=None,
+        )
+
+        pipeline_runner.apply_hard_interrupt(verdict)
+
+        assert seen_messages == ["用户反馈：{}"]
+        assert pipeline_runner._rollback_context == "Translated user feedback: changed mind"
+
     @pytest.mark.asyncio
     async def test_continue_after_interrupt_passes_context(self, pipeline_runner):
         pipeline_runner._rollback_context = "用户要求改为WordPress"

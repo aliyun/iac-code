@@ -1336,6 +1336,44 @@ async def test_rollback_session_meta_append_failure_is_best_effort(tmp_path, cap
 
 
 @pytest.mark.asyncio
+async def test_step_rollback_forwards_reason_to_target_step(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    seen: list[tuple[str, str | None]] = []
+    requested_rollback = False
+    rollback_reason = "用户变更需求：使用已有 VPC 创建安全组，不创建 VSwitch"
+
+    async def fake_execute(step, context, session_id, user_message=None, **kwargs):
+        nonlocal requested_rollback
+        seen.append((step.step_id, user_message))
+        conclusion = {"value": step.step_id}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        rollback_request = None
+        if step.step_id == "b" and not requested_rollback:
+            requested_rollback = True
+            rollback_request = ("a", rollback_reason)
+        yield StepResult(
+            step_id=step.step_id,
+            status=StepStatus.COMPLETED,
+            conclusion=conclusion,
+            rollback_request=rollback_request,
+        )
+
+    runner._step_executor.execute = fake_execute
+
+    events = [event async for event in runner.run("选择一个已有vpc，创建一个vswitch")]
+
+    assert any(
+        isinstance(event, PipelineEvent) and event.type == PipelineEventType.ROLLBACK_TRIGGERED for event in events
+    )
+    assert seen == [
+        ("a", "选择一个已有vpc，创建一个vswitch"),
+        ("b", None),
+        ("a", rollback_reason),
+        ("b", None),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_real_sidecar_save_failure_logs_once_at_runner_boundary(tmp_path, caplog, monkeypatch):
     from iac_code.pipeline.engine.session import PipelineSession
 

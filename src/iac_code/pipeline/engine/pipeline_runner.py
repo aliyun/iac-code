@@ -405,6 +405,14 @@ class PromptContext:
     sub_pipeline_id: str = ""
 
 
+def _rollback_context_for_interrupt_verdict(verdict: InterruptVerdict) -> str:
+    rollback_context = (verdict.rollback_context or "").strip()
+    if rollback_context:
+        return rollback_context
+    reason = (verdict.reason or "").strip()
+    return _("用户反馈：{}").format(reason) if reason else ""
+
+
 class PipelineRunner:
     """Generic pipeline orchestrator driven by pipeline.yaml configuration."""
 
@@ -2655,9 +2663,13 @@ class PipelineRunner:
     def _input_for_interrupt_verdict(
         verdict: InterruptVerdict,
         source_input: str | list[ContentBlock] | PipelineUserInput | None,
+        *,
+        fallback_to_reason: bool = False,
     ) -> PipelineUserInput | None:
         source = normalize_pipeline_user_input(source_input) if source_input is not None else None
-        rollback_context = verdict.rollback_context or ""
+        rollback_context = (
+            _rollback_context_for_interrupt_verdict(verdict) if fallback_to_reason else (verdict.rollback_context or "")
+        )
         if source is None:
             return normalize_pipeline_user_input(rollback_context) if rollback_context else None
         if rollback_context:
@@ -2784,7 +2796,7 @@ class PipelineRunner:
         target_field = next((s.conclusion_field for s in self._loaded.steps if s.step_id == target), None)
         if target_field:
             self.context.mark_stale(target_field)
-        rollback_input = self._input_for_interrupt_verdict(verdict, source_input)
+        rollback_input = self._input_for_interrupt_verdict(verdict, source_input, fallback_to_reason=True)
         self._rollback_context = rollback_input.display_text if rollback_input is not None else None
         self._rollback_input = rollback_input.content if rollback_input is not None else None
         self._set_current_step_user_input(rollback_input)
@@ -3882,7 +3894,15 @@ class PipelineRunner:
                 self._create_parent_attempt(target)
                 target_field = next((s.conclusion_field for s in self._loaded.steps if s.step_id == target), None)
                 stale = self.context.mark_stale(target_field) if target_field else []
-                self._set_current_step_user_input(None)
+                # Let the rollback target reprocess the reason instead of resuming with only a control prompt.
+                rollback_input = normalize_pipeline_user_input(reason)
+                self._set_current_step_user_input(rollback_input)
+                first_step_user_input = rollback_input.content
+                first_step_user_input_display_text = rollback_input.display_text
+                first_step_user_input_is_restored = False
+                first_step_resume_messages = None
+                first_step_precompleted_tools = None
+                is_first_step = True
                 try:
                     for warning_event in self._mark_rollback_cleanup_required(
                         step,
