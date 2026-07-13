@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, cast
 
 import httpx
-from a2a.server.agent_execution.active_task import TERMINAL_TASK_STATES
+from a2a.server.agent_execution.active_task import INTERRUPTED_TASK_STATES, TERMINAL_TASK_STATES
 from a2a.server.events.event_queue_v2 import QueueShutDown
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_jsonrpc_routes
@@ -61,6 +61,7 @@ from iac_code.a2a.pipeline_executor import (
     cancel_waiting_input_task_from_sidecar,
     recoverable_task_id_from_sidecar,
     terminal_task_state_from_sidecar,
+    waiting_input_task_id_from_sidecar,
 )
 from iac_code.a2a.push import (
     A2APushConfigStore,
@@ -393,6 +394,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             canceled_task = await self._cancel_inactive_pipeline_waiting_input_task(task, context)
             if canceled_task is not None:
                 return canceled_task
+            canceled_task = await self._cancel_inactive_normal_input_required_task(task, context)
+            if canceled_task is not None:
+                return canceled_task
             raise TaskNotCancelableError
         return await super().on_cancel_task(params, context)
 
@@ -436,11 +440,34 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             )
             if terminal_state is None:
                 return None
-            return await self._reconcile_inactive_pipeline_terminal_task(task, context, terminal_state)
+            return await self._reconcile_inactive_terminal_task(task, context, terminal_state)
 
         if cancel_result != WaitingInputCancelResult.CANCELED:
             return None
-        return await self._reconcile_inactive_pipeline_terminal_task(task, context, "canceled")
+        return await self._reconcile_inactive_terminal_task(task, context, "canceled")
+
+    async def _cancel_inactive_normal_input_required_task(self, task: Task, context) -> Task | None:
+        if not isinstance(self.task_store, A2ATaskStore) or not _task_is_cancelable_normal_input_required(task):
+            return None
+        try:
+            context_record = await self.task_store.get_context_record(task.context_id)
+        except Exception:
+            return None
+        try:
+            waiting_task_id = await asyncio.to_thread(
+                waiting_input_task_id_from_sidecar,
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                context_id=task.context_id,
+            )
+        except Exception:
+            logger.debug("Failed to inspect A2A pipeline waiting-input sidecar", exc_info=True)
+            return None
+        if waiting_task_id is not None:
+            return None
+        canceled = await self._reconcile_inactive_terminal_task(task, context, "canceled")
+        await self.task_store.discard_context_runtime(task.context_id)
+        return canceled
 
     async def _reconcile_inactive_pipeline_input_required_task(self, task: Task, context) -> Task:
         task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
@@ -448,7 +475,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         await self.task_store.save(task, context)
         return task
 
-    async def _reconcile_inactive_pipeline_terminal_task(self, task: Task, context, terminal_state: str) -> Task:
+    async def _reconcile_inactive_terminal_task(self, task: Task, context, terminal_state: str) -> Task:
         proto_state = {
             "completed": TaskState.TASK_STATE_COMPLETED,
             "failed": TaskState.TASK_STATE_FAILED,
@@ -497,6 +524,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             raise TaskNotFoundError(f"Task {params.id} is not active")
         async for event in super().on_subscribe_to_task(params, context):
             yield event
+            if _task_event_state(event) in INTERRUPTED_TASK_STATES:
+                return
 
     async def on_create_task_push_notification_config(
         self, params: TaskPushNotificationConfig, context
@@ -566,6 +595,28 @@ def _task_is_input_required(task: Task) -> bool:
         return TaskState.Name(task.status.state) == TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)
     except Exception:
         return str(task.status.state) in {"TASK_STATE_INPUT_REQUIRED", "input-required"}
+
+
+def _task_is_cancelable_normal_input_required(task: Task) -> bool:
+    if not _task_is_input_required(task):
+        return False
+    message = getattr(getattr(task, "status", None), "message", None)
+    parts = getattr(message, "parts", None) or []
+    retryable_messages = {
+        _("A temporary error occurred. Please retry."),
+        _("Authentication required. Configure credentials and retry."),
+    }
+    for part in parts:
+        text = getattr(part, "text", None)
+        if isinstance(text, str) and text in retryable_messages:
+            return True
+    return False
+
+
+def _task_event_state(event: Any) -> int | None:
+    status = getattr(event, "status", None)
+    state = getattr(status, "state", None)
+    return state if isinstance(state, int) else None
 
 
 def _create_dispatch_app(handler: DefaultRequestHandler) -> Starlette:

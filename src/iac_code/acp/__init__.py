@@ -11,8 +11,7 @@ def acp_main(*, debug: bool = False) -> None:
     import asyncio
     import signal
 
-    import acp
-
+    from iac_code.acp.runner import run_iac_code_acp_agent
     from iac_code.acp.server import ACPServer
     from iac_code.utils.log import setup_logging
 
@@ -35,7 +34,7 @@ def acp_main(*, debug: bool = False) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             install_signal_handler(loop, sig, _signal_handler)
 
-        agent_task = asyncio.create_task(acp.run_agent(server, use_unstable_protocol=True))
+        agent_task = asyncio.create_task(run_iac_code_acp_agent(server, use_unstable_protocol=True))
         shutdown_task = asyncio.create_task(shutdown_event.wait())
 
         try:

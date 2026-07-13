@@ -391,11 +391,16 @@ Tool and usage details are delivered through `metadata.iac_code`:
 | `iac_code.permission.safeSummary` | Redacted human-readable permission summary |
 | `iac_code.permission.inputSummary` | Safe operation summary for `aliyun_api` permission requests |
 | `iac_code.permission.toolInput` | Shape-only tool input for non-`aliyun_api` permission requests; string values use type, length, and fingerprint, and non-whitelisted field names may be fingerprinted |
+| `iac_code.mcpWarning` | Redacted MCP configuration or runtime warning, including server name, warning code, public message, scope, and source path when available |
+| `iac_code.mcpStatus` | Redacted MCP server status snapshot with connection state, authentication state, approval state, capability counts, capability refresh errors, and configuration warnings |
+| `iac_code.mcpProgress` | MCP tool progress metadata with public tool name, original server/tool names, tool-use ID, progress, total, and optional public message |
 | `iac_code.thinking.type` | `raw_thinking` when `raw-thinking` is enabled in `thinking-exposure` |
 | `iac_code.thinking.text` | Raw provider reasoning chunk, truncated to 4000 characters, emitted only for trusted configurations that enable `raw-thinking` |
 | `iac_code.usage.inputTokens` | Input token count for the turn |
 | `iac_code.usage.outputTokens` | Output token count for the turn |
 | `iac_code.usage.totalTokens` | Total token count for the turn |
+
+Pipeline mode can also publish MCP status as pipeline metadata with `metadata.iac_code.pipeline.eventType == "mcp_status"`. MCP warnings, status snapshots, and progress metadata are sanitized before streaming; secrets from headers, environment variables, OAuth tokens, and local paths are redacted or summarized.
 
 When a tool result includes a supported text artifact payload, the server stores the payload locally, emits a standard `TaskArtifactUpdateEvent`, and records the artifact in the task `artifacts` field. The artifact part uses a `file://` URL plus metadata such as `mediaType`, `byteSize`, and `sha256`; the original artifact content is not duplicated inside tool metadata.
 

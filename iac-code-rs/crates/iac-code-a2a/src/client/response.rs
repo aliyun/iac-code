@@ -42,22 +42,29 @@ pub fn extract_response_text(payload: &JsonValue) -> String {
             }
         }
         if let Some(JsonValue::Array(history)) = object_field(task, "history") {
-            for entry in history.iter().rev() {
-                let extracted = extract_agent_entry_text(entry);
-                if !extracted.is_empty() {
-                    return extracted;
-                }
+            let extracted = extract_trailing_agent_history_text(history);
+            if !extracted.is_empty() {
+                return extracted;
             }
         }
     }
     String::new()
 }
 
-fn extract_agent_entry_text(entry: &JsonValue) -> String {
-    if string_field(entry, "role") != Some("ROLE_AGENT") {
-        return String::new();
+fn extract_trailing_agent_history_text(history: &[JsonValue]) -> String {
+    let mut pieces = Vec::new();
+    for entry in history.iter().rev() {
+        if !matches!(entry, JsonValue::Object(_)) || string_field(entry, "role") != Some("ROLE_AGENT") {
+            break;
+        }
+        let extracted = extract_parts_text(entry);
+        if extracted.is_empty() {
+            break;
+        }
+        pieces.push(extracted);
     }
-    extract_parts_text(entry)
+    pieces.reverse();
+    pieces.join("")
 }
 
 fn extract_parts_text(message: &JsonValue) -> String {

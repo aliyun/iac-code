@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -14,6 +16,8 @@ from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.state_io import atomic_write_bytes
 
 _FALLBACK_STORE_LOCK = "__fallback_store__"
+_LOCK_NAME_SALT = b"iac-code-mcp-lock-name-v2"
+_LOCK_NAME_DERIVATION_ITERATIONS = 10_000
 
 
 class MCPSecretStorage:
@@ -163,7 +167,11 @@ def _locked_file(path: Path) -> Iterator[None]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+@lru_cache(maxsize=8192)
 def _safe_lock_name(value: str) -> str:
-    import hashlib
-
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        value.encode("utf-8"),
+        _LOCK_NAME_SALT,
+        _LOCK_NAME_DERIVATION_ITERATIONS,
+    ).hex()

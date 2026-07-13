@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
+from iac_code.a2a.client import A2AClientResponse
 from iac_code.a2a.persistence import A2APersistenceStore, A2ARouteSnapshot
 from iac_code.a2a.transport import A2AAuthConfig
 from iac_code.cli.main import (
@@ -533,6 +534,56 @@ def test_a2a_call_sends_prompt_with_auth(monkeypatch, tmp_path) -> None:
     assert called["require_card_signature"] is True
     assert called["timeout_seconds"] == 12.5
     assert called["closed"] is True
+
+
+def test_a2a_call_prints_aggregated_non_stream_task_history(monkeypatch, tmp_path) -> None:
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def discover(self, url: str):
+            return {"url": url}
+
+        @staticmethod
+        def select_endpoint_url(card, *, fallback_url: str) -> str:
+            return card.get("url", fallback_url)
+
+        async def send_message(self, *_args, **_kwargs):
+            return A2AClientResponse(
+                payload={
+                    "result": {
+                        "task": {
+                            "history": [
+                                {"role": "ROLE_USER", "parts": [{"text": "hello"}]},
+                                {"role": "ROLE_AGENT", "parts": [{"text": "first "}]},
+                                {"role": "ROLE_AGENT", "parts": [{"text": "second"}]},
+                            ]
+                        }
+                    }
+                }
+            )
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr("iac_code.a2a.client.A2AClient", FakeClient)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "a2a-client",
+            "call",
+            "--url",
+            "http://agent.example/rpc",
+            "--prompt",
+            "create vpc",
+            "--cwd",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == "first second\n"
 
 
 def test_a2a_call_default_cwd_prefers_logical_pwd(monkeypatch, tmp_path) -> None:

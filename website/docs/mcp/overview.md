@@ -34,9 +34,10 @@ Use MCP when you want IaC Code to call a local or remote capability that is not 
 | OAuth loopback auth | Supported for remote servers with OAuth metadata. |
 | `roots/list` | Supported. IaC Code returns the active workspace root as a file URI. |
 | `list_changed` notifications | Supported for tools, resources, and prompts. Registrations refresh dynamically. |
-| MCP elicitation | Not supported yet. Servers that request elicitation receive a clear unsupported error. |
-| WebSocket, SDK, IDE transports | Not supported. |
-| Dynamic `headersHelper` commands | Not supported. Use static headers or environment-variable references. |
+| MCP elicitation | Supported in interactive sessions. Non-interactive runs cancel safely. URL elicitation can retry the original tool call after user confirmation. |
+| WebSocket transport | Supported for URL-only `ws://` and `wss://` servers. Headers, `headersHelper`, and OAuth are rejected for WebSocket because the installed SDK transport accepts only a URL. |
+| Dynamic `headersHelper` commands | Supported for trusted `http` and `sse` servers. Helpers run without a shell, with a bounded timeout, minimal environment, and redacted diagnostics. |
+| SDK and IDE transports | Not supported. |
 | IaC Code as an MCP server | Not supported. IaC Code currently acts as an MCP host only. |
 
 ## How It Works
@@ -49,8 +50,9 @@ At runtime IaC Code:
 4. Connects approved servers with bounded concurrency.
 5. Discovers tools, resources, prompts, and `skill://` resources.
 6. Registers those capabilities into the existing tool and command registries.
-7. Converts MCP tool results into normal IaC Code tool results, storing binary artifacts under the runtime configuration directory.
-8. Disconnects MCP clients when the REPL, headless run, ACP session, or A2A runtime closes.
+7. Injects connected server instructions into the agent prompt as server-scoped guidance.
+8. Converts MCP tool results into normal IaC Code tool results, storing binary artifacts and large text artifacts under the runtime configuration directory.
+9. Disconnects MCP clients when the REPL, headless run, ACP session, or A2A runtime closes.
 
 One failed MCP server does not block other configured servers. Connection and discovery failures stay visible as MCP warnings.
 
@@ -66,8 +68,11 @@ mcp__<server>__<skill>
 
 Characters outside letters, numbers, and underscores become underscores. If two discovered capabilities collide after normalization, IaC Code appends a short digest to keep names unique.
 
+For MCP skills, IaC Code also registers a compatibility alias such as `<server>:<skill>` when that alias does not conflict with an existing command. Diagnostics preserve the original server, tool, prompt, or skill names even when public names are normalized.
+
 ## Related Pages
 
+- [MCP Quick Start](./quick-start.md)
 - [MCP Configuration](./configuration.md)
 - [Tools, Resources, Prompts, and Skills](./capabilities.md)
 - [OAuth and Security](./oauth-and-security.md)

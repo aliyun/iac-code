@@ -26,6 +26,7 @@ class AgentFactoryOptions:
     mcp_manager_factory: Any = None
     mcp_interactive_project_approval: bool = False
     a2a_safe_mode: bool = False
+    mcp_elicitation_handler: Any = None
 
 
 @dataclass
@@ -41,6 +42,7 @@ class AgentRuntime:
     _cloud_tools_refresher: Any | None = field(default=None, repr=False)
     mcp_manager: Any | None = None
     mcp_config_warnings: list[Any] | None = None
+    mcp_pending_configs: list[Any] | None = None
     _mcp_change_listeners: list[Any] = field(default_factory=list, repr=False)
     _mcp_auth_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
     _mcp_auth_flows: set[Any] = field(default_factory=set, repr=False)
@@ -229,10 +231,13 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
 
     mcp_manager = None
     mcp_config_warnings: list[Any] = []
+    mcp_pending_configs: list[Any] = []
     runtime_mcp_change_listeners: list[Any] = []
     mcp_auth_tasks: set[asyncio.Task[Any]] = set()
     mcp_auth_flows: set[Any] = set()
     mcp_workspace_root: Path | None = None
+    mcp_server_instructions_holder = {"value": ""}
+    mcp_load_result = None
     setup_complete = False
     try:
         if not options.a2a_safe_mode:
@@ -247,6 +252,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                 include_pending_project=options.mcp_interactive_project_approval,
             )
             mcp_config_warnings = mcp_load_result.warnings
+            mcp_pending_configs = list(mcp_load_result.pending)
         else:
             mcp_load_result = None
 
@@ -255,7 +261,9 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                 mcp_manager = options.mcp_manager_factory(mcp_load_result.servers, [mcp_workspace_root])
             else:
                 mcp_manager = MCPManager(mcp_load_result.servers, roots=[mcp_workspace_root], session_id=session_id)
+            _register_mcp_elicitation_handler(mcp_manager, options.mcp_elicitation_handler)
             _run_async_blocking(mcp_manager.connect_all())
+            mcp_server_instructions_holder["value"] = _mcp_server_instructions_text(mcp_manager)
             mcp_config_warnings.extend(_mcp_connection_warnings(mcp_manager))
             scoped_configs_by_name = {server.name: server for server in mcp_load_result.servers}
             registered_mcp_tool_names: set[str] = set()
@@ -293,7 +301,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                     auth_flows=mcp_auth_flows,
                     session_id=session_id,
                 )
-                if capability in {"tools", "resources", "auth"}:
+                if capability in {"tools", "resources", "auth", "connection"}:
                     registered_mcp_tool_names = _sync_mcp_tool_registry(
                         tool_registry,
                         mcp_manager,
@@ -301,7 +309,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                         registered_mcp_tool_names,
                         session_dir=session_dir,
                     )
-                if capability in {"prompts", "resources"}:
+                if capability in {"prompts", "resources", "auth", "connection"}:
                     registered_mcp_command_names, warnings = await _sync_mcp_command_registry(
                         command_registry,
                         mcp_manager,
@@ -309,6 +317,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                     )
                     mcp_config_warnings.extend(warnings)
                 _append_new_mcp_connection_warnings(mcp_config_warnings, mcp_manager)
+                mcp_server_instructions_holder["value"] = _mcp_server_instructions_text(mcp_manager)
                 skill_commands = command_registry.get_model_invocable_skills()
                 skill_listing_holder["value"] = build_skill_listing(skill_commands)
                 agent_loop.set_auto_trigger_skills(skill_commands)
@@ -350,6 +359,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
                 cwd=cwd,
                 memory_context=memory_runtime.build_memory_context(),
                 skill_listing=skill_listing_holder["value"],
+                mcp_server_instructions=mcp_server_instructions_holder["value"],
                 current_time=runtime_current_time,
                 provider_display=runtime_provider_display(),
                 model=runtime_model(),
@@ -368,6 +378,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             auto_trigger_skills=command_registry.get_model_invocable_skills(),
             memory_recall_service=memory_recall_service,
             system_prompt_refresher=build_agent_system_prompt,
+            background_task_starter=lambda: _start_mcp_background_tasks(mcp_manager),
             result_storage_dir=_result_storage_dir_for_session(session_dir),
         )
         if mcp_manager is not None:
@@ -387,6 +398,7 @@ def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
             _cloud_tools_refresher=refresh_cloud_tools,
             mcp_manager=mcp_manager,
             mcp_config_warnings=mcp_config_warnings,
+            mcp_pending_configs=mcp_pending_configs,
             _mcp_change_listeners=runtime_mcp_change_listeners,
             _mcp_auth_tasks=mcp_auth_tasks,
             _mcp_auth_flows=mcp_auth_flows,
@@ -586,6 +598,31 @@ def _append_new_mcp_connection_warnings(existing: list[Any], mcp_manager: Any) -
     return added
 
 
+def _mcp_server_instructions_text(mcp_manager: Any) -> str:
+    method = getattr(mcp_manager, "server_instructions_text", None)
+    if callable(method):
+        try:
+            return str(method() or "")
+        except Exception:
+            return ""
+    list_connections = getattr(mcp_manager, "list_connections", None)
+    if not callable(list_connections):
+        return ""
+    try:
+        records = list(list_connections())
+    except Exception:
+        return ""
+    from iac_code.mcp.manager import format_mcp_server_instructions
+
+    return format_mcp_server_instructions(records)
+
+
+def _register_mcp_elicitation_handler(mcp_manager: Any, handler: Any) -> None:
+    set_handler = getattr(mcp_manager, "set_elicitation_handler", None)
+    if callable(set_handler):
+        set_handler(handler)
+
+
 def _mcp_warning_key(warning: Any) -> tuple[str, str, str]:
     return (
         str(getattr(warning, "server_name", "")),
@@ -603,6 +640,14 @@ def _cleanup_mcp_runtime_setup(mcp_manager: Any, auth_tasks: set[asyncio.Task[An
         if callable(disconnect_all):
             with contextlib.suppress(Exception):
                 _run_async_blocking(disconnect_all())
+
+
+def _start_mcp_background_tasks(mcp_manager: Any) -> None:
+    if mcp_manager is None:
+        return
+    start_reconnect_tasks = getattr(mcp_manager, "start_reconnect_tasks", None)
+    if callable(start_reconnect_tasks):
+        start_reconnect_tasks()
 
 
 def _run_async_blocking(coro):
@@ -696,12 +741,35 @@ async def _sync_mcp_command_registry(
     from iac_code.mcp.prompts import register_mcp_prompt_commands
     from iac_code.mcp.skills import register_mcp_skill_commands
 
-    for name in registered_names:
-        command_registry.unregister(name)
+    for name in registered_names | _registered_mcp_command_names(command_registry):
+        _unregister_mcp_command(command_registry, name)
     warnings = register_mcp_prompt_commands(command_registry, mcp_manager)
     warnings.extend(await register_mcp_skill_commands(command_registry, mcp_manager))
     current_names = _current_mcp_command_names(mcp_manager)
-    return {name for name in current_names if command_registry.get(name) is not None}, warnings
+    return {name for name in current_names if _is_registered_mcp_command(command_registry.get(name))}, warnings
+
+
+def _registered_mcp_command_names(command_registry: Any) -> set[str]:
+    get_all = getattr(command_registry, "get_all", None)
+    if not callable(get_all):
+        return set()
+    return {str(command.name) for command in get_all() if _is_registered_mcp_command(command)}
+
+
+def _unregister_mcp_command(command_registry: Any, name: str) -> None:
+    command = command_registry.get(name)
+    if _is_registered_mcp_command(command):
+        command_registry.unregister(command.name)
+
+
+def _is_registered_mcp_command(command: Any) -> bool:
+    from iac_code.commands.registry import PromptCommand
+
+    if not isinstance(command, PromptCommand):
+        return False
+    skill = getattr(command, "skill", None)
+    file_path = str(getattr(skill, "file_path", "") or "")
+    return file_path.startswith("mcp://")
 
 
 def _current_mcp_command_names(mcp_manager: Any) -> set[str]:
@@ -740,10 +808,17 @@ def _mcp_auth_flow_factory(
 ):
     async def authenticate(server_name: str) -> str:
         from iac_code.i18n import _
-        from iac_code.mcp.oauth import oauth_scope_identity, start_oauth_loopback_flow
+        from iac_code.mcp.oauth import oauth_scope_identity, safe_oauth_resource_metadata_url, start_oauth_loopback_flow
         from iac_code.mcp.storage import MCPSecretStorage
 
         scoped = scoped_configs_by_name[server_name]
+        required_scopes = getattr(mcp_manager, "required_auth_scopes", lambda name: [])(server_name)
+        resource_metadata_url = getattr(mcp_manager, "required_auth_resource_metadata_url", lambda name: None)(
+            server_name
+        )
+        resource_metadata_url = safe_oauth_resource_metadata_url(
+            resource_metadata_url if isinstance(resource_metadata_url, str) else None
+        )
         flow = await asyncio.to_thread(
             start_oauth_loopback_flow,
             scoped.config,
@@ -753,6 +828,8 @@ def _mcp_auth_flow_factory(
                 source_path=getattr(scoped, "source_path", None),
                 session_id=session_id,
             ),
+            required_scopes=required_scopes or None,
+            resource_metadata_url=resource_metadata_url,
         )
         if auth_flows is not None:
             auth_flows.add(flow)

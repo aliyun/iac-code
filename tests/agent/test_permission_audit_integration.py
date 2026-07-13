@@ -5,6 +5,8 @@ from unittest.mock import Mock
 import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
+from iac_code.mcp.tools import MCPTool
+from iac_code.mcp.types import MCPToolRecord
 from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.bash.bash_tool import BashTool
@@ -74,6 +76,20 @@ class FakePermissionTool(Tool):
 class FakeAliyunApi(AliyunApi):
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         return ToolResult.success("{}")
+
+
+class FakeMCPManager:
+    def __init__(self) -> None:
+        self.called_with: dict[str, Any] = {}
+
+    async def call_tool(self, server_name: str, tool_name: str, arguments: dict[str, Any], **kwargs) -> dict[str, Any]:
+        self.called_with = {
+            "server_name": server_name,
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "kwargs": kwargs,
+        }
+        return {"content": [{"type": "text", "text": "search result"}]}
 
 
 def _read_jsonl(path):
@@ -631,6 +647,99 @@ async def test_agent_loop_does_not_audit_read_only_no_prompt_allow(monkeypatch, 
 
     assert not _permission_requests(events)
     assert records == []
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_audits_mcp_read_only_no_prompt_allow(monkeypatch, tmp_path):
+    audit = PermissionAuditMetadata(
+        scope="read_only",
+        source="permission_pipeline",
+        is_read_only=True,
+        operation={
+            "publicName": "mcp__yuque__search_docs",
+            "originalServerName": "yuque",
+            "originalToolName": "search-docs",
+            "isReadOnly": True,
+            "isDestructive": False,
+        },
+    )
+
+    events, records, _settings_seen = await _run_fake_tool_with_audit(
+        monkeypatch,
+        tmp_path,
+        PermissionResult(behavior="allow", audit=audit),
+    )
+
+    assert not _permission_requests(events)
+    assert len(records) == 1
+    assert records[0].decision == "allow"
+    assert records[0].scope == "read_only"
+    assert records[0].source == "permission_pipeline"
+    assert records[0].operation == {
+        "publicName": "mcp__yuque__search_docs",
+        "originalServerName": "yuque",
+        "originalToolName": "search-docs",
+        "isReadOnly": True,
+        "isDestructive": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_writes_audit_for_real_mcp_read_only_auto_allow(monkeypatch, tmp_path):
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    manager = FakeMCPManager()
+    provider = FakeProvider(
+        [
+            _tool_turn(
+                tool_name="mcp__yuque__search_docs",
+                tool_input={"query": "ros", "access_key_secret": "secret-value"},
+            ),
+            _text_turn("done"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(
+        MCPTool(
+            manager=manager,
+            record=MCPToolRecord(
+                server_name="yuque.internal",
+                tool_name="search-docs",
+                public_name="mcp__yuque__search_docs",
+                original_server_name="yuque",
+                original_tool_name="search-docs",
+                input_schema={"type": "object"},
+                annotations={"readOnlyHint": True, "destructiveHint": False},
+            ),
+            session_id="session-mcp-readonly",
+        )
+    )
+    loop = AgentLoop(
+        provider_manager=provider,
+        system_prompt="test",
+        tool_registry=registry,
+        cwd=str(tmp_path),
+        max_turns=2,
+        session_id="session-mcp-readonly",
+        permission_context=ToolPermissionContext(cwd=str(tmp_path)),
+    )
+
+    events = await _collect_events(loop, "search docs", permission_handler=Mock(return_value=False))
+
+    assert not _permission_requests(events)
+    assert manager.called_with["server_name"] == "yuque"
+    assert manager.called_with["tool_name"] == "search-docs"
+    [row] = _read_jsonl(_session_audit_log_path(tmp_path / "config", str(tmp_path), "session-mcp-readonly"))
+    assert row["decision"] == "allow"
+    assert row["scope"] == "read_only"
+    assert row["tool_name"] == "mcp__yuque__search_docs"
+    assert row["operation"] == {
+        "publicName": "mcp__yuque__search_docs",
+        "originalServerName": "yuque",
+        "originalToolName": "search-docs",
+        "isReadOnly": True,
+        "isDestructive": False,
+    }
+    assert "secret-value" not in str(row)
 
 
 @pytest.mark.asyncio

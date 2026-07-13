@@ -3,8 +3,12 @@ import base64
 from types import SimpleNamespace
 
 import pytest
+from a2a.server.context import ServerCallContext
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.types import SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
+from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import (
     A2AJsonRpcDispatcher,
     A2ARuntimeComponents,
@@ -318,6 +322,48 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
         await components.aclose()
 
 
+@pytest.mark.asyncio
+async def test_subscribe_to_task_stops_after_input_required_status(monkeypatch) -> None:
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    store = A2ATaskStore()
+    call_context = ServerCallContext()
+    await store.save(task, call_context)
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+
+    async def hanging_sdk_subscription(self, params, context):
+        yield TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+        )
+        yield TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        )
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_subscribe_to_task", hanging_sdk_subscription)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._validate_extensions = lambda context: None
+
+    events = await asyncio.wait_for(
+        _collect_async(handler.on_subscribe_to_task(SubscribeToTaskRequest(id="task-1"), call_context)),
+        timeout=0.5,
+    )
+
+    assert [event.status.state for event in events] == [
+        TaskState.TASK_STATE_WORKING,
+        TaskState.TASK_STATE_INPUT_REQUIRED,
+    ]
+
+
 def test_create_runtime_components_returns_shared_objects() -> None:
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
 
@@ -356,6 +402,10 @@ async def test_dispatcher_reuses_http_client(monkeypatch) -> None:
     await dispatcher.aclose()
 
     assert created == 1
+
+
+async def _collect_async(iterator):
+    return [item async for item in iterator]
 
 
 @pytest.mark.asyncio

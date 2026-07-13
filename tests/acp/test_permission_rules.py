@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 from unittest.mock import MagicMock
 
 import acp
@@ -18,6 +19,8 @@ from iac_code.acp.session import (
     _PREFIX_DENY_RULE,
     ACPSession,
 )
+from iac_code.mcp.tools import MCPTool
+from iac_code.mcp.types import MCPToolRecord
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionRuleValue, ToolPermissionContext
@@ -32,10 +35,11 @@ class FakePermissionResult:
 
 
 class _FakeLoop:
-    def __init__(self, permission_context=None):
+    def __init__(self, permission_context: ToolPermissionContext | None = None):
         self._permission_context = permission_context
         self.tool_registry = MagicMock()
         self.tool_registry.get.return_value = None
+        self.tool_registry.list_tools.return_value = []
 
     async def run_streaming(self, prompt: str):
         yield TextDeltaEvent(text="ok")
@@ -47,12 +51,14 @@ class _FakeConn:
         self._outcome = outcome
         self.last_options: list = []
         self.last_content: str = ""
+        self.last_title: str = ""
 
     async def session_update(self, session_id, update, **kwargs):
         pass
 
     async def request_permission(self, options, session_id, tool_call_update):
         self.last_options = options
+        self.last_title = tool_call_update.title
         for content_item in tool_call_update.content:
             if hasattr(content_item, "content") and hasattr(content_item.content, "text"):
                 self.last_content = content_item.content.text
@@ -60,7 +66,7 @@ class _FakeConn:
 
 
 def _make_allowed_outcome(option_id: str):
-    outcome = acp.schema.AllowedOutcome(outcome="selected", optionId=option_id)
+    outcome = acp.schema.AllowedOutcome(outcome="selected", option_id=option_id)
     return MagicMock(outcome=outcome)
 
 
@@ -74,6 +80,10 @@ def _make_denied_outcome(option_id: str | None = None):
     response = MagicMock(outcome=outcome)
     response.field_meta = {"option_id": option_id} if option_id else {}
     return response
+
+
+def _make_session(agent_loop, conn: _FakeConn) -> ACPSession:
+    return ACPSession("s1", agent_loop, cast(acp.Client, conn))
 
 
 def _make_event(tool_name="bash", tool_input=None, suggestions=None):
@@ -96,7 +106,7 @@ async def test_options_include_rule_suggestions_when_present():
     """When suggestions exist, options include rule-level allow/deny."""
     suggestions = [PermissionRuleValue(tool_name="bash", rule_content="git:*")]
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(suggestions=suggestions)
 
     await session._request_permission(event)
@@ -122,7 +132,7 @@ async def test_options_display_friendly_rule_text_when_present():
         )
     ]
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(tool_name="ros_deploy", suggestions=suggestions)
 
     await session._request_permission(event)
@@ -140,10 +150,32 @@ async def test_options_display_friendly_rule_text_when_present():
 
 
 @pytest.mark.asyncio
+async def test_options_encode_bare_tool_suggestions_when_rule_content_is_empty():
+    """MCP tool suggestions can grant the tool itself without rule_content."""
+    suggestions = [
+        PermissionRuleValue(
+            tool_name="mcp__yuque__search_docs",
+            rule_content="",
+            display_text="MCP yuque:search-docs",
+        )
+    ]
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    session = _make_session(_FakeLoop(), conn)
+    event = _make_event(tool_name="mcp__yuque__search_docs", suggestions=suggestions)
+
+    await session._request_permission(event)
+
+    option_ids = [opt.option_id for opt in conn.last_options]
+    assert _PREFIX_ALLOW_RULE + "mcp__yuque__search_docs" in option_ids
+    assert _PREFIX_DENY_RULE + "mcp__yuque__search_docs" in option_ids
+    assert "Suggested rule: MCP yuque:search-docs" in conn.last_content
+
+
+@pytest.mark.asyncio
 async def test_options_fallback_to_tool_level_without_suggestions():
     """Without suggestions, options include tool-level allow_always."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(suggestions=None)
 
     await session._request_permission(event)
@@ -161,7 +193,7 @@ async def test_read_file_without_suggestions_omits_allow_always():
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
     loop = _FakeLoop()
     loop.tool_registry.get.return_value = ReadFileTool()
-    session = ACPSession("s1", loop, conn)
+    session = _make_session(loop, conn)
     event = _make_event(tool_name="read_file", tool_input={"path": "/tmp/outside.txt"}, suggestions=None)
 
     await session._request_permission(event)
@@ -181,7 +213,7 @@ async def test_unoffered_allow_always_response_for_aliyun_write_is_rejected(monk
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ALWAYS))
     loop = _FakeLoop()
     loop.tool_registry.get.return_value = AliyunApi()
-    session = ACPSession("s1", loop, conn)
+    session = _make_session(loop, conn)
     event = PermissionRequestEvent(
         tool_name="aliyun_api",
         tool_input={"product": "ros", "action": "CreateStack"},
@@ -219,7 +251,7 @@ async def test_allow_rule_applies_to_permission_context():
     perm_ctx = ToolPermissionContext(cwd="/tmp")
     conn = _FakeConn(_make_allowed_outcome(_PREFIX_ALLOW_RULE + "git:*"))
     loop = _FakeLoop(permission_context=perm_ctx)
-    session = ACPSession("s1", loop, conn)
+    session = _make_session(loop, conn)
 
     suggestions = [PermissionRuleValue(tool_name="bash", rule_content="git:*")]
     event = _make_event(suggestions=suggestions)
@@ -228,6 +260,7 @@ async def test_allow_rule_applies_to_permission_context():
 
     assert result is True
     updated_ctx = loop._permission_context
+    assert updated_ctx is not None
     assert "session" in updated_ctx.allow_rules
     assert "bash(git:*)" in updated_ctx.allow_rules["session"]
 
@@ -238,7 +271,7 @@ async def test_allow_rule_multiple_suggestions():
     perm_ctx = ToolPermissionContext(cwd="/tmp")
     conn = _FakeConn(_make_allowed_outcome(_PREFIX_ALLOW_RULE + "curl:*,wget:*"))
     loop = _FakeLoop(permission_context=perm_ctx)
-    session = ACPSession("s1", loop, conn)
+    session = _make_session(loop, conn)
 
     suggestions = [
         PermissionRuleValue(tool_name="bash", rule_content="curl:*"),
@@ -249,9 +282,36 @@ async def test_allow_rule_multiple_suggestions():
     result = await session._request_permission(event)
 
     assert result is True
-    rules = loop._permission_context.allow_rules.get("session", [])
+    updated_ctx = loop._permission_context
+    assert updated_ctx is not None
+    rules = updated_ctx.allow_rules.get("session", [])
     assert "bash(curl:*)" in rules
     assert "bash(wget:*)" in rules
+
+
+@pytest.mark.asyncio
+async def test_allow_rule_applies_bare_tool_suggestion_to_permission_context():
+    """allow_rule:<tool> from a bare MCP suggestion adds a bare session rule."""
+    perm_ctx = ToolPermissionContext(cwd="/tmp")
+    conn = _FakeConn(_make_allowed_outcome(_PREFIX_ALLOW_RULE + "mcp__yuque__search_docs"))
+    loop = _FakeLoop(permission_context=perm_ctx)
+    session = _make_session(loop, conn)
+
+    suggestions = [
+        PermissionRuleValue(
+            tool_name="mcp__yuque__search_docs",
+            rule_content="",
+            display_text="MCP yuque:search-docs",
+        )
+    ]
+    event = _make_event(tool_name="mcp__yuque__search_docs", suggestions=suggestions)
+
+    result = await session._request_permission(event)
+
+    assert result is True
+    updated_ctx = loop._permission_context
+    assert updated_ctx is not None
+    assert "mcp__yuque__search_docs" in updated_ctx.allow_rules.get("session", [])
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +325,7 @@ async def test_deny_rule_applies_to_permission_context():
     perm_ctx = ToolPermissionContext(cwd="/tmp")
     conn = _FakeConn(_make_denied_outcome(_PREFIX_DENY_RULE + "curl:*"))
     loop = _FakeLoop(permission_context=perm_ctx)
-    session = ACPSession("s1", loop, conn)
+    session = _make_session(loop, conn)
 
     suggestions = [PermissionRuleValue(tool_name="bash", rule_content="curl:*")]
     event = _make_event(suggestions=suggestions)
@@ -274,6 +334,7 @@ async def test_deny_rule_applies_to_permission_context():
 
     assert result is False
     updated_ctx = loop._permission_context
+    assert updated_ctx is not None
     assert "session" in updated_ctx.deny_rules
     assert "bash(curl:*)" in updated_ctx.deny_rules["session"]
 
@@ -287,7 +348,7 @@ async def test_deny_rule_applies_to_permission_context():
 async def test_allow_once_returns_true_no_cache():
     """allow_once → returns True, no cache entry."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event()
 
     result = await session._request_permission(event)
@@ -300,7 +361,7 @@ async def test_allow_once_returns_true_no_cache():
 async def test_allow_always_caches_tool():
     """allow_always → returns True, caches tool-level decision."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ALWAYS))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event()
 
     result = await session._request_permission(event)
@@ -313,7 +374,7 @@ async def test_allow_always_caches_tool():
 async def test_reject_once_returns_false():
     """reject_once → returns False, no cache entry."""
     conn = _FakeConn(_make_denied_outcome(_OPTION_REJECT_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event()
 
     result = await session._request_permission(event)
@@ -326,7 +387,7 @@ async def test_reject_once_returns_false():
 async def test_reject_always_caches_tool():
     """reject_always → returns False, caches tool-level decision."""
     conn = _FakeConn(_make_denied_outcome(_OPTION_REJECT_ALWAYS))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event()
 
     result = await session._request_permission(event)
@@ -344,7 +405,7 @@ async def test_reject_always_caches_tool():
 async def test_cached_allow_skips_permission_request():
     """Cached always_allow short-circuits without calling request_permission."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     session._permission_cache["bash"] = "always_allow"
     event = _make_event()
 
@@ -358,7 +419,7 @@ async def test_cached_allow_skips_permission_request():
 async def test_cached_deny_skips_permission_request():
     """Cached always_deny short-circuits without calling request_permission."""
     conn = _FakeConn(_make_denied_outcome())
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     session._permission_cache["bash"] = "always_deny"
     event = _make_event()
 
@@ -378,7 +439,7 @@ async def test_content_includes_suggested_rule():
     """ToolCallUpdate content includes suggested rule when suggestions exist."""
     suggestions = [PermissionRuleValue(tool_name="bash", rule_content="git:*")]
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(suggestions=suggestions)
 
     await session._request_permission(event)
@@ -388,10 +449,38 @@ async def test_content_includes_suggested_rule():
 
 
 @pytest.mark.asyncio
+async def test_mcp_permission_content_uses_concise_registered_tool_name():
+    """MCP permission prompts use the registered tool display name, not the public ID."""
+    conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
+    loop = _FakeLoop()
+    loop.tool_registry.get.return_value = MCPTool(
+        manager=None,
+        record=MCPToolRecord(
+            server_name="yuque",
+            tool_name="search-docs",
+            public_name="mcp__yuque__search_docs",
+            original_server_name="yuque",
+            original_tool_name="search",
+            input_schema={"type": "object"},
+            annotations={"readOnlyHint": False},
+        ),
+        session_id="session-1",
+    )
+    session = _make_session(loop, conn)
+    event = _make_event(tool_name="mcp__yuque__search_docs", tool_input={"query": "ros"})
+
+    await session._request_permission(event)
+
+    assert conn.last_title == "MCP yuque:search"
+    assert "Approve tool call: MCP yuque:search" in conn.last_content
+    assert "mcp__yuque__search_docs" not in conn.last_content
+
+
+@pytest.mark.asyncio
 async def test_content_uses_safe_input_summary_for_aliyun_api():
     """ToolCallUpdate content does not expose raw Aliyun request input."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(
         tool_name="aliyun_api",
         tool_input={
@@ -429,7 +518,7 @@ async def test_content_uses_safe_input_summary_for_aliyun_api():
 async def test_content_preserves_redacted_non_aliyun_tool_input():
     """Non-Aliyun permission prompts keep decision-critical input visible."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(
         tool_name="bash",
         tool_input={"command": "git status --short", "apiKey": "secret-value"},
@@ -448,7 +537,7 @@ async def test_content_preserves_redacted_non_aliyun_tool_input():
 async def test_content_fingerprints_business_fields_in_non_aliyun_tool_input():
     """Non-Aliyun permission prompts hide business field names and values."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(
         tool_name="bash",
         tool_input={
@@ -469,7 +558,7 @@ async def test_content_fingerprints_business_fields_in_non_aliyun_tool_input():
 async def test_content_redacts_space_separated_secret_flags_and_preserves_paths():
     """Non-Aliyun permission prompts redact CLI secret flags without hiding paths."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(
         tool_name="bash",
         tool_input={
@@ -494,7 +583,7 @@ async def test_content_redacts_space_separated_secret_flags_and_preserves_paths(
 async def test_content_redacts_env_secret_assignments_without_false_flag_matches():
     """Non-Aliyun permission prompts redact env-style secrets without hiding paths."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(
         tool_name="bash",
         tool_input={
@@ -522,7 +611,7 @@ async def test_content_redacts_env_secret_assignments_without_false_flag_matches
 async def test_content_redacts_long_json_and_escaped_quote_secret_values():
     """Non-Aliyun permission prompts redact secrets before long-string slicing."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     long_secret = "sk-" + ("x" * 260) + "tail-secret"
     event = _make_event(
         tool_name="bash",
@@ -550,7 +639,7 @@ async def test_content_redacts_long_json_and_escaped_quote_secret_values():
 async def test_content_marks_truncated_long_non_aliyun_tool_input():
     """Non-Aliyun permission prompts make long decision input truncation explicit."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     command = ("echo safe && " * 40) + "rm -rf /"
     event = _make_event(tool_name="bash", tool_input={"command": command})
 
@@ -564,8 +653,8 @@ async def test_content_marks_truncated_long_non_aliyun_tool_input():
 async def test_content_preserves_priority_fields_in_wide_non_aliyun_tool_input():
     """Non-Aliyun permission prompts do not let low-value fields hide command/path."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
-    tool_input = {f"field_{index}": index for index in range(100)}
+    session = _make_session(_FakeLoop(), conn)
+    tool_input: dict[str, object] = {f"field_{index}": index for index in range(100)}
     tool_input["command"] = "rm -rf /"
     event = _make_event(tool_name="bash", tool_input=tool_input)
 
@@ -580,7 +669,7 @@ async def test_content_preserves_priority_fields_in_wide_non_aliyun_tool_input()
 async def test_content_no_suggested_rule_without_suggestions():
     """ToolCallUpdate content does not include 'Suggested rule' when no suggestions."""
     conn = _FakeConn(_make_allowed_outcome(_OPTION_ALLOW_ONCE))
-    session = ACPSession("s1", _FakeLoop(), conn)
+    session = _make_session(_FakeLoop(), conn)
     event = _make_event(suggestions=None)
 
     await session._request_permission(event)
@@ -598,7 +687,7 @@ async def test_allow_rule_without_permission_context_still_returns_true():
     """allow_rule still returns True even when no permission_context is available."""
     conn = _FakeConn(_make_allowed_outcome(_PREFIX_ALLOW_RULE + "git:*"))
     loop = _FakeLoop(permission_context=None)
-    session = ACPSession("s1", loop, conn)
+    session = _make_session(loop, conn)
 
     suggestions = [PermissionRuleValue(tool_name="bash", rule_content="git:*")]
     event = _make_event(suggestions=suggestions)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
+import json
 import logging
 import os
 import sys
@@ -39,12 +41,163 @@ from iac_code.utils.public_errors import public_error_from_exception
 SESSION_IDLE_TIMEOUT = 3600  # 1 hour
 CLEANUP_INTERVAL = 300  # 5 minutes
 _ACP_PIPELINE_MODE_UNSUPPORTED_TEXT = "ACP does not support pipeline mode."
+_ACP_MCP_STATUS_READER_LIMIT_BYTES = 64 * 1024
+_ACP_MCP_STATUS_FRAME_BUDGET_BYTES = 60 * 1024
+_ACP_MCP_STATUS_TRUNCATION_REASON = "acp-frame-size-limit"
+_ACP_MCP_STATUS_LIST_LIMITS = (64, 32, 16, 8, 4, 1, 0)
+_ACP_MCP_STATUS_CAPABILITY_KEYS = ("tools", "resources", "prompts", "skills")
+_ACP_MCP_STATUS_HEAVY_FIELDS = {
+    "tools": ("description", "inputSchema", "annotations"),
+    "resources": ("description", "title", "mimeType"),
+    "prompts": ("description", "arguments"),
+}
 
 logger = logging.getLogger(__name__)
 
 
 def _runtime_command_memory_manager(runtime: object) -> object | None:
     return getattr(runtime, "legacy_memory_manager", None) or getattr(runtime, "memory_manager", None)
+
+
+def _compact_mcp_status_for_acp(session_id: str, status_metadata: dict[str, Any]) -> dict[str, Any]:
+    """Fit MCP status metadata under ACP's default stdio reader limit.
+
+    The MCP manager remains the canonical source of complete public metadata.
+    ACP transports it as one newline-delimited JSON-RPC notification, so this
+    projection drops bulky capability details only at the ACP boundary.
+    """
+    if _acp_mcp_status_frame_size(session_id, status_metadata) < _ACP_MCP_STATUS_FRAME_BUDGET_BYTES:
+        return status_metadata
+
+    compacted = copy.deepcopy(status_metadata)
+    _mark_mcp_status_truncated(compacted)
+    _strip_mcp_status_heavy_fields(compacted)
+    if _acp_mcp_status_frame_size(session_id, compacted) < _ACP_MCP_STATUS_FRAME_BUDGET_BYTES:
+        return compacted
+
+    for limit in _ACP_MCP_STATUS_LIST_LIMITS:
+        candidate = copy.deepcopy(compacted)
+        _limit_mcp_status_capability_lists(candidate, limit)
+        if _acp_mcp_status_frame_size(session_id, candidate) < _ACP_MCP_STATUS_FRAME_BUDGET_BYTES:
+            return candidate
+
+    minimal = _minimal_mcp_status_for_acp(compacted)
+    if _acp_mcp_status_frame_size(session_id, minimal) < _ACP_MCP_STATUS_READER_LIMIT_BYTES:
+        return minimal
+    _limit_mcp_status_servers(minimal, session_id)
+    return minimal
+
+
+def _acp_mcp_status_frame_size(session_id: str, status_metadata: dict[str, Any]) -> int:
+    update = acp.schema.SessionInfoUpdate(
+        session_update="session_info_update",
+        field_meta={"iac_code": {"mcpStatus": status_metadata}},
+    )
+    notification = acp.schema.SessionNotification(session_id=session_id, update=update)
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": notification.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True),
+    }
+    return len((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+
+
+def _mark_mcp_status_truncated(status_metadata: dict[str, Any]) -> None:
+    status_metadata["truncated"] = True
+    status_metadata["truncationReason"] = _ACP_MCP_STATUS_TRUNCATION_REASON
+
+
+def _strip_mcp_status_heavy_fields(status_metadata: dict[str, Any]) -> None:
+    for server in _mcp_status_servers(status_metadata):
+        server_truncated = False
+        for capability_key, field_names in _ACP_MCP_STATUS_HEAVY_FIELDS.items():
+            values = server.get(capability_key)
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if not isinstance(value, dict):
+                    continue
+                for field_name in field_names:
+                    if field_name in value:
+                        value.pop(field_name, None)
+                        server_truncated = True
+        if server_truncated:
+            server["truncated"] = True
+
+
+def _limit_mcp_status_capability_lists(status_metadata: dict[str, Any], limit: int) -> None:
+    for server in _mcp_status_servers(status_metadata):
+        for key in _ACP_MCP_STATUS_CAPABILITY_KEYS:
+            values = server.get(key)
+            if not isinstance(values, list) or len(values) <= limit:
+                continue
+            server[key] = values[:limit]
+            server[f"{key}OmittedCount"] = len(values) - limit
+            server["truncated"] = True
+
+
+def _minimal_mcp_status_for_acp(status_metadata: dict[str, Any]) -> dict[str, Any]:
+    minimal: dict[str, Any] = {
+        "servers": [],
+        "warnings": [],
+        "truncated": True,
+        "truncationReason": _ACP_MCP_STATUS_TRUNCATION_REASON,
+    }
+    for server in _mcp_status_servers(status_metadata):
+        item = _minimal_mcp_status_server(server)
+        item["truncated"] = True
+        minimal["servers"].append(item)
+    warnings = status_metadata.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        minimal["warningsOmittedCount"] = len(warnings)
+    return minimal
+
+
+def _minimal_mcp_status_server(server: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "serverName",
+        "state",
+        "transport",
+        "scope",
+        "protocolVersion",
+        "authState",
+        "toolsCount",
+        "resourcesCount",
+        "promptsCount",
+        "retryCount",
+        "maxReconnectAttempts",
+        "failureReason",
+        "latestFailureReason",
+        "latestRefreshKind",
+        "latestRefreshAt",
+    )
+    item = {key: server[key] for key in keys if key in server}
+    for key in _ACP_MCP_STATUS_CAPABILITY_KEYS:
+        values = server.get(key)
+        if isinstance(values, list) and values:
+            item[f"{key}OmittedCount"] = len(values)
+    return item
+
+
+def _limit_mcp_status_servers(status_metadata: dict[str, Any], session_id: str) -> None:
+    servers = status_metadata.get("servers")
+    if not isinstance(servers, list):
+        return
+    for limit in _ACP_MCP_STATUS_LIST_LIMITS:
+        if _acp_mcp_status_frame_size(session_id, status_metadata) < _ACP_MCP_STATUS_READER_LIMIT_BYTES:
+            return
+        if len(servers) <= limit:
+            continue
+        status_metadata["servers"] = servers[:limit]
+        status_metadata["serversOmittedCount"] = len(servers) - limit
+        servers = status_metadata["servers"]
+
+
+def _mcp_status_servers(status_metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    servers = status_metadata.get("servers")
+    if not isinstance(servers, list):
+        return []
+    return [server for server in servers if isinstance(server, dict)]
 
 
 class ACPServer:
@@ -174,7 +327,9 @@ class ACPServer:
                 mcp_capabilities=acp.schema.McpCapabilities(http=True, sse=True),
                 session_capabilities=acp.schema.SessionCapabilities(
                     close=acp.schema.SessionCloseCapabilities(),
+                    fork=acp.schema.SessionForkCapabilities(),
                     list=acp.schema.SessionListCapabilities(),
+                    resume=acp.schema.SessionResumeCapabilities(),
                 ),
             ),
             auth_methods=_build_auth_methods(),
@@ -221,8 +376,11 @@ class ACPServer:
         )
 
         # Push available commands to the client
-        await self._push_mcp_warnings(session.id)
-        await self._push_available_commands(session.id)
+        try:
+            await self._push_initial_session_updates(session.id)
+        except BaseException:
+            await self._rollback_started_session(session.id)
+            raise
 
         return response
 
@@ -364,8 +522,11 @@ class ACPServer:
             session._replay_task = asyncio.create_task(self._replay_session_history(session, history))
 
         # 6. Push available commands
-        await self._push_mcp_warnings(session_id)
-        await self._push_available_commands(session_id)
+        try:
+            await self._push_initial_session_updates(session_id)
+        except BaseException:
+            await self._rollback_started_session(session_id)
+            raise
 
         return acp.LoadSessionResponse(models=self._build_model_state(model))
 
@@ -437,8 +598,11 @@ class ACPServer:
         if history:
             session._replay_task = asyncio.create_task(self._replay_session_history(session, history))
 
-        await self._push_mcp_warnings(new_session_id)
-        await self._push_available_commands(new_session_id)
+        try:
+            await self._push_initial_session_updates(new_session_id)
+        except BaseException:
+            await self._rollback_started_session(new_session_id)
+            raise
 
         return acp.schema.ForkSessionResponse(
             session_id=new_session_id,
@@ -461,6 +625,7 @@ class ACPServer:
             error = _active_session_project_error(cwd, session_id, session_id, active_session)
             if error is not None:
                 raise error
+            setattr(active_session, "_mcp_status_pushed_signature", None)
             await self._push_mcp_warnings(session_id)
             await self._push_available_commands(session_id)
             return acp.schema.ResumeSessionResponse()
@@ -507,6 +672,7 @@ class ACPServer:
             error = _active_session_project_error(cwd, session_id, resolved_session_id, active_session)
             if error is not None:
                 raise error
+            setattr(active_session, "_mcp_status_pushed_signature", None)
             await self._push_mcp_warnings(resolved_session_id)
             await self._push_available_commands(resolved_session_id)
             return acp.schema.ResumeSessionResponse()
@@ -548,8 +714,11 @@ class ACPServer:
         )
         self.sessions[resolved_session_id] = session
         self.metrics.record_session_created()
-        await self._push_mcp_warnings(resolved_session_id)
-        await self._push_available_commands(resolved_session_id)
+        try:
+            await self._push_initial_session_updates(resolved_session_id)
+        except BaseException:
+            await self._rollback_started_session(resolved_session_id)
+            raise
 
         return acp.schema.ResumeSessionResponse()
 
@@ -577,6 +746,7 @@ class ACPServer:
             memory_manager=_runtime_command_memory_manager(runtime),
             runtime=runtime,
             mcp_config_warnings=getattr(runtime, "mcp_config_warnings", None),
+            mcp_pending_configs=getattr(runtime, "mcp_pending_configs", None),
         )
         add_mcp_change_listener = getattr(runtime, "add_mcp_change_listener", None)
         if add_mcp_change_listener is not None:
@@ -590,7 +760,7 @@ class ACPServer:
                         if session.id not in self.sessions:
                             return
                         await self._push_mcp_warnings(session.id)
-                        if capability in {"prompts", "resources"}:
+                        if capability in {"prompts", "resources", "auth", "connection"}:
                             await self._push_available_commands(session.id)
 
                     try:
@@ -730,6 +900,18 @@ class ACPServer:
             ),
         )
 
+    async def _push_initial_session_updates(self, session_id: str) -> None:
+        await self._push_mcp_warnings(session_id)
+        await self._push_available_commands(session_id)
+
+    async def _rollback_started_session(self, session_id: str) -> None:
+        session = self.sessions.pop(session_id, None)
+        if session is None:
+            return
+        with contextlib.suppress(BaseException):
+            await session.close()
+        self.metrics.record_session_closed()
+
     async def _push_mcp_warnings(self, session_id: str) -> None:
         """Surface MCP startup/config warnings to ACP clients once per session."""
         if self.conn is None:
@@ -737,23 +919,45 @@ class ACPServer:
         session = self.sessions.get(session_id)
         if session is None:
             return
+        from iac_code.mcp.manager import mcp_status_metadata, mcp_warning_metadata
+
         warnings = list(getattr(session, "mcp_config_warnings", None) or [])
+        status_metadata = mcp_status_metadata(
+            getattr(session, "mcp_manager", None),
+            warnings=warnings,
+            pending_configs=getattr(session, "mcp_pending_configs", None),
+        )
         pushed_count = getattr(session, "_mcp_warnings_pushed_count", 0)
-        if pushed_count >= len(warnings):
-            return
-        for warning in warnings[pushed_count:]:
-            message = getattr(warning, "message", None) or str(warning)
-            await self.conn.session_update(
-                session_id=session_id,
-                update=acp.schema.AgentMessageChunk(
-                    session_update="agent_message_chunk",
-                    content=acp.schema.TextContentBlock(
-                        type="text",
-                        text=_("MCP warning: {message}").format(message=message),
+        if pushed_count < len(warnings):
+            for warning in warnings[pushed_count:]:
+                warning_metadata = mcp_warning_metadata(warning)
+                message = warning_metadata["message"]
+                await self.conn.session_update(
+                    session_id=session_id,
+                    update=acp.schema.AgentMessageChunk(
+                        session_update="agent_message_chunk",
+                        content=acp.schema.TextContentBlock(
+                            type="text",
+                            text=_("MCP warning: {message}").format(message=message),
+                        ),
+                        field_meta={"iac_code": {"mcpWarning": warning_metadata}},
                     ),
-                ),
-            )
-        setattr(session, "_mcp_warnings_pushed_count", len(warnings))
+                )
+            setattr(session, "_mcp_warnings_pushed_count", len(warnings))
+        if status_metadata is None:
+            return
+        acp_status_metadata = _compact_mcp_status_for_acp(session_id, status_metadata)
+        status_signature = repr(acp_status_metadata)
+        if getattr(session, "_mcp_status_pushed_signature", None) == status_signature:
+            return
+        await self.conn.session_update(
+            session_id=session_id,
+            update=acp.schema.SessionInfoUpdate(
+                session_update="session_info_update",
+                field_meta={"iac_code": {"mcpStatus": acp_status_metadata}},
+            ),
+        )
+        setattr(session, "_mcp_status_pushed_signature", status_signature)
 
     # ------------------------------------------------------------------
     # Cleanup loop

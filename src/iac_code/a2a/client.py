@@ -39,6 +39,9 @@ class A2AClientResponse:
             extracted = _extract_parts_text(status.get("message"))
             if extracted:
                 return extracted
+        extracted = _extract_parts_text(result.get("message"))
+        if extracted:
+            return extracted
         task = result.get("task")
         if isinstance(task, dict):
             task_status = task.get("status")
@@ -48,20 +51,40 @@ class A2AClientResponse:
                     return extracted
             history = task.get("history")
             if isinstance(history, list):
-                for entry in reversed(history):
-                    extracted = _extract_agent_entry_text(entry)
-                    if extracted:
-                        return extracted
+                extracted = _extract_trailing_agent_history_text(history)
+                if extracted:
+                    return extracted
         return ""
 
 
 _AGENT_ROLE_NAME = Role.Name(Role.ROLE_AGENT)
+_TASK_SUBSCRIPTION_STOP_STATES = {
+    "auth-required",
+    "canceled",
+    "completed",
+    "failed",
+    "input-required",
+    "rejected",
+    "task_state_auth_required",
+    "task_state_canceled",
+    "task_state_completed",
+    "task_state_failed",
+    "task_state_input_required",
+    "task_state_rejected",
+}
 
 
-def _extract_agent_entry_text(entry: Any) -> str:
-    if not isinstance(entry, dict) or entry.get("role") != _AGENT_ROLE_NAME:
-        return ""
-    return _extract_parts_text(entry)
+def _extract_trailing_agent_history_text(history: list[Any]) -> str:
+    pieces: list[str] = []
+    for entry in reversed(history):
+        if not isinstance(entry, dict) or entry.get("role") != _AGENT_ROLE_NAME:
+            break
+        extracted = _extract_parts_text(entry)
+        if not extracted:
+            break
+        pieces.append(extracted)
+    pieces.reverse()
+    return "".join(pieces)
 
 
 def _extract_parts_text(message: Any) -> str:
@@ -213,8 +236,16 @@ class A2AClient:
     async def subscribe_task(self, url: str, task_id: str) -> AsyncIterator[dict[str, Any]]:
         payload = self._jsonrpc_payload(method="SubscribeToTask", params={"id": task_id})
         transport = self._make_transport_client(url)
-        async for event in transport.stream(payload):
-            yield event
+        stream = transport.stream(payload)
+        try:
+            async for event in stream:
+                yield event
+                if _is_task_subscription_stop_event(event):
+                    break
+        finally:
+            close = getattr(stream, "aclose", None)
+            if close is not None:
+                await close()
 
     async def create_push_notification_config(
         self,
@@ -430,6 +461,32 @@ def _without_none(values: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
 
 
+def _is_task_subscription_stop_event(event: Any) -> bool:
+    if not isinstance(event, dict):
+        return False
+    state = _task_subscription_state(event.get("result"))
+    if not state:
+        return False
+    normalized = state.strip().lower().replace("_", "-")
+    return (
+        normalized in _TASK_SUBSCRIPTION_STOP_STATES or normalized.replace("-", "_") in _TASK_SUBSCRIPTION_STOP_STATES
+    )
+
+
+def _task_subscription_state(result: Any) -> str:
+    if not isinstance(result, dict):
+        return ""
+    status = result.get("status")
+    if isinstance(status, dict) and isinstance(status.get("state"), str):
+        return status["state"]
+    task = result.get("task")
+    if isinstance(task, dict):
+        task_status = task.get("status")
+        if isinstance(task_status, dict) and isinstance(task_status.get("state"), str):
+            return task_status["state"]
+    return ""
+
+
 def _merge_jwks(*jwks_values: Mapping[str, Any] | None) -> dict[str, Any] | None:
     keys: list[Any] = []
     for jwks in jwks_values:
@@ -450,8 +507,14 @@ class _BoundHttpA2AClient:
         return await self._client.send(self._url, payload)
 
     async def stream(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
-        async for event in self._client.stream(self._url, payload):
-            yield event
+        stream = self._client.stream(self._url, payload)
+        try:
+            async for event in stream:
+                yield event
+        finally:
+            close = getattr(stream, "aclose", None)
+            if close is not None:
+                await close()
 
     async def aclose(self) -> None:
         return None

@@ -1,13 +1,13 @@
 """HTTP+SSE transport for ACP server.
 
-Bridges HTTP POST/GET/DELETE requests to ``acp.run_agent()`` via in-memory
+Bridges HTTP POST/GET/DELETE requests to the iac-code ACP runner via in-memory
 asyncio pipes using a *pipe-bridge* pattern::
 
     HTTP Client
           |
     Starlette ASGI App
           |
-          +-- POST /acp -----> StreamReader (requests) -----> acp.run_agent(server)
+          +-- POST /acp -----> StreamReader (requests) -----> iac-code ACP runner
           |                                                          |
           +-- GET  /acp <----- StreamReader (responses) <----- (responses/notifications)
           |
@@ -32,6 +32,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from iac_code.acp.runner import run_iac_code_acp_agent
 from iac_code.acp.server import ACPServer
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ _SSE_QUEUE_MAX_SIZE = 1024
 
 
 class HTTPConnectionBridge:
-    """Bridges a single HTTP client connection to ``acp.run_agent()``
+    """Bridges a single HTTP client connection to the iac-code ACP runner
     via in-memory asyncio stream pairs.
 
     Lifecycle:
@@ -202,11 +203,9 @@ class HTTPConnectionBridge:
     # -- internal ------------------------------------------------------------
 
     async def _run_agent(self) -> None:
-        """Run ``acp.run_agent`` with bridged streams."""
-        import acp
-
+        """Run the ACP agent with bridged streams."""
         try:
-            await acp.run_agent(
+            await run_iac_code_acp_agent(
                 self.server,
                 # input_stream (StreamWriter): agent writes responses here
                 input_stream=self._response_writer,

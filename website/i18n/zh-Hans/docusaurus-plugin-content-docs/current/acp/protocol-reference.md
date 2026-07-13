@@ -80,7 +80,7 @@ ACP session 使用与交互式和 headless 运行相同的 v2 session 备份行�
 | 字段 | 类型 | 必填 | 描述 |
 |-------|------|----------|-------------|
 | `cwd` | string | 是 | 工作目录的绝对路径 |
-| `mcpServers` | object | 否 | MCP 服务器配置；HTTP（streamable）和 SSE 服务器会在该会话中建立连接 |
+| `mcpServers` | array | 否 | 注入到该会话运行时的 MCP 服务器配置数组；HTTP（streamable）和 SSE 服务器会在该会话中建立连接 |
 
 **响应字段**
 
@@ -307,6 +307,27 @@ Fork 一个现有会话，创建一个具有相同历史记录的独立分支。
 | `CompactionEvent` | `AgentMessageChunk` | 上下文压缩通知 |
 | `ErrorEvent` | `AgentMessageChunk` | 错误信息 |
 
+### MCP 状态与警告
+
+ACP 会在 wire 上的 `session/update.params.update._meta.iac_code` 中暴露 MCP runtime 状态：
+
+| 元数据键 | ACP 更新类型 | 描述 |
+|---|---|---|
+| `mcpStatus` | `session_info_update` | 当前 MCP server 状态；会在 session 创建后，以及 MCP auth、connection 或 capability 状态变化时推送。 |
+| `mcpWarning` | `agent_message_chunk` | 单条启动或配置警告，并带有简短的用户可见 warning 文本。 |
+
+`mcpStatus` 包含 `servers` 和 `warnings`。Server 条目包含 `serverName`、`state`、`authState`、`toolsCount`、`resourcesCount` 和 `promptsCount`。`authState` 取值包括 `configured`、`needs-auth` 和 `not-configured`。
+
+常见 server state 包括 `connected`、`failed`、`pending`、`needs-auth`、`pending-approval` 和 `disabled`。
+
+较大的 status frame 可能包含 `truncated`、取值为 `acp-frame-size-limit` 的 `truncationReason`、`serversOmittedCount`、`warningsOmittedCount`，或 `toolsOmittedCount` 等 capability-list 省略计数。
+
+`servers[].tools[]` 下的 tool 条目包含 `publicName`、`originalServerName`、`originalToolName`，并可包含 `annotations`。MCP annotations 可携带 `readOnlyHint` 和 `destructiveHint` 等 hint。
+
+Permission audit operation 记录在 MCP annotations 提供只读或 destructive hint 时，可包含 `isReadOnly` 和 `isDestructive`。
+
+`mcpWarning` 条目包含 `serverName`、`code`、`message`、`severity`、`source`，并可选包含 `sourcePath` 或 `scope`。常见 warning code 包括 `duplicate_config`、`invalid_name`、`invalid_config`、`missing_env`、`pending_approval`、`needs_auth`、`connection_failed`、`command_conflict`、`skill_read_failed`、`skill_truncated`、`alias_conflict`，以及 `<capability>_failed` 这类动态 capability warning。
+
 ### 工具调用生命周期
 
 ```
@@ -355,6 +376,8 @@ ToolCallStart (status=in_progress)
 | `options` | array | 可用的权限选项 |
 | `sessionId` | string | 请求权限的会话 |
 | `toolCall` | object | 工具调用详情（标题、类别、输入） |
+
+对于 MCP tool 权限请求，ACP `ToolCallUpdate` 的 `title` 使用公开操作标签，content 携带脱敏后的输入摘要。通过 ACP `_meta` 扩展字段，`toolCall._meta.iac_code.permission` 对象包含 `permissionId`、`toolName`、`toolUseId`、`scope`、`inputSummary`，并在可用时包含 `publicName`、`originalServerName`、`originalToolName`、`isReadOnly` 和 `isDestructive`。`inputSummary` 是字段形状和脱敏元数据，不包含原始敏感输入。
 
 ### 权限选项
 

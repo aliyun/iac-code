@@ -786,6 +786,8 @@ class PipelineProcessRuntimeController:
             resume_from_sidecar=request.resume_from_sidecar,
             surface="process",
             backup_service=SessionBackupService(session_storage=session_storage),
+            mcp_manager=getattr(runtime, "mcp_manager", None),
+            mcp_config_warnings=getattr(runtime, "mcp_config_warnings", None),
         )
 
     def _pipeline_name(self) -> str:

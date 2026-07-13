@@ -338,6 +338,38 @@ async def test_renderer_prompt_always_allow_rule_records_session_rule_audit(audi
 
 
 @pytest.mark.asyncio
+async def test_renderer_prompt_always_allow_bare_rule_records_session_rule_audit(audit_records) -> None:
+    store = AppStateStore(AppState(permission_context=ToolPermissionContext()))
+    renderer = _make_renderer(store)
+    event = _make_event(
+        "mcp__yuque__search_docs",
+        permission_result=PermissionResult(
+            behavior="ask",
+            suggestions=[
+                PermissionRuleValue(
+                    tool_name="mcp__yuque__search_docs",
+                    rule_content="",
+                    display_text="MCP yuque:search-docs",
+                )
+            ],
+        ),
+    )
+
+    with _patch_select("always_allow_rule"):
+        result = await renderer.prompt_permission(event)
+
+    assert result is True
+    allow_rules = store.get_state().permission_context.allow_rules.get("session", [])
+    assert "mcp__yuque__search_docs" in allow_rules
+    [(record, _settings)] = audit_records
+    assert record.source == "repl_prompt"
+    assert record.scope == "session_rule"
+    assert record.decision == "allow"
+    assert record.rule_source == "session"
+    assert record.rule == "mcp__yuque__search_docs"
+
+
+@pytest.mark.asyncio
 async def test_renderer_prompt_always_deny_rule_records_session_rule_source(audit_records) -> None:
     store = AppStateStore(AppState(permission_context=ToolPermissionContext()))
     renderer = _make_renderer(store)

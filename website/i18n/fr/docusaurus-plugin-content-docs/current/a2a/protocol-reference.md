@@ -370,11 +370,16 @@ Les détails d'outils et d'utilisation sont livrés via `metadata.iac_code` :
 | `iac_code.permission.safeSummary` | Résumé de permission expurgé et lisible par un humain |
 | `iac_code.permission.inputSummary` | Résumé sûr de l'opération pour les demandes de permission `aliyun_api` |
 | `iac_code.permission.toolInput` | Entrée d'outil sous forme uniquement pour les demandes de permission hors `aliyun_api` ; les chaînes utilisent type, longueur et empreinte, et les noms de champs hors liste blanche peuvent être représentés par une empreinte |
+| `iac_code.mcpWarning` | Warning MCP de configuration ou d'exécution expurgé, avec server name, warning code, message public, scope et source path lorsqu'il est disponible |
+| `iac_code.mcpStatus` | Instantané expurgé de l'état des serveurs MCP avec connection state, authentication state, approval state, capability counts, capability refresh errors et warnings de configuration |
+| `iac_code.mcpProgress` | MCP tool progress metadata avec public tool name, original server/tool names, tool-use ID, progress, total et message public facultatif |
 | `iac_code.thinking.type` | `raw_thinking` lorsque `raw-thinking` est activé dans `thinking-exposure` |
 | `iac_code.thinking.text` | Chunk brut de raisonnement du provider, tronqué à 4000 caractères, émis seulement pour les configurations de confiance qui activent `raw-thinking` |
 | `iac_code.usage.inputTokens` | Nombre de jetons d'entrée pour le tour |
 | `iac_code.usage.outputTokens` | Nombre de jetons de sortie pour le tour |
 | `iac_code.usage.totalTokens` | Nombre total de jetons pour le tour |
+
+Le mode pipeline peut aussi publier l'état MCP comme metadata de pipeline avec `metadata.iac_code.pipeline.eventType == "mcp_status"`. Les warnings MCP, les instantanés d'état et la metadata de progression sont nettoyés avant le streaming ; les secrets dans les headers, variables d'environnement, tokens OAuth et chemins locaux sont expurgés ou résumés.
 
 Lorsqu'un résultat d'outil inclut une charge utile d'artefact texte prise en charge, le serveur stocke la charge utile localement, émet un `TaskArtifactUpdateEvent` standard et enregistre l'artefact dans le champ `artifacts` de la tâche. La partie d'artefact utilise une URL `file://` plus des métadonnées comme `mediaType`, `byteSize` et `sha256` ; le contenu original de l'artefact n'est pas dupliqué dans les métadonnées d'outil.
 

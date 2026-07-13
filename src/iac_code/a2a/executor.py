@@ -61,8 +61,11 @@ from iac_code.a2a.types import (
 )
 from iac_code.agent.message import ContentBlock
 from iac_code.agent.message import Message as AgentMessage
+from iac_code.commands.registry import PromptCommand
 from iac_code.config import get_active_provider_key, get_provider_config, load_credentials
 from iac_code.i18n import _
+from iac_code.mcp.errors import MCPConnectionError
+from iac_code.mcp.prompt_dispatch import is_mcp_prompt_file_path
 from iac_code.pipeline.config import RunMode, get_run_mode
 from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_COMPLETED,
@@ -439,8 +442,8 @@ def _a2a_pipeline_state_for_session(
         (_a2a_pipeline_sequence_number(event.get("sequence")) for event in journal_events if isinstance(event, dict)),
         default=0,
     )
-    needs_backup_commit_repair = (
-        isinstance(snapshot, dict) and snapshot_needs_backup_commit_repair(snapshot, journal_events)
+    needs_backup_commit_repair = isinstance(snapshot, dict) and snapshot_needs_backup_commit_repair(
+        snapshot, journal_events
     )
     if journal_events and (
         not isinstance(snapshot, dict) or journal_sequence != snapshot_sequence or needs_backup_commit_repair
@@ -806,7 +809,13 @@ async def _stream_a2a_normal_events(
     else:
         prompts_to_run.append(prompt)
     for prompt_to_run in prompts_to_run:
-        prompt_stream = runtime.agent_loop.run_streaming(prompt_to_run)
+        prompt_stream = await _a2a_mcp_prompt_command_stream(
+            runtime=runtime,
+            prompt=prompt_to_run,
+            session_id=session_id,
+        )
+        if prompt_stream is None:
+            prompt_stream = runtime.agent_loop.run_streaming(prompt_to_run)
         if cleanup_ledger is not None:
             prompt_stream = _observe_cleanup_stream(prompt_stream, cleanup_ledger, publisher=cleanup_publisher)
         async for event in prompt_stream:
@@ -816,6 +825,85 @@ async def _stream_a2a_normal_events(
         _prune_completed_cleanup_prompt_from_runtime(runtime, cleanup_ledger)
     if has_deferred_prompts:
         _clear_a2a_deferred_cleanup_prompts(cwd=cwd, session_id=session_id)
+
+
+def _lookup_a2a_mcp_prompt_command(runtime: Any, prompt: str | list[ContentBlock]) -> tuple[PromptCommand, str] | None:
+    if not isinstance(prompt, str):
+        return None
+    stripped = prompt.strip()
+    if not stripped.startswith("/"):
+        return None
+    parts = stripped[1:].split(None, 1)
+    if not parts or not parts[0]:
+        return None
+    command_registry = getattr(runtime, "command_registry", None)
+    if command_registry is None:
+        return None
+    name = parts[0]
+    command = command_registry.get(name) or command_registry.get(name.lower())
+    if not isinstance(command, PromptCommand):
+        return None
+    skill = command.skill
+    file_path = str(getattr(skill, "file_path", "") if skill is not None else "")
+    if not is_mcp_prompt_file_path(file_path):
+        return None
+    args = parts[1] if len(parts) > 1 else ""
+    return command, args
+
+
+async def _a2a_mcp_prompt_command_stream(
+    *,
+    runtime: Any,
+    prompt: str | list[ContentBlock],
+    session_id: str,
+) -> AsyncIterator[Any] | None:
+    match = _lookup_a2a_mcp_prompt_command(runtime, prompt)
+    if match is None:
+        return None
+    command, args = match
+    from iac_code.skills.processor import process_prompt_command
+
+    result = await process_prompt_command(command, args, session_id=session_id)
+    if result.is_fork:
+        return runtime.agent_loop.run_streaming(result.prompt_content)
+
+    injected = False
+    context_manager = getattr(runtime.agent_loop, "context_manager", None)
+    add_raw_message = getattr(context_manager, "add_raw_message", None)
+    if callable(add_raw_message):
+        for message in result.new_messages:
+            injected_message = add_raw_message(message)
+            _persist_a2a_injected_prompt_message(runtime.agent_loop, injected_message)
+            injected = True
+
+    if result.context_modifier:
+        apply_context_modifier = getattr(runtime.agent_loop, "_apply_context_modifier", None)
+        if callable(apply_context_modifier):
+            apply_context_modifier(result.context_modifier)
+
+    continue_streaming = getattr(runtime.agent_loop, "continue_streaming", None)
+    if injected and callable(continue_streaming):
+        return continue_streaming()
+    return runtime.agent_loop.run_streaming(result.prompt_content)
+
+
+def _persist_a2a_injected_prompt_message(agent_loop: Any, message: Any) -> None:
+    session_storage = getattr(agent_loop, "_session_storage", None)
+    if session_storage is None or message is None:
+        return
+    append = getattr(session_storage, "append", None)
+    if not callable(append):
+        return
+    cwd = getattr(agent_loop, "_cwd", None)
+    session_id = getattr(agent_loop, "_session_id", None)
+    if not cwd or not session_id:
+        return
+    append(
+        cwd,
+        session_id,
+        message,
+        git_branch=getattr(agent_loop, "_current_git_branch", None),
+    )
 
 
 def _string_value(value: Any) -> str:
@@ -1128,13 +1216,6 @@ class IacCodeA2AExecutor(AgentExecutor):
                 runtime = ctx.runtime
                 if runtime is None:
                     raise RuntimeError("A2A context runtime missing")
-                await publish_mcp_warnings(
-                    event_queue,
-                    task_id=task_id,
-                    context_id=context_id,
-                    runtime=runtime,
-                    iac_code_session_id=ctx.session_id,
-                )
                 await self._publish_status(
                     event_queue,
                     task_id=task_id,
@@ -1147,6 +1228,20 @@ class IacCodeA2AExecutor(AgentExecutor):
                     task_id=task_id,
                     context_id=context_id,
                     state=TaskState.TASK_STATE_WORKING,
+                    session_id=ctx.session_id,
+                )
+                await publish_mcp_warnings(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    runtime=runtime,
+                    iac_code_session_id=ctx.session_id,
+                )
+                await self._publish_mcp_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    runtime=runtime,
                     session_id=ctx.session_id,
                 )
                 with a2a_request_context(
@@ -1193,6 +1288,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                             runtime=runtime,
                             iac_code_session_id=ctx.session_id,
                         )
+                        await self._publish_mcp_status(
+                            event_queue,
+                            task_id=task_id,
+                            context_id=context_id,
+                            runtime=runtime,
+                            session_id=ctx.session_id,
+                        )
                         text_chunk = await publish_stream_event(
                             event_queue,
                             task_id=task_id,
@@ -1212,6 +1314,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                         context_id=context_id,
                         runtime=runtime,
                         iac_code_session_id=ctx.session_id,
+                    )
+                    await self._publish_mcp_status(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        runtime=runtime,
+                        session_id=ctx.session_id,
                     )
                 task.state = TASK_STATE_INPUT_REQUIRED
                 ctx.active_task_id = None
@@ -1243,6 +1352,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 ctx.touch()
                 self._task_store.mirror_task(task)
                 self._task_store.mirror_context(ctx)
+                await self._task_store.discard_context_runtime(context_id)
                 if await self._publish_backup_blocked_after_terminal_backup_failure(
                     event_queue,
                     task=task,
@@ -1674,6 +1784,37 @@ class IacCodeA2AExecutor(AgentExecutor):
     def _log_executor_exception(self, stage: str, *, task_id: str, context_id: str) -> None:
         logger.exception("A2A executor %s failed (task_id=%s, context_id=%s)", stage, task_id, context_id)
 
+    async def _publish_mcp_status(
+        self,
+        event_queue: EventQueue,
+        *,
+        task_id: str,
+        context_id: str,
+        runtime: Any,
+        session_id: str | None,
+    ) -> None:
+        from iac_code.mcp.manager import mcp_status_metadata
+
+        status_metadata = mcp_status_metadata(
+            getattr(runtime, "mcp_manager", None),
+            warnings=list(getattr(runtime, "mcp_config_warnings", None) or []),
+            pending_configs=getattr(runtime, "mcp_pending_configs", None),
+        )
+        if status_metadata is None:
+            return
+        status_signature = (task_id, repr(status_metadata))
+        if getattr(runtime, "_a2a_mcp_status_pushed_signature", None) == status_signature:
+            return
+        await self._publish_status(
+            event_queue,
+            task_id=task_id,
+            context_id=context_id,
+            state=TaskState.TASK_STATE_WORKING,
+            metadata={"iac_code": {"mcpStatus": status_metadata}},
+            session_id=session_id,
+        )
+        setattr(runtime, "_a2a_mcp_status_pushed_signature", status_signature)
+
     async def _publish_status(
         self,
         event_queue: EventQueue,
@@ -1797,4 +1938,13 @@ def _normal_handoff_has_backup_ack(handoff: dict[str, Any], journal_events: list
 
 
 def _is_retryable_executor_error(exc: Exception) -> bool:
-    return isinstance(exc, (TimeoutError, httpx.TimeoutException, httpx.TransportError, ConnectionError))
+    return isinstance(
+        exc,
+        (
+            TimeoutError,
+            httpx.TimeoutException,
+            httpx.TransportError,
+            ConnectionError,
+            MCPConnectionError,
+        ),
+    )

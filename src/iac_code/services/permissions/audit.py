@@ -114,6 +114,8 @@ _SAFE_SHAPE_FIELD_NAMES = frozenset(
 )
 _OPERATION_ID_KEYS = ("product", "action", "region")
 _OPERATION_FINGERPRINT_KEYS = ("product_fingerprint", "action_fingerprint", "region_fingerprint")
+_MCP_OPERATION_STRING_KEYS = ("publicName", "originalServerName", "originalToolName")
+_MCP_OPERATION_BOOL_KEYS = ("isReadOnly", "isDestructive")
 _SECRET_VALUE_PATTERN = r"""(?:\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|"(?:(?:\\.)|[^"\\])*"|'(?:(?:\\.)|[^'\\])*'|[^\s,;}]+)"""
 _SECRET_KEY_PATTERN = (
     r"auth|authorization|cookie|credential|credentials|passphrase|password|passwd|private[-_]?key|pwd|"
@@ -526,7 +528,22 @@ def is_routine_read_only_allow(decision: Literal["allow", "deny"], metadata: Any
         and metadata is not None
         and getattr(metadata, "is_read_only", None) is True
         and getattr(metadata, "scope", None) == "read_only"
+        and not _is_mcp_operation_metadata(metadata)
     )
+
+
+def _is_mcp_operation_metadata(metadata: Any | None) -> bool:
+    operation = getattr(metadata, "operation", {}) or {}
+    if not isinstance(operation, dict):
+        return False
+    return all(key in operation for key in ("publicName", "originalServerName", "originalToolName"))
+
+
+def _is_mcp_operation_like(operation: dict[str, Any]) -> bool:
+    public_name = operation.get("publicName")
+    if isinstance(public_name, str) and public_name.startswith("mcp__"):
+        return True
+    return any(key in operation for key in _MCP_OPERATION_STRING_KEYS)
 
 
 def emit_permission_boundary_audit(
@@ -640,8 +657,11 @@ def permission_audit_operation(metadata: Any | None) -> dict[str, Any]:
 
     operation = dict(getattr(metadata, "operation", {}) or {})
     is_read_only = getattr(metadata, "is_read_only", None)
-    if isinstance(is_read_only, bool):
-        operation.setdefault("is_read_only", is_read_only)
+    if isinstance(is_read_only, bool) and "isReadOnly" not in operation:
+        if _is_mcp_operation_like(operation):
+            operation.setdefault("isReadOnly", is_read_only)
+        else:
+            operation.setdefault("is_read_only", is_read_only)
     return operation
 
 
@@ -783,7 +803,29 @@ def _sanitize_operation_metadata(operation: dict[str, Any]) -> dict[str, Any]:
     if isinstance(is_read_only, bool):
         sanitized["is_read_only"] = is_read_only
 
+    for key in _MCP_OPERATION_STRING_KEYS:
+        value = operation.get(key)
+        sanitized_value = _safe_mcp_operation_text(value)
+        if sanitized_value is not None:
+            sanitized[key] = sanitized_value
+
+    for key in _MCP_OPERATION_BOOL_KEYS:
+        value = operation.get(key)
+        if isinstance(value, bool):
+            sanitized[key] = value
+
     return sanitized
+
+
+def _safe_mcp_operation_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    from iac_code.mcp.redaction import sanitize_mcp_public_text
+
+    text = sanitize_mcp_public_text(value, fallback_summary="").strip()
+    if not text:
+        return None
+    return text[:_TEXT_MAX_CHARS]
 
 
 def _telemetry_metadata(record: PermissionAuditRecord) -> dict[str, Any]:
@@ -817,6 +859,8 @@ def _telemetry_metadata(record: PermissionAuditRecord) -> dict[str, Any]:
             metadata[key] = value
 
     is_read_only = record.operation.get("is_read_only")
+    if not isinstance(is_read_only, bool):
+        is_read_only = record.operation.get("isReadOnly")
     if isinstance(is_read_only, bool):
         metadata["is_read_only"] = is_read_only
 

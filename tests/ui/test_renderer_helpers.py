@@ -23,6 +23,7 @@ from iac_code.types.stream_events import (
     TOOL_RENDER_METADATA_KEY,
     TOOL_RENDER_RESULT_COMPACT_KEY,
     TOOL_RENDER_RESULT_VERBOSE_KEY,
+    MCPProgressEvent,
     PermissionRequestEvent,
     StackInstancesProgressEvent,
     StackProgressEvent,
@@ -401,6 +402,27 @@ class TestRendererHelpers:
         assert "tech_stack_nodejs" not in output
         assert "not of type" not in output
 
+    def test_render_tool_result_sanitizes_mcp_public_output_without_mutating_result(self):
+        renderer = make_renderer()
+        raw_result = (
+            "command=IAC_PRIVATE_COMMAND_ARG_MARKER_56 "
+            "metadata=IAC_PRIVATE_NESTED_METADATA_MARKER_56 "
+            "url=https://example.test/mcp?Signature=IAC_PRIVATE_QUERY_MARKER_56 "
+            "path=file:///Users/alice/.iac-code/settings.yml"
+        )
+        record = _ToolCallRecord(tool_name="mcp__remote__echo", tool_input={}, done=True, result=raw_result)
+
+        line = renderer._render_tool_result(record)
+
+        assert line is not None
+        assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in line.plain
+        assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" not in line.plain
+        assert "IAC_PRIVATE_QUERY_MARKER_56" not in line.plain
+        assert "/Users/alice" not in line.plain
+        assert "[REDACTED]" in line.plain
+        assert "[PATH]" in line.plain
+        assert record.result == raw_result
+
     def test_render_progress_groups_include_resource_rows(self):
         renderer = make_renderer()
 
@@ -439,6 +461,25 @@ class TestRendererHelpers:
         assert "vpc" in output
         assert "demo-group" in output
         assert "cn-hz" in output
+
+    def test_render_mcp_progress_redacts_public_message_text(self):
+        renderer = make_renderer()
+
+        line = renderer._render_mcp_progress(
+            MCPProgressEvent(
+                server_name="live",
+                tool_name="echo",
+                progress=1,
+                total=2,
+                message="api_key=sk-live-secret /Users/alice/.iac-code/settings.yml",
+                tool_use_id="tool-1",
+            )
+        )
+
+        assert "MCP live:echo: 1/2" in line.plain
+        assert "sk-live-secret" not in line.plain
+        assert "/Users/alice" not in line.plain
+        assert "api_key=[REDACTED]" in line.plain
 
     def test_render_tool_header_shows_child_summary_and_result_hides_in_compact_mode(self):
         renderer = make_renderer()

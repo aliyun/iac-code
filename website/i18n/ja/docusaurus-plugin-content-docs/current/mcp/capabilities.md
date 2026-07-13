@@ -1,110 +1,128 @@
 ---
 sidebar_position: 3
 title: ツール、リソース、プロンプト、スキル
-description: MCP 機能が IaC Code 内でどのように見えるかを説明します。
+description: MCP の機能が IaC Code 内でどのように表示されるかを理解します。
 ---
 
 # ツール、リソース、プロンプト、スキル
 
-接続済み MCP servers は 4 種類の機能を IaC Code に公開できます。
+接続済みの MCP servers は IaC Code に 4 種類の capabilities を公開できます。
 
 ## Tools
 
-各 MCP tool は IaC Code tool になります。
+Each MCP tool becomes an IaC Code tool:
 
 ```text
 mcp__<server>__<tool>
 ```
 
-Tool description と JSON input schema は MCP server から取得されます。IaC Code はモデルの tool input を MCP server に転送し、MCP content blocks を通常の tool result に変換します。
+ツールの説明と JSON 入力スキーマは MCP サーバーから取得されます。 IaC コードは、モデルのツール入力を MCP サーバーに転送し、MCP コンテンツ ブロックを通常のツール結果に変換します。
 
-可能な場合、MCP tool annotations は尊重されます。
+権限プロンプトと監査メタデータには、MCP サーバー名、元のツール名、公開正規化ツール名、読み取り専用/破壊的な注釈が含まれます。
 
-| MCP annotation | IaC Code の動作 |
+MCP ツールの注釈は可能な場合には尊重されます。
+
+| MCP annotation | IaC Code behavior |
 |---|---|
-| `readOnlyHint: true` | tool は読み取り専用で並行実行安全として扱われます。 |
-| `destructiveHint: true` | tool は権限判断で破壊的操作として扱われます。 |
+| `readOnlyHint: true` |このツールは読み取り専用で同時実行安全なものとして扱われます。 |
+| `destructiveHint: true` |このツールは、権限の決定に関して破壊的なものとして扱われます。 |
 
-MCP tools も IaC Code の既存権限システムを通ります。通常の `permissions` settings、または `--allowed-tools`、`--disallowed-tools`、`--permission-mode` などの CLI flags で権限ポリシーを設定します。
+MCP ツールは引き続き IaC コードの既存の権限システムを通過します。通常の`permissions`設定、または`--allowed-tools`、`--disallowed-tools`、`--permission-mode`などの CLI フラグを使用してアクセス許可ポリシーを構成します。
 
-MCP progress notifications は、対話型 rendering、headless progress output、ACP tool progress updates、A2A tool metadata に表示されます。
+MCP 進行状況通知は、インタラクティブ レンダリング、ヘッドレス進行状況出力、ACP ツール進行状況更新、および A2A ツール メタデータで表示されます。
 
-## Tool Results と Artifacts
+## Tool Results and Artifacts
 
-IaC Code は MCP content blocks をモデルに見えるテキストへ変換します。
+IaC コードは、MCP コンテンツ ブロックをモデルに表示されるテキストに変換します。
 
 | MCP content | IaC Code result |
 |---|---|
-| Text content | tool result に直接含めます。 |
-| `structuredContent` | structured-content section に整形済み JSON として表示します。 |
-| Text resources | server と URI の出所情報付きで表示します。 |
-| `resource_link` | URI と MIME type 付きの resource link として表示します。 |
-| Image、audio、blob data | 非公開 artifact ファイルとして保存し、artifact id で参照します。 |
+| Text content | Included directly in the tool result when small; 大きな text は private な `.txt`、`.json`、または `.md` artifact として保存されます. |
+| `structuredContent` |構造化コンテンツセクションの下にフォーマットされた JSON としてレンダリングされます。 |
+|テキストリソース |サーバーと URI の出自を使用してレンダリングされます。 |
+| `resource_link` | URI と MIME タイプを使用したリソース リンクとしてレンダリングされます。 |
+|画像、音声、BLOB データ |プライベート アーティファクト ファイルとして保存され、アーティファクト ID によって参照されます。 |
 
-v2 セッションでは、バイナリ artifacts はセッション所有の MCP tool-results ディレクトリに保存されます。
+バイナリ アーティファクトは、v2 セッションのセッション所有の MCP ツール結果ディレクトリに保存されます。
 
 ```text
 <config-dir>/projects/<project>/<session-id>/tool-results/mcp/<server>/<tool>/
 ```
 
-対応 layout marker のない旧セッションは引き続き次を使います。
+サポートされているレイアウト マーカーのないレガシー セッションでは、引き続き以下が使用されます。
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/<server>/<tool>/
 ```
 
-モデルが見るのは artifact id と metadata であり、raw base64 data ではありません。
+The model sees the artifact id and metadata, not raw base64 data. 大きな text artifact には path が含まれます so the full output can be read without flooding the conversation.
 
 ## Resources
 
-接続済み server のいずれかが resources を公開すると、IaC Code は 2 つの global tools を登録します。
+接続されたサーバーがリソースを公開すると、IaC コードは 2 つのグローバル ツールを登録します。
 
-| Tool | 用途 |
+| Tool | Purpose |
 |---|---|
-| `list_mcp_resources` | 接続済み MCP servers の resources を一覧表示します。server name で任意に絞り込めます。 |
-| `read_mcp_resource` | `server` と `uri` で 1 つの resource を読み取ります。 |
+| `list_mcp_resources` |接続されている MCP サーバーからのリソースをリストします。必要に応じて、サーバー名でフィルタリングします。 |
+| `read_mcp_resource` | `server`と`uri`によって1つのリソースを読み取ります。 |
 
-Resource 行には server name、URI、任意の resource name、任意の MIME type が含まれます。
+リソース行には、サーバー名、URI、オプションのリソース名、およびオプションの MIME タイプが含まれます。
 
 ## Prompts
 
-MCP prompts は slash commands になります。
+MCP prompts become slash commands:
 
 ```text
 /mcp__<server>__<prompt> key=value
 ```
 
-呼び出すと、IaC Code は MCP `prompts/get` を呼び出し、返された prompt messages をレンダリングし、レンダリング済み prompt を会話に注入してモデルを続行させます。Prompt arguments は次の形式で渡せます。
+呼び出されると、IaC コードは MCP `prompts/get` を呼び出し、返されたプロンプト メッセージをレンダリングし、レンダリングされたプロンプトを会話に挿入して、モデルを続行させます。プロンプト引数は次のように渡すことができます。
 
 ```text
 template_name=prod-vpc region=cn-hangzhou
 ```
 
-または JSON で渡せます。
+or as JSON:
 
 ```json
 {"template_name": "prod-vpc", "region": "cn-hangzhou"}
 ```
 
-Required prompt arguments は MCP call の前に検証されます。引用符付きの値に対応し、バックスラッシュを含む Windows paths も扱えます。
+必須のプロンプト引数は、MCP 呼び出しの前に検証されます。バックスラッシュを含む Windows パスを含め、引用符で囲まれた値がサポートされています。
 
 ## Skills
 
-`skill://` URI を持つ MCP resources は skill commands になります。
+`skill://` URI を持つ MCP リソースはスキル コマンドになります。
 
 ```text
 $mcp__<server>__<skill>
 ```
 
-IaC Code は remote skill resource を読み取り、frontmatter を解析し、通常の skill command として登録します。Remote MCP skills には安全上の制限があります。
+IaC コードは、リモート スキル リソースを読み取り、frontmatter を解析し、それを通常のスキル コマンドとして登録します。リモート MCP スキルには安全上の制限があります。
 
-- Remote `allowed_tools` は消去されます。
-- Remote auto-trigger path rules は消去されます。
-- Remote skill body と description には長さ制限があります。
-- Remote skill が既存 command と衝突する場合、MCP warning とともにスキップされます。
+- Remote `allowed_tools` are cleared.
+- リモート自動トリガー パス ルールがクリアされます。
+- リモートスキル本体と説明の長さには制限があります。
+- リモート スキルが既存のコマンドと競合する場合、MCP 警告が表示されてスキップされます。
 
-MCP skill resources は、ユーザーが呼び出す前に command を登録できるよう、起動時に読み取られる場合があります。
+MCP スキル リソースは起動時に読み取られるため、ユーザーがコマンドを呼び出す前にコマンドを登録できます。
 
-## 動的更新
+コマンドの競合がない場合、MCP スキルには互換性エイリアスも取得されます。
 
-MCP server が `tools/list_changed`、`resources/list_changed`、`prompts/list_changed` を送信すると、IaC Code は対象の capability list を更新し、tool または command registry を更新します。更新失敗は MCP warning として報告され、アクティブなセッションを停止しません。
+```text
+$<server>:<skill>
+```
+
+たとえば、`$mcp__yuque__search` と `$yuque:search` は同じリモート スキルに解決できます。
+
+## Server Instructions（サーバー指示）
+
+接続されたサーバーが初期化から「命令」を返した場合、IaC コードはそれらを専用の MCP サーバー命令セクションとしてエージェント プロンプトに挿入します。これらの指示はサーバースコープのガイダンスとして扱われ、ローカル プロジェクトの指示をオーバーライドしません。
+
+## Elicitation（対話要求）
+
+interactive session では MCP elicitation request をユーザーへ渡せます。URL mode elicitation は外部 URL flow の完了をユーザーに求め、その後 bounded retry limit 内で元の MCP tool call を retry できます。non-interactive context では elicitation を安全に cancel します。
+
+## Dynamic Updates
+
+MCP サーバーが`tools/list_changed`、`resources/list_changed`、または`prompts/list_changed`を送信すると、IaC コードは影響を受ける機能リストを更新し、ツールまたはコマンド レジストリを更新します。更新の失敗は MCP 警告として報告され、アクティブなセッションは停止されません。

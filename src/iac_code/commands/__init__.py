@@ -7,6 +7,7 @@ from iac_code.commands.debug import debug_command
 from iac_code.commands.effort import effort_command
 from iac_code.commands.exit import exit_command
 from iac_code.commands.help import help_command
+from iac_code.commands.mcp import mcp_command
 from iac_code.commands.memory import memory_command, memory_folder_command
 from iac_code.commands.model import model_command
 from iac_code.commands.prompt import prompt_command
@@ -160,6 +161,15 @@ def create_default_registry() -> CommandRegistry:
             name="status",
             description=_("Show current session status"),
             handler=status_command,
+            history_mode="session",
+        )
+    )
+    registry.register(
+        LocalCommand(
+            name="mcp",
+            description=_("Manage MCP servers"),
+            handler=mcp_command,
+            arg_hint=_("[enable|disable|reconnect [server-name] [--scope scope] [--source-path path]]"),
             history_mode="session",
         )
     )

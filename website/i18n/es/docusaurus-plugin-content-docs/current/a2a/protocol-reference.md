@@ -370,11 +370,16 @@ Los detalles de herramientas y uso se entregan mediante `metadata.iac_code`:
 | `iac_code.permission.safeSummary` | Resumen de permisos redactado y legible por humanos |
 | `iac_code.permission.inputSummary` | Resumen seguro de operación para solicitudes de permisos de `aliyun_api` |
 | `iac_code.permission.toolInput` | Entrada de herramienta solo con forma para solicitudes de permisos que no son de `aliyun_api`; los valores de cadena usan tipo, longitud y huella, y los nombres de campo fuera de la lista permitida pueden representarse con huella |
+| `iac_code.mcpWarning` | Advertencia MCP de configuración o ejecución redactada, con server name, warning code, mensaje público, scope y source path cuando está disponible |
+| `iac_code.mcpStatus` | Instantánea redactada del estado de servidores MCP con connection state, authentication state, approval state, capability counts, capability refresh errors y advertencias de configuración |
+| `iac_code.mcpProgress` | MCP tool progress metadata con public tool name, original server/tool names, tool-use ID, progress, total y mensaje público opcional |
 | `iac_code.thinking.type` | `raw_thinking` cuando `raw-thinking` está habilitado en `thinking-exposure` |
 | `iac_code.thinking.text` | Chunk bruto de razonamiento del provider, truncado a 4000 caracteres, emitido solo para configuraciones de confianza que habilitan `raw-thinking` |
 | `iac_code.usage.inputTokens` | Recuento de tokens de entrada del turno |
 | `iac_code.usage.outputTokens` | Recuento de tokens de salida del turno |
 | `iac_code.usage.totalTokens` | Recuento total de tokens del turno |
+
+El modo pipeline también puede publicar el estado MCP como metadata de pipeline con `metadata.iac_code.pipeline.eventType == "mcp_status"`. Las advertencias MCP, las instantáneas de estado y la metadata de progreso se sanitizan antes del streaming; los secretos de headers, variables de entorno, tokens OAuth y rutas locales se redactan o resumen.
 
 Cuando un resultado de herramienta incluye un payload de artefacto de texto soportado, el servidor almacena el payload localmente, emite un `TaskArtifactUpdateEvent` estándar y registra el artefacto en el campo `artifacts` de la tarea. La parte de artefacto usa una URL `file://` más metadatos como `mediaType`, `byteSize` y `sha256`; el contenido original del artefacto no se duplica dentro de los metadatos de herramienta.
 

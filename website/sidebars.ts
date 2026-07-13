@@ -30,6 +30,7 @@ const sidebars: SidebarsConfig = {
           label: 'MCP Integration',
           items: [
             'mcp/overview',
+            'mcp/quick-start',
             'mcp/configuration',
             'mcp/capabilities',
             'mcp/oauth-and-security',

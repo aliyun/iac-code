@@ -16,6 +16,7 @@ class PipelineEventType(str, Enum):
     BACKUP_BLOCKED = "backup_blocked"
     PIPELINE_ERROR = "pipeline_error"
     PIPELINE_WARNING = "pipeline_warning"
+    MCP_STATUS = "mcp_status"
 
     STEP_STARTED = "step_started"
     STEP_COMPLETED = "step_completed"

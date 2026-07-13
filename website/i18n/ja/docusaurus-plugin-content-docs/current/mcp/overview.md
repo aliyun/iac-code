@@ -1,47 +1,48 @@
 ---
 sidebar_position: 1
 title: MCP 連携
-description: Model Context Protocol サーバーを使って、外部ツール、リソース、プロンプト、スキルで IaC Code を拡張します。
+description: Model Context Protocol サーバーで IaC Code に外部ツール、リソース、プロンプト、スキルを拡張します。
 ---
 
 # MCP 連携
 
-IaC Code は Model Context Protocol (MCP) のホストとして動作できます。MCP サーバーは、外部ツール、リソース、プロンプト、再利用可能なスキルでエージェントを拡張します。これらは引き続き IaC Code の権限、セッション、ログ、出力処理の経路を通ります。
+IaC Code は Model Context Protocol (MCP) host として動作できます。MCP servers は IaC Code の permission、session、logging、output handling の経路を通りながら、agent に外部 tools、resources、prompts、reusable skills を拡張します。
 
-製品に組み込まれていないローカルまたはリモート機能を IaC Code から呼び出したい場合に MCP を使います。例として、社内テンプレートカタログ、内部デプロイレビュー、インベントリ照会サービス、特殊なクラウド操作ツールがあります。
+IaC コードで、プライベート テンプレート カタログ、内部展開レビュー担当者、インベントリ クエリ サービス、特殊なクラウド操作ツールなど、製品に組み込まれていないローカルまたはリモートの機能を呼び出す場合は、MCP を使用します。
 
-## 対応する利用面
+## Supported Surfaces
 
-| 利用面 | MCP 対応 |
+| Surface | MCP support |
 |---|---|
-| 対話型 REPL | ユーザー、ローカル、承認済みプロジェクトサーバーを読み込みます。新しいプロジェクト `.mcp.json` サーバーを信頼する前に確認します。 |
-| 非対話モード | ユーザー、ローカル、承認済みプロジェクトサーバーを読み込みます。確認は行わず、保留中のプロジェクトサーバーは warning とともにスキップされます。 |
-| ACP server | ACP client からセッション作成時に渡された MCP server 設定を受け取り、そのセッション内で発見した MCP 機能を公開します。 |
-| A2A server | 通常の runtime 経由で MCP を読み込み、A2A task metadata に MCP warning とツール進捗を出力できます。 |
-| Pipeline モード | normal モードと同じ runtime 連携を使い、MCP ツール進捗と warning の伝播を含みます。 |
+|インタラクティブ REPL |ユーザー、ローカル、および承認されたプロジェクト サーバーを読み込みます。新しいプロジェクトの `.mcp.json` サーバーを信頼する前にプロンプ​​トが表示されます。 |
+|非対話型モード |ユーザー、ローカル、および承認されたプロジェクト サーバーを読み込みます。決してプロンプトを表示しません。保留中のプロジェクト サーバーは警告とともにスキップされます。 |
+| ACPサーバー | ACP クライアントからセッション MCP サーバー設定を受け入れ、そのセッション内で検出された MCP 機能を公開します。 |
+| A2Aサーバー |通常のランタイムを通じて MCP をロードし、MCP 警告とツールの進行状況を A2A タスク メタデータで公開できます。 |
+|パイプラインモード | MCP ツールの進行状況や警告の伝達など、通常モードと同じランタイム統合を使用します。 |
 
-## 対応機能
+## Supported Capabilities
 
-| 機能 | 状態 |
+| Capability | Status |
 |---|---|
-| `stdio` transport | ローカル MCP server プロセスに対応。 |
-| Streamable HTTP transport | リモート MCP server に対応。 |
-| SSE transport | リモート MCP server に対応。 |
-| MCP tools | `mcp__<server>__<tool>` という agent tool として公開。 |
-| MCP resources | `list_mcp_resources` と `read_mcp_resource` で公開。 |
-| MCP prompts | `mcp__<server>__<prompt>` という slash command として公開。 |
-| MCP `skill://` resources | `mcp__<server>__<skill>` という skill command として公開。 |
-| OAuth loopback auth | OAuth metadata を持つリモートサーバーに対応。 |
-| `roots/list` | 対応。IaC Code は現在の workspace root を file URI として返します。 |
-| `list_changed` notifications | tools、resources、prompts に対応。登録情報は動的に更新されます。 |
-| MCP elicitation | まだ未対応。elicitation を要求するサーバーには明確な未対応エラーを返します。 |
-| WebSocket、SDK、IDE transports | 未対応。 |
-| 動的 `headersHelper` commands | 未対応。静的 headers または環境変数参照を使ってください。 |
-| IaC Code を MCP server として実行 | 未対応。現在の IaC Code は MCP host のみです。 |
+| `stdio` トランスポート |ローカル MCP サーバー プロセスでサポートされています。 |
+|ストリーミング可能な HTTP トランスポート |リモート MCP サーバーでサポートされています。 |
+| SSEトランスポート |リモート MCP サーバーでサポートされています。 |
+| MCP ツール | `mcp__<server>__<tool>` という名前のエージェント ツールとして公開されます。 |
+| MCP リソース | `list_mcp_resources` および `read_mcp_resource` を通じて公開されます。 |
+| MCP プロンプト | `mcp__<server>__<prompt>` という名前のスラッシュ コマンドとして公開されます。 |
+| MCP `skill://` リソース | `mcp__<server>__<skill>` という名前のスキル コマンドとして公開されます。 |
+| OAuth ループバック認証 | OAuth メタデータを含むリモート サーバーでサポートされます。 |
+| `roots/list` |サポートされています。 IaC コードは、アクティブなワークスペースのルートをファイル URI として返します。 |
+| `list_changed` 通知 |ツール、リソース、プロンプトがサポートされています。登録は動的に更新されます。 |
+| MCP elicitation | interactive session でサポートされます。non-interactive run では安全に cancel されます。URL elicitation はユーザー確認後に元の tool call を retry できます。 |
+| WebSocket transport | URL のみの `ws://` と `wss://` server をサポートします。installed SDK transport は URL のみを受け取るため、WebSocket では headers、`headersHelper`、OAuth が拒否されます。 |
+| 動的 `headersHelper` commands | trusted `http` と `sse` server でサポートされます。helper は shell なし、有界 timeout、最小環境、脱敏 diagnostics で実行されます。 |
+| SDK および IDE トランスポート |サポートされていません。 |
+| MCP サーバーとしての IaC コード |サポートされていません。 IaC コードは現在、MCP ホストとしてのみ機能します。 |
 
-## 動作の流れ
+## How It Works
 
-実行時、IaC Code は次の処理を行います。
+At runtime IaC Code:
 
 1. ユーザー、プロジェクト、ローカル、セッションの各ソースから MCP 設定を読み込みます。
 2. `${VAR}` と `${VAR:-default}` 参照を展開します。
@@ -49,14 +50,15 @@ IaC Code は Model Context Protocol (MCP) のホストとして動作できま�
 4. 承認済みサーバーに制限付き並行数で接続します。
 5. tools、resources、prompts、`skill://` resources を発見します。
 6. それらの機能を既存の tool registry と command registry に登録します。
-7. MCP tool result を通常の IaC Code tool result に変換し、バイナリ artifact を runtime 設定ディレクトリに保存します。
-8. REPL、headless run、ACP session、A2A runtime の終了時に MCP client を切断します。
+7. 接続済みサーバーの instructions を server-scoped guidance として agent prompt に注入します。
+8. MCP tool result を通常の IaC Code tool result に変換し、バイナリ artifact と大きな text artifact を runtime 設定ディレクトリに保存します。
+9. REPL、headless run、ACP session、A2A runtime の終了時に MCP client を切断します。
 
-1 つの MCP server が失敗しても、他の設定済み server はブロックされません。接続と discovery の失敗は MCP warning として表示されます。
+1 台の MCP サーバーに障害が発生しても、他の構成済みサーバーはブロックされません。接続と検出の失敗は、MCP 警告として表示されたままになります。
 
-## 命名
+## Naming
 
-MCP tools と commands は公開名に正規化されます。
+MCP ツールとコマンドは、パブリック名に正規化されます。
 
 ```text
 mcp__<server>__<tool>
@@ -64,10 +66,13 @@ mcp__<server>__<prompt>
 mcp__<server>__<skill>
 ```
 
-英数字とアンダースコア以外の文字はアンダースコアになります。正規化後に機能名が衝突した場合、IaC Code は短い digest を追加して名前を一意にします。
+文字、数字、アンダースコア以外の文字はアンダースコアになります。検出された 2 つの機能が正規化後に衝突した場合、IaC コードは名前を一意に保つために短いダイジェストを追加します。
 
-## 関連ページ
+MCP スキルの場合、IaC コードは、エイリアスが既存のコマンドと競合しない場合、`<server>:<skill>` などの互換性エイリアスも登録します。診断では、パブリック名が正規化されている場合でも、元のサーバー、ツール、プロンプト、またはスキルの名前が保持されます。
 
+## Related Pages
+
+- [MCP クイックスタート](./quick-start.md)
 - [MCP 設定](./configuration.md)
 - [ツール、リソース、プロンプト、スキル](./capabilities.md)
 - [OAuth とセキュリティ](./oauth-and-security.md)

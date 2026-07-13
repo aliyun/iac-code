@@ -2,6 +2,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -17,6 +18,7 @@ from iac_code.services.permissions.audit import (
     emit_permission_boundary_audit,
     fingerprint_text,
     is_permission_audit_non_read_only,
+    permission_audit_operation,
     sanitize_free_text,
 )
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
@@ -45,6 +47,7 @@ def _read_audit_rows(config_dir: Path, record: PermissionAuditRecord) -> list[di
 
 def _has_truncated_object(value: object) -> bool:
     if isinstance(value, dict):
+        value = cast("dict[str, Any]", value)
         if value.get("type") == "object" and value.get("truncated") is True:
             return True
         return any(_has_truncated_object(child) for child in value.values())
@@ -339,7 +342,7 @@ def test_build_display_tool_input_truncates_deep_wide_and_cyclic_values() -> Non
 
 
 def test_build_display_tool_input_preserves_priority_fields_in_wide_objects() -> None:
-    tool_input = {f"field_{index}": index for index in range(100)}
+    tool_input: dict[str, object] = {f"field_{index}": index for index in range(100)}
     tool_input["command"] = "rm -rf /"
 
     display = build_display_tool_input(tool_input)
@@ -504,6 +507,140 @@ def test_boundary_audit_helper_emits_prompt_record(monkeypatch) -> None:
     }
 
 
+def test_boundary_audit_persisted_mcp_operation_omits_legacy_read_only_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
+    cwd = "/home/workspace/mcp-boundary"
+    event = Mock(
+        tool_name="mcp__yuque__search_docs",
+        tool_input={"query": "ros"},
+        tool_use_id="tool-mcp",
+        audit_context={
+            "session_id": "session-mcp-boundary",
+            "cwd": cwd,
+            "metadata": PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=False,
+                operation={
+                    "publicName": "mcp__yuque__search_docs",
+                    "originalServerName": "yuque",
+                    "originalToolName": "search",
+                    "isReadOnly": False,
+                    "isDestructive": True,
+                },
+            ),
+        },
+    )
+
+    assert emit_permission_boundary_audit(event, decision="allow", scope="once", source="acp_prompt") is True
+
+    [row] = _read_jsonl(_session_audit_log_path(tmp_path, cwd, "session-mcp-boundary"))
+    assert row["operation"] == {
+        "publicName": "mcp__yuque__search_docs",
+        "originalServerName": "yuque",
+        "originalToolName": "search",
+        "isReadOnly": False,
+        "isDestructive": True,
+    }
+    assert "is_read_only" not in row["operation"]
+
+
+def test_boundary_audit_folds_mcp_read_only_classification_into_camel_case(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
+    cwd = "/home/workspace/mcp-boundary"
+    event = Mock(
+        tool_name="mcp__yuque__search_docs",
+        tool_input={"query": "ros"},
+        tool_use_id="tool-mcp",
+        audit_context={
+            "session_id": "session-mcp-boundary",
+            "cwd": cwd,
+            "metadata": PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=False,
+                operation={
+                    "publicName": "mcp__yuque__search_docs",
+                    "originalServerName": "yuque",
+                    "originalToolName": "search",
+                },
+            ),
+        },
+    )
+
+    assert emit_permission_boundary_audit(event, decision="allow", scope="once", source="repl_prompt") is True
+
+    [row] = _read_jsonl(_session_audit_log_path(tmp_path, cwd, "session-mcp-boundary"))
+    assert row["operation"] == {
+        "publicName": "mcp__yuque__search_docs",
+        "originalServerName": "yuque",
+        "originalToolName": "search",
+        "isReadOnly": False,
+    }
+    assert "is_read_only" not in row["operation"]
+    assert "isDestructive" not in row["operation"]
+
+
+def test_boundary_audit_preserves_unsafe_mcp_original_tool_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", Mock())
+    cwd = "/home/workspace/mcp-boundary"
+    event = Mock(
+        tool_name="mcp__yuque__search_docs_collision",
+        tool_input={"query": "ros"},
+        tool_use_id="tool-mcp",
+        audit_context={
+            "session_id": "session-mcp-boundary",
+            "cwd": cwd,
+            "metadata": PermissionAuditMetadata(
+                scope="once",
+                source="permission_pipeline",
+                is_read_only=False,
+                operation={
+                    "publicName": "mcp__yuque__search_docs_collision",
+                    "originalServerName": "yuque space",
+                    "originalToolName": "search/docs\x1b[2J",
+                },
+            ),
+        },
+    )
+
+    assert emit_permission_boundary_audit(event, decision="allow", scope="once", source="repl_prompt") is True
+
+    [row] = _read_jsonl(_session_audit_log_path(tmp_path, cwd, "session-mcp-boundary"))
+    assert row["operation"] == {
+        "publicName": "mcp__yuque__search_docs_collision",
+        "originalServerName": "yuque space",
+        "originalToolName": "search/docs",
+        "isReadOnly": False,
+    }
+    assert "is_read_only" not in row["operation"]
+    serialized = json.dumps(row, ensure_ascii=False)
+    assert "\x1b" not in serialized
+
+
+def test_permission_audit_operation_uses_mcp_camel_case_with_partial_identity() -> None:
+    metadata = PermissionAuditMetadata(
+        scope="once",
+        source="permission_pipeline",
+        is_read_only=False,
+        operation={"publicName": "mcp__yuque__search_docs_collision"},
+    )
+
+    assert permission_audit_operation(metadata) == {
+        "publicName": "mcp__yuque__search_docs_collision",
+        "isReadOnly": False,
+    }
+
+
 def test_boundary_audit_helper_emits_read_only_denial(monkeypatch) -> None:
     records = []
     event = Mock(
@@ -534,6 +671,7 @@ def test_sanitize_free_text_redacts_and_caps() -> None:
         "Signature=signature-secret Authorization: Bearer bearer-secret " + ("x" * 300),
         max_chars=160,
     )
+    assert text is not None
     assert "ak-secret" not in text
     assert "api-secret" not in text
     assert "secret-token" not in text
@@ -571,6 +709,45 @@ def test_emit_permission_audit_writes_jsonl_and_telemetry(tmp_path: Path, monkey
     assert not (tmp_path / "logs" / "permission-audit.jsonl").exists()
     telemetry.assert_called_once()
     assert telemetry.call_args.args[0] == "iac.tool.permission.granted"
+
+
+def test_emit_permission_audit_preserves_sanitized_mcp_operation_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path))
+    telemetry = Mock()
+    monkeypatch.setattr("iac_code.services.permissions.audit.log_event", telemetry)
+    record = PermissionAuditRecord(
+        session_id="s-mcp",
+        cwd="/home/workspace/context-mcp",
+        tool_name="mcp__yuque__search_docs",
+        tool_use_id="tu-mcp",
+        decision="allow",
+        scope="settings_rule",
+        source="permission_pipeline",
+        operation={
+            "publicName": "mcp__yuque__search_docs",
+            "originalServerName": "yuque",
+            "originalToolName": "search-docs",
+            "isReadOnly": False,
+            "isDestructive": True,
+            "arbitrarySecret": "access_token=secret-token",
+        },
+    )
+
+    emit_permission_audit(record, settings=PermissionAuditSettings(max_file_bytes=1024, max_files=2))
+
+    [row] = _read_audit_rows(tmp_path, record)
+    assert row["operation"] == {
+        "publicName": "mcp__yuque__search_docs",
+        "originalServerName": "yuque",
+        "originalToolName": "search-docs",
+        "isReadOnly": False,
+        "isDestructive": True,
+    }
+    serialized = json.dumps(row)
+    assert "arbitrarySecret" not in serialized
+    assert "secret-token" not in serialized
+    telemetry.assert_called_once()
+    assert telemetry.call_args.args[1]["is_read_only"] is False
 
 
 def test_emit_permission_audit_requests_durable_jsonl_append(tmp_path: Path, monkeypatch) -> None:

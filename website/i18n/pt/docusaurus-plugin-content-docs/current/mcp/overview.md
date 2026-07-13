@@ -1,62 +1,64 @@
 ---
 sidebar_position: 1
 title: Integração MCP
-description: Use servidores Model Context Protocol para estender o IaC Code com ferramentas, recursos, prompts e skills externos.
+description: Use servidores Model Context Protocol para ampliar o IaC Code com ferramentas, recursos, prompts e habilidades externas.
 ---
 
 # Integração MCP
 
-O IaC Code pode atuar como host do Model Context Protocol (MCP). Servidores MCP estendem o agente com ferramentas externas, recursos, prompts e skills reutilizáveis, mantendo o fluxo de permissões, sessão, logs e tratamento de saída do IaC Code.
+IaC Code pode atuar como host Model Context Protocol (MCP). Os MCP servers ampliam o agent com tools, resources, prompts e reusable skills externos enquanto continuam passando pelos fluxos de permission, session, logging e output handling do IaC Code.
 
-Use MCP quando quiser que o IaC Code chame uma capacidade local ou remota que não é nativa do produto, como um catálogo privado de templates, um revisor interno de implantação, um serviço de inventário ou uma ferramenta especializada de operações em nuvem.
+Use o MCP quando quiser que o Código IaC chame um recurso local ou remoto que não esteja integrado ao produto, como um catálogo de modelos privado, um revisor de implantação interno, um serviço de consulta de inventário ou uma ferramenta especializada de operação em nuvem.
 
-## Superfícies compatíveis
+## Supported Surfaces
 
-| Superfície | Suporte MCP |
+| Surface | MCP support |
 |---|---|
-| REPL interativo | Carrega servidores de usuário, locais e de projeto aprovados. Pergunta antes de confiar em novos servidores de projeto `.mcp.json`. |
-| Modo não interativo | Carrega servidores de usuário, locais e de projeto aprovados. Nunca pergunta; servidores de projeto pendentes são ignorados com avisos. |
-| Servidor ACP | Aceita configurações MCP de clientes ACP na sessão e expõe as capacidades MCP descobertas dentro dessa sessão. |
-| Servidor A2A | Carrega MCP pelo runtime normal e pode publicar avisos MCP e progresso de ferramentas nos metadados de tarefas A2A. |
-| Modo pipeline | Usa as mesmas integrações de runtime do modo normal, incluindo progresso de ferramentas MCP e propagação de avisos. |
+| REPL interativo | Carrega servidores de projetos de usuários, locais e aprovados. Avisa antes de confiar nos servidores `.mcp.json` do novo projeto. |
+| Modo não interativo | Carrega servidores de projetos de usuários, locais e aprovados. Nunca solicita; servidores de projetos pendentes são ignorados com avisos. |
+| Servidor ACP | Aceita configurações de servidor MCP de sessão de clientes ACP e expõe recursos MCP descobertos dentro dessa sessão. |
+| Servidor A2A | Carrega o MCP durante o tempo de execução normal e pode publicar avisos do MCP e o progresso da ferramenta em metadados de tarefas A2A. |
+| Modo pipeline | Usa as mesmas integrações de tempo de execução do modo normal, incluindo o progresso da ferramenta MCP e a propagação de avisos. |
 
-## Capacidades compatíveis
+## Supported Capabilities
 
-| Capacidade | Status |
+| Capability | Status |
 |---|---|
-| Transporte `stdio` | Compatível com processos MCP locais. |
-| Transporte Streamable HTTP | Compatível com servidores MCP remotos. |
+| transporte `stdio` | Compatível com processos do servidor MCP local. |
+| Transporte HTTP streamável | Compatível com servidores MCP remotos. |
 | Transporte SSE | Compatível com servidores MCP remotos. |
-| Ferramentas MCP | Expostas como ferramentas de agente chamadas `mcp__<server>__<tool>`. |
-| Recursos MCP | Expostos por `list_mcp_resources` e `read_mcp_resource`. |
-| Prompts MCP | Expostos como comandos slash chamados `mcp__<server>__<prompt>`. |
-| Recursos MCP `skill://` | Expostos como comandos de skill chamados `mcp__<server>__<skill>`. |
-| Autenticação OAuth loopback | Compatível com servidores remotos que têm metadados OAuth. |
-| `roots/list` | Compatível. O IaC Code retorna a raiz ativa do workspace como URI file. |
-| Notificações `list_changed` | Compatíveis para ferramentas, recursos e prompts. Os registros são atualizados dinamicamente. |
-| MCP elicitation | Ainda não compatível. Servidores que solicitam elicitation recebem um erro claro de não suporte. |
-| Transportes WebSocket, SDK e IDE | Não compatíveis. |
-| Comandos dinâmicos `headersHelper` | Não compatíveis. Use headers estáticos ou referências a variáveis de ambiente. |
-| IaC Code como servidor MCP | Não compatível. Atualmente o IaC Code atua apenas como host MCP. |
+| Ferramentas MCP | Expostas como ferramentas de agente denominadas `mcp__<server>__<tool>`. |
+| Recursos do MCP | Exposto através de `list_mcp_resources` e `read_mcp_resource`. |
+| Solicitações do MCP | Exposto como comandos de barra denominados `mcp__<server>__<prompt>`. |
+| Recursos `skill://` do MCP | Exposto como comandos de habilidade denominados `mcp__<server>__<skill>`. |
+| Autenticação de loopback OAuth | Compatível com servidores remotos com metadados OAuth. |
+| `roots/list` | Suportado. O Código IaC retorna a raiz do espaço de trabalho ativo como um URI de arquivo. |
+| notificações `list_changed` | Com suporte para ferramentas, recursos e prompts. Os registros são atualizados dinamicamente. |
+| MCP elicitation | Suportado em sessões interativas. Execuções não interativas cancelam com segurança. URL elicitation pode repetir o tool call original após confirmação do usuário. |
+| WebSocket transport | Suportado para servers `ws://` e `wss://` somente com URL. WebSocket rejeita headers, `headersHelper` e OAuth porque o SDK transport instalado aceita apenas uma URL. |
+| Comandos dinâmicos `headersHelper` | Suportados para servers `http` e `sse` confiáveis. Helpers executam sem shell, com timeout limitado, ambiente mínimo e diagnostics redigidos. |
+| Transportes SDK e IDE | Não suportado. |
+| Código IaC como servidor MCP | Não suportado. O Código IaC atualmente atua apenas como um host MCP. |
 
-## Como funciona
+## How It Works
 
-Em tempo de execução, o IaC Code:
+At runtime IaC Code:
 
-1. Carrega configuração MCP de fontes de usuário, de projeto, locais e de sessão.
-2. Expande referências `${VAR}` e `${VAR:-default}`.
+1. Carrega a configuração do MCP de fontes de usuário, local, projeto e sessão.
+2. Expande as referências `${VAR}` e `${VAR:-default}`.
 3. Ignora servidores inseguros ou inválidos com avisos visíveis ao usuário.
-4. Conecta servidores aprovados com concorrência limitada.
+4. Conecta servidores aprovados com simultaneidade limitada.
 5. Descobre ferramentas, recursos, prompts e recursos `skill://`.
-6. Registra essas capacidades nos registros existentes de ferramentas e comandos.
-7. Converte resultados de ferramentas MCP em resultados normais do IaC Code e armazena artefatos binários no diretório de configuração runtime.
-8. Desconecta clientes MCP quando o REPL, a execução headless, a sessão ACP ou o runtime A2A é fechado.
+6. Registra esses recursos nos registros de ferramentas e comandos existentes.
+7. Injeta instruções do servidor conectado no prompt do agente como orientação no escopo do servidor.
+8. Converte os resultados da ferramenta MCP em resultados normais da ferramenta IaC Code, armazenando artefatos binários e artefatos de texto grandes no diretório de configuração de tempo de execução.
+9. Desconecta clientes MCP quando o tempo de execução REPL, headless run, sessão ACP ou A2A é fechado.
 
-Um servidor MCP com falha não bloqueia outros servidores configurados. Falhas de conexão e descoberta continuam visíveis como avisos MCP.
+Um servidor MCP com falha não bloqueia outros servidores configurados. As falhas de conexão e descoberta permanecem visíveis como avisos do MCP.
 
-## Nomes
+## Naming
 
-Ferramentas e comandos MCP são normalizados como nomes públicos:
+As ferramentas e comandos do MCP são normalizados em nomes públicos:
 
 ```text
 mcp__<server>__<tool>
@@ -64,11 +66,14 @@ mcp__<server>__<prompt>
 mcp__<server>__<skill>
 ```
 
-Caracteres fora de letras, números e sublinhados viram sublinhados. Se capacidades descobertas colidirem depois da normalização, o IaC Code adiciona um digest curto para manter nomes únicos.
+Caracteres fora de letras, números e sublinhados tornam-se sublinhados. Se dois recursos descobertos colidirem após a normalização, o Código IaC anexa um breve resumo para manter os nomes exclusivos.
 
-## Páginas relacionadas
+Para habilidades MCP, o Código IaC também registra um alias de compatibilidade como `<server>:<skill>` quando esse alias não entra em conflito com um comando existente. Os diagnósticos preservam os nomes originais do servidor, da ferramenta, do prompt ou da habilidade, mesmo quando os nomes públicos são normalizados.
 
+## Related Pages
+
+- [Inicio rapido MCP](./quick-start.md)
 - [Configuração MCP](./configuration.md)
-- [Ferramentas, recursos, prompts e skills](./capabilities.md)
+- [Ferramentas, recursos, prompts e habilidades](./capabilities.md)
 - [OAuth e segurança](./oauth-and-security.md)
 - [Solução de problemas](./troubleshooting.md)

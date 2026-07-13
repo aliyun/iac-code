@@ -6,14 +6,13 @@ Converts MCP server configurations from the ACP client into the internal format.
 from __future__ import annotations
 
 import logging
-from typing import Any
-
-from iac_code.acp.types import MCPServer
+from collections.abc import Iterable, Mapping
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
 
-def convert_mcp_configs(mcp_servers: list[MCPServer]) -> list[dict[str, Any]]:
+def convert_mcp_configs(mcp_servers: Iterable[Any]) -> list[dict[str, Any]]:
     """Convert ACP MCP server configurations to the internal format.
 
     Args:
@@ -30,7 +29,7 @@ def convert_mcp_configs(mcp_servers: list[MCPServer]) -> list[dict[str, Any]]:
     return configs
 
 
-def _convert_single_server(server: MCPServer) -> dict[str, Any] | None:
+def _convert_single_server(server: Any) -> dict[str, Any] | None:
     """Convert a single MCP server configuration."""
     import acp
 
@@ -49,6 +48,42 @@ def _convert_single_server(server: MCPServer) -> dict[str, Any] | None:
             "headers": {h.name: h.value for h in server.headers} if server.headers else {},
             "name": server.name,
         }
+    elif isinstance(server, Mapping):
+        return _convert_mapping_server(server)
     else:
         logger.warning("Unsupported MCP server type: %s", type(server).__name__)
         return None
+
+
+def _convert_mapping_server(server: Mapping[str, Any]) -> dict[str, Any] | None:
+    name = server.get("name")
+    if not isinstance(name, str) or not name:
+        logger.warning("Invalid MCP server config: missing name")
+        return None
+    converted = dict(server)
+    converted["name"] = name
+    if "headers" in converted:
+        converted["headers"] = _name_value_entries_to_dict(converted["headers"])
+    if "env" in converted:
+        converted["env"] = _name_value_entries_to_dict(converted["env"])
+    return converted
+
+
+def _name_value_entries_to_dict(value: object) -> dict[str, str]:
+    if isinstance(value, Mapping):
+        mapping = cast(Mapping[str, Any], value)
+        return {key: item for key, item in mapping.items() if isinstance(key, str) and isinstance(item, str)}
+    if not isinstance(value, list):
+        return {}
+    result: dict[str, str] = {}
+    for item in value:
+        if isinstance(item, Mapping):
+            entry = cast(Mapping[str, Any], item)
+            name = entry.get("name")
+            entry_value = entry.get("value")
+        else:
+            name = getattr(item, "name", None)
+            entry_value = getattr(item, "value", None)
+        if isinstance(name, str) and isinstance(entry_value, str):
+            result[name] = entry_value
+    return result

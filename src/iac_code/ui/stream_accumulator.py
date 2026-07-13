@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from iac_code.i18n import _
+from iac_code.mcp.progress import format_mcp_progress_text, mcp_progress_public_name
 from iac_code.types.stream_events import (
     MCPProgressEvent,
     StreamEvent,
@@ -194,10 +194,17 @@ class StreamAccumulator:
         if isinstance(event, MCPProgressEvent):
             rec = self.tool_records.get(event.tool_use_id or "")
             if rec is None and event.tool_use_id is None:
+                public_name = mcp_progress_public_name(event)
                 matches = [
                     item
                     for item in self.tool_records.values()
-                    if item.tool_name.startswith("mcp__{}__".format(event.server_name)) and not item.done
+                    if (
+                        (
+                            item.tool_name == public_name
+                            or item.tool_name.startswith("mcp__{}__".format(event.server_name))
+                        )
+                        and not item.done
+                    )
                 ]
                 if len(matches) == 1:
                     rec = matches[0]
@@ -227,11 +234,4 @@ class StreamAccumulator:
 
 
 def _format_mcp_progress(event: MCPProgressEvent) -> str:
-    parts = [_("MCP {server}:{tool}").format(server=event.server_name, tool=event.tool_name)]
-    if event.progress is not None and event.total is not None:
-        parts.append("{:g}/{:g}".format(event.progress, event.total))
-    elif event.progress is not None:
-        parts.append("{:g}".format(event.progress))
-    if event.message:
-        parts.append(event.message)
-    return ": ".join(parts)
+    return format_mcp_progress_text(event)

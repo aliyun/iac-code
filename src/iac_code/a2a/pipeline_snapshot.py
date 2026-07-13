@@ -1130,9 +1130,7 @@ def snapshot_needs_backup_commit_repair(snapshot: dict[str, Any] | None, events:
         return False
 
     matching_events = [
-        event
-        for event in events
-        if isinstance(event, dict) and _event_matches_snapshot_task_context(event, snapshot)
+        event for event in events if isinstance(event, dict) and _event_matches_snapshot_task_context(event, snapshot)
     ]
     committed_by_id: dict[str, dict[str, Any]] = {}
     committed_by_sequence_type: dict[tuple[int, str], dict[str, Any]] = {}
@@ -1167,10 +1165,9 @@ def snapshot_needs_backup_commit_repair(snapshot: dict[str, Any] | None, events:
         committed_event_type = _string_or_none(committed_event.get("eventType"))
         committed_sequence = _sequence_value(committed_event)
         for pending in pending_publications:
-            if (
-                committed_event_type == _string_or_none(pending.get("eventType"))
-                and committed_sequence >= _sequence_value(pending)
-            ):
+            if committed_event_type == _string_or_none(
+                pending.get("eventType")
+            ) and committed_sequence >= _sequence_value(pending):
                 return True
     return False
 

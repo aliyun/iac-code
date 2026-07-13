@@ -58,6 +58,15 @@ def _a2a_server_missing_dependencies_message() -> str:
     return _("A2A server dependencies are missing. Install with: pip install 'iac-code[a2a]'")
 
 
+def _piped_repl_requires_tty_message(piped_input: str) -> str:
+    if piped_input.strip().startswith("/mcp"):
+        return _(
+            "Interactive REPL input requires a terminal. The /mcp command opens an interactive MCP manager; "
+            "use `iac-code mcp --help` for non-interactive MCP commands."
+        )
+    return _("Interactive REPL input requires a terminal. Use `iac-code --prompt -` for non-interactive stdin input.")
+
+
 # `install-git-bash` is a Windows-only helper that installs Git for Windows
 # via the npmmirror mirror. We register it conditionally so it does not
 # show up in --help on non-Windows platforms (where it could not work).
@@ -361,10 +370,14 @@ def main(
                 initial_prompt = piped
             # Replace fd 0 itself with the real console so ALL code (including
             # low-level termios/os.read on fd 0) sees a real terminal.
-            if sys.platform == "win32":
-                tty_fd = os.open("CONIN$", os.O_RDWR)
-            else:
-                tty_fd = os.open("/dev/tty", os.O_RDWR)
+            try:
+                if sys.platform == "win32":
+                    tty_fd = os.open("CONIN$", os.O_RDWR)
+                else:
+                    tty_fd = os.open("/dev/tty", os.O_RDWR)
+            except OSError:
+                typer.echo(_piped_repl_requires_tty_message(piped), err=True)
+                raise typer.Exit(1)
             os.dup2(tty_fd, 0)
             os.close(tty_fd)
             sys.stdin = os.fdopen(0, "r", closefd=False)

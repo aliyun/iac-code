@@ -80,7 +80,7 @@ Create a new session with an independent agent runtime, tool registry, and LLM c
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cwd` | string | Yes | Absolute path to the working directory |
-| `mcpServers` | object | No | MCP server configuration; HTTP (streamable) and SSE servers are connected for the session |
+| `mcpServers` | array | No | MCP server configuration array injected into the session runtime; HTTP (streamable) and SSE servers are connected for the session |
 
 **Response Fields**
 
@@ -307,6 +307,27 @@ Each `session/update` notification carries an update object with a specific type
 | `CompactionEvent` | `AgentMessageChunk` | Context compaction notification |
 | `ErrorEvent` | `AgentMessageChunk` | Error information |
 
+### MCP Status and Warnings
+
+ACP exposes MCP runtime state in `session/update.params.update._meta.iac_code` on the wire:
+
+| Metadata key | ACP update type | Description |
+|---|---|---|
+| `mcpStatus` | `session_info_update` | Current MCP server state, pushed after session creation and when MCP auth, connection, or capability state changes. |
+| `mcpWarning` | `agent_message_chunk` | One startup or configuration warning, paired with a short user-visible warning message. |
+
+`mcpStatus` contains `servers` and `warnings`. Server entries include `serverName`, `state`, `authState`, `toolsCount`, `resourcesCount`, and `promptsCount`. `authState` values include `configured`, `needs-auth`, and `not-configured`.
+
+Common server states are `connected`, `failed`, `pending`, `needs-auth`, `pending-approval`, and `disabled`.
+
+Large status frames may include `truncated`, `truncationReason` set to `acp-frame-size-limit`, `serversOmittedCount`, `warningsOmittedCount`, or capability-list omission counts such as `toolsOmittedCount`.
+
+Tool entries under `servers[].tools[]` include `publicName`, `originalServerName`, `originalToolName`, and may include `annotations`. MCP annotations can carry hints such as `readOnlyHint` and `destructiveHint`.
+
+Permission audit operation records may include `isReadOnly` and `isDestructive` when MCP annotations provide read-only or destructive hints.
+
+`mcpWarning` entries include `serverName`, `code`, `message`, `severity`, `source`, and optionally `sourcePath` or `scope`. Common warning codes are `duplicate_config`, `invalid_name`, `invalid_config`, `missing_env`, `pending_approval`, `needs_auth`, `connection_failed`, `command_conflict`, `skill_read_failed`, `skill_truncated`, `alias_conflict`, and dynamic capability warnings such as `<capability>_failed`.
+
 ### Tool Call Lifecycle
 
 ```
@@ -355,6 +376,8 @@ The server sends a `request_permission` callback with:
 | `options` | array | Available permission choices |
 | `sessionId` | string | Session requesting permission |
 | `toolCall` | object | Tool call details (title, kind, input) |
+
+For MCP tool permission prompts, the ACP `ToolCallUpdate` `title` uses the public operation label and the content carries a redacted input summary. Through the ACP `_meta` extensibility field, the `toolCall._meta.iac_code.permission` object includes `permissionId`, `toolName`, `toolUseId`, `scope`, `inputSummary`, and, when available, `publicName`, `originalServerName`, `originalToolName`, `isReadOnly`, and `isDestructive`. `inputSummary` is shape and redaction metadata, not raw sensitive input.
 
 ### Permission Options
 

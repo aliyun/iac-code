@@ -10,6 +10,7 @@ from iac_code.a2a.artifacts import sanitize_public_tool_output_data
 from iac_code.acp.state import TurnState, display_tool_title
 from iac_code.acp.types import ACPContentBlock
 from iac_code.i18n import _
+from iac_code.mcp.progress import format_mcp_progress_text, format_mcp_progress_title, mcp_progress_metadata
 from iac_code.services.permissions.audit import build_input_summary
 from iac_code.types.stream_events import (
     CompactionEvent,
@@ -234,30 +235,17 @@ class ACPEventConverter:
                     )
                 ]
             case MCPProgressEvent(
-                server_name=server_name,
-                tool_name=tool_name,
-                progress=progress_value,
-                total=total,
-                message=message,
                 tool_use_id=tool_use_id,
             ):
+                progress_metadata = mcp_progress_metadata(event)
                 return [
                     acp.schema.ToolCallProgress(
                         session_update="tool_call_update",
-                        tool_call_id=self.acp_tool_call_id(tool_use_id or f"mcp-{server_name}-{tool_name}"),
-                        title=_("MCP {server}:{tool}").format(server=server_name, tool=tool_name),
+                        tool_call_id=self.acp_tool_call_id(tool_use_id or progress_metadata["publicName"]),
+                        title=format_mcp_progress_title(event),
                         status="in_progress",
-                        content=[
-                            _text_tool_content(
-                                _format_mcp_progress_text(
-                                    server_name=server_name,
-                                    tool_name=tool_name,
-                                    progress=progress_value,
-                                    total=total,
-                                    message=message,
-                                )
-                            )
-                        ],
+                        content=[_text_tool_content(format_mcp_progress_text(event))],
+                        field_meta={"iac_code": {"mcpProgress": progress_metadata}},
                     )
                 ]
             case ToolResultEvent(
@@ -364,24 +352,6 @@ def _text_tool_content(text: str) -> acp.schema.ContentToolCallContent:
         type="content",
         content=acp.schema.TextContentBlock(type="text", text=text),
     )
-
-
-def _format_mcp_progress_text(
-    *,
-    server_name: str,
-    tool_name: str,
-    progress: float | None,
-    total: float | None,
-    message: str | None,
-) -> str:
-    parts = [_("MCP {server}:{tool}").format(server=server_name, tool=tool_name)]
-    if progress is not None and total is not None:
-        parts.append("{:g}/{:g}".format(progress, total))
-    elif progress is not None:
-        parts.append("{:g}".format(progress))
-    if message:
-        parts.append(sanitize_public_text(message))
-    return ": ".join(parts)
 
 
 def _input_summary_text(tool_name: str, tool_input: dict[str, Any]) -> str:

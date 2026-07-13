@@ -10,6 +10,7 @@ from typing import Any
 
 from iac_code.a2a.artifacts import UnsafeArtifactNameError, artifact_filename_from_path, sanitize_public_artifact_text
 from iac_code.a2a.events import _tool_result_metadata, _truncate
+from iac_code.mcp.progress import mcp_progress_metadata
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.permissions.audit import build_input_summary, build_redacted_tool_input, fingerprint_text
 from iac_code.types.stream_events import (
@@ -48,6 +49,7 @@ _TOP_LEVEL_DATA_KEY_ALIASES = {
     "cleanup_status": "cleanupStatus",
     "cleanup_tool_use_id": "cleanupToolUseId",
     "last_error": "lastError",
+    "mcp_status": "mcpStatus",
     "progress_percentage": "progressPercentage",
     "resource_count": "resourceCount",
     "resource_id": "resourceId",
@@ -378,6 +380,16 @@ class PipelineEventTranslator:
                     created_at=created_at,
                 )
             ]
+        if event.type == PipelineEventType.MCP_STATUS:
+            envelope = self._envelope(
+                "mcp_status",
+                "pipeline",
+                "working",
+                _event_data(data),
+                created_at=created_at,
+            )
+            envelope.pop("status", None)
+            return [envelope]
         if event.type == PipelineEventType.BACKUP_BLOCKED:
             return [
                 self._envelope(
@@ -1038,6 +1050,10 @@ def _warning_event_data(data: dict[str, Any]) -> dict[str, Any]:
 
 def _sanitize_event_value(key: str, value: Any) -> Any:
     key_lower = key.lower()
+    if key_lower in {"mcp_status", "mcpstatus"} and isinstance(value, dict):
+        from iac_code.mcp.manager import sanitize_mcp_status_metadata
+
+        return sanitize_mcp_status_metadata(value)
     if isinstance(value, str):
         if any(marker in key_lower for marker in ("reason", "error", "message", "traceback")):
             return sanitize_public_artifact_text(value)
@@ -1319,18 +1335,20 @@ def _thinking_delta_data(event: ThinkingDeltaEvent) -> dict[str, Any]:
 
 
 def _mcp_progress_data(event: MCPProgressEvent) -> dict[str, Any]:
+    canonical_progress = mcp_progress_metadata(event)
     data: dict[str, Any] = {
-        "toolName": "mcp__{}__{}".format(event.server_name, event.tool_name),
-        "toolUseId": event.tool_use_id or "",
-        "serverName": event.server_name,
-        "mcpToolName": event.tool_name,
+        "toolName": canonical_progress["publicName"],
+        "toolUseId": canonical_progress["toolUseId"],
+        "serverName": canonical_progress["originalServerName"],
+        "mcpToolName": canonical_progress["originalToolName"],
+        "mcpProgress": canonical_progress,
     }
-    if event.progress is not None:
-        data["progress"] = event.progress
-    if event.total is not None:
-        data["total"] = event.total
-    if event.message:
-        data["message"] = _truncate(event.message)
+    if "progress" in canonical_progress:
+        data["progress"] = canonical_progress["progress"]
+    if "total" in canonical_progress:
+        data["total"] = canonical_progress["total"]
+    if "message" in canonical_progress:
+        data["message"] = canonical_progress["message"]
     return data
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import time
 import uuid
@@ -30,7 +31,7 @@ from iac_code.services.session_usage import SessionUsageStore, SessionUsageTotal
 from iac_code.tools.base import ToolContext, ToolRegistry, ToolResult
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY, ResultStorage
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
-from iac_code.types.permissions import PermissionAuditSettings, PermissionResult
+from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings, PermissionResult
 from iac_code.types.stream_events import (
     TOOL_RENDER_DISPLAY_NAME_KEY,
     TOOL_RENDER_METADATA_KEY,
@@ -161,6 +162,29 @@ def _emit_no_prompt_permission_audit(
     return result is not False
 
 
+def _with_prompt_permission_metadata(tool: Any, tool_input: dict, permission: PermissionResult) -> PermissionResult:
+    operation = tool.permission_audit_operation(tool_input)
+    if permission.audit is not None:
+        if permission.audit.operation or not operation:
+            return permission
+        return replace(permission, audit=replace(permission.audit, operation=operation))
+    if permission.behavior != "ask":
+        return permission
+    reason_type = permission.reason.type if permission.reason is not None else "prompt_required"
+    reason_detail = permission.reason.detail if permission.reason is not None else "prompt_required"
+    return replace(
+        permission,
+        audit=PermissionAuditMetadata(
+            scope="once",
+            source="permission_pipeline",
+            reason_type=reason_type,
+            reason_detail=reason_detail,
+            is_read_only=tool.is_read_only(tool_input),
+            operation=operation,
+        ),
+    )
+
+
 def _filter_recalled_memory_content(content: str, selected_files: list[str]) -> str:
     keep = [_normalize_memory_filename(filename) for filename in selected_files]
     keep = [filename for filename in keep if filename]
@@ -216,6 +240,7 @@ class AgentLoop:
         auto_trigger_skills: list[Any] | None = None,
         memory_recall_service: Any = None,
         system_prompt_refresher: Callable[[], str] | None = None,
+        background_task_starter: Callable[[], Any] | None = None,
         pause_event: asyncio.Event | None = None,
         tool_context_trusted_read_directories: list[str] | None = None,
         tool_context_relative_read_directories: list[str] | None = None,
@@ -249,6 +274,7 @@ class AgentLoop:
         self._auto_loaded_skills: set[str] = set()
         self._current_git_branch: str | None = None
         self._memory_recall_service = memory_recall_service
+        self._background_task_starter = background_task_starter
         self._recorded_memory_prefetch_ids: set[int] = set()
         self._pending_memory_prefetches: list[Any] = []
         self._memory_recall_generation = 0
@@ -603,6 +629,16 @@ class AgentLoop:
         self.system_prompt = system_prompt
         self.context_manager.set_system_prompt(system_prompt)
 
+    async def _start_background_tasks(self) -> None:
+        if self._background_task_starter is None:
+            return
+        try:
+            result = self._background_task_starter()
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:
+            logger.debug("Failed to start background tasks: {}", exc)
+
     def _sync_tool_system_prompt(self, system_prompt: str, tools: list[Any] | None = None) -> None:
         if tools is None:
             try:
@@ -749,6 +785,7 @@ class AgentLoop:
             entry_attrs[GenAiAttr.SYSTEM_INSTRUCTIONS] = serialize_system_instructions(self.system_prompt)
 
         with start_span(Spans.ENTRY, entry_attrs) as entry_span:
+            await self._start_background_tasks()
             interaction_started = time.monotonic()
             first_token_received = False
             final_text_chunks: list[str] = []
@@ -837,6 +874,7 @@ class AgentLoop:
             GenAiAttr.FRAMEWORK: FRAMEWORK_IAC_CODE,
         }
         with start_span(Spans.ENTRY, entry_attrs) as entry_span:
+            await self._start_background_tasks()
             interaction_started = time.monotonic()
             first_token_received = False
             final_text_chunks: list[str] = []
@@ -1080,6 +1118,7 @@ class AgentLoop:
                         permission = await check_tool_permission(tool, request.input, effective_perm_ctx)
                     else:
                         permission = await tool.check_permissions(request.input, {"cwd": context.cwd})
+                    permission = _with_prompt_permission_metadata(tool, request.input, permission)
 
                     audit_context = {
                         "session_id": self._session_id,

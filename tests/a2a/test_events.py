@@ -80,6 +80,7 @@ async def test_mcp_progress_publishes_tool_trace_metadata() -> None:
         event=MCPProgressEvent(
             server_name="live",
             tool_name="echo",
+            public_name="mcp__live__echo_8d3f",
             progress=1,
             total=2,
             message="halfway",
@@ -91,11 +92,22 @@ async def test_mcp_progress_publishes_tool_trace_metadata() -> None:
     tool = dumped["metadata"]["iac_code"]["tool"]
     assert tool["status"] == "progress"
     assert tool["toolUseId"] == "tool-1"
+    assert tool["name"] == "mcp__live__echo_8d3f"
     assert tool["mcp"]["serverName"] == "live"
     assert tool["mcp"]["toolName"] == "echo"
     assert tool["mcp"]["progress"] == 1
     assert tool["mcp"]["total"] == 2
     assert tool["mcp"]["message"] == "halfway"
+    assert tool["mcpProgress"] == {
+        "status": "progress",
+        "toolUseId": "tool-1",
+        "publicName": "mcp__live__echo_8d3f",
+        "originalServerName": "live",
+        "originalToolName": "echo",
+        "progress": 1,
+        "total": 2,
+        "message": "halfway",
+    }
 
 
 @pytest.mark.asyncio
@@ -783,6 +795,38 @@ async def test_failed_tool_result_metadata_is_sanitized() -> None:
     assert tool["status"] == "failed"
     assert "hunter2" not in str(tool["result"])
     assert "/Users/alice" not in str(tool["result"])
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_result_metadata_redacts_private_markers() -> None:
+    queue = FakeEventQueue()
+
+    await publish_stream_event(
+        queue,
+        task_id="task-1",
+        context_id="ctx-1",
+        event=ToolResultEvent(
+            tool_use_id="tool-1",
+            tool_name="mcp__remote__echo",
+            result=(
+                "command=IAC_PRIVATE_COMMAND_ARG_MARKER_56 "
+                "metadata=IAC_PRIVATE_NESTED_METADATA_MARKER_56 "
+                "url=https://user:pass@example.test/mcp?Signature=IAC_PRIVATE_QUERY_MARKER_56 "
+                "path=file:///Users/alice/.iac-code/settings.yml"
+            ),
+            is_error=False,
+        ),
+    )
+
+    dumped = dump(queue.events[0])
+    rendered = str(dumped["metadata"]["iac_code"]["tool"]["result"])
+    assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in rendered
+    assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" not in rendered
+    assert "IAC_PRIVATE_QUERY_MARKER_56" not in rendered
+    assert "user:pass" not in rendered
+    assert "/Users/alice" not in rendered
+    assert "[REDACTED]" in rendered
+    assert "[PATH]" in rendered
 
 
 @pytest.mark.asyncio

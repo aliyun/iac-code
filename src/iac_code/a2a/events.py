@@ -25,6 +25,8 @@ from iac_code.a2a.artifacts import (
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.metadata_redaction import A2AMetadataEchoRedactor
 from iac_code.i18n import _
+from iac_code.mcp.progress import mcp_progress_metadata, mcp_progress_public_name
+from iac_code.mcp.redaction import sanitize_mcp_public_data
 from iac_code.services.permissions.audit import (
     build_input_summary,
     build_redacted_tool_input,
@@ -118,8 +120,11 @@ async def publish_mcp_warnings(
     pushed_count = getattr(runtime, "_a2a_mcp_warnings_pushed_count", 0)
     if pushed_count >= len(warnings):
         return
+    from iac_code.mcp.manager import mcp_warning_metadata
+
     for warning in warnings[pushed_count:]:
-        message = str(getattr(warning, "message", None) or warning)
+        warning_metadata = mcp_warning_metadata(warning)
+        message = warning_metadata["message"]
         await _enqueue_status(
             event_queue,
             task_id=task_id,
@@ -132,11 +137,7 @@ async def publish_mcp_warnings(
             ),
             metadata={
                 "iac_code": {
-                    "mcpWarning": {
-                        "serverName": str(getattr(warning, "server_name", "")),
-                        "code": str(getattr(warning, "code", "")),
-                        "message": message,
-                    }
+                    "mcpWarning": warning_metadata,
                 }
             },
             iac_code_session_id=iac_code_session_id,
@@ -352,15 +353,18 @@ async def publish_stream_event(
                     _artifact_update_event(task_id=task_id, context_id=context_id, metadata=artifact_metadata)
                 )
             return None
+        result_metadata = _tool_result_metadata(
+            event.result,
+            is_error=event.is_error,
+            public_path_roots=event.public_path_roots,
+        )
+        if event.tool_name.startswith("mcp__"):
+            result_metadata = sanitize_mcp_public_data(result_metadata, fallback_summary="")
         tool_metadata = {
             "status": "failed" if event.is_error else "completed",
             "toolUseId": event.tool_use_id,
             "name": event.tool_name,
-            "result": _tool_result_metadata(
-                event.result,
-                is_error=event.is_error,
-                public_path_roots=event.public_path_roots,
-            ),
+            "result": result_metadata,
         }
         if artifact_metadata is not None:
             tool_metadata["artifact"] = artifact_metadata
@@ -380,17 +384,19 @@ async def publish_stream_event(
     if isinstance(event, MCPProgressEvent):
         if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
             return None
+        canonical_progress = mcp_progress_metadata(event)
         progress_metadata = {
             "status": "progress",
-            "toolUseId": event.tool_use_id or "",
-            "name": "mcp__{}__{}".format(event.server_name, event.tool_name),
+            "toolUseId": canonical_progress["toolUseId"],
+            "name": mcp_progress_public_name(event),
             "mcp": {
-                "serverName": event.server_name,
-                "toolName": event.tool_name,
-                "progress": event.progress,
-                "total": event.total,
-                "message": _truncate(event.message) if event.message else None,
+                "serverName": canonical_progress["originalServerName"],
+                "toolName": canonical_progress["originalToolName"],
+                "progress": canonical_progress.get("progress"),
+                "total": canonical_progress.get("total"),
+                "message": canonical_progress.get("message"),
             },
+            "mcpProgress": canonical_progress,
         }
         await _enqueue_status(
             event_queue,

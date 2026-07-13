@@ -80,7 +80,7 @@ ACP セッションは、対話実行および headless 実行と同じ v2 セ�
 | フィールド | 型 | 必須 | 説明 |
 |-------|------|----------|-------------|
 | `cwd` | string | はい | 作業ディレクトリの絶対パス |
-| `mcpServers` | object | いいえ | MCP サーバー設定。HTTP（streamable）と SSE サーバーはそのセッションで接続されます |
+| `mcpServers` | array | いいえ | セッション runtime に注入される MCP サーバー設定配列。HTTP（streamable）と SSE サーバーはそのセッションで接続されます |
 
 **レスポンスフィールド**
 
@@ -307,6 +307,27 @@ ACP セッションは、対話実行および headless 実行と同じ v2 セ�
 | `CompactionEvent` | `AgentMessageChunk` | コンテキストコンパクション通知 |
 | `ErrorEvent` | `AgentMessageChunk` | エラー情報 |
 
+### MCP ステータスと警告
+
+ACP は wire 上の `session/update.params.update._meta.iac_code` で MCP runtime state を公開します：
+
+| メタデータキー | ACP 更新タイプ | 説明 |
+|---|---|---|
+| `mcpStatus` | `session_info_update` | 現在の MCP server state。session 作成後、および MCP auth、connection、capability state の変更時に push されます。 |
+| `mcpWarning` | `agent_message_chunk` | 起動または設定の warning 1 件。短いユーザー表示用 warning text と一緒に送信されます。 |
+
+`mcpStatus` には `servers` と `warnings` が含まれます。Server entry には `serverName`、`state`、`authState`、`toolsCount`、`resourcesCount`、`promptsCount` が含まれます。`authState` の値には `configured`、`needs-auth`、`not-configured` があります。
+
+代表的な server state は `connected`、`failed`、`pending`、`needs-auth`、`pending-approval`、`disabled` です。
+
+大きい status frame では `truncated`、値が `acp-frame-size-limit` の `truncationReason`、`serversOmittedCount`、`warningsOmittedCount`、または `toolsOmittedCount` などの capability-list omission count が含まれる場合があります。
+
+`servers[].tools[]` の tool entry には `publicName`、`originalServerName`、`originalToolName` が含まれ、`annotations` を含む場合があります。MCP annotations は `readOnlyHint` や `destructiveHint` などの hint を運べます。
+
+Permission audit operation record は、MCP annotations が read-only または destructive hint を提供する場合に `isReadOnly` と `isDestructive` を含むことがあります。
+
+`mcpWarning` entry には `serverName`、`code`、`message`、`severity`、`source` が含まれ、任意で `sourcePath` または `scope` が含まれます。代表的な warning code は `duplicate_config`、`invalid_name`、`invalid_config`、`missing_env`、`pending_approval`、`needs_auth`、`connection_failed`、`command_conflict`、`skill_read_failed`、`skill_truncated`、`alias_conflict`、および `<capability>_failed` のような動的 capability warning です。
+
 ### ツール呼び出しのライフサイクル
 
 ```
@@ -355,6 +376,8 @@ ToolCallStart (status=in_progress)
 | `options` | array | 利用可能な権限選択肢 |
 | `sessionId` | string | 権限を要求するセッション |
 | `toolCall` | object | ツール呼び出しの詳細（タイトル、種別、入力） |
+
+MCP tool の権限プロンプトでは、ACP `ToolCallUpdate` の `title` が公開 operation label を使い、content は redacted input summary を運びます。ACP `_meta` extensibility field を通じて、`toolCall._meta.iac_code.permission` オブジェクトには `permissionId`、`toolName`、`toolUseId`、`scope`、`inputSummary` が入り、利用可能な場合は `publicName`、`originalServerName`、`originalToolName`、`isReadOnly`、`isDestructive` も入ります。`inputSummary` は形状と redaction metadata であり、生の sensitive input ではありません。
 
 ### 権限オプション
 

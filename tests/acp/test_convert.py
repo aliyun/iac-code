@@ -335,6 +335,7 @@ def test_mcp_progress_event_to_tool_call_progress() -> None:
         MCPProgressEvent(
             server_name="live",
             tool_name="echo",
+            public_name="mcp__live__echo_8d3f",
             progress=1,
             total=2,
             message="halfway",
@@ -348,6 +349,20 @@ def test_mcp_progress_event_to_tool_call_progress() -> None:
     assert update.tool_call_id == "turn-1/tool-1"
     assert update.status == "in_progress"
     assert update.content[0].content.text == "MCP live:echo: 1/2: halfway"
+    assert update.field_meta == {
+        "iac_code": {
+            "mcpProgress": {
+                "status": "progress",
+                "toolUseId": "tool-1",
+                "publicName": "mcp__live__echo_8d3f",
+                "originalServerName": "live",
+                "originalToolName": "echo",
+                "progress": 1,
+                "total": 2,
+                "message": "halfway",
+            }
+        }
+    }
 
 
 def test_mcp_progress_event_redacts_public_message_text() -> None:
@@ -365,10 +380,44 @@ def test_mcp_progress_event_redacts_public_message_text() -> None:
     )
 
     text = updates[0].content[0].content.text
+    meta = updates[0].field_meta["iac_code"]["mcpProgress"]
     assert "sk-live-secret" not in text
     assert "/Users/alice" not in text
+    assert "sk-live-secret" not in str(meta)
+    assert "/Users/alice" not in str(meta)
     assert "api_key=[REDACTED]" in text
-    assert "path=[PATH]" in text
+    assert meta["message"] == "api_key=[REDACTED] path=[PATH]"
+
+
+def test_mcp_progress_event_redacts_title_content_and_metadata() -> None:
+    converter = ACPEventConverter(turn_id="turn-1")
+
+    updates = converter.event_to_updates(
+        MCPProgressEvent(
+            server_name="live api_key=sk-live-secret",
+            tool_name="echo /Users/alice/.iac-code/settings.yml",
+            public_name="mcp__live__echo_PRIVATE_MARKER_59",
+            progress=1,
+            total=2,
+            message="phase api_key=sk-live-secret /Users/alice/.iac-code/settings.yml",
+        )
+    )
+
+    update = updates[0]
+    rendered = "{} {} {} {}".format(
+        update.tool_call_id,
+        update.title,
+        update.content[0].content.text,
+        update.field_meta,
+    )
+    assert "sk-live-secret" not in rendered
+    assert "PRIVATE_MARKER_59" not in rendered
+    assert "/Users/alice" not in rendered
+    assert update.tool_call_id == "turn-1/[REDACTED]"
+    assert update.title == "MCP live api_key=[REDACTED]:echo [PATH]"
+    assert update.field_meta["iac_code"]["mcpProgress"]["toolUseId"] == ""
+    assert update.field_meta["iac_code"]["mcpProgress"]["publicName"] == "[REDACTED]"
+    assert "phase api_key=[REDACTED] [PATH]" in update.content[0].content.text
 
 
 # ---------------------------------------------------------------------------

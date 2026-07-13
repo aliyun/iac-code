@@ -1854,6 +1854,7 @@ class TestAgentLoopStreaming:
             input_schema={},
             needs_event_queue=lambda: False,
             check_permissions=AsyncMock(return_value=PermissionResult(behavior="allow")),
+            permission_audit_operation=lambda tool_input: None,
             user_facing_name=lambda input=None: "Rendered tool",
             render_tool_result_message=lambda output, *, is_error=False, verbose=False: (
                 "verbose result" if verbose else "compact result"

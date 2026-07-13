@@ -22,6 +22,7 @@ Slash 命令用于在交互式会话中控制 IaC Code。输入 `/` 可以查看
 | `/exit` | 退出交互式 REPL。别名：`/quit`、`/q`。 |
 | `/help` | 在 REPL 中显示可用命令和常用快捷键。别名：`/?`。 |
 | `/memory` | 打开记忆选择器。可以编辑项目或用户的 `AGENTS.md` 文件，切换 auto-memory，并在 auto-memory 开启时打开项目 auto-memory 文件夹。 |
+| `/mcp [enable\|disable\|reconnect ...]` | 在交互式 REPL 中管理 MCP 服务器。不带参数时打开 MCP 管理器，可查看状态、诊断、tools、resources、prompts、OAuth 认证、审批、启用/禁用、重连和删除操作；快捷操作可以启用、禁用或重连已配置的服务器。 |
 | `/model [model_name]` | 查看或切换当前模型。带 `model_name` 时，会直接为当前提供商切换到该模型；不带参数时，如果已配置提供商，会打开交互式模型选择器；在无控制台 UI 的场景中会显示当前模型。 |
 | `/rename <name>` | 为当前会话命名。名称会显示在欢迎横幅、退出提示和 `/resume` 选择器中；当它能唯一标识一个会话时，也可以用于 `/resume` 或 `--resume`。 |
 | `/resume [session id\|unique id prefix\|unique session name]` | 恢复历史会话。带参数时，IaC Code 会把它解析为精确会话 ID、唯一 ID 前缀或唯一会话名称；不带参数时打开交互式会话选择器。跨项目会话不会直接热切换，而是打印 `cd ... && iac-code --resume <id>` 命令。 |

@@ -250,6 +250,7 @@ class MCPProgressEvent(ToolEmittedEvent):
     total: float | None = None
     message: str | None = None
     tool_use_id: str | None = None
+    public_name: str | None = None
     type: Literal["mcp_progress"] = "mcp_progress"
 
 

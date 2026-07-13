@@ -261,6 +261,14 @@ class Tool(ABC):
         """Whether the tool performs destructive operations."""
         return False
 
+    def permission_audit_operation(self, input: dict | None = None) -> dict[str, object]:
+        """Static operation metadata for permission audit records.
+
+        This must be cheap and side-effect free because permission rules may
+        use it before running tool-specific permission checks.
+        """
+        return {}
+
     def needs_event_queue(self) -> bool:
         """Override to return True if this tool emits ToolEmittedEvent subclasses.
 
