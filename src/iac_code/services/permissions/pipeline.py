@@ -55,8 +55,12 @@ def _audit(
     reason_type: str | None = None,
     reason_detail: str | None = None,
     is_read_only: bool | None = None,
+    operation: dict[str, object] | None = None,
     inherit: PermissionAuditMetadata | None = None,
 ) -> PermissionAuditMetadata:
+    final_operation = dict(operation or {})
+    if inherit is not None:
+        final_operation.update(inherit.operation)
     return PermissionAuditMetadata(
         scope=scope,
         source="permission_pipeline",
@@ -65,7 +69,7 @@ def _audit(
         reason_type=reason_type,
         reason_detail=reason_detail,
         is_read_only=inherit.is_read_only if inherit is not None and inherit.is_read_only is not None else is_read_only,
-        operation=dict(inherit.operation) if inherit is not None else {},
+        operation=final_operation,
     )
 
 
@@ -91,6 +95,7 @@ def _with_prompt_audit(tool: Tool, input: dict, result: PermissionResult) -> Per
             reason_type=reason_type,
             reason_detail=reason_type,
             is_read_only=tool.is_read_only(input),
+            operation=tool.permission_audit_operation(input),
         ),
     )
 
@@ -115,6 +120,7 @@ async def check_tool_permission(
                 reason_type="rule",
                 reason_detail="matched deny rule: {}".format(rule),
                 is_read_only=tool.is_read_only(input),
+                operation=tool.permission_audit_operation(input),
             ),
         )
 
@@ -141,6 +147,7 @@ async def check_tool_permission(
                 reason_type="rule",
                 reason_detail=detail,
                 is_read_only=tool.is_read_only(input),
+                operation=tool.permission_audit_operation(input),
                 inherit=result.audit,
             ),
         )
@@ -159,6 +166,7 @@ async def check_tool_permission(
                 reason_type="rule",
                 reason_detail=_("matched ask rule(s): {}").format(rule),
                 is_read_only=tool.is_read_only(input),
+                operation=tool.permission_audit_operation(input),
                 inherit=result.audit,
             ),
         )
@@ -176,6 +184,7 @@ async def check_tool_permission(
                 reason_type="bypass_permissions",
                 reason_detail="bypass_permissions mode",
                 is_read_only=tool.is_read_only(input),
+                operation=tool.permission_audit_operation(input),
                 inherit=result.audit,
             ),
         )
@@ -198,6 +207,8 @@ async def check_tool_permission(
                 reason_type="rule",
                 reason_detail="matched allow rule: {}".format(rule),
                 is_read_only=tool.is_read_only(input),
+                operation=tool.permission_audit_operation(input),
+                inherit=result.audit,
             ),
         )
 
@@ -211,6 +222,7 @@ async def check_tool_permission(
                 reason_type="prompt_required",
                 reason_detail="prompt_required",
                 is_read_only=tool.is_read_only(input),
+                operation=tool.permission_audit_operation(input),
             ),
         )
 
@@ -223,6 +235,7 @@ async def check_tool_permission(
                 reason_type="dont_ask",
                 reason_detail="dont_ask converted ask to deny",
                 is_read_only=tool.is_read_only(input),
+                operation=tool.permission_audit_operation(input),
                 inherit=result.audit,
             ),
         )

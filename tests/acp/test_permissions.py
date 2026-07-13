@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from types import SimpleNamespace
+from typing import cast
 
 import acp
 import pytest
@@ -12,6 +15,7 @@ from iac_code.acp.session import (
     _OPTION_REJECT_ONCE,
     ACPSession,
 )
+from iac_code.types.permissions import PermissionAuditMetadata, PermissionAuditSettings
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
 
 # ---------------------------------------------------------------------------
@@ -58,6 +62,10 @@ class FakeConn:
         self.updates.append(update)
 
 
+def _make_session(session_id: str, agent_loop, conn: object) -> ACPSession:
+    return ACPSession(session_id, agent_loop, cast(acp.Client, conn))
+
+
 class FakeLoopApprove:
     """Loop that yields one permission request then text."""
 
@@ -74,6 +82,57 @@ class FakeLoopApprove:
             yield TextDeltaEvent(text="executed")
         else:
             yield TextDeltaEvent(text="denied")
+
+
+class FakeMCPTool:
+    supports_blanket_allow = True
+
+    def user_facing_name(self, tool_input):
+        return "MCP yuque/search-docs"
+
+
+class FakeMCPRegistry:
+    def get(self, tool_name: str):
+        return FakeMCPTool() if tool_name == "mcp__yuque__search_docs" else None
+
+    def list_tools(self):
+        return []
+
+
+class FakeLoopMCPPermission:
+    tool_registry = FakeMCPRegistry()
+
+    async def run_streaming(self, prompt):
+        future = asyncio.get_running_loop().create_future()
+        yield PermissionRequestEvent(
+            tool_name="mcp__yuque__search_docs",
+            tool_input={"query": "ros", "api_token": "IAC_PRIVATE_PERMISSION_TOKEN_37"},
+            tool_use_id="mcp_tool1",
+            response_future=future,
+            permission_result=SimpleNamespace(suggestions=[]),
+            audit_context={
+                "session_id": "internal-session-id-37",
+                "settings": PermissionAuditSettings(max_file_bytes=123, max_files=2),
+                "metadata": PermissionAuditMetadata(
+                    scope="once",
+                    source="mcp",
+                    rule_source="secret-rule-source",
+                    rule="secret-rule-37",
+                    reason_type="secret-reason-type",
+                    reason_detail="secret-reason-detail",
+                    is_read_only=False,
+                    operation={
+                        "publicName": "mcp__yuque__search_docs",
+                        "originalServerName": "yuque",
+                        "originalToolName": "search-docs",
+                        "isReadOnly": False,
+                        "isDestructive": True,
+                    },
+                ),
+            },
+        )
+        await future
+        yield TextDeltaEvent(text="done")
 
 
 class FakeLoopMultiPermission:
@@ -124,7 +183,7 @@ class FakeLoopSlow:
 @pytest.mark.asyncio
 async def test_permission_approve_leads_to_tool_execution() -> None:
     conn = FakeConn(outcome="allow_once")
-    session = ACPSession("s1", FakeLoopApprove(), conn)
+    session = _make_session("s1", FakeLoopApprove(), conn)
 
     response = await session.prompt([acp.schema.TextContentBlock(type="text", text="create main.tf")])
 
@@ -143,7 +202,7 @@ async def test_permission_approve_leads_to_tool_execution() -> None:
 @pytest.mark.asyncio
 async def test_permission_deny_leads_to_denied_text() -> None:
     conn = FakeConn(outcome="reject_once")
-    session = ACPSession("s1", FakeLoopApprove(), conn)
+    session = _make_session("s1", FakeLoopApprove(), conn)
 
     response = await session.prompt([acp.schema.TextContentBlock(type="text", text="create main.tf")])
 
@@ -162,7 +221,7 @@ async def test_permission_deny_leads_to_denied_text() -> None:
 @pytest.mark.asyncio
 async def test_permission_request_cancelled_during_wait() -> None:
     conn = FakeConn(outcome="allow_once")
-    session = ACPSession("s1", FakeLoopSlow(), conn)
+    session = _make_session("s1", FakeLoopSlow(), conn)
 
     # Start prompt and cancel quickly
     task = asyncio.create_task(session.prompt([acp.schema.TextContentBlock(type="text", text="go")]))
@@ -181,7 +240,7 @@ async def test_permission_request_cancelled_during_wait() -> None:
 @pytest.mark.asyncio
 async def test_multiple_tools_requesting_permission_same_turn() -> None:
     conn = FakeConn(outcome="allow_once")
-    session = ACPSession("s1", FakeLoopMultiPermission(), conn)
+    session = _make_session("s1", FakeLoopMultiPermission(), conn)
 
     response = await session.prompt([acp.schema.TextContentBlock(type="text", text="do both")])
 
@@ -202,7 +261,7 @@ async def test_multiple_tools_requesting_permission_same_turn() -> None:
 @pytest.mark.asyncio
 async def test_permission_request_format() -> None:
     conn = FakeConn(outcome="allow_once")
-    session = ACPSession("s1", FakeLoopApprove(), conn)
+    session = _make_session("s1", FakeLoopApprove(), conn)
 
     await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
@@ -225,6 +284,44 @@ async def test_permission_request_format() -> None:
     assert "permission/" in tool_call.tool_call_id
     assert tool_call.title == "write_file"
     assert len(tool_call.content) >= 1
+    wire = tool_call.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
+    assert "_meta" not in wire
+    assert not {"publicName", "originalServerName", "originalToolName", "isReadOnly", "isDestructive"} & set(wire)
+
+
+@pytest.mark.asyncio
+async def test_mcp_permission_request_wire_includes_safe_metadata() -> None:
+    conn = FakeConn(outcome="allow_once")
+    session = _make_session("s1", FakeLoopMCPPermission(), conn)
+
+    await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
+
+    assert len(conn.permission_requests) == 1
+    tool_call = conn.permission_requests[0]["tool_call"]
+    assert tool_call.title == "MCP yuque/search-docs"
+    wire = tool_call.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
+    wire_text = json.dumps(wire, sort_keys=True)
+    assert "IAC_PRIVATE_PERMISSION_TOKEN_37" not in wire_text
+    for internal_value in (
+        "internal-session-id-37",
+        "secret-rule-source",
+        "secret-rule-37",
+        "secret-reason-type",
+        "secret-reason-detail",
+        "max_file_bytes",
+    ):
+        assert internal_value not in wire_text
+    permission = wire["_meta"]["iac_code"]["permission"]
+    assert permission["permissionId"] == "perm-mcp_tool1"
+    assert permission["toolName"] == "mcp__yuque__search_docs"
+    assert permission["toolUseId"] == "mcp_tool1"
+    assert permission["scope"] == "once"
+    assert permission["publicName"] == "mcp__yuque__search_docs"
+    assert permission["originalServerName"] == "yuque"
+    assert permission["originalToolName"] == "search-docs"
+    assert permission["isReadOnly"] is False
+    assert permission["isDestructive"] is True
+    assert permission["inputSummary"]["tool_name"] == "mcp__yuque__search_docs"
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +357,7 @@ class FakeLoopRepeatedTool:
 @pytest.mark.asyncio
 async def test_allow_always_caches_and_skips_second_request() -> None:
     conn = FakeConn(outcome="allow_always")
-    session = ACPSession("s1", FakeLoopRepeatedTool(), conn)
+    session = _make_session("s1", FakeLoopRepeatedTool(), conn)
 
     await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
@@ -277,7 +374,7 @@ async def test_allow_always_caches_and_skips_second_request() -> None:
 @pytest.mark.asyncio
 async def test_reject_always_caches_and_skips_second_request() -> None:
     conn = FakeConn(outcome="reject_always")
-    session = ACPSession("s1", FakeLoopRepeatedTool(), conn)
+    session = _make_session("s1", FakeLoopRepeatedTool(), conn)
 
     await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
@@ -294,7 +391,7 @@ async def test_reject_always_caches_and_skips_second_request() -> None:
 @pytest.mark.asyncio
 async def test_allow_once_does_not_cache() -> None:
     conn = FakeConn(outcome="allow_once")
-    session = ACPSession("s1", FakeLoopRepeatedTool(), conn)
+    session = _make_session("s1", FakeLoopRepeatedTool(), conn)
 
     await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
@@ -311,7 +408,7 @@ async def test_allow_once_does_not_cache() -> None:
 @pytest.mark.asyncio
 async def test_reject_once_does_not_cache() -> None:
     conn = FakeConn(outcome="reject_once")
-    session = ACPSession("s1", FakeLoopRepeatedTool(), conn)
+    session = _make_session("s1", FakeLoopRepeatedTool(), conn)
 
     await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
@@ -328,7 +425,7 @@ async def test_reject_once_does_not_cache() -> None:
 @pytest.mark.asyncio
 async def test_cache_is_per_tool() -> None:
     conn = FakeConn(outcome="allow_always")
-    session = ACPSession("s1", FakeLoopMultiPermission(), conn)
+    session = _make_session("s1", FakeLoopMultiPermission(), conn)
 
     await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
@@ -348,14 +445,14 @@ async def test_permission_memory_is_per_session() -> None:
     """Scenario 6: allow_always in session1 does NOT affect session2."""
     conn = FakeConn(outcome="allow_always")
 
-    session1 = ACPSession("s1", FakeLoopRepeatedTool(), conn)
+    session1 = _make_session("s1", FakeLoopRepeatedTool(), conn)
     await session1.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
     # session1 should have cached allow_always for write_file
     assert session1._permission_cache.get("write_file") == "always_allow"
 
     # session2 is a brand-new session — its cache should be empty
-    session2 = ACPSession("s2", FakeLoopRepeatedTool(), conn)
+    session2 = _make_session("s2", FakeLoopRepeatedTool(), conn)
     assert session2._permission_cache == {}
 
     # Running session2 should still trigger permission requests (not auto-allowed)
@@ -436,8 +533,8 @@ async def test_concurrent_permission_requests_do_not_interfere() -> None:
         }
     )
 
-    session_a = ACPSession("sess_a", FakeLoopSinglePermission("write_file"), conn)
-    session_b = ACPSession("sess_b", FakeLoopSinglePermission("write_file"), conn)
+    session_a = _make_session("sess_a", FakeLoopSinglePermission("write_file"), conn)
+    session_b = _make_session("sess_b", FakeLoopSinglePermission("write_file"), conn)
 
     # Run both prompts concurrently
     resp_a, resp_b = await asyncio.gather(
@@ -486,7 +583,7 @@ class _BasicPermissionLoop:
 @pytest.mark.asyncio
 async def test_permission_request_uses_acp_client() -> None:
     conn = FakeConn(outcome="allow_once")
-    session = ACPSession("s1", _BasicPermissionLoop(), conn)
+    session = _make_session("s1", _BasicPermissionLoop(), conn)
 
     response = await session.prompt([acp.schema.TextContentBlock(type="text", text="go")])
 
@@ -509,7 +606,7 @@ def test_permission_cache_evicts_oldest_when_above_limit(monkeypatch) -> None:
     monkeypatch.setattr(app_state_module, "_PERMISSION_CACHE_MAX_SIZE", 3)
 
     conn_stub = object()  # never actually used here
-    session = ACPSession("lru-session", agent_loop=object(), conn=conn_stub)  # type: ignore[arg-type]
+    session = _make_session("lru-session", object(), conn_stub)
 
     session._cache_permission("tool_a", "always_allow")
     session._cache_permission("tool_b", "always_allow")
@@ -531,7 +628,7 @@ def test_permission_cache_repeated_writes_do_not_grow(monkeypatch) -> None:
     monkeypatch.setattr(app_state_module, "_PERMISSION_CACHE_MAX_SIZE", 2)
 
     conn_stub = object()
-    session = ACPSession("lru-session", agent_loop=object(), conn=conn_stub)  # type: ignore[arg-type]
+    session = _make_session("lru-session", object(), conn_stub)
 
     for i in range(50):
         session._cache_permission(f"tool_{i % 4}", "always_allow")

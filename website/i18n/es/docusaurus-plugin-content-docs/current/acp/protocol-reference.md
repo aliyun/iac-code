@@ -80,7 +80,7 @@ Crea una nueva sesion con un runtime de agente independiente, registro de herram
 | Campo | Tipo | Requerido | Descripcion |
 |-------|------|----------|-------------|
 | `cwd` | string | Si | Ruta absoluta al directorio de trabajo |
-| `mcpServers` | object | No | Configuracion de servidores MCP; los servidores HTTP (streamable) y SSE se conectan para la sesion |
+| `mcpServers` | array | No | Array de configuracion de servidores MCP inyectado en el runtime de la sesion; los servidores HTTP (streamable) y SSE se conectan para la sesion |
 
 **Campos de respuesta**
 
@@ -307,6 +307,27 @@ Cada notificacion `session/update` lleva un objeto de actualizacion con un tipo 
 | `CompactionEvent` | `AgentMessageChunk` | Notificacion de compactacion de contexto |
 | `ErrorEvent` | `AgentMessageChunk` | Informacion de error |
 
+### Estado y advertencias MCP
+
+ACP expone el estado runtime MCP en la ruta wire `session/update.params.update._meta.iac_code`:
+
+| Clave de metadatos | Tipo de actualizacion ACP | Descripcion |
+|---|---|---|
+| `mcpStatus` | `session_info_update` | Estado actual de los servidores MCP, enviado despues de crear la sesion y cuando cambia el estado de MCP auth, connection o capability. |
+| `mcpWarning` | `agent_message_chunk` | Una advertencia de arranque o configuracion con un mensaje corto visible para el usuario. |
+
+`mcpStatus` contiene `servers` y `warnings`. Las entradas de server incluyen `serverName`, `state`, `authState`, `toolsCount`, `resourcesCount` y `promptsCount`. Los valores de `authState` incluyen `configured`, `needs-auth` y `not-configured`.
+
+Los server states comunes son `connected`, `failed`, `pending`, `needs-auth`, `pending-approval` y `disabled`.
+
+Los status frames grandes pueden incluir `truncated`, `truncationReason` con valor `acp-frame-size-limit`, `serversOmittedCount`, `warningsOmittedCount` o contadores de omision de capability list como `toolsOmittedCount`.
+
+Las entradas de tool bajo `servers[].tools[]` incluyen `publicName`, `originalServerName`, `originalToolName` y pueden incluir `annotations`. Las annotations MCP pueden llevar hints como `readOnlyHint` y `destructiveHint`.
+
+Los registros permission audit operation pueden incluir `isReadOnly` e `isDestructive` cuando las annotations MCP proporcionan hints read-only o destructive.
+
+Las entradas `mcpWarning` incluyen `serverName`, `code`, `message`, `severity`, `source` y opcionalmente `sourcePath` o `scope`. Los warning codes comunes son `duplicate_config`, `invalid_name`, `invalid_config`, `missing_env`, `pending_approval`, `needs_auth`, `connection_failed`, `command_conflict`, `skill_read_failed`, `skill_truncated`, `alias_conflict` y warnings dinamicos como `<capability>_failed`.
+
 ### Ciclo de vida de llamada a herramienta
 
 ```
@@ -355,6 +376,8 @@ El servidor envia un callback `request_permission` con:
 | `options` | array | Opciones de permisos disponibles |
 | `sessionId` | string | Sesion que solicita el permiso |
 | `toolCall` | object | Detalles de la llamada a herramienta (titulo, tipo, entrada) |
+
+Para prompts de permisos MCP, el `title` del ACP `ToolCallUpdate` usa la etiqueta publica de la operacion y el contenido lleva un resumen de entrada redactado. Mediante el campo de extensibilidad ACP `_meta`, el objeto `toolCall._meta.iac_code.permission` incluye `permissionId`, `toolName`, `toolUseId`, `scope`, `inputSummary` y, cuando estan disponibles, `publicName`, `originalServerName`, `originalToolName`, `isReadOnly` e `isDestructive`. `inputSummary` es metadata de forma y redaccion, no entrada sensible sin procesar.
 
 ### Opciones de permisos
 

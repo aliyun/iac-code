@@ -62,6 +62,7 @@ msgstr "MCP 警告: {message}"
 
 #: src/iac_code/a2a/events.py src/iac_code/a2a/executor.py
 #: src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/transports/dispatcher.py
 msgid "A temporary error occurred. Please retry."
 msgstr "一時的なエラーが発生しました。再試行してください。"
 
@@ -104,6 +105,7 @@ msgid "Current model {model} does not support image input."
 msgstr "現在のモデル {model} は画像入力をサポートしていません。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "認証が必要です。認証情報を設定して再試行してください。"
 
@@ -112,7 +114,7 @@ msgstr "認証が必要です。認証情報を設定して再試行してくだ
 msgid "Pipeline already running. Resume task {task_id}."
 msgstr "パイプラインはすでに実行中です。タスク {task_id} を再開してください。"
 
-#: src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/pipeline_executor.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "unknown"
 msgstr "不明"
 
@@ -194,13 +196,6 @@ msgstr "タスクが完了しました。"
 msgid "Task failed."
 msgstr "タスクが失敗しました。"
 
-#: src/iac_code/acp/convert.py src/iac_code/cli/headless.py
-#: src/iac_code/mcp/tools.py src/iac_code/ui/renderer.py
-#: src/iac_code/ui/stream_accumulator.py
-#, python-brace-format
-msgid "MCP {server}:{tool}"
-msgstr "MCP {server}:{tool}"
-
 #: src/iac_code/acp/convert.py src/iac_code/acp/session.py
 #: src/iac_code/ui/renderer.py
 #, python-brace-format
@@ -230,6 +225,15 @@ msgstr "セッションは別のプロジェクトに属しています。実行
 #, python-brace-format
 msgid "Input: {input}"
 msgstr "入力: {input}"
+
+#: src/iac_code/acp/session.py src/iac_code/mcp/manager.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/repl.py
+msgid "[truncated]"
+msgstr "[切り詰め]"
+
+#: src/iac_code/acp/session.py
+msgid "Authentication required. Please configure your API credentials."
+msgstr "認証が必要です。API 認証情報を設定してください。"
 
 #: src/iac_code/acp/session.py
 msgid "Allow once"
@@ -578,9 +582,10 @@ msgstr ""
 "  ドキュメント：https://aliyun.github.io/iac-"
 "code/ja/docs/configuration/authentication\n"
 
-#: src/iac_code/cli/headless.py
+#: src/iac_code/cli/headless.py src/iac_code/commands/mcp.py
 #: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
-#: src/iac_code/ui/renderer.py src/iac_code/ui/repl.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/renderer.py
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "エラー：{error}"
@@ -645,6 +650,21 @@ msgid ""
 "A2A server dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
 msgstr "A2A サーバーの依存関係が不足しています。次のコマンドでインストールしてください: pip install 'iac-code[a2a]'"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Interactive REPL input requires a terminal. The /mcp command opens an "
+"interactive MCP manager; use `iac-code mcp --help` for non-interactive "
+"MCP commands."
+msgstr ""
+"対話型 REPL 入力には端末が必要です。/mcp コマンドは対話型 MCP マネージャーを開きます。非対話型の MCP コマンドには `iac-"
+"code mcp --help` を使用してください。"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Interactive REPL input requires a terminal. Use `iac-code --prompt -` for"
+" non-interactive stdin input."
+msgstr "対話型 REPL 入力には端末が必要です。非対話型の標準入力には `iac-code --prompt -` を使用してください。"
 
 #: src/iac_code/cli/main.py
 msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
@@ -1123,6 +1143,16 @@ msgstr "スキルを管理"
 msgid "Show current session status"
 msgstr "現在のセッション状態を表示"
 
+#: src/iac_code/commands/__init__.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Manage MCP servers"
+msgstr "MCP サーバーを管理"
+
+#: src/iac_code/commands/__init__.py
+msgid ""
+"[enable|disable|reconnect [server-name] [--scope scope] [--source-path "
+"path]]"
+msgstr "[enable|disable|reconnect [サーバー名] [--scope スコープ] [--source-path パス]]"
+
 #: src/iac_code/commands/auth.py src/iac_code/ui/core/prompt_input.py
 msgid "Navigate"
 msgstr "移動"
@@ -1506,6 +1536,89 @@ msgstr "コマンド候補を表示"
 msgid "Exit"
 msgstr "終了"
 
+#: src/iac_code/commands/mcp.py
+msgid "MCP command requires a context."
+msgstr "MCP コマンドにはコンテキストが必要です。"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "--scope or --source-path cannot be used with /mcp {command} all."
+msgstr "--scope または --source-path は /mcp {command} all では使用できません。"
+
+#: src/iac_code/commands/mcp.py
+msgid "--scope requires a value."
+msgstr "--scope には値が必要です。"
+
+#: src/iac_code/commands/mcp.py
+msgid "--source-path requires a value."
+msgstr "--source-path には値が必要です。"
+
+#: src/iac_code/commands/mcp.py
+msgid "Error: --source-path requires --scope."
+msgstr "エラー: --source-path には --scope が必要です。"
+
+#: src/iac_code/commands/mcp.py src/iac_code/commands/thinking_enabled.py
+msgid "enabled"
+msgstr "有効"
+
+#: src/iac_code/commands/mcp.py src/iac_code/commands/thinking_enabled.py
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "disabled"
+msgstr "無効"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "All MCP servers are already {state}"
+msgstr "すべての MCP サーバーは既に {state} です"
+
+#: src/iac_code/commands/mcp.py
+msgid "Enabled"
+msgstr "有効化しました"
+
+#: src/iac_code/commands/mcp.py
+msgid "Disabled"
+msgstr "無効化しました"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "{verb} {count} MCP server(s)"
+msgstr "{count} 個の MCP サーバーを{verb}"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "MCP server \"{name}\" {state}"
+msgstr "MCP サーバー \"{name}\" {state}"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "MCP server \"{name}\" not found"
+msgstr "MCP サーバー \"{name}\" が見つかりません"
+
+#: src/iac_code/commands/mcp.py src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
+msgstr "無効な MCP スコープ {scope!r}。有効な値: user、local、project。"
+
+#: src/iac_code/commands/mcp.py src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Scope {scope!r} cannot be used for persisted MCP config."
+msgstr "スコープ {scope!r} は永続化された MCP 設定には使用できません。"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "Successfully reconnected to {name}"
+msgstr "{name} に正常に再接続しました"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "{name} requires authentication. Use /mcp to authenticate."
+msgstr "{name} には認証が必要です。/mcp で認証してください。"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "Failed to reconnect to {name}"
+msgstr "{name} への再接続に失敗しました"
+
 #: src/iac_code/commands/memory.py
 msgid "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
 msgstr "使い方: /memory-folder [<名前>|search <検索語>|delete <名前>|help]"
@@ -1758,7 +1871,7 @@ msgstr "システムプロンプト"
 msgid "Provider Messages"
 msgstr "プロバイダーメッセージ"
 
-#: src/iac_code/commands/prompt.py
+#: src/iac_code/commands/prompt.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "Tools"
 msgstr "ツール"
 
@@ -1910,7 +2023,7 @@ msgstr "{count} 件のクリーンアッププロンプト"
 msgid "Tool definitions available to the main model for this request."
 msgstr "このリクエストでメインモデルが利用できるツール定義です。"
 
-#: src/iac_code/commands/prompt.py
+#: src/iac_code/commands/prompt.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "{count} tools"
 msgstr "{count} 個のツール"
@@ -2130,14 +2243,6 @@ msgstr "thinking_enabled を {state} に切り替えました"
 msgid "Current thinking_enabled: {state}"
 msgstr "現在の thinking_enabled: {state}"
 
-#: src/iac_code/commands/thinking_enabled.py
-msgid "enabled"
-msgstr "有効"
-
-#: src/iac_code/commands/thinking_enabled.py
-msgid "disabled"
-msgstr "無効"
-
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py
 msgid "Options"
@@ -2243,6 +2348,10 @@ msgid "Manage MCP servers."
 msgstr "MCP server を管理します。"
 
 #: src/iac_code/mcp/cli.py
+msgid "Command or remote URL."
+msgstr "コマンドまたはリモート URL。"
+
+#: src/iac_code/mcp/cli.py
 msgid "Command for stdio MCP server."
 msgstr "stdio MCP server の command。"
 
@@ -2255,16 +2364,16 @@ msgid "Environment variable KEY=VALUE. Can be repeated."
 msgstr "環境変数 KEY=VALUE。繰り返し指定できます。"
 
 #: src/iac_code/mcp/cli.py
-msgid "Transport type: stdio, http, sse."
-msgstr "Transport type: stdio、http、sse。"
+msgid "Transport type: stdio, http, sse, ws."
+msgstr "トランスポート種別: stdio、http、sse、ws。"
 
 #: src/iac_code/mcp/cli.py
-msgid "Remote MCP URL for http/sse."
-msgstr "http/sse 用のリモート MCP URL。"
+msgid "Remote MCP URL for http/sse/ws."
+msgstr "http/sse/ws 用のリモート MCP URL。"
 
 #: src/iac_code/mcp/cli.py
-msgid "HTTP header KEY=VALUE. Can be repeated."
-msgstr "HTTP header KEY=VALUE。繰り返し指定できます。"
+msgid "HTTP header KEY=VALUE or Name: Value. Can be repeated."
+msgstr "HTTP ヘッダー KEY=VALUE または Name: Value。複数回指定できます。"
 
 #: src/iac_code/mcp/cli.py
 msgid "Config scope: user, local, project."
@@ -2295,17 +2404,29 @@ msgid "--command is required for stdio MCP servers."
 msgstr "stdio MCP server には --command が必要です。"
 
 #: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid ""
+"Warning: {operand!r} looks like a URL. Use --transport http, --transport "
+"sse, or --transport ws for remote MCP servers."
+msgstr ""
+"警告: {operand!r} は URL のように見えます。リモート MCP サーバーには --transport "
+"http、--transport sse、または --transport ws を使用してください。"
+
+#: src/iac_code/mcp/cli.py
 msgid "Warning: on Windows, bare npx may need to be configured as: cmd /c npx"
 msgstr "警告: Windows では、単独の npx は cmd /c npx として設定する必要がある場合があります"
 
 #: src/iac_code/mcp/cli.py
-msgid "--url is required for remote MCP servers."
-msgstr "リモート MCP server には --url が必要です。"
+msgid "Use either --url or a positional URL for remote MCP servers, not both."
+msgstr "リモート MCP サーバーには --url または位置引数 URL のどちらか一方だけを使用してください。"
 
 #: src/iac_code/mcp/cli.py
-#, python-brace-format
-msgid "Added MCP server {name!r} to {scope} config."
-msgstr "MCP server {name!r} を {scope} 設定に追加しました。"
+msgid "Remote MCP servers accept one positional URL, not command arguments."
+msgstr "リモート MCP サーバーは 1 つの位置引数 URL を受け付けます。コマンド引数は受け付けません。"
+
+#: src/iac_code/mcp/cli.py
+msgid "--url is required for remote MCP servers."
+msgstr "リモート MCP server には --url が必要です。"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
@@ -2317,6 +2438,23 @@ msgid "MCP server JSON must be an object."
 msgstr "MCP server JSON はオブジェクトでなければなりません。"
 
 #: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Added MCP server {name!r} to {scope} config."
+msgstr "MCP server {name!r} を {scope} 設定に追加しました。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Connect briefly and show MCP health."
+msgstr "短時間接続して MCP の状態を表示します。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Show configured MCP servers without health checks."
+msgstr "構成済み MCP サーバーをヘルスチェックなしで表示します。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Use either --check or --config-only, not both."
+msgstr "--check または --config-only のどちらか一方を使用してください。両方は指定できません。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "No MCP servers configured."
 msgstr "MCP server は設定されていません。"
 
@@ -2328,7 +2466,36 @@ msgstr "承認済み"
 msgid "pending"
 msgstr "保留中"
 
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "missing-env"
+msgstr "環境変数不足"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "invalid-config"
+msgstr "設定無効"
+
 #: src/iac_code/mcp/cli.py
+msgid "configured"
+msgstr "設定済み"
+
+#: src/iac_code/mcp/cli.py
+msgid "Persisted MCP config file path."
+msgstr "永続化された MCP 設定ファイルのパス。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Show configured MCP server JSON only."
+msgstr "構成済み MCP サーバーの JSON のみを表示します。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "MCP health check failed: {error}"
+msgstr "MCP ヘルスチェックに失敗しました: {error}"
+
+#: src/iac_code/mcp/cli.py
+msgid "No diagnostic was returned."
+msgstr "診断は返されませんでした。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/mcp/config.py
 #, python-brace-format
 msgid "MCP server {name!r} not found in {scope} config."
 msgstr "{scope} 設定に MCP server {name!r} が見つかりません。"
@@ -2339,11 +2506,45 @@ msgid "Removed MCP server {name!r} from {path}."
 msgstr "{path} から MCP server {name!r} を削除しました。"
 
 #: src/iac_code/mcp/cli.py
+msgid "MCP server name."
+msgstr "MCP サーバー名。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Reconnect all persisted MCP servers."
+msgstr "保存済みのすべての MCP サーバーに再接続します。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Use either a server name or --all, not both."
+msgstr "サーバー名または --all のどちらか一方だけを使用してください。"
+
+#: src/iac_code/mcp/cli.py
+msgid "--scope cannot be used with mcp reconnect --all."
+msgstr "--scope は mcp reconnect --all と併用できません。"
+
+#: src/iac_code/mcp/cli.py
+msgid "--source-path cannot be used with mcp reconnect --all."
+msgstr "--source-path は mcp reconnect --all と併用できません。"
+
+#: src/iac_code/mcp/cli.py
+msgid "MCP server name is required unless --all is used."
+msgstr "--all を使用しない場合は MCP サーバー名が必要です。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Disabled MCP server {name!r}."
+msgstr "MCP サーバー {name!r} を無効にしました。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Enabled MCP server {name!r}."
+msgstr "MCP サーバー {name!r} を有効にしました。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "Approved MCP server {name!r}."
 msgstr "MCP server {name!r} を承認しました。"
 
-#: src/iac_code/mcp/cli.py
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "Rejected MCP server {name!r}."
 msgstr "MCP server {name!r} を拒否しました。"
@@ -2358,6 +2559,10 @@ msgid "MCP auth failed for {name!r}: {error}"
 msgstr "{name!r} の MCP 認証に失敗しました: {error}"
 
 #: src/iac_code/mcp/cli.py
+msgid "OAuth authorization was cancelled."
+msgstr "OAuth 認可がキャンセルされました。"
+
+#: src/iac_code/mcp/cli.py
 #, python-brace-format
 msgid "Authenticated MCP server {name!r}."
 msgstr "MCP server {name!r} を認証しました。"
@@ -2369,27 +2574,80 @@ msgstr "MCP server {name!r} の保存済み認証状態をリセットしまし�
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
-msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
-msgstr "無効な MCP スコープ {scope!r}。有効な値: user、local、project。"
+msgid "Warning: {warning}"
+msgstr "警告: {warning}"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "yes"
+msgstr "はい"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "no"
+msgstr "いいえ"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Browser opened: {status}"
+msgstr "ブラウザーを開きました: {status}"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
-msgid "Scope {scope!r} cannot be used for persisted MCP config."
-msgstr "スコープ {scope!r} は永続化された MCP 設定には使用できません。"
+msgid "Authorization URL: {url}"
+msgstr "認可 URL: {url}"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
 msgid ""
-"MCP {section} {key!r} may contain a secret; use an environment variable "
-"reference like ${{VAR}} instead of storing plaintext."
+"Paste the callback URL or authorization code for MCP server {name!r}, or "
+"press Enter to wait for the loopback callback:"
 msgstr ""
-"MCP {section} {key!r} には secret が含まれる可能性があります。平文で保存せず、${{VAR}} "
-"のような環境変数参照を使用してください。"
+"MCP サーバー {name!r} のコールバック URL または認可コードを貼り付けるか、Enter "
+"キーを押してループバックコールバックを待機してください:"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
-msgid "{option} expects KEY=VALUE, got {value!r}."
-msgstr "{option} は KEY=VALUE を期待していますが、{value!r} を受け取りました。"
+msgid "MCP reconnect failed: {error}"
+msgstr "MCP の再接続に失敗しました: {error}"
+
+#: src/iac_code/mcp/cli.py
+msgid "--source-path requires --scope."
+msgstr "--source-path には --scope が必要です。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "MCP server {name!r} not found in persisted MCP config."
+msgstr "保存済み MCP 設定に MCP サーバー {name!r} が見つかりません。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid ""
+"MCP server {name!r} exists in multiple persisted scopes. Re-run with one "
+"of:"
+msgstr "MCP サーバー {name!r} は複数の保存済みスコープに存在します。次のいずれかを指定して再実行してください:"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid ""
+"Unknown MCP option {option!r}. Put subprocess flags after a command, for "
+"example: iac-code mcp add NAME -- npx --yes mcp-server."
+msgstr ""
+"不明な MCP オプション {option!r} です。サブプロセスのフラグはコマンドの後に置いてください。例: iac-code mcp add"
+" NAME -- npx --yes mcp-server。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Next: run `{command}` to check MCP server health."
+msgstr "次に `{command}` を実行して MCP サーバーの状態を確認してください。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Next: run `{command}` to authenticate this MCP server."
+msgstr "次に `{command}` を実行してこの MCP サーバーを認証してください。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "{option} expects {expected}, got {value!r}."
+msgstr "{option} は {expected} を期待しましたが、{value!r} を受け取りました。"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
@@ -2400,6 +2658,11 @@ msgstr "{option} には空でない key が必要です。"
 #, python-brace-format
 msgid "Project MCP server {name!r} not found."
 msgstr "project MCP server {name!r} が見つかりません。"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP server {server!r} is closing."
+msgstr "MCP サーバー {server!r} を終了しています。"
 
 #: src/iac_code/mcp/client.py src/iac_code/mcp/manager.py
 #, python-brace-format
@@ -2412,6 +2675,69 @@ msgid "Unsupported MCP transport: {transport}"
 msgstr "未対応の MCP transport: {transport}"
 
 #: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} could not be parsed: {error}"
+msgstr "サーバー {server!r} の MCP ヘッダーヘルパーを解析できませんでした: {error}"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} is empty."
+msgstr "サーバー {server!r} の MCP ヘッダーヘルパーは空です。"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} failed to start: {error}"
+msgstr "サーバー {server!r} の MCP ヘッダーヘルパーを開始できませんでした: {error}"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "timed out after {seconds:g} seconds"
+msgstr "{seconds:g} 秒後にタイムアウトしました"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "{stream} output too large"
+msgstr "{stream} の出力が大きすぎます"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "exited with status {status}"
+msgstr "ステータス {status} で終了しました"
+
+#: src/iac_code/mcp/client.py
+msgid "returned invalid JSON"
+msgstr "無効な JSON を返しました"
+
+#: src/iac_code/mcp/client.py
+msgid "must return a JSON object"
+msgstr "JSON オブジェクトを返す必要があります"
+
+#: src/iac_code/mcp/client.py
+msgid "must return string header names and values"
+msgstr "ヘッダー名と値は文字列で返す必要があります"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} {reason}."
+msgstr "サーバー {server!r} の MCP ヘッダーヘルパー: {reason}。"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid ""
+"{message}\n"
+"MCP headers helper stderr:\n"
+"{stderr}"
+msgstr ""
+"{message}\n"
+"MCP ヘッダーヘルパー stderr:\n"
+"{stderr}"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP HTTP session expired for server {server!r}; reconnect required."
+msgstr "サーバー {server!r} の MCP HTTP セッションが期限切れです。再接続が必要です。"
+
+#: src/iac_code/mcp/client.py src/iac_code/mcp/oauth.py
 #, python-brace-format
 msgid "MCP server {server!r} requires authentication."
 msgstr "MCP server {server!r} には認証が必要です。"
@@ -2427,14 +2753,10 @@ msgstr ""
 "MCP server stderr:\n"
 "{stderr}"
 
-#: src/iac_code/mcp/config.py
-msgid "MCP server names must be non-empty strings."
-msgstr "MCP server 名は空でない文字列でなければなりません。"
-
-#: src/iac_code/mcp/config.py
+#: src/iac_code/mcp/config.py src/iac_code/mcp/types.py
 #, python-brace-format
-msgid "Project MCP server {name!r} is pending approval."
-msgstr "project MCP server {name!r} は承認待ちです。"
+msgid "MCP server {server!r} config must be an object."
+msgstr "MCP server {server!r} の設定はオブジェクトでなければなりません。"
 
 #: src/iac_code/mcp/config.py
 #, python-brace-format
@@ -2448,12 +2770,26 @@ msgstr "MCP スコープ {scope!r} は永続化設定スコープではありま
 
 #: src/iac_code/mcp/config.py
 #, python-brace-format
+msgid "MCP source path {path} does not belong to {scope} scope."
+msgstr "MCP ソースパス {path} は {scope} スコープに属していません。"
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
 msgid ""
 "MCP server {existing!r} has the same content signature as {current!r}; "
 "keeping higher-precedence server {current!r}."
 msgstr ""
 "MCP server {existing!r} は {current!r} と同じ content signature "
 "を持っています。優先度の高い server {current!r} を保持します。"
+
+#: src/iac_code/mcp/config.py
+msgid "MCP server names must be non-empty strings."
+msgstr "MCP server 名は空でない文字列でなければなりません。"
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid "Project MCP server {name!r} is pending approval."
+msgstr "project MCP server {name!r} は承認待ちです。"
 
 #: src/iac_code/mcp/config.py
 #, python-brace-format
@@ -2473,18 +2809,69 @@ msgid "Environment variable {name!r} is not set for MCP config."
 msgstr "MCP 設定用の環境変数 {name!r} が設定されていません。"
 
 #: src/iac_code/mcp/manager.py
+msgid "authentication required"
+msgstr "認証が必要です"
+
+#: src/iac_code/mcp/manager.py
 #, python-brace-format
-msgid ""
-"MCP server {server!r} requested elicitation, but iac-code does not "
-"support elicitation yet."
-msgstr ""
-"MCP server {server!r} が elicitation を要求しましたが、iac-code はまだ elicitation "
-"をサポートしていません。"
+msgid "{} Required scopes: {}"
+msgstr "{} 必要なスコープ: {}"
+
+#: src/iac_code/mcp/manager.py
+msgid "MCP HTTP session expired; reconnect required."
+msgstr "MCP HTTP セッションが期限切れです。再接続が必要です。"
+
+#: src/iac_code/mcp/manager.py
+msgid "MCP server disabled."
+msgstr "MCP サーバーは無効です。"
+
+#: src/iac_code/mcp/manager.py
+msgid "Project MCP server pending approval."
+msgstr "プロジェクト MCP サーバーは承認待ちです。"
+
+#: src/iac_code/mcp/manager.py
+#, python-brace-format
+msgid "{} call failed: {}"
+msgstr "{} の呼び出しに失敗しました: {}"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth callback state did not match."
+msgstr "OAuth callback state が一致しません。"
 
 #: src/iac_code/mcp/oauth.py
 #, python-brace-format
 msgid "Could not discover OAuth metadata for MCP server {server!r}."
 msgstr "MCP server {server!r} の OAuth metadata を発見できませんでした。"
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} oauth.clientMetadataUrl must be an HTTPS URL with a"
+" non-root pathname."
+msgstr ""
+"MCP サーバー {server!r} の oauth.clientMetadataUrl は、ルート以外のパス名を持つ HTTPS URL "
+"である必要があります。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "The installed MCP SDK does not support OAuth client metadata URLs."
+msgstr "インストール済みの MCP SDK は OAuth クライアントメタデータ URL をサポートしていません。"
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid "required scopes: {scopes}"
+msgstr "必要なスコープ: {scopes}"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth dynamic client registration requires a remote MCP server URL."
+msgstr "OAuth 動的クライアント登録にはリモート MCP サーバー URL が必要です。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "Timed out waiting for MCP OAuth authorization URL."
+msgstr "MCP OAuth 認可 URL の待機中にタイムアウトしました。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth provider did not produce an authorization URL."
+msgstr "OAuth プロバイダーが認可 URL を生成しませんでした。"
 
 #: src/iac_code/mcp/oauth.py
 #, python-brace-format
@@ -2511,20 +2898,25 @@ msgid ""
 msgstr "MCP server {server!r} の OAuth refresh response に access token が含まれていません。"
 
 #: src/iac_code/mcp/oauth.py
-msgid "Timed out waiting for MCP OAuth callback."
-msgstr "MCP OAuth callback の待機がタイムアウトしました。"
+#, python-brace-format
+msgid "OAuth token revocation failed for MCP server {server!r}: {detail}"
+msgstr "MCP サーバー {server!r} の OAuth トークンの取り消しに失敗しました: {detail}"
 
-#: src/iac_code/mcp/oauth.py
+#: src/iac_code/mcp/oauth.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "OAuth manual callback input was empty."
+msgstr "OAuth の手動コールバック入力が空でした。"
+
+#: src/iac_code/mcp/oauth.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "OAuth callback did not include a code."
 msgstr "OAuth callback に code が含まれていません。"
 
 #: src/iac_code/mcp/oauth.py
-msgid "OAuth flow closed."
-msgstr "OAuth フローが閉じられました。"
+msgid "Timed out waiting for MCP OAuth callback."
+msgstr "MCP OAuth callback の待機がタイムアウトしました。"
 
 #: src/iac_code/mcp/oauth.py
-msgid "OAuth callback state did not match."
-msgstr "OAuth callback state が一致しません。"
+msgid "OAuth flow closed."
+msgstr "OAuth フローが閉じられました。"
 
 #: src/iac_code/mcp/oauth.py
 msgid "MCP authentication complete. You can close this window."
@@ -2535,8 +2927,40 @@ msgid "OAuth metadata endpoint did not return an object."
 msgstr "OAuth metadata endpoint がオブジェクトを返しませんでした。"
 
 #: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata redirects are not allowed."
+msgstr "OAuth メタデータのリダイレクトは許可されていません。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint must be an HTTPS URL."
+msgstr "OAuth メタデータエンドポイントは HTTPS URL である必要があります。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint must include a host."
+msgstr "OAuth メタデータエンドポイントにはホストが必要です。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth endpoint host is not allowed."
+msgstr "OAuth エンドポイントのホストは許可されていません。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint host is not allowed."
+msgstr "OAuth メタデータエンドポイントのホストは許可されていません。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint host could not be resolved."
+msgstr "OAuth メタデータエンドポイントのホストを解決できませんでした。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth token endpoint redirects are not allowed."
+msgstr "OAuth トークンエンドポイントのリダイレクトは許可されていません。"
+
+#: src/iac_code/mcp/oauth.py
 msgid "OAuth token endpoint did not return an object."
 msgstr "OAuth token endpoint がオブジェクトを返しませんでした。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth revocation endpoint redirects are not allowed."
+msgstr "OAuth 取り消しエンドポイントのリダイレクトは許可されていません。"
 
 #: src/iac_code/mcp/output.py
 #, python-brace-format
@@ -2578,7 +3002,7 @@ msgstr "（名前なし）"
 msgid "Resource link: {name}"
 msgstr "リソースリンク: {name}"
 
-#: src/iac_code/mcp/output.py
+#: src/iac_code/mcp/output.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "URI: {uri}"
 msgstr "URI: {uri}"
@@ -2599,6 +3023,18 @@ msgstr ""
 
 #: src/iac_code/mcp/output.py
 #, python-brace-format
+msgid ""
+"Saved large MCP text output as {artifact_id} ({chars} chars, {bytes} "
+"bytes)."
+msgstr "大きな MCP テキスト出力を {artifact_id} として保存しました（{chars} 文字、{bytes} バイト）。"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid "Read the full output from {path}."
+msgstr "完全な出力は {path} で確認してください。"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
 msgid "MCP {kind} content must contain base64 string data."
 msgstr "MCP {kind} コンテンツには base64 文字列データが必要です。"
 
@@ -2606,6 +3042,11 @@ msgstr "MCP {kind} コンテンツには base64 文字列データが必要で�
 #, python-brace-format
 msgid "Saved {mime_type} artifact as {artifact_id} ({bytes} bytes)."
 msgstr "{mime_type} artifact を {artifact_id} として保存しました（{bytes} bytes）。"
+
+#: src/iac_code/mcp/progress.py src/iac_code/mcp/tools.py
+#, python-brace-format
+msgid "MCP {server}:{tool}"
+msgstr "MCP {server}:{tool}"
 
 #: src/iac_code/mcp/prompts.py
 #, python-brace-format
@@ -2641,18 +3082,32 @@ msgstr "MCP skill command {command!r} は既存の command と競合していま
 
 #: src/iac_code/mcp/skills.py
 #, python-brace-format
+msgid "MCP skill {command!r} was truncated to fit safety limits."
+msgstr "MCP skill {command!r} は安全上の制限に収まるよう切り詰められました。"
+
+#: src/iac_code/mcp/skills.py
+#, python-brace-format
 msgid "MCP skill command {command!r} could not be loaded: {error}"
 msgstr "MCP skill command {command!r} を読み込めませんでした: {error}"
 
 #: src/iac_code/mcp/skills.py
 #, python-brace-format
-msgid "MCP skill {command!r} was truncated to fit safety limits."
-msgstr "MCP skill {command!r} は安全上の制限に収まるよう切り詰められました。"
+msgid "MCP skill alias {alias!r} conflicts with an existing command."
+msgstr "MCP スキルエイリアス {alias!r} は既存のコマンドと競合しています。"
 
 #: src/iac_code/mcp/tools.py
 #, python-brace-format
 msgid "MCP tool {tool!r} from server {server!r}."
 msgstr "server {server!r} の MCP tool {tool!r}。"
+
+#: src/iac_code/mcp/tools.py
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
+#: src/iac_code/tools/bash/bash_tool.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
+msgid "Allow {}?"
+msgstr "{} を許可しますか？"
 
 #: src/iac_code/mcp/tools.py
 msgid "List resources exposed by connected MCP servers."
@@ -2723,8 +3178,8 @@ msgstr "MCP server {server!r} の oauth.callbackPort は整数でなければな
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
-msgid "MCP server {server!r} config must be an object."
-msgstr "MCP server {server!r} の設定はオブジェクトでなければなりません。"
+msgid "MCP server {server!r} oauth.callbackPort must be between 0 and 65535."
+msgstr "MCP server {server!r} の oauth.callbackPort は 0 から 65535 の範囲でなければなりません。"
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
@@ -2739,17 +3194,41 @@ msgstr "MCP server {server!r} の type は文字列でなければなりませ�
 #: src/iac_code/mcp/types.py
 #, python-brace-format
 msgid ""
-"MCP server {server!r} uses unsupported field 'headersHelper'. Static "
-"headers are supported; dynamic headers need a later trusted-execution "
-"design."
-msgstr ""
-"MCP server {server!r} は未対応の field 'headersHelper' を使用しています。静的 headers "
-"はサポートされていますが、動的 headers には今後の信頼された実行設計が必要です。"
+"MCP server {server!r} field headersHelper is only supported for http and "
+"sse transports."
+msgstr "MCP サーバー {server!r} の headersHelper フィールドは http と sse トランスポートでのみサポートされます。"
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
 msgid "MCP server {server!r} has unsupported config fields: {fields}."
 msgstr "MCP server {server!r} には未対応の config fields があります: {fields}。"
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} WebSocket transport url must be a ws:// or wss:// "
+"URL with a host."
+msgstr ""
+"MCP サーバー {server!r} の WebSocket トランスポート URL はホスト付きの ws:// または wss:// URL "
+"である必要があります。"
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} WebSocket transport field {field} is not supported "
+"because the installed MCP SDK websocket_client accepts only a URL."
+msgstr ""
+"MCP サーバー {server!r} の WebSocket トランスポートフィールド {field} はサポートされません。インストール済み "
+"MCP SDK の websocket_client は URL のみを受け付けます。"
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP {section} {key!r} may contain a secret; use an environment variable "
+"reference like ${{VAR}} instead of storing plaintext."
+msgstr ""
+"MCP {section} {key!r} には secret が含まれる可能性があります。平文で保存せず、${{VAR}} "
+"のような環境変数参照を使用してください。"
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
@@ -3630,7 +4109,7 @@ msgid "passed"
 msgstr "合格"
 
 #: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
-#: src/iac_code/ui/repl.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/repl.py
 msgid "failed"
 msgstr "失敗"
 
@@ -3824,14 +4303,6 @@ msgstr "ROS スタック {stack_id} は現在の販売デプロイ手順で作�
 #, python-brace-format
 msgid "matched {behavior} rule: {rule}"
 msgstr "一致した {behavior} ルール: {rule}"
-
-#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
-#: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
-#: src/iac_code/tools/bash/bash_tool.py
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
-#, python-brace-format
-msgid "Allow {}?"
-msgstr "{} を許可しますか？"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -5096,6 +5567,7 @@ msgstr "リソース"
 msgid "Type"
 msgstr "種類"
 
+#: src/iac_code/ui/dialogs/mcp_manager.py
 #: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
 msgid "Status"
 msgstr "状態"
@@ -5310,6 +5782,44 @@ msgstr "Homebrew パッケージマネージャー"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
+msgid "{label}{suffix} ({choices}): "
+msgstr "{label}{suffix}（{choices}）: "
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{label}{suffix} (yes/no): "
+msgstr "{label}{suffix}（はい/いいえ）: "
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{label}{suffix}: "
+msgstr "{label}{suffix}： "
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "MCP server {server!r} requested user action."
+msgstr "MCP サーバー {server!r} がユーザー操作を要求しました。"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Press Enter when complete, type 'decline' to decline, or 'cancel' to "
+"cancel: "
+msgstr "完了したら Enter キーを押し、拒否する場合は 'decline'、キャンセルする場合は 'cancel' と入力してください: "
+
+#: src/iac_code/ui/repl.py
+msgid "Type 'accept' to accept, 'decline' to decline, or 'cancel' to cancel: "
+msgstr "承認する場合は 'accept'、拒否する場合は 'decline'、キャンセルする場合は 'cancel' と入力してください: "
+
+#: src/iac_code/ui/repl.py
+msgid "A value is required. Try again."
+msgstr "値が必要です。もう一度お試しください。"
+
+#: src/iac_code/ui/repl.py
+msgid "Invalid value. Try again."
+msgstr "値が無効です。もう一度お試しください。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
 msgid "Approve project MCP server {server!r} from {source}? [y/N] "
 msgstr "{source} からの project MCP server {server!r} を承認しますか？[y/N] "
 
@@ -5484,7 +5994,7 @@ msgstr "↺ ロールバッククリーンアップ再開: {count} 件のレコ�
 msgid "in progress"
 msgstr "進行中"
 
-#: src/iac_code/ui/repl.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/repl.py
 msgid "skipped"
 msgstr "スキップ済み"
 
@@ -6047,6 +6557,566 @@ msgstr "会話履歴がありません"
 msgid "Message Preview"
 msgstr "メッセージのプレビュー"
 
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No MCP servers configured. Run `iac-code mcp --help` to learn more."
+msgstr "MCP サーバーが設定されていません。詳細は `iac-code mcp --help` を実行してください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"Interactive MCP manager requires a TTY. Use `iac-code mcp list` or MCP "
+"quick commands."
+msgstr ""
+"インタラクティブ MCP マネージャーには TTY が必要です。`iac-code mcp list` または MCP "
+"クイックコマンドを使用してください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Refreshed MCP status."
+msgstr "MCP 状態を更新しました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Run `iac-code mcp --help` to add or inspect MCP servers."
+msgstr "MCP サーバーを追加または確認するには `iac-code mcp --help` を実行してください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Esc close"
+msgstr "Esc 閉じる"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "iac-code mcp --help for help"
+msgstr "ヘルプは iac-code mcp --help"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Enter select"
+msgstr "Enter 選択"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Up/Down navigate"
+msgstr "上/下 移動"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Actions"
+msgstr "操作"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Esc back"
+msgstr "Esc 戻る"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Tools for {name}"
+msgstr "{name} のツール"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No tools available"
+msgstr "利用可能なツールはありません"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Tool name: {name}"
+msgstr "ツール名: {name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Full name: {name}"
+msgstr "完全な名前: {name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Description:"
+msgstr "説明:"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Parameters:"
+msgstr "パラメーター:"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Resources for {name}"
+msgstr "{name} のリソース"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No resources available"
+msgstr "利用可能なリソースはありません"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Name: {name}"
+msgstr "名前: {name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "MIME type: {mime_type}"
+msgstr "MIME タイプ: {mime_type}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Prompts for {name}"
+msgstr "{name} のプロンプト"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No prompts available"
+msgstr "利用可能なプロンプトはありません"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Prompt name: {name}"
+msgstr "プロンプト名: {name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Arguments:"
+msgstr "引数:"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authenticating {name}"
+msgstr "{name} を認証中"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Copied!"
+msgstr "コピーしました!"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "press c to copy"
+msgstr "c を押してコピー"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid ""
+"If your browser does not open automatically, copy this URL manually "
+"({hint})."
+msgstr "ブラウザが自動で開かない場合は、この URL を手動でコピーしてください（{hint}）。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Waiting for OAuth callback."
+msgstr "OAuth コールバックを待機しています。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"If the redirect page shows a connection error, paste the URL from your "
+"browser address bar."
+msgstr "リダイレクトページに接続エラーが表示された場合は、ブラウザのアドレスバーの URL を貼り付けてください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "URL > {value}"
+msgstr "URL > {value}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "c copy URL"
+msgstr "c URL コピー"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Enter submit"
+msgstr "Enter 送信"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Esc cancel"
+msgstr "Esc キャンセル"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "This may take a few moments."
+msgstr "少し時間がかかる場合があります。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "MCP dialog dismissed"
+msgstr "MCP ダイアログを閉じました"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Failed to {action} MCP server {name!r}: {error}"
+msgstr "MCP サーバー {name!r} の {action} に失敗しました: {error}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Enable"
+msgstr "有効化"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Re-authenticate"
+msgstr "再認証"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Clear authentication"
+msgstr "認証情報をクリア"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Authenticate"
+msgstr "認証"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Remove"
+msgstr "削除"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Approve"
+msgstr "承認"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Reject"
+msgstr "拒否"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Disable"
+msgstr "無効化"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "View tools"
+msgstr "ツールを表示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "View resources"
+msgstr "リソースを表示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "View prompts"
+msgstr "プロンプトを表示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Reconnect"
+msgstr "再接続"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Completing OAuth authorization."
+msgstr "OAuth 認可を完了しています。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No authorization URL is available to copy."
+msgstr "コピーできる認可 URL がありません。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Copied authorization URL."
+msgstr "認可 URL をコピーしました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Could not copy authorization URL. Copy it manually from the text above."
+msgstr "認可 URL をコピーできませんでした。上のテキストから手動でコピーしてください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Reconnecting to {name}"
+msgstr "{name} に再接続しています"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Restarting MCP server process"
+msgstr "MCP サーバープロセスを再起動しています"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Connecting to {name}…"
+msgstr "{name} に接続しています…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Establishing connection to MCP server"
+msgstr "MCP サーバーへの接続を確立しています"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "MCP server {name!r} not found in project config."
+msgstr "MCP サーバー {name!r} がプロジェクト設定に見つかりません。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Project MCPs"
+msgstr "プロジェクト MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "User MCPs"
+msgstr "ユーザー MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Local MCPs"
+msgstr "ローカル MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Session MCPs"
+msgstr "セッション MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Built-in MCPs"
+msgstr "組み込み MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{scope} MCPs"
+msgstr "{scope} MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{heading} (always available)"
+msgstr "{heading}（常に利用可能）"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 server"
+msgstr "1 個のサーバー"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{count} servers"
+msgstr "{count} 個のサーバー"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 tool"
+msgstr "1 個のツール"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 resource"
+msgstr "リソース 1 件"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{count} resources"
+msgstr "{count} 件のリソース"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 prompt"
+msgstr "プロンプト 1 件"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{count} prompts"
+msgstr "{count} 件のプロンプト"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Unknown"
+msgstr "不明"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{name} MCP Server"
+msgstr "{name} MCP サーバー"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Auth"
+msgstr "認証"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Command"
+msgstr "コマンド"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Args"
+msgstr "引数"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "URL"
+msgstr "URL アドレス"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Config location"
+msgstr "設定場所"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Capabilities"
+msgstr "機能"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Resources"
+msgstr "リソース"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Prompts"
+msgstr "プロンプト"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Failure"
+msgstr "失敗"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Latest failure"
+msgstr "最新の失敗"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Latest refresh failure"
+msgstr "最新の更新失敗"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Tools refresh"
+msgstr "ツール更新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Resources refresh"
+msgstr "リソース更新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Prompts refresh"
+msgstr "プロンプト更新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{capability} refresh"
+msgstr "{capability} 更新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "needs authentication"
+msgstr "認証が必要"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "reconnecting ({attempt}/{max})…"
+msgstr "再接続中 ({attempt}/{max})…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "reconnecting…"
+msgstr "再接続中…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "connecting…"
+msgstr "接続中…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "pending approval"
+msgstr "承認待ち"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "connected"
+msgstr "接続済み"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "※ Debug logging is enabled. Log file: {path}"
+msgstr "※ デバッグログが有効です。ログファイル: {path}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "※ Debug logging is enabled; check the log file for MCP error details"
+msgstr "※ デバッグログが有効です。MCP エラーの詳細はログファイルを確認してください"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "※ Run iac-code --debug to see error logs"
+msgstr "※ エラーログを確認するには iac-code --debug を実行してください"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "authenticated"
+msgstr "認証済み"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "not authenticated"
+msgstr "未認証"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "tools"
+msgstr "ツール"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "resources"
+msgstr "リソース"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "prompts"
+msgstr "プロンプト"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "none"
+msgstr "なし"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "read-only"
+msgstr "読み取り専用"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "destructive"
+msgstr "破壊的"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "open-world"
+msgstr "オープンワールド"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid " (required)"
+msgstr " (必須)"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "MCP Config Diagnostics"
+msgstr "MCP 設定診断"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "For help configuring MCP servers, run `iac-code mcp --help`."
+msgstr "MCP サーバー設定のヘルプは `iac-code mcp --help` を実行してください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Failed to parse"
+msgstr "解析に失敗しました"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Contains warnings"
+msgstr "警告があります"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Location: {path}"
+msgstr "場所: {path}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "[Error]"
+msgstr "[エラー]"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "[Warning]"
+msgstr "[警告]"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Error reconnecting to {name}: {error}"
+msgstr "{name} への再接続中にエラーが発生しました: {error}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Reconnected to {name}."
+msgstr "{name} に再接続しました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{name} requires authentication. Use the 'Authenticate' option."
+msgstr "{name} には認証が必要です。'認証' オプションを使用してください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Failed to reconnect to {name}."
+msgstr "{name} への再接続に失敗しました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Unknown result when reconnecting to {name}."
+msgstr "{name} への再接続結果が不明です。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication successful. Reconnected to {name}."
+msgstr "認証に成功しました。{name} に再接続しました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication successful. Connected to {name}."
+msgstr "認証に成功しました。{name} に接続しました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication successful. Enable {name} to connect."
+msgstr "認証に成功しました。接続するには {name} を有効にしてください。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"Authentication successful, but server still requires authentication. You "
+"may need to manually restart iac-code."
+msgstr "認証は成功しましたが、サーバーはまだ認証を必要としています。iac-code を手動で再起動する必要があるかもしれません。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"Authentication successful, but server reconnection failed. You may need "
+"to manually restart iac-code for the changes to take effect."
+msgstr "認証は成功しましたが、サーバーの再接続に失敗しました。変更を反映するには、iac-code を手動で再起動する必要があるかもしれません。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication cleared for {name}."
+msgstr "{name} の認証をクリアしました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Removed MCP server {name!r}."
+msgstr "MCP サーバー {name!r} を削除しました。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Updated MCP server {name!r}."
+msgstr "MCP サーバー {name!r} を更新しました。"
+
 #: src/iac_code/ui/dialogs/memory.py
 msgid "Memory"
 msgstr "メモリ"
@@ -6519,6 +7589,129 @@ msgstr "通常ファイルではないファイルを開くことを拒否しま
 #~ msgid "Note: images are not supported in pipeline mode and will be ignored."
 #~ msgstr "注: パイプラインモードでは画像はサポートされておらず、無視されます。"
 
+#~ msgid ""
+#~ "MCP server {server!r} requested elicitation,"
+#~ " but iac-code does not support "
+#~ "elicitation yet."
+#~ msgstr ""
+#~ "MCP server {server!r} が elicitation "
+#~ "を要求しましたが、iac-code はまだ elicitation をサポートしていません。"
+
+#~ msgid ""
+#~ "MCP server {server!r} uses unsupported "
+#~ "field 'headersHelper'. Static headers are "
+#~ "supported; dynamic headers need a later"
+#~ " trusted-execution design."
+#~ msgstr ""
+#~ "MCP server {server!r} は未対応の field "
+#~ "'headersHelper' を使用しています。静的 headers はサポートされていますが、動的"
+#~ " headers には今後の信頼された実行設計が必要です。"
+
+#~ msgid "MCP command failed with exit code {code}."
+#~ msgstr "MCP command failed with exit code {code}."
+
+#~ msgid "MCP Servers"
+#~ msgstr "MCP Servers"
+
+#~ msgid "Scope"
+#~ msgstr "Scope"
+
+#~ msgid "Refresh"
+#~ msgstr "Refresh"
+
+#~ msgid "--scope can only be used once."
+#~ msgstr "--scope can only be used once."
+
+#~ msgid "Unknown MCP option {option!r}."
+#~ msgstr "Unknown MCP option {option!r}."
+
+#~ msgid "Unexpected MCP argument {argument!r}."
+#~ msgstr "Unexpected MCP argument {argument!r}."
+
+#~ msgid "MCP server name is required for {action}."
+#~ msgstr "MCP server name is required for {action}."
+
+#~ msgid "MCP server {server!r} oauth.clientMetadataUrl must be an HTTPS URL."
+#~ msgstr "MCP server {server!r} oauth.clientMetadataUrl must be an HTTPS URL."
+
+#~ msgid "Capability errors"
+#~ msgstr "ケイパビリティエラー"
+
+#~ msgid "Field"
+#~ msgstr "フィールド"
+
+#~ msgid "MCP Server: {name}"
+#~ msgstr "MCP サーバー: {name}"
+
+#~ msgid "MCP server name is required for show."
+#~ msgstr "show には MCP サーバー名が必要です。"
+
+#~ msgid "MCP server {name!r} is not active in {scope} scope."
+#~ msgstr "MCP サーバー {name!r} は {scope} スコープでアクティブではありません。"
+
+#~ msgid "MCP server {name!r} is not active."
+#~ msgstr "MCP サーバー {name!r} はアクティブではありません。"
+
+#~ msgid "MIME type"
+#~ msgstr "MIME タイプ"
+
+#~ msgid "Original name"
+#~ msgstr "元の名前"
+
+#~ msgid "URI"
+#~ msgstr "URI"
+
+#~ msgid "Value"
+#~ msgstr "値"
+
+#~ msgid "Dynamic MCPs"
+#~ msgstr "動的 MCP"
+
+#~ msgid ""
+#~ "Use /mcp to open the MCP manager."
+#~ " Use `iac-code mcp <command>` for "
+#~ "CLI management."
+#~ msgstr "/mcp で MCP マネージャーを開きます。CLI 管理には `iac-code mcp <command>` を使用してください。"
+
+#~ msgid "Paste callback URL or authorization code, then press Enter."
+#~ msgstr "コールバック URL または認可コードを貼り付けて Enter を押してください。"
+
+#~ msgid "Callback input: {value}"
+#~ msgstr "コールバック入力: {value}"
+
+#~ msgid "Name"
+#~ msgstr "Name"
+
+#~ msgid "State"
+#~ msgstr "State"
+
+#~ msgid "Original server: {name}"
+#~ msgstr "元のサーバー: {name}"
+
+#~ msgid "Transport"
+#~ msgstr "Transport"
+
+#~ msgid "Reconnected MCP server {name!r}: {state}."
+#~ msgstr "MCP サーバー {name!r} を再接続しました: {state}。"
+
+#~ msgid "Reconnected MCP server {name!r}."
+#~ msgstr "MCP サーバー {name!r} を再接続しました。"
+
+#~ msgid "No tools reported for this MCP server."
+#~ msgstr "この MCP サーバーからツールは報告されていません。"
+
+#~ msgid "Annotations: {annotations}"
+#~ msgstr "アノテーション: {annotations}"
+
+#~ msgid "[status|auth|reconnect|disable|enable]"
+#~ msgstr "[status|auth|reconnect|disable|enable]"
+
+#~ msgid "Enter details"
+#~ msgstr "Enter 詳細"
+
+#~ msgid "Error"
+#~ msgstr "エラー"
+
 #~ msgid "review"
 #~ msgstr "レビュー"
 
@@ -6527,4 +7720,16 @@ msgstr "通常ファイルではないファイルを開くことを拒否しま
 
 #~ msgid "Pipeline mode does not support --input-format stream-json."
 #~ msgstr "Pipeline モードは --input-format stream-json をサポートしていません。"
+
+#~ msgid "Transport type: stdio, http, sse."
+#~ msgstr "Transport type: stdio、http、sse。"
+
+#~ msgid "Remote MCP URL for http/sse."
+#~ msgstr "http/sse 用のリモート MCP URL。"
+
+#~ msgid "HTTP header KEY=VALUE. Can be repeated."
+#~ msgstr "HTTP header KEY=VALUE。繰り返し指定できます。"
+
+#~ msgid "{option} expects KEY=VALUE, got {value!r}."
+#~ msgstr "{option} は KEY=VALUE を期待していますが、{value!r} を受け取りました。"
 

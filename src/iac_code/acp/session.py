@@ -29,17 +29,20 @@ from iac_code.agent.message import (
 )
 from iac_code.commands.registry import PromptCommand
 from iac_code.i18n import _
+from iac_code.mcp.errors import MCPConnectionError
+from iac_code.mcp.redaction import sanitize_mcp_public_text
 from iac_code.services.permissions.audit import (
     build_input_summary,
     build_prompt_tool_input,
     emit_permission_boundary_audit,
     is_permission_audit_non_read_only,
+    permission_audit_operation,
     should_fail_closed_permission_audit,
 )
 from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.telemetry import use_session_id
 from iac_code.state.app_state import lookup_permission, record_permission
-from iac_code.types.permissions import PermissionDecision
+from iac_code.types.permissions import PermissionDecision, PermissionRuleValue
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
 from iac_code.utils.public_errors import public_error
 
@@ -234,6 +237,9 @@ _OPTION_REJECT_ONCE = "reject_once"
 _OPTION_REJECT_ALWAYS = "reject_always"
 _PREFIX_ALLOW_RULE = "allow_rule:"
 _PREFIX_DENY_RULE = "deny_rule:"
+_PERMISSION_META_STRING_MAX_CHARS = 256
+_MCP_PERMISSION_STRING_FIELDS = ("publicName", "originalServerName", "originalToolName")
+_MCP_PERMISSION_BOOL_FIELDS = ("isReadOnly", "isDestructive")
 
 
 def _tool_supports_blanket_allow(agent_loop, tool_name: str) -> bool:
@@ -250,6 +256,72 @@ def _tool_supports_blanket_allow(agent_loop, tool_name: str) -> bool:
     return bool(getattr(tool, "supports_blanket_allow", True))
 
 
+def _permission_tool_title(agent_loop, tool_name: str, tool_input: dict[str, Any]) -> str:
+    registry = getattr(agent_loop, "tool_registry", None)
+    get_tool = getattr(registry, "get", None)
+    if get_tool is not None:
+        tool = get_tool(tool_name)
+        user_facing_name = getattr(tool, "user_facing_name", None)
+        if callable(user_facing_name):
+            title = user_facing_name(tool_input)
+            if isinstance(title, str) and title:
+                return title
+    return display_tool_title(tool_name)
+
+
+def _permission_meta_text(value: Any) -> str:
+    text = sanitize_mcp_public_text(value, fallback_summary="")
+    if len(text) <= _PERMISSION_META_STRING_MAX_CHARS:
+        return text
+    marker = _("[truncated]")
+    return text[: _PERMISSION_META_STRING_MAX_CHARS - len(marker)].rstrip() + marker
+
+
+def _permission_audit_metadata(event: PermissionRequestEvent) -> Any | None:
+    audit_context = getattr(event, "audit_context", None) or {}
+    if not isinstance(audit_context, dict):
+        return None
+    return audit_context.get("metadata")
+
+
+def _acp_permission_wire_meta(event: PermissionRequestEvent) -> dict[str, Any] | None:
+    metadata = _permission_audit_metadata(event)
+    operation = permission_audit_operation(metadata)
+    has_mcp_identity = any(isinstance(operation.get(key), str) for key in _MCP_PERMISSION_STRING_FIELDS)
+    if not (str(event.tool_name).startswith("mcp__") or has_mcp_identity):
+        return None
+
+    tool_name = _permission_meta_text(event.tool_name)
+    tool_use_id = _permission_meta_text(event.tool_use_id)
+    permission: dict[str, Any] = {
+        "permissionId": "perm-{}".format(tool_use_id),
+        "toolName": tool_name,
+        "toolUseId": tool_use_id,
+        "inputSummary": build_input_summary(event.tool_name, event.tool_input),
+    }
+
+    scope = getattr(metadata, "scope", None)
+    if isinstance(scope, str):
+        permission["scope"] = _permission_meta_text(scope)
+
+    for key in _MCP_PERMISSION_STRING_FIELDS:
+        value = operation.get(key)
+        if isinstance(value, str):
+            permission[key] = _permission_meta_text(value)
+
+    for key in _MCP_PERMISSION_BOOL_FIELDS:
+        value = operation.get(key)
+        if isinstance(value, bool):
+            permission[key] = value
+
+    if "isReadOnly" not in permission:
+        is_read_only = getattr(metadata, "is_read_only", None)
+        if isinstance(is_read_only, bool):
+            permission["isReadOnly"] = is_read_only
+
+    return {"iac_code": {"permission": permission}}
+
+
 class ACPSession:
     def __init__(
         self,
@@ -263,6 +335,7 @@ class ACPSession:
         memory_manager=None,
         runtime=None,
         mcp_config_warnings: list[Any] | None = None,
+        mcp_pending_configs: list[Any] | None = None,
     ) -> None:
         self.id = session_id
         self.agent_loop = agent_loop
@@ -282,6 +355,7 @@ class ACPSession:
         self.mcp_configs: list[dict] = mcp_configs or []
         self.mcp_manager = mcp_manager
         self.mcp_config_warnings = mcp_config_warnings if mcp_config_warnings is not None else []
+        self.mcp_pending_configs = mcp_pending_configs if mcp_pending_configs is not None else []
         self._mcp_warnings_pushed_count = 0
         self.command_registry = command_registry
         # Dynamic session configuration (temperature, max_tokens, etc.)
@@ -434,7 +508,10 @@ class ACPSession:
         if slash_registry.is_slash_command(prompt_text):
             prompt_command = self._lookup_prompt_command(prompt_text)
             if prompt_command is not None:
-                prompt_text, stream_factory = await self._prepare_prompt_command(prompt_text, prompt_command)
+                try:
+                    prompt_text, stream_factory = await self._prepare_prompt_command(prompt_text, prompt_command)
+                except Exception as exc:
+                    raise self._request_error_from_prompt_exception(exc) from exc
             else:
                 result = await slash_registry.execute(
                     prompt_text,
@@ -492,24 +569,15 @@ class ACPSession:
             logger.info("Prompt cancelled, session_id=%s, elapsed_ms=%d", self.id, elapsed_ms)
             return acp.PromptResponse(stop_reason="cancelled")
         except Exception as exc:
+            if isinstance(exc, MCPConnectionError):
+                await self._push_mcp_status_update()
             if self._metrics is not None:
                 self._metrics.record_error()
             if _is_auth_error(exc):
                 logger.warning("ACP session %s: authentication error: %s", self.id, exc)
-                raise acp.RequestError.internal_error(
-                    {
-                        "error": "Authentication required. Please configure your API credentials.",
-                        "code": "auth_required",
-                    }
-                ) from exc
+                raise self._request_error_from_prompt_exception(exc, log=False, record_metrics=False) from exc
             logger.error("ACP session %s: unhandled error: %s", self.id, exc, exc_info=True)
-            failure = public_error(message=f"{type(exc).__name__}: {exc}", error_type=type(exc).__name__)
-            raise acp.RequestError.internal_error(
-                {
-                    "error": failure.summary,
-                    "error_id": failure.error_id,
-                }
-            ) from exc
+            raise self._request_error_from_prompt_exception(exc, log=False, record_metrics=False) from exc
         finally:
             self._current_task = None
             duration_ms = (time.monotonic() - prompt_start) * 1000
@@ -546,6 +614,63 @@ class ACPSession:
         response.field_meta = meta
         return response
 
+    async def _push_mcp_status_update(self) -> None:
+        if self.mcp_manager is None:
+            return
+        try:
+            from iac_code.acp.server import _compact_mcp_status_for_acp
+            from iac_code.mcp.manager import mcp_status_metadata
+
+            status_metadata = mcp_status_metadata(
+                self.mcp_manager,
+                warnings=list(self.mcp_config_warnings),
+                pending_configs=self.mcp_pending_configs,
+            )
+            if status_metadata is None:
+                return
+            acp_status_metadata = _compact_mcp_status_for_acp(self.id, status_metadata)
+            status_signature = repr(acp_status_metadata)
+            if getattr(self, "_mcp_status_pushed_signature", None) == status_signature:
+                return
+            await self._conn.session_update(
+                session_id=self.id,
+                update=acp.schema.SessionInfoUpdate(
+                    session_update="session_info_update",
+                    field_meta={"iac_code": {"mcpStatus": acp_status_metadata}},
+                ),
+            )
+            setattr(self, "_mcp_status_pushed_signature", status_signature)
+        except Exception:
+            logger.debug("Failed to push ACP MCP status after MCP prompt error", exc_info=True)
+
+    def _request_error_from_prompt_exception(
+        self,
+        exc: Exception,
+        *,
+        log: bool = True,
+        record_metrics: bool = True,
+    ) -> acp.RequestError:
+        if record_metrics and self._metrics is not None:
+            self._metrics.record_error()
+        if _is_auth_error(exc):
+            if log:
+                logger.warning("ACP session %s: authentication error: %s", self.id, exc)
+            return acp.RequestError.internal_error(
+                {
+                    "error": _("Authentication required. Please configure your API credentials."),
+                    "code": "auth_required",
+                }
+            )
+        if log:
+            logger.error("ACP session %s: unhandled error: %s", self.id, exc, exc_info=True)
+        failure = public_error(message=f"{type(exc).__name__}: {exc}", error_type=type(exc).__name__)
+        return acp.RequestError.internal_error(
+            {
+                "error": failure.summary,
+                "error_id": failure.error_id,
+            }
+        )
+
     def _lookup_prompt_command(self, prompt_text: str) -> PromptCommand | None:
         command_registry = self.command_registry
         if command_registry is None:
@@ -572,7 +697,8 @@ class ACPSession:
             for message in result.new_messages:
                 add_raw_message = getattr(context_manager, "add_raw_message", None)
                 if add_raw_message is not None:
-                    add_raw_message(message)
+                    injected_message = add_raw_message(message)
+                    self._persist_prompt_command_message(injected_message)
         if result.context_modifier:
             apply_context_modifier = getattr(self.agent_loop, "_apply_context_modifier", None)
             if apply_context_modifier is not None:
@@ -581,6 +707,26 @@ class ACPSession:
         if callable(continue_streaming):
             return result.prompt_content, continue_streaming
         return result.prompt_content, lambda: self.agent_loop.run_streaming(result.prompt_content)
+
+    def _persist_prompt_command_message(self, message: Message | None) -> None:
+        if message is None:
+            return
+        session_storage = getattr(self.agent_loop, "_session_storage", None)
+        append = getattr(session_storage, "append", None)
+        if not callable(append):
+            return
+        cwd = getattr(self.agent_loop, "_cwd", None)
+        if not isinstance(cwd, str) or not cwd:
+            return
+        session_id = getattr(self.agent_loop, "_session_id", None) or self.id
+        if not isinstance(session_id, str) or not session_id:
+            return
+        append(
+            cwd,
+            session_id,
+            message,
+            git_branch=getattr(self.agent_loop, "_current_git_branch", None),
+        )
 
     async def cancel(self) -> None:
         if self._current_task is not None and not self._current_task.done():
@@ -599,7 +745,6 @@ class ACPSession:
     def _apply_rule(self, tool_name: str, rules_str: str, behavior: str) -> None:
         """Apply rule-level permission to the session's permission_context."""
         from iac_code.services.permissions.storage import apply_session_rule
-        from iac_code.types.permissions import PermissionRuleValue
 
         perm_ctx = self._get_permission_context()
         if perm_ctx is None:
@@ -611,14 +756,40 @@ class ACPSession:
                 perm_ctx = apply_session_rule(perm_ctx, behavior, rule_value)
         self._set_permission_context(perm_ctx)
 
+    def _apply_rule_values(self, rule_values: list[PermissionRuleValue], behavior: str) -> None:
+        """Apply concrete rule suggestions to the session's permission_context."""
+        from iac_code.services.permissions.storage import apply_session_rule
+
+        perm_ctx = self._get_permission_context()
+        if perm_ctx is None:
+            return
+        for rule_value in rule_values:
+            perm_ctx = apply_session_rule(perm_ctx, behavior, rule_value)
+        self._set_permission_context(perm_ctx)
+
     async def _request_permission(self, event: PermissionRequestEvent) -> bool:
         tool_name = event.tool_name
         is_non_read_only = is_permission_audit_non_read_only(event)
+
+        suggestion_rules_value = ""
+        suggestion_rule_values: list[PermissionRuleValue] = []
+
+        def _format_rule_value(rule_value: PermissionRuleValue) -> str:
+            if rule_value.rule_content:
+                return "{}({})".format(rule_value.tool_name, rule_value.rule_content)
+            return rule_value.tool_name
+
+        def _encode_suggestion(rule_value: PermissionRuleValue) -> str:
+            if rule_value.rule_content and rule_value.tool_name == tool_name:
+                return rule_value.rule_content
+            return _format_rule_value(rule_value)
 
         def _rule_from_option(option_id: str, prefix: str) -> str | None:
             rules_str = option_id[len(prefix) :]
             if not rules_str:
                 return None
+            if rules_str == suggestion_rules_value and suggestion_rule_values:
+                return ", ".join(_format_rule_value(rule_value) for rule_value in suggestion_rule_values)
             return ", ".join(f"{tool_name}({rule.strip()})" for rule in rules_str.split(",") if rule.strip())
 
         def _prompt_option_reason(option_id: str) -> str:
@@ -662,9 +833,11 @@ class ACPSession:
             and event.permission_result.suggestions
         ):
             suggestions = event.permission_result.suggestions
+            suggestion_rule_values = list(suggestions)
+            suggestion_rules_value = ",".join(_encode_suggestion(suggestion) for suggestion in suggestion_rule_values)
 
         def _suggestion_rules() -> str:
-            return ",".join(s.rule_content for s in suggestions)
+            return suggestion_rules_value
 
         def _suggestion_display() -> str:
             return ",".join(s.display_label() for s in suggestions)
@@ -726,7 +899,7 @@ class ACPSession:
         offered_option_ids = {option.option_id for option in options}
 
         # Build content with command details and suggested rule.
-        tool_title = display_tool_title(tool_name)
+        tool_title = _permission_tool_title(self.agent_loop, tool_name, event.tool_input)
         if tool_name == "aliyun_api":
             input_summary = json.dumps(
                 build_input_summary(tool_name, event.tool_input),
@@ -757,6 +930,7 @@ class ACPSession:
             acp.schema.ToolCallUpdate(
                 tool_call_id="permission/{}".format(event.tool_use_id),
                 title=tool_title,
+                field_meta=_acp_permission_wire_meta(event),
                 content=[
                     acp.schema.ContentToolCallContent(
                         type="content",
@@ -809,7 +983,10 @@ class ACPSession:
             if cache_decision is not None:
                 self._cache_permission(tool_name, cache_decision)
             if allow_rules_str is not None:
-                self._apply_rule(tool_name, allow_rules_str, "allow")
+                if allow_rules_str == suggestion_rules_value and suggestion_rule_values:
+                    self._apply_rule_values(suggestion_rule_values, "allow")
+                else:
+                    self._apply_rule(tool_name, allow_rules_str, "allow")
             return True
 
         # DeniedOutcome — parse option_id from meta or direct field.
@@ -829,7 +1006,10 @@ class ACPSession:
                 audit_scope = "tool_cache"
             elif option_id and option_id.startswith(_PREFIX_DENY_RULE):
                 rules_str = option_id[len(_PREFIX_DENY_RULE) :]
-                self._apply_rule(tool_name, rules_str, "deny")
+                if rules_str == suggestion_rules_value and suggestion_rule_values:
+                    self._apply_rule_values(suggestion_rule_values, "deny")
+                else:
+                    self._apply_rule(tool_name, rules_str, "deny")
                 audit_scope = "session_rule"
                 audit_rule = _rule_from_option(option_id, _PREFIX_DENY_RULE)
             emit_permission_boundary_audit(

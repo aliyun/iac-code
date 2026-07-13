@@ -8,13 +8,14 @@ import copy
 import inspect
 import json
 import logging
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from iac_code.agent.message import ContentBlock, Message
 from iac_code.agent.system_prompt import SECTION_BUILDERS, build_base_sections
+from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
 from iac_code.pipeline.engine.complete_step_tool import CompleteStepTool
 from iac_code.pipeline.engine.completion_guard_state import (
     ensure_completion_guard_state,
@@ -197,7 +198,7 @@ class StepExecutor:
         last_complete_step_input: dict | None = None
 
         async def consume_complete_step_events(
-            stream: AsyncGenerator[StreamEvent | PipelineEvent, None],
+            stream: AsyncIterator[Any],
         ) -> AsyncGenerator[StreamEvent | PipelineEvent, None]:
             nonlocal complete_step_input
             nonlocal last_complete_step_error
@@ -247,11 +248,17 @@ class StepExecutor:
 
         try:
             first_stream_had_event = False
-            first_stream = (
-                agent_loop.continue_streaming()
-                if agent_context.resume_messages and user_message is None
-                else agent_loop.run_streaming(agent_context.initial_prompt)
-            )
+            if agent_context.resume_messages and user_message is None:
+                first_stream = agent_loop.continue_streaming()
+            else:
+                first_stream = await mcp_prompt_command_stream(
+                    agent_loop=agent_loop,
+                    commands=self._auto_trigger_skills,
+                    prompt=agent_context.initial_prompt,
+                    session_id=transcript_id or session_id,
+                )
+                if first_stream is None:
+                    first_stream = agent_loop.run_streaming(agent_context.initial_prompt)
             async for event in consume_complete_step_events(first_stream):
                 first_stream_had_event = True
                 yield event

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 
 import pytest
@@ -41,7 +42,13 @@ class FakeHTTPClient:
         self.requests.append(("POST", url, json, headers))
         return FakeHTTPResponse({"result": {"status": {"state": "input-required"}, "text": "done"}})
 
-    def stream(self, method: str, url: str, json: dict[str, object], headers: dict[str, str] | None = None):
+    def stream(
+        self,
+        method: str,
+        url: str,
+        json: dict[str, object],
+        headers: dict[str, str] | None = None,
+    ):
         self.requests.append((method, url, json, headers))
 
         class StreamResponse:
@@ -64,6 +71,40 @@ class FakeHTTPClient:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class HangingInputRequiredHTTPClient(FakeHTTPClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_required_reached = False
+        self.closed_by_consumer = False
+
+    def stream(self, method: str, url: str, json: dict[str, object], headers: dict[str, str] | None = None):
+        self.requests.append((method, url, json, headers))
+        parent = self
+
+        class StreamResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            async def aiter_lines(self):
+                yield 'data: {"result": {"status": {"state": "working"}}}'
+                parent.input_required_reached = True
+                yield 'data: {"result": {"status": {"state": "input-required"}}}'
+                await asyncio.Event().wait()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                parent.closed_by_consumer = True
+                return None
+
+        return StreamResponse()
+
+
+async def _collect_async(iterator):
+    return [item async for item in iterator]
 
 
 def _base64url_uint(value: int) -> str:
@@ -250,6 +291,101 @@ def test_response_text_extracts_from_task_history_agent_message() -> None:
     assert response.text == "final answer"
 
 
+def test_response_text_aggregates_contiguous_final_task_history_agent_messages() -> None:
+    response = A2AClientResponse(
+        payload={
+            "result": {
+                "task": {
+                    "history": [
+                        {"role": "ROLE_USER", "parts": [{"text": "hello"}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "first "}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "second"}]},
+                    ]
+                }
+            }
+        }
+    )
+
+    assert response.text == "first second"
+
+
+def test_response_text_does_not_cross_user_message_when_aggregating_task_history() -> None:
+    response = A2AClientResponse(
+        payload={
+            "result": {
+                "task": {
+                    "history": [
+                        {"role": "ROLE_USER", "parts": [{"text": "first prompt"}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "old answer"}]},
+                        {"role": "ROLE_USER", "parts": [{"text": "follow up"}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "new "}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "answer"}]},
+                    ]
+                }
+            }
+        }
+    )
+
+    assert response.text == "new answer"
+
+
+def test_response_text_returns_empty_when_task_history_ends_with_user_message() -> None:
+    response = A2AClientResponse(
+        payload={
+            "result": {
+                "task": {
+                    "history": [
+                        {"role": "ROLE_USER", "parts": [{"text": "first prompt"}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "old answer"}]},
+                        {"role": "ROLE_USER", "parts": [{"text": "follow up"}]},
+                    ]
+                }
+            }
+        }
+    )
+
+    assert response.text == ""
+
+
+def test_response_text_returns_empty_when_task_history_ends_with_malformed_agent_message() -> None:
+    response = A2AClientResponse(
+        payload={
+            "result": {
+                "task": {
+                    "history": [
+                        {"role": "ROLE_USER", "parts": [{"text": "first prompt"}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "old answer"}]},
+                        {"role": "ROLE_AGENT", "parts": "broken"},
+                    ]
+                }
+            }
+        }
+    )
+
+    assert response.text == ""
+
+
+def test_response_text_extracts_from_result_message_before_task_history() -> None:
+    response = A2AClientResponse(
+        payload={
+            "result": {
+                "message": {
+                    "role": "ROLE_AGENT",
+                    "parts": [{"text": "message "}, {"text": "parts"}],
+                },
+                "task": {
+                    "history": [
+                        {"role": "ROLE_USER", "parts": [{"text": "hello"}]},
+                        {"role": "ROLE_AGENT", "parts": [{"text": "history"}]},
+                    ]
+                },
+            }
+        }
+    )
+
+    assert response.text == "message parts"
+
+
 def test_response_text_extracts_from_task_status_message_parts() -> None:
     response = A2AClientResponse(
         payload={
@@ -349,6 +485,21 @@ async def test_subscribe_task_posts_stream_request() -> None:
     assert events[0]["result"]["status"]["state"] == "working"
     assert http.requests[-1][2]["method"] == "SubscribeToTask"
     assert http.requests[-1][2]["params"] == {"id": "task-1"}
+
+
+@pytest.mark.asyncio
+async def test_subscribe_task_stops_after_input_required_even_when_stream_stays_open() -> None:
+    http = HangingInputRequiredHTTPClient()
+    client = A2AClient(http_client=http)
+
+    events = await asyncio.wait_for(
+        _collect_async(client.subscribe_task("http://remote/", "task-1")),
+        timeout=0.5,
+    )
+
+    assert [event["result"]["status"]["state"] for event in events] == ["working", "input-required"]
+    assert http.input_required_reached is True
+    assert http.closed_by_consumer is True
 
 
 @pytest.mark.asyncio

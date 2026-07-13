@@ -22,6 +22,7 @@ from a2a.types import (
     TaskState,
 )
 from a2a.utils.errors import TaskNotCancelableError, TaskNotFoundError
+from google.protobuf.json_format import MessageToDict
 from starlette.testclient import TestClient
 
 from iac_code.a2a.app import (
@@ -41,6 +42,7 @@ from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import create_runtime_components
+from iac_code.mcp.errors import MCPNeedsAuthError
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
 from iac_code.services.session_storage import SessionStorage
@@ -1179,6 +1181,76 @@ def test_follow_up_message_through_sdk_route_updates_existing_task(monkeypatch, 
     assert "turn-2:follow up" in json.dumps(second_data)
 
 
+def test_follow_up_message_with_context_id_continues_after_failed_task(monkeypatch, tmp_path) -> None:
+    class FailThenEchoAgentLoop:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def run_streaming(self, prompt: str):
+            self.prompts.append(prompt)
+            if len(self.prompts) == 1:
+                raise RuntimeError("first task failed")
+                yield TextDeltaEvent(text="never")
+            yield TextDeltaEvent(text="recovered")
+
+    loop = FailThenEchoAgentLoop()
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="qwen3.6-plus")
+    with TestClient(app) as client:
+        first = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "1",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-1",
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "fail first"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        )
+        first_data = first.json()
+        failed_task = first_data["result"]["task"]
+        assert failed_task["status"]["state"] == "TASK_STATE_FAILED"
+
+        second = client.post(
+            "/",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "jsonrpc": "2.0",
+                "id": "2",
+                "method": "SendMessage",
+                "params": {
+                    "message": {
+                        "messageId": "msg-2",
+                        "contextId": failed_task["contextId"],
+                        "role": "ROLE_USER",
+                        "parts": [{"text": "continue"}],
+                        "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+                    },
+                    "configuration": {"acceptedOutputModes": ["text/plain"]},
+                },
+            },
+        )
+        second_data = second.json()
+
+    assert "error" not in second_data
+    recovered_task = second_data["result"]["task"]
+    assert recovered_task["id"] != failed_task["id"]
+    assert recovered_task["contextId"] == failed_task["contextId"]
+    assert recovered_task["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    assert "recovered" in json.dumps(recovered_task)
+    assert loop.prompts == ["fail first", "continue"]
+
+
 def test_get_task_applies_history_length_without_mutating_stored_history(monkeypatch, tmp_path) -> None:
     loop = FakeAgentLoop([TextDeltaEvent(text="history chunk")])
     runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
@@ -2030,6 +2102,100 @@ async def test_cancel_input_required_pipeline_task_after_restart_marks_canceled(
             "pipeline_canceled",
             "pipeline_handoff_ready",
         ]
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_input_required_normal_task_marks_canceled_and_allows_same_context_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    persistence_dir = tmp_path / "a2a"
+
+    class NeedsAuthLoop:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def run_streaming(self, prompt: str):
+            self.prompts.append(prompt)
+            if prompt == "first":
+                yield TextDeltaEvent(text="old partial")
+                raise MCPNeedsAuthError("MCP server 'remote' requires authentication")
+            yield TextDeltaEvent(text="old runtime reused")
+
+    class FreshLoop:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def run_streaming(self, prompt: str):
+            self.prompts.append(prompt)
+            yield TextDeltaEvent(text="fresh retry")
+
+    needs_auth_loop = NeedsAuthLoop()
+    fresh_loop = FreshLoop()
+    factory_sessions: list[str] = []
+
+    def runtime_factory(options):
+        factory_sessions.append(options.session_id)
+        loop = needs_auth_loop if len(factory_sessions) == 1 else fresh_loop
+        return FakeRuntime(agent_loop=loop, session_id=options.session_id)
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", runtime_factory)
+
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+    )
+    call_context = ServerCallContext()
+
+    try:
+        first = await components.handler.on_message_send(
+            SendMessageRequest(
+                message=Message(
+                    message_id="msg-first",
+                    context_id="ctx-1",
+                    role=Role.ROLE_USER,
+                    parts=[Part(text="first")],
+                    metadata={"iac_code": {"cwd": str(tmp_path)}},
+                ),
+                configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"]),
+            ),
+            call_context,
+        )
+        assert isinstance(first, Task)
+        assert first.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+
+        canceled = await components.handler.on_cancel_task(CancelTaskRequest(id=first.id), call_context)
+
+        assert isinstance(canceled, Task)
+        assert canceled.status.state == TaskState.TASK_STATE_CANCELED
+        assert A2APersistenceStore(persistence_dir).load_task(first.id).state == "canceled"
+
+        second = await components.handler.on_message_send(
+            SendMessageRequest(
+                message=Message(
+                    message_id="msg-second",
+                    context_id="ctx-1",
+                    role=Role.ROLE_USER,
+                    parts=[Part(text="second")],
+                    metadata={"iac_code": {"cwd": str(tmp_path)}},
+                ),
+                configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"]),
+            ),
+            call_context,
+        )
+
+        assert isinstance(second, Task)
+        assert second.id != first.id
+        assert second.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        assert "fresh retry" in json.dumps(MessageToDict(second, preserving_proto_field_name=False))
+        assert len(factory_sessions) == 2
+        assert factory_sessions[0] == factory_sessions[1]
+        assert needs_auth_loop.prompts == ["first"]
+        assert fresh_loop.prompts == ["second"]
     finally:
         await components.aclose()
 

@@ -1,5 +1,7 @@
 import pytest
 
+from iac_code.mcp.tools import MCPTool
+from iac_code.mcp.types import MCPToolRecord
 from iac_code.services.permissions.pipeline import check_tool_permission
 from iac_code.tools.base import Tool, ToolResult
 from iac_code.tools.bash.bash_tool import BashTool
@@ -50,6 +52,11 @@ class FakeWriteTool(Tool):
 
     async def execute(self, *, tool_input, context):
         return ToolResult.success("ok")
+
+
+class DenyOnlyMCPTool(MCPTool):
+    async def check_permissions(self, input, context=None):
+        raise AssertionError("deny rules must not call full MCP permission checks")
 
 
 def _ctx(mode=PermissionMode.DEFAULT, deny=None, allow=None, ask=None):
@@ -381,6 +388,74 @@ class TestPipeline:
         assert r.audit.scope == "settings_rule"
         assert r.audit.rule_source == "user_settings"
         assert r.audit.reason_detail == "matched deny rule: write_file"
+
+    @pytest.mark.asyncio
+    async def test_allow_rule_preserves_mcp_tool_audit_operation(self):
+        tool = MCPTool(
+            manager=None,
+            record=MCPToolRecord(
+                server_name="yuque",
+                tool_name="search-docs",
+                public_name="mcp__yuque__search_docs",
+                original_server_name="yuque",
+                original_tool_name="search-docs",
+                input_schema={"type": "object"},
+                annotations={"readOnlyHint": False},
+            ),
+            session_id="session-1",
+        )
+
+        r = await check_tool_permission(
+            tool,
+            {"query": "ros"},
+            _ctx(allow={"user_settings": ["mcp__yuque__search_docs"]}),
+        )
+
+        assert r.behavior == "allow"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {
+            "publicName": "mcp__yuque__search_docs",
+            "originalServerName": "yuque",
+            "originalToolName": "search-docs",
+            "isReadOnly": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_deny_rule_preserves_mcp_tool_audit_operation_without_permission_check(self):
+        tool = DenyOnlyMCPTool(
+            manager=None,
+            record=MCPToolRecord(
+                server_name="yuque",
+                tool_name="search-docs",
+                public_name="mcp__yuque__search_docs",
+                original_server_name="yuque",
+                original_tool_name="search-docs",
+                input_schema={"type": "object"},
+                annotations={"readOnlyHint": False},
+            ),
+            session_id="session-1",
+        )
+
+        r = await check_tool_permission(
+            tool,
+            {"query": "ros"},
+            _ctx(deny={"user_settings": ["mcp__yuque__search_docs"]}),
+        )
+
+        assert r.behavior == "deny"
+        assert r.audit is not None
+        assert r.audit.scope == "settings_rule"
+        assert r.audit.rule_source == "user_settings"
+        assert r.audit.is_read_only is False
+        assert r.audit.operation == {
+            "publicName": "mcp__yuque__search_docs",
+            "originalServerName": "yuque",
+            "originalToolName": "search-docs",
+            "isReadOnly": False,
+        }
 
     @pytest.mark.asyncio
     async def test_cli_bare_deny_rule_includes_cli_rule_audit_scope(self):

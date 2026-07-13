@@ -370,11 +370,16 @@ Detalhes de ferramentas e uso são entregues por `metadata.iac_code`:
 | `iac_code.permission.safeSummary` | Resumo de permissão redigido e legível por humanos |
 | `iac_code.permission.inputSummary` | Resumo seguro da operação para solicitações de permissão de `aliyun_api` |
 | `iac_code.permission.toolInput` | Entrada de ferramenta apenas em forma estrutural para solicitações de permissão que não são de `aliyun_api`; valores de string usam tipo, tamanho e fingerprint, e nomes de campo fora da lista permitida podem ser representados por fingerprint |
+| `iac_code.mcpWarning` | Warning MCP de configuração ou execução redigido, incluindo server name, warning code, mensagem pública, scope e source path quando disponível |
+| `iac_code.mcpStatus` | Snapshot redigido do status de servidores MCP com connection state, authentication state, approval state, capability counts, capability refresh errors e warnings de configuração |
+| `iac_code.mcpProgress` | MCP tool progress metadata com public tool name, original server/tool names, tool-use ID, progress, total e mensagem pública opcional |
 | `iac_code.thinking.type` | `raw_thinking` quando `raw-thinking` está habilitado em `thinking-exposure` |
 | `iac_code.thinking.text` | Chunk bruto de raciocínio do provider, truncado para 4000 caracteres, emitido apenas em configurações confiáveis que habilitam `raw-thinking` |
 | `iac_code.usage.inputTokens` | Contagem de tokens de entrada do turno |
 | `iac_code.usage.outputTokens` | Contagem de tokens de saída do turno |
 | `iac_code.usage.totalTokens` | Contagem total de tokens do turno |
+
+O modo pipeline também pode publicar status MCP como metadata de pipeline com `metadata.iac_code.pipeline.eventType == "mcp_status"`. Warnings MCP, snapshots de status e metadata de progresso são sanitizados antes do streaming; secrets em headers, variáveis de ambiente, tokens OAuth e caminhos locais são redigidos ou resumidos.
 
 Quando um resultado de ferramenta inclui um payload de artefato de texto suportado, o servidor armazena o payload localmente, emite um `TaskArtifactUpdateEvent` padrão e registra o artefato no campo `artifacts` da tarefa. A parte do artefato usa uma URL `file://` mais metadados como `mediaType`, `byteSize` e `sha256`; o conteúdo original do artefato não é duplicado dentro dos metadados da ferramenta.
 

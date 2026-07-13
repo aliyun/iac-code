@@ -68,6 +68,91 @@ fn response_text_extracts_python_priority_order() {
     );
     assert_eq!(
         A2AClientResponse {
+            payload: json::object([(
+                "result",
+                json::object([(
+                    "task",
+                    json::object([(
+                        "history",
+                        json::array([
+                            message("ROLE_USER", &["hello"]),
+                            message("ROLE_AGENT", &["first "]),
+                            message("ROLE_AGENT", &["second"]),
+                        ])
+                    ),])
+                )])
+            )])
+        }
+        .text(),
+        "first second"
+    );
+    assert_eq!(
+        A2AClientResponse {
+            payload: json::object([(
+                "result",
+                json::object([(
+                    "task",
+                    json::object([(
+                        "history",
+                        json::array([
+                            message("ROLE_USER", &["first prompt"]),
+                            message("ROLE_AGENT", &["old answer"]),
+                            message("ROLE_USER", &["follow up"]),
+                            message("ROLE_AGENT", &["new "]),
+                            message("ROLE_AGENT", &["answer"]),
+                        ])
+                    ),])
+                )])
+            )])
+        }
+        .text(),
+        "new answer"
+    );
+    assert_eq!(
+        A2AClientResponse {
+            payload: json::object([(
+                "result",
+                json::object([(
+                    "task",
+                    json::object([(
+                        "history",
+                        json::array([
+                            message("ROLE_USER", &["first prompt"]),
+                            message("ROLE_AGENT", &["old answer"]),
+                            message("ROLE_USER", &["follow up"]),
+                        ])
+                    ),])
+                )])
+            )])
+        }
+        .text(),
+        ""
+    );
+    assert_eq!(
+        A2AClientResponse {
+            payload: json::object([(
+                "result",
+                json::object([(
+                    "task",
+                    json::object([(
+                        "history",
+                        json::array([
+                            message("ROLE_USER", &["first prompt"]),
+                            message("ROLE_AGENT", &["old answer"]),
+                            json::object([
+                                ("role", json::string("ROLE_AGENT")),
+                                ("parts", json::string("broken")),
+                            ]),
+                        ])
+                    ),])
+                )])
+            )])
+        }
+        .text(),
+        ""
+    );
+    assert_eq!(
+        A2AClientResponse {
             payload: json::object([("result", json::object([("text", json::string(""))]))])
         }
         .text(),

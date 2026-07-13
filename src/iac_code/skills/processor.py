@@ -32,7 +32,7 @@ async def process_prompt_command(
     """Unified skill processing — called by BOTH slash commands AND SkillTool.
 
     1. Render skill prompt (argument substitution + variable replacement + shell execution)
-    2. Wrap as <skill-name> tagged message
+    2. Preserve MCP prompt content verbatim; tag regular skill invocations
     3. Build context_modifier (allowed_tools / model / effort)
     """
     skill = command.skill
@@ -49,8 +49,9 @@ async def process_prompt_command(
     # Step 1: Render prompt
     prompt_content = await skill.get_prompt(args, skill_context)
 
-    # Step 2: Wrap as tagged message
-    tagged_content = f"<skill-name>{command.name}</skill-name>\n\n{prompt_content}"
+    # MCP prompt text comes from the server and is already the complete user message.
+    is_mcp_prompt = str(getattr(skill, "file_path", "")).startswith("mcp://")
+    tagged_content = prompt_content if is_mcp_prompt else f"<skill-name>{command.name}</skill-name>\n\n{prompt_content}"
     new_messages = [{"role": "user", "content": tagged_content}]
 
     # Step 3: Build context_modifier

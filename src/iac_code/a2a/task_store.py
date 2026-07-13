@@ -248,6 +248,9 @@ class A2ATaskStore(TaskStore):
                     raise ValueError(_("A2A context belongs to a different workspace"))
                 if record.runtime is None:
                     create_task = self._context_runtime_tasks.get(context_id)
+                    if create_task is None:
+                        create_task = asyncio.create_task(asyncio.to_thread(runtime_factory, record.session_id))
+                        self._context_runtime_tasks[context_id] = create_task
                 else:
                     record.touch()
                     self._mirror_context(record)
@@ -370,6 +373,20 @@ class A2ATaskStore(TaskStore):
                     )
 
         raise ValueError(_("A2A context not found"))
+
+    async def discard_context_runtime(self, context_id: str) -> None:
+        """Drop a cached runtime so the next turn rebuilds the context cleanly."""
+        runtime: Any | None = None
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            record = self._contexts.get(context_id)
+            if record is None or record.runtime is None:
+                return
+            runtime = record.runtime
+            record.runtime = None
+            record.touch()
+            self._mirror_context(record)
+        await _close_runtime(runtime)
 
     async def get_task_record(self, task_id: str) -> A2ATaskRecord:
         task_id = validate_protocol_id(task_id)

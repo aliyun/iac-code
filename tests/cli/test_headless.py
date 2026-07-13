@@ -15,10 +15,12 @@ from typer.testing import CliRunner
 from iac_code.agent.message import Message
 from iac_code.cli.headless import EXIT_ERROR, EXIT_MAX_TURNS, EXIT_OK, HeadlessRunner
 from iac_code.cli.output_formats import OutputFormat
+from iac_code.commands.registry import CommandRegistry, PromptCommand
 from iac_code.providers.manager import ProviderNotConfiguredError
 from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
+from iac_code.types.skill_source import SkillSource
 from iac_code.types.stream_events import (
     ErrorEvent,
     MCPProgressEvent,
@@ -49,6 +51,34 @@ async def _fake_stream(*events):
     """Create an async generator that yields the given events."""
     for event in events:
         yield event
+
+
+class _FakeHeadlessMCPPromptProvider:
+    def __init__(self, prompt: str = "expanded MCP prompt") -> None:
+        self.prompt = prompt
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_prompt(self, args: str, context) -> str:
+        self.calls.append((args, context.session_id))
+        return "{} [{}]".format(self.prompt, args)
+
+
+def _headless_mcp_prompt_command(provider: _FakeHeadlessMCPPromptProvider) -> PromptCommand:
+    return PromptCommand(
+        name="mcp__ros__review",
+        description="Review with MCP",
+        skill=SkillDefinition(
+            name="mcp__ros__review",
+            description="Review with MCP",
+            frontmatter=SkillFrontmatter(description="Review with MCP"),
+            content="",
+            source=SkillSource.PROJECT,
+            file_path="mcp://ros/prompt/review",
+            content_length=0,
+            _prompt_provider=provider,
+        ),
+        source=SkillSource.PROJECT,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +161,53 @@ async def test_headless_emits_dynamic_mcp_config_warnings_to_progress_stream():
 
     assert exit_code == EXIT_OK
     assert "MCP warning: MCP server 'broken' prompts discovery failed." in progress.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_headless_expands_mcp_prompt_command_before_streaming(monkeypatch):
+    stdout = io.StringIO()
+    runner = HeadlessRunner(model="test-model", output_format=OutputFormat.TEXT, output_stream=stdout)
+    provider = _FakeHeadlessMCPPromptProvider()
+    registry = CommandRegistry()
+    registry.register(_headless_mcp_prompt_command(provider))
+
+    class FakeLoop:
+        def __init__(self) -> None:
+            self.run_prompts: list[str] = []
+            self.injected: list[str] = []
+            self.continued = False
+
+        def inject_user_message(self, message: str) -> None:
+            self.injected.append(message)
+
+        async def continue_streaming(self):
+            self.continued = True
+            yield TextDeltaEvent(text="continued from MCP prompt")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        async def run_streaming(self, prompt: str):
+            self.run_prompts.append(prompt)
+            yield TextDeltaEvent(text="raw prompt reached LLM")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    loop = FakeLoop()
+    runtime = SimpleNamespace(
+        agent_loop=loop,
+        session_id="session-headless",
+        command_registry=registry,
+        mcp_config_warnings=[],
+        aclose=AsyncMock(),
+    )
+    monkeypatch.setattr("iac_code.services.agent_factory.create_agent_runtime", lambda options: runtime)
+
+    exit_code = await runner.run("/mcp__ros__review template=vpc")
+
+    assert exit_code == EXIT_OK
+    assert loop.run_prompts == []
+    assert loop.injected == ["expanded MCP prompt [template=vpc]"]
+    assert loop.continued is True
+    assert provider.calls == [("template=vpc", "session-headless")]
+    assert "continued from MCP prompt" in stdout.getvalue()
 
 
 @pytest.mark.asyncio
@@ -796,6 +873,26 @@ class TestCLIFlags:
 
             mock_instance.run.assert_called_once_with("hello from stdin")
 
+    def test_piped_mcp_without_controlling_tty_returns_cli_guidance(self, monkeypatch):
+        from iac_code.cli.main import app
+
+        def fail_open(path, flags):
+            _ = flags
+            if path in {"/dev/tty", "CONIN$"}:
+                raise OSError("No such device or address: '/dev/tty'")
+            raise AssertionError(path)
+
+        monkeypatch.setattr("iac_code.cli.main.os.open", fail_open)
+
+        result = runner_cli.invoke(app, [], input="/mcp\n")
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "Interactive REPL input requires a terminal." in result.output
+        assert "iac-code mcp --help" in result.output
+        assert "Traceback" not in result.output
+        assert "/dev/tty" not in result.output
+
     def test_invalid_provider_env_prints_error_not_traceback(self, monkeypatch):
         from iac_code.cli.main import app
 
@@ -1051,7 +1148,7 @@ async def test_verbose_progress_writes_subagent_and_stack_events():
             tool_name="echo",
             progress=1,
             total=2,
-            message="halfway",
+            message="halfway api_key=sk-live-secret /Users/alice/.iac-code/settings.yml",
             tool_use_id="tu_mcp",
         ),
         MessageEndEvent(stop_reason="end_turn", usage=Usage()),
@@ -1070,7 +1167,9 @@ async def test_verbose_progress_writes_subagent_and_stack_events():
     assert "Child tool finished: read_file" in progress_output
     assert "Stack stack: CREATE_IN_PROGRESS (42.5%)" in progress_output
     assert "Stack group group: RUNNING (67%)" in progress_output
-    assert "MCP live:echo: 1/2: halfway" in progress_output
+    assert "MCP live:echo: 1/2: halfway api_key=[REDACTED] [PATH]" in progress_output
+    assert "sk-live-secret" not in progress_output
+    assert "/Users/alice" not in progress_output
 
 
 class FakeToolRegistry:

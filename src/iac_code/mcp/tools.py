@@ -4,12 +4,13 @@ import inspect
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from iac_code.i18n import _
 from iac_code.mcp.output import convert_mcp_tool_result
 from iac_code.mcp.types import MCPResourceRecord, MCPToolRecord
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult, PermissionRuleValue
 from iac_code.types.stream_events import MCPProgressEvent
 
 
@@ -34,8 +35,8 @@ class MCPTool(Tool):
     @property
     def description(self) -> str:
         description = self._record.description or _("MCP tool {tool!r} from server {server!r}.").format(
-            tool=self._record.tool_name,
-            server=self._record.server_name,
+            tool=self._original_tool_name,
+            server=self._original_server_name,
         )
         return description[:4000]
 
@@ -50,37 +51,103 @@ class MCPTool(Tool):
         return 600.0
 
     def is_read_only(self, input: dict | None = None) -> bool:
-        return self._record.annotations.get("readOnlyHint") is True
+        return (
+            _annotation_value(self._record.annotations, "readOnlyHint") is True
+            and _annotation_value(self._record.annotations, "destructiveHint") is not True
+        )
 
     def is_concurrency_safe(self, tool_input: dict[str, Any]) -> bool:
         return self.is_read_only(tool_input)
 
     def is_destructive(self, input: dict | None = None) -> bool:
-        return self._record.annotations.get("destructiveHint") is True
+        return _annotation_value(self._record.annotations, "destructiveHint") is True
 
     def needs_event_queue(self) -> bool:
         return True
 
     def user_facing_name(self, input: dict | None = None) -> str:
-        return _("MCP {server}:{tool}").format(server=self._record.server_name, tool=self._record.tool_name)
+        return _("MCP {server}:{tool}").format(server=self._original_server_name, tool=self._original_tool_name)
+
+    def permission_audit_operation(self, input: dict | None = None) -> dict[str, object]:
+        return self._permission_audit_operation(input)
+
+    async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        is_read_only = self.is_read_only(input)
+        audit = PermissionAuditMetadata(
+            scope="read_only" if is_read_only else "once",
+            source="permission_pipeline",
+            reason_type=None if is_read_only else "prompt_required",
+            reason_detail=None if is_read_only else "prompt_required",
+            is_read_only=is_read_only,
+            operation=self._permission_audit_operation(input),
+        )
+        if is_read_only:
+            return PermissionResult(behavior="allow", audit=audit)
+        return PermissionResult(
+            behavior="ask",
+            message=_("Allow {}?").format(self.user_facing_name(input)),
+            suggestions=[
+                PermissionRuleValue(
+                    tool_name=self.name,
+                    rule_content="",
+                    display_text=self.user_facing_name(input),
+                )
+            ],
+            audit=audit,
+        )
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        meta = {"iac_code/toolUseId": context.tool_use_id} if context.tool_use_id else None
+        audit_metadata = self._audit_metadata()
+        meta: dict[str, Any] = {"iac_code/mcp": audit_metadata}
+        if context.tool_use_id:
+            meta["iac_code/toolUseId"] = context.tool_use_id
         progress_callback = self._build_progress_callback(context) if context.event_queue is not None else None
         result = await self._manager.call_tool(
-            self._record.server_name,
-            self._record.tool_name,
+            self._original_server_name,
+            self._original_tool_name,
             tool_input,
             progress_callback=progress_callback,
             meta=meta,
         )
-        return convert_mcp_tool_result(
+        tool_result = convert_mcp_tool_result(
             result,
-            server_name=self._record.server_name,
-            tool_name=self._record.tool_name,
+            server_name=self._original_server_name,
+            tool_name=self._original_tool_name,
             session_id=self._session_id,
             session_dir=self._session_dir,
         )
+        if tool_result.metadata is None:
+            tool_result.metadata = {}
+        mcp_metadata = tool_result.metadata.setdefault("mcp", {})
+        mcp_metadata["public_name"] = self._record.public_name
+        mcp_metadata["original_server_name"] = self._original_server_name
+        mcp_metadata["original_tool_name"] = self._original_tool_name
+        return tool_result
+
+    @property
+    def _original_server_name(self) -> str:
+        return self._record.original_server_name or self._record.server_name
+
+    @property
+    def _original_tool_name(self) -> str:
+        return self._record.original_tool_name or self._record.tool_name
+
+    def _audit_metadata(self) -> dict[str, str]:
+        return {
+            "publicName": self._record.public_name,
+            "originalServerName": self._original_server_name,
+            "originalToolName": self._original_tool_name,
+        }
+
+    def _permission_audit_operation(self, input: dict | None = None) -> dict[str, object]:
+        operation: dict[str, object] = {
+            **self._audit_metadata(),
+        }
+        if _annotation_has(self._record.annotations, "readOnlyHint"):
+            operation["isReadOnly"] = self.is_read_only(input)
+        if _annotation_has(self._record.annotations, "destructiveHint"):
+            operation["isDestructive"] = self.is_destructive(input)
+        return operation
 
     def _build_progress_callback(self, context: ToolContext):
         queue = context.event_queue
@@ -96,12 +163,13 @@ class MCPTool(Tool):
             message_value = _progress_field(progress, "message", message)
             await queue.put(
                 MCPProgressEvent(
-                    server_name=self._record.server_name,
-                    tool_name=self._record.tool_name,
+                    server_name=self._original_server_name,
+                    tool_name=self._original_tool_name,
                     progress=_to_float(progress_value),
                     total=_to_float(total_value),
                     message=str(message_value) if message_value is not None else None,
                     tool_use_id=context.tool_use_id,
+                    public_name=self._record.public_name,
                 )
             )
 
@@ -233,6 +301,57 @@ def _to_float(value: Any) -> float | None:
     if isinstance(value, int | float):
         return float(value)
     return None
+
+
+def _annotation_value(annotations: Any, key: str) -> Any:
+    mapping = _annotation_mapping(annotations)
+    if key in mapping:
+        return mapping[key]
+    snake_key = _camel_to_snake(key)
+    if snake_key in mapping:
+        return mapping[snake_key]
+    if hasattr(annotations, key):
+        return getattr(annotations, key)
+    if hasattr(annotations, snake_key):
+        return getattr(annotations, snake_key)
+    return None
+
+
+def _annotation_has(annotations: Any, key: str) -> bool:
+    mapping = _annotation_mapping(annotations)
+    snake_key = _camel_to_snake(key)
+    return key in mapping or snake_key in mapping or hasattr(annotations, key) or hasattr(annotations, snake_key)
+
+
+def _annotation_mapping(annotations: Any) -> Mapping[str, Any]:
+    if isinstance(annotations, Mapping):
+        return annotations
+    for kwargs in (
+        {"by_alias": True, "exclude_none": True},
+        {"exclude_none": True},
+        {},
+    ):
+        model_dump = getattr(annotations, "model_dump", None)
+        if callable(model_dump):
+            try:
+                dumped = model_dump(**kwargs)
+            except TypeError:
+                continue
+            if isinstance(dumped, Mapping):
+                return dumped
+        dict_method = getattr(annotations, "dict", None)
+        if callable(dict_method):
+            try:
+                dumped = dict_method(**kwargs)
+            except TypeError:
+                continue
+            if isinstance(dumped, Mapping):
+                return dumped
+    return {}
+
+
+def _camel_to_snake(value: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", value).lower()
 
 
 def _get_value(value: Any, key: str, default: Any = None) -> Any:

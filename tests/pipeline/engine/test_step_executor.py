@@ -7,11 +7,15 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
+from iac_code.commands.registry import PromptCommand
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import IncludeExcludeConfig, LoadedPipeline, StepSpec, StepSurfaceOverride
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.skills.frontmatter import SkillFrontmatter
+from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
+from iac_code.types.skill_source import SkillSource
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     MessageEndEvent,
@@ -112,6 +116,33 @@ class _NamedTool(Tool):
 
     async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
         return ToolResult.success("{}")
+
+
+class _FakePipelineMCPPromptProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_prompt(self, args: str, context) -> str:
+        self.calls.append((args, context.session_id))
+        return "pipeline expanded MCP prompt [{}]".format(args)
+
+
+def _pipeline_mcp_prompt_command(provider: _FakePipelineMCPPromptProvider) -> PromptCommand:
+    return PromptCommand(
+        name="mcp__ros__review",
+        description="Review with MCP",
+        skill=SkillDefinition(
+            name="mcp__ros__review",
+            description="Review with MCP",
+            frontmatter=SkillFrontmatter(description="Review with MCP"),
+            content="",
+            source=SkillSource.PROJECT,
+            file_path="mcp://ros/prompt/review",
+            content_length=0,
+            _prompt_provider=provider,
+        ),
+        source=SkillSource.PROJECT,
+    )
 
 
 class TestStepExecutorToolSetup:
@@ -882,6 +913,68 @@ class TestStepExecutor:
                 pass
 
         assert captured_input["value"] == "帮我搭建电商网站"
+
+    @pytest.mark.asyncio
+    async def test_user_message_mcp_prompt_command_expands_before_agent_stream(self, tmp_path):
+        provider = _FakePipelineMCPPromptProvider()
+        command = _pipeline_mcp_prompt_command(provider)
+        loops = []
+
+        class CapturingAgentLoop:
+            def __init__(self, **kwargs):
+                self.system_prompt = kwargs.get("system_prompt", "")
+                self.tool_registry = kwargs.get("tool_registry")
+                self.run_prompts: list[str] = []
+                self.injected: list[str] = []
+                self.continued = False
+                loops.append(self)
+
+            def inject_user_message(self, message: str) -> None:
+                self.injected.append(message)
+
+            async def continue_streaming(self):
+                self.continued = True
+                yield ToolUseStartEvent(tool_use_id="tu_1", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="tu_1",
+                    name="complete_step",
+                    input={"conclusion": {"ok": True}},
+                )
+                yield ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok")
+
+            async def run_streaming(self, user_input):
+                self.run_prompts.append(user_input)
+                yield ToolUseStartEvent(tool_use_id="tu_1", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="tu_1",
+                    name="complete_step",
+                    input={"conclusion": {"ok": True}},
+                )
+                yield ToolResultEvent(tool_use_id="tu_1", tool_name="complete_step", result="ok")
+
+        executor = _make_executor(tmp_path)
+        executor._auto_trigger_skills = [command]
+        step = _make_step()
+        ctx = PipelineContext(SIMPLE_DEPS)
+
+        collected = []
+        with patch("iac_code.agent.agent_loop.AgentLoop", CapturingAgentLoop):
+            async for event in executor.execute(
+                step,
+                ctx,
+                "test_session",
+                user_message="/mcp__ros__review template=vpc",
+            ):
+                collected.append(event)
+
+        assert len(loops) == 1
+        loop = loops[0]
+        assert loop.run_prompts == []
+        assert loop.injected == ["pipeline expanded MCP prompt [template=vpc]"]
+        assert loop.continued is True
+        assert provider.calls == [("template=vpc", "test_session")]
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert results[0].status == StepStatus.COMPLETED
 
     @pytest.mark.asyncio
     async def test_default_prompt_when_no_user_message(self, tmp_path):

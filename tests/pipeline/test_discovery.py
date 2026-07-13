@@ -1,9 +1,12 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
+from iac_code.mcp.types import MCPConnectionState
 from iac_code.pipeline import create_pipeline, discover_pipelines
+from iac_code.pipeline.engine.events import PipelineEventType
 
 
 class TestDiscoverPipelines:
@@ -30,6 +33,43 @@ class TestCreatePipeline:
         )
         assert pipeline.pipeline_name == "selling"
         assert pipeline.state_machine.total_steps == 5
+
+    def test_create_pipeline_propagates_mcp_status_metadata_to_runner(self):
+        storage = MagicMock()
+        storage.session_path.return_value = MagicMock()
+        manager = SimpleNamespace(
+            list_connections=lambda: [
+                SimpleNamespace(
+                    name="broken",
+                    state=MCPConnectionState.FAILED,
+                    error="access_token=super-secret-token",
+                    capability_errors={},
+                    tools=[],
+                    resources=[],
+                    prompts=[],
+                    retry_count=1,
+                    metadata=None,
+                )
+            ]
+        )
+        warnings = [SimpleNamespace(server_name="broken", code="connection_failed", message="MCP server failed")]
+
+        pipeline = create_pipeline(
+            "selling",
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=storage,
+            session_id="test123",
+            mcp_manager=manager,
+            mcp_config_warnings=warnings,
+        )
+
+        event = pipeline._mcp_status_event()
+        assert event is not None
+        assert event.type is PipelineEventType.MCP_STATUS
+        assert event.data["mcp_status"]["servers"][0]["serverName"] == "broken"
+        assert event.data["mcp_status"]["warnings"][0]["code"] == "connection_failed"
+        assert "super-secret-token" not in repr(event.data["mcp_status"])
 
     def test_unknown_pipeline_raises(self):
         with pytest.raises(ValueError, match="Unknown pipeline"):

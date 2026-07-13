@@ -37,6 +37,8 @@ def create_pipeline(
     surface: str = "repl",
     backup_service: Any | None = None,
     prerequisite_resolution: dict[str, Any] | None = None,
+    mcp_manager: Any | None = None,
+    mcp_config_warnings: list[Any] | None = None,
 ) -> PipelineRunner:
     """Factory: create a pipeline runner by name.
 
@@ -85,6 +87,8 @@ def create_pipeline(
         surface=surface,
         backup_service=backup_service,
         prerequisite_resolution=resolved_prerequisites,
+        mcp_manager=mcp_manager,
+        mcp_config_warnings=mcp_config_warnings,
     )
 
 

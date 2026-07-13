@@ -4,8 +4,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from iac_code.commands.registry import CommandRegistry, PromptCommand
 from iac_code.pipeline.config import RunMode
 from iac_code.pipeline.engine.step_spec import AllowUserEscapes
+from iac_code.skills.frontmatter import SkillFrontmatter
+from iac_code.skills.skill_definition import SkillDefinition
+from iac_code.types.skill_source import SkillSource
 
 
 @pytest.fixture
@@ -64,6 +68,31 @@ def test_default_pipeline_blocks_slash_command_except_whitelist(repl_with_pipeli
     assert repl_with_pipeline._maybe_block_user_escape("/exit") is False
     assert repl_with_pipeline._maybe_block_user_escape("/help") is False
     assert repl_with_pipeline._maybe_block_user_escape("/resume foo") is False
+
+
+def test_default_pipeline_allows_mcp_prompt_command(repl_with_pipeline):
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__review",
+            description="Review with MCP",
+            skill=SkillDefinition(
+                name="mcp__ros__review",
+                description="Review with MCP",
+                frontmatter=SkillFrontmatter(description="Review with MCP"),
+                content="",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/prompt/review",
+                content_length=0,
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    repl_with_pipeline.command_registry = registry
+
+    assert repl_with_pipeline._maybe_block_user_escape("/mcp__ros__review template=vpc") is False
+    repl_with_pipeline.renderer.print_system_message.assert_not_called()
+    assert repl_with_pipeline._maybe_block_user_escape("/clear") is True
 
 
 def test_allow_user_escapes_true_permits_all(repl_with_pipeline):

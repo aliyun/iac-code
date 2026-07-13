@@ -20,6 +20,7 @@ from iac_code.types.stream_events import (
     TOOL_RENDER_METADATA_KEY,
     TOOL_RENDER_RESULT_COMPACT_KEY,
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
@@ -775,6 +776,71 @@ class TestStreamJsonWriter:
         rendered = json.dumps(data, ensure_ascii=False)
         assert "/Users/alice" not in rendered
         assert data["metadata"]["step_result"]["error"] == "Schema failed at ./logs/result.txt"
+
+    def test_mcp_tool_result_redacts_private_markers_in_result_and_metadata(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+        writer.handle(
+            ToolResultEvent(
+                tool_use_id="tu_1",
+                tool_name="mcp__remote__echo",
+                result=(
+                    "command=IAC_PRIVATE_COMMAND_ARG_MARKER_56 "
+                    "metadata=IAC_PRIVATE_NESTED_METADATA_MARKER_56 "
+                    "url=https://example.test/mcp?Signature=IAC_PRIVATE_QUERY_MARKER_56 "
+                    "path=file:///Users/alice/.iac-code/settings.yml"
+                ),
+                metadata={
+                    "mcp": {
+                        "meta": {
+                            "nested": "IAC_PRIVATE_NESTED_METADATA_MARKER_56",
+                            "callback": "https://user:pass@example.test/mcp",
+                        }
+                    }
+                },
+            )
+        )
+
+        data = json.loads(stream.getvalue())
+        rendered = json.dumps(data, ensure_ascii=False)
+        assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in rendered
+        assert "IAC_PRIVATE_NESTED_METADATA_MARKER_56" not in rendered
+        assert "IAC_PRIVATE_QUERY_MARKER_56" not in rendered
+        assert "/Users/alice" not in rendered
+        assert "user:pass" not in rendered
+        assert "[REDACTED]" in rendered
+        assert "[PATH]" in rendered
+
+    def test_mcp_progress_includes_canonical_public_metadata(self) -> None:
+        stream = io.StringIO()
+        writer = StreamJsonWriter(stream)
+
+        writer.handle(
+            MCPProgressEvent(
+                server_name="yuque space",
+                tool_name="search/docs",
+                public_name="mcp__yuque_space__search_docs_8d3f",
+                progress=1,
+                total=3,
+                message="phase api_key=sk-live-secret /Users/alice/.iac-code/settings.yml",
+                tool_use_id="tool-59",
+            )
+        )
+
+        payload = json.loads(stream.getvalue())
+        assert payload["mcpProgress"] == {
+            "status": "progress",
+            "toolUseId": "tool-59",
+            "publicName": "mcp__yuque_space__search_docs_8d3f",
+            "originalServerName": "yuque space",
+            "originalToolName": "search/docs",
+            "progress": 1,
+            "total": 3,
+            "message": "phase api_key=[REDACTED] [PATH]",
+        }
+        assert payload["public_name"] == "mcp__yuque_space__search_docs_8d3f"
+        assert "sk-live-secret" not in stream.getvalue()
+        assert "/Users/alice" not in stream.getvalue()
 
     def test_finalize_is_noop(self) -> None:
         stream = io.StringIO()

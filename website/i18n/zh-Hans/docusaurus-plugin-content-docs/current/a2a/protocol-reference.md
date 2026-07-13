@@ -390,11 +390,16 @@ Assistant text 作为 status message 投递：
 | `iac_code.permission.safeSummary` | 脱敏后的人类可读权限摘要 |
 | `iac_code.permission.inputSummary` | `aliyun_api` 权限请求的安全操作摘要 |
 | `iac_code.permission.toolInput` | 非 `aliyun_api` 权限请求的仅形态工具输入；字符串值使用类型、长度和指纹表示，非白名单字段名可能以指纹表示 |
+| `iac_code.mcpWarning` | 脱敏后的 MCP 配置或运行时 warning，包含 server name、warning code、公开 message、scope，以及可用时的 source path |
+| `iac_code.mcpStatus` | 脱敏后的 MCP server 状态快照，包含 connection state、authentication state、approval state、capability counts、capability refresh errors 和配置 warnings |
+| `iac_code.mcpProgress` | MCP tool progress metadata，包含 public tool name、original server/tool names、tool-use ID、progress、total，以及可选的公开 message |
 | `iac_code.thinking.type` | 在 `thinking-exposure` 中启用 `raw-thinking` 时为 `raw_thinking` |
 | `iac_code.thinking.text` | 原始 provider 推理 chunk，截断为 4000 个字符，仅在受信任配置启用 `raw-thinking` 时发出 |
 | `iac_code.usage.inputTokens` | 该轮次的 input token 数 |
 | `iac_code.usage.outputTokens` | 该轮次的 output token 数 |
 | `iac_code.usage.totalTokens` | 该轮次的 total token 数 |
+
+Pipeline 模式也可以通过 `metadata.iac_code.pipeline.eventType == "mcp_status"` 发布 MCP status 作为 pipeline metadata。MCP warnings、status snapshots 和 progress metadata 在流式输出前都会被清洗；headers、环境变量、OAuth tokens 和本地路径中的 secrets 会被脱敏或摘要化。
 
 当工具结果包含受支持的文本 artifact payload 时，服务器会在本地存储该 payload，发出标准 `TaskArtifactUpdateEvent`，并在 task `artifacts` 字段中记录该 artifact。Artifact part 使用 `file://` URL 以及 `mediaType`、`byteSize` 和 `sha256` 等元数据；原始 artifact 内容不会在工具元数据中重复。
 

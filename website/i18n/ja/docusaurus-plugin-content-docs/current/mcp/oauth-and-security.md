@@ -1,16 +1,23 @@
 ---
 sidebar_position: 4
 title: OAuth とセキュリティ
-description: リモート MCP server を認証し、IaC Code の MCP セキュリティモデルを理解します。
+description: リモート MCP サーバーを認証し、IaC Code の MCP セキュリティモデルを理解します。
 ---
 
 # OAuth とセキュリティ
 
-MCP はローカルプロセスの起動やリモートサービス呼び出しができるため、IaC Code は MCP 設定と認証をセキュリティ上重要なものとして扱います。
+MCP はローカル プロセスを開始してリモート サービスを呼び出すことができるため、IaC コードは MCP の構成と認証をセキュリティに依存するものとして扱います。
 
 ## OAuth
 
-リモート `http` と `sse` servers は OAuth を利用できます。Server config に OAuth metadata を設定します。
+リモートの `http` および `sse` servers は OAuth を使用できます。OAuth metadata を公開し Dynamic Client Registration をサポートする標準準拠 server では、事前に client id を用意する必要はありません。server を追加してから auth を実行します。
+
+```bash
+iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
+iac-code mcp auth yuque
+```
+
+サーバーが事前にプロビジョニングされたクライアントを必要とする場合は、サーバー構成で OAuth メタデータを構成します。
 
 ```json
 {
@@ -29,82 +36,96 @@ MCP はローカルプロセスの起動やリモートサービス呼び出し�
 }
 ```
 
-対応する OAuth fields:
+Supported OAuth fields:
 
-| Field | 用途 |
+| Field | Purpose |
 |---|---|
-| `clientId` | OAuth client id。 |
-| `clientSecretEnv` | client secret を含む環境変数。 |
-| `callbackPort` | 任意の loopback callback port。`0` または省略で空きポートを選びます。 |
-| `authServerMetadataUrl` | 任意の明示的な authorization server metadata URL。 |
+| `clientId` | OAuth client id. |
+| `clientSecretEnv` |クライアントシークレットを含む環境変数。 |
+| `callbackPort` |オプションのループバック コールバック ポート。空きポートを選択するには、「0」を使用するか省略します。 |
+| `authServerMetadataUrl` |オプションの明示的な認可サーバーのメタデータ URL。 |
+| `clientMetadataUrl` | client-id メタデータ ドキュメントをサポートする認可サーバーのオプションの HTTPS クライアント メタデータ ドキュメント URL。 |
 
-Plaintext `oauth.clientSecret` は拒否されます。`clientSecretEnv` または安全な CLI prompt を使ってください。
+平文の `oauth.clientSecret` は拒否されます。 `clientSecretEnv`または安全な CLI プロンプトを使用します。
 
-## 認証
+## Authenticating
 
-次を実行します。
+Run:
 
 ```bash
 iac-code mcp auth secure-reviewer --scope user
 ```
 
-IaC Code は authorization URL を開くか表示し、`127.0.0.1` で loopback callback server を起動します。Provider が authorization code 付きで戻ってくると、IaC Code は token と交換して安全に保存します。
+IaC コードは認証 URL を開くか出力し、`127.0.0.1`でループバック コールバック サーバーを起動します。ブラウザを開けない場合、またはコールバックが自動的に完了できない場合は、コールバック URL または認証コードを CLI プロンプトに貼り付けます。承認後、IaC コードはコードをトークンと交換し、安全に保管します。
 
-通常セッション中に server が認証を必要とする場合、IaC Code は authentication tool を登録します。
+DCR 対応サーバーの場合、IaC コードは OAuth クライアントをサーバーに登録し、返されたクライアント ID とオプションのクライアント シークレットを MCP シークレット ストレージを通じて保存します。トークン交換とリフレッシュには、保護されたリソースのメタデータで必要な場合に、MCP SDK セマンティクスによって選択されたリソース パラメーターが含まれます。
+
+通常のセッション中にサーバーが認証を必要とする場合、IaC コードは認証ツールを登録します。
 
 ```text
 mcp__<server>__authenticate
 ```
 
-モデルはこの tool を呼び出して、OAuth URL をユーザーに提示できます。フロー完了後、IaC Code は MCP server に再接続し、発見済み機能を更新します。
+モデルはそのツールを呼び出して、ユーザーに OAuth URL を提供できます。フローが完了すると、IaC コードは MCP サーバーに再接続し、検出された機能を更新します。
 
 ## Token Storage
 
-IaC Code は `MCPSecretStorage` で OAuth tokens と MCP client secrets を保存します。
+IaC コードは、`MCPSecretStorage`を通じて OAuth トークンと MCP クライアント シークレットを保存します。
 
-1. 利用できる場合は OS keyring を優先します。
-2. keyring が無効または利用不可の場合、`<config-dir>/mcp/` に暗号化 fallback data を保存します。
-3. fallback key と暗号化 secret store には制限されたファイル権限を設定します。
+1. 利用可能な場合は、オペレーティング システムのキーリングを試行します。
+2. キーリングが無効になっているか使用できない場合は、暗号化されたフォールバック データが `<config-dir>/mcp/` に保存されます。
+3. ファイルのアクセス許可は、フォールバック キーと暗号化されたシークレット ストアに対して制限されます。
 
-隔離テストでは `IAC_CODE_MCP_DISABLE_KEYRING=1` を設定すると encrypted fallback storage を強制できます。
+`IAC_CODE_MCP_DISABLE_KEYRING=1`を設定すると、暗号化されたフォールバック ストレージが強制的に使用されます。これは、分離されたテストに役立ちます。
 
-保存された auth state を消すには次を使います。
+保存されている認証状態をクリアするには、次のコマンドを使用します。
 
 ```bash
 iac-code mcp reset-auth secure-reviewer --scope user
 ```
 
-## プロジェクト信頼
+`reset-auth` は選択した永続化 scope の OAuth token state、dynamic client registration state、保存済み
+`client_id`、任意の `client_secret`、OAuth signature index を消去しますが、server config は保持します。
+永続化 server を削除する場合は、設定を削除する前に同じ auth-state cleanup を実行します。
 
-プロジェクト `.mcp.json` は自動的には信頼されません。リポジトリが任意のローカルコードを実行する `stdio` server を追加できるためです。対話型 approval は server config signature ごとに紐づきます。command、args、env、URL、headers、OAuth config を変更すると以前の approval は無効になります。
+```bash
+iac-code mcp remove secure-reviewer --scope user
+```
 
-Headless と protocol server modes は、未承認の project servers を確認せずスキップします。
+既存 server を再認可したいだけなら `reset-auth` を使います。server config 自体も消す場合は `mcp remove` を使います。
+どちらの経路も `MCPSecretStorage` が管理する keyring と encrypted fallback entries を消去します。
+
+## Project Trust
+
+リポジトリは任意のローカル コードを実行する `stdio` サーバーを追加できるため、プロジェクトの `.mcp.json` ファイルは自動的には信頼されません。対話型承認はサーバー構成署名ごとに行われます。コマンド、引数、環境、URL、ヘッダー、または OAuth 設定を変更すると、以前の承認が無効になります。
+
+ヘッドレス モードとプロトコル サーバー モードでは、未承認のプロジェクト サーバーはプロンプトを表示せずにスキップします。
 
 ## Secret Handling
 
-IaC Code は複数の方法で secrets を保護します。
+IaC コードは、いくつかの方法で秘密を保護します。
 
-- `iac-code mcp get` の config 出力では、token、secret、password、API key、authorization header に見える keys を秘匿化します。
-- 機密性の高い header または env 値の plaintext は、`iac-code mcp add` / `mcp add-json` でサーバーを追加する場合にのみ拒否されます（環境変数参照を使う場合を除く）。手動で編集した config ファイルは読み込み時に再検証されないため、plaintext の secret を直接保存しないでください。
-- MCP stdio servers は、安全な環境変数 allowlist と明示的な server env だけを継承します。
-- username または password を含む proxy 環境変数は stdio MCP servers に継承されません。
+- `iac-code mcp get` と `iac-code mcp get --config-only` の設定出力では、token、secret、password、API key、authorization header に見えるキーを秘匿化します。
+- 機密性の高い header または env 値の平文は、`iac-code mcp add` または `mcp add-json` でサーバーを追加するときに拒否されます（環境変数参照を使う場合を除く）。手動で編集した設定ファイルは読み込み時に再検証されないため、平文の secret を直接保存しないでください。
+- MCP stdio サーバーは、安全な環境変数 allowlist と明示的な server env だけを継承します。
+- username または password を含む proxy 環境変数は stdio MCP サーバーに継承されません。
+- `headersHelper` コマンドは shell なし、stdin なし、最小限の環境、制限付き stdout/stderr キャプチャ、秘匿化された private stderr diagnostics で実行されます。
 - MCP artifact files は非公開の IaC Code runtime configuration directory に書き込まれます。
 
-## 権限
+## Permissions
 
-MCP tools は組み込み tools と同じ権限フレームワークを使います。リモート MCP server は tool を広告するだけで IaC Code の権限チェックを回避することはできません。次の点に注意してください。
+MCP ツールは、組み込みツールと同じ権限フレームワークを使用します。リモート MCP サーバーは、ツールをアドバタイズするだけでは IaC コードのアクセス許可チェックをバイパスできません。次のルールに留意してください。
 
-- Read-only MCP tools は、現在の権限ポリシーによって自動許可される場合があります。
-- Destructive MCP tools は明示的に許可されていない限り approval が必要です。
-- Headless automation では、`--permission-mode`、`--allowed-tools`、`--disallowed-tools` を組み合わせて MCP tools の操作範囲を制限します。
-- Remote MCP skills は独自の `allowed_tools` を付与しません。
+- アクティブなアクセス許可ポリシーに応じて、読み取り専用 MCP ツールが自動的に許可される場合があります。
+- 明示的に許可されていない限り、破壊的な MCP ツールには承認が必要です。
+- ヘッドレス オートメーションでは、`--permission-mode`、`--allowed-tools`、および`--disallowed-tools`を組み合わせて、MCP ツールが実行できることを制限します。
+- リモート MCP スキルは、独自の `allowed_tools` を付与しません。
 
-## 未対応のセキュリティ関連機能
+## サポートされていないセキュリティ重視の機能
 
-IaC Code は現在、次の MCP 機能を意図的に拒否または省略しています。
+IaC コードは、現時点では次の MCP 機能を意図的に拒否または省略しています。
 
-- `headersHelper` dynamic commands。
-- MCP elicitation UI。
-- WebSocket、IDE、SDK transports。
-- Enterprise managed MCP policy。
-- IaC Code を MCP server として実行すること。
+- Enterprise managed MCP policy.
+- IDE and SDK transports.
+- WebSocket headers、WebSocket `headersHelper`、WebSocket OAuth。
+- IaC Code acting as an MCP server.

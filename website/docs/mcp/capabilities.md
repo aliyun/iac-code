@@ -18,6 +18,8 @@ mcp__<server>__<tool>
 
 Tool descriptions and JSON input schemas come from the MCP server. IaC Code forwards the model's tool input to the MCP server, then converts MCP content blocks into a normal tool result.
 
+Permission prompts and audit metadata include the MCP server name, original tool name, public normalized tool name, and read-only/destructive annotations.
+
 MCP tool annotations are honored where possible:
 
 | MCP annotation | IaC Code behavior |
@@ -35,7 +37,7 @@ IaC Code converts MCP content blocks into model-visible text:
 
 | MCP content | IaC Code result |
 |---|---|
-| Text content | Included directly in the tool result. |
+| Text content | Included directly in the tool result when small; large text is saved as a private `.txt`, `.json`, or `.md` artifact. |
 | `structuredContent` | Rendered as formatted JSON under a structured-content section. |
 | Text resources | Rendered with server and URI provenance. |
 | `resource_link` | Rendered as a resource link with URI and MIME type. |
@@ -53,7 +55,7 @@ Legacy sessions without a supported layout marker continue to use:
 <config-dir>/tool-results/<session-id>/mcp/<server>/<tool>/
 ```
 
-The model sees the artifact id and metadata, not raw base64 data.
+The model sees the artifact id and metadata, not raw base64 data. Large text artifacts include a path so the full output can be read without flooding the conversation.
 
 ## Resources
 
@@ -104,6 +106,22 @@ IaC Code reads the remote skill resource, parses frontmatter, and registers it a
 - If the remote skill conflicts with an existing command, it is skipped with an MCP warning.
 
 MCP skill resources may be read during startup so the command can be registered before the user invokes it.
+
+When there is no command conflict, MCP skills also get a compatibility alias:
+
+```text
+$<server>:<skill>
+```
+
+For example, `$mcp__yuque__search` and `$yuque:search` can resolve to the same remote skill.
+
+## Server Instructions
+
+If a connected server returns `instructions` from initialize, IaC Code injects them into the agent prompt as a dedicated MCP server-instructions section. These instructions are treated as server-scoped guidance and do not override local project instructions.
+
+## Elicitation
+
+Interactive sessions can route MCP elicitation requests to the user. URL-mode elicitation can ask the user to complete an external URL flow, then retry the original MCP tool call up to a bounded retry limit. Non-interactive contexts cancel elicitation safely.
 
 ## Dynamic Updates
 

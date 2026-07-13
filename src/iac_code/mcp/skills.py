@@ -22,12 +22,13 @@ async def register_mcp_skill_commands(command_registry: CommandRegistry, manager
         if not resource.is_skill_resource:
             continue
         command_name = resource.public_name or _resource_command_name(resource)
+        server_name = _original_server_name(resource)
         existing = command_registry.get(command_name)
         if existing is not None and not _is_mcp_prompt_command(existing):
             warnings.append(
                 MCPConfigWarning(
                     source="mcp",
-                    server_name=resource.server_name,
+                    server_name=server_name,
                     code="command_conflict",
                     message=_("MCP skill command {command!r} conflicts with an existing command.").format(
                         command=command_name
@@ -38,64 +39,75 @@ async def register_mcp_skill_commands(command_registry: CommandRegistry, manager
 
         try:
             server_name, result = await asyncio.wait_for(
-                manager.read_resource(resource.uri, server_name=resource.server_name),
+                manager.read_resource(resource.uri, server_name=server_name),
                 timeout=getattr(manager, "operation_timeout_seconds", 20.0),
             )
         except Exception as exc:
-            warnings.append(
-                MCPConfigWarning(
-                    source="mcp",
-                    server_name=resource.server_name,
-                    code="skill_read_failed",
-                    message=_("MCP skill command {command!r} could not be loaded: {error}").format(
-                        command=command_name,
-                        error=sanitize_public_text(str(exc) or exc.__class__.__name__),
-                    ),
-                )
-            )
+            warnings.append(_skill_load_failed_warning(command_name, server_name, exc))
             continue
-        text = _first_text_content(result)
-        frontmatter, content = parse_frontmatter(text)
-        frontmatter.allowed_tools = []
-        frontmatter.auto_trigger = {}
-        frontmatter.paths = []
-        description = frontmatter.description or resource.description or resource.title or resource.name or ""
-        truncated = False
-        if len(description) > _MAX_SKILL_DESCRIPTION_CHARS:
-            description = description[:_MAX_SKILL_DESCRIPTION_CHARS]
-            frontmatter.description = description
-            truncated = True
-        if len(content) > _MAX_SKILL_BODY_CHARS:
-            content = content[:_MAX_SKILL_BODY_CHARS]
-            truncated = True
-        if truncated:
-            warnings.append(
-                MCPConfigWarning(
-                    source="mcp",
-                    server_name=resource.server_name,
-                    code="skill_truncated",
-                    message=_("MCP skill {command!r} was truncated to fit safety limits.").format(command=command_name),
+
+        try:
+            text = _first_text_content(result)
+            frontmatter, content = parse_frontmatter(text)
+            frontmatter.allowed_tools = []
+            frontmatter.auto_trigger = {}
+            frontmatter.paths = []
+            description = frontmatter.description or resource.description or resource.title or resource.name or ""
+            truncated = False
+            if len(description) > _MAX_SKILL_DESCRIPTION_CHARS:
+                description = description[:_MAX_SKILL_DESCRIPTION_CHARS]
+                frontmatter.description = description
+                truncated = True
+            if len(content) > _MAX_SKILL_BODY_CHARS:
+                content = content[:_MAX_SKILL_BODY_CHARS]
+                truncated = True
+            if truncated:
+                warnings.append(
+                    MCPConfigWarning(
+                        source="mcp",
+                        server_name=resource.server_name,
+                        code="skill_truncated",
+                        message=_("MCP skill {command!r} was truncated to fit safety limits.").format(
+                            command=command_name
+                        ),
+                    )
                 )
-            )
-        skill = SkillDefinition(
-            name=command_name,
-            description=description,
-            frontmatter=frontmatter,
-            content=content,
-            source=SkillSource.PROJECT,
-            file_path="mcp://{}/{}".format(server_name, resource.uri),
-            skill_root="",
-            content_length=len(content),
-        )
-        command_registry.register(
-            PromptCommand(
+            skill = SkillDefinition(
                 name=command_name,
                 description=description,
-                skill=skill,
+                frontmatter=frontmatter,
+                content=content,
                 source=SkillSource.PROJECT,
+                file_path="mcp://{}/{}".format(server_name, resource.uri),
+                skill_root="",
+                content_length=len(content),
             )
-        )
+            aliases = _compatibility_aliases(command_registry, resource, command_name, warnings)
+            command_registry.register(
+                PromptCommand(
+                    name=command_name,
+                    description=description,
+                    aliases=aliases,
+                    skill=skill,
+                    source=SkillSource.PROJECT,
+                )
+            )
+        except Exception as exc:
+            warnings.append(_skill_load_failed_warning(command_name, server_name, exc))
+            continue
     return warnings
+
+
+def _skill_load_failed_warning(command_name: str, server_name: str, exc: BaseException) -> MCPConfigWarning:
+    return MCPConfigWarning(
+        source="mcp",
+        server_name=server_name,
+        code="skill_read_failed",
+        message=_("MCP skill command {command!r} could not be loaded: {error}").format(
+            command=command_name,
+            error=sanitize_public_text(str(exc) or exc.__class__.__name__),
+        ),
+    )
 
 
 def _first_text_content(result: Any) -> str:
@@ -129,4 +141,40 @@ def _resource_command_name(resource: Any) -> str:
     return "mcp__{}__{}".format(
         _safe_identifier(resource.server_name),
         _safe_identifier(resource.name or "skill"),
+    )
+
+
+def _compatibility_aliases(
+    command_registry: CommandRegistry,
+    resource: Any,
+    command_name: str,
+    warnings: list[MCPConfigWarning],
+) -> list[str]:
+    alias = "{}:{}".format(_original_server_name(resource), _original_skill_name(resource))
+    if alias == command_name:
+        return []
+    existing = command_registry.get(alias)
+    if existing is None:
+        return [alias]
+    warnings.append(
+        MCPConfigWarning(
+            source="mcp",
+            server_name=_original_server_name(resource),
+            code="alias_conflict",
+            message=_("MCP skill alias {alias!r} conflicts with an existing command.").format(alias=alias),
+        )
+    )
+    return []
+
+
+def _original_server_name(resource: Any) -> str:
+    return getattr(resource, "original_server_name", None) or resource.server_name
+
+
+def _original_skill_name(resource: Any) -> str:
+    return (
+        getattr(resource, "original_skill_name", None)
+        or getattr(resource, "original_resource_name", None)
+        or resource.name
+        or "skill"
     )

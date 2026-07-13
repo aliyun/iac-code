@@ -12,11 +12,14 @@ from enum import Enum
 from typing import IO, Any
 
 from iac_code.a2a.artifacts import sanitize_public_tool_output_data
+from iac_code.mcp.progress import mcp_progress_metadata
+from iac_code.mcp.redaction import sanitize_mcp_public_data
 from iac_code.services.permissions.audit import build_input_summary
 from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.types.stream_events import (
     TOOL_RENDER_METADATA_KEY,
     ErrorEvent,
+    MCPProgressEvent,
     MessageEndEvent,
     PermissionRequestEvent,
     StreamEvent,
@@ -40,17 +43,19 @@ class OutputFormat(str, Enum):
 
 
 def _public_tool_result(event: ToolResultEvent) -> Any:
-    return sanitize_public_tool_output_data(event.result, public_path_roots=event.public_path_roots)
+    result = sanitize_public_tool_output_data(event.result, public_path_roots=event.public_path_roots)
+    return sanitize_mcp_public_data(result, fallback_summary="") if event.tool_name.startswith("mcp__") else result
 
 
 def _public_tool_metadata(event: ToolResultEvent, metadata: Any) -> Any:
     public_metadata = _strip_internal_tool_metadata(metadata)
     if event.is_error:
         public_metadata = _sanitize_public_value(public_metadata, public_path_roots=event.public_path_roots)
-    return sanitize_public_tool_output_data(
+    result = sanitize_public_tool_output_data(
         public_metadata,
         public_path_roots=event.public_path_roots,
     )
+    return sanitize_mcp_public_data(result, fallback_summary="") if event.tool_name.startswith("mcp__") else result
 
 
 def _strip_internal_tool_metadata(metadata: Any) -> Any:
@@ -125,6 +130,15 @@ def stream_json_event_data(event: StreamEvent) -> dict[str, Any]:
             "sub_pipeline_id": event.sub_pipeline_id,
             "type": event.type,
         }
+    if isinstance(event, MCPProgressEvent):
+        data = dataclasses.asdict(event)
+        canonical_progress = mcp_progress_metadata(event)
+        data["server_name"] = canonical_progress["originalServerName"]
+        data["tool_name"] = canonical_progress["originalToolName"]
+        data["public_name"] = canonical_progress["publicName"]
+        data["message"] = canonical_progress.get("message")
+        data["mcpProgress"] = canonical_progress
+        return data
 
     data = dataclasses.asdict(event)
     if isinstance(event, ErrorEvent):

@@ -176,6 +176,12 @@ async def test_initialize_advertises_only_implemented_initial_capabilities() -> 
     assert response.agent_capabilities.prompt_capabilities.image is False
     assert response.agent_capabilities.mcp_capabilities.http is True
     assert response.agent_capabilities.mcp_capabilities.sse is True
+    assert response.agent_capabilities.session_capabilities.fork is not None
+    assert response.agent_capabilities.session_capabilities.resume is not None
+    wire = response.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
+    session_capabilities = wire["agentCapabilities"]["sessionCapabilities"]
+    assert session_capabilities["fork"] == {}
+    assert session_capabilities["resume"] == {}
     # auth_methods should declare supported provider env-var authentication
     assert len(response.auth_methods) > 0
     for method in response.auth_methods:

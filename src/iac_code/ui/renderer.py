@@ -20,7 +20,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Literal
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Literal, TypeVar
 
 if sys.platform != "win32":
     import termios
@@ -39,6 +39,7 @@ from rich.table import Table
 from rich.text import Text
 
 from iac_code.i18n import _
+from iac_code.mcp.progress import format_mcp_progress_text, mcp_progress_public_name
 from iac_code.services.permissions.audit import (
     build_input_summary,
     emit_permission_boundary_audit,
@@ -84,6 +85,8 @@ from iac_code.utils.json_utils import extract_partial_string_fields
 if TYPE_CHECKING:
     from iac_code.state.app_state import AppStateStore
     from iac_code.tools.base import ToolRegistry
+
+_T = TypeVar("_T")
 
 
 def _display_tool_name(tool_name: str, candidate: str | None = None) -> str:
@@ -139,6 +142,18 @@ def _tool_render_metadata_text(rec: "_ToolCallRecord", key: str) -> str | None:
 def _metadata_tool_result_message(rec: "_ToolCallRecord", *, verbose: bool) -> str | None:
     key = TOOL_RENDER_RESULT_VERBOSE_KEY if verbose else TOOL_RENDER_RESULT_COMPACT_KEY
     return _tool_render_metadata_text(rec, key)
+
+
+def _public_tool_result_display_text(tool_name: str, value: object) -> str:
+    text = str(value)
+    if not tool_name.startswith("mcp__"):
+        return text
+
+    from iac_code.a2a.artifacts import sanitize_public_tool_output_data
+    from iac_code.mcp.redaction import sanitize_mcp_public_data
+
+    sanitized = sanitize_public_tool_output_data(text)
+    return str(sanitize_mcp_public_data(sanitized, fallback_summary=""))
 
 
 def _permission_detail_text(tool_name: str, tool_input: dict[str, Any], tool: Any | None) -> str | None:
@@ -410,6 +425,9 @@ class Renderer:
         # contexts where no session state is wired up.
         self._app_state_store = app_state_store
         self._streaming_input: StreamingInputBuffer | None = None
+        self._streaming_input_suspend: Callable[[], Awaitable[None]] | None = None
+        self._streaming_input_resume: Callable[[], Awaitable[None]] | None = None
+        self._streaming_input_suspend_lock = asyncio.Lock()
 
     # ── Footer (shown inside Live during streaming) ─────────────────
 
@@ -445,6 +463,18 @@ class Renderer:
     def _with_footer(self, content) -> Group:
         """Wrap content with the persistent footer below it."""
         return Group(content, self._build_footer())
+
+    async def run_with_streaming_input_suspended(self, callback: Callable[[], Awaitable[_T]]) -> _T:
+        suspend = self._streaming_input_suspend
+        resume = self._streaming_input_resume
+        if suspend is None or resume is None:
+            return await callback()
+        async with self._streaming_input_suspend_lock:
+            await suspend()
+            try:
+                return await callback()
+            finally:
+                await resume()
 
     # ── Static output (goes to scrollback) ──────────────────────────
 
@@ -711,14 +741,7 @@ class Renderer:
 
     def _render_mcp_progress(self, event: MCPProgressEvent) -> Text:
         text = Text("  ⎿  ", style="dim")
-        parts = [_("MCP {server}:{tool}").format(server=event.server_name, tool=event.tool_name)]
-        if event.progress is not None and event.total is not None:
-            parts.append("{:g}/{:g}".format(event.progress, event.total))
-        elif event.progress is not None:
-            parts.append("{:g}".format(event.progress))
-        if event.message:
-            parts.append(event.message)
-        text.append(": ".join(parts), style="dim")
+        text.append(format_mcp_progress_text(event), style="dim")
         return text
 
     def _render_diagram(self, event: DiagramEvent) -> Group:
@@ -896,10 +919,11 @@ class Renderer:
 
         line = Text()
         line.append("  ⎿  ", style="dim")
+        result_text = _public_tool_result_display_text(rec.tool_name, result_text)
         if rec.is_error:
-            line.append(str(result_text), style="red")
+            line.append(result_text, style="red")
         else:
-            line.append(str(result_text))
+            line.append(result_text)
         return line
 
     def _render_text_block(self, text: str, continuation: bool = False) -> list[Any]:
@@ -1059,6 +1083,8 @@ class Renderer:
         turn_start_time: float = time.monotonic()
         input_buffer = streaming_input or StreamingInputBuffer()
         previous_streaming_input = self._streaming_input
+        previous_streaming_input_suspend = self._streaming_input_suspend
+        previous_streaming_input_resume = self._streaming_input_resume
         self._streaming_input = input_buffer
         streaming_task = asyncio.current_task()
 
@@ -1120,6 +1146,40 @@ class Renderer:
                     vertical_overflow="visible",
                 )
                 live.start()
+
+        async def _suspend_streaming_input() -> None:
+            nonlocal refresh_task, key_task, live
+            await self._stop_refresh(refresh_task)
+            refresh_task = None
+            await self._stop_refresh(key_task)
+            key_task = None
+            if live is not None:
+                self._quiet_stop_live(live)
+                live = None
+
+        async def _resume_streaming_input() -> None:
+            nonlocal refresh_task, key_task
+            if self._streaming_input is not input_buffer:
+                return
+            _ensure_live()
+            _update_live()
+            if live is not None and (refresh_task is None or refresh_task.done()):
+                refresh_task = asyncio.create_task(
+                    self._refresh_loop(
+                        live,
+                        segments,
+                        spinner,
+                        lambda: text_buffer,
+                        lambda: task_spinner,
+                        lambda: thinking_buffer,
+                        live_header=live_header,
+                    )
+                )
+            if live is not None and (key_task is None or key_task.done()):
+                key_task = _new_key_task()
+
+        self._streaming_input_suspend = _suspend_streaming_input
+        self._streaming_input_resume = _resume_streaming_input
 
         async def _rebuild_after_transcript():
             """Rebuild Live + refresh task immediately after the transcript
@@ -1470,10 +1530,17 @@ class Renderer:
                 elif isinstance(event, MCPProgressEvent):
                     rec = tool_records.get(event.tool_use_id or "")
                     if rec is None and event.tool_use_id is None:
+                        public_name = mcp_progress_public_name(event)
                         matches = [
                             item
                             for item in tool_records.values()
-                            if item.tool_name.startswith("mcp__{}__".format(event.server_name)) and not item.done
+                            if (
+                                (
+                                    item.tool_name == public_name
+                                    or item.tool_name.startswith("mcp__{}__".format(event.server_name))
+                                )
+                                and not item.done
+                            )
                         ]
                         if len(matches) == 1:
                             rec = matches[0]
@@ -1752,6 +1819,8 @@ class Renderer:
                 verb = random_completion_verb()
                 self.console.print(Text(f"✻ {verb} {_format_elapsed(elapsed)}", style="dim italic"))
             self._streaming_input = previous_streaming_input
+            self._streaming_input_suspend = previous_streaming_input_suspend
+            self._streaming_input_resume = previous_streaming_input_resume
 
         return StreamingOutputResult(
             elapsed=elapsed,
@@ -1773,7 +1842,14 @@ class Renderer:
         def _suggestion_rule() -> str | None:
             if not suggestions:
                 return None
-            return ", ".join(f"{suggestion.tool_name}({suggestion.rule_content})" for suggestion in suggestions)
+            return ", ".join(
+                (
+                    "{}({})".format(suggestion.tool_name, suggestion.rule_content)
+                    if suggestion.rule_content
+                    else suggestion.tool_name
+                )
+                for suggestion in suggestions
+            )
 
         def _suggestion_display() -> str:
             return ", ".join(suggestion.display_label() for suggestion in suggestions)

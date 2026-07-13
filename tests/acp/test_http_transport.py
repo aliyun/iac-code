@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -22,6 +23,8 @@ from iac_code.acp.http_sse import (
     _MemoryTransport,
     create_app,
 )
+from iac_code.commands.registry import CommandRegistry
+from iac_code.services.agent_factory import _session_mcp_configs
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -48,8 +51,40 @@ _SESSION_NEW_REQUEST = {
 }
 
 
+class _FakeLoop:
+    tool_registry = None
+
+    async def run_streaming(self, prompt):
+        yield  # pragma: no cover
+
+
+class _ClosableRuntime:
+    session_id = "http-session"
+    agent_loop = _FakeLoop()
+    tool_registry = None
+    command_registry = CommandRegistry()
+    mcp_manager = None
+    mcp_config_warnings: list = []
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _mcp_warnings_from_real_loader(cwd: str, configs: list[dict[str, object]]) -> list:
+    from iac_code.mcp.config import load_mcp_configs
+
+    cwd_path = Path(cwd)
+    result = load_mcp_configs(
+        cwd=cwd_path,
+        workspace_root=cwd_path,
+        session_configs=_session_mcp_configs(configs),
+        include_pending_project=False,
+    )
+    return result.warnings
+
+
 def _make_fake_run_agent():
-    """Return a coroutine that mimics ``acp.run_agent``.
+    """Return a coroutine that mimics the ACP runner.
 
     It reads JSON-RPC messages from *output_stream* (the request pipe) and
     writes matching responses to *input_stream* (the response pipe).
@@ -106,8 +141,8 @@ def _clear_connections():
 
 @pytest.fixture()
 def app():
-    """Create a fresh Starlette app with ``acp.run_agent`` mocked."""
-    with patch("acp.run_agent", side_effect=_make_fake_run_agent()):
+    """Create a fresh Starlette app with the ACP runner mocked."""
+    with patch("iac_code.acp.http_sse.run_iac_code_acp_agent", side_effect=_make_fake_run_agent()):
         yield create_app()
 
 
@@ -130,6 +165,22 @@ async def _initialize(client: httpx.AsyncClient, extra_headers: dict | None = No
     resp = await client.post("/acp", json=_INIT_REQUEST, headers=headers)
     conn_id = resp.headers.get("acp-connection-id")
     return resp, conn_id
+
+
+async def _collect_bridge_payloads_until(bridge: HTTPConnectionBridge, predicate, *, timeout: float = 2.0):
+    """Collect queued ACP SSE payloads until *predicate* sees the desired state."""
+    payloads: list[dict] = []
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        if predicate(payloads):
+            return payloads
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return payloads
+        message = await asyncio.wait_for(bridge._sse_queue.get(), timeout=remaining)
+        if message is None:
+            return payloads
+        payloads.append(json.loads(message))
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +215,84 @@ class TestBasicProtocol:
             )
 
         assert resp.status_code == 202
+
+    @pytest.mark.asyncio
+    async def test_real_runner_skips_unknown_mcp_server_type_without_invalid_params(self, raw_app, monkeypatch):
+        """A2b: Real ACP runner accepts raw unknown MCP transports for warning-based handling."""
+        captured_configs: list[dict[str, object]] = []
+
+        def _fake_runtime(options):
+            captured_configs.extend(options.mcp_configs or [])
+            runtime = _ClosableRuntime()
+            runtime.mcp_config_warnings = _mcp_warnings_from_real_loader(options.cwd, options.mcp_configs or [])
+            return runtime
+
+        monkeypatch.setattr("iac_code.acp.server.create_agent_runtime", _fake_runtime)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=raw_app),
+            base_url="http://testserver",
+        ) as client:
+            _, conn_id = await _initialize(client)
+            resp = await client.post(
+                "/acp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/new",
+                    "params": {
+                        "cwd": "/tmp",
+                        "mcpServers": [
+                            {
+                                "type": "tcp",
+                                "name": "future-mcp",
+                                "url": "tcp://localhost:9999",
+                            }
+                        ],
+                    },
+                },
+                headers={"Acp-Connection-Id": conn_id},
+            )
+            assert resp.status_code == 202
+
+            bridge = _connections[conn_id]
+            payloads = await _collect_bridge_payloads_until(
+                bridge,
+                lambda seen: (
+                    any(payload.get("id") == 2 and "result" in payload for payload in seen)
+                    and any(
+                        payload.get("method") == "session/update"
+                        and payload.get("params", {})
+                        .get("update", {})
+                        .get("_meta", {})
+                        .get("iac_code", {})
+                        .get("mcpWarning", {})
+                        .get("code")
+                        == "invalid_config"
+                        for payload in seen
+                    )
+                ),
+            )
+
+        assert captured_configs == [
+            {
+                "type": "tcp",
+                "name": "future-mcp",
+                "url": "tcp://localhost:9999",
+            }
+        ]
+        assert not any(payload.get("error", {}).get("message") == "Invalid params" for payload in payloads)
+        assert any(payload.get("id") == 2 and "result" in payload for payload in payloads)
+        assert any(
+            payload.get("method") == "session/update"
+            and payload.get("params", {})
+            .get("update", {})
+            .get("_meta", {})
+            .get("iac_code", {})
+            .get("mcpWarning", {})
+            .get("code")
+            == "invalid_config"
+            for payload in payloads
+        )
 
     @pytest.mark.asyncio
     async def test_invalid_json_returns_400(self, app):
@@ -461,7 +590,7 @@ class TestHTTPConnectionBridge:
         """G20: close() cancels tasks, feeds EOF, closes writer, shuts down server."""
         bridge = HTTPConnectionBridge()
         with (
-            patch("acp.run_agent", side_effect=_make_fake_run_agent()),
+            patch("iac_code.acp.http_sse.run_iac_code_acp_agent", side_effect=_make_fake_run_agent()),
             patch.object(bridge.server, "shutdown", return_value=None) as mock_shutdown,
         ):
             await bridge.start()
@@ -545,7 +674,7 @@ class TestHTTPConnectionBridge:
         bridge._response_writer = asyncio.StreamReader()  # dummy, won't be used
         bridge._request_reader = asyncio.StreamReader()
 
-        with patch("acp.run_agent", side_effect=RuntimeError("agent crashed")):
+        with patch("iac_code.acp.http_sse.run_iac_code_acp_agent", side_effect=RuntimeError("agent crashed")):
             await bridge._run_agent()
 
         msg = await asyncio.wait_for(bridge._sse_queue.get(), timeout=1.0)
@@ -621,7 +750,7 @@ class TestHTTPRouteEdgeCases:
             await asyncio.sleep(999)
 
         with (
-            patch("acp.run_agent", side_effect=_stuck_agent),
+            patch("iac_code.acp.http_sse.run_iac_code_acp_agent", side_effect=_stuck_agent),
             patch("iac_code.acp.http_sse._INIT_TIMEOUT", 0.1),
         ):
             app = create_app()
@@ -636,7 +765,7 @@ class TestHTTPRouteEdgeCases:
     @pytest.mark.asyncio
     async def test_lifespan_cleanup(self):
         """H33: Starlette lifespan cleanup closes all connections."""
-        with patch("acp.run_agent", side_effect=_make_fake_run_agent()):
+        with patch("iac_code.acp.http_sse.run_iac_code_acp_agent", side_effect=_make_fake_run_agent()):
             app = create_app()
 
             async with httpx.AsyncClient(

@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
@@ -102,6 +103,7 @@ from iac_code.utils.image.clipboard import ClipboardImage, get_image_from_clipbo
 from iac_code.utils.image.format_detect import IMAGE_EXTENSION_REGEX
 from iac_code.utils.json_utils import extract_json_int_value, extract_json_string_value
 from iac_code.utils.project_paths import format_resume_command, same_project_path
+from iac_code.utils.public_errors import sanitize_public_text
 
 if TYPE_CHECKING:
     from iac_code.pipeline import PipelineRunner
@@ -123,6 +125,7 @@ else:
 # pipeline's allow_user_escapes.command setting (problem 5). Permanent whitelist
 # so users are never locked out of the basics while a pipeline is running.
 _PIPELINE_SAFE_COMMANDS: frozenset[str] = frozenset({"/exit", "/help", "/status", "/prompt", "/resume"})
+_MCP_ELICITATION_DISPLAY_MAX_CHARS = 1000
 PipelineHandoffResult = Literal["not_applicable", "succeeded", "failed", "persistence_failed"]
 
 
@@ -456,6 +459,68 @@ def _innermost_sub_pipeline_stream_event(event: SubPipelineStreamEvent) -> SubPi
     return event
 
 
+def _safe_mcp_elicitation_display_text(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    sanitized = sanitize_public_text(raw, fallback_summary="")
+    if len(sanitized) <= _MCP_ELICITATION_DISPLAY_MAX_CHARS:
+        return sanitized
+    marker = _("[truncated]")
+    return sanitized[: _MCP_ELICITATION_DISPLAY_MAX_CHARS - len(marker)].rstrip() + marker
+
+
+_MCP_ELICITATION_INVALID = object()
+
+
+def _mcp_elicitation_schema(params: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    schema = params.get("requestedSchema") or params.get("schema")
+    if not isinstance(schema, Mapping):
+        return None
+    properties = schema.get("properties")
+    return schema if isinstance(properties, Mapping) else None
+
+
+def _mcp_elicitation_prompt_for_field(name: str, field_schema: Mapping[str, Any], *, required: bool) -> str:
+    label = str(field_schema.get("title") or name)
+    enum_values = field_schema.get("enum")
+    suffix = " *" if required else ""
+    if isinstance(enum_values, list) and enum_values:
+        choices = "/".join(str(value) for value in enum_values)
+        return _("{label}{suffix} ({choices}): ").format(label=label, suffix=suffix, choices=choices)
+    field_type = str(field_schema.get("type") or "string")
+    if field_type == "boolean":
+        return _("{label}{suffix} (yes/no): ").format(label=label, suffix=suffix)
+    return _("{label}{suffix}: ").format(label=label, suffix=suffix)
+
+
+def _parse_mcp_elicitation_field_value(raw_value: str, field_schema: Mapping[str, Any]) -> Any:
+    enum_values = field_schema.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        allowed = {str(value): value for value in enum_values}
+        return allowed.get(raw_value, _MCP_ELICITATION_INVALID)
+
+    field_type = str(field_schema.get("type") or "string")
+    if field_type == "boolean":
+        normalized = raw_value.lower()
+        if normalized in {"yes", "y", "true", "1"}:
+            return True
+        if normalized in {"no", "n", "false", "0"}:
+            return False
+        return _MCP_ELICITATION_INVALID
+    if field_type == "integer":
+        try:
+            return int(raw_value)
+        except ValueError:
+            return _MCP_ELICITATION_INVALID
+    if field_type == "number":
+        try:
+            return float(raw_value)
+        except ValueError:
+            return _MCP_ELICITATION_INVALID
+    return raw_value
+
+
 class InlineREPL:
     """Inline terminal REPL integrating all subsystems."""
 
@@ -607,6 +672,7 @@ class InlineREPL:
             auto_trigger_skills=skill_commands,
             memory_recall_service=self._memory_recall_service,
             system_prompt_refresher=self._build_current_system_prompt,
+            background_task_starter=self._start_mcp_background_tasks,
             result_storage_dir=self._result_storage_dir_for_session(),
         )
         self.renderer = Renderer(
@@ -782,6 +848,29 @@ class InlineREPL:
             session_dir=self._session_dir_for_artifacts(),
         )
 
+    async def refresh_mcp_integrations(self) -> None:
+        await self._close_mcp_manager()
+        self._unregister_mcp_integrations()
+        self._mcp_warnings_printed_count = 0
+        self._register_mcp_integrations()
+        self._refresh_model_skill_listing()
+
+    def _unregister_mcp_integrations(self) -> None:
+        tool_registry = getattr(self, "tool_registry", None)
+        for name in getattr(self, "_registered_mcp_tool_names", set()):
+            if tool_registry is not None:
+                tool_registry.unregister(name)
+        for name in getattr(self, "_registered_mcp_auth_tool_names", set()):
+            if tool_registry is not None:
+                tool_registry.unregister(name)
+        command_registry = getattr(self, "command_registry", None)
+        for name in getattr(self, "_registered_mcp_command_names", set()):
+            if command_registry is not None:
+                command_registry.unregister(name)
+        self._registered_mcp_tool_names = set()
+        self._registered_mcp_auth_tool_names = set()
+        self._registered_mcp_command_names = set()
+
     def _register_mcp_integrations(self) -> None:
         from pathlib import Path
 
@@ -804,6 +893,7 @@ class InlineREPL:
             return
 
         self._mcp_manager = MCPManager(load_result.servers, roots=[mcp_workspace_root], session_id=self._session_id)
+        self._mcp_manager.set_elicitation_handler(self._request_mcp_elicitation)
         session_dir = self._session_dir_for_artifacts()
         try:
             _run_async_blocking(self._mcp_manager.connect_all())
@@ -841,7 +931,7 @@ class InlineREPL:
                     auth_flows=self._mcp_auth_flows,
                     session_id=self._session_id,
                 )
-                if capability in {"tools", "resources", "auth"}:
+                if capability in {"tools", "resources", "auth", "connection"}:
                     self._registered_mcp_tool_names = _sync_mcp_tool_registry(
                         self.tool_registry,
                         self._mcp_manager,
@@ -849,7 +939,7 @@ class InlineREPL:
                         self._registered_mcp_tool_names,
                         session_dir=self._session_dir_for_artifacts(),
                     )
-                if capability in {"prompts", "resources"}:
+                if capability in {"prompts", "resources", "auth", "connection"}:
                     self._registered_mcp_command_names, warnings = await _sync_mcp_command_registry(
                         self.command_registry,
                         self._mcp_manager,
@@ -866,6 +956,97 @@ class InlineREPL:
         except BaseException:
             _run_async_blocking(self._close_mcp_manager())
             raise
+
+    async def _request_mcp_elicitation(self, server_name: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return {"action": "cancel"}
+
+        async def run_interactive() -> dict[str, Any]:
+            return await self._request_mcp_elicitation_interactive(server_name, params)
+
+        renderer = getattr(self, "renderer", None)
+        suspend = getattr(renderer, "run_with_streaming_input_suspended", None)
+        if callable(suspend):
+            return await suspend(run_interactive)
+        return await run_interactive()
+
+    async def _request_mcp_elicitation_interactive(self, server_name: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        mode = str(params.get("mode", "") or "")
+        message = _safe_mcp_elicitation_display_text(params.get("message"))
+        url = _safe_mcp_elicitation_display_text(params.get("url"))
+
+        self.console.print(Text(_("MCP server {server!r} requested user action.").format(server=server_name), "bold"))
+        if message:
+            self.console.print(Text(message))
+        if url:
+            self.console.print(Text(url, "cyan"))
+
+        schema = _mcp_elicitation_schema(params)
+        if mode != "url" and schema is not None:
+            return await self._request_mcp_elicitation_form(schema)
+
+        prompt = _("Press Enter when complete, type 'decline' to decline, or 'cancel' to cancel: ")
+        if mode != "url":
+            prompt = _("Type 'accept' to accept, 'decline' to decline, or 'cancel' to cancel: ")
+        raw_answer = await self._read_mcp_elicitation_input(prompt)
+        if raw_answer is None:
+            return {"action": "cancel"}
+
+        answer = raw_answer.strip().lower()
+        if answer in {"decline", "d", "no", "n"}:
+            return {"action": "decline"}
+        if answer in {"cancel", "c", "quit", "q"}:
+            return {"action": "cancel"}
+        if mode != "url" and answer not in {"accept", "a", "yes", "y"}:
+            return {"action": "cancel"}
+        return {"action": "accept"}
+
+    async def _request_mcp_elicitation_form(self, schema: Mapping[str, Any]) -> dict[str, Any]:
+        properties = schema.get("properties")
+        if not isinstance(properties, Mapping):
+            return {"action": "cancel"}
+        required = {str(value) for value in schema.get("required", []) if str(value)}
+        content: dict[str, Any] = {}
+        for raw_name, raw_field_schema in properties.items():
+            name = str(raw_name)
+            if not isinstance(raw_field_schema, Mapping):
+                continue
+            is_required = name in required
+            prompt = _mcp_elicitation_prompt_for_field(name, raw_field_schema, required=is_required)
+            while True:
+                raw_answer = await self._read_mcp_elicitation_input(prompt)
+                if raw_answer is None:
+                    return {"action": "cancel"}
+                answer = raw_answer.strip()
+                normalized = answer.lower()
+                if normalized in {"decline", "d"}:
+                    return {"action": "decline"}
+                if normalized in {"cancel", "c", "quit", "q"}:
+                    return {"action": "cancel"}
+                if not answer:
+                    if is_required:
+                        self.console.print(Text(_("A value is required. Try again."), "yellow"))
+                        continue
+                    break
+                value = _parse_mcp_elicitation_field_value(answer, raw_field_schema)
+                if value is _MCP_ELICITATION_INVALID:
+                    self.console.print(Text(_("Invalid value. Try again."), "yellow"))
+                    continue
+                content[name] = value
+                break
+        return {"action": "accept", "content": content}
+
+    async def _read_mcp_elicitation_input(self, prompt: str) -> str | None:
+        prompt_input = getattr(self, "_prompt_input", None)
+        get_input = getattr(prompt_input, "get_input", None)
+        if callable(get_input):
+            return await get_input(prompt, transient=True)
+
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, self.console.input, prompt)
+        except EOFError:
+            return None
 
     def _prompt_for_pending_project_mcp_servers(self) -> None:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -922,10 +1103,14 @@ class InlineREPL:
         return self._memory_context
 
     def _build_current_system_prompt(self) -> str:
+        from iac_code.services.agent_factory import _mcp_server_instructions_text
+
+        mcp_manager = getattr(self, "_mcp_manager", None)
         return build_system_prompt(
             cwd=os.getcwd(),
             memory_context=self._refresh_memory_context(),
             skill_listing=getattr(self, "_skill_listing", ""),
+            mcp_server_instructions=_mcp_server_instructions_text(mcp_manager) if mcp_manager is not None else "",
             current_time=getattr(self, "_runtime_current_time", None),
             provider_display=self._status_provider_display(),
             model=self._status_model(getattr(self, "_current_model", "")),
@@ -1021,6 +1206,11 @@ class InlineREPL:
             )
         self._mcp_warnings_printed_count = len(warnings)
 
+    def _start_mcp_background_tasks(self) -> None:
+        from iac_code.services.agent_factory import _start_mcp_background_tasks
+
+        _start_mcp_background_tasks(getattr(self, "_mcp_manager", None))
+
     async def run(self, initial_prompt: str | None = None) -> None:
         """Run the REPL until the user exits.
 
@@ -1030,6 +1220,7 @@ class InlineREPL:
         """
         # Capture session start time for duration calculation
         self._started_monotonic = time.monotonic()
+        self._start_mcp_background_tasks()
 
         self._handle_startup_update()
         state = self.store.get_state()
@@ -1202,6 +1393,7 @@ class InlineREPL:
     async def run_once(self, prompt: str) -> None:
         """Process a single prompt and exit (non-interactive mode)."""
         try:
+            self._start_mcp_background_tasks()
             stripped_prompt = prompt.strip()
             if stripped_prompt.startswith("!"):
                 await self._handle_shell_escape(stripped_prompt)
@@ -1674,6 +1866,10 @@ class InlineREPL:
             return True
         if self.command_registry.is_command(user_input) and not escapes.command:
             if not self._is_pipeline_safe_command(user_input):
+                from iac_code.mcp.prompt_dispatch import lookup_mcp_prompt_command
+
+                if lookup_mcp_prompt_command(self.command_registry, user_input) is not None:
+                    return False
                 allowed = ", ".join(sorted(_PIPELINE_SAFE_COMMANDS))
                 self.renderer.print_system_message(
                     _("Slash commands are disabled in this pipeline. Allowed: {allowed}").format(allowed=allowed),
@@ -1725,8 +1921,15 @@ class InlineREPL:
                     # Stream the agent's response to the injected skill prompt
                     return await self._handle_chat_continue()
             except Exception as exc:
+                error_text = str(exc)
+                from iac_code.mcp.prompt_dispatch import is_mcp_prompt_command
+
+                if is_mcp_prompt_command(cmd):
+                    from iac_code.mcp.redaction import sanitize_mcp_public_text
+
+                    error_text = sanitize_mcp_public_text(error_text, fallback_summary="")
                 self.renderer.print_system_message(
-                    _("Command error: {error}").format(error=exc),
+                    _("Command error: {error}").format(error=error_text),
                     style="red",
                 )
             return []
@@ -3258,6 +3461,8 @@ class InlineREPL:
             auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
             resume_from_sidecar=True,
             prerequisite_resolution=prerequisite_resolution,
+            mcp_manager=getattr(self, "_mcp_manager", None),
+            mcp_config_warnings=getattr(self, "mcp_config_warnings", None),
         )
         self._refresh_pipeline_display_recorder()
         restored = self._pipeline.sidecar_restore_result
@@ -3345,6 +3550,8 @@ class InlineREPL:
                 memory_content_getter=self._pipeline_memory_content_getter(),
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
                 prerequisite_resolution=prerequisite_resolution,
+                mcp_manager=getattr(self, "_mcp_manager", None),
+                mcp_config_warnings=getattr(self, "mcp_config_warnings", None),
             )
             self._refresh_pipeline_display_recorder()
             self._pipeline_backup_blocked = False
@@ -5770,6 +5977,8 @@ class InlineREPL:
                 auto_trigger_skills=self.command_registry.get_model_invocable_skills(),
                 resume_from_sidecar=True,
                 prerequisite_resolution=prerequisite_resolution,
+                mcp_manager=getattr(self, "_mcp_manager", None),
+                mcp_config_warnings=getattr(self, "mcp_config_warnings", None),
             )
             restored = self._pipeline.sidecar_restore_result
             if restored is None or restored.ok is False:

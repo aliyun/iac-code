@@ -15,12 +15,14 @@ from iac_code.types.skill_source import SkillSource
 def register_mcp_prompt_commands(command_registry: CommandRegistry, manager: Any) -> list[MCPConfigWarning]:
     warnings: list[MCPConfigWarning] = []
     for record in manager.list_prompts():
+        server_name = _original_server_name(record)
+        prompt_name = _original_prompt_name(record)
         existing = command_registry.get(record.public_name)
         if existing is not None and not _is_mcp_prompt_command(existing):
             warnings.append(
                 MCPConfigWarning(
                     source="mcp",
-                    server_name=record.server_name,
+                    server_name=server_name,
                     code="command_conflict",
                     message=_("MCP prompt command {command!r} conflicts with an existing command.").format(
                         command=record.public_name
@@ -41,7 +43,7 @@ def register_mcp_prompt_commands(command_registry: CommandRegistry, manager: Any
             frontmatter=frontmatter,
             content="",
             source=SkillSource.PROJECT,
-            file_path="mcp://{}/prompt/{}".format(record.server_name, record.prompt_name),
+            file_path="mcp://{}/prompt/{}".format(server_name, prompt_name),
             content_length=0,
             _prompt_provider=_MCPPromptProvider(manager=manager, record=record),
         )
@@ -66,7 +68,11 @@ class _MCPPromptProvider:
         for name in _required_arguments(self.record):
             if name not in arguments or arguments[name] == "":
                 raise ValueError(_("Missing required MCP prompt argument: {name}").format(name=name))
-        result = await self.manager.get_prompt(self.record.server_name, self.record.prompt_name, arguments)
+        result = await self.manager.get_prompt(
+            _original_server_name(self.record),
+            _original_prompt_name(self.record),
+            arguments,
+        )
         return _render_prompt_result(result)
 
 
@@ -99,6 +105,14 @@ def _argument_hint(record: MCPPromptRecord) -> str:
     if required:
         return " ".join("{}=<value>".format(name) for name in required)
     return ""
+
+
+def _original_server_name(record: MCPPromptRecord) -> str:
+    return record.original_server_name or record.server_name
+
+
+def _original_prompt_name(record: MCPPromptRecord) -> str:
+    return record.original_prompt_name or record.prompt_name
 
 
 def _parse_prompt_args(args: str) -> dict[str, str]:
@@ -202,6 +216,11 @@ def _content_text(content: Any) -> str:
         return json.dumps(content, ensure_ascii=False, sort_keys=True)
     if isinstance(content, list):
         return "\n".join(_content_text(item) for item in content)
+    if getattr(content, "type", None) == "text":
+        return str(getattr(content, "text", ""))
+    model_dump = getattr(content, "model_dump", None)
+    if callable(model_dump):
+        return json.dumps(model_dump(by_alias=True, exclude_none=True), ensure_ascii=False, sort_keys=True)
     return str(content)
 
 

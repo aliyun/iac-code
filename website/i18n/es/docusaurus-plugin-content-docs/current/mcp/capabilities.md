@@ -1,110 +1,128 @@
 ---
 sidebar_position: 3
-title: Herramientas, recursos, prompts y skills
-description: Entiende cómo aparecen las capacidades MCP dentro de IaC Code.
+title: Herramientas, recursos, prompts y habilidades
+description: Entiende como aparecen las capacidades MCP dentro de IaC Code.
 ---
 
-# Herramientas, recursos, prompts y skills
+# Herramientas, recursos, prompts y habilidades
 
-Los servidores MCP conectados pueden exponer cuatro tipos de capacidades a IaC Code.
+Los MCP servers conectados pueden exponer cuatro tipos de capabilities a IaC Code.
 
-## Herramientas
+## Tools
 
-Cada herramienta MCP se convierte en una herramienta de IaC Code:
+Each MCP tool becomes an IaC Code tool:
 
 ```text
 mcp__<server>__<tool>
 ```
 
-Las descripciones de herramientas y los esquemas JSON de entrada vienen del servidor MCP. IaC Code reenvía la entrada de herramienta del modelo al servidor MCP y luego convierte los bloques de contenido MCP en un resultado normal.
+Las descripciones de herramientas y los esquemas de entrada JSON provienen del servidor MCP. El código IaC reenvía la entrada de la herramienta del modelo al servidor MCP y luego convierte los bloques de contenido de MCP en un resultado de herramienta normal.
 
-Las anotaciones MCP se respetan cuando es posible:
+Las solicitudes de permiso y los metadatos de auditoría incluyen el nombre del servidor MCP, el nombre de la herramienta original, el nombre de la herramienta pública normalizada y anotaciones destructivas/de solo lectura.
 
-| Anotación MCP | Comportamiento de IaC Code |
+Las anotaciones de la herramienta MCP se respetan siempre que sea posible:
+
+| MCP annotation | IaC Code behavior |
 |---|---|
-| `readOnlyHint: true` | La herramienta se trata como de solo lectura y segura para concurrencia. |
-| `destructiveHint: true` | La herramienta se trata como destructiva en decisiones de permisos. |
+| `readOnlyHint: true` | La herramienta se trata como de solo lectura y segura para la simultaneidad. |
+| `destructiveHint: true` | La herramienta se trata como destructiva para las decisiones de permisos. |
 
-Las herramientas MCP siguen pasando por el sistema de permisos existente de IaC Code. Configura la política con settings normales de `permissions` o flags CLI como `--allowed-tools`, `--disallowed-tools` y `--permission-mode`.
+Las herramientas MCP aún pasan por el sistema de permisos existente del Código IaC. Configure la política de permisos con configuraciones normales de `permissions` o indicadores CLI como `--allowed-tools`, `--disallowed-tools` y `--permission-mode`.
 
-Las notificaciones de progreso MCP se muestran en el renderizado interactivo, la salida de progreso headless, las actualizaciones de progreso ACP y los metadatos de herramientas A2A.
+Las notificaciones de progreso de MCP aparecen en renderizado interactivo, salida de progreso sin cabeza, actualizaciones de progreso de la herramienta ACP y metadatos de la herramienta A2A.
 
-## Resultados de herramientas y artefactos
+## Tool Results and Artifacts
 
-IaC Code convierte bloques de contenido MCP en texto visible para el modelo:
+El código IaC convierte bloques de contenido MCP en texto visible para el modelo:
 
-| Contenido MCP | Resultado de IaC Code |
+| MCP content | IaC Code result |
 |---|---|
-| Contenido de texto | Incluido directamente en el resultado de herramienta. |
-| `structuredContent` | Renderizado como JSON formateado en una sección de contenido estructurado. |
-| Recursos de texto | Renderizados con procedencia de servidor y URI. |
-| `resource_link` | Renderizado como enlace de recurso con URI y tipo MIME. |
-| Datos de imagen, audio y blob | Guardados como archivos de artefacto privados y referenciados por id de artefacto. |
+| Text content | Included directly in the tool result when small; el texto grande se guarda como artifact privado `.txt`, `.json` o `.md`. |
+| `structuredContent` | Representado como JSON formateado en una sección de contenido estructurado. |
+| Recursos de texto | Renderizado con servidor y procedencia de URI. |
+| `resource_link` | Representado como un enlace de recurso con tipo URI y MIME. |
+| Datos de imágenes, audio y blobs | Almacenados como archivos de artefactos privados y referenciados por ID de artefacto. |
 
-En sesiones v2, los artefactos binarios se guardan en el directorio MCP tool-results propio de la sesión:
+Los artefactos binarios se almacenan en el directorio de resultados de la herramienta MCP propiedad de la sesión para las sesiones v2:
 
 ```text
 <config-dir>/projects/<project>/<session-id>/tool-results/mcp/<server>/<tool>/
 ```
 
-Las sesiones legacy sin marcador de layout compatible siguen usando:
+Las sesiones heredadas sin un marcador de diseño compatible siguen utilizando:
 
 ```text
 <config-dir>/tool-results/<session-id>/mcp/<server>/<tool>/
 ```
 
-El modelo ve el id de artefacto y metadatos, no datos base64 sin procesar.
+The model sees the artifact id and metadata, not raw base64 data. Los artifacts de texto grande incluyen un path so the full output can be read without flooding the conversation.
 
-## Recursos
+## Resources
 
-Cuando cualquier servidor conectado expone recursos, IaC Code registra dos herramientas globales:
+Cuando cualquier servidor conectado expone recursos, el Código IaC registra dos herramientas globales:
 
-| Herramienta | Propósito |
+| Tool | Purpose |
 |---|---|
-| `list_mcp_resources` | Lista recursos expuestos por servidores MCP conectados. Puede filtrar por nombre de servidor. |
+| `list_mcp_resources` | Enumera los recursos de los servidores MCP conectados. Opcionalmente, filtre por nombre de servidor. |
 | `read_mcp_resource` | Lee un recurso por `server` y `uri`. |
 
-Las líneas de recurso incluyen nombre de servidor, URI, nombre de recurso opcional y tipo MIME opcional.
+Las líneas de recursos incluyen el nombre del servidor, URI, nombre de recurso opcional y tipo MIME opcional.
 
 ## Prompts
 
-Los prompts MCP se convierten en comandos slash:
+MCP prompts become slash commands:
 
 ```text
 /mcp__<server>__<prompt> key=value
 ```
 
-Al invocarlo, IaC Code llama a MCP `prompts/get`, renderiza los mensajes de prompt devueltos, inyecta el prompt renderizado en la conversación y deja que el modelo continúe. Los argumentos se pueden pasar como:
+Cuando se invoca, el código IaC llama a MCP `prompts/get`, presenta los mensajes de solicitud devueltos, inyecta el mensaje representado en la conversación y permite que el modelo continúe. Los argumentos rápidos se pueden pasar como:
 
 ```text
 template_name=prod-vpc region=cn-hangzhou
 ```
 
-o como JSON:
+or as JSON:
 
 ```json
 {"template_name": "prod-vpc", "region": "cn-hangzhou"}
 ```
 
-Los argumentos requeridos se validan antes de la llamada MCP. Se admiten valores entre comillas, incluidos paths de Windows con barras invertidas.
+Los argumentos de solicitud requeridos se validan antes de la llamada a MCP. Se admiten valores entrecomillados, incluidas las rutas de Windows con barras invertidas.
 
 ## Skills
 
-Los recursos MCP con URI `skill://` se convierten en comandos de skill:
+Los recursos de MCP con URI `skill://` se convierten en comandos de habilidad:
 
 ```text
 $mcp__<server>__<skill>
 ```
 
-IaC Code lee el recurso de skill remoto, analiza el frontmatter y lo registra como comando de skill normal. Los skills MCP remotos están limitados por seguridad:
+El código IaC lee el recurso de habilidad remota, analiza el contenido inicial y lo registra como un comando de habilidad normal. Las habilidades de MCP remotas están limitadas por motivos de seguridad:
 
-- Se eliminan los `allowed_tools` remotos.
-- Se eliminan las reglas remotas de autoactivación por paths.
-- El cuerpo y la descripción del skill remoto tienen límites de longitud.
-- Si el skill remoto entra en conflicto con un comando existente, se omite con una advertencia MCP.
+- Remote `allowed_tools` are cleared.
+- Se borran las reglas de ruta de activación automática remota.
+- El cuerpo de la habilidad remota y la longitud de la descripción están limitados.
+- Si la habilidad remota entra en conflicto con un comando existente, se omite con una advertencia de MCP.
 
-Los recursos de skill MCP pueden leerse durante el inicio para que el comando esté registrado antes de que el usuario lo invoque.
+Los recursos de habilidades de MCP se pueden leer durante el inicio para que el comando pueda registrarse antes de que el usuario lo invoque.
 
-## Actualizaciones dinámicas
+Cuando no hay conflicto de comandos, las habilidades de MCP también obtienen un alias de compatibilidad:
 
-Si un servidor MCP envía `tools/list_changed`, `resources/list_changed` o `prompts/list_changed`, IaC Code actualiza la lista de capacidades afectada y el registro de herramientas o comandos. Los fallos de actualización se reportan como advertencias MCP y no detienen la sesión activa.
+```text
+$<server>:<skill>
+```
+
+Por ejemplo, `$mcp__yuque__search` y `$yuque:search` pueden resolverse en la misma habilidad remota.
+
+## Server Instructions (instrucciones del servidor)
+
+Si un servidor conectado devuelve "instrucciones" desde la inicialización, el código IaC las inyecta en el indicador del agente como una sección dedicada de instrucciones del servidor MCP. Estas instrucciones se tratan como una guía centrada en el servidor y no anulan las instrucciones del proyecto local.
+
+## Elicitation (solicitudes interactivas)
+
+Las sesiones interactivas pueden enrutar solicitudes de MCP elicitation al usuario. La elicitation en modo URL puede pedir al usuario completar un flujo de URL externo y luego reintentar el MCP tool call original hasta un límite acotado. Los contextos no interactivos cancelan la elicitation de forma segura.
+
+## Dynamic Updates
+
+Si un servidor MCP envía `tools/list_changed`, `resources/list_changed` o `prompts/list_changed`, el código IaC actualiza la lista de capacidades afectadas y actualiza el registro de herramientas o comandos. Los errores de actualización se informan como advertencias de MCP y no detienen la sesión activa.

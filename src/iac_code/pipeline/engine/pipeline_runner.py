@@ -431,6 +431,8 @@ class PipelineRunner:
         surface: str = "repl",
         backup_service: Any | None = None,
         prerequisite_resolution: dict[str, Any] | None = None,
+        mcp_manager: Any | None = None,
+        mcp_config_warnings: list[Any] | None = None,
     ) -> None:
         self._session_storage = session_storage
         self._session_id = session_id
@@ -440,6 +442,9 @@ class PipelineRunner:
         self._memory_content_getter = memory_content_getter
         self._auto_trigger_skills = auto_trigger_skills or []
         self._surface = surface
+        self._mcp_manager = mcp_manager
+        self._mcp_config_warnings = mcp_config_warnings if mcp_config_warnings is not None else []
+        self._mcp_status_event_signature: str | None = None
 
         self._pipeline_dir = pipeline_dir
 
@@ -981,10 +986,23 @@ class PipelineRunner:
         self, user_input: str | list[ContentBlock] | PipelineUserInput | None = None
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         if self.sidecar_status == "backup_blocked":
-            return self._continue_from_backup_blocked(user_input)
-        if not user_input:
-            return self._continue_from_current(resume_running_step=True)
-        return self._continue_from_sidecar_with_input(user_input)
+            events = self._continue_from_backup_blocked(user_input)
+        elif not user_input:
+            events = self._continue_from_current(resume_running_step=True)
+        else:
+            events = self._continue_from_sidecar_with_input(user_input)
+        return self._with_initial_mcp_status(events)
+
+    async def _with_initial_mcp_status(
+        self,
+        events: AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None],
+    ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+        await self._start_mcp_reconnect_tasks()
+        mcp_status_event = self._mcp_status_event(force=True)
+        if mcp_status_event is not None:
+            yield mcp_status_event
+        async for event in events:
+            yield event
 
     async def _continue_from_backup_blocked(
         self,
@@ -1138,6 +1156,34 @@ class PipelineRunner:
             return
         async for event in self._continue_from_current(resume_running_step=True):
             yield event
+
+    def _mcp_status_event(self, *, force: bool = False) -> PipelineEvent | None:
+        from iac_code.mcp.manager import mcp_status_metadata
+
+        status_metadata = mcp_status_metadata(self._mcp_manager, warnings=self._mcp_config_warnings)
+        if status_metadata is None:
+            return None
+        status_signature = repr(status_metadata)
+        if not force and self._mcp_status_event_signature == status_signature:
+            return None
+        self._mcp_status_event_signature = status_signature
+        return PipelineEvent(
+            type=PipelineEventType.MCP_STATUS,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "kind": "mcp_status",
+                "mcp_status": status_metadata,
+            },
+        )
+
+    async def _start_mcp_reconnect_tasks(self) -> None:
+        starter = getattr(self._mcp_manager, "start_reconnect_tasks", None)
+        if not callable(starter):
+            return
+        result = starter()
+        if asyncio.iscoroutine(result):
+            await result
 
     async def save_interrupt_pause(self, verdict: InterruptVerdict) -> PipelineEvent:
         return await self._save_and_emit_interrupt_pause(verdict)
@@ -2287,6 +2333,7 @@ class PipelineRunner:
         self, user_input: str | list[ContentBlock] | PipelineUserInput
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Start the pipeline from the first step."""
+        await self._start_mcp_reconnect_tasks()
         pipeline_input = normalize_pipeline_user_input(user_input)
         self._set_current_step_user_input(pipeline_input)
         try:
@@ -2312,6 +2359,9 @@ class PipelineRunner:
                 "step_names": list(self.state_machine._order),
             },
         )
+        mcp_status_event = self._mcp_status_event(force=True)
+        if mcp_status_event is not None:
+            yield mcp_status_event
         with self._observability.pipeline_run_span(total_steps=self.state_machine.total_steps):
             async for event in self._continue_from_current(**self._continue_input_kwargs(pipeline_input)):
                 yield event
@@ -2320,6 +2370,10 @@ class PipelineRunner:
         self, user_input: str | list[ContentBlock] | PipelineUserInput
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Resume after user input at a USER_INPUT_REQUIRED pause."""
+        await self._start_mcp_reconnect_tasks()
+        mcp_status_event = self._mcp_status_event(force=True)
+        if mcp_status_event is not None:
+            yield mcp_status_event
         if self.has_pending_pipeline_pause_confirmation():
             async for event in self._continue_from_sidecar_with_input(user_input):
                 yield event
@@ -2415,6 +2469,10 @@ class PipelineRunner:
             raise ValueError(
                 f"ask_user_question tool_use_id mismatch: expected {expected_tool_use_id!r}, got {tool_use_id!r}"
             )
+        await self._start_mcp_reconnect_tasks()
+        mcp_status_event = self._mcp_status_event(force=True)
+        if mcp_status_event is not None:
+            yield mcp_status_event
         tool_result = ToolResultBlock(
             tool_use_id=tool_use_id,
             content=json.dumps(payload, ensure_ascii=False),
@@ -3470,6 +3528,9 @@ class PipelineRunner:
                             user_message=step_user_message,
                             emit_step_completed_event=False,
                         ):
+                            mcp_status_event = self._mcp_status_event()
+                            if mcp_status_event is not None:
+                                yield mcp_status_event
                             yield event
                             if self._is_persistence_failure_event(event):
                                 return
@@ -3655,6 +3716,9 @@ class PipelineRunner:
                     self._session_id,
                     **execute_kwargs,
                 ):
+                    mcp_status_event = self._mcp_status_event()
+                    if mcp_status_event is not None:
+                        yield mcp_status_event
                     if isinstance(event, StepResult):
                         step_result = event
                     else:

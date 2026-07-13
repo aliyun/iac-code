@@ -59,3 +59,24 @@ def test_mcp_progress_updates_matching_tool_record() -> None:
 
     assert action == "tool_update"
     assert acc.tool_records["tool-a"].progress_renderable == "MCP live:echo: 1/2: halfway"
+
+
+def test_mcp_progress_without_tool_use_id_matches_public_tool_name() -> None:
+    acc = StreamAccumulator()
+    acc.process(ToolUseStartEvent(tool_use_id="tool-a", name="mcp__yuque_space__search_docs_8d3f"))
+
+    action = acc.process(
+        MCPProgressEvent(
+            server_name="yuque space",
+            tool_name="search/docs",
+            public_name="mcp__yuque_space__search_docs_8d3f",
+            progress=1,
+            total=2,
+            message="api_key=sk-live-secret /Users/alice/.iac-code/settings.yml",
+        )
+    )
+
+    assert action == "tool_update"
+    assert (
+        acc.tool_records["tool-a"].progress_renderable == "MCP yuque space:search/docs: 1/2: api_key=[REDACTED] [PATH]"
+    )

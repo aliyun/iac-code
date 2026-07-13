@@ -27,14 +27,21 @@ def fake_msvcrt(monkeypatch):
     return queue
 
 
+def _patch_raw_input_win_stdout(monkeypatch, buf: io.StringIO):
+    import iac_code.ui.core.raw_input_win as raw_input_win
+
+    monkeypatch.setattr(raw_input_win, "sys", types.SimpleNamespace(stdout=buf))
+    return raw_input_win
+
+
 def test_enter_writes_bracketed_paste_enable_when_vt_safe(monkeypatch):
     """W-I3: __enter__ must write ESC [ ? 2004 h."""
     buf = io.StringIO()
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.sys.stdout", buf)
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.stdout_supports_virtual_terminal", lambda: True)
-    from iac_code.ui.core.raw_input_win import RawInputCapture
+    raw_input_win = _patch_raw_input_win_stdout(monkeypatch, buf)
+    monkeypatch.setattr(raw_input_win, "stdout_supports_virtual_terminal", lambda: True)
+    raw_input_capture = raw_input_win.RawInputCapture
 
-    with RawInputCapture() as _cap:
+    with raw_input_capture() as _cap:
         out = buf.getvalue()
         assert "\x1b[?2004h" in out, f"expected bracketed paste enable, got: {out!r}"
 
@@ -42,22 +49,22 @@ def test_enter_writes_bracketed_paste_enable_when_vt_safe(monkeypatch):
 def test_enter_skips_bracketed_paste_enable_when_vt_not_safe(monkeypatch):
     """Legacy Windows consoles must not see bracketed paste control bytes."""
     buf = io.StringIO()
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.sys.stdout", buf)
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.stdout_supports_virtual_terminal", lambda: False)
-    from iac_code.ui.core.raw_input_win import RawInputCapture
+    raw_input_win = _patch_raw_input_win_stdout(monkeypatch, buf)
+    monkeypatch.setattr(raw_input_win, "stdout_supports_virtual_terminal", lambda: False)
+    raw_input_capture = raw_input_win.RawInputCapture
 
-    with RawInputCapture() as _cap:
+    with raw_input_capture() as _cap:
         assert buf.getvalue() == ""
 
 
 def test_exit_writes_bracketed_paste_disable_only_if_enabled(monkeypatch):
     """W-I3: __exit__ must write ESC [ ? 2004 l."""
     buf = io.StringIO()
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.sys.stdout", buf)
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.stdout_supports_virtual_terminal", lambda: True)
-    from iac_code.ui.core.raw_input_win import RawInputCapture
+    raw_input_win = _patch_raw_input_win_stdout(monkeypatch, buf)
+    monkeypatch.setattr(raw_input_win, "stdout_supports_virtual_terminal", lambda: True)
+    raw_input_capture = raw_input_win.RawInputCapture
 
-    cap = RawInputCapture()
+    cap = raw_input_capture()
     cap.__enter__()
     buf.truncate(0)
     buf.seek(0)
@@ -69,11 +76,11 @@ def test_exit_writes_bracketed_paste_disable_only_if_enabled(monkeypatch):
 def test_exit_skips_bracketed_paste_disable_when_not_enabled(monkeypatch):
     """A skipped enable must not be paired with a raw disable sequence."""
     buf = io.StringIO()
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.sys.stdout", buf)
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.stdout_supports_virtual_terminal", lambda: False)
-    from iac_code.ui.core.raw_input_win import RawInputCapture
+    raw_input_win = _patch_raw_input_win_stdout(monkeypatch, buf)
+    monkeypatch.setattr(raw_input_win, "stdout_supports_virtual_terminal", lambda: False)
+    raw_input_capture = raw_input_win.RawInputCapture
 
-    cap = RawInputCapture()
+    cap = raw_input_capture()
     cap.__enter__()
     cap.__exit__(None, None, None)
     assert buf.getvalue() == ""
@@ -82,11 +89,11 @@ def test_exit_skips_bracketed_paste_disable_when_not_enabled(monkeypatch):
 def test_exit_clears_bracketed_paste_enabled_after_disable(monkeypatch):
     """Repeated exit calls must not emit duplicate disable sequences."""
     buf = io.StringIO()
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.sys.stdout", buf)
-    monkeypatch.setattr("iac_code.ui.core.raw_input_win.stdout_supports_virtual_terminal", lambda: True)
-    from iac_code.ui.core.raw_input_win import RawInputCapture
+    raw_input_win = _patch_raw_input_win_stdout(monkeypatch, buf)
+    monkeypatch.setattr(raw_input_win, "stdout_supports_virtual_terminal", lambda: True)
+    raw_input_capture = raw_input_win.RawInputCapture
 
-    cap = RawInputCapture()
+    cap = raw_input_capture()
     cap.__enter__()
     buf.truncate(0)
     buf.seek(0)

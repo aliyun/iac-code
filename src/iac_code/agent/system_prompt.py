@@ -260,17 +260,33 @@ def _build_memory_section(memory_content: str) -> str:
 
 
 def _build_memory_context_section(memory_context: object) -> str:
-    parts: list[str] = []
+    parts = [
+        section
+        for section in (
+            _build_instruction_memory_context_section(memory_context),
+            _build_memory_mechanics_context_section(memory_context),
+        )
+        if section
+    ]
+    return "\n\n".join(parts)
+
+
+def _build_instruction_memory_context_section(memory_context: object) -> str:
     instruction_memory = str(getattr(memory_context, "instruction_memory_content", "") or "").strip()
+    if not instruction_memory:
+        return ""
+    return "# Memory\n## Instruction Memory\n" + instruction_memory
+
+
+def _build_memory_mechanics_context_section(memory_context: object) -> str:
+    parts: list[str] = []
     memory_mechanics = str(getattr(memory_context, "memory_mechanics_content", "") or "").strip()
 
-    if instruction_memory:
-        parts.append(f"## Instruction Memory\n{instruction_memory}")
     if memory_mechanics:
-        parts.append(f"## Memory Mechanics\n{memory_mechanics}")
+        parts.append(memory_mechanics)
     if not parts:
         return ""
-    return "# Memory\n" + "\n\n".join(parts)
+    return "# Memory Mechanics\n" + "\n\n".join(parts)
 
 
 def _build_cloud_config_section() -> str:
@@ -383,6 +399,7 @@ def build_system_prompt(
     cwd: str | None = None,
     memory_content: str = "",
     skill_listing: str = "",
+    mcp_server_instructions: str = "",
     memory_context: object | None = None,
     current_time: str | None = None,
     provider_display: str = "",
@@ -415,7 +432,15 @@ def build_system_prompt(
             is_static=False,
         )
 
-    # Skill listing (priority 65, between project_instructions and memory)
+    if mcp_server_instructions:
+        builder.add_cached_section(
+            "mcp_server_instructions",
+            lambda: mcp_server_instructions,
+            priority=68,
+            is_static=False,
+        )
+
+    # Skill listing (priority 65, between MCP server instructions and memory)
     if skill_listing:
         builder.add_cached_section(
             "skills",
@@ -424,10 +449,18 @@ def build_system_prompt(
             is_static=False,
         )
 
-    if memory_context is not None and _build_memory_context_section(memory_context):
+    if memory_context is not None and _build_instruction_memory_context_section(memory_context):
         builder.add_cached_section(
-            "memory",
-            lambda: _build_memory_context_section(memory_context),
+            "instruction_memory",
+            lambda: _build_instruction_memory_context_section(memory_context),
+            priority=70,
+            is_static=False,
+        )
+
+    if memory_context is not None and _build_memory_mechanics_context_section(memory_context):
+        builder.add_cached_section(
+            "memory_mechanics",
+            lambda: _build_memory_mechanics_context_section(memory_context),
             priority=60,
             is_static=False,
         )

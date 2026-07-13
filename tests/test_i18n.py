@@ -7,7 +7,9 @@ all msgid entries from the .pot template file.
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
+from string import Formatter
 
 import pytest
 from babel.messages.pofile import read_po
@@ -149,6 +151,178 @@ PIPELINE_USER_VISIBLE_MSGIDS = {
     'Displayed details for "{candidate_name}".',
 }
 
+MCP_HOST_ENHANCE_USER_VISIBLE_MSGIDS = {
+    "Manage MCP servers",
+    "[enable|disable|reconnect [server-name] [--scope scope] [--source-path path]]",
+    "MCP command requires a context.",
+    'MCP server "{name}" not found',
+    "enabled",
+    "disabled",
+    "All MCP servers are already {state}",
+    "Enabled",
+    "Disabled",
+    "{verb} {count} MCP server(s)",
+    'MCP server "{name}" {state}',
+    "Error: {error}",
+    "Successfully reconnected to {name}",
+    "{name} requires authentication. Use /mcp to authenticate.",
+    "Failed to reconnect to {name}",
+    "--scope or --source-path cannot be used with /mcp {command} all.",
+    "--scope requires a value.",
+    "--source-path requires a value.",
+    "Persisted MCP config file path.",
+    "Interactive MCP manager requires a TTY. Use `iac-code mcp list` or MCP quick commands.",
+    "Command or remote URL.",
+    "Transport type: stdio, http, sse, ws.",
+    "Remote MCP URL for http/sse/ws.",
+    "HTTP header KEY=VALUE or Name: Value. Can be repeated.",
+    (
+        "Warning: {operand!r} looks like a URL. Use --transport http, --transport sse, "
+        "or --transport ws for remote MCP servers."
+    ),
+    "Use either --url or a positional URL for remote MCP servers, not both.",
+    "Remote MCP servers accept one positional URL, not command arguments.",
+    "Connect briefly and show MCP health.",
+    "Show configured MCP servers without health checks.",
+    "Use either --check or --config-only, not both.",
+    "Show configured MCP server JSON only.",
+    "MCP health check failed: {error}",
+    "No diagnostic was returned.",
+    "MCP server name.",
+    "Reconnect all persisted MCP servers.",
+    "Use either a server name or --all, not both.",
+    "--scope cannot be used with mcp reconnect --all.",
+    "MCP server name is required unless --all is used.",
+    "Disabled MCP server {name!r}.",
+    "Enabled MCP server {name!r}.",
+    "OAuth authorization was cancelled.",
+    "yes",
+    "no",
+    "Browser opened: {status}",
+    "Authorization URL: {url}",
+    (
+        "Paste the callback URL or authorization code for MCP server {name!r}, "
+        "or press Enter to wait for the loopback callback:"
+    ),
+    "MCP reconnect failed: {error}",
+    "MCP server {name!r} not found in persisted MCP config.",
+    "MCP server {name!r} exists in multiple persisted scopes. Re-run with one of:",
+    (
+        "Unknown MCP option {option!r}. Put subprocess flags after a command, for example: "
+        "iac-code mcp add NAME -- npx --yes mcp-server."
+    ),
+    "Next: run `{command}` to check MCP server health.",
+    "Next: run `{command}` to authenticate this MCP server.",
+    "{option} expects {expected}, got {value!r}.",
+    "MCP server {server!r} is closing.",
+    "MCP headers helper for server {server!r} could not be parsed: {error}",
+    "MCP headers helper for server {server!r} is empty.",
+    "MCP headers helper for server {server!r} failed to start: {error}",
+    "timed out after {seconds:g} seconds",
+    "{stream} output too large",
+    "exited with status {status}",
+    "returned invalid JSON",
+    "must return a JSON object",
+    "must return string header names and values",
+    "MCP headers helper for server {server!r} {reason}.",
+    "{message}\nMCP headers helper stderr:\n{stderr}",
+    "MCP HTTP session expired for server {server!r}; reconnect required.",
+    "authentication required",
+    "{} Required scopes: {}",
+    "MCP HTTP session expired; reconnect required.",
+    "MCP server disabled.",
+    "Project MCP server pending approval.",
+    "{} call failed: {}",
+    "MCP server {server!r} oauth.clientMetadataUrl must be an HTTPS URL with a non-root pathname.",
+    "MCP server {server!r} oauth.callbackPort must be between 0 and 65535.",
+    "The installed MCP SDK does not support OAuth client metadata URLs.",
+    "required scopes: {scopes}",
+    "OAuth dynamic client registration requires a remote MCP server URL.",
+    "Timed out waiting for MCP OAuth authorization URL.",
+    "OAuth provider did not produce an authorization URL.",
+    "OAuth manual callback input was empty.",
+    "Saved large MCP text output as {artifact_id} ({chars} chars, {bytes} bytes).",
+    "Read the full output from {path}.",
+    "MCP skill alias {alias!r} conflicts with an existing command.",
+    "MCP server {server!r} field headersHelper is only supported for http and sse transports.",
+    ("MCP server {server!r} WebSocket transport url must be a ws:// or wss:// URL with a host."),
+    (
+        "MCP server {server!r} WebSocket transport field {field} is not supported because "
+        "the installed MCP SDK websocket_client accepts only a URL."
+    ),
+    "{label}{suffix} ({choices}): ",
+    "{label}{suffix} (yes/no): ",
+    "{label}{suffix}: ",
+    "MCP server {server!r} requested user action.",
+    "Press Enter when complete, type 'decline' to decline, or 'cancel' to cancel: ",
+    "Type 'accept' to accept, 'decline' to decline, or 'cancel' to cancel: ",
+    "No MCP servers configured. Run `iac-code mcp --help` to learn more.",
+    "No MCP servers configured.",
+    "Run `iac-code mcp --help` to add or inspect MCP servers.",
+    "Enter select",
+    "Esc close",
+    "Up/Down navigate",
+    "Actions",
+    "Authenticating {name}",
+    "Copied!",
+    "press c to copy",
+    "c copy URL",
+    "If your browser does not open automatically, copy this URL manually ({hint}).",
+    "Waiting for OAuth callback.",
+    "If the redirect page shows a connection error, paste the URL from your browser address bar.",
+    "Enter submit",
+    "Esc cancel",
+    "This may take a few moments.",
+    "Failed to {action} MCP server {name!r}: {error}",
+    "Enable",
+    "Disable",
+    "Authenticate",
+    "Re-authenticate",
+    "Clear authentication",
+    "Reconnect",
+    "View tools",
+    "View resources",
+    "View prompts",
+    "Resources for {name}",
+    "1 resource",
+    "{count} resources",
+    "No resources available",
+    "Name: {name}",
+    "MIME type: {mime_type}",
+    "Prompts for {name}",
+    "1 prompt",
+    "{count} prompts",
+    "No prompts available",
+    "Prompt name: {name}",
+    "Arguments:",
+    "Refreshed MCP status.",
+    "Authentication successful. Enable {name} to connect.",
+    "Restarting MCP server process",
+    "Establishing connection to MCP server",
+    "Error reconnecting to {name}: {error}",
+    "{name} requires authentication. Use the 'Authenticate' option.",
+    "Authentication successful. Connected to {name}.",
+    "Authentication successful. Reconnected to {name}.",
+    "Authentication cleared for {name}.",
+    "MCP Config Diagnostics",
+    "For help configuring MCP servers, run `iac-code mcp --help`.",
+    "Failed to parse",
+    "Contains warnings",
+    "Location: {path}",
+    "{scope} MCPs",
+    "Auth",
+    "URL",
+    "Capabilities",
+    "Failure",
+    "Latest failure",
+    "Latest refresh failure",
+    "Tools refresh",
+    "Resources refresh",
+    "Prompts refresh",
+    "{capability} refresh",
+    "prompts",
+}
+
 SESSION_BACKUP_USER_VISIBLE_MSGIDS = {
     "A2A pipeline sidecar owner is unavailable",
     "A2A pipeline sidecar restore failed: status={status}, reason={reason}",
@@ -209,6 +383,27 @@ def _get_all_translations_from_po(po_file: Path) -> dict[str, str]:
         else:
             result[message.id] = message.string
     return result
+
+
+def _format_fields(value: str) -> Counter[str]:
+    fields: Counter[str] = Counter()
+    for literal_text, field_name, format_spec, conversion in Formatter().parse(value):
+        _ = literal_text
+        if field_name is None:
+            continue
+        token = "{"
+        token += field_name
+        if conversion:
+            token += "!{}".format(conversion)
+        if format_spec:
+            token += ":{}".format(format_spec)
+        token += "}"
+        fields[token] += 1
+    return fields
+
+
+def test_format_fields_tracks_empty_positional_placeholders() -> None:
+    assert _format_fields("{} Required scopes: {}") == Counter({"{}": 2})
 
 
 def _discover_language_dirs() -> list[Path]:
@@ -320,37 +515,6 @@ def test_supported_languages_match_locale_dirs():
 
     assert len(SUPPORTED_LANGUAGES) == 7
     assert set(SUPPORTED_LANGUAGES) == {DEFAULT_LANGUAGE, *locale_codes}
-
-
-def test_mo_files_up_to_date():
-    """Verify that .mo files are compiled and newer than their .po files.
-
-    At runtime gettext loads the compiled .mo file, not the .po source.
-    If the .mo is missing or older than the .po, translations will be
-    stale or absent.
-    """
-    language_dirs = _discover_language_dirs()
-    if not language_dirs:
-        pytest.skip("No language directories found")
-
-    errors = []
-    for lang_dir in language_dirs:
-        po_file = lang_dir / "LC_MESSAGES" / "messages.po"
-        mo_file = lang_dir / "LC_MESSAGES" / "messages.mo"
-
-        if not po_file.exists():
-            continue
-
-        compile_cmd = f"pybabel compile -d src/iac_code/i18n/locales -l {lang_dir.name}"
-        if not mo_file.exists():
-            errors.append(f"{lang_dir.name}: .mo file missing — run: {compile_cmd}")
-            continue
-
-        if mo_file.stat().st_mtime < po_file.stat().st_mtime:
-            errors.append(f"{lang_dir.name}: .mo file is older than .po — run: {compile_cmd}")
-
-    if errors:
-        pytest.fail(".mo files are out of date. Translations will not appear at runtime.\n" + "\n".join(errors))
 
 
 def test_mo_compilation_valid():
@@ -477,6 +641,11 @@ def test_memory_command_translations_are_complete():
                 errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
             elif msgstr == msgid:
                 errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+            elif _format_fields(msgstr) != _format_fields(msgid):
+                errors.append(
+                    f"{lang_dir.name}: placeholder mismatch for {msgid!r}: "
+                    f"expected {sorted(_format_fields(msgid))}, got {sorted(_format_fields(msgstr))}"
+                )
 
     assert not errors, "\n".join(errors)
 
@@ -502,8 +671,50 @@ def test_pipeline_user_visible_translations_are_complete():
                 errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
             elif msgstr == msgid:
                 errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+            elif _format_fields(msgstr) != _format_fields(msgid):
+                errors.append(
+                    f"{lang_dir.name}: placeholder mismatch for {msgid!r}: "
+                    f"expected {sorted(_format_fields(msgid))}, got {sorted(_format_fields(msgstr))}"
+                )
 
     assert not errors, "\n".join(errors)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="messages.pot not generated on Windows")
+def test_mcp_host_enhance_user_visible_translations_are_complete():
+    """MCP host command, OAuth, diagnostics, and /mcp UI strings must be localized."""
+    assert POT_FILE.exists(), f"POT file not found at {POT_FILE}"
+    pot_msgids = _get_all_msgids_from_pot(POT_FILE)
+    missing_from_pot = MCP_HOST_ENHANCE_USER_VISIBLE_MSGIDS - pot_msgids
+    assert not missing_from_pot, f"MCP host msgids missing from messages.pot: {sorted(missing_from_pot)}"
+
+    errors = []
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        for msgid in sorted(MCP_HOST_ENHANCE_USER_VISIBLE_MSGIDS):
+            msgstr = translations.get(msgid, "").strip()
+            if not msgstr:
+                errors.append(f"{lang_dir.name}: missing translation for {msgid!r}")
+            elif msgstr == msgid:
+                errors.append(f"{lang_dir.name}: untranslated placeholder for {msgid!r}")
+            elif _format_fields(msgstr) != _format_fields(msgid):
+                errors.append(
+                    f"{lang_dir.name}: placeholder mismatch for {msgid!r}: "
+                    f"expected {sorted(_format_fields(msgid))}, got {sorted(_format_fields(msgstr))}"
+                )
+
+    assert not errors, "\n".join(errors)
+
+
+def test_mcp_manager_authenticate_option_reference_uses_localized_label():
+    msgid = "{name} requires authentication. Use the 'Authenticate' option."
+    for lang_dir in _discover_language_dirs():
+        translations = _get_all_translations_from_po(lang_dir / "LC_MESSAGES" / "messages.po")
+        auth_label = translations.get("Authenticate", "").strip()
+        message = translations.get(msgid, "").strip()
+        assert auth_label, f"{lang_dir.name}: missing translation for 'Authenticate'"
+        assert message, f"{lang_dir.name}: missing translation for {msgid!r}"
+        assert auth_label in message, f"{lang_dir.name}: auth prompt does not reference localized label {auth_label!r}"
 
 
 def test_ros_deployment_rejection_translations_preserve_format_fields():

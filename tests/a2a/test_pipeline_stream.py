@@ -23,6 +23,7 @@ from iac_code.types.permissions import PermissionAuditMetadata
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
+    MCPProgressEvent,
     PermissionRequestEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
@@ -104,6 +105,12 @@ def test_unknown_working_step_event_is_recovery_semantic() -> None:
     assert is_recovery_semantic_event(envelope) is True
 
 
+def test_mcp_status_is_metadata_only_not_recovery_semantic() -> None:
+    envelope = _envelope("mcp_status")
+
+    assert is_recovery_semantic_event(envelope) is False
+
+
 @pytest.mark.asyncio
 async def test_publish_text_writes_pipeline_metadata_without_duplicate_status_message(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path)
@@ -122,6 +129,36 @@ async def test_publish_text_writes_pipeline_metadata_without_duplicate_status_me
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     assert snapshot["display"]["messages"][0]["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_publish_mcp_progress_preserves_canonical_metadata(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    await publisher.publish(
+        MCPProgressEvent(
+            server_name="live",
+            tool_name="echo",
+            public_name="mcp__live__echo_8d3f",
+            progress=1,
+            total=2,
+            message="halfway",
+            tool_use_id="tool-1",
+        )
+    )
+
+    envelope = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert envelope["eventType"] == "tool_progress"
+    assert envelope["data"]["mcpProgress"] == {
+        "status": "progress",
+        "toolUseId": "tool-1",
+        "publicName": "mcp__live__echo_8d3f",
+        "originalServerName": "live",
+        "originalToolName": "echo",
+        "progress": 1,
+        "total": 2,
+        "message": "halfway",
+    }
 
 
 @pytest.mark.asyncio
@@ -1483,6 +1520,40 @@ async def test_publish_input_required_maps_to_a2a_input_required(tmp_path: Path)
     snapshot = publisher.snapshot_store.load()
     assert snapshot is not None
     assert snapshot["status"] == "waiting_input"
+
+
+@pytest.mark.asyncio
+async def test_publish_mcp_status_does_not_clear_pending_input_snapshot(tmp_path: Path) -> None:
+    publisher, _queue = _publisher(tmp_path)
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.USER_INPUT_REQUIRED,
+            step_id="confirm_and_select",
+            timestamp=1717821600.0,
+            data={"prompt": "Choose one", "kind": "choice"},
+        )
+    )
+    before = publisher.snapshot_store.load()
+    assert before is not None
+    assert before["status"] == "waiting_input"
+    assert before["pendingInput"] is not None
+
+    await publisher.publish(
+        PipelineEvent(
+            type=PipelineEventType.MCP_STATUS,
+            step_id=None,
+            timestamp=1717821601.0,
+            data={
+                "kind": "mcp_status",
+                "mcp_status": {"servers": [{"serverName": "remote", "state": "connected"}], "warnings": []},
+            },
+        )
+    )
+
+    after = publisher.snapshot_store.load()
+    assert after is not None
+    assert after["status"] == "waiting_input"
+    assert after["pendingInput"] == before["pendingInput"]
 
 
 @pytest.mark.asyncio

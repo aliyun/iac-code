@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from iac_code.agent.message import Message, ToolResultBlock, create_recalled_memory_message
+from iac_code.memory.project_memory import MemoryContext
 from iac_code.pipeline.engine.cleanup import create_cleanup_prompt_message
 from iac_code.state.app_state import AppState, AppStateStore
 from iac_code.ui.repl import InlineREPL
@@ -199,3 +200,32 @@ def test_current_system_prompt_uses_repl_runtime_current_time(tmp_path, monkeypa
 
     assert first == second
     assert _current_time_line(first) == "- Current time: 2026-06-05 10:00:00"
+
+
+def test_current_system_prompt_places_project_instructions_before_mcp_server_instructions(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repl = object.__new__(InlineREPL)
+    repl._memory_runtime = SimpleNamespace(
+        build_memory_context=lambda: MemoryContext(
+            instruction_memory_content="## Project AGENTS.md\nProject REPL instruction",
+            memory_mechanics_content="Use read_memory and write_memory for topic files.",
+        )
+    )
+    repl._skill_listing = "- skill: available"
+    repl._runtime_current_time = "2026-06-05 10:00:00"
+    repl._current_model = "qwen3.7-max"
+    repl._provider_manager = MagicMock()
+    repl._provider_manager.get_provider_display.return_value = "Alibaba Cloud Bailian"
+    repl._provider_manager.get_model_name.return_value = "qwen3.7-max"
+    repl._mcp_manager = SimpleNamespace(
+        server_instructions_text=lambda: "# MCP Server Instructions\nMCP REPL instruction"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    prompt = repl._build_current_system_prompt()
+
+    assert prompt.index("Project REPL instruction") < prompt.index("# MCP Server Instructions")
+    assert prompt.index("# MCP Server Instructions") < prompt.index("# Available Skills")
+    assert prompt.index("# Available Skills") < prompt.index("Use read_memory")

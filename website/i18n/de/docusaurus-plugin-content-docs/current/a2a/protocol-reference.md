@@ -370,11 +370,16 @@ Tool- und Nutzungsdetails werden ueber `metadata.iac_code` geliefert:
 | `iac_code.permission.safeSummary` | Redigierte, menschenlesbare Berechtigungszusammenfassung |
 | `iac_code.permission.inputSummary` | Sichere Operationszusammenfassung fuer `aliyun_api`-Berechtigungsanfragen |
 | `iac_code.permission.toolInput` | Nur die Form der Tool-Eingabe fuer Berechtigungsanfragen ausserhalb von `aliyun_api`; String-Werte verwenden Typ, Laenge und Fingerprint, und Feldnamen ausserhalb der Whitelist koennen als Fingerprint erscheinen |
+| `iac_code.mcpWarning` | Redigierte MCP-Konfigurations- oder Laufzeitwarnung mit server name, warning code, öffentlicher message, scope und source path, sofern verfügbar |
+| `iac_code.mcpStatus` | Redigierter MCP-Serverstatus-Snapshot mit connection state, authentication state, approval state, capability counts, capability refresh errors und Konfigurationswarnungen |
+| `iac_code.mcpProgress` | MCP tool progress metadata mit public tool name, original server/tool names, tool-use ID, progress, total und optionaler öffentlicher message |
 | `iac_code.thinking.type` | `raw_thinking`, wenn `raw-thinking` in `thinking-exposure` aktiviert ist |
 | `iac_code.thinking.text` | Roher Provider-Reasoning-Chunk, auf 4000 Zeichen gekuerzt, nur fuer vertrauenswuerdige Konfigurationen ausgegeben, die `raw-thinking` aktivieren |
 | `iac_code.usage.inputTokens` | Anzahl der Eingabetoken fuer den Turn |
 | `iac_code.usage.outputTokens` | Anzahl der Ausgabetoken fuer den Turn |
 | `iac_code.usage.totalTokens` | Gesamtzahl der Token fuer den Turn |
+
+Im Pipeline-Modus kann MCP-Status auch als Pipeline-Metadata mit `metadata.iac_code.pipeline.eventType == "mcp_status"` veröffentlicht werden. MCP-Warnungen, Status-Snapshots und Progress-Metadata werden vor dem Streaming bereinigt; Secrets aus Headers, Umgebungsvariablen, OAuth-Tokens und lokalen Pfaden werden redigiert oder zusammengefasst.
 
 Wenn ein Tool-Ergebnis eine unterstuetzte Text-Artifact-Payload enthaelt, speichert der Server die Payload lokal, gibt ein standardmaessiges `TaskArtifactUpdateEvent` aus und zeichnet das Artifact im Task-Feld `artifacts` auf. Der Artifact-Teil verwendet eine `file://`-URL plus Metadaten wie `mediaType`, `byteSize` und `sha256`; der urspruengliche Artifact-Inhalt wird nicht innerhalb der Tool-Metadaten dupliziert.
 

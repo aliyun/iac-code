@@ -62,6 +62,7 @@ msgstr "MCP 警告：{message}"
 
 #: src/iac_code/a2a/events.py src/iac_code/a2a/executor.py
 #: src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/transports/dispatcher.py
 msgid "A temporary error occurred. Please retry."
 msgstr "发生临时错误，请重试。"
 
@@ -104,6 +105,7 @@ msgid "Current model {model} does not support image input."
 msgstr "当前模型 {model} 不支持图片输入。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/transports/dispatcher.py
 msgid "Authentication required. Configure credentials and retry."
 msgstr "需要身份验证。请配置凭据后重试。"
 
@@ -112,7 +114,7 @@ msgstr "需要身份验证。请配置凭据后重试。"
 msgid "Pipeline already running. Resume task {task_id}."
 msgstr "管道已在运行。请恢复任务 {task_id}。"
 
-#: src/iac_code/a2a/pipeline_executor.py
+#: src/iac_code/a2a/pipeline_executor.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "unknown"
 msgstr "未知"
 
@@ -192,13 +194,6 @@ msgstr "任务已完成。"
 msgid "Task failed."
 msgstr "任务失败。"
 
-#: src/iac_code/acp/convert.py src/iac_code/cli/headless.py
-#: src/iac_code/mcp/tools.py src/iac_code/ui/renderer.py
-#: src/iac_code/ui/stream_accumulator.py
-#, python-brace-format
-msgid "MCP {server}:{tool}"
-msgstr "MCP {server}:{tool}"
-
 #: src/iac_code/acp/convert.py src/iac_code/acp/session.py
 #: src/iac_code/ui/renderer.py
 #, python-brace-format
@@ -228,6 +223,15 @@ msgstr "会话属于另一个项目。请运行：{hint}"
 #, python-brace-format
 msgid "Input: {input}"
 msgstr "输入：{input}"
+
+#: src/iac_code/acp/session.py src/iac_code/mcp/manager.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/repl.py
+msgid "[truncated]"
+msgstr "[已截断]"
+
+#: src/iac_code/acp/session.py
+msgid "Authentication required. Please configure your API credentials."
+msgstr "需要身份验证。请配置 API 凭据。"
 
 #: src/iac_code/acp/session.py
 msgid "Allow once"
@@ -574,9 +578,10 @@ msgstr ""
 "  文档：https://aliyun.github.io/iac-code/zh-"
 "Hans/docs/configuration/authentication\n"
 
-#: src/iac_code/cli/headless.py
+#: src/iac_code/cli/headless.py src/iac_code/commands/mcp.py
 #: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
-#: src/iac_code/ui/renderer.py src/iac_code/ui/repl.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/renderer.py
+#: src/iac_code/ui/repl.py
 #, python-brace-format
 msgid "Error: {error}"
 msgstr "错误：{error}"
@@ -639,6 +644,21 @@ msgid ""
 "A2A server dependencies are missing. Install with: pip install 'iac-"
 "code[a2a]'"
 msgstr "缺少 A2A 服务器依赖。请使用以下命令安装：pip install 'iac-code[a2a]'"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Interactive REPL input requires a terminal. The /mcp command opens an "
+"interactive MCP manager; use `iac-code mcp --help` for non-interactive "
+"MCP commands."
+msgstr ""
+"交互式 REPL 输入需要终端。/mcp 命令会打开交互式 MCP 管理器；非交互式 MCP 命令请使用 `iac-code mcp "
+"--help`。"
+
+#: src/iac_code/cli/main.py
+msgid ""
+"Interactive REPL input requires a terminal. Use `iac-code --prompt -` for"
+" non-interactive stdin input."
+msgstr "交互式 REPL 输入需要终端。非交互式 stdin 输入请使用 `iac-code --prompt -`。"
 
 #: src/iac_code/cli/main.py
 msgid "Install Git for Windows via the npmmirror mirror (Windows only)."
@@ -1113,6 +1133,16 @@ msgstr "管理技能"
 msgid "Show current session status"
 msgstr "显示当前会话状态"
 
+#: src/iac_code/commands/__init__.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Manage MCP servers"
+msgstr "管理 MCP 服务器"
+
+#: src/iac_code/commands/__init__.py
+msgid ""
+"[enable|disable|reconnect [server-name] [--scope scope] [--source-path "
+"path]]"
+msgstr "[enable|disable|reconnect [服务器名称] [--scope 作用域] [--source-path 路径]]"
+
 #: src/iac_code/commands/auth.py src/iac_code/ui/core/prompt_input.py
 msgid "Navigate"
 msgstr "导航"
@@ -1494,6 +1524,89 @@ msgstr "显示命令建议"
 msgid "Exit"
 msgstr "退出"
 
+#: src/iac_code/commands/mcp.py
+msgid "MCP command requires a context."
+msgstr "MCP 命令需要上下文。"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "--scope or --source-path cannot be used with /mcp {command} all."
+msgstr "--scope 或 --source-path 不能与 /mcp {command} all 一起使用。"
+
+#: src/iac_code/commands/mcp.py
+msgid "--scope requires a value."
+msgstr "--scope 需要一个值。"
+
+#: src/iac_code/commands/mcp.py
+msgid "--source-path requires a value."
+msgstr "--source-path 需要一个值。"
+
+#: src/iac_code/commands/mcp.py
+msgid "Error: --source-path requires --scope."
+msgstr "错误：--source-path 需要同时指定 --scope。"
+
+#: src/iac_code/commands/mcp.py src/iac_code/commands/thinking_enabled.py
+msgid "enabled"
+msgstr "启用"
+
+#: src/iac_code/commands/mcp.py src/iac_code/commands/thinking_enabled.py
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "disabled"
+msgstr "已禁用"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "All MCP servers are already {state}"
+msgstr "所有 MCP 服务器均已处于{state}状态"
+
+#: src/iac_code/commands/mcp.py
+msgid "Enabled"
+msgstr "已启用"
+
+#: src/iac_code/commands/mcp.py
+msgid "Disabled"
+msgstr "已禁用"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "{verb} {count} MCP server(s)"
+msgstr "{verb} {count} 个 MCP 服务器"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "MCP server \"{name}\" {state}"
+msgstr "MCP 服务器 \"{name}\" {state}"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "MCP server \"{name}\" not found"
+msgstr "未找到 MCP 服务器 \"{name}\""
+
+#: src/iac_code/commands/mcp.py src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
+msgstr "无效的 MCP 作用域 {scope!r}。有效值：user、local、project。"
+
+#: src/iac_code/commands/mcp.py src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Scope {scope!r} cannot be used for persisted MCP config."
+msgstr "作用域 {scope!r} 不能用于持久化 MCP 配置。"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "Successfully reconnected to {name}"
+msgstr "成功重新连接到 {name}"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "{name} requires authentication. Use /mcp to authenticate."
+msgstr "{name} 需要认证。请使用 /mcp 进行认证。"
+
+#: src/iac_code/commands/mcp.py
+#, python-brace-format
+msgid "Failed to reconnect to {name}"
+msgstr "重新连接到 {name} 失败"
+
 #: src/iac_code/commands/memory.py
 msgid "Usage: /memory-folder [<name>|search <query>|delete <name>|help]"
 msgstr "用法：/memory-folder [<名称>|search <查询>|delete <名称>|help]"
@@ -1744,7 +1857,7 @@ msgstr "系统提示词"
 msgid "Provider Messages"
 msgstr "提供商消息"
 
-#: src/iac_code/commands/prompt.py
+#: src/iac_code/commands/prompt.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "Tools"
 msgstr "工具"
 
@@ -1896,7 +2009,7 @@ msgstr "{count} 个清理提示词"
 msgid "Tool definitions available to the main model for this request."
 msgstr "本次请求中主模型可用的工具定义。"
 
-#: src/iac_code/commands/prompt.py
+#: src/iac_code/commands/prompt.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "{count} tools"
 msgstr "{count} 个工具"
@@ -2116,14 +2229,6 @@ msgstr "thinking_enabled 已切换为：{state}"
 msgid "Current thinking_enabled: {state}"
 msgstr "当前 thinking_enabled：{state}"
 
-#: src/iac_code/commands/thinking_enabled.py
-msgid "enabled"
-msgstr "已启用"
-
-#: src/iac_code/commands/thinking_enabled.py
-msgid "disabled"
-msgstr "已禁用"
-
 # Typer/Click built-in strings
 #: src/iac_code/i18n/__init__.py
 msgid "Options"
@@ -2229,6 +2334,10 @@ msgid "Manage MCP servers."
 msgstr "管理 MCP 服务器。"
 
 #: src/iac_code/mcp/cli.py
+msgid "Command or remote URL."
+msgstr "命令或远程 URL。"
+
+#: src/iac_code/mcp/cli.py
 msgid "Command for stdio MCP server."
 msgstr "stdio MCP 服务器的命令。"
 
@@ -2241,16 +2350,16 @@ msgid "Environment variable KEY=VALUE. Can be repeated."
 msgstr "环境变量 KEY=VALUE。可重复指定。"
 
 #: src/iac_code/mcp/cli.py
-msgid "Transport type: stdio, http, sse."
-msgstr "Transport 类型：stdio、http、sse。"
+msgid "Transport type: stdio, http, sse, ws."
+msgstr "传输类型：stdio、http、sse、ws。"
 
 #: src/iac_code/mcp/cli.py
-msgid "Remote MCP URL for http/sse."
-msgstr "http/sse 远程 MCP URL。"
+msgid "Remote MCP URL for http/sse/ws."
+msgstr "http/sse/ws 的远程 MCP URL。"
 
 #: src/iac_code/mcp/cli.py
-msgid "HTTP header KEY=VALUE. Can be repeated."
-msgstr "HTTP header KEY=VALUE。可重复指定。"
+msgid "HTTP header KEY=VALUE or Name: Value. Can be repeated."
+msgstr "HTTP 请求头，格式为 KEY=VALUE 或 Name: Value。可重复指定。"
 
 #: src/iac_code/mcp/cli.py
 msgid "Config scope: user, local, project."
@@ -2281,17 +2390,29 @@ msgid "--command is required for stdio MCP servers."
 msgstr "stdio MCP 服务器需要 --command。"
 
 #: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid ""
+"Warning: {operand!r} looks like a URL. Use --transport http, --transport "
+"sse, or --transport ws for remote MCP servers."
+msgstr ""
+"警告：{operand!r} 看起来像 URL。远程 MCP 服务器请使用 --transport http、--transport sse 或 "
+"--transport ws。"
+
+#: src/iac_code/mcp/cli.py
 msgid "Warning: on Windows, bare npx may need to be configured as: cmd /c npx"
 msgstr "警告：在 Windows 上，裸 npx 可能需要配置为：cmd /c npx"
 
 #: src/iac_code/mcp/cli.py
-msgid "--url is required for remote MCP servers."
-msgstr "远程 MCP 服务器需要 --url。"
+msgid "Use either --url or a positional URL for remote MCP servers, not both."
+msgstr "远程 MCP 服务器只能使用 --url 或一个位置 URL，不能同时使用。"
 
 #: src/iac_code/mcp/cli.py
-#, python-brace-format
-msgid "Added MCP server {name!r} to {scope} config."
-msgstr "已将 MCP 服务器 {name!r} 添加到 {scope} 配置。"
+msgid "Remote MCP servers accept one positional URL, not command arguments."
+msgstr "远程 MCP 服务器只接受一个位置 URL，不接受命令参数。"
+
+#: src/iac_code/mcp/cli.py
+msgid "--url is required for remote MCP servers."
+msgstr "远程 MCP 服务器需要 --url。"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
@@ -2303,6 +2424,23 @@ msgid "MCP server JSON must be an object."
 msgstr "MCP 服务器 JSON 必须是对象。"
 
 #: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Added MCP server {name!r} to {scope} config."
+msgstr "已将 MCP 服务器 {name!r} 添加到 {scope} 配置。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Connect briefly and show MCP health."
+msgstr "短暂连接并显示 MCP 健康状态。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Show configured MCP servers without health checks."
+msgstr "显示已配置的 MCP 服务器，不执行健康检查。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Use either --check or --config-only, not both."
+msgstr "只能使用 --check 或 --config-only，不能同时使用。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "No MCP servers configured."
 msgstr "未配置 MCP 服务器。"
 
@@ -2314,7 +2452,36 @@ msgstr "已批准"
 msgid "pending"
 msgstr "待处理"
 
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "missing-env"
+msgstr "缺少环境变量"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "invalid-config"
+msgstr "配置无效"
+
 #: src/iac_code/mcp/cli.py
+msgid "configured"
+msgstr "已配置"
+
+#: src/iac_code/mcp/cli.py
+msgid "Persisted MCP config file path."
+msgstr "持久化 MCP 配置文件路径。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Show configured MCP server JSON only."
+msgstr "仅显示已配置的 MCP 服务器 JSON。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "MCP health check failed: {error}"
+msgstr "MCP 健康检查失败：{error}"
+
+#: src/iac_code/mcp/cli.py
+msgid "No diagnostic was returned."
+msgstr "未返回诊断信息。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/mcp/config.py
 #, python-brace-format
 msgid "MCP server {name!r} not found in {scope} config."
 msgstr "在 {scope} 配置中找不到 MCP 服务器 {name!r}。"
@@ -2325,11 +2492,45 @@ msgid "Removed MCP server {name!r} from {path}."
 msgstr "已从 {path} 移除 MCP 服务器 {name!r}。"
 
 #: src/iac_code/mcp/cli.py
+msgid "MCP server name."
+msgstr "MCP 服务器名称。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Reconnect all persisted MCP servers."
+msgstr "重连所有持久化 MCP 服务器。"
+
+#: src/iac_code/mcp/cli.py
+msgid "Use either a server name or --all, not both."
+msgstr "服务器名称和 --all 只能二选一。"
+
+#: src/iac_code/mcp/cli.py
+msgid "--scope cannot be used with mcp reconnect --all."
+msgstr "--scope 不能和 mcp reconnect --all 一起使用。"
+
+#: src/iac_code/mcp/cli.py
+msgid "--source-path cannot be used with mcp reconnect --all."
+msgstr "--source-path 不能和 mcp reconnect --all 一起使用。"
+
+#: src/iac_code/mcp/cli.py
+msgid "MCP server name is required unless --all is used."
+msgstr "除非使用 --all，否则必须提供 MCP 服务器名称。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Disabled MCP server {name!r}."
+msgstr "已禁用 MCP 服务器 {name!r}。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Enabled MCP server {name!r}."
+msgstr "已启用 MCP 服务器 {name!r}。"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "Approved MCP server {name!r}."
 msgstr "已批准 MCP 服务器 {name!r}。"
 
-#: src/iac_code/mcp/cli.py
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "Rejected MCP server {name!r}."
 msgstr "已拒绝 MCP 服务器 {name!r}。"
@@ -2344,6 +2545,10 @@ msgid "MCP auth failed for {name!r}: {error}"
 msgstr "MCP 认证失败，服务器 {name!r}：{error}"
 
 #: src/iac_code/mcp/cli.py
+msgid "OAuth authorization was cancelled."
+msgstr "OAuth 授权已取消。"
+
+#: src/iac_code/mcp/cli.py
 #, python-brace-format
 msgid "Authenticated MCP server {name!r}."
 msgstr "已认证 MCP 服务器 {name!r}。"
@@ -2355,25 +2560,78 @@ msgstr "已重置 MCP 服务器 {name!r} 的已存储认证状态。"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
-msgid "Invalid MCP scope {scope!r}. Valid values: user, local, project."
-msgstr "无效的 MCP 作用域 {scope!r}。有效值：user、local、project。"
+msgid "Warning: {warning}"
+msgstr "警告：{warning}"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "yes"
+msgstr "是"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "no"
+msgstr "否"
+
+#: src/iac_code/mcp/cli.py src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Browser opened: {status}"
+msgstr "浏览器已打开：{status}"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
-msgid "Scope {scope!r} cannot be used for persisted MCP config."
-msgstr "作用域 {scope!r} 不能用于持久化 MCP 配置。"
+msgid "Authorization URL: {url}"
+msgstr "授权 URL：{url}"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
 msgid ""
-"MCP {section} {key!r} may contain a secret; use an environment variable "
-"reference like ${{VAR}} instead of storing plaintext."
-msgstr "MCP {section} {key!r} 可能包含 secret；请使用类似 ${{VAR}} 的环境变量引用，不要存储明文。"
+"Paste the callback URL or authorization code for MCP server {name!r}, or "
+"press Enter to wait for the loopback callback:"
+msgstr "粘贴 MCP 服务器 {name!r} 的回调 URL 或授权码，或按 Enter 等待 loopback 回调："
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
-msgid "{option} expects KEY=VALUE, got {value!r}."
-msgstr "{option} 需要 KEY=VALUE，收到 {value!r}。"
+msgid "MCP reconnect failed: {error}"
+msgstr "MCP 重连失败：{error}"
+
+#: src/iac_code/mcp/cli.py
+msgid "--source-path requires --scope."
+msgstr "--source-path 需要同时指定 --scope。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "MCP server {name!r} not found in persisted MCP config."
+msgstr "在持久化 MCP 配置中找不到服务器 {name!r}。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid ""
+"MCP server {name!r} exists in multiple persisted scopes. Re-run with one "
+"of:"
+msgstr "MCP 服务器 {name!r} 存在于多个持久化作用域中。请使用以下命令之一重新运行："
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid ""
+"Unknown MCP option {option!r}. Put subprocess flags after a command, for "
+"example: iac-code mcp add NAME -- npx --yes mcp-server."
+msgstr ""
+"未知 MCP 选项 {option!r}。请把子进程参数放在命令之后，例如：iac-code mcp add NAME -- npx --yes "
+"mcp-server。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Next: run `{command}` to check MCP server health."
+msgstr "下一步：运行 `{command}` 检查 MCP 服务器健康状态。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "Next: run `{command}` to authenticate this MCP server."
+msgstr "下一步：运行 `{command}` 认证此 MCP 服务器。"
+
+#: src/iac_code/mcp/cli.py
+#, python-brace-format
+msgid "{option} expects {expected}, got {value!r}."
+msgstr "{option} 期望 {expected}，实际收到 {value!r}。"
 
 #: src/iac_code/mcp/cli.py
 #, python-brace-format
@@ -2384,6 +2642,11 @@ msgstr "{option} 需要非空 key。"
 #, python-brace-format
 msgid "Project MCP server {name!r} not found."
 msgstr "未找到项目 MCP 服务器 {name!r}。"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP server {server!r} is closing."
+msgstr "MCP 服务器 {server!r} 正在关闭。"
 
 #: src/iac_code/mcp/client.py src/iac_code/mcp/manager.py
 #, python-brace-format
@@ -2396,6 +2659,69 @@ msgid "Unsupported MCP transport: {transport}"
 msgstr "不支持的 MCP transport：{transport}"
 
 #: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} could not be parsed: {error}"
+msgstr "无法解析 MCP 服务器 {server!r} 的 headers helper：{error}"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} is empty."
+msgstr "MCP 服务器 {server!r} 的 headers helper 为空。"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} failed to start: {error}"
+msgstr "MCP 服务器 {server!r} 的 headers helper 启动失败：{error}"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "timed out after {seconds:g} seconds"
+msgstr "{seconds:g} 秒后超时"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "{stream} output too large"
+msgstr "{stream} 输出过大"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "exited with status {status}"
+msgstr "退出状态为 {status}"
+
+#: src/iac_code/mcp/client.py
+msgid "returned invalid JSON"
+msgstr "返回了无效 JSON"
+
+#: src/iac_code/mcp/client.py
+msgid "must return a JSON object"
+msgstr "必须返回 JSON 对象"
+
+#: src/iac_code/mcp/client.py
+msgid "must return string header names and values"
+msgstr "必须返回字符串类型的 header 名称和值"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP headers helper for server {server!r} {reason}."
+msgstr "MCP 服务器 {server!r} 的 headers helper {reason}。"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid ""
+"{message}\n"
+"MCP headers helper stderr:\n"
+"{stderr}"
+msgstr ""
+"{message}\n"
+"MCP headers helper stderr：\n"
+"{stderr}"
+
+#: src/iac_code/mcp/client.py
+#, python-brace-format
+msgid "MCP HTTP session expired for server {server!r}; reconnect required."
+msgstr "MCP 服务器 {server!r} 的 HTTP 会话已过期，需要重连。"
+
+#: src/iac_code/mcp/client.py src/iac_code/mcp/oauth.py
 #, python-brace-format
 msgid "MCP server {server!r} requires authentication."
 msgstr "MCP 服务器 {server!r} 需要认证。"
@@ -2411,14 +2737,10 @@ msgstr ""
 "MCP 服务器 stderr：\n"
 "{stderr}"
 
-#: src/iac_code/mcp/config.py
-msgid "MCP server names must be non-empty strings."
-msgstr "MCP 服务器名称必须是非空字符串。"
-
-#: src/iac_code/mcp/config.py
+#: src/iac_code/mcp/config.py src/iac_code/mcp/types.py
 #, python-brace-format
-msgid "Project MCP server {name!r} is pending approval."
-msgstr "项目 MCP 服务器 {name!r} 正在等待批准。"
+msgid "MCP server {server!r} config must be an object."
+msgstr "MCP 服务器 {server!r} 配置必须是对象。"
 
 #: src/iac_code/mcp/config.py
 #, python-brace-format
@@ -2432,10 +2754,24 @@ msgstr "MCP 作用域 {scope!r} 不是持久化配置作用域。"
 
 #: src/iac_code/mcp/config.py
 #, python-brace-format
+msgid "MCP source path {path} does not belong to {scope} scope."
+msgstr "MCP 源路径 {path} 不属于 {scope} 作用域。"
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
 msgid ""
 "MCP server {existing!r} has the same content signature as {current!r}; "
 "keeping higher-precedence server {current!r}."
 msgstr "MCP 服务器 {existing!r} 与 {current!r} 具有相同内容签名；保留优先级更高的服务器 {current!r}。"
+
+#: src/iac_code/mcp/config.py
+msgid "MCP server names must be non-empty strings."
+msgstr "MCP 服务器名称必须是非空字符串。"
+
+#: src/iac_code/mcp/config.py
+#, python-brace-format
+msgid "Project MCP server {name!r} is pending approval."
+msgstr "项目 MCP 服务器 {name!r} 正在等待批准。"
 
 #: src/iac_code/mcp/config.py
 #, python-brace-format
@@ -2455,16 +2791,67 @@ msgid "Environment variable {name!r} is not set for MCP config."
 msgstr "MCP 配置所需的环境变量 {name!r} 未设置。"
 
 #: src/iac_code/mcp/manager.py
+msgid "authentication required"
+msgstr "需要认证"
+
+#: src/iac_code/mcp/manager.py
 #, python-brace-format
-msgid ""
-"MCP server {server!r} requested elicitation, but iac-code does not "
-"support elicitation yet."
-msgstr "MCP 服务器 {server!r} 请求 elicitation，但 iac-code 尚不支持 elicitation。"
+msgid "{} Required scopes: {}"
+msgstr "{} 需要的 scopes：{}"
+
+#: src/iac_code/mcp/manager.py
+msgid "MCP HTTP session expired; reconnect required."
+msgstr "MCP HTTP 会话已过期，需要重连。"
+
+#: src/iac_code/mcp/manager.py
+msgid "MCP server disabled."
+msgstr "MCP 服务器已禁用。"
+
+#: src/iac_code/mcp/manager.py
+msgid "Project MCP server pending approval."
+msgstr "项目 MCP 服务器等待批准。"
+
+#: src/iac_code/mcp/manager.py
+#, python-brace-format
+msgid "{} call failed: {}"
+msgstr "{} 调用失败：{}"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth callback state did not match."
+msgstr "OAuth 回调 state 不匹配。"
 
 #: src/iac_code/mcp/oauth.py
 #, python-brace-format
 msgid "Could not discover OAuth metadata for MCP server {server!r}."
 msgstr "无法发现 MCP 服务器 {server!r} 的 OAuth 元数据。"
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} oauth.clientMetadataUrl must be an HTTPS URL with a"
+" non-root pathname."
+msgstr "MCP 服务器 {server!r} 的 oauth.clientMetadataUrl 必须是带非根路径的 HTTPS URL。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "The installed MCP SDK does not support OAuth client metadata URLs."
+msgstr "已安装的 MCP SDK 不支持 OAuth 客户端元数据 URL。"
+
+#: src/iac_code/mcp/oauth.py
+#, python-brace-format
+msgid "required scopes: {scopes}"
+msgstr "需要的 scopes：{scopes}"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth dynamic client registration requires a remote MCP server URL."
+msgstr "OAuth 动态客户端注册需要远程 MCP 服务器 URL。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "Timed out waiting for MCP OAuth authorization URL."
+msgstr "等待 MCP OAuth 授权 URL 超时。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth provider did not produce an authorization URL."
+msgstr "OAuth 提供方未生成授权 URL。"
 
 #: src/iac_code/mcp/oauth.py
 #, python-brace-format
@@ -2491,20 +2878,25 @@ msgid ""
 msgstr "MCP 服务器 {server!r} 的 OAuth refresh 响应未包含 access token。"
 
 #: src/iac_code/mcp/oauth.py
-msgid "Timed out waiting for MCP OAuth callback."
-msgstr "等待 MCP OAuth 回调超时。"
+#, python-brace-format
+msgid "OAuth token revocation failed for MCP server {server!r}: {detail}"
+msgstr "MCP 服务器 {server!r} 的 OAuth token 撤销失败：{detail}"
 
-#: src/iac_code/mcp/oauth.py
+#: src/iac_code/mcp/oauth.py src/iac_code/ui/dialogs/mcp_manager.py
+msgid "OAuth manual callback input was empty."
+msgstr "OAuth 手动回调输入为空。"
+
+#: src/iac_code/mcp/oauth.py src/iac_code/ui/dialogs/mcp_manager.py
 msgid "OAuth callback did not include a code."
 msgstr "OAuth 回调未包含 code。"
 
 #: src/iac_code/mcp/oauth.py
-msgid "OAuth flow closed."
-msgstr "OAuth 流程已关闭。"
+msgid "Timed out waiting for MCP OAuth callback."
+msgstr "等待 MCP OAuth 回调超时。"
 
 #: src/iac_code/mcp/oauth.py
-msgid "OAuth callback state did not match."
-msgstr "OAuth 回调 state 不匹配。"
+msgid "OAuth flow closed."
+msgstr "OAuth 流程已关闭。"
 
 #: src/iac_code/mcp/oauth.py
 msgid "MCP authentication complete. You can close this window."
@@ -2515,8 +2907,40 @@ msgid "OAuth metadata endpoint did not return an object."
 msgstr "OAuth 元数据端点未返回对象。"
 
 #: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata redirects are not allowed."
+msgstr "不允许 OAuth 元数据重定向。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint must be an HTTPS URL."
+msgstr "OAuth 元数据端点必须是 HTTPS URL。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint must include a host."
+msgstr "OAuth 元数据端点必须包含主机。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth endpoint host is not allowed."
+msgstr "不允许使用该 OAuth 端点主机。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint host is not allowed."
+msgstr "不允许使用该 OAuth 元数据端点主机。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth metadata endpoint host could not be resolved."
+msgstr "无法解析 OAuth 元数据端点主机。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth token endpoint redirects are not allowed."
+msgstr "不允许 OAuth token 端点重定向。"
+
+#: src/iac_code/mcp/oauth.py
 msgid "OAuth token endpoint did not return an object."
 msgstr "OAuth token 端点未返回对象。"
+
+#: src/iac_code/mcp/oauth.py
+msgid "OAuth revocation endpoint redirects are not allowed."
+msgstr "不允许 OAuth 撤销端点重定向。"
 
 #: src/iac_code/mcp/output.py
 #, python-brace-format
@@ -2558,7 +2982,7 @@ msgstr "（未命名）"
 msgid "Resource link: {name}"
 msgstr "资源链接：{name}"
 
-#: src/iac_code/mcp/output.py
+#: src/iac_code/mcp/output.py src/iac_code/ui/dialogs/mcp_manager.py
 #, python-brace-format
 msgid "URI: {uri}"
 msgstr "URI：{uri}"
@@ -2579,6 +3003,18 @@ msgstr ""
 
 #: src/iac_code/mcp/output.py
 #, python-brace-format
+msgid ""
+"Saved large MCP text output as {artifact_id} ({chars} chars, {bytes} "
+"bytes)."
+msgstr "已将大段 MCP 文本输出保存为 {artifact_id}（{chars} 字符，{bytes} 字节）。"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
+msgid "Read the full output from {path}."
+msgstr "从 {path} 读取完整输出。"
+
+#: src/iac_code/mcp/output.py
+#, python-brace-format
 msgid "MCP {kind} content must contain base64 string data."
 msgstr "MCP {kind} 内容必须包含 base64 字符串数据。"
 
@@ -2586,6 +3022,11 @@ msgstr "MCP {kind} 内容必须包含 base64 字符串数据。"
 #, python-brace-format
 msgid "Saved {mime_type} artifact as {artifact_id} ({bytes} bytes)."
 msgstr "已将 {mime_type} artifact 保存为 {artifact_id}（{bytes} 字节）。"
+
+#: src/iac_code/mcp/progress.py src/iac_code/mcp/tools.py
+#, python-brace-format
+msgid "MCP {server}:{tool}"
+msgstr "MCP {server}:{tool}"
 
 #: src/iac_code/mcp/prompts.py
 #, python-brace-format
@@ -2621,18 +3062,32 @@ msgstr "MCP skill 命令 {command!r} 与现有命令冲突。"
 
 #: src/iac_code/mcp/skills.py
 #, python-brace-format
+msgid "MCP skill {command!r} was truncated to fit safety limits."
+msgstr "MCP skill {command!r} 已被截断以满足安全限制。"
+
+#: src/iac_code/mcp/skills.py
+#, python-brace-format
 msgid "MCP skill command {command!r} could not be loaded: {error}"
 msgstr "无法加载 MCP skill 命令 {command!r}：{error}"
 
 #: src/iac_code/mcp/skills.py
 #, python-brace-format
-msgid "MCP skill {command!r} was truncated to fit safety limits."
-msgstr "MCP skill {command!r} 已被截断以满足安全限制。"
+msgid "MCP skill alias {alias!r} conflicts with an existing command."
+msgstr "MCP skill alias {alias!r} 与现有命令冲突。"
 
 #: src/iac_code/mcp/tools.py
 #, python-brace-format
 msgid "MCP tool {tool!r} from server {server!r}."
 msgstr "来自服务器 {server!r} 的 MCP 工具 {tool!r}。"
+
+#: src/iac_code/mcp/tools.py
+#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
+#: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
+#: src/iac_code/tools/bash/bash_tool.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
+msgid "Allow {}?"
+msgstr "允许 {}？"
 
 #: src/iac_code/mcp/tools.py
 msgid "List resources exposed by connected MCP servers."
@@ -2701,8 +3156,8 @@ msgstr "MCP 服务器 {server!r} 的 oauth.callbackPort 必须是整数。"
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
-msgid "MCP server {server!r} config must be an object."
-msgstr "MCP 服务器 {server!r} 配置必须是对象。"
+msgid "MCP server {server!r} oauth.callbackPort must be between 0 and 65535."
+msgstr "MCP 服务器 {server!r} 的 oauth.callbackPort 必须在 0 到 65535 之间。"
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
@@ -2717,17 +3172,37 @@ msgstr "MCP 服务器 {server!r} 的 type 必须是字符串。"
 #: src/iac_code/mcp/types.py
 #, python-brace-format
 msgid ""
-"MCP server {server!r} uses unsupported field 'headersHelper'. Static "
-"headers are supported; dynamic headers need a later trusted-execution "
-"design."
-msgstr ""
-"MCP 服务器 {server!r} 使用不支持的字段 'headersHelper'。支持静态 headers；动态 headers "
-"需要后续可信执行设计。"
+"MCP server {server!r} field headersHelper is only supported for http and "
+"sse transports."
+msgstr "MCP 服务器 {server!r} 的 headersHelper 字段仅支持 http 和 sse 传输。"
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
 msgid "MCP server {server!r} has unsupported config fields: {fields}."
 msgstr "MCP 服务器 {server!r} 包含不支持的配置字段：{fields}。"
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} WebSocket transport url must be a ws:// or wss:// "
+"URL with a host."
+msgstr "MCP 服务器 {server!r} 的 WebSocket 传输 url 必须是带主机名的 ws:// 或 wss:// URL。"
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP server {server!r} WebSocket transport field {field} is not supported "
+"because the installed MCP SDK websocket_client accepts only a URL."
+msgstr ""
+"MCP 服务器 {server!r} 的 WebSocket 传输不支持字段 {field}，因为已安装的 MCP SDK "
+"websocket_client 只接受 URL。"
+
+#: src/iac_code/mcp/types.py
+#, python-brace-format
+msgid ""
+"MCP {section} {key!r} may contain a secret; use an environment variable "
+"reference like ${{VAR}} instead of storing plaintext."
+msgstr "MCP {section} {key!r} 可能包含 secret；请使用类似 ${{VAR}} 的环境变量引用，不要存储明文。"
 
 #: src/iac_code/mcp/types.py
 #, python-brace-format
@@ -3579,7 +4054,7 @@ msgid "passed"
 msgstr "通过"
 
 #: src/iac_code/pipeline/selling/tools/infraguard_scan_tool.py
-#: src/iac_code/ui/repl.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/repl.py
 msgid "failed"
 msgstr "已失败"
 
@@ -3773,14 +4248,6 @@ msgstr "ROS 资源栈 {stack_id} 不是由当前售卖部署步骤创建的。"
 #, python-brace-format
 msgid "matched {behavior} rule: {rule}"
 msgstr "匹配到 {behavior} 规则：{rule}"
-
-#: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
-#: src/iac_code/services/permissions/pipeline.py src/iac_code/tools/base.py
-#: src/iac_code/tools/bash/bash_tool.py
-#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
-#, python-brace-format
-msgid "Allow {}?"
-msgstr "允许 {}？"
 
 #: src/iac_code/pipeline/selling/tools/ros_deploy_tool.py
 #, python-brace-format
@@ -5027,6 +5494,7 @@ msgstr "资源"
 msgid "Type"
 msgstr "类型"
 
+#: src/iac_code/ui/dialogs/mcp_manager.py
 #: src/iac_code/ui/pipeline_display_replay.py src/iac_code/ui/renderer.py
 msgid "Status"
 msgstr "状态"
@@ -5241,6 +5709,44 @@ msgstr "Homebrew 包管理器"
 
 #: src/iac_code/ui/repl.py
 #, python-brace-format
+msgid "{label}{suffix} ({choices}): "
+msgstr "{label}{suffix}（{choices}）： "
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{label}{suffix} (yes/no): "
+msgstr "{label}{suffix}（是/否）： "
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "{label}{suffix}: "
+msgstr "{label}{suffix}： "
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
+msgid "MCP server {server!r} requested user action."
+msgstr "MCP 服务器 {server!r} 请求用户操作。"
+
+#: src/iac_code/ui/repl.py
+msgid ""
+"Press Enter when complete, type 'decline' to decline, or 'cancel' to "
+"cancel: "
+msgstr "完成后按 Enter，输入 'decline' 表示拒绝，或输入 'cancel' 取消："
+
+#: src/iac_code/ui/repl.py
+msgid "Type 'accept' to accept, 'decline' to decline, or 'cancel' to cancel: "
+msgstr "输入 'accept' 接受，输入 'decline' 拒绝，或输入 'cancel' 取消："
+
+#: src/iac_code/ui/repl.py
+msgid "A value is required. Try again."
+msgstr "需要填写一个值。请重试。"
+
+#: src/iac_code/ui/repl.py
+msgid "Invalid value. Try again."
+msgstr "值无效。请重试。"
+
+#: src/iac_code/ui/repl.py
+#, python-brace-format
 msgid "Approve project MCP server {server!r} from {source}? [y/N] "
 msgstr "是否批准来自 {source} 的项目 MCP 服务器 {server!r}？[y/N] "
 
@@ -5415,7 +5921,7 @@ msgstr "↺ 回滚清理恢复：所有 {count} 条记录都已完成。"
 msgid "in progress"
 msgstr "进行中"
 
-#: src/iac_code/ui/repl.py
+#: src/iac_code/ui/dialogs/mcp_manager.py src/iac_code/ui/repl.py
 msgid "skipped"
 msgstr "已跳过"
 
@@ -5972,6 +6478,564 @@ msgstr "没有对话历史"
 msgid "Message Preview"
 msgstr "消息预览"
 
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No MCP servers configured. Run `iac-code mcp --help` to learn more."
+msgstr "未配置 MCP 服务器。运行 `iac-code mcp --help` 了解更多。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"Interactive MCP manager requires a TTY. Use `iac-code mcp list` or MCP "
+"quick commands."
+msgstr "交互式 MCP 管理器需要 TTY。请使用 `iac-code mcp list` 或 MCP 快捷命令。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Refreshed MCP status."
+msgstr "已刷新 MCP 状态。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Run `iac-code mcp --help` to add or inspect MCP servers."
+msgstr "运行 `iac-code mcp --help` 添加或查看 MCP 服务器。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Esc close"
+msgstr "Esc 关闭"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "iac-code mcp --help for help"
+msgstr "运行 iac-code mcp --help 获取帮助"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Enter select"
+msgstr "Enter 选择"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Up/Down navigate"
+msgstr "上/下 导航"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Actions"
+msgstr "操作"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Esc back"
+msgstr "Esc 返回"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Tools for {name}"
+msgstr "{name} 的工具"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No tools available"
+msgstr "没有可用工具"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Tool name: {name}"
+msgstr "工具名称：{name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Full name: {name}"
+msgstr "完整名称：{name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Description:"
+msgstr "描述："
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Parameters:"
+msgstr "参数："
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Resources for {name}"
+msgstr "{name} 的资源"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No resources available"
+msgstr "没有可用资源"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Name: {name}"
+msgstr "名称：{name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "MIME type: {mime_type}"
+msgstr "MIME 类型：{mime_type}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Prompts for {name}"
+msgstr "{name} 的提示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No prompts available"
+msgstr "没有可用提示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Prompt name: {name}"
+msgstr "提示名称：{name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Arguments:"
+msgstr "参数："
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authenticating {name}"
+msgstr "正在认证 {name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Copied!"
+msgstr "已复制！"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "press c to copy"
+msgstr "按 c 复制"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid ""
+"If your browser does not open automatically, copy this URL manually "
+"({hint})."
+msgstr "如果浏览器没有自动打开，请手动复制此 URL（{hint}）。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Waiting for OAuth callback."
+msgstr "正在等待 OAuth 回调。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"If the redirect page shows a connection error, paste the URL from your "
+"browser address bar."
+msgstr "如果重定向页面显示连接错误，请粘贴浏览器地址栏中的 URL。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "URL > {value}"
+msgstr "URL > {value}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "c copy URL"
+msgstr "c 复制 URL"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Enter submit"
+msgstr "Enter 提交"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Esc cancel"
+msgstr "Esc 取消"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "This may take a few moments."
+msgstr "这可能需要一点时间。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "MCP dialog dismissed"
+msgstr "MCP 对话框已关闭"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Failed to {action} MCP server {name!r}: {error}"
+msgstr "{action} MCP 服务器 {name!r} 失败：{error}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Enable"
+msgstr "启用"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Re-authenticate"
+msgstr "重新认证"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Clear authentication"
+msgstr "清除认证"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Authenticate"
+msgstr "认证"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Remove"
+msgstr "移除"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Approve"
+msgstr "批准"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Reject"
+msgstr "拒绝"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Disable"
+msgstr "禁用"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "View tools"
+msgstr "查看工具"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "View resources"
+msgstr "查看资源"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "View prompts"
+msgstr "查看提示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Reconnect"
+msgstr "重新连接"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Completing OAuth authorization."
+msgstr "正在完成 OAuth 授权。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "No authorization URL is available to copy."
+msgstr "没有可复制的授权 URL。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Copied authorization URL."
+msgstr "已复制授权 URL。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Could not copy authorization URL. Copy it manually from the text above."
+msgstr "无法复制授权 URL。请手动复制上方文本中的 URL。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Reconnecting to {name}"
+msgstr "正在重新连接到 {name}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Restarting MCP server process"
+msgstr "正在重启 MCP 服务器进程"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Connecting to {name}…"
+msgstr "正在连接到 {name}…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Establishing connection to MCP server"
+msgstr "正在建立到 MCP 服务器的连接"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "MCP server {name!r} not found in project config."
+msgstr "在项目配置中找不到 MCP 服务器 {name!r}。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Project MCPs"
+msgstr "项目 MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "User MCPs"
+msgstr "用户 MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Local MCPs"
+msgstr "本地 MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Session MCPs"
+msgstr "会话 MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Built-in MCPs"
+msgstr "内置 MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{scope} MCPs"
+msgstr "{scope} MCP"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{heading} (always available)"
+msgstr "{heading}（始终可用）"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 server"
+msgstr "1 个服务器"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{count} servers"
+msgstr "{count} 个服务器"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 tool"
+msgstr "1 个工具"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 resource"
+msgstr "1 个资源"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{count} resources"
+msgstr "{count} 个资源"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "1 prompt"
+msgstr "1 个提示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{count} prompts"
+msgstr "{count} 个提示"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Unknown"
+msgstr "未知"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{name} MCP Server"
+msgstr "{name} MCP 服务器"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Auth"
+msgstr "认证"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Command"
+msgstr "命令"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Args"
+msgstr "参数"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "URL"
+msgstr "URL 地址"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Config location"
+msgstr "配置位置"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Capabilities"
+msgstr "能力"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Resources"
+msgstr "资源"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Prompts"
+msgstr "提示词"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Failure"
+msgstr "失败"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Latest failure"
+msgstr "最近失败"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Latest refresh failure"
+msgstr "最近刷新失败"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Tools refresh"
+msgstr "工具刷新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Resources refresh"
+msgstr "资源刷新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Prompts refresh"
+msgstr "提示词刷新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{capability} refresh"
+msgstr "{capability} 刷新"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "needs authentication"
+msgstr "需要认证"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "reconnecting ({attempt}/{max})…"
+msgstr "正在重新连接 ({attempt}/{max})…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "reconnecting…"
+msgstr "正在重新连接…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "connecting…"
+msgstr "正在连接…"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "pending approval"
+msgstr "等待批准"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "connected"
+msgstr "已连接"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "※ Debug logging is enabled. Log file: {path}"
+msgstr "※ 调试日志已启用。日志文件：{path}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "※ Debug logging is enabled; check the log file for MCP error details"
+msgstr "※ 调试日志已启用；请查看日志文件获取 MCP 错误详情"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "※ Run iac-code --debug to see error logs"
+msgstr "※ 运行 iac-code --debug 查看错误日志"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "authenticated"
+msgstr "已认证"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "not authenticated"
+msgstr "未认证"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "tools"
+msgstr "工具"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "resources"
+msgstr "资源"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "prompts"
+msgstr "提示词"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "none"
+msgstr "无"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "read-only"
+msgstr "只读"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "destructive"
+msgstr "破坏性"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "open-world"
+msgstr "开放世界"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid " (required)"
+msgstr " (必填)"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "MCP Config Diagnostics"
+msgstr "MCP 配置诊断"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "For help configuring MCP servers, run `iac-code mcp --help`."
+msgstr "如需配置 MCP 服务器的帮助，请运行 `iac-code mcp --help`。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Failed to parse"
+msgstr "解析失败"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "Contains warnings"
+msgstr "包含警告"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Location: {path}"
+msgstr "位置：{path}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "[Error]"
+msgstr "[错误]"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "[Warning]"
+msgstr "[警告]"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Error reconnecting to {name}: {error}"
+msgstr "重新连接 {name} 时出错：{error}"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Reconnected to {name}."
+msgstr "已重新连接到 {name}。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "{name} requires authentication. Use the 'Authenticate' option."
+msgstr "{name} 需要认证。请使用 '认证' 选项。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Failed to reconnect to {name}."
+msgstr "重新连接到 {name} 失败。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Unknown result when reconnecting to {name}."
+msgstr "重新连接 {name} 时返回未知结果。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication successful. Reconnected to {name}."
+msgstr "认证成功。已重新连接到 {name}。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication successful. Connected to {name}."
+msgstr "认证成功。已连接到 {name}。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication successful. Enable {name} to connect."
+msgstr "认证成功。启用 {name} 以连接。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"Authentication successful, but server still requires authentication. You "
+"may need to manually restart iac-code."
+msgstr "认证成功，但服务器仍然需要认证。你可能需要手动重启 iac-code。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid ""
+"Authentication successful, but server reconnection failed. You may need "
+"to manually restart iac-code for the changes to take effect."
+msgstr "认证成功，但服务器重连失败。你可能需要手动重启 iac-code 以使更改生效。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Authentication cleared for {name}."
+msgstr "已清除 {name} 的认证。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Removed MCP server {name!r}."
+msgstr "已移除 MCP 服务器 {name!r}。"
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+#, python-brace-format
+msgid "Updated MCP server {name!r}."
+msgstr "已更新 MCP 服务器 {name!r}。"
+
 #: src/iac_code/ui/dialogs/memory.py
 msgid "Memory"
 msgstr "记忆"
@@ -6422,6 +7486,123 @@ msgstr "拒绝打开非常规文件：{path}"
 #~ msgid "Note: images are not supported in pipeline mode and will be ignored."
 #~ msgstr "注意：pipeline 模式不支持图像，将忽略图像。"
 
+#~ msgid ""
+#~ "MCP server {server!r} requested elicitation,"
+#~ " but iac-code does not support "
+#~ "elicitation yet."
+#~ msgstr "MCP 服务器 {server!r} 请求 elicitation，但 iac-code 尚不支持 elicitation。"
+
+#~ msgid ""
+#~ "MCP server {server!r} uses unsupported "
+#~ "field 'headersHelper'. Static headers are "
+#~ "supported; dynamic headers need a later"
+#~ " trusted-execution design."
+#~ msgstr ""
+#~ "MCP 服务器 {server!r} 使用不支持的字段 "
+#~ "'headersHelper'。支持静态 headers；动态 headers 需要后续可信执行设计。"
+
+#~ msgid "MCP command failed with exit code {code}."
+#~ msgstr "MCP 命令失败，退出码为 {code}。"
+
+#~ msgid "MCP Servers"
+#~ msgstr "MCP 服务器"
+
+#~ msgid "Scope"
+#~ msgstr "作用域"
+
+#~ msgid "Refresh"
+#~ msgstr "刷新"
+
+#~ msgid "MCP server name is required for show."
+#~ msgstr "show 需要 MCP 服务器名称。"
+
+#~ msgid "MCP server {name!r} is not active."
+#~ msgstr "MCP 服务器 {name!r} 未激活。"
+
+#~ msgid "MCP server {name!r} is not active in {scope} scope."
+#~ msgstr "MCP 服务器 {name!r} 在 {scope} 作用域中未激活。"
+
+#~ msgid "MCP Server: {name}"
+#~ msgstr "MCP 服务器：{name}"
+
+#~ msgid "Field"
+#~ msgstr "字段"
+
+#~ msgid "Value"
+#~ msgstr "值"
+
+#~ msgid "Capability errors"
+#~ msgstr "能力错误"
+
+#~ msgid "Original name"
+#~ msgstr "原始名称"
+
+#~ msgid "URI"
+#~ msgstr "URI"
+
+#~ msgid "MIME type"
+#~ msgstr "MIME 类型"
+
+#~ msgid "--scope can only be used once."
+#~ msgstr "--scope 只能使用一次。"
+
+#~ msgid "Unknown MCP option {option!r}."
+#~ msgstr "未知 MCP 选项 {option!r}。"
+
+#~ msgid "Unexpected MCP argument {argument!r}."
+#~ msgstr "意外的 MCP 参数 {argument!r}。"
+
+#~ msgid "MCP server name is required for {action}."
+#~ msgstr "{action} 需要 MCP 服务器名称。"
+
+#~ msgid "Dynamic MCPs"
+#~ msgstr "动态 MCP"
+
+#~ msgid ""
+#~ "Use /mcp to open the MCP manager."
+#~ " Use `iac-code mcp <command>` for "
+#~ "CLI management."
+#~ msgstr "使用 /mcp 打开 MCP 管理器。使用 `iac-code mcp <command>` 进行 CLI 管理。"
+
+#~ msgid "Paste callback URL or authorization code, then press Enter."
+#~ msgstr "粘贴回调 URL 或授权码，然后按 Enter。"
+
+#~ msgid "Callback input: {value}"
+#~ msgstr "回调输入：{value}"
+
+#~ msgid "Name"
+#~ msgstr "名称"
+
+#~ msgid "State"
+#~ msgstr "状态"
+
+#~ msgid "Original server: {name}"
+#~ msgstr "原始服务器：{name}"
+
+#~ msgid "Transport"
+#~ msgstr "传输"
+
+#~ msgid "Reconnected MCP server {name!r}: {state}."
+#~ msgstr "已重新连接 MCP 服务器 {name!r}：{state}。"
+
+#~ msgid "Reconnected MCP server {name!r}."
+#~ msgstr "已重新连接 MCP 服务器 {name!r}。"
+
+#~ msgid "No tools reported for this MCP server."
+#~ msgstr "此 MCP 服务器未报告工具。"
+
+#~ msgid "Annotations: {annotations}"
+#~ msgstr "注解：{annotations}"
+
+#~ msgid "[status|auth|reconnect|disable|enable]"
+#~ msgstr "[status|auth|reconnect|disable|enable]"
+
+#~ msgid "Enter details"
+#~ msgstr "Enter 查看详情"
+
+#~ msgid "Error"
+#~ msgstr "错误"
+
 #~ msgid "review"
 #~ msgstr "审查"
 
@@ -6430,4 +7611,16 @@ msgstr "拒绝打开非常规文件：{path}"
 
 #~ msgid "Pipeline mode does not support --input-format stream-json."
 #~ msgstr "Pipeline 模式不支持 --input-format stream-json。"
+
+#~ msgid "Transport type: stdio, http, sse."
+#~ msgstr "Transport 类型：stdio、http、sse。"
+
+#~ msgid "Remote MCP URL for http/sse."
+#~ msgstr "http/sse 远程 MCP URL。"
+
+#~ msgid "HTTP header KEY=VALUE. Can be repeated."
+#~ msgstr "HTTP header KEY=VALUE。可重复指定。"
+
+#~ msgid "{option} expects KEY=VALUE, got {value!r}."
+#~ msgstr "{option} 需要 KEY=VALUE，收到 {value!r}。"
 

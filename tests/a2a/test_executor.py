@@ -21,9 +21,22 @@ from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import ImageBlock, Message, TextBlock
+from iac_code.commands.registry import CommandRegistry, PromptCommand
+from iac_code.mcp.errors import MCPConnectionError, MCPNeedsAuthError
+from iac_code.mcp.prompts import register_mcp_prompt_commands
+from iac_code.mcp.types import (
+    MCPConfigScope,
+    MCPConnectionMetadata,
+    MCPConnectionState,
+    MCPServerConfig,
+    ScopedMCPServerConfig,
+)
 from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
 from iac_code.services.session_storage import SessionStorage
+from iac_code.skills.frontmatter import SkillFrontmatter
+from iac_code.skills.skill_definition import SkillDefinition
+from iac_code.types.skill_source import SkillSource
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent, ToolResultEvent
 
 from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntime, pending_future
@@ -123,6 +136,92 @@ class ExplodingBackupMetrics(NoOpA2AMetrics):
 
     def record_backup_succeeded(self, *, reason: str, critical: bool, retry_count: int) -> None:
         raise RuntimeError("metrics sink failed with token=abc123")
+
+
+class FakeContextManager:
+    def __init__(self) -> None:
+        self.raw_messages: list[Message] = []
+
+    def add_raw_message(self, message: dict[str, object]) -> Message:
+        converted = Message(role=str(message.get("role", "user")), content=str(message.get("content", "")))
+        self.raw_messages.append(converted)
+        return converted
+
+
+class A2APromptCommandFakeLoop:
+    def __init__(self, *, cwd: str | None = None, session_id: str = "session-1") -> None:
+        self.context_manager = FakeContextManager()
+        self.prompts: list[object] = []
+        self.continued = False
+        self.context_modifiers: list[object] = []
+        self._session_storage = SessionStorage() if cwd is not None else None
+        self._cwd = cwd
+        self._session_id = session_id
+        self._current_git_branch = None
+
+    async def run_streaming(self, prompt: object):
+        self.prompts.append(prompt)
+        yield TextDeltaEvent(text=f"unexpected raw prompt: {prompt}")
+
+    async def continue_streaming(self):
+        self.continued = True
+        yield TextDeltaEvent(text="MCP prompt executed")
+
+    def _apply_context_modifier(self, modifier: object) -> None:
+        self.context_modifiers.append(modifier)
+
+
+class FakeA2AMCPPromptManager:
+    def __init__(self) -> None:
+        self.called_with: dict[str, object] | None = None
+
+    def list_prompts(self) -> list[object]:
+        return [
+            SimpleNamespace(
+                server_name="ros",
+                prompt_name="review",
+                public_name="mcp__ros__review",
+                description="Review ROS template",
+                arguments={"template": {"required": True}},
+                original_server_name="ros",
+                original_prompt_name="review",
+            )
+        ]
+
+    async def get_prompt(self, server_name: str, prompt_name: str, arguments: dict[str, str]):
+        self.called_with = {
+            "server_name": server_name,
+            "prompt_name": prompt_name,
+            "arguments": dict(arguments),
+        }
+        return {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"A2A_MCP_PROMPT_EXECUTED:{arguments['template']}",
+                    },
+                }
+            ]
+        }
+
+
+class FailingA2AMCPPromptManager(FakeA2AMCPPromptManager):
+    async def get_prompt(self, server_name: str, prompt_name: str, arguments: dict[str, str]):
+        self.called_with = {
+            "server_name": server_name,
+            "prompt_name": prompt_name,
+            "arguments": dict(arguments),
+        }
+        raise RuntimeError("MCP prompt server failed with access_token=super-secret-token")
+
+
+def _mcp_prompt_command_registry(manager: FakeA2AMCPPromptManager) -> CommandRegistry:
+    registry = CommandRegistry()
+    warnings = register_mcp_prompt_commands(registry, manager)
+    assert warnings == []
+    return registry
 
 
 @pytest.fixture(autouse=True)
@@ -248,6 +347,228 @@ async def test_executor_does_not_enable_a2a_safe_mode_for_unknown_env_value(
     )
 
     assert captured_options["a2a_safe_mode"] is False
+
+
+@pytest.mark.asyncio
+async def test_executor_executes_mcp_prompt_command_before_llm(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    loop = A2APromptCommandFakeLoop(cwd=str(tmp_path), session_id="session-1")
+    manager = FakeA2AMCPPromptManager()
+    runtime = FakeRuntime(
+        agent_loop=loop,
+        session_id="session-1",
+        command_registry=_mcp_prompt_command_registry(manager),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(
+        text="/mcp__ros__review template=manual-real",
+        metadata={"iac_code": {"cwd": str(tmp_path)}},
+    )
+
+    await executor.execute(context, queue)
+
+    assert loop.prompts == []
+    assert loop.continued is True
+    assert [message.content for message in loop.context_manager.raw_messages] == [
+        "user: A2A_MCP_PROMPT_EXECUTED:manual-real"
+    ]
+    persisted = SessionStorage().load(str(tmp_path), "session-1")
+    assert [message.content for message in persisted] == ["user: A2A_MCP_PROMPT_EXECUTED:manual-real"]
+    assert all("/mcp__ros__review" not in str(message.content) for message in persisted)
+    assert manager.called_with == {
+        "server_name": "ros",
+        "prompt_name": "review",
+        "arguments": {"template": "manual-real"},
+    }
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert "".join(record.output_text) == "MCP prompt executed"
+
+
+@pytest.mark.asyncio
+async def test_executor_mcp_prompt_missing_required_argument_fails_before_llm(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    loop = A2APromptCommandFakeLoop(cwd=str(tmp_path), session_id="session-1")
+    manager = FakeA2AMCPPromptManager()
+    runtime = FakeRuntime(
+        agent_loop=loop,
+        session_id="session-1",
+        command_registry=_mcp_prompt_command_registry(manager),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(
+        text="/mcp__ros__review",
+        metadata={"iac_code": {"cwd": str(tmp_path)}},
+    )
+
+    await executor.execute(context, queue)
+
+    assert loop.prompts == []
+    assert loop.context_manager.raw_messages == []
+    assert manager.called_with is None
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    text = dumped["status"]["message"]["parts"][0]["text"]
+    assert text == "ValueError: Missing required MCP prompt argument: template"
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_executor_mcp_prompt_server_error_fails_before_llm_and_redacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    loop = A2APromptCommandFakeLoop(cwd=str(tmp_path), session_id="session-1")
+    manager = FailingA2AMCPPromptManager()
+    runtime = FakeRuntime(
+        agent_loop=loop,
+        session_id="session-1",
+        command_registry=_mcp_prompt_command_registry(manager),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    context = FakeRequestContext(
+        text="/mcp__ros__review template=manual-real",
+        metadata={"iac_code": {"cwd": str(tmp_path)}},
+    )
+
+    await executor.execute(context, queue)
+
+    assert loop.prompts == []
+    assert loop.context_manager.raw_messages == []
+    assert manager.called_with == {
+        "server_name": "ros",
+        "prompt_name": "review",
+        "arguments": {"template": "manual-real"},
+    }
+    dumped = dump(queue.events[-1])
+    assert dumped["status"]["state"] == "TASK_STATE_FAILED"
+    text = dumped["status"]["message"]["parts"][0]["text"]
+    assert text.startswith("RuntimeError: MCP prompt server failed with access_token=")
+    assert "super-secret-token" not in text
+
+
+@pytest.mark.asyncio
+async def test_executor_does_not_execute_non_mcp_prompt_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="regular_review",
+            description="Review local context",
+            skill=SkillDefinition(
+                name="regular_review",
+                description="Review local context",
+                frontmatter=SkillFrontmatter(description="Review local context"),
+                content="Review local context: {{args}}",
+                source=SkillSource.PROJECT,
+                file_path=str(tmp_path / "skills" / "regular_review.md"),
+                content_length=0,
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1", command_registry=registry)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(
+            text="/regular_review topic=iac",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert loop.prompts == ["/regular_review topic=iac"]
+
+
+@pytest.mark.asyncio
+async def test_executor_does_not_execute_mcp_resource_skill_as_prompt_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__resource_skill",
+            description="Remote resource skill",
+            skill=SkillDefinition(
+                name="mcp__ros__resource_skill",
+                description="Remote resource skill",
+                frontmatter=SkillFrontmatter(description="Remote resource skill"),
+                content="Resource skill content: {{args}}",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/skill://ros/resource_skill",
+                content_length=0,
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1", command_registry=registry)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(
+            text="/mcp__ros__resource_skill topic=iac",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert loop.prompts == ["/mcp__ros__resource_skill topic=iac"]
+
+
+@pytest.mark.asyncio
+async def test_executor_does_not_execute_mcp_resource_skill_with_prompt_path_segment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__skill_prompt",
+            description="Remote resource skill containing prompt path segment",
+            skill=SkillDefinition(
+                name="mcp__ros__skill_prompt",
+                description="Remote resource skill containing prompt path segment",
+                frontmatter=SkillFrontmatter(description="Remote resource skill containing prompt path segment"),
+                content="Resource skill content: {{args}}",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/skill://ros/prompt/foo",
+                content_length=0,
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    loop = FakeAgentLoop([TextDeltaEvent(text="hi")])
+    runtime = FakeRuntime(agent_loop=loop, session_id="session-1", command_registry=registry)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+    await executor.execute(
+        FakeRequestContext(
+            text="/mcp__ros__skill_prompt topic=iac",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert loop.prompts == ["/mcp__ros__skill_prompt topic=iac"]
 
 
 @pytest.mark.asyncio
@@ -605,7 +926,11 @@ async def test_executor_publishes_mcp_warnings(monkeypatch: pytest.MonkeyPatch, 
         agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]),
         session_id="session-1",
         mcp_config_warnings=[
-            SimpleNamespace(server_name="broken", code="connection_failed", message="MCP server failed")
+            SimpleNamespace(
+                server_name="broken",
+                code="connection_failed",
+                message="MCP server failed with access_token=super-secret-token",
+            )
         ],
     )
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
@@ -624,8 +949,190 @@ async def test_executor_publishes_mcp_warnings(monkeypatch: pytest.MonkeyPatch, 
         and "mcpWarning" in dump(event).get("metadata", {}).get("iac_code", {})
     ]
     assert len(warning_events) == 1
-    assert warning_events[0]["status"]["message"]["parts"][0]["text"] == "MCP warning: MCP server failed"
+    assert warning_events[0]["status"]["message"]["parts"][0]["text"] == (
+        "MCP warning: MCP server failed with access_token=[REDACTED]"
+    )
     assert warning_events[0]["metadata"]["iac_code"]["mcpWarning"]["code"] == "connection_failed"
+    assert "super-secret-token" not in repr(warning_events[0]["metadata"]["iac_code"]["mcpWarning"])
+
+
+@pytest.mark.asyncio
+async def test_executor_publishes_mcp_status_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    private_marker = "IAC_PRIVATE_COMMAND_ARG_MARKER_36_A2A"
+    scoped_config = ScopedMCPServerConfig(
+        config=MCPServerConfig.from_mapping("broken", {"command": "node", "args": ["server.js", private_marker]}),
+        scope=MCPConfigScope.USER,
+    )
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]),
+        session_id="session-1",
+        mcp_manager=SimpleNamespace(
+            list_connections=lambda: [
+                SimpleNamespace(
+                    name="broken",
+                    scoped_config=scoped_config,
+                    state=MCPConnectionState.FAILED,
+                    error="access_token=super-secret-token",
+                    capability_errors={},
+                    tools=[],
+                    resources=[],
+                    prompts=[],
+                    retry_count=2,
+                    metadata=MCPConnectionMetadata(
+                        state=MCPConnectionState.FAILED,
+                        server_name="broken",
+                        protocol_version="2025-06-18",
+                    ),
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    status_events = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    states = [event["status"]["state"] for event in status_events]
+    assert states[:2] == ["TASK_STATE_SUBMITTED", "TASK_STATE_WORKING"]
+    mcp_status_indexes = [
+        index
+        for index, event in enumerate(status_events)
+        if "mcpStatus" in event.get("metadata", {}).get("iac_code", {})
+    ]
+    assert mcp_status_indexes and mcp_status_indexes[0] >= 2
+    status_events = [status_events[index] for index in mcp_status_indexes]
+    assert len(status_events) == 1
+    status = status_events[0]["metadata"]["iac_code"]["mcpStatus"]
+    assert status["servers"][0]["serverName"] == "broken"
+    assert status["servers"][0]["state"] == "failed"
+    assert status["servers"][0]["protocolVersion"] == "2025-06-18"
+    assert status["servers"][0]["retryCount"] == 2
+    assert "super-secret-token" not in repr(status)
+    assert private_marker not in repr(status)
+
+
+@pytest.mark.asyncio
+async def test_executor_publishes_initial_mcp_status_for_each_task_in_same_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="hi")]),
+        session_id="session-1",
+        mcp_manager=SimpleNamespace(
+            list_connections=lambda: [
+                SimpleNamespace(
+                    name="remote",
+                    state=MCPConnectionState.CONNECTED,
+                    error=None,
+                    capability_errors={},
+                    tools=[],
+                    resources=[],
+                    prompts=[],
+                    retry_count=0,
+                    metadata=None,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    first_queue = FakeEventQueue()
+    second_queue = FakeEventQueue()
+
+    await executor.execute(
+        FakeRequestContext(task_id="task-1", context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        first_queue,
+    )
+    await executor.execute(
+        FakeRequestContext(task_id="task-2", context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        second_queue,
+    )
+
+    first_status_events = [dump(event) for event in first_queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    second_status_events = [dump(event) for event in second_queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    assert any("mcpStatus" in event.get("metadata", {}).get("iac_code", {}) for event in first_status_events)
+    assert any("mcpStatus" in event.get("metadata", {}).get("iac_code", {}) for event in second_status_events)
+
+
+@pytest.mark.asyncio
+async def test_executor_pushes_updated_mcp_status_when_capabilities_change(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class DynamicMCPManager:
+        def __init__(self) -> None:
+            self.include_dynamic_tool = False
+
+        def list_connections(self) -> list[SimpleNamespace]:
+            tools = [
+                SimpleNamespace(
+                    public_name="mcp__remote__echo",
+                    original_server_name="remote",
+                    original_tool_name="echo",
+                )
+            ]
+            if self.include_dynamic_tool:
+                tools.append(
+                    SimpleNamespace(
+                        public_name="mcp__remote__live_added",
+                        original_server_name="remote",
+                        original_tool_name="live-added",
+                    )
+                )
+            return [
+                SimpleNamespace(
+                    name="remote",
+                    state=MCPConnectionState.CONNECTED,
+                    error=None,
+                    capability_errors={},
+                    tools=tools,
+                    resources=[],
+                    prompts=[],
+                    retry_count=0,
+                    metadata=MCPConnectionMetadata(state=MCPConnectionState.CONNECTED, server_name="remote"),
+                )
+            ]
+
+    class DynamicStatusLoop:
+        def __init__(self, manager: DynamicMCPManager) -> None:
+            self.manager = manager
+
+        async def run_streaming(self, prompt: str):
+            yield TextDeltaEvent(text="before")
+            self.manager.include_dynamic_tool = True
+            yield TextDeltaEvent(text="after")
+
+    manager = DynamicMCPManager()
+    runtime = FakeRuntime(
+        agent_loop=DynamicStatusLoop(manager),
+        session_id="session-1",
+        mcp_manager=manager,
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    status_events = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    mcp_statuses = [
+        event["metadata"]["iac_code"]["mcpStatus"]
+        for event in status_events
+        if "mcpStatus" in event.get("metadata", {}).get("iac_code", {})
+    ]
+
+    assert len(mcp_statuses) == 2
+    initial_tools = {tool["publicName"] for tool in mcp_statuses[0]["servers"][0]["tools"]}
+    updated_tools = {tool["publicName"] for tool in mcp_statuses[1]["servers"][0]["tools"]}
+    assert initial_tools == {"mcp__remote__echo"}
+    assert updated_tools == {"mcp__remote__echo", "mcp__remote__live_added"}
 
 
 @pytest.mark.asyncio
@@ -1378,6 +1885,61 @@ async def test_cancel_bypasses_context_lock(monkeypatch: pytest.MonkeyPatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_cancel_running_task_discards_context_runtime_before_same_context_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    started = asyncio.Event()
+    factory_sessions: list[str] = []
+
+    class BlockingLoop:
+        async def run_streaming(self, prompt: str):
+            started.set()
+            await asyncio.Future()
+            yield TextDeltaEvent(text="never")
+
+    class FreshLoop:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def run_streaming(self, prompt: str):
+            self.prompts.append(prompt)
+            yield TextDeltaEvent(text="fresh retry")
+
+    fresh_loop = FreshLoop()
+
+    def runtime_factory(options):
+        factory_sessions.append(options.session_id)
+        if len(factory_sessions) == 1:
+            return FakeRuntime(agent_loop=BlockingLoop(), session_id=options.session_id)
+        return FakeRuntime(agent_loop=fresh_loop, session_id=options.session_id)
+
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", runtime_factory)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    first = FakeRequestContext(task_id="task-1", context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}})
+    first_queue = FakeEventQueue()
+    running = asyncio.create_task(executor.execute(first, first_queue))
+    await asyncio.wait_for(started.wait(), timeout=5.0)
+
+    await executor.cancel(first, first_queue)
+    await running
+
+    second_queue = FakeEventQueue()
+    await executor.execute(
+        FakeRequestContext(task_id="task-2", context_id="ctx-1", metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        second_queue,
+    )
+
+    assert len(factory_sessions) == 2
+    assert factory_sessions[0] == factory_sessions[1]
+    assert fresh_loop.prompts == ["hello"]
+    assert dump(first_queue.events[-1])["status"]["state"] == "TASK_STATE_CANCELED"
+    assert dump(second_queue.events[-1])["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+
+
+@pytest.mark.asyncio
 async def test_same_context_concurrent_message_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     started = asyncio.Event()
 
@@ -2127,6 +2689,72 @@ async def test_retryable_executor_error_returns_input_required(monkeypatch: pyte
     assert reason == BackupReason.INPUT_REQUIRED
     assert task_snapshot["state"] == "input-required"
     assert context_snapshot["active_task_id"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc", "state"),
+    [
+        (MCPConnectionError("MCP server 'remote' connection failed"), MCPConnectionState.FAILED),
+        (MCPNeedsAuthError("MCP server 'remote' requires authentication"), MCPConnectionState.NEEDS_AUTH),
+    ],
+)
+async def test_mcp_stream_error_after_text_returns_input_required(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    exc: Exception,
+    state: MCPConnectionState,
+) -> None:
+    class MCPErrorAfterTextLoop:
+        async def run_streaming(self, prompt: str):
+            yield TextDeltaEvent(text="partial reply")
+            raise exc
+
+    runtime = FakeRuntime(
+        agent_loop=MCPErrorAfterTextLoop(),
+        session_id="session-1",
+        mcp_manager=SimpleNamespace(
+            list_connections=lambda: [
+                SimpleNamespace(
+                    name="remote",
+                    state=state,
+                    error=str(exc),
+                    auth_error=str(exc) if state is MCPConnectionState.NEEDS_AUTH else None,
+                    required_auth_scopes=["write:stack"] if state is MCPConnectionState.NEEDS_AUTH else [],
+                    auth_resource_metadata_url=None,
+                    capability_errors={},
+                    tools=[],
+                    resources=[],
+                    prompts=[],
+                    retry_count=0,
+                    metadata=MCPConnectionMetadata(state=state, server_name="remote"),
+                    scoped_config=ScopedMCPServerConfig(
+                        config=MCPServerConfig.from_mapping(
+                            "remote",
+                            {"type": "http", "url": "https://example.com/mcp"},
+                        ),
+                        scope=MCPConfigScope.USER,
+                    ),
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    status_events = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    rendered_events = [dump(event) for event in queue.events if isinstance(event, Task | TaskStatusUpdateEvent)]
+    assert any("partial reply" in json.dumps(event, ensure_ascii=False) for event in rendered_events)
+    assert any("mcpStatus" in event.get("metadata", {}).get("iac_code", {}) for event in status_events)
+    assert status_events[-1]["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    assert record.state == "input-required"
+    assert "".join(record.output_text) == "partial reply"
 
 
 @pytest.mark.asyncio

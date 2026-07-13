@@ -14,6 +14,9 @@ from iac_code.tools.base import ToolResult
 from iac_code.utils.file_security import ensure_private_dir
 from iac_code.utils.state_io import atomic_write_bytes
 
+MAX_INLINE_TEXT_CHARS = 50_000
+MAX_INLINE_TEXT_BYTES = 100_000
+
 
 def convert_mcp_tool_result(
     result: Any,
@@ -28,7 +31,8 @@ def convert_mcp_tool_result(
     artifacts: list[dict[str, Any]] = []
     sections: list[str] = []
 
-    for index, block in enumerate(_get_value(result, "content", []) or []):
+    content_blocks = _get_value(result, "content", []) or []
+    for index, block in enumerate(content_blocks):
         converted = _convert_content_block(
             block,
             server_name=server_name,
@@ -43,7 +47,18 @@ def convert_mcp_tool_result(
 
     structured_content = _get_value(result, "structuredContent")
     if structured_content is not None:
-        sections.append(_("Structured content:\n{content}").format(content=_json_dumps(structured_content)))
+        converted_structured_content = _convert_text_content(
+            _json_dumps(structured_content),
+            mime_type="application/json",
+            kind="structured-content",
+            server_name=server_name,
+            tool_name=tool_name,
+            session_id=session_id,
+            session_dir=session_dir,
+            index=len(content_blocks),
+            artifacts=artifacts,
+        )
+        sections.append(_("Structured content:\n{content}").format(content=converted_structured_content))
 
     is_error = bool(_get_value(result, "isError", False))
     meta = _get_value(result, "_meta")
@@ -77,7 +92,17 @@ def _convert_content_block(
 ) -> str:
     block_type = _get_value(block, "type")
     if block_type == "text":
-        return str(_get_value(block, "text", ""))
+        return _convert_text_content(
+            str(_get_value(block, "text", "")),
+            mime_type=str(_get_value(block, "mimeType", "text/plain") or "text/plain"),
+            kind="text",
+            server_name=server_name,
+            tool_name=tool_name,
+            session_id=session_id,
+            session_dir=session_dir,
+            index=index,
+            artifacts=artifacts,
+        )
 
     if block_type in {"image", "audio"}:
         return _store_base64_artifact(
@@ -101,7 +126,19 @@ def _convert_content_block(
             header = _("Resource from MCP server {server!r}\nURI: {uri}").format(server=server_name, uri=uri)
             if mime_type:
                 header = _("{header}\nMIME: {mime_type}").format(header=header, mime_type=mime_type)
-            return "{}\n\n{}".format(header, text)
+            converted_text = _convert_text_content(
+                str(text),
+                mime_type=str(mime_type or "text/plain"),
+                kind="resource",
+                server_name=server_name,
+                tool_name=tool_name,
+                session_id=session_id,
+                session_dir=session_dir,
+                index=index,
+                artifacts=artifacts,
+                uri=uri,
+            )
+            return "{}\n\n{}".format(header, converted_text)
 
         blob = _get_value(resource, "blob")
         if blob is not None:
@@ -130,6 +167,106 @@ def _convert_content_block(
     return _("Unsupported MCP content block:\n{content}").format(content=_json_dumps(_to_jsonable(block)))
 
 
+def _convert_text_content(
+    text: str,
+    *,
+    mime_type: str,
+    kind: str,
+    server_name: str,
+    tool_name: str,
+    session_id: str,
+    session_dir: Path | str | None,
+    index: int,
+    artifacts: list[dict[str, Any]],
+    uri: str | None = None,
+) -> str:
+    if len(text) <= MAX_INLINE_TEXT_CHARS and len(text.encode("utf-8")) <= MAX_INLINE_TEXT_BYTES:
+        return text
+    return _store_text_artifact(
+        text,
+        mime_type=mime_type,
+        kind=kind,
+        server_name=server_name,
+        tool_name=tool_name,
+        session_id=session_id,
+        session_dir=session_dir,
+        index=index,
+        artifacts=artifacts,
+        uri=uri,
+    )
+
+
+def _artifact_directory(
+    *,
+    server_name: str,
+    tool_name: str,
+    session_id: str,
+    session_dir: Path | str | None,
+) -> Path:
+    if session_dir is not None:
+        session_root = Path(session_dir)
+        session_paths = SessionPaths.require_supported(session_root)
+        artifact_root = ensure_session_owned_dir(session_root, session_paths.tool_results_dir)
+    else:
+        artifact_root = get_config_dir() / "tool-results" / session_id
+    directory = artifact_root / "mcp" / _safe_path_segment(server_name) / _safe_path_segment(tool_name)
+    if session_dir is not None:
+        return ensure_session_owned_dir(session_dir, directory)
+    return ensure_private_dir(directory)
+
+
+def _store_text_artifact(
+    text: str,
+    *,
+    mime_type: str,
+    kind: str,
+    server_name: str,
+    tool_name: str,
+    session_id: str,
+    session_dir: Path | str | None,
+    index: int,
+    artifacts: list[dict[str, Any]],
+    uri: str | None = None,
+) -> str:
+    data = text.encode("utf-8")
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    extension = _extension_for_text_mime_type(mime_type)
+    directory = _artifact_directory(
+        server_name=server_name,
+        tool_name=tool_name,
+        session_id=session_id,
+        session_dir=session_dir,
+    )
+    path = directory / "{:02d}-{}-{}{}".format(index, _safe_path_segment(kind), digest, extension)
+    atomic_write_bytes(path, data)
+
+    artifact_id = "{}/{}/{}".format(
+        _safe_path_segment(server_name),
+        _safe_path_segment(tool_name),
+        path.name,
+    )
+    artifact = {
+        "id": artifact_id,
+        "kind": kind,
+        "mime_type": mime_type,
+        "path": str(path),
+        "size": len(data),
+        "chars": len(text),
+    }
+    if uri:
+        artifact["uri"] = uri
+    artifacts.append(artifact)
+    return (
+        _("Saved large MCP text output as {artifact_id} ({chars} chars, {bytes} bytes).").format(
+            artifact_id=artifact_id,
+            chars=len(text),
+            bytes=len(data),
+        )
+        + "\n"
+        + _("Read the full output from {path}.").format(path=path)
+    )
+
+
 def _store_base64_artifact(
     encoded: object,
     *,
@@ -149,17 +286,12 @@ def _store_base64_artifact(
     data = base64.b64decode(encoded, validate=True)
     digest = hashlib.sha256(data).hexdigest()[:16]
     extension = _extension_for_mime_type(mime_type)
-    if session_dir is not None:
-        session_root = Path(session_dir)
-        session_paths = SessionPaths.require_supported(session_root)
-        artifact_root = ensure_session_owned_dir(session_root, session_paths.tool_results_dir)
-    else:
-        artifact_root = get_config_dir() / "tool-results" / session_id
-    directory = artifact_root / "mcp" / _safe_path_segment(server_name) / _safe_path_segment(tool_name)
-    if session_dir is not None:
-        ensure_session_owned_dir(session_dir, directory)
-    else:
-        ensure_private_dir(directory)
+    directory = _artifact_directory(
+        server_name=server_name,
+        tool_name=tool_name,
+        session_id=session_id,
+        session_dir=session_dir,
+    )
     path = directory / "{:02d}-{}-{}{}".format(index, _safe_path_segment(kind), digest, extension)
     atomic_write_bytes(path, data)
 
@@ -226,7 +358,18 @@ def _extension_for_mime_type(mime_type: str) -> str:
         "audio/ogg": ".ogg",
         "application/json": ".json",
         "application/octet-stream": ".bin",
+        "application/pdf": ".pdf",
         "text/plain": ".txt",
         "text/markdown": ".md",
         "text/yaml": ".yml",
+        "video/mp4": ".mp4",
     }.get(normalized, ".bin")
+
+
+def _extension_for_text_mime_type(mime_type: str) -> str:
+    normalized = mime_type.split(";", 1)[0].strip().lower()
+    if normalized in {"application/json", "text/json"} or normalized.endswith("+json"):
+        return ".json"
+    if normalized in {"text/markdown", "text/x-markdown"}:
+        return ".md"
+    return ".txt"

@@ -370,11 +370,16 @@ iac-code は A2A コンテキストを内部エージェントランタイムに
 | `iac_code.permission.safeSummary` | マスク済みの人間向け権限サマリー |
 | `iac_code.permission.inputSummary` | `aliyun_api` 権限リクエスト向けの安全な操作サマリー |
 | `iac_code.permission.toolInput` | `aliyun_api` 以外の権限リクエスト向けの形状のみのツール入力。文字列値は型、長さ、フィンガープリントで表され、ホワイトリスト外のフィールド名もフィンガープリントで表される場合があります |
+| `iac_code.mcpWarning` | マスク済みの MCP 設定または実行時 warning。server name、warning code、公開 message、scope、利用可能な場合は source path を含みます |
+| `iac_code.mcpStatus` | マスク済みの MCP server 状態スナップショット。connection state、authentication state、approval state、capability counts、capability refresh errors、設定 warnings を含みます |
+| `iac_code.mcpProgress` | MCP tool progress metadata。public tool name、original server/tool names、tool-use ID、progress、total、任意の公開 message を含みます |
 | `iac_code.thinking.type` | `thinking-exposure` で `raw-thinking` が有効な場合は `raw_thinking` |
 | `iac_code.thinking.text` | 生の provider 推論チャンク。4000 文字に切り詰められ、信頼済み設定で `raw-thinking` が有効な場合のみ出力 |
 | `iac_code.usage.inputTokens` | ターンの入力トークン数 |
 | `iac_code.usage.outputTokens` | ターンの出力トークン数 |
 | `iac_code.usage.totalTokens` | ターンの合計トークン数 |
+
+Pipeline モードでは、`metadata.iac_code.pipeline.eventType == "mcp_status"` によって MCP status を pipeline metadata として公開することもできます。MCP warnings、status snapshots、progress metadata はストリーミング前にサニタイズされます。headers、環境変数、OAuth tokens、ローカルパス内の secrets はマスクまたは要約されます。
 
 ツール結果にサポート対象のテキストアーティファクトペイロードが含まれる場合、サーバーはペイロードをローカルに保存し、標準の `TaskArtifactUpdateEvent` を出力し、タスクの `artifacts` フィールドにアーティファクトを記録します。アーティファクトパーツは、`file://` URL と `mediaType`、`byteSize`、`sha256` などのメタデータを使用します。元のアーティファクト内容はツールメタデータ内に重複して含まれません。
 

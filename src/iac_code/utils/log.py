@@ -113,7 +113,7 @@ def setup_logging(
 def _install_stdlib_bridge() -> None:
     """Install the stdlib → loguru bridge on key namespaces."""
     handler = _StdlibToLoguruHandler()
-    for name in ("opentelemetry", "iac_code"):
+    for name in ("opentelemetry", "iac_code", "mcp"):
         stdlib_logger = logging.getLogger(name)
         if not any(isinstance(h, _StdlibToLoguruHandler) for h in stdlib_logger.handlers):
             stdlib_logger.addHandler(handler)

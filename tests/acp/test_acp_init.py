@@ -23,7 +23,7 @@ class TestAcpMain:
 
         with (
             patch("iac_code.acp.server.ACPServer", return_value=mock_server),
-            patch("acp.run_agent", side_effect=fake_run_agent),
+            patch("iac_code.acp.runner.run_iac_code_acp_agent", side_effect=fake_run_agent),
             patch("iac_code.utils.log.setup_logging") as mock_setup,
         ):
             loop = asyncio.new_event_loop()
@@ -61,7 +61,7 @@ class TestAcpMain:
 
         with (
             patch("iac_code.acp.server.ACPServer", return_value=mock_server),
-            patch("acp.run_agent", side_effect=slow_agent),
+            patch("iac_code.acp.runner.run_iac_code_acp_agent", side_effect=slow_agent),
             patch("iac_code.utils.log.setup_logging"),
         ):
             loop = asyncio.new_event_loop()

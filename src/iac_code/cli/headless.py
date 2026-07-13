@@ -21,6 +21,8 @@ from loguru import logger
 
 from iac_code.cli.output_formats import OutputFormat, create_writer
 from iac_code.i18n import _
+from iac_code.mcp.progress import format_mcp_progress_text
+from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
 from iac_code.providers.manager import ProviderNotConfiguredError
 from iac_code.services.permissions.audit import emit_auto_permission_audit, is_aliyun_api_non_read_only_permission_event
 from iac_code.services.session_backup import BackupReason, SessionBackupService
@@ -91,14 +93,12 @@ class _ProgressWriter:
 
 
 def _format_mcp_progress(event: MCPProgressEvent) -> str:
-    parts = [_("MCP {server}:{tool}").format(server=event.server_name, tool=event.tool_name)]
-    if event.progress is not None and event.total is not None:
-        parts.append("{:g}/{:g}".format(event.progress, event.total))
-    elif event.progress is not None:
-        parts.append("{:g}".format(event.progress))
-    if event.message:
-        parts.append(event.message)
-    return ": ".join(parts)
+    return format_mcp_progress_text(event)
+
+
+async def _headless_mcp_elicitation_handler(server_name: str, params: dict[str, Any]) -> dict[str, Any]:
+    _ = server_name, params
+    return {"action": "cancel"}
 
 
 def _permission_request_event(event: Any) -> PermissionRequestEvent | None:
@@ -186,6 +186,7 @@ class HeadlessRunner:
                 cli_disallowed_tools=self._cli_disallowed_tools,
                 cli_permission_mode=self._cli_permission_mode,
                 resume_messages=resume_messages,
+                mcp_elicitation_handler=_headless_mcp_elicitation_handler,
             )
         )
         self._runtime = runtime
@@ -285,7 +286,16 @@ class HeadlessRunner:
         try:
             agent_loop = self._create_agent_loop()
             self._print_mcp_config_warnings()
-            async for event in agent_loop.run_streaming(prompt):
+            runtime = self._runtime
+            stream = await mcp_prompt_command_stream(
+                agent_loop=agent_loop,
+                commands=getattr(runtime, "command_registry", None),
+                prompt=prompt,
+                session_id=str(getattr(runtime, "session_id", "") or ""),
+            )
+            if stream is None:
+                stream = agent_loop.run_streaming(prompt)
+            async for event in stream:
                 self._print_mcp_config_warnings()
                 permission_event = _permission_request_event(event)
                 if permission_event is not None:

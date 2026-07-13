@@ -1232,13 +1232,13 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                        _stack_current_changed_event(
-                            action="CreateStack",
-                            stack_id="stack-2",
-                            stack_name=runner._cleanup_stack_name(self, "second"),
-                            status="CREATE_COMPLETE",
-                            is_success=True,
-                        )
+                    _stack_current_changed_event(
+                        action="CreateStack",
+                        stack_id="stack-2",
+                        stack_name=runner._cleanup_stack_name(self, "second"),
+                        status="CREATE_COMPLETE",
+                        is_success=True,
+                    )
                 )
             return FakeStream(summary, events=events)
 
@@ -1391,13 +1391,13 @@ def test_rollback_step5_cleanup_recovery_uses_tool_safe_recovery_prompt(monkeypa
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                        _stack_current_changed_event(
-                            action="CreateStack",
-                            stack_id="stack-2",
-                            stack_name=runner._cleanup_stack_name(self, "second"),
-                            status="CREATE_COMPLETE",
-                            is_success=True,
-                        )
+                    _stack_current_changed_event(
+                        action="CreateStack",
+                        stack_id="stack-2",
+                        stack_name=runner._cleanup_stack_name(self, "second"),
+                        status="CREATE_COMPLETE",
+                        is_success=True,
+                    )
                 )
             return FakeStream(summary, events=events)
 
@@ -1550,13 +1550,13 @@ def test_rollback_step5_cleanup_flow_fails_when_any_cleanup_stack_is_left(monkey
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                        _stack_current_changed_event(
-                            action="CreateStack",
-                            stack_id="stack-2",
-                            stack_name=runner._cleanup_stack_name(self, "second"),
-                            status="CREATE_COMPLETE",
-                            is_success=True,
-                        )
+                    _stack_current_changed_event(
+                        action="CreateStack",
+                        stack_id="stack-2",
+                        stack_name=runner._cleanup_stack_name(self, "second"),
+                        status="CREATE_COMPLETE",
+                        is_success=True,
+                    )
                 )
             return FakeStream(summary, events=events)
 
@@ -1716,13 +1716,13 @@ def test_rollback_step5_cleanup_recovery_kills_and_retriggers_cleanup(monkeypatc
             events = []
             if name == "04-select-second-stack":
                 events.append(
-                        _stack_current_changed_event(
-                            action="CreateStack",
-                            stack_id="stack-2",
-                            stack_name=runner._cleanup_stack_name(self, "second"),
-                            status="CREATE_COMPLETE",
-                            is_success=True,
-                        )
+                    _stack_current_changed_event(
+                        action="CreateStack",
+                        stack_id="stack-2",
+                        stack_name=runner._cleanup_stack_name(self, "second"),
+                        status="CREATE_COMPLETE",
+                        is_success=True,
+                    )
                 )
             return FakeStream(summary, events=events)
 

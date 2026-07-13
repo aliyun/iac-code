@@ -78,6 +78,7 @@ def test_mcp_progress_event_has_tool_progress_envelope() -> None:
         MCPProgressEvent(
             server_name="live",
             tool_name="echo",
+            public_name="mcp__live__echo_8d3f",
             progress=1,
             total=2,
             message="halfway",
@@ -88,11 +89,22 @@ def test_mcp_progress_event_has_tool_progress_envelope() -> None:
     assert envelope["eventType"] == "tool_progress"
     assert envelope["scope"] == "pipeline"
     assert envelope["data"]["toolUseId"] == "tool-1"
+    assert envelope["data"]["toolName"] == "mcp__live__echo_8d3f"
     assert envelope["data"]["serverName"] == "live"
     assert envelope["data"]["mcpToolName"] == "echo"
     assert envelope["data"]["progress"] == 1
     assert envelope["data"]["total"] == 2
     assert envelope["data"]["message"] == "halfway"
+    assert envelope["data"]["mcpProgress"] == {
+        "status": "progress",
+        "toolUseId": "tool-1",
+        "publicName": "mcp__live__echo_8d3f",
+        "originalServerName": "live",
+        "originalToolName": "echo",
+        "progress": 1,
+        "total": 2,
+        "message": "halfway",
+    }
 
 
 def test_tool_result_redacts_embedded_infraguard_file_content() -> None:
@@ -184,6 +196,40 @@ def test_pipeline_warning_translates_to_non_terminal_envelope() -> None:
     assert envelope["data"]["reason"] == "cleanup_tracking_unavailable"
     assert "ledger_path" not in envelope["data"]
     assert "load_error" not in envelope["data"]
+
+
+def test_mcp_status_translates_to_metadata_envelope() -> None:
+    private_marker = "IAC_PRIVATE_COMMAND_ARG_MARKER_36_BRIDGE"
+    translator = PipelineEventTranslator(_ctx())
+
+    [envelope] = translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.MCP_STATUS,
+            step_id=None,
+            timestamp=1717821600.0,
+            data={
+                "kind": "mcp_status",
+                "mcp_status": {
+                    "servers": [
+                        {
+                            "serverName": "remote",
+                            "state": "failed",
+                            "protocolVersion": "2025-06-18",
+                            "args": ["server.js", private_marker],
+                        }
+                    ],
+                    "warnings": [],
+                },
+            },
+        )
+    )
+
+    assert envelope["eventType"] == "mcp_status"
+    assert envelope["scope"] == "pipeline"
+    assert "status" not in envelope
+    assert envelope["data"]["mcpStatus"]["servers"][0]["serverName"] == "remote"
+    assert envelope["data"]["mcpStatus"]["servers"][0]["protocolVersion"] == "2025-06-18"
+    assert private_marker not in repr(envelope)
 
 
 def test_backup_blocked_translates_to_recoverable_envelope() -> None:

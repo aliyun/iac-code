@@ -924,6 +924,8 @@ def committed_backup_publication_envelope(
 def is_recovery_semantic_event(envelope: dict[str, Any]) -> bool:
     event_type = envelope.get("eventType")
     event_type = event_type if isinstance(event_type, str) else None
+    if event_type == "mcp_status":
+        return False
     if event_type in _DISPLAY_ONLY_EVENT_TYPES:
         return False
     if event_type in _RECOVERY_SEMANTIC_EVENT_TYPES:

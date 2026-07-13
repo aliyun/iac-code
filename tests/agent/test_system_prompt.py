@@ -180,6 +180,23 @@ class TestBuildSystemPrompt:
 
         assert prompt.count("project instructions") == 1
 
+    def test_memory_context_instruction_memory_precedes_mcp_server_instructions(self):
+        from iac_code.memory.project_memory import MemoryContext
+
+        prompt = build_system_prompt(
+            cwd=_TMP,
+            memory_context=MemoryContext(
+                instruction_memory_content="## Project AGENTS.md\nProject instruction",
+                memory_mechanics_content="Use read_memory and write_memory for topic files.",
+            ),
+            mcp_server_instructions="# MCP Server Instructions\nMCP instruction",
+            skill_listing="- skill: available",
+        )
+
+        assert prompt.index("Project instruction") < prompt.index("# MCP Server Instructions")
+        assert prompt.index("# MCP Server Instructions") < prompt.index("# Available Skills")
+        assert prompt.index("# Available Skills") < prompt.index("Use read_memory")
+
     def test_volatile_current_time_stays_out_of_static_cache_prefix(self, monkeypatch):
         from iac_code.agent import system_prompt
 

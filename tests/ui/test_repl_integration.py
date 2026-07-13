@@ -253,6 +253,7 @@ class TestREPLProviderIntegration:
             list_resources=Mock(return_value=[]),
             list_prompts=Mock(return_value=[]),
             needs_auth_servers=Mock(return_value=[]),
+            set_elicitation_handler=Mock(),
         )
         monkeypatch.setattr("iac_code.mcp.manager.MCPManager", lambda configs, roots, **kwargs: manager)
 
@@ -281,6 +282,7 @@ class TestREPLProviderIntegration:
             list_resources=Mock(return_value=[]),
             list_prompts=Mock(return_value=[]),
             needs_auth_servers=Mock(return_value=[]),
+            set_elicitation_handler=Mock(),
         )
         monkeypatch.setattr("iac_code.mcp.manager.MCPManager", lambda configs, roots, **kwargs: manager)
 
@@ -319,6 +321,7 @@ class TestREPLProviderIntegration:
             ),
             needs_auth_servers=Mock(return_value=[]),
             add_change_listener=Mock(),
+            set_elicitation_handler=Mock(),
         )
         monkeypatch.setattr("iac_code.mcp.manager.MCPManager", lambda configs, roots, **kwargs: manager)
 
@@ -329,6 +332,59 @@ class TestREPLProviderIntegration:
 
         assert repl.command_registry.get("mcp__ros__review") is not None
         assert "mcp__ros__review" in repl._skill_listing
+
+    @patch("iac_code.ui.repl.ProviderManager")
+    @patch("iac_code.ui.repl.SessionStorage")
+    @patch("iac_code.ui.repl.MemoryManager")
+    def test_mcp_prompts_list_changed_removes_deleted_prompt_command(
+        self,
+        mock_mm,
+        mock_ss,
+        mock_pm,
+        monkeypatch,
+        tmp_path,
+    ):
+        from iac_code.mcp.types import MCPPromptRecord
+        from iac_code.ui.repl import InlineREPL
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+        (tmp_path / ".iac-code").mkdir()
+        (tmp_path / ".iac-code" / "settings.local.yml").write_text(
+            "mcpServers:\n  ros:\n    command: uvx\n",
+            encoding="utf-8",
+        )
+        listener_holder = {}
+        manager = SimpleNamespace(
+            connect_all=AsyncMock(),
+            list_tools=Mock(return_value=[]),
+            list_resources=Mock(return_value=[]),
+            list_prompts=Mock(
+                return_value=[
+                    MCPPromptRecord(
+                        server_name="ros",
+                        prompt_name="review",
+                        public_name="mcp__ros__review",
+                        description="Review template",
+                    )
+                ]
+            ),
+            list_connections=Mock(return_value=[]),
+            needs_auth_servers=Mock(return_value=[]),
+            add_change_listener=Mock(side_effect=lambda listener: listener_holder.setdefault("listener", listener)),
+            set_elicitation_handler=Mock(),
+        )
+        monkeypatch.setattr("iac_code.mcp.manager.MCPManager", lambda configs, roots, **kwargs: manager)
+
+        repl = InlineREPL(model="claude-sonnet-4-6")
+        assert repl.command_registry.get("mcp__ros__review") is not None
+        assert "mcp__ros__review" in repl.command_registry.get_completions("mcp__ros")
+
+        manager.list_prompts.return_value = []
+        asyncio.run(listener_holder["listener"]("ros", "prompts"))
+
+        assert repl.command_registry.get("mcp__ros__review") is None
+        assert "mcp__ros__review" not in repl.command_registry.get_completions("mcp__ros")
 
     @patch("iac_code.ui.repl.ProviderManager")
     @patch("iac_code.ui.repl.SessionStorage")
@@ -370,6 +426,7 @@ class TestREPLProviderIntegration:
             list_resources=Mock(return_value=[]),
             list_prompts=Mock(return_value=[]),
             needs_auth_servers=Mock(return_value=[]),
+            set_elicitation_handler=Mock(),
         )
 
         def make_manager(configs, roots, **kwargs):
@@ -834,6 +891,51 @@ async def test_handle_command_reports_disabled_skill():
     message = repl.renderer.print_system_message.call_args.args[0]
     assert "disabled" in message.lower()
     assert "/skills" in message
+
+
+@pytest.mark.asyncio
+async def test_handle_mcp_prompt_command_error_is_redacted():
+    from iac_code.commands.registry import CommandRegistry, PromptCommand
+    from iac_code.skills.frontmatter import SkillFrontmatter
+    from iac_code.skills.skill_definition import SkillDefinition
+    from iac_code.types.skill_source import SkillSource
+    from iac_code.ui.repl import InlineREPL
+
+    class FailingPromptProvider:
+        async def get_prompt(self, args, context):
+            raise RuntimeError(
+                "MCP prompt failed with IAC_PRIVATE_COMMAND_ARG_MARKER_56 at https://user:pass@example.test/mcp"
+            )
+
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__review",
+            description="Review with MCP",
+            skill=SkillDefinition(
+                name="mcp__ros__review",
+                description="Review with MCP",
+                frontmatter=SkillFrontmatter(description="Review with MCP"),
+                content="",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/prompt/review",
+                content_length=0,
+                _prompt_provider=FailingPromptProvider(),
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    repl = InlineREPL.__new__(InlineREPL)
+    repl.command_registry = registry
+    repl._disabled_skill_commands = {}
+    repl.renderer = SimpleNamespace(print_system_message=Mock())
+
+    await repl._handle_command("/mcp__ros__review template=vpc")
+
+    message = repl.renderer.print_system_message.call_args.args[0]
+    assert "IAC_PRIVATE_COMMAND_ARG_MARKER_56" not in message
+    assert "user:pass" not in message
+    assert "[REDACTED]" in message
 
 
 @patch("iac_code.ui.repl.ProviderManager")
@@ -1421,6 +1523,135 @@ def test_swap_session_refreshes_session_trusted_read_directories(monkeypatch, tm
     mcp_tool = repl.tool_registry.get("mcp__ros__render")
     assert mcp_tool._session_id == "new"
     assert mcp_tool._session_dir == sessions_root / "new"
+
+
+def test_repl_mcp_change_listener_syncs_connection_and_auth_like_agent_factory(monkeypatch, tmp_path):
+    from iac_code.mcp.types import MCPConfigScope, MCPServerConfig, ScopedMCPServerConfig
+    from iac_code.ui.repl import InlineREPL
+
+    scoped = ScopedMCPServerConfig(
+        config=MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"}),
+        scope=MCPConfigScope.USER,
+    )
+    listener_holder = {}
+
+    class FakeMCPManager:
+        def __init__(self, configs, *, roots, session_id):
+            self.configs = configs
+            self.roots = roots
+            self.session_id = session_id
+
+        def set_elicitation_handler(self, handler):
+            self.elicitation_handler = handler
+
+        async def connect_all(self):
+            return None
+
+        def add_change_listener(self, listener):
+            listener_holder["listener"] = listener
+
+    monkeypatch.setattr(
+        "iac_code.mcp.config.load_mcp_configs",
+        lambda **kwargs: SimpleNamespace(servers=[scoped], warnings=[]),
+    )
+    monkeypatch.setattr("iac_code.mcp.config.resolve_mcp_workspace_root", lambda cwd: tmp_path)
+    monkeypatch.setattr("iac_code.mcp.manager.MCPManager", FakeMCPManager)
+    monkeypatch.setattr("iac_code.services.agent_factory._mcp_connection_warnings", lambda manager: [])
+    monkeypatch.setattr(
+        "iac_code.services.agent_factory._append_new_mcp_connection_warnings",
+        lambda warnings, manager: None,
+    )
+    monkeypatch.setattr(
+        "iac_code.services.agent_factory._sync_mcp_auth_tools",
+        lambda *args, **kwargs: {"auth-tool"},
+    )
+    tool_sync_calls = []
+    command_sync_calls = []
+
+    def sync_tools(*args, **kwargs):
+        tool_sync_calls.append(True)
+        return {"mcp__remote__search"}
+
+    async def sync_commands(*args, **kwargs):
+        command_sync_calls.append(True)
+        return {"mcp__remote__review"}, []
+
+    monkeypatch.setattr("iac_code.services.agent_factory._sync_mcp_tool_registry", sync_tools)
+    monkeypatch.setattr("iac_code.services.agent_factory._sync_mcp_command_registry", sync_commands)
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._prompt_for_pending_project_mcp_servers = Mock()
+    repl._original_cwd = str(tmp_path)
+    repl._session_id = "session-1"
+    repl._mcp_auth_tasks = set()
+    repl._mcp_auth_flows = set()
+    repl.tool_registry = object()
+    repl.command_registry = object()
+    repl.mcp_config_warnings = []
+    repl._registered_mcp_tool_names = set()
+    repl._registered_mcp_auth_tool_names = set()
+    repl._registered_mcp_command_names = set()
+    repl._session_dir_for_artifacts = Mock(return_value=tmp_path / "tool-results")
+    repl._request_mcp_elicitation = Mock()
+    repl._refresh_model_skill_listing = Mock()
+    repl._print_mcp_config_warnings = Mock()
+
+    repl._register_mcp_integrations()
+    tool_sync_calls.clear()
+    command_sync_calls.clear()
+
+    asyncio.run(listener_holder["listener"]("remote", "connection"))
+
+    assert tool_sync_calls == [True]
+    assert command_sync_calls == [True]
+
+    tool_sync_calls.clear()
+    command_sync_calls.clear()
+    asyncio.run(listener_holder["listener"]("remote", "auth"))
+
+    assert tool_sync_calls == [True]
+    assert command_sync_calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_repl_pipeline_restore_passes_mcp_status_metadata_to_pipeline_factory(monkeypatch, tmp_path):
+    from iac_code.pipeline.config import RunMode
+    from iac_code.ui.repl import InlineREPL
+
+    mcp_manager = SimpleNamespace(list_connections=Mock(return_value=[]))
+    warnings = [SimpleNamespace(server_name="broken", code="connection_failed", message="MCP server failed")]
+    captured_kwargs = {}
+
+    class FakePipeline:
+        sidecar_restore_result = SimpleNamespace(ok=True, status="running")
+
+    def fake_create_pipeline(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return FakePipeline()
+
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._pipeline = None
+    repl._get_runtime_mode = Mock(return_value=RunMode.PIPELINE)
+    repl._original_cwd = str(tmp_path)
+    repl._session_id = "session-1"
+    repl._detect_pipeline_session = Mock(return_value=True)
+    repl._provider_manager = object()
+    repl.tool_registry = object()
+    repl._session_storage = object()
+    repl.store = SimpleNamespace(get_state=Mock(return_value=SimpleNamespace(permission_context=object())))
+    repl._pipeline_memory_content_getter = Mock(return_value=lambda: "")
+    repl.command_registry = SimpleNamespace(get_model_invocable_skills=Mock(return_value=[]))
+    repl._refresh_pipeline_display_recorder = Mock()
+    repl._mcp_manager = mcp_manager
+    repl.mcp_config_warnings = warnings
+
+    monkeypatch.setattr("iac_code.pipeline.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.pipeline.config.get_pipeline_name", lambda: "selling")
+    monkeypatch.setattr("iac_code.pipeline.config.get_working_directory", lambda: str(tmp_path))
+
+    assert await repl.ensure_pipeline_restored_for_prompt() is True
+    assert captured_kwargs["mcp_manager"] is mcp_manager
+    assert captured_kwargs["mcp_config_warnings"] == warnings
 
 
 def test_extract_last_user_text_skips_recalled_memory_message():

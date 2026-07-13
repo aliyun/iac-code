@@ -990,6 +990,8 @@ class IacCodeA2APipelineExecutor:
             surface="a2a",
             backup_service=self._backup_service,
             **create_kwargs,
+            mcp_manager=getattr(runtime, "mcp_manager", None),
+            mcp_config_warnings=getattr(runtime, "mcp_config_warnings", None),
         )
 
     def _inspect_pipeline_prerequisite_metadata(
@@ -3475,9 +3477,7 @@ async def _consume_active_interrupt_action_before_terminal(runtime: Any, event: 
         return action
 
     if not done and not interrupt_settled.is_set():
-        logger.warning(
-            "Timed out waiting for active A2A pipeline interrupt before publishing terminal pipeline event"
-        )
+        logger.warning("Timed out waiting for active A2A pipeline interrupt before publishing terminal pipeline event")
     return None
 
 

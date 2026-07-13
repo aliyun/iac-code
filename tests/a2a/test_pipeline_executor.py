@@ -1258,6 +1258,46 @@ async def test_pipeline_executor_publishes_mcp_warnings(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
+async def test_pipeline_executor_passes_mcp_status_metadata_to_pipeline_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    fake_pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ],
+        session_dir=tmp_path / "sidecar",
+    )
+    runtime = _fake_runtime()
+    runtime.mcp_manager = SimpleNamespace(list_connections=lambda: [])
+    runtime.mcp_config_warnings = [
+        SimpleNamespace(server_name="broken", code="connection_failed", message="MCP server failed")
+    ]
+    captured_kwargs: dict = {}
+
+    def fake_create_pipeline(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return fake_pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", fake_create_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+
+    assert captured_kwargs["mcp_manager"] is runtime.mcp_manager
+    assert captured_kwargs["mcp_config_warnings"] == runtime.mcp_config_warnings
+
+
+@pytest.mark.asyncio
 async def test_executor_publishes_normal_handoff_ready_after_completed_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -3,12 +3,20 @@ import json
 import logging
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 import yaml
 
 from iac_code.agent.message import Message, ToolResultBlock
+from iac_code.mcp.types import (
+    MCPConfigScope,
+    MCPConnectionMetadata,
+    MCPConnectionState,
+    MCPServerConfig,
+    ScopedMCPServerConfig,
+)
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, ObservedResource
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
@@ -257,6 +265,8 @@ def _build_two_step_runner(
     storage=None,
     backup_service=None,
     resume_from_sidecar=False,
+    mcp_manager=None,
+    mcp_config_warnings=None,
 ):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "a.md").write_text("A", encoding="utf-8")
@@ -293,7 +303,62 @@ def _build_two_step_runner(
         cwd=str(tmp_path),
         backup_service=backup_service,
         resume_from_sidecar=resume_from_sidecar,
+        mcp_manager=mcp_manager,
+        mcp_config_warnings=mcp_config_warnings,
     )
+
+
+def _single_connection_mcp_manager(state: MCPConnectionState, *, error: str | None = None):
+    return SimpleNamespace(
+        list_connections=lambda: [
+            SimpleNamespace(
+                name="remote",
+                state=state,
+                error=error,
+                capability_errors={},
+                tools=[],
+                resources=[],
+                prompts=[],
+                retry_count=0,
+                metadata=None,
+            )
+        ]
+    )
+
+
+def _reconnectable_mcp_manager(state: MCPConnectionState = MCPConnectionState.FAILED):
+    calls: list[str] = []
+
+    def start_reconnect_tasks() -> None:
+        calls.append("start")
+
+    return SimpleNamespace(
+        reconnect_start_calls=calls,
+        start_reconnect_tasks=start_reconnect_tasks,
+        list_connections=lambda: [
+            SimpleNamespace(
+                name="remote",
+                state=state,
+                error="initial failure" if state is MCPConnectionState.FAILED else None,
+                capability_errors={},
+                tools=[],
+                resources=[],
+                prompts=[],
+                retry_count=0,
+                metadata=None,
+            )
+        ],
+    )
+
+
+def _mcp_status_events(events):
+    return [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent)
+        and event.type is PipelineEventType.MCP_STATUS
+        and event.data.get("kind") == "mcp_status"
+    ]
 
 
 def _build_parallel_runner(tmp_path, *, storage=None, backup_service=None):
@@ -452,6 +517,325 @@ async def test_runner_passes_attempt_transcript_to_step_executor(tmp_path, monke
     assert captured["session_id"] == runner._session_id
     assert captured["attempt_id"] == "att_0001"
     assert captured["transcript_id"] == "transcript_att_0001"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_emits_mcp_status_metadata_event(tmp_path, monkeypatch):
+    private_marker = "IAC_PRIVATE_COMMAND_ARG_MARKER_36_PIPELINE"
+    scoped_config = ScopedMCPServerConfig(
+        config=MCPServerConfig.from_mapping("broken", {"command": "node", "args": ["server.js", private_marker]}),
+        scope=MCPConfigScope.USER,
+    )
+    manager = SimpleNamespace(
+        list_connections=lambda: [
+            SimpleNamespace(
+                name="broken",
+                scoped_config=scoped_config,
+                state=MCPConnectionState.FAILED,
+                error="Authorization: Bearer super-secret-token",
+                capability_errors={},
+                tools=[],
+                resources=[],
+                prompts=[],
+                retry_count=1,
+                metadata=MCPConnectionMetadata(
+                    state=MCPConnectionState.FAILED,
+                    server_name="broken",
+                    protocol_version="2025-06-18",
+                ),
+            )
+        ]
+    )
+    runner = _build_two_step_runner(
+        tmp_path,
+        mcp_manager=manager,
+        mcp_config_warnings=[
+            SimpleNamespace(
+                server_name="broken",
+                code="connection_failed",
+                message="MCP failed with Authorization: Bearer super-secret-token",
+            )
+        ],
+    )
+
+    async def fake_execute(*args, **kwargs):
+        yield StepResult(step_id="a", status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    events = [event async for event in runner.run("start")]
+
+    mcp_events = [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent)
+        and event.type is PipelineEventType.MCP_STATUS
+        and event.data.get("kind") == "mcp_status"
+    ]
+    assert len(mcp_events) == 1
+    status = mcp_events[0].data["mcp_status"]
+    assert status["servers"][0]["serverName"] == "broken"
+    assert status["servers"][0]["state"] == "failed"
+    assert status["servers"][0]["protocolVersion"] == "2025-06-18"
+    assert status["warnings"][0]["code"] == "connection_failed"
+    assert "super-secret-token" not in repr(status)
+    assert private_marker not in repr(status)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_starts_mcp_reconnect_tasks_on_run(tmp_path, monkeypatch):
+    manager = _reconnectable_mcp_manager()
+    runner = _build_two_step_runner(tmp_path, mcp_manager=manager)
+
+    async def fake_execute(step, *args, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    async for _event in runner.run("start"):
+        pass
+
+    assert manager.reconnect_start_calls == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_starts_mcp_reconnect_tasks_on_resume(tmp_path, monkeypatch):
+    manager = _reconnectable_mcp_manager()
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, mcp_manager=manager)
+
+    async def fake_execute(step, *args, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    async for _event in runner.resume("continue"):
+        pass
+
+    assert manager.reconnect_start_calls == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_starts_mcp_reconnect_tasks_on_sidecar_continue(tmp_path, monkeypatch):
+    manager = _reconnectable_mcp_manager()
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, mcp_manager=manager)
+
+    async def fake_execute(step, *args, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    async for _event in runner.continue_from_sidecar():
+        pass
+
+    assert manager.reconnect_start_calls == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_emits_initial_mcp_status_on_ask_user_question_resume(tmp_path, monkeypatch):
+    manager = _reconnectable_mcp_manager()
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, mcp_manager=manager)
+
+    async def fake_execute(step, *args, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    events = [
+        event
+        async for event in runner.resume_ask_user_question(
+            {"selected_id": "nginx", "selected_label": "Nginx", "free_text": ""},
+            tool_use_id="ask-1",
+        )
+    ]
+
+    mcp_events = _mcp_status_events(events)
+    assert manager.reconnect_start_calls == ["start"]
+    assert len(mcp_events) == 1
+    assert events.index(mcp_events[0]) == 0
+
+
+def test_pipeline_runner_mcp_status_uses_live_warning_list(tmp_path):
+    warnings: list[SimpleNamespace] = []
+    runner = _build_two_step_runner(
+        tmp_path,
+        mcp_manager=SimpleNamespace(list_connections=lambda: []),
+        mcp_config_warnings=warnings,
+    )
+
+    assert runner._mcp_status_event(force=True) is None
+
+    warnings.append(
+        SimpleNamespace(
+            server_name="remote",
+            code="prompts_failed",
+            message="MCP prompt refresh failed",
+            source="user",
+        )
+    )
+
+    event = runner._mcp_status_event(force=True)
+
+    assert event is not None
+    assert event.data["mcp_status"]["warnings"][0]["code"] == "prompts_failed"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_emits_mcp_status_update_when_state_changes_during_run(tmp_path, monkeypatch):
+    state = {"value": MCPConnectionState.FAILED, "error": "initial failure"}
+
+    def list_connections():
+        return [
+            SimpleNamespace(
+                name="remote",
+                state=state["value"],
+                error=state["error"],
+                capability_errors={},
+                tools=[],
+                resources=[],
+                prompts=[],
+                retry_count=0,
+                metadata=None,
+            )
+        ]
+
+    runner = _build_two_step_runner(tmp_path, mcp_manager=SimpleNamespace(list_connections=list_connections))
+
+    async def fake_execute(step, *args, **kwargs):
+        state["value"] = MCPConnectionState.CONNECTED
+        state["error"] = None
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    events = [event async for event in runner.run("start")]
+
+    mcp_events = [
+        event
+        for event in events
+        if isinstance(event, PipelineEvent)
+        and event.type is PipelineEventType.MCP_STATUS
+        and event.data.get("kind") == "mcp_status"
+    ]
+    assert [event.data["mcp_status"]["servers"][0]["state"] for event in mcp_events] == ["failed", "connected"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_emits_mcp_status_metadata_event_on_resume(tmp_path, monkeypatch):
+    manager = SimpleNamespace(
+        list_connections=lambda: [
+            SimpleNamespace(
+                name="remote",
+                state=MCPConnectionState.FAILED,
+                error="access_token=super-secret-token",
+                capability_errors={},
+                tools=[],
+                resources=[],
+                prompts=[],
+                retry_count=0,
+                metadata=None,
+            )
+        ]
+    )
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, mcp_manager=manager)
+
+    async def fake_execute(*args, **kwargs):
+        yield StepResult(step_id="a", status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    events = [event async for event in runner.resume("continue")]
+
+    mcp_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type is PipelineEventType.MCP_STATUS
+    ]
+    assert len(mcp_events) == 1
+    assert events.index(mcp_events[0]) < next(
+        index
+        for index, event in enumerate(events)
+        if isinstance(event, PipelineEvent) and event.type is PipelineEventType.USER_INPUT_RECEIVED
+    )
+    assert "super-secret-token" not in repr(mcp_events[0].data)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_emits_mcp_status_metadata_event_on_sidecar_continue(tmp_path, monkeypatch):
+    manager = SimpleNamespace(
+        list_connections=lambda: [
+            SimpleNamespace(
+                name="remote",
+                state=MCPConnectionState.FAILED,
+                error="access_token=super-secret-token",
+                capability_errors={},
+                tools=[],
+                resources=[],
+                prompts=[],
+                retry_count=0,
+                metadata=None,
+            )
+        ]
+    )
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, mcp_manager=manager)
+
+    async def fake_execute(*args, **kwargs):
+        yield StepResult(step_id="a", status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    events = [event async for event in runner.continue_from_sidecar()]
+
+    mcp_events = [
+        event for event in events if isinstance(event, PipelineEvent) and event.type is PipelineEventType.MCP_STATUS
+    ]
+    assert len(mcp_events) == 1
+    assert "super-secret-token" not in repr(mcp_events[0].data)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_reemits_initial_mcp_status_on_resume_after_run_when_status_unchanged(
+    tmp_path,
+    monkeypatch,
+):
+    manager = _single_connection_mcp_manager(MCPConnectionState.FAILED, error="access_token=super-secret-token")
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, mcp_manager=manager)
+
+    async def fake_execute(step, *args, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    run_events = [event async for event in runner.run("start")]
+
+    assert len(_mcp_status_events(run_events)) == 1
+
+    resume_events = [event async for event in runner.resume("continue")]
+    resume_mcp_events = _mcp_status_events(resume_events)
+
+    assert len(resume_mcp_events) == 1
+    assert resume_events.index(resume_mcp_events[0]) == 0
+    assert "super-secret-token" not in repr(resume_mcp_events[0].data)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_runner_reemits_initial_mcp_status_on_sidecar_continue_after_prior_status_event(
+    tmp_path,
+    monkeypatch,
+):
+    manager = _single_connection_mcp_manager(MCPConnectionState.FAILED, error="access_token=super-secret-token")
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, mcp_manager=manager)
+
+    async def fake_execute(step, *args, **kwargs):
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"ok": True})
+
+    monkeypatch.setattr(runner._step_executor, "execute", fake_execute)
+
+    assert runner._mcp_status_event() is not None
+
+    events = [event async for event in runner.continue_from_sidecar()]
+    mcp_events = _mcp_status_events(events)
+
+    assert len(mcp_events) == 1
+    assert events.index(mcp_events[0]) == 0
+    assert "super-secret-token" not in repr(mcp_events[0].data)
 
 
 @pytest.mark.asyncio

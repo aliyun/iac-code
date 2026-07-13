@@ -6,11 +6,18 @@ description: Autentica servidores MCP remotos y entiende el modelo de seguridad 
 
 # OAuth y seguridad
 
-MCP puede iniciar procesos locales y llamar servicios remotos, por lo que IaC Code trata la configuración y autenticación MCP como sensibles para la seguridad.
+MCP puede iniciar procesos locales y llamar a servicios remotos, por lo que el código IaC trata la configuración y autenticación de MCP como cuestiones sensibles a la seguridad.
 
 ## OAuth
 
-Los servidores remotos `http` y `sse` pueden usar OAuth. Configura metadatos OAuth en la configuración del servidor:
+Los servers remotos `http` y `sse` pueden usar OAuth. Los servers compatibles con el estandar que publican OAuth metadata y admiten Dynamic Client Registration no requieren que proporciones un client id. Agrega el server y luego ejecuta auth:
+
+```bash
+iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
+iac-code mcp auth yuque
+```
+
+Si un servidor requiere un cliente previamente aprovisionado, configure los metadatos de OAuth en la configuración del servidor:
 
 ```json
 {
@@ -29,82 +36,96 @@ Los servidores remotos `http` y `sse` pueden usar OAuth. Configura metadatos OAu
 }
 ```
 
-Campos OAuth compatibles:
+Supported OAuth fields:
 
-| Campo | Propósito |
+| Field | Purpose |
 |---|---|
-| `clientId` | Id de cliente OAuth. |
-| `clientSecretEnv` | Variable de entorno que contiene el client secret. |
-| `callbackPort` | Puerto loopback opcional. Usa `0` u omítelo para elegir un puerto libre. |
-| `authServerMetadataUrl` | URL explícita opcional de metadatos del servidor de autorización. |
+| `clientId` | OAuth client id. |
+| `clientSecretEnv` | Variable de entorno que contiene el secreto del cliente. |
+| `callbackPort` | Puerto de devolución de llamada de bucle opcional. Utilice `0` u omítalo para elegir un puerto libre. |
+| `authServerMetadataUrl` | URL de metadatos del servidor de autorización explícita opcional. |
+| `clientMetadataUrl` | URL del documento de metadatos del cliente HTTPS opcional para servidores de autorización que admiten documentos de metadatos de ID de cliente. |
 
-`oauth.clientSecret` en texto claro se rechaza. Usa `clientSecretEnv` o el prompt CLI seguro.
+Se rechaza el texto sin formato `oauth.clientSecret`. Utilice `clientSecretEnv` o el indicador CLI seguro.
 
-## Autenticación
+## Authenticating
 
-Ejecuta:
+Run:
 
 ```bash
 iac-code mcp auth secure-reviewer --scope user
 ```
 
-IaC Code abre o imprime una URL de autorización y arranca un servidor de callback loopback en `127.0.0.1`. Después de que el proveedor redirige con un código de autorización, IaC Code lo intercambia por tokens y los guarda de forma segura.
+El código IaC abre o imprime una URL de autorización e inicia un servidor de devolución de llamada de bucle invertido en `127.0.0.1`. Si el navegador no se puede abrir o la devolución de llamada no se puede completar automáticamente, pegue la URL de devolución de llamada o el código de autorización en el mensaje CLI. Después de la autorización, IaC Code intercambia el código por tokens y los almacena de forma segura.
 
-Si un servidor necesita autenticación durante una sesión normal, IaC Code registra una herramienta de autenticación:
+Para servidores compatibles con DCR, el código IaC registra un cliente OAuth en el servidor y almacena la identificación del cliente devuelta y el secreto de cliente opcional a través del almacenamiento secreto de MCP. El intercambio y la actualización de tokens incluyen el parámetro de recurso seleccionado por la semántica del SDK de MCP cuando los metadatos de recursos protegidos lo requieren.
+
+Si un servidor necesita autenticación durante una sesión normal, el Código IaC registra una herramienta de autenticación:
 
 ```text
 mcp__<server>__authenticate
 ```
 
-El modelo puede llamar a esa herramienta para mostrar al usuario la URL OAuth. Cuando el flujo termina, IaC Code reconecta el servidor MCP y actualiza las capacidades descubiertas.
+El modelo puede llamar a esa herramienta para proporcionar al usuario la URL de OAuth. Una vez que se completa el flujo, el código IaC vuelve a conectar el servidor MCP y actualiza las capacidades descubiertas.
 
-## Almacenamiento de tokens
+## Token Storage
 
-IaC Code guarda tokens OAuth y secretos de cliente MCP con `MCPSecretStorage`:
+El código IaC almacena tokens OAuth y secretos del cliente MCP a través de `MCPSecretStorage`:
 
-1. Intenta usar el keyring del sistema operativo cuando está disponible.
-2. Si el keyring está desactivado o no disponible, guarda datos fallback cifrados bajo `<config-dir>/mcp/`.
-3. Los permisos de archivo se restringen para la clave fallback y el almacén cifrado.
+1. Prueba el conjunto de claves del sistema operativo cuando está disponible.
+2. Si el conjunto de claves está deshabilitado o no está disponible, almacena datos de reserva cifrados en `<config-dir>/mcp/`.
+3. Los permisos de archivos están restringidos para la clave alternativa y el almacén secreto cifrado.
 
-Define `IAC_CODE_MCP_DISABLE_KEYRING=1` para forzar almacenamiento fallback cifrado, útil en pruebas aisladas.
+Configure `IAC_CODE_MCP_DISABLE_KEYRING=1` para forzar el almacenamiento alternativo cifrado, lo cual es útil para pruebas aisladas.
 
-Usa este comando para borrar el estado de autenticación guardado:
+Utilice este comando para borrar el estado de autenticación almacenado:
 
 ```bash
 iac-code mcp reset-auth secure-reviewer --scope user
 ```
 
-## Confianza de proyecto
+`reset-auth` borra, para el scope persistente seleccionado, OAuth token state, dynamic client registration state,
+el `client_id` almacenado, el `client_secret` opcional y OAuth signature index, pero conserva el server config.
+Al eliminar un server persistente, se ejecuta el mismo auth-state cleanup antes de borrar la configuracion:
 
-Los archivos de proyecto `.mcp.json` no se confían automáticamente porque un repositorio puede añadir un servidor `stdio` que ejecuta código local arbitrario. La aprobación interactiva se vincula a la firma de configuración del servidor. Cambiar command, args, env, URL, headers u OAuth config invalida la aprobación previa.
+```bash
+iac-code mcp remove secure-reviewer --scope user
+```
 
-Los modos headless y servidor de protocolo omiten servidores de proyecto no aprobados en lugar de pedir confirmación.
+Use `reset-auth` para volver a autorizar un server existente. Use `mcp remove` cuando tambien deba desaparecer el
+server config; ambos caminos limpian keyring y encrypted fallback entries administradas por `MCPSecretStorage`.
 
-## Manejo de secretos
+## Project Trust
 
-IaC Code protege secretos de varias maneras:
+Los archivos del proyecto `.mcp.json` no son confiables automáticamente porque un repositorio puede agregar un servidor `stdio` que ejecuta código local arbitrario. La aprobación interactiva se realiza por firma de configuración del servidor. Cambiar el comando, los argumentos, el entorno, la URL, los encabezados o la configuración de OAuth invalida la aprobación previa.
 
-- La salida de `iac-code mcp get` redacta claves que parecen tokens, secrets, passwords, API keys y authorization headers.
-- Los valores sensibles de headers o env en texto claro se rechazan solo al añadir servidores mediante `iac-code mcp add` / `mcp add-json` (salvo que usen una referencia a variable de entorno); los archivos de configuración editados a mano no se vuelven a validar al cargarse, así que evita almacenar secretos en texto claro directamente.
-- Los servidores MCP stdio heredan solo una allowlist de variables de entorno seguras más el env explícito del servidor.
-- Las variables proxy con usernames o passwords no se heredan por servidores MCP stdio.
-- Los archivos de artefactos MCP se escriben bajo el directorio privado de configuración runtime de IaC Code.
+Los modos de servidor de protocolo y sin cabeza omiten los servidores de proyectos no aprobados en lugar de solicitarlos.
 
-## Permisos
+## Secret Handling
 
-Las herramientas MCP usan el mismo marco de permisos que las herramientas integradas. Un servidor MCP remoto no puede saltarse las comprobaciones de permisos de IaC Code solo por anunciar una herramienta. Ten en cuenta:
+El Código IaC protege los secretos de varias maneras:
 
-- Las herramientas MCP de solo lectura pueden autoaprobarse según la política activa.
-- Las herramientas MCP destructivas deben requerir aprobación salvo que estén permitidas explícitamente.
-- En automatización headless, combina `--permission-mode`, `--allowed-tools` y `--disallowed-tools` para restringir lo que pueden hacer las herramientas MCP.
-- Los skills MCP remotos no conceden sus propios `allowed_tools`.
+- La salida de configuración de `iac-code mcp get` y `iac-code mcp get --config-only` redacta claves que parecen tokens, secretos, contraseñas, claves API y encabezados de autorización.
+- Los valores sensibles de encabezados o entorno en texto claro se rechazan al añadir servidores mediante `iac-code mcp add` o `mcp add-json`, salvo que usen una referencia a variable de entorno. Los archivos de configuración editados a mano no se vuelven a validar al cargarse; evita almacenar secretos en texto claro directamente.
+- Los servidores MCP stdio heredan solo una lista permitida de variables de entorno seguras más el entorno explícito del servidor.
+- Los servidores stdio MCP no heredan las variables de entorno proxy con nombres de usuario o contraseñas integrados.
+- Los comandos `headersHelper` se ejecutan sin shell, sin stdin, con un entorno mínimo, captura acotada de stdout/stderr y diagnósticos privados de stderr redactados.
+- Los archivos de artefactos MCP se escriben en el directorio de configuración de tiempo de ejecución del código IaC privado.
 
-## Funciones sensibles no compatibles
+## Permissions
 
-IaC Code rechaza u omite deliberadamente estas funciones MCP por ahora:
+Las herramientas MCP utilizan el mismo marco de permisos que las herramientas integradas. Un servidor MCP remoto no puede eludir las comprobaciones de permisos del Código IaC simplemente anunciando una herramienta. Tenga en cuenta estas reglas:
 
-- Comandos dinámicos `headersHelper`.
-- Interfaz de elicitation MCP.
-- Transportes WebSocket, IDE y SDK.
-- Política MCP empresarial administrada.
-- IaC Code como servidor MCP.
+- Las herramientas MCP de solo lectura pueden permitirse automáticamente según la política de permisos activa.
+- Las herramientas MCP destructivas deberían requerir aprobación a menos que se permita explícitamente.
+- En la automatización sin cabeza, combine `--permission-mode`, `--allowed-tools` y `--disallowed-tools` para restringir lo que pueden hacer las herramientas MCP.
+- Las habilidades de MCP remotas no otorgan sus propias `allowed_tools`.
+
+## Funciones sensibles a la seguridad no compatibles
+
+El Código IaC rechaza u omite intencionalmente estas características de MCP por ahora:
+
+- Enterprise managed MCP policy.
+- IDE and SDK transports.
+- Headers de WebSocket, `headersHelper` de WebSocket y OAuth de WebSocket.
+- IaC Code acting as an MCP server.

@@ -10,7 +10,14 @@ MCP can start local processes and call remote services, so IaC Code treats MCP c
 
 ## OAuth
 
-Remote `http` and `sse` servers can use OAuth. Configure OAuth metadata in the server config:
+Remote `http` and `sse` servers can use OAuth. Standards-compliant servers that publish OAuth metadata and support Dynamic Client Registration do not require you to provide a client id. Add the server, then run auth:
+
+```bash
+iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
+iac-code mcp auth yuque
+```
+
+If a server requires a pre-provisioned client, configure OAuth metadata in the server config:
 
 ```json
 {
@@ -37,6 +44,7 @@ Supported OAuth fields:
 | `clientSecretEnv` | Environment variable that contains the client secret. |
 | `callbackPort` | Optional loopback callback port. Use `0` or omit it to choose a free port. |
 | `authServerMetadataUrl` | Optional explicit authorization server metadata URL. |
+| `clientMetadataUrl` | Optional HTTPS client metadata document URL for authorization servers that support client-id metadata documents. |
 
 Plaintext `oauth.clientSecret` is rejected. Use `clientSecretEnv` or the secure CLI prompt.
 
@@ -48,7 +56,9 @@ Run:
 iac-code mcp auth secure-reviewer --scope user
 ```
 
-IaC Code opens or prints an authorization URL and starts a loopback callback server on `127.0.0.1`. After the provider redirects back with an authorization code, IaC Code exchanges it for tokens and stores them securely.
+IaC Code opens or prints an authorization URL and starts a loopback callback server on `127.0.0.1`. If the browser cannot open or the callback cannot complete automatically, paste the callback URL or authorization code into the CLI prompt. After authorization, IaC Code exchanges the code for tokens and stores them securely.
+
+For DCR-capable servers, IaC Code registers an OAuth client with the server and stores the returned client id and optional client secret through MCP secret storage. Token exchange and refresh include the resource parameter selected by the MCP SDK semantics when protected-resource metadata requires it.
 
 If a server needs authentication during a normal session, IaC Code registers an authentication tool:
 
@@ -74,6 +84,17 @@ Use this command to clear stored auth state:
 iac-code mcp reset-auth secure-reviewer --scope user
 ```
 
+`reset-auth` clears OAuth token state, dynamic client registration state, stored `client_id`, optional
+`client_secret`, and the OAuth signature index for the selected persisted scope, while keeping the server config.
+Removing a persisted server performs the same auth-state cleanup before deleting the config:
+
+```bash
+iac-code mcp remove secure-reviewer --scope user
+```
+
+Use `reset-auth` when you want to reauthorize an existing server. Use `mcp remove` when the server config itself
+should disappear; both paths clear keyring and encrypted-fallback entries managed by `MCPSecretStorage`.
+
 ## Project Trust
 
 Project `.mcp.json` files are not trusted automatically because a repository can add a `stdio` server that runs arbitrary local code. Interactive approval is per server config signature. Changing command, args, env, URL, headers, or OAuth config invalidates previous approval.
@@ -84,10 +105,11 @@ Headless and protocol server modes skip unapproved project servers rather than p
 
 IaC Code protects secrets in several ways:
 
-- Config output from `iac-code mcp get` redacts keys that look like tokens, secrets, passwords, API keys, and authorization headers.
+- Config output from `iac-code mcp get` and `iac-code mcp get --config-only` redacts keys that look like tokens, secrets, passwords, API keys, and authorization headers.
 - Plaintext sensitive header or env values are rejected when adding servers via `iac-code mcp add` or `mcp add-json` unless they use an environment-variable reference. Configuration files edited by hand are not re-validated on load, so avoid storing plaintext secrets directly.
 - MCP stdio servers inherit only an allowlist of safe environment variables plus the explicit server env.
 - Proxy environment variables with embedded usernames or passwords are not inherited by stdio MCP servers.
+- `headersHelper` commands run without a shell, no stdin, a minimal environment, bounded stdout/stderr capture, and redacted private stderr diagnostics.
 - MCP artifact files are written under the private IaC Code runtime configuration directory.
 
 ## Permissions
@@ -103,8 +125,7 @@ MCP tools use the same permission framework as built-in tools. A remote MCP serv
 
 IaC Code intentionally rejects or omits these MCP features for now:
 
-- `headersHelper` dynamic commands.
-- MCP elicitation UI.
-- WebSocket, IDE, and SDK transports.
 - Enterprise managed MCP policy.
+- IDE and SDK transports.
+- WebSocket headers, WebSocket `headersHelper`, and WebSocket OAuth.
 - IaC Code acting as an MCP server.

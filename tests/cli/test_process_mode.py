@@ -4,13 +4,16 @@ import asyncio
 import io
 import json
 import os
+import queue
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import pytest
 
 from iac_code.cli.process_mode import (
     PipelineProcessContextSnapshot,
     PipelineProcessContextStore,
+    PipelineProcessCreateRequest,
     PipelineProcessRuntimeController,
     ProcessModeOptions,
     ProcessModeRunner,
@@ -100,8 +103,80 @@ class FakePipeline:
         )
 
 
+def test_default_pipeline_factory_passes_mcp_runtime_state(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    pipeline = object()
+    mcp_manager = object()
+    warnings = [object()]
+    session_storage = object()
+    permission_context = object()
+
+    def fake_create_pipeline(name, **kwargs):
+        captured["name"] = name
+        captured.update(kwargs)
+        return pipeline
+
+    monkeypatch.setattr("iac_code.pipeline.create_pipeline", fake_create_pipeline)
+    runtime = SimpleNamespace(
+        provider_manager=object(),
+        tool_registry=object(),
+        command_registry=SimpleNamespace(get_model_invocable_skills=lambda: ["skill"]),
+        agent_loop=SimpleNamespace(_session_storage=session_storage, permission_context=permission_context),
+        mcp_manager=mcp_manager,
+        mcp_config_warnings=warnings,
+    )
+    controller = PipelineProcessRuntimeController(
+        ProcessModeOptions(model="model-a", cwd=str(tmp_path), run_mode="pipeline")
+    )
+
+    result = controller._default_pipeline_factory(
+        PipelineProcessCreateRequest(
+            context_id="ctx-1",
+            task_id="task-1",
+            iac_code_session_id="session-1",
+            cwd=str(tmp_path),
+            model="model-a",
+            resume_from_sidecar=True,
+            agent_runtime=runtime,
+        )
+    )
+
+    assert result is pipeline
+    assert captured["session_storage"] is session_storage
+    assert captured["permission_context_getter"]() is permission_context
+    assert captured["auto_trigger_skills"] == ["skill"]
+    assert captured["surface"] == "process"
+    assert captured["mcp_manager"] is mcp_manager
+    assert captured["mcp_config_warnings"] is warnings
+
+
 def _load_output(stream: io.StringIO) -> list[dict]:
     return [json.loads(line) for line in stream.getvalue().splitlines() if line.strip()]
+
+
+class _BlockingInputStream:
+    def __init__(self) -> None:
+        self._lines: queue.Queue[str] = queue.Queue()
+
+    def push_json(self, frame: dict) -> None:
+        self._lines.put(json.dumps(frame) + "\n")
+
+    def close(self) -> None:
+        self._lines.put("")
+
+    def readline(self) -> str:
+        return self._lines.get()
+
+
+async def _wait_for_output(stream: io.StringIO, predicate, *, timeout: float = 2.0) -> list[dict]:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        lines = _load_output(stream)
+        if any(predicate(line) for line in lines):
+            return lines
+        await asyncio.sleep(0.01)
+    lines = _load_output(stream)
+    raise AssertionError(f"timed out waiting for process output; got {lines!r}")
 
 
 @pytest.mark.asyncio
@@ -119,40 +194,51 @@ async def test_pipeline_process_runner_starts_waits_and_resumes(tmp_path) -> Non
             "iacCodeSessionId": "iac-session-1",
         }
     }
-    stdin = io.StringIO(
-        "\n".join(
-            [
-                json.dumps({"type": "control_request", "request_id": "req-init", "request": {"subtype": "initialize"}}),
-                json.dumps(
-                    {
-                        "type": "user",
-                        "request_id": "req-start",
-                        "session_id": "sdk-session-1",
-                        "metadata": metadata,
-                        "message": {"role": "user", "content": "start"},
-                    }
-                ),
-                json.dumps(
-                    {
-                        "type": "user",
-                        "request_id": "req-resume",
-                        "session_id": "sdk-session-1",
-                        "metadata": metadata,
-                        "message": {"role": "user", "content": "continue"},
-                    }
-                ),
-            ]
-        )
-        + "\n"
-    )
+    stdin = _BlockingInputStream()
     stdout = io.StringIO()
 
-    exit_code = await ProcessModeRunner(
-        ProcessModeOptions(model="model-a", cwd=str(tmp_path), run_mode="pipeline"),
-        input_stream=stdin,
-        output_stream=stdout,
-        runtime_controller=controller,
-    ).run()
+    runner_task = asyncio.create_task(
+        ProcessModeRunner(
+            ProcessModeOptions(model="model-a", cwd=str(tmp_path), run_mode="pipeline"),
+            input_stream=stdin,
+            output_stream=stdout,
+            runtime_controller=controller,
+        ).run()
+    )
+
+    stdin.push_json({"type": "control_request", "request_id": "req-init", "request": {"subtype": "initialize"}})
+    await _wait_for_output(stdout, lambda line: line.get("type") == "control_response")
+
+    stdin.push_json(
+        {
+            "type": "user",
+            "request_id": "req-start",
+            "session_id": "sdk-session-1",
+            "metadata": metadata,
+            "message": {"role": "user", "content": "start"},
+        }
+    )
+    await _wait_for_output(
+        stdout,
+        lambda line: line.get("type") == "result" and line.get("request_id") == "req-start",
+    )
+
+    stdin.push_json(
+        {
+            "type": "user",
+            "request_id": "req-resume",
+            "session_id": "sdk-session-1",
+            "metadata": metadata,
+            "message": {"role": "user", "content": "continue"},
+        }
+    )
+    await _wait_for_output(
+        stdout,
+        lambda line: line.get("type") == "result" and line.get("request_id") == "req-resume",
+    )
+    stdin.close()
+
+    exit_code = await asyncio.wait_for(runner_task, timeout=2)
 
     assert exit_code == 0
     assert pipeline.inputs == [("run", "start"), ("resume", "continue")]

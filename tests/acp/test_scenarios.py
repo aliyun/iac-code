@@ -30,6 +30,7 @@ import logging
 import os
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import acp
@@ -59,7 +60,15 @@ from iac_code.agent.message import (
     create_recalled_memory_message,
 )
 from iac_code.commands.registry import CommandRegistry, PromptCommand
-from iac_code.mcp.types import MCPConfigWarning
+from iac_code.mcp.errors import MCPNeedsAuthError
+from iac_code.mcp.types import (
+    MCPConfigScope,
+    MCPConfigWarning,
+    MCPConnectionState,
+    MCPServerConfig,
+    ScopedMCPServerConfig,
+)
+from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
@@ -114,9 +123,19 @@ class FakeLoop:
 
 
 class PromptCommandFakeLoop:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        cwd: str | None = None,
+        session_id: str | None = None,
+        session_storage: SessionStorage | None = None,
+    ) -> None:
         self.context_manager = FakeContextManager()
         self.continued = False
+        self._cwd = cwd
+        self._session_id = session_id
+        self._session_storage = session_storage
+        self._current_git_branch = "feature-mcp-enhance"
 
     async def run_streaming(self, prompt: str):
         yield TextDeltaEvent(text=f"unexpected run: {prompt}")
@@ -126,6 +145,20 @@ class PromptCommandFakeLoop:
         self.continued = True
         yield TextDeltaEvent(text="MCP prompt executed")
         yield MessageEndEvent(stop_reason="stop", usage=Usage())
+
+
+class FailingPromptProvider:
+    async def get_prompt(self, args: str, context) -> str:
+        _ = args, context
+        raise RuntimeError("MCP prompt server failed with access_token=super-secret-token")
+
+
+class RequiredPromptProvider:
+    async def get_prompt(self, args: str, context) -> str:
+        _ = context
+        if not args.strip():
+            raise ValueError("Missing required MCP prompt argument: template")
+        return "MCP prompt executed with " + args
 
 
 class SlowFakeLoop:
@@ -1387,6 +1420,53 @@ class TestStructuredLogging:
         assert any(rec.levelno >= logging.WARNING for rec in caplog.records)
         assert any("auth" in rec.message.lower() for rec in caplog.records)
 
+    @pytest.mark.asyncio
+    async def test_mcp_needs_auth_prompt_error_pushes_status_before_request_error(self) -> None:
+        scoped = ScopedMCPServerConfig(
+            config=MCPServerConfig.from_mapping("remote", {"type": "http", "url": "https://example.com/mcp"}),
+            scope=MCPConfigScope.SESSION,
+        )
+        manager = SimpleNamespace(
+            list_connections=lambda: [
+                SimpleNamespace(
+                    name="remote",
+                    state=MCPConnectionState.NEEDS_AUTH,
+                    error="MCP server 'remote' requires authentication",
+                    auth_error="MCP server 'remote' requires authentication",
+                    required_auth_scopes=[],
+                    auth_resource_metadata_url=None,
+                    capability_errors={},
+                    tools=[],
+                    resources=[],
+                    prompts=[],
+                    retry_count=0,
+                    metadata=None,
+                    scoped_config=scoped,
+                )
+            ]
+        )
+
+        class _MCPNeedsAuthLoop:
+            async def run_streaming(self, prompt):
+                raise MCPNeedsAuthError("MCP server 'remote' requires authentication")
+                yield  # noqa: RET503
+
+        conn = FakeConn()
+        session = ACPSession("mcp-auth-sess", _MCPNeedsAuthLoop(), conn, mcp_manager=manager)
+
+        with pytest.raises(acp.RequestError):
+            await session.prompt([acp.schema.TextContentBlock(type="text", text="hi")])
+
+        status_metas = [
+            meta["iac_code"]["mcpStatus"]
+            for _session_id, update in conn.updates
+            if hasattr(update, "model_dump")
+            and "mcpStatus" in (meta := (update.model_dump(by_alias=True).get("_meta") or {})).get("iac_code", {})
+        ]
+        assert status_metas
+        assert status_metas[-1]["servers"][0]["state"] == "needs-auth"
+        assert status_metas[-1]["servers"][0]["authState"] == "needs-auth"
+
 
 class TestGracefulShutdown:
     """D15: shutdown stops the cleanup loop task."""
@@ -1838,9 +1918,10 @@ async def test_acp_executes_advertised_mcp_prompt_command() -> None:
 
     assert response.stop_reason == "end_turn"
     assert loop.continued is True
-    assert any(
-        "mcp__ros__review" in block.text for message in loop.context_manager.get_messages() for block in message.content
-    )
+    prompt_texts = [block.text for message in loop.context_manager.get_messages() for block in message.content]
+    assert len(prompt_texts) == 1
+    assert "template=manual-real" in prompt_texts[0]
+    assert all("<skill-name>" not in text for text in prompt_texts)
     text_chunks = [
         update.content.text
         for _, update in conn.updates
@@ -1848,6 +1929,113 @@ async def test_acp_executes_advertised_mcp_prompt_command() -> None:
     ]
     assert "MCP prompt executed" in "".join(text_chunks)
     assert "not supported over ACP" not in "".join(text_chunks)
+
+
+@pytest.mark.asyncio
+async def test_acp_mcp_prompt_command_persists_expanded_prompt(tmp_path) -> None:
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__review",
+            description="Review ROS template",
+            skill=SkillDefinition(
+                name="mcp__ros__review",
+                description="Review ROS template",
+                frontmatter=SkillFrontmatter(description="Review ROS template"),
+                content="Review the template with these args: {{args}}",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/prompt/review",
+                content_length=0,
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    conn = FakeConn()
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    cwd = str(tmp_path / "repo")
+    session_id = "mcp-session"
+    loop = PromptCommandFakeLoop(cwd=cwd, session_id=session_id, session_storage=storage)
+    session = ACPSession(session_id, loop, conn, command_registry=registry)
+
+    await session.prompt([acp.schema.TextContentBlock(type="text", text="/mcp__ros__review template=manual-real")])
+
+    persisted_texts = [
+        block.text
+        for message in storage.load(cwd, session_id)
+        for block in message.content
+        if isinstance(block, TextBlock)
+    ]
+    assert len(persisted_texts) == 1
+    assert "Review the template with these args" in persisted_texts[0]
+    assert "template=manual-real" in persisted_texts[0]
+    assert all("/mcp__ros__review" not in text for text in persisted_texts)
+
+
+@pytest.mark.asyncio
+async def test_acp_mcp_prompt_server_error_raises_request_error_without_leaking_secret() -> None:
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__review",
+            description="Review ROS template",
+            skill=SkillDefinition(
+                name="mcp__ros__review",
+                description="Review ROS template",
+                frontmatter=SkillFrontmatter(description="Review ROS template"),
+                content="",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/prompt/review",
+                content_length=0,
+                _prompt_provider=FailingPromptProvider(),
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    conn = FakeConn()
+    loop = PromptCommandFakeLoop()
+    session = ACPSession("mcp-session", loop, conn, command_registry=registry)
+
+    with pytest.raises(acp.RequestError) as exc_info:
+        await session.prompt([acp.schema.TextContentBlock(type="text", text="/mcp__ros__review template=manual-real")])
+
+    payload = getattr(exc_info.value, "data", {}) or {}
+    assert payload["error"].startswith("RuntimeError: MCP prompt server failed with access_token=")
+    assert "super-secret-token" not in payload["error"]
+    assert loop.continued is False
+    assert conn.updates == []
+
+
+@pytest.mark.asyncio
+async def test_acp_mcp_prompt_missing_required_argument_raises_request_error() -> None:
+    registry = CommandRegistry()
+    registry.register(
+        PromptCommand(
+            name="mcp__ros__review",
+            description="Review ROS template",
+            skill=SkillDefinition(
+                name="mcp__ros__review",
+                description="Review ROS template",
+                frontmatter=SkillFrontmatter(description="Review ROS template"),
+                content="",
+                source=SkillSource.PROJECT,
+                file_path="mcp://ros/prompt/review",
+                content_length=0,
+                _prompt_provider=RequiredPromptProvider(),
+            ),
+            source=SkillSource.PROJECT,
+        )
+    )
+    conn = FakeConn()
+    loop = PromptCommandFakeLoop()
+    session = ACPSession("mcp-session", loop, conn, command_registry=registry)
+
+    with pytest.raises(acp.RequestError) as exc_info:
+        await session.prompt([acp.schema.TextContentBlock(type="text", text="/mcp__ros__review")])
+
+    payload = getattr(exc_info.value, "data", {}) or {}
+    assert payload["error"] == "ValueError: Missing required MCP prompt argument: template"
+    assert loop.continued is False
+    assert conn.updates == []
 
 
 @pytest.mark.asyncio
