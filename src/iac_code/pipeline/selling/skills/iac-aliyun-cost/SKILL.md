@@ -10,7 +10,7 @@ conclusion_schema:
   properties:
     monthly_estimate:
       type: string
-      description: 月度费用估算（如 ¥1500/月）或 "询价失败"
+      description: 月度费用估算；询价同时返回 OriginalAmount 与 TradeAmount 时，必须同时包含列表价和合同优惠后价格（如 ¥96.80/月（列表价，合同优惠后约¥13.76/月））；询价失败时填 "询价失败"
     currency:
       type: string
       enum: [CNY]

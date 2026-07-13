@@ -96,6 +96,16 @@ class TestSkillFrontmatter:
         assert preview_schema["properties"]["template_url"]["type"] == "string"
         assert preview_schema["properties"]["parameters"]["type"] == "object"
 
+    def test_monthly_estimate_schema_describes_list_and_discounted_prices(self):
+        content = SKILL_MD.read_text(encoding="utf-8")
+        fm = _parse_frontmatter(content)
+        description = fm["conclusion_schema"]["properties"]["monthly_estimate"]["description"]
+
+        assert "列表价" in description
+        assert "合同优惠后" in description
+        assert "OriginalAmount" in description
+        assert "TradeAmount" in description
+
     def test_conclusion_schema_requires_full_preview_validation_when_succeeded(self):
         content = SKILL_MD.read_text(encoding="utf-8")
         fm = _parse_frontmatter(content)
@@ -409,6 +419,15 @@ class TestCostPrompt:
         assert "ros_preview_template" in body
         assert "ros_estimate_template_cost" in body
         assert "不要传 `TemplateBody`" in body
+
+    def test_prompt_requires_list_and_discounted_monthly_prices(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+
+        assert "OriginalAmount" in body
+        assert "TradeAmount" in body
+        assert "列表价" in body
+        assert "合同优惠后" in body
+        assert "monthly_estimate" in body
 
 
 class TestEvalsJson:
