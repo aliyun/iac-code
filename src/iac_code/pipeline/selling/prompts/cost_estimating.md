@@ -1,6 +1,8 @@
 # 步骤：成本预估
 
-你正在为候选方案预估部署费用。优先通过 `ros_preview_template` 形成 Preview-Validated Pricing Parameter Set，不要使用 `ros_stack` 执行预览；PreviewStack 不是硬门禁，若完整部署参数暂时无法自动补齐，记录参数缺口后可用当前已选参数调用 `ros_estimate_template_cost` 获取费用预估。
+你正在为候选方案预估部署费用。优先通过 `ros_preview_template` 形成 Preview-Validated Pricing Parameter Set，并尽量形成完整部署参数集；不要使用 `ros_stack` 执行预览。PreviewStack 不是硬门禁，若完整部署参数暂时无法自动补齐，记录参数缺口后可用当前已选参数调用 `ros_estimate_template_cost` 获取费用预估。
+
+在记录参数缺口前，必须先尽量补齐可生成参数，尤其是普通密码；生成值须满足模板约束，并在展示和摘要中脱敏。库存值和外部输入不得编造，仍按缺口记录。
 
 ## 模板信息
 - 文件路径：`{template.file_path}`

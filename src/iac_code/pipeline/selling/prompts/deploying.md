@@ -7,6 +7,8 @@
 
 本步骤的部署、等待与失败恢复入口仅为 `ros_deploy`，不要绕过它调用原始 ROS 部署生命周期接口。删除约束和失败恢复策略见技能；超时等待策略也见技能。
 
+如果 `selected_plan` 中仍有部署参数缺口，不要直接放弃部署。先按技能使用 `ros_get_template_parameter_constraints` 继续求解参数，能生成的普通密码等可生成参数要生成合规随机值；形成完整参数集后由 `ros_deploy` 的部署调用做最终校验。部署步骤不询价，也不再向用户询问参数。
+
 ## 原始用户需求与约束
 部署时必须继续遵守原始用户需求中的地域、资源命名、StackName、是否复用已有资源等约束。如果这些约束与候选方案、模板文件名或默认参数冲突，以原始用户需求为准。
 
@@ -29,6 +31,8 @@
 
 需要调用 `ros_validate_template` 校验时，必须传 `template_url = "{selected_plan.template_url}"`。调用 `ros_deploy` 的 `create` / `continue_create` / `delete_and_create` 时，必须传 `template_url = "{selected_plan.template_url}"`；调用 `ros_deploy` 的 `wait` 时不要传 `template_url`。不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口；不要传 `TemplateBody`、`TemplateId` 或 `TemplateScratchId`；部署类动作不要省略 `template_url`。
 
+该模板路径是部署硬约束。不得另写新模板文件，不得把新文件路径传给部署工具；如果模板必须修复，只能就地修改 `{selected_plan.template_url}` 指向的原文件，然后继续使用同一个 `template_url`。
+
 ## 所有候选方案的评估数据
 `selected_plan.selection_valid` 为 `true` 时，使用 `selected_plan.selected_candidate` 和
 `selected_plan.selected_candidate_result` 中的模板、费用、审查信息进行部署。
@@ -47,7 +51,7 @@
 
 ## 错误处理
 - 模板校验失败 → 就地修复模板后重试（最多 5 轮）
-- 部署失败或等待超时 → 按技能的 `ros_deploy` 恢复策略处理；只调整部署参数时由 `ros_deploy` 的部署调用做最终校验
+- 部署失败或等待超时 → 按技能的参数补全与 `ros_deploy` 恢复策略处理
 - 架构层面必须变更（如产品组合不可行）→ rollback_request 到 `architecture_planning`
 
 ## 注意事项

@@ -64,7 +64,7 @@ def test_ros_template_tools_are_only_injected_into_matching_pipeline_steps(monke
         "template_generating": {"ros_validate_template"},
         "reviewing": {"ros_validate_template"},
         "cost_estimating": ROS_TEMPLATE_TOOLS,
-        "deploying": {"ros_validate_template"},
+        "deploying": {"ros_validate_template", "ros_get_template_parameter_constraints"},
     }
 
     for step_id, expected_tools in expected_by_step.items():
@@ -114,3 +114,21 @@ def test_deploying_step_excludes_raw_ros_stack_from_base_registry(monkeypatch):
     assert deploying_registry.get("ros_deploy") is not None
     assert deploying_registry.get("ros_stack") is None
     assert deploying_registry.get("aliyun_api") is not None
+
+
+def test_deploying_step_excludes_write_file_but_keeps_shell_and_in_place_editing(monkeypatch):
+    monkeypatch.setenv("IAC_CODE_PIPELINE_SELLING_ENABLE_REVIEWING", "true")
+    loaded = load_pipeline_dir(_selling_dir())
+    base_registry = ToolRegistry()
+    base_registry.register_default_tools()
+
+    deploying_registry = _registry_for_step(
+        loaded,
+        _step_by_id(loaded.steps, "deploying"),
+        base_registry=base_registry,
+    )
+
+    assert deploying_registry.get("read_file") is not None
+    assert deploying_registry.get("edit_file") is not None
+    assert deploying_registry.get("write_file") is None
+    assert deploying_registry.get("bash") is not None

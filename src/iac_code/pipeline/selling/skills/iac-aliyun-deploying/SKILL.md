@@ -50,7 +50,7 @@ conclusion_schema:
 所有 API 调用都需要地域，按以下优先级确定：
 1. **用户指定**（如"在北京创建"）→ 使用用户指定的地域
 2. **工具默认地域**（用户未指定时）→ aliyun_api 工具的 region_id 参数描述中会显示默认地域（如 `Defaults to 'cn-hangzhou'`），使用该默认值并告知用户
-3. **均无**（工具参数无默认值且用户未指定）→ 请用户指定目标地域
+3. **均无**（工具参数无默认值且用户未指定）→ 不发起澄清问题；返回失败并说明缺少目标地域
 
 确定后，所有 API 调用统一使用该地域。
 
@@ -66,9 +66,22 @@ conclusion_schema:
 ## 快速创建与模板校验
 
 - `selected_plan.preview_ready_for_create` 为 `true` 时，表示成本步骤已对同一模板路径完成预览验证，且没有完整部署参数缺口；部署时直接调用 `ros_deploy` 的 `create`，跳过例行 `ros_validate_template`，并跳过例行可用性查询。用户覆盖后的最终部署参数由 `ros_deploy` 的部署调用做最终校验。
-- 否则，部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），修复模板文件后重试（最多 5 轮）。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
+- 否则，部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用 `selected_plan.template_url`，也就是当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），只能使用 `edit_file` 就地修复 `selected_plan.template_url` 指向的原模板文件后重试（最多 5 轮）；不得写入新的模板文件，不得改用新的模板路径。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
 - `ros_deploy` 的 `create` 失败后，如果需要修改模板，成本步骤的预览验证已失效；修复后必须重新调用 `ros_validate_template`，通过后再调用 `ros_deploy` 的 `continue_create`。只调整部署参数时，不需要为了参数变化补跑 `ros_validate_template`；最终参数由 `ros_deploy` 的部署调用校验。
 - `ros_deploy` 的 `create` / `continue_create` / `delete_and_create` 已经发起 ROS 操作但工具调用超时或中断时，不要再次调用创建类动作。使用同一 `stack_id` 调用 `ros_deploy` 的 `wait`，它只轮询已有 Stack 的创建进度，不会调用 CreateStack 或 ContinueCreateStack。
+
+## 部署前参数补全
+
+快速创建标记不为 true，或 `selected_plan.selected_candidate_result.cost.missing_deployment_parameters` 非空时，不要把成本阶段的参数缺口当成最终结论。部署阶段可以继续使用 `ros_get_template_parameter_constraints` 补全参数，但不要调用询价工具，也不要向用户发起澄清问题。
+
+参数补全流程：
+1. 先从 `selected_plan.effective_deployment_parameters`、`selected_plan.selected_candidate_result.cost.deployment_parameters`、用户 `parameter_overrides`、模板 Default 和上下文已有值合并当前参数。
+2. 仍缺少模板必填参数时，调用 `ros_get_template_parameter_constraints`，传当前 `parameters` 字典继续求解可用候选。
+3. 对可推断配置（名称、CIDR、布尔值、小整数、非敏感字符串、模板安全默认值）直接给出合规值；对普通密码（ECS/RDS/Redis/RocketMQ/WordPress 等密码，或参数名、`NoEcho`、AssociationProperty、描述/约束表明是密码）生成合规随机值，必须满足长度、复杂度、`AllowedPattern`、`ConstraintDescription`，并在输出、日志和摘要中脱敏。
+4. 对库存相关参数只在工具/API 返回的合法候选内筛选或排序，不得编造库存值；对 LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等外部或账号特定输入，不得编造。
+5. 补齐后的参数不再调用预览工具；直接进入 `ros_deploy` 创建类动作，由部署调用做最终参数校验。部署错误指向可调整参数时，继续更换非用户指定参数并按 `ros_deploy` 恢复策略重试；错误指向模板时按模板校验/修复流程处理。
+
+不得仅因部署参数缺失返回 `status: failed`。只有在已经先尽量补齐或生成参数、调用可用工具仍无法形成合法完整参数集，且剩余缺口属于不得编造的外部输入时，才允许失败或回滚；失败原因必须列出剩余缺口和为什么不能自动补齐。
 
 ## 可用性查询
 
@@ -91,11 +104,11 @@ conclusion_schema:
 
 ## 部署参数装配
 
-调用 `ros_deploy` 的 `create` 前按以下优先级确定 `parameters`：
+调用 `ros_deploy` 的 `create` 前按以下优先级装配 `parameters`：
 
-1. `selected_plan.effective_deployment_parameters` 非空时，直接作为最终部署参数集。
-2. 否则使用 `selected_plan.selected_candidate_result.cost.deployment_parameters`。
-3. 仍缺少模板必填参数时，使用模板 Default 或上下文已有值补足；无法补足时返回 `status: failed` 或通过 rollback_request 回到 `confirm_and_select`。
+1. `selected_plan.effective_deployment_parameters` 非空时，作为当前参数基础；不得因它非空就视为完整。
+2. 否则使用 `selected_plan.selected_candidate_result.cost.deployment_parameters` 作为当前参数基础。
+3. `selected_plan.selected_candidate_result.cost.missing_deployment_parameters` 非空，或仍缺少模板必填参数时，按「部署前参数补全」先尽量补齐或生成参数，再交由 `ros_deploy` 做最终参数校验。
 
 装配参数时不得改写模板 `Default`，不得编造缺失的外部输入（LicenseKey、Token、证书、真实域名、已有资源 ID、VpcId、VSwitchId、SecurityGroupId、KeyPairName 等）。参数不可用或部署调用无法成功时，优先调整非用户指定参数；仍无法成功创建资源栈时，才可调整用户指定参数。部署步骤不计算费用。
 

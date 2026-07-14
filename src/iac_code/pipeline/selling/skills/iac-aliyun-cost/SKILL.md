@@ -28,12 +28,12 @@ conclusion_schema:
       type: boolean
     deployment_parameters:
       type: object
-      description: 当前已选、已验证或已用于询价并传递给 deploying 的模板参数字典；可由后续选择阶段补充覆盖
+      description: 当前已选、已验证或已用于询价并传递给 deploying 的模板参数字典；可由后续选择或部署阶段补充覆盖
     preview_validation:
       type: object
       required: [succeeded]
       additionalProperties: false
-      description: ros_preview_template 的结构化成功证明；deploying 仅在模板路径匹配且没有部署参数缺口时跳过例行校验并直接 CreateStack
+      description: ros_preview_template 的结构化成功证明；deploying 仅在模板路径匹配且没有部署参数缺口时跳过例行校验并直接调用 ros_deploy 创建
       properties:
         succeeded:
           type: boolean
@@ -64,7 +64,7 @@ conclusion_schema:
             required: [error]
     missing_deployment_parameters:
       type: array
-      description: PreviewStack 或最终部署仍缺少、需要用户在后续选择阶段补充的参数
+      description: PreviewStack 或完整部署仍未补齐的参数及原因；后续选择阶段可补充，deploying 也可继续补齐
       items:
         type: object
         required: [name, reason]
@@ -87,17 +87,17 @@ conclusion_schema:
 
 使用专用 ROS 模板询价工具预估部署费用。
 
-前一步已完成模板校验；本步骤避免在成本预估前重复校验模板。首次询价前优先按参数推荐流程形成 Preview-Validated Pricing Parameter Set，再调用 `ros_estimate_template_cost`。PreviewStack 不是硬门禁；完整部署参数暂时无法自动形成时，仍可用当前已选参数调用 `ros_estimate_template_cost`，并把缺口留给后续选择阶段补充。只有在修复或改写模板后，才调用 `ros_validate_template` 校验改动。
+前一步已完成模板校验；本步骤避免在成本预估前重复校验模板。首次询价前优先按参数推荐流程形成 Preview-Validated Pricing Parameter Set，再调用 `ros_estimate_template_cost`。PreviewStack 不是硬门禁；完整部署参数暂时无法自动形成时，仍可用当前已选参数调用 `ros_estimate_template_cost`，并把缺口留给后续步骤补充。只有在修复或改写模板后，才调用 `ros_validate_template` 校验改动。
 
 ## 执行流程
 
 1. **解析模板** — 从上下文的 `template` 字段获取模板内容和文件路径
 2. **提取参数** — 从模板 Parameters 中提取所有参数及其默认值
-3. **推荐并预览验证询价参数** — 按「询价参数推荐与传递」优先形成 Preview-Validated Pricing Parameter Set，不得跳过约束求解直接编造库存值
+3. **推荐并预览验证询价参数** — 按「询价参数推荐与传递」完成参数推荐与预览验证，不得跳过约束求解直接编造库存值
 4. **调用询价工具** — 优先使用 Preview-Validated Pricing Parameter Set；若 PreviewStack 因完整部署参数缺口无法通过，可用当前已选或可用于询价的参数调用 `ros_estimate_template_cost`
 5. **按需修复问题** — 仅当询价失败且错误指向模板问题，或你必须修复/改写模板时，修改模板并写回原文件路径
 6. **修改后校验并重新询价** — 调用 `ros_validate_template` 校验改动；通过后调用 `ros_estimate_template_cost` 重新询价；失败则修复重试（最多 7 轮）
-7. **结构化传递参数** — 在 `complete_step.conclusion.deployment_parameters` 输出当前已选或已用于询价的参数字典；在 `preview_validation` 输出预览成功证明；在 `missing_deployment_parameters` 输出仍需用户补充的完整部署参数缺口
+7. **结构化传递参数** — 在 `complete_step.conclusion.deployment_parameters` 输出当前已选或已用于询价的参数字典；在 `preview_validation` 输出预览成功证明；在 `missing_deployment_parameters` 输出仍未补齐的完整部署参数缺口
 8. **输出结果** — 汇总费用并调用 `complete_step`
 
 ## 按需校验模板
@@ -130,14 +130,15 @@ ros_validate_template(
 
 PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先确定唯一 `stack_name`。`stack_name` 使用候选方案或服务简名作为前缀，并追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。该 `stack_name` 是预览工具参数，不写入模板 `parameters`，不放入 `deployment_parameters`。
 
-PreviewStack 不是硬门禁。它要求完整部署参数，常比询价工具需要更多外部输入；如果完整部署参数无法自动补齐、或 PreviewStack 因外部参数缺口失败，但已有参数足以询价，则可以调用 `ros_estimate_template_cost` 估算费用。此时必须在 `parameter_set_summary` 说明 PreviewStack 状态，在 `missing_deployment_parameters` 列出缺口，后续选择阶段可通过 `parameter_overrides` 补齐，deploying 再做最终部署校验。
+PreviewStack 不是硬门禁。它要求完整部署参数，常比询价工具需要更多外部输入；但在软降级到部分参数询价前，必须先尽量形成完整部署参数集，不要过早把可补齐参数列入 `missing_deployment_parameters`。如果完整部署参数无法自动补齐、或 PreviewStack 因外部参数缺口失败，但已有参数足以询价，则可以调用 `ros_estimate_template_cost` 估算费用。此时必须在 `parameter_set_summary` 说明 PreviewStack 状态，在 `missing_deployment_parameters` 列出缺口，后续选择阶段可通过 `parameter_overrides` 补充，deploying 也可继续补齐并做最终部署校验。
 
 本步骤的裁剪规则：
 - 优先使用上下文已有值和模板 Default；库存相关参数缺值时，先通过 `ros_get_template_parameter_constraints` 获取合法 `AllowedValues`，必要时再按 [references/cloud-products/](references/cloud-products/) 的可用性 API 与选型策略补足。
 - VpcId、VSwitchId、SecurityGroupId、KeyPairName 等已有资源参数：先查询约束或只读资源候选；API 返回候选不是编造，可作为参数候选参与回溯与 PreviewStack。没有上下文值、模板 Default、用户提供值或 API 返回候选时，才按外部输入缺失处理。
 - 只能在合法候选内筛选或排序，不得编造 API 未返回的库存值；LicenseKey、Token、证书、真实域名等外部输入不得编造。不要仅因参数名是 VpcId、VSwitchId、SecurityGroupId 或 KeyPairName 就跳过参数推荐并直接停止询价。
+- 对可生成参数要主动补齐：普通密码（ECS/RDS/Redis/RocketMQ/WordPress 等密码，或参数名、`NoEcho`、AssociationProperty、描述/约束表明是密码）应生成合规随机值，必须满足模板长度、复杂度、`AllowedPattern`、`ConstraintDescription`，并在展示、日志和摘要中脱敏。
 - `PreviewStack` 因候选组合不可行失败时，按 reference 的回溯规则更换候选；因外部输入缺失失败时，记录缺口，不用占位值伪造，并按上方软门禁规则决定是否继续询价。
-- 最终得到的参数集不写入模板 `Default`；将当前已选、已验证或已用于询价的参数作为结构化数据放入 `complete_step.conclusion.deployment_parameters`，传递给 deploying。`ros_preview_template` 成功时，还必须把 `succeeded: true`、同一个 `template_url` 和预览时使用的 `parameters` 写入 `complete_step.conclusion.preview_validation`；deploying 用它判断同一模板是否已完成预览验证，实际部署参数由 CreateStack 做最终校验。模板 Default 只是参数求解的输入来源之一，不是跨步骤传参介质。
+- 最终得到的参数集不写入模板 `Default`；将当前已选、已验证或已用于询价的参数作为结构化数据放入 `complete_step.conclusion.deployment_parameters`，传递给 deploying。`ros_preview_template` 成功时，还必须把 `succeeded: true`、同一个 `template_url` 和预览时使用的 `parameters` 写入 `complete_step.conclusion.preview_validation`；deploying 用它判断同一模板是否已完成预览验证，实际部署参数由 `ros_deploy` 做最终校验。模板 Default 只是参数求解的输入来源之一，不是跨步骤传参介质。
 - PreviewStack 成功但询价失败时，不要丢弃 Preview-Validated Pricing Parameter Set；仍在 `deployment_parameters` 输出该参数集，同时如实报告询价失败原因。
 
 ## 调用询价 API

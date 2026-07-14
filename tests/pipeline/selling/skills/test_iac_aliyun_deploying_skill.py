@@ -89,14 +89,21 @@ class TestSkillContentRosOnly:
     def test_contains_availability_query(self, body):
         assert "可用性查询" in body
 
-    def test_deploying_uses_parameters_without_preview_recommendation(self, body):
+    def test_deploying_can_complete_parameters_without_pricing_or_user_questions(self, body):
         assert "部署参数装配" in body
         assert "selected_plan.effective_deployment_parameters" in body
         assert "ros_deploy" in body
-        assert "GetTemplateParameterConstraints" not in body
-        assert "PreviewStack" not in body
-        assert "Preview-Validated Parameter Set" not in body
-        assert "参数推荐" not in body
+        assert "ros_get_template_parameter_constraints" in body
+        assert "预览工具" in body
+        assert "ros_preview_template" not in body
+        assert "ros_estimate_template_cost" not in body
+        assert "ask_user_question" not in body
+
+    def test_missing_parameters_are_not_a_direct_failure_reason(self, body):
+        assert "仍缺少模板必填参数" in body
+        assert "不得仅因部署参数缺失返回 `status: failed`" in body
+        assert "先尽量补齐或生成参数" in body
+        assert "普通密码" in body
 
     def test_create_stack_name_has_random_suffix(self, body):
         assert "StackName" in body
@@ -110,8 +117,13 @@ class TestSkillContentRosOnly:
 
     def test_prefers_effective_deployment_parameters(self, body):
         assert "selected_plan.effective_deployment_parameters" in body
-        assert "最终部署参数集" in body
-        assert "GetTemplateEstimateCost" not in body
+        assert "作为当前参数基础" in body
+        assert "不得因它非空就视为完整" in body
+
+    def test_does_not_ask_user_for_missing_region_or_parameters(self, body):
+        assert "请用户指定目标地域" not in body
+        assert "不发起澄清问题" in body
+        assert "不要向用户发起澄清问题" in body
 
     def test_availability_conflict_prefers_non_user_parameters_first(self, body):
         assert "优先调整非用户指定参数" in body
@@ -149,9 +161,17 @@ class TestSkillContentRosOnly:
         assert "重新调用 `ros_validate_template`" in body
         assert "`continue_create`" in body
 
+    def test_template_repairs_stay_on_selected_template_path(self, body):
+        assert "selected_plan.template_url" in body
+        assert "不得写入新的模板文件" in body
+        assert "不得改用新的模板路径" in body
+        assert "edit_file" in body
+        assert "write_file" not in body
+
     def test_no_pricing_section(self, body):
         assert "GetTemplateEstimateCost" not in body
         assert "部署前询价" not in body
+        assert "ros_estimate_template_cost" not in body
 
     def test_deploy_tool_create_documents_disable_rollback(self, body):
         assert "`ros_deploy` 的 `create`" in body
@@ -258,15 +278,18 @@ class TestDeployingPrompt:
         assert "非本步骤创建的 Stack" not in body
         assert "未收到明确删除确认前，不得调用 `ros_stack` 的 `DeleteStack`" not in body
 
-    def test_prompt_does_not_mention_uninjected_ros_stack_tool(self):
+    def test_prompt_does_not_mention_uninjected_ros_tools(self):
         body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
         assert "ros_stack" not in body
+        assert "ros_preview_template" not in body
 
     def test_prompt_names_template_url_value_for_deploy_tools(self):
         body = DEPLOYING_PROMPT_MD.read_text(encoding="utf-8")
         assert 'template_url = "{selected_plan.template_url}"' in body
         assert 'params.TemplateURL = "{selected_plan.template_url}"' not in body
         assert "selected_plan.template_url" in body
+        assert "不得另写新模板文件" in body
+        assert "不得把新文件路径传给部署工具" in body
         assert "ros_validate_template" in body
         assert "ros_deploy" in body
         assert "不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口" in body
