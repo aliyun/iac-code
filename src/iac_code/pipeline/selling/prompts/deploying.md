@@ -31,6 +31,8 @@
 
 需要调用 `ros_validate_template` 校验时，必须传 `template_url = "{selected_plan.template_url}"`。调用 `ros_deploy` 的 `create` / `continue_create` / `delete_and_create` 时，必须传 `template_url = "{selected_plan.template_url}"`；调用 `ros_deploy` 的 `wait` 时不要传 `template_url`。不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口；不要传 `TemplateBody`、`TemplateId` 或 `TemplateScratchId`；部署类动作不要省略 `template_url`。
 
+该模板路径是部署硬约束。不得另写新模板文件，不得把新文件路径传给部署工具；如果模板必须修复，只能就地修改 `{selected_plan.template_url}` 指向的原文件，然后继续使用同一个 `template_url`。
+
 ## 所有候选方案的评估数据
 `selected_plan.selection_valid` 为 `true` 时，使用 `selected_plan.selected_candidate` 和
 `selected_plan.selected_candidate_result` 中的模板、费用、审查信息进行部署。

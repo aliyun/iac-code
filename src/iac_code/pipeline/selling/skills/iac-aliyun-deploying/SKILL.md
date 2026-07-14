@@ -66,7 +66,7 @@ conclusion_schema:
 ## 快速创建与模板校验
 
 - `selected_plan.preview_ready_for_create` 为 `true` 时，表示成本步骤已对同一模板路径完成预览验证，且没有完整部署参数缺口；部署时直接调用 `ros_deploy` 的 `create`，跳过例行 `ros_validate_template`，并跳过例行可用性查询。用户覆盖后的最终部署参数由 `ros_deploy` 的部署调用做最终校验。
-- 否则，部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），修复模板文件后重试（最多 5 轮）。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
+- 否则，部署前必须校验模板文件。调用 `ros_validate_template` 校验，`template_url` 使用 `selected_plan.template_url`，也就是当前步骤 prompt 中已选定的具体模板文件路径；已有具体地域时传 `region_id`，否则使用工具默认地域。不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口。校验失败时分析错误原因，查 GetResourceType Schema（如需），只能使用 `edit_file` 就地修复 `selected_plan.template_url` 指向的原模板文件后重试（最多 5 轮）；不得写入新的模板文件，不得改用新的模板路径。模板文件会被后续步骤依赖，必须确保其内容正确后再继续。
 - `ros_deploy` 的 `create` 失败后，如果需要修改模板，成本步骤的预览验证已失效；修复后必须重新调用 `ros_validate_template`，通过后再调用 `ros_deploy` 的 `continue_create`。只调整部署参数时，不需要为了参数变化补跑 `ros_validate_template`；最终参数由 `ros_deploy` 的部署调用校验。
 - `ros_deploy` 的 `create` / `continue_create` / `delete_and_create` 已经发起 ROS 操作但工具调用超时或中断时，不要再次调用创建类动作。使用同一 `stack_id` 调用 `ros_deploy` 的 `wait`，它只轮询已有 Stack 的创建进度，不会调用 CreateStack 或 ContinueCreateStack。
 

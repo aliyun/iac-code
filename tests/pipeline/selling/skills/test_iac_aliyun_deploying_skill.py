@@ -161,6 +161,13 @@ class TestSkillContentRosOnly:
         assert "重新调用 `ros_validate_template`" in body
         assert "`continue_create`" in body
 
+    def test_template_repairs_stay_on_selected_template_path(self, body):
+        assert "selected_plan.template_url" in body
+        assert "不得写入新的模板文件" in body
+        assert "不得改用新的模板路径" in body
+        assert "edit_file" in body
+        assert "write_file" not in body
+
     def test_no_pricing_section(self, body):
         assert "GetTemplateEstimateCost" not in body
         assert "部署前询价" not in body
@@ -281,6 +288,8 @@ class TestDeployingPrompt:
         assert 'template_url = "{selected_plan.template_url}"' in body
         assert 'params.TemplateURL = "{selected_plan.template_url}"' not in body
         assert "selected_plan.template_url" in body
+        assert "不得另写新模板文件" in body
+        assert "不得把新文件路径传给部署工具" in body
         assert "ros_validate_template" in body
         assert "ros_deploy" in body
         assert "不要通过 `aliyun_api` 调用 ROS 模板校验或部署生命周期接口" in body
