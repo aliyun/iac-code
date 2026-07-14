@@ -510,4 +510,4 @@ steps:
     tools:
       include: []
       exclude: [write_memory, ros_stack, ros_stack_instances]
-    inject_tools: [ros_validate_template, ros_deploy]
+    inject_tools: [ros_validate_template, ros_get_template_parameter_constraints, ros_deploy]

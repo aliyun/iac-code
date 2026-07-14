@@ -230,6 +230,15 @@ class TestSkillContentRosOnly:
         assert "首次询价前" in body
         assert "形成 Preview-Validated Pricing Parameter Set" in body
 
+    def test_parameter_recommendation_pushes_for_complete_deployment_parameters(self, body):
+        assert "尽量形成完整部署参数集" in body
+        assert "不要过早把可补齐参数列入 `missing_deployment_parameters`" in body
+        assert "普通密码" in body
+        assert "生成合规随机值" in body
+        assert "仍需用户补充" not in body
+        assert "需要用户在后续选择阶段补充" not in body
+        assert "deploying 也可继续补齐" in body
+
     def test_preserves_preview_parameters_when_pricing_fails(self, body):
         assert "PreviewStack 成功但询价失败" in body
         assert "不要丢弃 Preview-Validated Pricing Parameter Set" in body
@@ -406,6 +415,12 @@ class TestCostPrompt:
         assert "优先通过" in body
         assert "不是硬门禁" in body
         assert "参数缺口" in body
+
+    def test_prompt_asks_model_to_complete_parameters_before_pricing(self):
+        body = COST_PROMPT_MD.read_text(encoding="utf-8")
+        assert "尽量形成完整部署参数集" in body
+        assert "可生成参数" in body
+        assert "普通密码" in body
 
     def test_prompt_records_preview_validation_for_deploying(self):
         body = COST_PROMPT_MD.read_text(encoding="utf-8")

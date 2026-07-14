@@ -64,7 +64,7 @@ def test_ros_template_tools_are_only_injected_into_matching_pipeline_steps(monke
         "template_generating": {"ros_validate_template"},
         "reviewing": {"ros_validate_template"},
         "cost_estimating": ROS_TEMPLATE_TOOLS,
-        "deploying": {"ros_validate_template"},
+        "deploying": {"ros_validate_template", "ros_get_template_parameter_constraints"},
     }
 
     for step_id, expected_tools in expected_by_step.items():
