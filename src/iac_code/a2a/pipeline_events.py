@@ -19,6 +19,7 @@ from iac_code.types.stream_events import (
     DiagramEvent,
     MCPProgressEvent,
     PermissionRequestEvent,
+    ResourceObservedEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -302,6 +303,9 @@ class PipelineEventTranslator:
             return [self._translate_diagram_event(event)]
         if isinstance(event, ToolResultEvent):
             return self._translate_tool_result_event(event)
+        if isinstance(event, ResourceObservedEvent):
+            envelope = self._translate_resource_observed_event(event)
+            return [] if envelope is None else [envelope]
         if isinstance(event, MCPProgressEvent):
             return [self._translate_parent_scoped_display_event("tool_progress", _mcp_progress_data(event))]
         if isinstance(event, SubPipelineStreamEvent):
@@ -548,6 +552,14 @@ class PipelineEventTranslator:
         stream_event = _innermost_sub_pipeline_stream_event(event)
         state = self._candidate_from_stream_event(stream_event)
         inner = stream_event.inner
+        if isinstance(inner, ResourceObservedEvent):
+            stack_envelope = self._translate_resource_observed_event(inner)
+            if stack_envelope is None:
+                return []
+            self._add_candidate_coordinates(stack_envelope, state)
+            if state.current_step_id is not None:
+                stack_envelope["candidateStep"] = self._candidate_step_coordinate(state, state.current_step_id)
+            return [stack_envelope]
         if isinstance(inner, TextDeltaEvent):
             event_type = "text_delta"
             data = {"text": inner.text}
@@ -717,6 +729,61 @@ class PipelineEventTranslator:
         if self._current_parent_step_id is not None:
             envelope["step"] = self._parent_step_coordinate(self._current_parent_step_id)
         return envelope
+
+    def _translate_resource_observed_event(self, event: ResourceObservedEvent) -> dict[str, Any] | None:
+        data = self._stack_current_changed_data_from_resource_observed(event)
+        if data is None:
+            return None
+        envelope = self._envelope("stack_current_changed", "stack", "working", data)
+        if self._current_parent_step_id is not None:
+            envelope["step"] = self._parent_step_coordinate(self._current_parent_step_id)
+        return envelope
+
+    def _stack_current_changed_data_from_resource_observed(
+        self,
+        event: ResourceObservedEvent,
+    ) -> dict[str, Any] | None:
+        if not self._context.emit_stack_events:
+            return None
+        if event.resource_type != "stack" or not event.resource_id:
+            return None
+
+        record = self._tool_inputs.get(event.tool_use_id or "")
+        tool_input = record.get("input") if isinstance(record, dict) else {}
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        tool_name = _string_or_none(record.get("toolName")) if isinstance(record, dict) else None
+        tool_name = tool_name or event.tool_name
+
+        operation = _stack_operation_from_tool_input(tool_name, tool_input) if tool_name else None
+        provider = event.provider or (operation or {}).get("provider")
+        action = event.action or (operation or {}).get("action")
+        if action not in _STACK_TOOL_ACTIONS:
+            return None
+
+        params = (operation or {}).get("params")
+        if not isinstance(params, dict):
+            params = {}
+        stack_status = _first_string_from_sources((event.metadata,), ("StackStatus", "stackStatus", "status"))
+        if stack_status is None and action == "CreateStack":
+            stack_status = "CREATE_IN_PROGRESS"
+
+        data: dict[str, Any] = {
+            "toolName": tool_name,
+            "toolUseId": event.tool_use_id,
+            "provider": provider,
+            "action": action,
+            "deployAction": (operation or {}).get("deployAction"),
+            "previousStackId": (operation or {}).get("previousStackId"),
+            "regionId": event.region_id or (operation or {}).get("regionId"),
+            "stackId": event.resource_id,
+            "stackName": event.resource_name
+            or _first_string_from_sources((params, tool_input), ("StackName", "stackName", "stack_name", "name")),
+            "stackStatus": stack_status,
+            "isSuccess": True,
+            "current": True,
+        }
+        return {key: value for key, value in data.items() if value is not None}
 
     def _stack_current_changed_data(self, event: ToolResultEvent) -> dict[str, Any] | None:
         if not self._context.emit_stack_events:
