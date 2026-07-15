@@ -6,7 +6,13 @@ import pytest
 
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
-from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, TextDeltaEvent
+from iac_code.types.stream_events import (
+    PermissionRequestEvent,
+    ResourceObservedEvent,
+    SubPipelineStreamEvent,
+    TextDeltaEvent,
+    ToolUseEndEvent,
+)
 
 
 class TestSubPipelineStreamEvent:
@@ -243,8 +249,8 @@ class TestPipelineRunnerParallelStreaming:
         return event
 
     @pytest.mark.asyncio
-    async def test_parallel_step_prioritizes_permission_requests_over_streaming_text(self, tmp_path):
-        """Permission requests unblock tools and must not queue behind another candidate's text flood."""
+    async def test_parallel_step_does_not_starve_permission_requests_behind_streaming_text(self, tmp_path):
+        """A text-heavy candidate must not monopolize normal turns before another candidate's permission."""
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "arch.md").write_text("Arch", encoding="utf-8")
         (tmp_path / "prompts" / "eval.md").write_text("Eval", encoding="utf-8")
@@ -328,11 +334,33 @@ class TestPipelineRunnerParallelStreaming:
                         candidate_index=candidate_index,
                         inner=TextDeltaEvent(text=f"flood-{i}"),
                     )
+                yield PipelineEvent(
+                    type=PipelineEventType.SUB_STEP_STARTED,
+                    step_id="next_step",
+                    timestamp=1,
+                    data={
+                        "sub_pipeline_id": sub_pipeline_id,
+                        "candidate_index": candidate_index,
+                        "candidate_name": candidate["name"],
+                        "step_id": "next_step",
+                        "step_index": 1,
+                        "total_steps": 2,
+                    },
+                )
                 text_flood_enqueued.set()
                 await asyncio.sleep(1)
                 return
 
             await text_flood_enqueued.wait()
+            yield SubPipelineStreamEvent(
+                sub_pipeline_id=sub_pipeline_id,
+                candidate_index=candidate_index,
+                inner=ToolUseEndEvent(
+                    tool_use_id="toolu-write",
+                    name="write_file",
+                    input={"path": "main.tf", "content": "x"},
+                ),
+            )
             future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
             yield SubPipelineStreamEvent(
                 sub_pipeline_id=sub_pipeline_id,
@@ -366,9 +394,178 @@ class TestPipelineRunnerParallelStreaming:
             finally:
                 await gen.aclose()
 
-        assert not any(
-            isinstance(self._unwrap_sub_pipeline_event(event), TextDeltaEvent) for event in seen_before_permission
+        text_events_before_permission = [
+            event
+            for event in seen_before_permission
+            if isinstance(self._unwrap_sub_pipeline_event(event), TextDeltaEvent)
+        ]
+        assert len(text_events_before_permission) <= 1
+        assert any(
+            isinstance(self._unwrap_sub_pipeline_event(event), ToolUseEndEvent) for event in seen_before_permission
         )
+
+    @pytest.mark.asyncio
+    async def test_parallel_step_preserves_event_order_within_each_candidate(self, tmp_path):
+        """A later step start must not overtake events from the prior step in the same candidate."""
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "arch.md").write_text("Arch", encoding="utf-8")
+        (tmp_path / "prompts" / "eval.md").write_text("Eval", encoding="utf-8")
+        (tmp_path / "prompts" / "template.md").write_text("T", encoding="utf-8")
+        (tmp_path / "pipeline.yaml").write_text(
+            dedent("""\
+            name: test
+            context_dependencies:
+              architecture: []
+              evaluated: [architecture]
+            max_rollbacks: 3
+            sub_pipelines:
+              evaluate_candidate:
+                max_rollbacks: 2
+                iterate_over: architecture.candidates
+                context_fields_from_parent: []
+                steps:
+                  - id: template_gen
+                    conclusion_field: template
+                    forward: null
+                    prompt: prompts/template.md
+                    context_fields: [candidate]
+            steps:
+              - id: arch
+                conclusion_field: architecture
+                forward: eval
+                prompt: prompts/arch.md
+              - id: eval
+                type: parallel_sub_pipeline
+                sub_pipeline: evaluate_candidate
+                conclusion_field: evaluated
+                forward: null
+                prompt: prompts/eval.md
+        """),
+            encoding="utf-8",
+        )
+
+        storage = MagicMock()
+        storage.session_path.return_value = MagicMock()
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=storage,
+            session_id="test123",
+        )
+        runner.context.set_conclusion("architecture", {"candidates": [{"name": "Plan A"}, {"name": "Plan B"}]})
+        runner.state_machine.advance()
+
+        candidate_events_enqueued = asyncio.Event()
+
+        async def fake_streaming(
+            sub_spec,
+            candidate,
+            candidate_index,
+            parent_context,
+            session_id,
+            *,
+            start_from_step=None,
+            preserved_conclusions=None,
+            user_message=None,
+            parent_step_id=None,
+        ):
+            sub_pipeline_id = f"eval_{candidate_index}"
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_STARTED,
+                step_id=None,
+                timestamp=0,
+                data={
+                    "sub_pipeline_id": sub_pipeline_id,
+                    "candidate_index": candidate_index,
+                    "candidate_name": candidate["name"],
+                    "total_steps": 2,
+                    "sub_pipeline_name": "evaluate_candidate",
+                },
+            )
+            if candidate_index == 0:
+                await candidate_events_enqueued.wait()
+                return
+
+            step_data = {
+                "sub_pipeline_id": sub_pipeline_id,
+                "candidate_index": candidate_index,
+                "candidate_name": candidate["name"],
+                "total_steps": 2,
+            }
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_STEP_STARTED,
+                step_id="deploy",
+                timestamp=1,
+                data={**step_data, "step_id": "deploy", "step_index": 0},
+            )
+            yield SubPipelineStreamEvent(
+                sub_pipeline_id=sub_pipeline_id,
+                candidate_index=candidate_index,
+                inner=ToolUseEndEvent(
+                    tool_use_id="toolu-deploy",
+                    name="ros_deploy",
+                    input={"action": "create", "stack_name": "demo", "region_id": "cn-hangzhou"},
+                ),
+            )
+            yield SubPipelineStreamEvent(
+                sub_pipeline_id=sub_pipeline_id,
+                candidate_index=candidate_index,
+                inner=ResourceObservedEvent(
+                    provider="ros",
+                    resource_type="stack",
+                    resource_id="stack-123",
+                    resource_name="demo",
+                    region_id="cn-hangzhou",
+                    action="CreateStack",
+                    tool_name="ros_stack",
+                    tool_use_id="toolu-deploy",
+                ),
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_STEP_COMPLETED,
+                step_id="deploy",
+                timestamp=2,
+                data={**step_data, "step_id": "deploy", "step_index": 0},
+            )
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_STEP_STARTED,
+                step_id="verify",
+                timestamp=3,
+                data={**step_data, "step_id": "verify", "step_index": 1},
+            )
+            candidate_events_enqueued.set()
+
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_exec:
+            instances = [MagicMock(), MagicMock()]
+            for instance in instances:
+                instance.execute_streaming = fake_streaming
+            mock_exec.side_effect = instances
+            events = [event async for event in runner._continue_from_current()]
+
+        candidate_events = [
+            event
+            for event in events
+            if (
+                isinstance(event, PipelineEvent)
+                and event.data.get("candidate_index") == 1
+                or isinstance(event, SubPipelineStreamEvent)
+                and event.candidate_index == 1
+            )
+        ]
+        event_order = [
+            event.type if isinstance(event, PipelineEvent) else self._unwrap_sub_pipeline_event(event).type
+            for event in candidate_events
+        ]
+
+        assert event_order[:6] == [
+            PipelineEventType.SUB_PIPELINE_STARTED,
+            PipelineEventType.SUB_STEP_STARTED,
+            "tool_use_end",
+            "resource_observed",
+            PipelineEventType.SUB_STEP_COMPLETED,
+            PipelineEventType.SUB_STEP_STARTED,
+        ]
 
     @pytest.mark.asyncio
     async def test_parallel_step_yields_events_in_realtime(self, tmp_path):

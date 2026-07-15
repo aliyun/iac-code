@@ -10,6 +10,7 @@ import logging
 import os
 import stat
 import time
+from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -381,12 +382,6 @@ class CandidateSentinel:
     candidate_index: int
 
 
-_PARALLEL_PRIORITY_PIPELINE_EVENTS = {
-    PipelineEventType.SUB_PIPELINE_STARTED,
-    PipelineEventType.SUB_STEP_STARTED,
-}
-
-
 def _unwrap_sub_pipeline_stream_event(event: Any) -> Any:
     while isinstance(event, SubPipelineStreamEvent):
         event = event.inner
@@ -395,8 +390,6 @@ def _unwrap_sub_pipeline_stream_event(event: Any) -> Any:
 
 def _parallel_sub_pipeline_event_priority(event: Any) -> int:
     if isinstance(event, (PipelineStatePersistenceError, SessionBackupBlocked)):
-        return 0
-    if isinstance(event, PipelineEvent) and event.type in _PARALLEL_PRIORITY_PIPELINE_EVENTS:
         return 0
     inner = _unwrap_sub_pipeline_stream_event(event)
     if isinstance(inner, (PermissionRequestEvent, AskUserQuestionEvent)):
@@ -4235,7 +4228,9 @@ class PipelineRunner:
 
         self._active_candidates.clear()
 
-        event_queue: asyncio.PriorityQueue[tuple[int, int, Any]] = asyncio.PriorityQueue()
+        candidate_event_queues: list[deque[tuple[int, int, Any]]] = [deque() for _ in candidates]
+        event_available = asyncio.Event()
+        next_candidate_index = 0
         event_sequence = 0
         conclusions_by_index: dict[int, dict] = {}
         failed_by_index: dict[int, dict[str, Any]] = {}
@@ -4339,10 +4334,36 @@ class PipelineRunner:
             failed_by_index[i] = dict(entry)
             await self._save_running(step.step_id, reason="parallel candidate failed")
 
-        async def put_candidate_event(event: Any) -> None:
+        async def put_candidate_event(candidate_index: int, event: Any) -> None:
             nonlocal event_sequence
             event_sequence += 1
-            await event_queue.put((_parallel_sub_pipeline_event_priority(event), event_sequence, event))
+            priority = _parallel_sub_pipeline_event_priority(event)
+            candidate_event_queues[candidate_index].append((priority, event_sequence, event))
+            event_available.set()
+
+        async def get_candidate_event() -> Any:
+            nonlocal next_candidate_index
+            while True:
+                priority_head = min(
+                    (
+                        (candidate_queue[0][1], candidate_index)
+                        for candidate_index, candidate_queue in enumerate(candidate_event_queues)
+                        if candidate_queue and candidate_queue[0][0] == 0
+                    ),
+                    default=None,
+                )
+                if priority_head is not None:
+                    _sequence, candidate_index = priority_head
+                    return candidate_event_queues[candidate_index].popleft()[2]
+
+                for offset in range(len(candidate_event_queues)):
+                    candidate_index = (next_candidate_index + offset) % len(candidate_event_queues)
+                    if candidate_event_queues[candidate_index]:
+                        next_candidate_index = (candidate_index + 1) % len(candidate_event_queues)
+                        return candidate_event_queues[candidate_index].popleft()[2]
+
+                event_available.clear()
+                await event_available.wait()
 
         async def run_candidate(
             i: int,
@@ -4486,13 +4507,13 @@ class PipelineRunner:
                         state["error"] = event.data.get("error")
                         state["error_details"] = event.data.get("error_details")
                         await save_candidate_failed(i, state)
-                    await put_candidate_event(event)
+                    await put_candidate_event(i, event)
             except asyncio.CancelledError:
                 logger.debug("Candidate %d cancelled", i)
             except PipelineStatePersistenceError as exc:
-                await put_candidate_event(exc)
+                await put_candidate_event(i, exc)
             except SessionBackupBlocked as exc:
-                await put_candidate_event(exc)
+                await put_candidate_event(i, exc)
             except Exception as exc:
                 failure = public_error_from_exception(exc)
                 error_summary = failure.summary
@@ -4543,9 +4564,10 @@ class PipelineRunner:
                 try:
                     await save_candidate_failed(i, state)
                 except PipelineStatePersistenceError as persistence_exc:
-                    await put_candidate_event(persistence_exc)
+                    await put_candidate_event(i, persistence_exc)
                     return
                 await put_candidate_event(
+                    i,
                     PipelineEvent(
                         type=PipelineEventType.SUB_PIPELINE_COMPLETED,
                         step_id=None,
@@ -4560,11 +4582,11 @@ class PipelineRunner:
                             "error_summary": error_summary,
                             "error_details": failure.details,
                         },
-                    )
+                    ),
                 )
             finally:
                 self._active_candidates.pop(i, None)
-                await put_candidate_event(CandidateSentinel(candidate_index=i))
+                await put_candidate_event(i, CandidateSentinel(candidate_index=i))
 
         tasks: list[asyncio.Task | None] = []
         initial_done_count = 0
@@ -4602,7 +4624,7 @@ class PipelineRunner:
             done_count = initial_done_count
             total = len(candidates)
             while done_count < total:
-                _priority, _sequence, event = await event_queue.get()
+                event = await get_candidate_event()
                 if isinstance(event, PipelineStatePersistenceError):
                     yield self._persistence_failure_event(event)
                     return
