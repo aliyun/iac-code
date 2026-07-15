@@ -1,3 +1,4 @@
+import asyncio
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
@@ -5,7 +6,7 @@ import pytest
 
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
-from iac_code.types.stream_events import SubPipelineStreamEvent, TextDeltaEvent
+from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, TextDeltaEvent
 
 
 class TestSubPipelineStreamEvent:
@@ -235,6 +236,140 @@ class TestSubPipelineExecutorStreaming:
 
 
 class TestPipelineRunnerParallelStreaming:
+    @staticmethod
+    def _unwrap_sub_pipeline_event(event):
+        while isinstance(event, SubPipelineStreamEvent):
+            event = event.inner
+        return event
+
+    @pytest.mark.asyncio
+    async def test_parallel_step_prioritizes_permission_requests_over_streaming_text(self, tmp_path):
+        """Permission requests unblock tools and must not queue behind another candidate's text flood."""
+        (tmp_path / "prompts").mkdir(exist_ok=True)
+        (tmp_path / "prompts" / "arch.md").write_text("Arch", encoding="utf-8")
+        (tmp_path / "prompts" / "eval.md").write_text("Eval", encoding="utf-8")
+        (tmp_path / "prompts" / "template.md").write_text("T", encoding="utf-8")
+        (tmp_path / "pipeline.yaml").write_text(
+            dedent("""\
+            name: test
+            context_dependencies:
+              architecture: []
+              evaluated: [architecture]
+            max_rollbacks: 3
+            sub_pipelines:
+              evaluate_candidate:
+                max_rollbacks: 2
+                iterate_over: architecture.candidates
+                context_fields_from_parent: []
+                steps:
+                  - id: template_gen
+                    conclusion_field: template
+                    forward: null
+                    prompt: prompts/template.md
+                    context_fields: [candidate]
+            steps:
+              - id: arch
+                conclusion_field: architecture
+                forward: eval
+                prompt: prompts/arch.md
+              - id: eval
+                type: parallel_sub_pipeline
+                sub_pipeline: evaluate_candidate
+                conclusion_field: evaluated
+                forward: null
+                prompt: prompts/eval.md
+        """),
+            encoding="utf-8",
+        )
+
+        storage = MagicMock()
+        storage.session_path.return_value = MagicMock()
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=storage,
+            session_id="test123",
+        )
+        runner.context.set_conclusion("architecture", {"candidates": [{"name": "Plan A"}, {"name": "Plan B"}]})
+        runner.state_machine.advance()
+
+        text_flood_enqueued = asyncio.Event()
+
+        async def fake_streaming(
+            sub_spec,
+            candidate,
+            candidate_index,
+            parent_context,
+            session_id,
+            *,
+            start_from_step=None,
+            preserved_conclusions=None,
+            user_message=None,
+            parent_step_id=None,
+        ):
+            sub_pipeline_id = f"eval_{candidate_index}"
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_STARTED,
+                step_id=None,
+                timestamp=0,
+                data={
+                    "sub_pipeline_id": sub_pipeline_id,
+                    "candidate_index": candidate_index,
+                    "candidate_name": candidate["name"],
+                    "total_steps": 1,
+                    "sub_pipeline_name": "evaluate_candidate",
+                },
+            )
+            if candidate_index == 0:
+                for i in range(25):
+                    yield SubPipelineStreamEvent(
+                        sub_pipeline_id=sub_pipeline_id,
+                        candidate_index=candidate_index,
+                        inner=TextDeltaEvent(text=f"flood-{i}"),
+                    )
+                text_flood_enqueued.set()
+                await asyncio.sleep(1)
+                return
+
+            await text_flood_enqueued.wait()
+            future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+            yield SubPipelineStreamEvent(
+                sub_pipeline_id=sub_pipeline_id,
+                candidate_index=candidate_index,
+                inner=PermissionRequestEvent(
+                    tool_name="write_file",
+                    tool_input={"path": "main.tf", "content": "x"},
+                    tool_use_id="toolu-write",
+                    response_future=future,
+                ),
+            )
+            await future
+
+        with patch("iac_code.pipeline.engine.pipeline_runner.SubPipelineExecutor") as mock_exec:
+            instances = [MagicMock(), MagicMock()]
+            for instance in instances:
+                instance.execute_streaming = fake_streaming
+            mock_exec.side_effect = instances
+
+            gen = runner._continue_from_current()
+            seen_before_permission = []
+            try:
+                while True:
+                    event = await asyncio.wait_for(anext(gen), timeout=1)
+                    inner = self._unwrap_sub_pipeline_event(event)
+                    if isinstance(inner, PermissionRequestEvent):
+                        assert inner.response_future is not None
+                        inner.response_future.set_result(True)
+                        break
+                    seen_before_permission.append(event)
+            finally:
+                await gen.aclose()
+
+        assert not any(
+            isinstance(self._unwrap_sub_pipeline_event(event), TextDeltaEvent) for event in seen_before_permission
+        )
+
     @pytest.mark.asyncio
     async def test_parallel_step_yields_events_in_realtime(self, tmp_path):
         """Events should arrive during execution, not batched after gather."""
