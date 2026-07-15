@@ -16,6 +16,7 @@ from iac_code.types.stream_events import (
     DiagramEvent,
     MCPProgressEvent,
     PermissionRequestEvent,
+    ResourceObservedEvent,
     SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -1253,6 +1254,25 @@ def test_stack_current_changed_is_disabled_by_default() -> None:
     assert [envelope["eventType"] for envelope in envelopes] == ["tool_result"]
 
 
+def test_observed_stack_current_changed_is_disabled_by_default() -> None:
+    translator = PipelineEventTranslator(_ctx())
+
+    envelopes = translator.translate(
+        ResourceObservedEvent(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-123",
+            resource_name="demo",
+            region_id="cn-hangzhou",
+            action="CreateStack",
+            tool_name="ros_stack",
+            tool_use_id="toolu-stack",
+        )
+    )
+
+    assert envelopes == []
+
+
 def test_failed_tool_result_payload_is_sanitized() -> None:
     translator = PipelineEventTranslator(_ctx())
 
@@ -1512,6 +1532,131 @@ def test_stack_current_changed_emits_after_successful_ros_deploy_recreate() -> N
         "isSuccess": True,
         "current": True,
     }
+
+
+def test_stack_current_changed_emits_when_create_stack_resource_is_observed() -> None:
+    ctx = _ctx()
+    ctx.emit_stack_events = True
+    translator = PipelineEventTranslator(ctx)
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="deploying",
+            timestamp=time.time(),
+            data={"index": 5, "total": 5},
+        )
+    )
+    translator.translate(
+        ToolUseEndEvent(
+            tool_use_id="toolu-deploy",
+            name="ros_deploy",
+            input={
+                "action": "create",
+                "stack_name": "demo",
+                "template_url": "templates/demo.yml",
+                "region_id": "cn-hangzhou",
+            },
+        )
+    )
+
+    envelopes = translator.translate(
+        ResourceObservedEvent(
+            provider="ros",
+            resource_type="stack",
+            resource_id="stack-123",
+            resource_name="demo",
+            region_id="cn-hangzhou",
+            action="CreateStack",
+            tool_name="ros_stack",
+            tool_use_id="toolu-deploy",
+        )
+    )
+
+    assert len(envelopes) == 1
+    stack_event = envelopes[0]
+    assert stack_event["eventType"] == "stack_current_changed"
+    assert stack_event["scope"] == "stack"
+    assert stack_event["step"]["id"] == "deploying"
+    assert stack_event["data"] == {
+        "toolName": "ros_deploy",
+        "toolUseId": "toolu-deploy",
+        "provider": "ros",
+        "action": "CreateStack",
+        "regionId": "cn-hangzhou",
+        "stackId": "stack-123",
+        "stackName": "demo",
+        "stackStatus": "CREATE_IN_PROGRESS",
+        "isSuccess": True,
+        "current": True,
+    }
+
+
+def test_stack_current_changed_emits_for_observed_resource_in_sub_pipeline() -> None:
+    ctx = _ctx()
+    ctx.emit_stack_events = True
+    translator = PipelineEventTranslator(ctx)
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.STEP_STARTED,
+            step_id="evaluate_candidates",
+            timestamp=time.time(),
+            data={"index": 3, "total": 5},
+        )
+    )
+    translator.translate(
+        PipelineEvent(
+            type=PipelineEventType.SUB_PIPELINE_STARTED,
+            step_id=None,
+            timestamp=time.time(),
+            data={
+                "sub_pipeline_id": "evaluate_candidate_abcd",
+                "candidate_index": 0,
+                "candidate_name": "candidate",
+                "parent_step_id": "evaluate_candidates",
+            },
+        )
+    )
+    translator.translate(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="evaluate_candidate_abcd",
+            candidate_index=0,
+            inner=ToolUseEndEvent(
+                tool_use_id="toolu-deploy",
+                name="ros_deploy",
+                input={
+                    "action": "create",
+                    "stack_name": "demo",
+                    "template_url": "templates/demo.yml",
+                    "region_id": "cn-hangzhou",
+                },
+            ),
+        )
+    )
+
+    envelopes = translator.translate(
+        SubPipelineStreamEvent(
+            sub_pipeline_id="evaluate_candidate_abcd",
+            candidate_index=0,
+            inner=ResourceObservedEvent(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                resource_name="demo",
+                region_id="cn-hangzhou",
+                action="CreateStack",
+                tool_name="ros_stack",
+                tool_use_id="toolu-deploy",
+            ),
+        )
+    )
+
+    assert len(envelopes) == 1
+    stack_event = envelopes[0]
+    assert stack_event["eventType"] == "stack_current_changed"
+    assert stack_event["step"]["id"] == "evaluate_candidates"
+    assert stack_event["candidate"]["index"] == 0
+    assert stack_event["data"]["stackId"] == "stack-123"
+    assert stack_event["data"]["stackStatus"] == "CREATE_IN_PROGRESS"
 
 
 def test_stack_current_changed_keeps_current_stack_after_statusless_successful_delete() -> None:
