@@ -17,7 +17,7 @@ from google.protobuf.json_format import MessageToDict
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.metrics import NoOpA2AMetrics
-from iac_code.a2a.persistence import A2APersistenceStore
+from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
@@ -27,7 +27,12 @@ from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.prerequisites import PrerequisiteDecision, PrerequisiteResolution
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
-from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
+from iac_code.services.session_backup import (
+    BackupReason,
+    BackupResult,
+    SessionBackupBlocked,
+    SessionBackupService,
+)
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
@@ -2442,6 +2447,137 @@ async def test_committed_handoff_routes_to_normal_after_backup_visibility_commit
     assert snapshot is not None
     assert snapshot["pendingNormalHandoff"] is None
     assert snapshot["normalHandoff"]["summary"] == "[Pipeline Handoff Context]\nPipeline: selling"
+
+
+@pytest.mark.asyncio
+async def test_committed_handoff_restores_backup_before_normal_route(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    session_id = "session-backup-handoff"
+    context_id = "ctx-backup-handoff"
+    task_id = "task-backup-handoff"
+
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    backup_session_dir = backup_storage.ensure_v2_session_dir_for_new_session(
+        str(cwd),
+        session_id,
+    )
+    pipeline_dir = backup_session_dir / "a2a" / "pipeline"
+    translator = PipelineEventTranslator(
+        PipelineA2AContext(
+            pipeline_run_id=context_id,
+            task_id=task_id,
+            context_id=context_id,
+            pipeline_name="selling",
+            iac_code_session_id=session_id,
+        )
+    )
+    terminal = translator.manual_event(
+        "pipeline_completed",
+        "pipeline",
+        status="completed",
+        data={"totalSteps": 1},
+    )
+    handoff = translator.manual_event(
+        "pipeline_handoff_ready",
+        "pipeline",
+        status="completed",
+        data={
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "completed",
+            "summary": "[Pipeline Handoff Context]\nPipeline: selling",
+        },
+    )
+    handoff["visibility"] = "committed"
+    ack = translator.manual_event(
+        "backup_committed",
+        "pipeline",
+        data={
+            "committedEventId": handoff["eventId"],
+            "committedEventType": "pipeline_handoff_ready",
+            "committedSequence": handoff["sequence"],
+        },
+    )
+    ack.pop("status", None)
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append_many([terminal, handoff, ack], durable=True)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(journal.read_all_repairing_tail()))
+
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(
+        A2AContextSnapshot(
+            context_id=context_id,
+            session_id=session_id,
+            cwd=str(cwd),
+        )
+    )
+    local_storage = SessionStorage()
+    local_session_dir = local_storage.session_dir(str(cwd), session_id)
+    assert not local_session_dir.exists()
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(
+            metrics=NoOpA2AMetrics(),
+            persistence=persistence,
+        ),
+        model="qwen3.6-plus",
+        backup_service=SessionBackupService(
+            session_storage=local_storage,
+            retry_delays=(),
+        ),
+    )
+
+    assert await executor._should_route_pipeline_handoff_to_normal(
+        context_id=context_id,
+        cwd=str(cwd),
+    )
+    assert local_session_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_handoff_restore_failure_does_not_start_fresh_pipeline(
+    tmp_path: Path,
+) -> None:
+    class FailingRestoreService:
+        def restore_session(self, cwd: str, session_id: str) -> None:
+            raise RuntimeError(f"restore failed for {cwd}/{session_id}")
+
+    cwd = tmp_path / "ws"
+    cwd.mkdir()
+    context_id = "ctx-restore-failed"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(
+        A2AContextSnapshot(
+            context_id=context_id,
+            session_id="session-restore-failed",
+            cwd=str(cwd),
+        )
+    )
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(
+            metrics=NoOpA2AMetrics(),
+            persistence=persistence,
+        ),
+        model="qwen3.6-plus",
+        backup_service=FailingRestoreService(),
+    )
+
+    with pytest.raises(RuntimeError, match="restore failed"):
+        await executor._should_route_pipeline_handoff_to_normal(
+            context_id=context_id,
+            cwd=str(cwd),
+        )
 
 
 @pytest.mark.asyncio

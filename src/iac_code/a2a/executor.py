@@ -1706,6 +1706,9 @@ class IacCodeA2AExecutor(AgentExecutor):
             return False
         if ctx.cwd != cwd:
             return False
+        restore_session = getattr(self._backup_service, "restore_session", None)
+        if callable(restore_session):
+            await asyncio.to_thread(restore_session, cwd, ctx.session_id)
         state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=ctx.session_id)
         if state is None:
             return False
