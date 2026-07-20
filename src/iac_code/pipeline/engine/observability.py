@@ -700,6 +700,22 @@ class PipelineObservability:
             ),
         )
 
+    def candidate_selection_rejected(
+        self,
+        *,
+        step_id: str,
+        step_attempt: int | None,
+        option_count: int,
+    ) -> None:
+        attrs = self.base_attrs(
+            step_id=step_id,
+            step_attempt=step_attempt,
+            ui_mode="candidate_selection",
+            candidate_count_bucket=self.count_bucket(option_count),
+        )
+        self._event(Events.PIPELINE_SELECTION_REJECTED, attrs)
+        self._metric(Metrics.PIPELINE_SELECTION_REJECTED_COUNT, 1, self.metric_attrs(**attrs))
+
     def candidates_evaluated(
         self,
         *,

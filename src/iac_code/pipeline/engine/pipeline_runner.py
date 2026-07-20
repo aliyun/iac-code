@@ -2291,10 +2291,19 @@ class PipelineRunner:
 
     def _infer_selected_index(self, selected_value: str, options: list[Any]) -> int | None:
         structured = parse_selected_candidate(selected_value)
-        if structured is not None and structured.selected_candidate_index is not None:
-            idx = structured.selected_candidate_index
-            if 0 <= idx < len(options):
-                return idx
+        if structured is not None:
+            if structured.selected_evaluated_candidate_index is not None:
+                matches = [
+                    idx
+                    for idx, option in enumerate(options)
+                    if isinstance(option, dict)
+                    and option.get("candidate_index") == structured.selected_evaluated_candidate_index
+                ]
+                return matches[0] if len(matches) == 1 else None
+            if structured.selected_candidate_index is not None:
+                idx = structured.selected_candidate_index
+                return idx if 0 <= idx < len(options) else None
+            selected_value = structured.selected_candidate_name
         matches = [idx for idx, option in enumerate(options) if self._option_display_value(option) == selected_value]
         if len(matches) == 1:
             return matches[0]
@@ -2406,12 +2415,10 @@ class PipelineRunner:
         step = self.state_machine.current_step
         step_index = self.state_machine.current_step_index + 1
         step_attempt = self._current_step_attempt(step.step_id)
-        wait_started_at = self._waiting_input_started_at.pop(step.step_id, None)
-        wait_duration_ms = self._observability.duration_ms(wait_started_at) if wait_started_at is not None else None
         current_conclusion = self.context.get_conclusion(step.conclusion_field) or {}
         if not isinstance(current_conclusion, dict):
             current_conclusion = {}
-        waiting_options = self._waiting_input_options_by_step.pop(step.step_id, [])
+        waiting_options = self._waiting_input_options_by_step.get(step.step_id, [])
         if not waiting_options:
             restored_options = current_conclusion.get("options")
             if isinstance(restored_options, list):
@@ -2425,6 +2432,28 @@ class PipelineRunner:
                     step.step_id,
                     len(waiting_options),
                 )
+                self._observability.candidate_selection_rejected(
+                    step_id=step.step_id,
+                    step_attempt=step_attempt,
+                    option_count=len(waiting_options),
+                )
+                yield PipelineEvent(
+                    type=PipelineEventType.USER_INPUT_REQUIRED,
+                    step_id=step.step_id,
+                    timestamp=time.time(),
+                    data={
+                        "step_id": step.step_id,
+                        "prompt": current_conclusion.get("user_prompt", "")
+                        if isinstance(current_conclusion.get("user_prompt", ""), str)
+                        else "",
+                        "options": waiting_options,
+                        "validation_error": "invalid_candidate_selection",
+                    },
+                )
+                return
+        wait_started_at = self._waiting_input_started_at.pop(step.step_id, None)
+        wait_duration_ms = self._observability.duration_ms(wait_started_at) if wait_started_at is not None else None
+        self._waiting_input_options_by_step.pop(step.step_id, None)
         current_conclusion["user_input"] = user_text
         self.context.set_conclusion(step.conclusion_field, current_conclusion)
         self._set_current_step_user_input(pipeline_input)

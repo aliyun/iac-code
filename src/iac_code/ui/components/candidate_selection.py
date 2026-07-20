@@ -49,6 +49,7 @@ class CandidateSelection:
 
     selected_candidate_name: str
     selected_candidate_index: int | None
+    selected_evaluated_candidate_index: int | None = None
     display_label: str = ""
 
 
@@ -83,6 +84,7 @@ class CandidateSelectionRenderer:
         self._selecting = False
         self._scroll_offset = 0
         self._status_message: str = ""
+        self._selection_option_keys: list[str] = []
 
     def set_status_message(self, msg: str) -> None:
         self._status_message = msg
@@ -115,6 +117,7 @@ class CandidateSelectionRenderer:
 
     def seed_candidates(self, candidates: list[dict[str, Any]]) -> None:
         """Create placeholder tabs for expected candidates before selection."""
+        self._selection_option_keys = []
         for candidate in candidates:
             if not isinstance(candidate, dict):
                 continue
@@ -122,7 +125,14 @@ class CandidateSelectionRenderer:
             if not isinstance(name, str) or not name.strip():
                 continue
             candidate_index = self._coerce_candidate_index(candidate.get("candidate_index"))
-            self._get_or_create_tab(name.strip(), candidate_index)
+            normalized_name = name.strip()
+            named_tabs = [tab for tab in self._tabs if tab.candidate_name == normalized_name]
+            tab = (
+                named_tabs[0]
+                if candidate_index is None and len(named_tabs) == 1
+                else self._get_or_create_tab(normalized_name, candidate_index)
+            )
+            self._selection_option_keys.append(tab.candidate_key)
 
     def _merge_tab_data(self, target: CandidateTab, source: CandidateTab) -> None:
         if target.mermaid_source is None and source.mermaid_source is not None:
@@ -272,9 +282,14 @@ class CandidateSelectionRenderer:
     def confirm_selection(self) -> CandidateSelection:
         if self._tabs:
             tab = self._tabs[self._selected]
+            try:
+                display_index = self._selection_option_keys.index(tab.candidate_key)
+            except ValueError:
+                display_index = self._selected if not self._selection_option_keys else None
             return CandidateSelection(
                 selected_candidate_name=tab.candidate_name,
-                selected_candidate_index=tab.candidate_index,
+                selected_candidate_index=display_index,
+                selected_evaluated_candidate_index=tab.candidate_index,
                 display_label=self._display_label(tab),
             )
         return CandidateSelection(selected_candidate_name="", selected_candidate_index=None)

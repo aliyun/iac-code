@@ -4,6 +4,7 @@ from pathlib import Path
 
 from iac_code.agent.message import Message
 from iac_code.pipeline.config import RunMode
+from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_index import SessionIndex
 from iac_code.services.session_storage import SessionStorage
 
@@ -144,6 +145,7 @@ def test_explicit_resume_restores_backup_only_session(monkeypatch, tmp_path):
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
     backup_storage = SessionStorage(projects_dir=backup_root / "projects")
     backup_storage.save(str(cwd), session_id, [Message(role="user", content="from backup")], git_branch=None)
+    SessionBackupService(backup_storage).initialize_session(str(cwd), session_id)
 
     repl = InlineREPL.__new__(InlineREPL)
     repl._original_cwd = str(cwd)

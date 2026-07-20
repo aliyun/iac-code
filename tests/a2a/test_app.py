@@ -45,6 +45,7 @@ from iac_code.a2a.transports.dispatcher import create_runtime_components
 from iac_code.mcp.errors import MCPNeedsAuthError
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
+from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
 
@@ -2218,10 +2219,20 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_returns_input_
         def __init__(self) -> None:
             self.calls: list[tuple[str, str, BackupReason, bool]] = []
             self.thread_ids: list[int] = []
+            self.publication_proofs: list[dict[str, BackupPublicationProof]] = []
 
-        def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+        def backup_session(
+            self,
+            cwd: str,
+            session_id: str,
+            *,
+            reason: BackupReason,
+            critical: bool,
+            publication_proofs: dict[str, BackupPublicationProof],
+        ) -> None:
             self.calls.append((cwd, session_id, reason, critical))
             self.thread_ids.append(threading.get_ident())
+            self.publication_proofs.append(publication_proofs)
             session_dir = SessionStorage().session_dir(cwd, session_id)
             task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
             context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
@@ -2254,6 +2265,7 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_returns_input_
         assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
         assert persistence.load_task("task-1").state == "input-required"
         assert backup_service.calls == [(str(tmp_path), session_id, BackupReason.TERMINAL, True)]
+        assert backup_service.publication_proofs[0][NORMAL_HANDOFF_PROOF_KEY].event_type == "pipeline_handoff_ready"
         assert backup_service.thread_ids and backup_service.thread_ids[0] != event_loop_thread_id
         snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
         assert snapshot is not None
@@ -2306,7 +2318,16 @@ async def test_cancel_input_required_pipeline_task_backup_blocked_persist_failur
     A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending]))
 
     class BlockingBackupService:
-        def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+        def backup_session(
+            self,
+            cwd: str,
+            session_id: str,
+            *,
+            reason: BackupReason,
+            critical: bool,
+            publication_proofs: dict[str, BackupPublicationProof],
+        ) -> None:
+            assert publication_proofs[NORMAL_HANDOFF_PROOF_KEY].event_type == "pipeline_handoff_ready"
             raise SessionBackupBlocked("copy failed secret_token=tok-live at /tmp/iac-code/cancel")
 
     original_append = A2APipelineJournal.append

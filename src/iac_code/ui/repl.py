@@ -4784,7 +4784,7 @@ class InlineREPL:
             self._record_pipeline_display_candidate_selected(
                 step_id=getattr(self, "_pipeline_display_current_step_id", None),
                 candidate_name=selected.selected_candidate_name,
-                candidate_index=selected.selected_candidate_index,
+                candidate_index=selected.selected_evaluated_candidate_index,
             )
             self.renderer.console.print()
             self.renderer.console.print("  [green]✓[/] {} [bold]{}[/]".format(_("Selected:"), selected_label))
@@ -4803,6 +4803,7 @@ class InlineREPL:
             resume_payload = encode_selected_candidate(
                 selected.selected_candidate_name,
                 selected.selected_candidate_index,
+                evaluated_candidate_index=selected.selected_evaluated_candidate_index,
             )
             event_stream = self._pipeline.resume(resume_payload)
             try:

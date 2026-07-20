@@ -61,6 +61,7 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
+from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import AskUserQuestionEvent, SubPipelineStreamEvent
 from iac_code.utils.path_locks import PathLockRegistry
@@ -265,7 +266,8 @@ class IacCodeA2APipelineExecutor:
         cwd: str,
         pipeline_input: PipelineUserInput | str | None = None,
         prompt: str | None = None,
-    ) -> None:
+        active_followup_only: bool = False,
+    ) -> bool | None:
         if pipeline_input is None:
             pipeline_input = prompt or ""
         pipeline_input = normalize_pipeline_user_input(pipeline_input)
@@ -273,7 +275,6 @@ class IacCodeA2APipelineExecutor:
         session_storage = SessionStorage()
 
         def runtime_factory(session_id: str) -> Any:
-            SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)
             return create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd))
 
         try:
@@ -312,7 +313,16 @@ class IacCodeA2APipelineExecutor:
                         preserve_task_record=preserve_active_task,
                     )
                 if routed:
-                    return
+                    return True
+            if active_followup_only:
+                await self._fail_already_active(
+                    event_queue,
+                    task=task,
+                    task_id=task_id,
+                    context_id=context_id,
+                    preserve_task_record=preserve_active_task,
+                )
+                return True
             await self._fail_already_active(
                 event_queue,
                 task=task,
@@ -321,6 +331,9 @@ class IacCodeA2APipelineExecutor:
                 preserve_task_record=preserve_active_task,
             )
             return
+
+        if active_followup_only:
+            return False
 
         lock = ctx.lock
         try:
@@ -1308,6 +1321,11 @@ class IacCodeA2APipelineExecutor:
                 return True
         else:
             self._mirror_a2a_snapshots_for_pipeline_publication(envelope, task=task, ctx=ctx)
+        publication_proofs = None
+        if reason == BackupReason.HANDOFF_READY and envelope.get("visibility") == "committed":
+            publication_proofs = {
+                NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(envelope),
+            }
         try:
             await backup_session_async(
                 self._backup_service,
@@ -1316,6 +1334,7 @@ class IacCodeA2APipelineExecutor:
                 reason=reason,
                 critical=True,
                 metrics=self._metrics,
+                publication_proofs=publication_proofs,
             )
         except SessionBackupBlocked as exc:
             sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
@@ -2835,12 +2854,18 @@ def _cancel_waiting_input_task_from_sidecar_locked(
             state=TASK_STATE_INPUT_REQUIRED,
         )
         return WaitingInputCancelResult.PERSIST_FAILED
+    publication_proofs = None
+    if committed_handoff_envelope is not None:
+        publication_proofs = {
+            NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(committed_handoff_envelope),
+        }
     try:
         backup_result = (backup_service or SessionBackupService()).backup_session(
             cwd,
             session_id,
             reason=BackupReason.TERMINAL,
             critical=True,
+            publication_proofs=publication_proofs,
         )
     except SessionBackupBlocked as exc:
         _record_backup_failed_metric(

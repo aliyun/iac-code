@@ -17,6 +17,7 @@ from iac_code.cli.headless import EXIT_ERROR, EXIT_MAX_TURNS, EXIT_OK, HeadlessR
 from iac_code.cli.output_formats import OutputFormat
 from iac_code.commands.registry import CommandRegistry, PromptCommand
 from iac_code.providers.manager import ProviderNotConfiguredError
+from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
@@ -236,6 +237,7 @@ def test_headless_explicit_resume_restores_backup_only_session(monkeypatch, tmp_
     monkeypatch.chdir(cwd)
     backup_storage = SessionStorage(projects_dir=backup_root / "projects")
     backup_storage.save(str(cwd), session_id, [Message(role="user", content="from backup")], git_branch=None)
+    SessionBackupService(backup_storage).initialize_session(str(cwd), session_id)
     captured_options = {}
     mock_loop = AsyncMock()
     runtime = SimpleNamespace(

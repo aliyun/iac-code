@@ -12,6 +12,11 @@ from iac_code.services.session_backup import (
     SessionBackupService,
     SessionRestoreResult,
 )
+from iac_code.services.session_backup_state import (
+    NORMAL_HANDOFF_PROOF_KEY,
+    BackupPublicationProof,
+    SessionBackupState,
+)
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
 
@@ -33,7 +38,13 @@ def _create_v2_session_dir(storage: SessionStorage, cwd: str, session_id: str) -
         session_dir,
         SessionMetadata(session_id=session_id, cwd=cwd, layout_version=SESSION_LAYOUT_VERSION_V2),
     )
+    SessionBackupService(storage).initialize_session(cwd, session_id)
     return session_dir
+
+
+def _seed_shared_state(local_dir: Path, shared_dir: Path) -> None:
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    (shared_dir / ".backup-state.json").write_bytes((local_dir / ".backup-state.json").read_bytes())
 
 
 def test_backup_disabled_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -142,7 +153,6 @@ def test_backup_mirrors_session_and_excludes_local_markers(monkeypatch: pytest.M
     (session_dir / "session.jsonl").write_text("one\n", encoding="utf-8")
     (session_dir / "permission-audit.jsonl").write_text("audit\n", encoding="utf-8")
     (session_dir / "usage.jsonl").write_text("usage\n", encoding="utf-8")
-    (session_dir / ".backup-state.json").write_text("local\n", encoding="utf-8")
     (session_dir / ".backup-lock").write_text("lock\n", encoding="utf-8")
     (session_dir / ".session.jsonl.lock").write_text("session lock\n", encoding="utf-8")
     (session_dir / ".permission-audit.jsonl.lock").write_text("audit lock\n", encoding="utf-8")
@@ -160,7 +170,8 @@ def test_backup_mirrors_session_and_excludes_local_markers(monkeypatch: pytest.M
     assert (mirror / "session.jsonl").read_text(encoding="utf-8") == "one\n"
     assert (mirror / "permission-audit.jsonl").read_text(encoding="utf-8") == "audit\n"
     assert (mirror / "usage.jsonl").read_text(encoding="utf-8") == "usage\n"
-    assert not (mirror / ".backup-state.json").exists()
+    shared_state = SessionBackupState.from_dict(_read_backup_marker(mirror), shared=True)
+    assert shared_state.generation == 1
     assert not (mirror / ".backup-lock").exists()
     assert not (mirror / ".session.jsonl.lock").exists()
     assert not (mirror / ".permission-audit.jsonl.lock").exists()
@@ -199,7 +210,7 @@ def test_restore_session_copies_backup_only_v2_session(monkeypatch: pytest.Monke
     assert (restored_session_dir / "a2a" / "context.json").read_text(encoding="utf-8") == '{"context_id":"ctx-1"}\n'
 
 
-def test_restore_session_does_not_overwrite_existing_config_session(
+def test_reconcile_session_restores_newer_shared_generation_over_existing_local_session(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -210,17 +221,510 @@ def test_restore_session_does_not_overwrite_existing_config_session(
     session_id = "restore-session"
     storage = SessionStorage(projects_dir=config_projects)
     local_session_dir = _create_v2_session_dir(storage, cwd, session_id)
-    (local_session_dir / "session.jsonl").write_text("local\n", encoding="utf-8")
+    (local_session_dir / "session.jsonl").write_text("local-v0\n", encoding="utf-8")
     backup_storage = SessionStorage(projects_dir=backup_root / "projects")
     backup_session_dir = _create_v2_session_dir(backup_storage, cwd, session_id)
-    (backup_session_dir / "session.jsonl").write_text("backup\n", encoding="utf-8")
+    (backup_session_dir / "session.jsonl").write_text("backup-v1\n", encoding="utf-8")
+    shared_state = SessionBackupState.bootstrap(session_id, writer_id="writer").committed_next(
+        commit_id="commit-1",
+        reason="normal_turn_end",
+        writer_id="writer",
+        proofs={},
+    )
+    (backup_session_dir / ".backup-state.json").write_text(json.dumps(shared_state.to_dict()), encoding="utf-8")
 
-    result = SessionBackupService(session_storage=storage, retry_delays=()).restore_session(cwd, session_id)
+    result = SessionBackupService(session_storage=storage, retry_delays=()).reconcile_session(cwd, session_id)
 
     assert result.enabled is True
-    assert result.restored is False
-    assert result.destination == local_session_dir
-    assert (local_session_dir / "session.jsonl").read_text(encoding="utf-8") == "local\n"
+    assert result.action == "restored"
+    assert result.payload_changed is True
+    assert result.state == shared_state
+    assert (local_session_dir / "session.jsonl").read_text(encoding="utf-8") == "backup-v1\n"
+
+
+def test_backup_blocks_stale_writer_before_mirror(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    cwd = "/repo"
+    session_id = "s1"
+    first_storage = SessionStorage(projects_dir=tmp_path / "sandbox-1" / "projects")
+    second_storage = SessionStorage(projects_dir=tmp_path / "sandbox-2" / "projects")
+    first_dir = _create_v2_session_dir(first_storage, cwd, session_id)
+    (first_dir / "session.jsonl").write_text("generation-1\n", encoding="utf-8")
+    first_service = SessionBackupService(first_storage, retry_delays=())
+    first_service.backup_session(cwd, session_id, reason=BackupReason.INPUT_REQUIRED, critical=True)
+    stale_state = (first_dir / ".backup-state.json").read_bytes()
+
+    second_service = SessionBackupService(second_storage, retry_delays=())
+    second_service.reconcile_session(cwd, session_id)
+    second_dir = second_storage.session_dir(cwd, session_id)
+    (second_dir / "session.jsonl").write_text("generation-2\n", encoding="utf-8")
+    second_service.backup_session(cwd, session_id, reason=BackupReason.HANDOFF_READY, critical=True)
+
+    (first_dir / ".backup-state.json").write_bytes(stale_state)
+    (first_dir / "session.jsonl").write_text("stale-write\n", encoding="utf-8")
+    mirror_calls: list[tuple[Path, Path]] = []
+    monkeypatch.setattr(
+        first_service, "_mirror", lambda source, destination: mirror_calls.append((source, destination))
+    )
+
+    with pytest.raises(SessionBackupBlocked, match="generation") as exc_info:
+        first_service.backup_session(cwd, session_id, reason=BackupReason.NORMAL_TURN_END, critical=True)
+
+    assert isinstance(exc_info.value.__context__, type(None))
+    assert mirror_calls == []
+    shared_dir = backup_root / "projects" / first_dir.parent.name / session_id
+    assert (shared_dir / "session.jsonl").read_text(encoding="utf-8") == "generation-2\n"
+
+
+def test_backup_rejects_nonempty_shared_destination_without_state_before_mirror(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("local\n", encoding="utf-8")
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    shared_dir.mkdir(parents=True)
+    (shared_dir / "interrupted-payload.jsonl").write_text("unknown\n", encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=())
+    mirror_calls: list[tuple[Path, Path]] = []
+    monkeypatch.setattr(service, "_mirror", lambda source, destination: mirror_calls.append((source, destination)))
+
+    with pytest.raises(SessionBackupBlocked, match="missing backup state"):
+        service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
+
+    assert mirror_calls == []
+    assert (shared_dir / "interrupted-payload.jsonl").read_text(encoding="utf-8") == "unknown\n"
+
+
+def test_reconcile_repairs_equal_lineage_from_authoritative_shared_proof_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    cwd = "/repo"
+    session_id = "s1"
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    local_dir = _create_v2_session_dir(storage, cwd, session_id)
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    shared_dir = _create_v2_session_dir(backup_storage, cwd, session_id)
+    proof = BackupPublicationProof("event-handoff", "pipeline_handoff_ready", 9)
+    shared_state = SessionBackupState.bootstrap(session_id, writer_id="writer").committed_next(
+        commit_id="commit-1",
+        reason="handoff_ready",
+        writer_id="writer",
+        proofs={NORMAL_HANDOFF_PROOF_KEY: proof},
+    )
+    local_payload = shared_state.to_dict()
+    local_payload["publication_proofs"] = {}
+    (local_dir / ".backup-state.json").write_text(json.dumps(local_payload), encoding="utf-8")
+    (shared_dir / ".backup-state.json").write_text(json.dumps(shared_state.to_dict()), encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=())
+    monkeypatch.setattr(service, "_mirror", lambda *_args: pytest.fail("metadata repair must not mirror payload"))
+
+    result = service.reconcile_session(cwd, session_id)
+
+    assert result.action == "metadata_repaired"
+    assert result.payload_changed is False
+    assert result.state == shared_state
+    assert SessionBackupState.from_dict(_read_backup_marker(local_dir)) == shared_state
+
+    next_result = SessionBackupService(storage, retry_delays=()).backup_session(
+        cwd,
+        session_id,
+        reason=BackupReason.NORMAL_TURN_END,
+        critical=True,
+    )
+    committed = SessionBackupState.from_dict(_read_backup_marker(shared_dir))
+    assert next_result.generation == 2
+    assert committed.publication_proofs[NORMAL_HANDOFF_PROOF_KEY] == proof
+
+
+def test_mirror_preserves_destination_control_state_byte_for_byte(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    (source / "payload.txt").write_text("fresh\n", encoding="utf-8")
+    destination_state = SessionBackupState.bootstrap("s1", writer_id="shared-writer").to_dict()
+    state_bytes = json.dumps(destination_state, separators=(",", ":"), sort_keys=True).encode()
+    (destination / ".backup-state.json").write_bytes(state_bytes)
+
+    SessionBackupService()._mirror(source, destination)
+
+    assert (destination / ".backup-state.json").read_bytes() == state_bytes
+    assert (destination / "payload.txt").read_text(encoding="utf-8") == "fresh\n"
+
+
+def test_reconcile_promotes_validated_attempted_handoff_proof(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("before\n", encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=())
+    service.backup_session("/repo", "s1", reason=BackupReason.INPUT_REQUIRED, critical=True)
+    (session_dir / "session.jsonl").write_text("handoff\n", encoding="utf-8")
+    proof = BackupPublicationProof("event-handoff", "pipeline_handoff_ready", 9)
+    original_mirror = service._mirror
+    monkeypatch.setattr(service, "_mirror", lambda *_args: (_ for _ in ()).throw(OSError("mirror failed")))
+
+    with pytest.raises(SessionBackupBlocked, match="mirror failed"):
+        service.backup_session(
+            "/repo",
+            "s1",
+            reason=BackupReason.HANDOFF_READY,
+            critical=True,
+            publication_proofs={NORMAL_HANDOFF_PROOF_KEY: proof},
+        )
+
+    failed = SessionBackupState.from_dict(_read_backup_marker(session_dir))
+    assert failed.status == "failed"
+    assert failed.generation == 1
+    assert failed.attempt_publication_proofs[NORMAL_HANDOFF_PROOF_KEY] == proof
+    monkeypatch.setattr(service, "_mirror", original_mirror)
+
+    result = service.reconcile_session(
+        "/repo",
+        "s1",
+        attempted_proof_validator=lambda key, candidate: key == NORMAL_HANDOFF_PROOF_KEY and candidate == proof,
+    )
+
+    assert result.action == "repaired"
+    assert result.state is not None and result.state.generation == 2
+    assert result.state.publication_proofs[NORMAL_HANDOFF_PROOF_KEY] == proof
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    assert SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True) == result.state
+
+
+def test_reconcile_failed_local_uses_authoritative_shared_publication_proofs(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    cwd = "/repo"
+    session_id = "s1"
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    local_dir = _create_v2_session_dir(storage, cwd, session_id)
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    shared_dir = _create_v2_session_dir(backup_storage, cwd, session_id)
+    shared_proof = BackupPublicationProof("shared-handoff", "pipeline_handoff_ready", 9)
+    stale_local_proof = BackupPublicationProof("stale-handoff", "pipeline_handoff_ready", 7)
+    shared_state = SessionBackupState.bootstrap(session_id, writer_id="writer").committed_next(
+        commit_id="commit-1",
+        reason="handoff_ready",
+        writer_id="writer",
+        proofs={NORMAL_HANDOFF_PROOF_KEY: shared_proof},
+    )
+    stale_payload = shared_state.to_dict()
+    stale_payload["publication_proofs"] = {
+        NORMAL_HANDOFF_PROOF_KEY: stale_local_proof.to_dict(),
+    }
+    stale_local = SessionBackupState.from_dict(stale_payload).failed_attempt(
+        reason="normal_turn_end",
+        writer_id="local-writer",
+        attempt_commit_id="commit-2",
+        attempted_proofs={},
+        error="local state write failed",
+        attempt=1,
+        retry_count=0,
+        exhausted=True,
+    )
+    (local_dir / ".backup-state.json").write_text(json.dumps(stale_local.to_dict()), encoding="utf-8")
+    (shared_dir / ".backup-state.json").write_text(json.dumps(shared_state.to_dict()), encoding="utf-8")
+
+    result = SessionBackupService(storage, retry_delays=()).reconcile_session(cwd, session_id)
+
+    assert result.action == "repaired"
+    assert result.state is not None and result.state.generation == 2
+    assert result.state.publication_proofs == {NORMAL_HANDOFF_PROOF_KEY: shared_proof}
+    assert SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True) == result.state
+
+
+def test_reconcile_failed_local_does_not_downgrade_authoritative_shared_proof(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    cwd = "/repo"
+    session_id = "s1"
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    local_dir = _create_v2_session_dir(storage, cwd, session_id)
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    shared_dir = _create_v2_session_dir(backup_storage, cwd, session_id)
+    shared_proof = BackupPublicationProof("shared-new", "pipeline_handoff_ready", 9)
+    attempted_proof = BackupPublicationProof("local-old", "pipeline_handoff_ready", 7)
+    shared_state = SessionBackupState.bootstrap(session_id, writer_id="writer").committed_next(
+        commit_id="commit-1",
+        reason="handoff_ready",
+        writer_id="writer",
+        proofs={NORMAL_HANDOFF_PROOF_KEY: shared_proof},
+    )
+    failed_local = shared_state.failed_attempt(
+        reason="handoff_ready",
+        writer_id="local-writer",
+        attempt_commit_id="commit-2",
+        attempted_proofs={NORMAL_HANDOFF_PROOF_KEY: attempted_proof},
+        error="mirror failed",
+        attempt=1,
+        retry_count=0,
+        exhausted=True,
+    )
+    (local_dir / ".backup-state.json").write_text(json.dumps(failed_local.to_dict()), encoding="utf-8")
+    (shared_dir / ".backup-state.json").write_text(json.dumps(shared_state.to_dict()), encoding="utf-8")
+
+    result = SessionBackupService(storage, retry_delays=()).reconcile_session(
+        cwd,
+        session_id,
+        attempted_proof_validator=lambda *_args: True,
+    )
+
+    assert result.action == "repaired"
+    assert result.state is not None and result.state.generation == 2
+    assert result.state.publication_proofs == {NORMAL_HANDOFF_PROOF_KEY: shared_proof}
+    assert SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True) == result.state
+
+
+def test_reconcile_failed_local_rejects_conflicting_equal_sequence_before_mirror(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    cwd = "/repo"
+    session_id = "s1"
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    local_dir = _create_v2_session_dir(storage, cwd, session_id)
+    backup_storage = SessionStorage(projects_dir=backup_root / "projects")
+    shared_dir = _create_v2_session_dir(backup_storage, cwd, session_id)
+    (local_dir / "session.jsonl").write_text("local\n", encoding="utf-8")
+    (shared_dir / "session.jsonl").write_text("shared\n", encoding="utf-8")
+    shared_proof = BackupPublicationProof("shared-event", "pipeline_handoff_ready", 9)
+    conflicting_proof = BackupPublicationProof("local-event", "pipeline_handoff_ready", 9)
+    shared_state = SessionBackupState.bootstrap(session_id, writer_id="writer").committed_next(
+        commit_id="commit-1",
+        reason="handoff_ready",
+        writer_id="writer",
+        proofs={NORMAL_HANDOFF_PROOF_KEY: shared_proof},
+    )
+    failed_local = shared_state.failed_attempt(
+        reason="handoff_ready",
+        writer_id="local-writer",
+        attempt_commit_id="commit-2",
+        attempted_proofs={NORMAL_HANDOFF_PROOF_KEY: conflicting_proof},
+        error="mirror failed",
+        attempt=1,
+        retry_count=0,
+        exhausted=True,
+    )
+    (local_dir / ".backup-state.json").write_text(json.dumps(failed_local.to_dict()), encoding="utf-8")
+    (shared_dir / ".backup-state.json").write_text(json.dumps(shared_state.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SessionBackupError, match="conflicts with shared proof"):
+        SessionBackupService(storage, retry_delays=()).reconcile_session(
+            cwd,
+            session_id,
+            attempted_proof_validator=lambda *_args: True,
+        )
+
+    assert (shared_dir / "session.jsonl").read_text(encoding="utf-8") == "shared\n"
+    assert SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True) == shared_state
+
+
+def test_backup_retry_after_shared_commit_does_not_mirror_twice(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("payload\n", encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=(0,))
+    original_mirror = service._mirror
+    original_write_marker = service._write_marker
+    mirror_calls = 0
+    succeeded_marker_calls = 0
+
+    def recording_mirror(source: Path, destination: Path):
+        nonlocal mirror_calls
+        mirror_calls += 1
+        return original_mirror(source, destination)
+
+    def fail_first_succeeded_marker(*args, status: str, **kwargs):
+        nonlocal succeeded_marker_calls
+        if status == "succeeded":
+            succeeded_marker_calls += 1
+            if succeeded_marker_calls == 1:
+                raise OSError("local state write failed")
+        return original_write_marker(*args, status=status, **kwargs)
+
+    monkeypatch.setattr(service, "_mirror", recording_mirror)
+    monkeypatch.setattr(service, "_write_marker", fail_first_succeeded_marker)
+
+    result = service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
+
+    assert result.succeeded is True
+    assert result.retry_count == 1
+    assert result.shared_committed is True
+    assert mirror_calls == 1
+    assert service.read_local_state("/repo", "s1").generation == 1
+
+
+def test_backup_does_not_downgrade_authoritative_shared_publication_proof(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    service = SessionBackupService(storage, retry_delays=())
+    authoritative = BackupPublicationProof("newer", "pipeline_handoff_ready", 9)
+    older = BackupPublicationProof("older", "pipeline_handoff_ready", 7)
+    service.backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.HANDOFF_READY,
+        critical=True,
+        publication_proofs={NORMAL_HANDOFF_PROOF_KEY: authoritative},
+    )
+
+    result = service.backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.NORMAL_TURN_END,
+        critical=True,
+        publication_proofs={NORMAL_HANDOFF_PROOF_KEY: older},
+    )
+
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    committed = SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True)
+    assert result.generation == 2
+    assert committed.publication_proofs == {NORMAL_HANDOFF_PROOF_KEY: authoritative}
+
+
+def test_backup_rejects_conflicting_equal_sequence_proof_before_mirror(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("generation-1\n", encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=())
+    authoritative = BackupPublicationProof("authoritative", "pipeline_handoff_ready", 9)
+    conflicting = BackupPublicationProof("conflicting", "pipeline_handoff_ready", 9)
+    service.backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.HANDOFF_READY,
+        critical=True,
+        publication_proofs={NORMAL_HANDOFF_PROOF_KEY: authoritative},
+    )
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    shared_state = SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True)
+    (session_dir / "session.jsonl").write_text("generation-2\n", encoding="utf-8")
+
+    with pytest.raises(SessionBackupBlocked, match="conflicts with shared proof"):
+        service.backup_session(
+            "/repo",
+            "s1",
+            reason=BackupReason.HANDOFF_READY,
+            critical=True,
+            publication_proofs={NORMAL_HANDOFF_PROOF_KEY: conflicting},
+        )
+
+    assert (shared_dir / "session.jsonl").read_text(encoding="utf-8") == "generation-1\n"
+    assert SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True) == shared_state
+
+
+def test_bootstrap_backup_retries_after_partial_precommit_mirror(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("payload\n", encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=(0,))
+    original_mirror = service._mirror
+    mirror_calls = 0
+
+    def fail_after_first_mirror(source: Path, destination: Path):
+        nonlocal mirror_calls
+        mirror_calls += 1
+        result = original_mirror(source, destination)
+        if mirror_calls == 1:
+            raise OSError("transient precommit failure")
+        return result
+
+    monkeypatch.setattr(service, "_mirror", fail_after_first_mirror)
+
+    result = service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
+
+    assert result.generation == 1
+    assert result.retry_count == 1
+    assert mirror_calls == 2
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    assert SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True).generation == 1
+
+
+def test_bootstrap_retry_rejects_payload_appearing_after_mirror_failed_before_write(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("local\n", encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=(0,))
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    original_mirror = service._mirror
+    mirror_calls = 0
+
+    def fail_before_write(source: Path, destination: Path):
+        nonlocal mirror_calls
+        mirror_calls += 1
+        if mirror_calls == 1:
+            raise OSError("failed before write")
+        return original_mirror(source, destination)
+
+    def inject_unversioned_payload(_delay: float) -> None:
+        shared_dir.mkdir(parents=True, exist_ok=True)
+        (shared_dir / "foreign.jsonl").write_text("foreign\n", encoding="utf-8")
+
+    monkeypatch.setattr(service, "_mirror", fail_before_write)
+    monkeypatch.setattr("iac_code.services.session_backup.time.sleep", inject_unversioned_payload)
+
+    with pytest.raises(SessionBackupBlocked, match="missing backup state"):
+        service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
+
+    assert mirror_calls == 1
+    assert (shared_dir / "foreign.jsonl").read_text(encoding="utf-8") == "foreign\n"
+
+
+def test_existing_generation_backup_retries_after_partial_precommit_mirror(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = _create_v2_session_dir(storage, "/repo", "s1")
+    (session_dir / "session.jsonl").write_text("generation-1\n", encoding="utf-8")
+    SessionBackupService(storage, retry_delays=()).backup_session(
+        "/repo",
+        "s1",
+        reason=BackupReason.INPUT_REQUIRED,
+        critical=True,
+    )
+    (session_dir / "session.jsonl").write_text("generation-2\n", encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=(0,))
+    original_mirror = service._mirror
+    mirror_calls = 0
+
+    def fail_after_first_mirror(source: Path, destination: Path):
+        nonlocal mirror_calls
+        mirror_calls += 1
+        result = original_mirror(source, destination)
+        if mirror_calls == 1:
+            raise OSError("transient precommit failure")
+        return result
+
+    monkeypatch.setattr(service, "_mirror", fail_after_first_mirror)
+
+    result = service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
+
+    assert result.generation == 2
+    assert result.retry_count == 1
+    assert mirror_calls == 2
+    shared_dir = backup_root / "projects" / session_dir.parent.name / "s1"
+    shared_state = SessionBackupState.from_dict(_read_backup_marker(shared_dir), shared=True)
+    assert shared_state.generation == 2
+    assert (shared_dir / "session.jsonl").read_text(encoding="utf-8") == "generation-2\n"
 
 
 def test_backup_deletes_stale_mirror_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -231,6 +735,7 @@ def test_backup_deletes_stale_mirror_files(monkeypatch: pytest.MonkeyPatch, tmp_
     (session_dir / "session.jsonl").write_text("fresh\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     (mirror / "stale.txt").write_text("old\n", encoding="utf-8")
 
     SessionBackupService(session_storage=storage).backup_session(
@@ -252,6 +757,7 @@ def test_backup_deletes_stale_symlink_to_directory(monkeypatch: pytest.MonkeyPat
     (session_dir / "session.jsonl").write_text("fresh\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
     stale_link = mirror / "stale-link"
@@ -544,6 +1050,7 @@ def test_backup_deletes_stale_broken_symlink(monkeypatch: pytest.MonkeyPatch, tm
     (session_dir / "session.jsonl").write_text("fresh\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     stale_link = mirror / "broken-link"
     _symlink_or_skip(tmp_path / "missing-target", stale_link)
 
@@ -568,6 +1075,7 @@ def test_backup_deletes_stale_non_regular_destination_entry(monkeypatch: pytest.
     (session_dir / "session.jsonl").write_text("fresh\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     stale_fifo = mirror / "stale.pipe"
     try:
         os.mkfifo(stale_fifo)
@@ -596,6 +1104,7 @@ def test_backup_skips_source_symlink_to_external_file(monkeypatch: pytest.Monkey
     _symlink_or_skip(external_file, session_dir / "linked-secret.txt")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     (mirror / "linked-secret.txt").write_text("stale\n", encoding="utf-8")
 
     SessionBackupService(session_storage=storage).backup_session(
@@ -720,8 +1229,8 @@ def test_backup_rejects_reparse_point_source_ancestry(
 
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     assert not (mirror / "session.jsonl").exists()
-    assert not (session_dir / ".backup-state.json").exists()
-    assert not (session_dir / ".backup-lock").exists()
+    assert _read_backup_marker(session_dir)["generation"] == 0
+    assert (session_dir / ".backup-lock").is_file()
 
 
 def test_backup_skips_non_regular_source_entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -739,6 +1248,7 @@ def test_backup_skips_non_regular_source_entry(monkeypatch: pytest.MonkeyPatch, 
         pytest.skip(f"fifo creation unsupported: {exc}")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     (mirror / "event.pipe").write_text("stale\n", encoding="utf-8")
 
     SessionBackupService(session_storage=storage).backup_session(
@@ -828,6 +1338,7 @@ def test_backup_replaces_stale_file_with_source_directory(monkeypatch: pytest.Mo
     (session_dir / "foo" / "child.txt").write_text("child\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     (mirror / "foo").write_text("stale file\n", encoding="utf-8")
 
     SessionBackupService(session_storage=storage).backup_session(
@@ -841,7 +1352,7 @@ def test_backup_replaces_stale_file_with_source_directory(monkeypatch: pytest.Mo
     assert (mirror / "foo" / "child.txt").read_text(encoding="utf-8") == "child\n"
 
 
-def test_backup_replaces_stale_root_file_with_session_directory(
+def test_backup_rejects_stale_root_file_without_backup_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -854,15 +1365,16 @@ def test_backup_replaces_stale_root_file_with_session_directory(
     mirror.parent.mkdir(parents=True)
     mirror.write_text("stale file\n", encoding="utf-8")
 
-    SessionBackupService(session_storage=storage).backup_session(
-        "/repo",
-        "s1",
-        reason=BackupReason.TERMINAL,
-        critical=True,
-    )
+    with pytest.raises(SessionBackupBlocked):
+        SessionBackupService(session_storage=storage).backup_session(
+            "/repo",
+            "s1",
+            reason=BackupReason.TERMINAL,
+            critical=True,
+        )
 
-    assert mirror.is_dir()
-    assert (mirror / "session.jsonl").read_text(encoding="utf-8") == "fresh\n"
+    assert mirror.is_file()
+    assert mirror.read_text(encoding="utf-8") == "stale file\n"
 
 
 def test_backup_replaces_stale_directory_with_source_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -873,6 +1385,7 @@ def test_backup_replaces_stale_directory_with_source_file(monkeypatch: pytest.Mo
     (session_dir / "foo").write_text("fresh file\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     (mirror / "foo").mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     (mirror / "foo" / "old.txt").write_text("old\n", encoding="utf-8")
 
     SessionBackupService(session_storage=storage).backup_session(
@@ -897,6 +1410,7 @@ def test_backup_replaces_stale_fifo_with_source_file(monkeypatch: pytest.MonkeyP
     source_file.write_text("", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     mirror_fifo = mirror / "foo"
     try:
         os.mkfifo(mirror_fifo)
@@ -1184,6 +1698,7 @@ def test_backup_fsyncs_structural_metadata_changes(monkeypatch: pytest.MonkeyPat
     (session_dir / "dir_conflict").write_text("fresh file\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     (mirror / "stale.txt").write_text("stale\n", encoding="utf-8")
     (mirror / "dir_conflict").mkdir()
     (mirror / "dir_conflict" / "old.txt").write_text("old\n", encoding="utf-8")
@@ -1285,6 +1800,7 @@ def test_critical_backup_lock_failure_retries_then_blocks(
     storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
     session_dir = _create_v2_session_dir(storage, "/repo", "s1")
     (session_dir / "session.jsonl").write_text("one\n", encoding="utf-8")
+    (session_dir / ".backup-lock").unlink()
     (session_dir / ".backup-lock").mkdir()
     sleep_calls: list[float] = []
     monkeypatch.setattr("iac_code.services.session_backup.time.sleep", sleep_calls.append)
@@ -1339,6 +1855,7 @@ def test_non_critical_backup_lock_failure_returns_enabled_result(
     storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
     session_dir = _create_v2_session_dir(storage, "/repo", "s1")
     (session_dir / "session.jsonl").write_text("one\n", encoding="utf-8")
+    (session_dir / ".backup-lock").unlink()
     (session_dir / ".backup-lock").mkdir()
 
     result = SessionBackupService(session_storage=storage, retry_delays=(0, 0)).backup_session(
@@ -1392,6 +1909,29 @@ def test_non_critical_backup_root_failure_returns_enabled_result(
     assert marker["attempt"] == 3
     assert marker["exhausted"] is True
     assert "backup root failed" in str(marker["error"])
+
+
+def test_first_backup_root_failure_initializes_failed_generation_zero_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    storage = SessionStorage(projects_dir=tmp_path / "config" / "projects")
+    session_dir = storage.session_dir("/repo", "s1")
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id="s1", cwd="/repo", layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    service = SessionBackupService(storage, retry_delays=())
+    monkeypatch.setattr(service, "_backup_root", lambda: (_ for _ in ()).throw(OSError("root unavailable")))
+
+    result = service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=False)
+
+    state = SessionBackupState.from_dict(_read_backup_marker(session_dir))
+    assert result.succeeded is False
+    assert state.status == "failed"
+    assert state.generation == 0
+    assert state.attempt_commit_id is not None
 
 
 def test_missing_unmarked_source_blocks_when_critical_and_does_not_create_dirs(
@@ -1591,6 +2131,7 @@ def test_backup_deletes_stale_reparse_point_like_destination_entry(
     (session_dir / "session.jsonl").write_text("fresh\n", encoding="utf-8")
     mirror = backup_root / "projects" / session_dir.parent.name / "s1"
     mirror.mkdir(parents=True)
+    _seed_shared_state(session_dir, mirror)
     stale_reparse = mirror / "stale-junction"
     stale_reparse.mkdir()
     service = SessionBackupService(session_storage=storage)

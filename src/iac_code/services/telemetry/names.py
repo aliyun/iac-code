@@ -192,6 +192,7 @@ class Events:
     PIPELINE_USER_INPUT_REQUIRED = "iac.pipeline.user_input.required"
     PIPELINE_USER_INPUT_RECEIVED = "iac.pipeline.user_input.received"
     PIPELINE_SELECTION_MADE = "iac.pipeline.selection.made"
+    PIPELINE_SELECTION_REJECTED = "iac.pipeline.selection.rejected"
     PIPELINE_CANDIDATES_EVALUATED = "iac.pipeline.candidates.evaluated"
     PIPELINE_FUNNEL_STEP = "iac.pipeline.funnel.step"
 
@@ -227,6 +228,7 @@ class Metrics:
     PIPELINE_SUB_STEP_DURATION = "iac.pipeline.sub_step.duration"
     PIPELINE_CANDIDATE_CANCELLED_COUNT = "iac.pipeline.candidate.cancelled.count"
     PIPELINE_USER_INPUT_WAIT_DURATION = "iac.pipeline.user_input.wait.duration"
+    PIPELINE_SELECTION_REJECTED_COUNT = "iac.pipeline.selection.rejected.count"
     PIPELINE_CANDIDATE_COUNT = "iac.pipeline.candidate.count"
     PIPELINE_CANDIDATE_SUCCESS_COUNT = "iac.pipeline.candidate.success.count"
     PIPELINE_CANDIDATE_FAILED_COUNT = "iac.pipeline.candidate.failed.count"

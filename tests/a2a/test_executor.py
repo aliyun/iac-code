@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,14 +12,14 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.backup import backup_session_async
-from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.a2a.executor import IacCodeA2AExecutor, _normal_handoff_has_backup_ack
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
-from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import ImageBlock, Message, TextBlock
 from iac_code.commands.registry import CommandRegistry, PromptCommand
@@ -32,7 +33,14 @@ from iac_code.mcp.types import (
     ScopedMCPServerConfig,
 )
 from iac_code.pipeline.engine.user_input import PipelineUserInput
-from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
+from iac_code.services.session_backup import (
+    BackupReason,
+    BackupResult,
+    SessionBackupBlocked,
+    SessionBackupService,
+    SessionReconcileResult,
+)
+from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
@@ -58,6 +66,55 @@ def _ensure_v2_session(cwd: str, session_id: str) -> Path:
     return SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
 
 
+def _committed_normal_handoff_events(
+    *,
+    context_id: str,
+    task_id: str,
+    summary: str,
+    extra_data: dict | None = None,
+) -> tuple[dict, dict]:
+    handoff_data = {
+        "action": "switch_to_normal",
+        "targetMode": "normal",
+        "summary": summary,
+        **(extra_data or {}),
+    }
+    handoff = {
+        "schemaVersion": "1.0",
+        "eventId": "{}-handoff".format(task_id),
+        "sequence": 1,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "eventType": "pipeline_handoff_ready",
+        "scope": "pipeline",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "completed",
+        "visibility": "committed",
+        "data": handoff_data,
+    }
+    backup_ack = {
+        "schemaVersion": "1.0",
+        "eventId": "{}-backup-committed".format(task_id),
+        "sequence": 2,
+        "createdAt": "2026-01-01T00:00:01Z",
+        "eventType": "backup_committed",
+        "scope": "pipeline",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "completed",
+        "data": {
+            "committedEventId": handoff["eventId"],
+            "committedSequence": handoff["sequence"],
+            "committedEventType": handoff["eventType"],
+        },
+    }
+    return handoff, backup_ack
+
+
 class FailingBackupService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, BackupReason, bool]] = []
@@ -65,6 +122,497 @@ class FailingBackupService:
     def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
         self.calls.append((cwd, session_id, reason, critical))
         raise RuntimeError("backup destination unavailable")
+
+
+@pytest.mark.asyncio
+async def test_pipeline_request_reconciles_before_route_and_task_recovery(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(cwd)))
+    calls: list[str] = []
+
+    class RecordingBackupService:
+        def reconcile_session(self, *_args, **_kwargs) -> SessionReconcileResult:
+            calls.append("reconcile")
+            return SessionReconcileResult(enabled=True, action="current")
+
+    class RecordingPipelineExecutor:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def execute(self, **_kwargs) -> None:
+            calls.append("pipeline")
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=RecordingBackupService(),
+    )
+
+    async def route(**_kwargs) -> bool:
+        calls.append("route")
+        return False
+
+    async def recover(**_kwargs) -> None:
+        calls.append("recover-task")
+        return None
+
+    monkeypatch.setattr(executor, "_should_route_pipeline_handoff_to_normal", route)
+    monkeypatch.setattr(executor, "_recoverable_pipeline_task_id_for_context", recover)
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", RecordingPipelineExecutor)
+
+    await executor.execute(
+        FakeRequestContext(task_id="", context_id="ctx-1", text="deploy", metadata={"iac_code": {"cwd": str(cwd)}}),
+        FakeEventQueue(),
+    )
+
+    assert calls[:3] == ["reconcile", "route", "recover-task"]
+    assert await store.context_reconciliation_is_blocked("ctx-1") is False
+
+
+@pytest.mark.asyncio
+async def test_pipeline_request_waits_for_active_execution_then_reconciles(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(cwd)))
+    calls: list[str] = []
+
+    class RecordingBackupService:
+        def reconcile_session(self, *_args, **_kwargs) -> SessionReconcileResult:
+            calls.append("reconcile")
+            return SessionReconcileResult(enabled=True, action="current")
+
+    class RecordingPipelineExecutor:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def execute(self, **_kwargs) -> None:
+            calls.append("pipeline")
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    active_record = await store.get_or_create_task(task_id="task-active", context_id="ctx-1")
+    release_active = asyncio.Event()
+
+    async def hold_active_execution() -> None:
+        await release_active.wait()
+
+    active_execution = asyncio.create_task(hold_active_execution())
+    active_record.active_task = active_execution
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=RecordingBackupService(),
+    )
+
+    async def route_to_pipeline(**_kwargs) -> bool:
+        return False
+
+    monkeypatch.setattr(executor, "_should_route_pipeline_handoff_to_normal", route_to_pipeline)
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", RecordingPipelineExecutor)
+
+    request = asyncio.create_task(
+        executor.execute(
+            FakeRequestContext(
+                task_id="task-next",
+                context_id="ctx-1",
+                text="next",
+                metadata={"iac_code": {"cwd": str(cwd)}},
+            ),
+            FakeEventQueue(),
+        )
+    )
+    await asyncio.sleep(0)
+    calls_while_active = list(calls)
+    release_active.set()
+    await active_execution
+    await request
+
+    assert calls_while_active == []
+    assert calls == ["reconcile", "pipeline"]
+
+
+@pytest.mark.asyncio
+async def test_active_pipeline_followup_does_not_start_new_pipeline_after_owner_finishes(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(cwd)))
+    active_only_values: list[bool] = []
+
+    class RecordingPipelineExecutor:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def execute(self, **kwargs) -> bool:
+            active_only_values.append(bool(kwargs.get("active_followup_only")))
+            return False
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    release_active = asyncio.Event()
+
+    async def hold_active_execution() -> None:
+        await release_active.wait()
+
+    active_execution = asyncio.create_task(hold_active_execution())
+    task.active_task = active_execution
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    async def finish_before_route(**_kwargs) -> bool:
+        release_active.set()
+        await active_execution
+        return False
+
+    monkeypatch.setattr(executor, "_should_route_pipeline_handoff_to_normal", finish_before_route)
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", RecordingPipelineExecutor)
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            text="pause",
+            metadata={"iac_code": {"cwd": str(cwd)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert active_only_values == [True]
+
+
+@pytest.mark.asyncio
+async def test_stale_sandbox_reconciles_committed_handoff_before_routing(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    context_id = "ctx-cross-sandbox"
+    session_id = "session-cross-sandbox"
+    task_id = "task-pipeline"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+
+    sandbox_1_config = tmp_path / "sandbox-1"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(sandbox_1_config))
+    storage_1 = SessionStorage(projects_dir=sandbox_1_config / "projects")
+    storage_1.ensure_v2_session_dir_for_new_session(str(cwd), session_id)
+    session_1 = storage_1.session_dir(str(cwd), session_id)
+    (session_1 / "a2a").mkdir()
+    (session_1 / "a2a" / "context.json").write_text(
+        json.dumps(
+            A2AContextSnapshot(
+                context_id=context_id,
+                session_id=session_id,
+                cwd=str(cwd),
+                active_task_id=task_id,
+            ).__dict__
+        ),
+        encoding="utf-8",
+    )
+    service_1 = SessionBackupService(storage_1, retry_delays=())
+    service_1.initialize_session(str(cwd), session_id)
+    service_1.backup_session(str(cwd), session_id, reason=BackupReason.INPUT_REQUIRED, critical=True)
+
+    persistence = A2APersistenceStore(tmp_path / "a2a-persistence")
+    persistence.save_context(
+        A2AContextSnapshot(
+            context_id=context_id,
+            session_id=session_id,
+            cwd=str(cwd),
+            active_task_id=task_id,
+        )
+    )
+    stale_runtime = SimpleNamespace(closed=False)
+
+    async def close_stale_runtime() -> None:
+        stale_runtime.closed = True
+
+    stale_runtime.aclose = close_stale_runtime
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    stale_context = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: stale_runtime,
+    )
+    stale_context.active_task_id = task_id
+    store.mirror_context(stale_context)
+
+    sandbox_2_config = tmp_path / "sandbox-2"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(sandbox_2_config))
+    storage_2 = SessionStorage(projects_dir=sandbox_2_config / "projects")
+    service_2 = SessionBackupService(storage_2, retry_delays=())
+    service_2.reconcile_session(str(cwd), session_id)
+    handoff_data = {"action": "switch_to_normal", "targetMode": "normal", "summary": "handoff"}
+    pending_handoff = {
+        "schemaVersion": "1.0",
+        "eventId": "event-handoff-pending",
+        "sequence": 7,
+        "eventType": "pipeline_handoff_ready",
+        "scope": "pipeline",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "completed",
+        "visibility": "pending_backup",
+        "data": handoff_data,
+    }
+    handoff = {
+        "schemaVersion": "1.0",
+        "eventId": "event-handoff",
+        "sequence": 8,
+        "eventType": "pipeline_handoff_ready",
+        "scope": "pipeline",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "completed",
+        "visibility": "committed",
+        "data": handoff_data,
+    }
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending_handoff, durable=True)
+    journal.append(handoff, durable=True)
+    snapshot = reduce_pipeline_events([pending_handoff, handoff])
+    assert snapshot["normalHandoff"] is None
+    assert snapshot["pendingNormalHandoff"]["eventId"] == pending_handoff["eventId"]
+    A2APipelineSnapshotStore(pipeline_dir).save(snapshot)
+    service_2.backup_session(
+        str(cwd),
+        session_id,
+        reason=BackupReason.HANDOFF_READY,
+        critical=True,
+        publication_proofs={NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(handoff)},
+    )
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(sandbox_1_config))
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=service_1)
+
+    result = await executor._reconcile_session_before_route(context_id=context_id, cwd=str(cwd))
+
+    assert result is not None
+    assert result.action == "restored"
+    assert result.state is not None and result.state.generation == 2
+    assert stale_runtime.closed is True
+    assert store._contexts[context_id].active_task_id is None
+    restored_pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    restored_events = A2APipelineJournal(restored_pipeline_dir).read_all()
+    restored_snapshot = A2APipelineSnapshotStore(restored_pipeline_dir).load()
+    assert restored_events == [pending_handoff, handoff]
+    assert restored_snapshot is not None
+    assert restored_snapshot["normalHandoff"] is None
+    assert restored_snapshot["pendingNormalHandoff"]["eventId"] == pending_handoff["eventId"]
+    assert executor._normal_handoff_has_state_proof(cwd=str(cwd), session_id=session_id, state=result.state) is True
+    assert await executor._should_route_pipeline_handoff_to_normal(context_id=context_id, cwd=str(cwd)) is True
+
+
+@pytest.mark.asyncio
+async def test_current_generation_proof_clears_stale_active_task_and_runtime(monkeypatch, tmp_path) -> None:
+    backup_root = tmp_path / "backup"
+    config_dir = tmp_path / "sandbox"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    context_id = "ctx-current-handoff"
+    session_id = "session-current-handoff"
+    task_id = "task-pipeline"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    storage = SessionStorage(projects_dir=config_dir / "projects")
+    storage.ensure_v2_session_dir_for_new_session(str(cwd), session_id)
+    session_dir = storage.session_dir(str(cwd), session_id)
+    (session_dir / "a2a").mkdir()
+    context_snapshot = A2AContextSnapshot(
+        context_id=context_id,
+        session_id=session_id,
+        cwd=str(cwd),
+        active_task_id=task_id,
+    )
+    (session_dir / "a2a" / "context.json").write_text(json.dumps(context_snapshot.__dict__), encoding="utf-8")
+    service = SessionBackupService(storage, retry_delays=())
+    service.initialize_session(str(cwd), session_id)
+    handoff_data = {"action": "switch_to_normal", "targetMode": "normal", "summary": "handoff"}
+    pending_handoff = {
+        "schemaVersion": "1.0",
+        "eventId": "event-handoff-pending",
+        "sequence": 7,
+        "eventType": "pipeline_handoff_ready",
+        "scope": "pipeline",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "completed",
+        "visibility": "pending_backup",
+        "data": handoff_data,
+    }
+    committed_handoff = {**pending_handoff, "eventId": "event-handoff", "sequence": 8, "visibility": "committed"}
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending_handoff, durable=True)
+    journal.append(committed_handoff, durable=True)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_handoff, committed_handoff]))
+    service.backup_session(
+        str(cwd),
+        session_id,
+        reason=BackupReason.HANDOFF_READY,
+        critical=True,
+        publication_proofs={NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(committed_handoff)},
+    )
+
+    persistence = A2APersistenceStore(tmp_path / "a2a-persistence")
+    persistence.save_context(context_snapshot)
+    stale_runtime = SimpleNamespace(closed=False)
+
+    async def close_stale_runtime() -> None:
+        stale_runtime.closed = True
+
+    stale_runtime.aclose = close_stale_runtime
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: stale_runtime,
+    )
+    context.active_task_id = task_id
+    store.mirror_context(context)
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=service)
+
+    result = await executor._reconcile_session_before_route(context_id=context_id, cwd=str(cwd))
+
+    assert result is not None and result.action == "current"
+    assert result.payload_changed is False
+    assert stale_runtime.closed is True
+    assert store._contexts[context_id].active_task_id is None
+    assert persistence.load_context(context_id).active_task_id is None
+    assert await executor._should_route_pipeline_handoff_to_normal(context_id=context_id, cwd=str(cwd)) is True
+
+
+@pytest.mark.asyncio
+async def test_reconcile_rejects_running_context_task_before_filesystem_mutation(tmp_path) -> None:
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    calls: list[str] = []
+
+    class RecordingBackupService:
+        def reconcile_session(self, *_args, **_kwargs) -> SessionReconcileResult:
+            calls.append("reconcile")
+            return SessionReconcileResult(enabled=True, action="current")
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context = await store.get_or_create_context(
+        context_id="ctx-active",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: FakeRuntime(),
+    )
+    task = await store.get_or_create_task(task_id="task-active", context_id=context.context_id)
+    running = asyncio.create_task(asyncio.sleep(60))
+    task.active_task = running
+    context.active_task_id = task.task_id
+    store.mirror_context(context)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=RecordingBackupService(),
+    )
+
+    try:
+        with pytest.raises(ValueError, match="A2A context not found"):
+            await executor._reconcile_session_before_route(context_id=context.context_id, cwd=str(cwd))
+    finally:
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_rejects_context_execution_start_before_filesystem_mutation(tmp_path) -> None:
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    calls: list[str] = []
+
+    class RecordingBackupService:
+        def reconcile_session(self, *_args, **_kwargs) -> SessionReconcileResult:
+            calls.append("reconcile")
+            return SessionReconcileResult(enabled=True, action="current")
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context = await store.get_or_create_context(
+        context_id="ctx-starting",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: FakeRuntime(),
+    )
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=RecordingBackupService(),
+    )
+    token = await store.begin_context_execution(context.context_id)
+
+    try:
+        with pytest.raises(ValueError, match="A2A context not found"):
+            await executor._reconcile_session_before_route(context_id=context.context_id, cwd=str(cwd))
+    finally:
+        await store.end_context_execution(context.context_id, token)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_cancellation_holds_lock_until_background_thread_finishes(tmp_path) -> None:
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class BlockingBackupService:
+        def reconcile_session(self, *_args, **_kwargs) -> SessionReconcileResult:
+            started.set()
+            try:
+                release.wait(timeout=5)
+                return SessionReconcileResult(enabled=True, action="current")
+            finally:
+                finished.set()
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: FakeRuntime(),
+    )
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=BlockingBackupService(),
+    )
+    reconciliation = asyncio.create_task(
+        executor._reconcile_session_before_route(context_id=context.context_id, cwd=str(cwd))
+    )
+    while not started.is_set():
+        await asyncio.sleep(0)
+
+    reconciliation.cancel()
+    await asyncio.sleep(0.05)
+    lock_held_while_thread_runs = store.reconciliation_lock(context.context_id).locked()
+    lease_attempt = asyncio.create_task(store.begin_context_execution(context.context_id))
+    await asyncio.sleep(0)
+    lease_waited_for_thread = not lease_attempt.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await reconciliation
+    token = await lease_attempt
+    await store.end_context_execution(context.context_id, token)
+
+    assert finished.is_set()
+    assert lock_held_while_thread_runs is True
+    assert lease_waited_for_thread is True
 
 
 class SnapshotReadingBackupService:
@@ -271,6 +819,58 @@ async def test_backup_session_async_swallows_metrics_errors_for_noncritical_fail
 
     assert result is not None
     assert result.succeeded is False
+
+
+@pytest.mark.asyncio
+async def test_backup_session_async_cancellation_waits_for_worker() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class BlockingBackupService:
+        def backup_session(self, *_args, **_kwargs) -> BackupResult:
+            started.set()
+            try:
+                release.wait(timeout=5)
+                return BackupResult(enabled=True)
+            finally:
+                finished.set()
+
+    backup = asyncio.create_task(
+        backup_session_async(
+            BlockingBackupService(),
+            "/repo",
+            "session-1",
+            reason=BackupReason.NORMAL_TURN_END,
+            critical=False,
+        )
+    )
+    while not started.is_set():
+        await asyncio.sleep(0)
+
+    backup.cancel()
+    await asyncio.sleep(0.05)
+
+    assert backup.done() is False
+    assert finished.is_set() is False
+
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await backup
+    assert finished.is_set() is True
+
+
+def test_normal_handoff_without_committed_visibility_has_no_backup_ack() -> None:
+    assert (
+        _normal_handoff_has_backup_ack(
+            {
+                "action": "switch_to_normal",
+                "targetMode": "normal",
+            },
+            [],
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -587,6 +1187,13 @@ async def test_executor_restores_backup_only_session_for_persisted_context(
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
     backup_storage = SessionStorage(projects_dir=backup_root / "projects")
     backup_storage.save(cwd, session_id, [Message(role="user", content="from backup")], git_branch=None)
+    backup_session_dir = backup_storage.session_dir(cwd, session_id)
+    (backup_session_dir / "a2a").mkdir()
+    (backup_session_dir / "a2a" / "context.json").write_text(
+        json.dumps(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=cwd).__dict__),
+        encoding="utf-8",
+    )
+    SessionBackupService(backup_storage).initialize_session(cwd, session_id)
     persistence = A2APersistenceStore(tmp_path / "a2a-persistence")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=cwd))
     captured_options = {}
@@ -1532,7 +2139,18 @@ async def test_executor_delegates_pipeline_mode_after_validation(
         def __init__(self, **kwargs):
             calls.append(("init", kwargs))
 
-        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, pipeline_input):
+        async def execute(
+            self,
+            *,
+            context,
+            event_queue,
+            task,
+            task_id,
+            context_id,
+            cwd,
+            pipeline_input,
+            active_followup_only=False,
+        ):
             calls.append(
                 (
                     "execute",
@@ -1624,7 +2242,18 @@ async def test_executor_hydrates_running_pipeline_task_id_from_sidecar(
         def __init__(self, **kwargs):
             calls.append(("init", kwargs))
 
-        async def execute(self, *, context, event_queue, task, task_id, context_id, cwd, pipeline_input):
+        async def execute(
+            self,
+            *,
+            context,
+            event_queue,
+            task,
+            task_id,
+            context_id,
+            cwd,
+            pipeline_input,
+            active_followup_only=False,
+        ):
             calls.append(
                 (
                     "execute",
@@ -2243,15 +2872,14 @@ async def test_pipeline_handoff_context_routes_followup_to_normal_after_restart(
     persistence = A2APersistenceStore(tmp_path / "a2a")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
     _ensure_v2_session(str(cwd), session_id)
-    A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
-        {
-            "normalHandoff": {
-                "action": "switch_to_normal",
-                "targetMode": "normal",
-                "summary": "[Pipeline Handoff Context]\nPipeline: selling",
-            }
-        }
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    handoff_events = _committed_normal_handoff_events(
+        context_id=context_id,
+        task_id="task-pipeline",
+        summary="[Pipeline Handoff Context]\nPipeline: selling",
     )
+    A2APipelineJournal(pipeline_dir).append_many(handoff_events, durable=True)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(handoff_events))
     SessionStorage().append(str(cwd), session_id, Message(role="user", content="[Pipeline Handoff Context]"))
 
     loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
@@ -2414,9 +3042,14 @@ async def test_pipeline_handoff_image_request_passes_image_blocks_to_normal_agen
     persistence = A2APersistenceStore(tmp_path / "a2a")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
     _ensure_v2_session(str(cwd), session_id)
-    A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
-        {"normalHandoff": {"action": "switch_to_normal", "targetMode": "normal", "summary": "handoff"}}
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    handoff_events = _committed_normal_handoff_events(
+        context_id=context_id,
+        task_id="task-pipeline",
+        summary="handoff",
     )
+    A2APipelineJournal(pipeline_dir).append_many(handoff_events, durable=True)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(handoff_events))
     SessionStorage().append(str(cwd), session_id, AgentMessage(role="user", content="handoff"))
 
     def fail_pipeline_input(*args, **kwargs):
@@ -2486,15 +3119,14 @@ async def test_pipeline_handoff_context_is_backfilled_from_snapshot_when_session
     persistence = A2APersistenceStore(tmp_path / "a2a")
     persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=str(cwd)))
     _ensure_v2_session(str(cwd), session_id)
-    A2APipelineSnapshotStore(a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)).save(
-        {
-            "normalHandoff": {
-                "action": "switch_to_normal",
-                "targetMode": "normal",
-                "summary": summary,
-            }
-        }
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    handoff_events = _committed_normal_handoff_events(
+        context_id=context_id,
+        task_id="task-pipeline",
+        summary=summary,
     )
+    A2APipelineJournal(pipeline_dir).append_many(handoff_events, durable=True)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(handoff_events))
 
     loop = FakeAgentLoop([TextDeltaEvent(text="normal-ok")])
     seen_resume: list[object | None] = []
@@ -2559,32 +3191,20 @@ async def test_pipeline_handoff_context_routes_and_backfills_public_summary_from
     pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
     pipeline_dir.mkdir(parents=True, exist_ok=True)
     (pipeline_dir / "a2a-snapshot.json").write_text("{broken", encoding="utf-8")
-    A2APipelineJournal(pipeline_dir).append(
-        {
-            "schemaVersion": "1.0",
-            "eventId": "evt-handoff",
-            "sequence": 1,
-            "createdAt": "2026-01-01T00:00:00Z",
-            "eventType": "pipeline_handoff_ready",
-            "scope": "pipeline",
-            "pipelineRunId": context_id,
-            "taskId": "task-pipeline",
-            "contextId": context_id,
-            "pipelineName": "selling",
-            "status": "completed",
-            "data": {
-                "action": "switch_to_normal",
-                "targetMode": "normal",
-                "summary": summary,
-                "cleanup": {
-                    "status": "pending",
-                    "resourceCount": 1,
-                    "prompt": cleanup_prompt,
-                    "resources": [{"resourceId": "stack-123", "regionId": "cn-hangzhou"}],
-                },
-            },
-        }
+    handoff_events = _committed_normal_handoff_events(
+        context_id=context_id,
+        task_id="task-pipeline",
+        summary=summary,
+        extra_data={
+            "cleanup": {
+                "status": "pending",
+                "resourceCount": 1,
+                "prompt": cleanup_prompt,
+                "resources": [{"resourceId": "stack-123", "regionId": "cn-hangzhou"}],
+            }
+        },
     )
+    A2APipelineJournal(pipeline_dir).append_many(handoff_events, durable=True)
     ledger = CleanupLedger(SessionStorage().session_dir(str(cwd), session_id) / "pipeline" / "cleanup.yaml")
     ledger.mark_cleanup_required(
         [

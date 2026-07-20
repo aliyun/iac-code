@@ -5,7 +5,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +34,7 @@ from iac_code.a2a.types import (
     validate_protocol_id,
 )
 from iac_code.i18n import _
+from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_parent
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.file_security import atomic_write_text
@@ -67,6 +68,9 @@ class A2ATaskStore(TaskStore):
         self._context_runtime_waiters: dict[str, int] = {}
         self._discarded_context_runtime_tasks: set[asyncio.Task[Any]] = set()
         self._discarded_context_runtime_task_waiters: dict[asyncio.Task[Any], int] = {}
+        self._reconciliation_locks: dict[str, asyncio.Lock] = {}
+        self._context_reconciliation_waiters: dict[str, set[str]] = {}
+        self._context_execution_starts: dict[str, dict[str, asyncio.Task[Any]]] = {}
         self._owner_resolver = owner_resolver
 
     async def get(self, task_id: str, context: ServerCallContext | None = None) -> Task | None:
@@ -388,6 +392,270 @@ class A2ATaskStore(TaskStore):
             self._mirror_context(record)
         await _close_runtime(runtime)
 
+    def reconciliation_lock(self, context_id: str) -> asyncio.Lock:
+        context_id = validate_protocol_id(context_id)
+        return self._reconciliation_locks.setdefault(context_id, asyncio.Lock())
+
+    async def context_reconciliation_is_blocked(self, context_id: str) -> bool:
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            return (
+                bool(self._context_execution_starts.get(context_id))
+                or context_id in self._context_runtime_tasks
+                or any(
+                    task.context_id == context_id and task.active_task is not None and not task.active_task.done()
+                    for task in self._tasks.values()
+                )
+            )
+
+    async def begin_context_execution(self, context_id: str) -> str:
+        context_id = validate_protocol_id(context_id)
+        owner_task = asyncio.current_task()
+        if owner_task is None:  # pragma: no cover - asyncio always provides a task here.
+            raise ValueError(_("A2A context not found"))
+        token = str(uuid.uuid4())
+        async with self.reconciliation_lock(context_id):
+            async with self._mutation_lock:
+                self._register_context_execution_start_locked(
+                    context_id=context_id,
+                    token=token,
+                    owner_task=owner_task,
+                )
+        return token
+
+    async def begin_context_execution_after_reconciliation(
+        self,
+        context_id: str,
+        reconcile: Callable[[], Awaitable[Any]],
+        *,
+        wait_timeout: float | None = None,
+    ) -> tuple[str, Any]:
+        context_id = validate_protocol_id(context_id)
+        owner_task = asyncio.current_task()
+        if owner_task is None:  # pragma: no cover - asyncio always provides a task here.
+            raise ValueError(_("A2A context not found"))
+        waiter_token = str(uuid.uuid4())
+        token = str(uuid.uuid4())
+        deadline = None if wait_timeout is None else asyncio.get_running_loop().time() + wait_timeout
+        async with self._mutation_lock:
+            self._register_context_reconciliation_waiter_locked(
+                context_id=context_id,
+                token=waiter_token,
+                owner_task=owner_task,
+            )
+        try:
+            while True:
+                await self._wait_for_context_reconciliation_safe(
+                    context_id,
+                    owner_task=owner_task,
+                    deadline=deadline,
+                )
+                async with self.reconciliation_lock(context_id):
+                    async with self._mutation_lock:
+                        if self._context_reconciliation_blockers_locked(context_id, owner_task=owner_task):
+                            continue
+                    result = await reconcile()
+                    async with self._mutation_lock:
+                        self._discard_context_reconciliation_waiter(
+                            context_id=context_id,
+                            token=waiter_token,
+                        )
+                        self._register_context_execution_start_locked(
+                            context_id=context_id,
+                            token=token,
+                            owner_task=owner_task,
+                        )
+                    return token, result
+        finally:
+            async with self._mutation_lock:
+                self._discard_context_reconciliation_waiter(context_id=context_id, token=waiter_token)
+
+    async def begin_context_execution_if_task_active(
+        self,
+        context_id: str,
+        task_id: str,
+    ) -> tuple[str, asyncio.Task[Any]] | None:
+        context_id = validate_protocol_id(context_id)
+        task_id = validate_protocol_id(task_id)
+        owner_task = asyncio.current_task()
+        if owner_task is None:  # pragma: no cover - asyncio always provides a task here.
+            raise ValueError(_("A2A context not found"))
+        token = str(uuid.uuid4())
+        async with self.reconciliation_lock(context_id):
+            async with self._mutation_lock:
+                record = self._tasks.get(task_id)
+                if (
+                    record is None
+                    or record.context_id != context_id
+                    or record.active_task is None
+                    or record.active_task.done()
+                ):
+                    return None
+                active_owner = record.active_task
+                self._register_context_execution_start_locked(
+                    context_id=context_id,
+                    token=token,
+                    owner_task=owner_task,
+                )
+                return token, active_owner
+
+    async def end_context_execution(self, context_id: str, token: str) -> None:
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            self._discard_context_execution_start(context_id=context_id, token=token)
+
+    def _discard_context_execution_start(self, *, context_id: str, token: str) -> None:
+        starts = self._context_execution_starts.get(context_id)
+        if starts is None:
+            return
+        starts.pop(token, None)
+        if not starts:
+            self._context_execution_starts.pop(context_id, None)
+
+    def _discard_context_reconciliation_waiter(self, *, context_id: str, token: str) -> None:
+        waiters = self._context_reconciliation_waiters.get(context_id)
+        if waiters is None:
+            return
+        waiters.discard(token)
+        if not waiters:
+            self._context_reconciliation_waiters.pop(context_id, None)
+
+    def _register_context_execution_start_locked(
+        self,
+        *,
+        context_id: str,
+        token: str,
+        owner_task: asyncio.Task[Any],
+    ) -> None:
+        self._context_execution_starts.setdefault(context_id, {})[token] = owner_task
+        owner_task.add_done_callback(
+            lambda _task: self._discard_context_execution_start(context_id=context_id, token=token)
+        )
+
+    def _register_context_reconciliation_waiter_locked(
+        self,
+        *,
+        context_id: str,
+        token: str,
+        owner_task: asyncio.Task[Any],
+    ) -> None:
+        self._context_reconciliation_waiters.setdefault(context_id, set()).add(token)
+        owner_task.add_done_callback(
+            lambda _task: self._discard_context_reconciliation_waiter(context_id=context_id, token=token)
+        )
+
+    def _context_reconciliation_blockers_locked(
+        self,
+        context_id: str,
+        *,
+        owner_task: asyncio.Task[Any],
+    ) -> set[asyncio.Task[Any]]:
+        blockers = {
+            task
+            for task in self._context_execution_starts.get(context_id, {}).values()
+            if task is not owner_task and not task.done()
+        }
+        runtime_task = self._context_runtime_tasks.get(context_id)
+        if runtime_task is not None and runtime_task is not owner_task and not runtime_task.done():
+            blockers.add(runtime_task)
+        blockers.update(
+            task.active_task
+            for task in self._tasks.values()
+            if task.context_id == context_id
+            and task.active_task is not None
+            and task.active_task is not owner_task
+            and not task.active_task.done()
+        )
+        return blockers
+
+    async def _wait_for_context_reconciliation_safe(
+        self,
+        context_id: str,
+        *,
+        owner_task: asyncio.Task[Any],
+        deadline: float | None,
+    ) -> None:
+        while True:
+            async with self._mutation_lock:
+                blockers = self._context_reconciliation_blockers_locked(context_id, owner_task=owner_task)
+            if not blockers:
+                return
+            remaining = None if deadline is None else deadline - asyncio.get_running_loop().time()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError
+            _done, pending = await asyncio.wait(blockers, timeout=remaining)
+            if pending:
+                raise TimeoutError
+
+    async def ensure_context_reconciliation_safe(self, context_id: str) -> None:
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            if self._context_execution_starts.get(context_id):
+                raise ValueError(_("A2A context not found"))
+            if context_id in self._context_runtime_tasks:
+                raise ValueError(_("A2A context not found"))
+            if any(
+                task.context_id == context_id and task.active_task is not None and not task.active_task.done()
+                for task in self._tasks.values()
+            ):
+                raise ValueError(_("A2A context not found"))
+
+    async def refresh_context_from_session(
+        self,
+        *,
+        context_id: str,
+        cwd: str,
+        session_id: str,
+        clear_active_task_for_proven_handoff: bool,
+    ) -> A2AContextRecord:
+        context_id = validate_protocol_id(context_id)
+        session_id = validate_protocol_id(session_id)
+        snapshot = _load_session_context_snapshot(cwd=cwd, session_id=session_id)
+        if snapshot.context_id != context_id or snapshot.session_id != session_id or snapshot.cwd != cwd:
+            raise ValueError(_("A2A context belongs to a different workspace"))
+
+        runtime: Any | None = None
+        async with self._mutation_lock:
+            create_task = self._context_runtime_tasks.get(context_id)
+            if create_task is not None:
+                raise ValueError(_("A2A context not found"))
+            record = self._contexts.get(context_id)
+            active_task_ids = {task_id for task_id in (snapshot.active_task_id,) if task_id is not None}
+            if record is not None and record.active_task_id is not None:
+                active_task_ids.add(record.active_task_id)
+            if any(self._task_is_active_locked(task_id) for task_id in active_task_ids):
+                raise ValueError(_("A2A context not found"))
+            if record is None:
+                record = A2AContextRecord(
+                    context_id=context_id,
+                    session_id=session_id,
+                    cwd=cwd,
+                    lock=asyncio.Lock(),
+                )
+                self._contexts[context_id] = record
+            elif record.session_id != session_id or record.cwd != cwd:
+                raise ValueError(_("A2A context belongs to a different workspace"))
+            runtime = record.runtime
+            record.runtime = None
+            record.active_task_id = None if clear_active_task_for_proven_handoff else snapshot.active_task_id
+            record.touch()
+            self._mirror_context(record)
+            refreshed = A2AContextRecord(
+                context_id=record.context_id,
+                session_id=record.session_id,
+                cwd=record.cwd,
+                active_task_id=record.active_task_id,
+                expired=record.expired,
+                created_at=record.created_at,
+                last_active=record.last_active,
+            )
+        await _close_runtime(runtime)
+        return refreshed
+
+    def _task_is_active_locked(self, task_id: str) -> bool:
+        record = self._tasks.get(validate_protocol_id(task_id))
+        return bool(record is not None and record.active_task is not None and not record.active_task.done())
+
     async def get_task_record(self, task_id: str) -> A2ATaskRecord:
         task_id = validate_protocol_id(task_id)
         async with self._mutation_lock:
@@ -472,8 +740,7 @@ class A2ATaskStore(TaskStore):
 
     async def is_task_active(self, task_id: str) -> bool:
         async with self._mutation_lock:
-            record = self._tasks.get(validate_protocol_id(task_id))
-            return bool(record is not None and record.active_task is not None and not record.active_task.done())
+            return self._task_is_active_locked(task_id)
 
     def mirror_task(self, record: A2ATaskRecord) -> None:
         record.updated_at = time.time()
@@ -485,12 +752,24 @@ class A2ATaskStore(TaskStore):
     async def cleanup_once(self, *, now_offset_seconds: float = 0) -> None:
         now = time.monotonic() + now_offset_seconds
         async with self._mutation_lock:
+            active_context_ids = {
+                task.context_id
+                for task in self._tasks.values()
+                if task.active_task is not None and not task.active_task.done()
+            }
+            reconciling_context_ids = {
+                context_id for context_id, lock in self._reconciliation_locks.items() if lock.locked()
+            }
             expired_context_ids = [
                 context_id
                 for context_id, context in self._contexts.items()
                 if context.active_task_id is None
                 and now - context.last_active > self._idle_timeout_seconds
                 and context_id not in self._context_runtime_tasks
+                and not self._context_reconciliation_waiters.get(context_id)
+                and not self._context_execution_starts.get(context_id)
+                and context_id not in active_context_ids
+                and context_id not in reconciling_context_ids
             ]
             for context_id in expired_context_ids:
                 record = self._contexts.pop(context_id, None)
@@ -722,6 +1001,44 @@ def _ensure_new_a2a_session_layout(cwd: str, session_id: str) -> None:
             "Failed to prepare A2A session layout error_type=%s",
             type(exc).__name__,
         )
+        return
+    try:
+        SessionBackupService().initialize_session(cwd, session_id)
+    except Exception as exc:
+        logger.error(
+            "Failed to initialize A2A session backup state error_type=%s",
+            type(exc).__name__,
+        )
+        raise
+
+
+def _load_session_context_snapshot(*, cwd: str, session_id: str) -> A2AContextSnapshot:
+    session_dir = SessionStorage().v2_session_dir(cwd, session_id)
+    if session_dir is None:
+        raise ValueError(_("A2A context not found"))
+    session_paths = SessionPaths.require_supported(session_dir)
+    try:
+        payload = json.loads(session_paths.a2a_context_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(_("A2A context not found")) from exc
+    if not isinstance(payload, dict):
+        raise ValueError(_("A2A context not found"))
+    context_id = validate_protocol_id(payload.get("context_id"))
+    snapshot_session_id = validate_protocol_id(payload.get("session_id"))
+    snapshot_cwd = payload.get("cwd")
+    active_task_id = payload.get("active_task_id")
+    if not isinstance(snapshot_cwd, str) or (active_task_id is not None and not isinstance(active_task_id, str)):
+        raise ValueError(_("A2A context not found"))
+    if active_task_id is not None:
+        active_task_id = validate_protocol_id(active_task_id)
+    updated_at = payload.get("updated_at")
+    return A2AContextSnapshot(
+        context_id=context_id,
+        session_id=snapshot_session_id,
+        cwd=snapshot_cwd,
+        active_task_id=active_task_id,
+        updated_at=float(updated_at) if isinstance(updated_at, (int, float)) else time.time(),
+    )
 
 
 def _write_session_snapshot(session_dir: Path, path: Path, data: dict[str, Any]) -> None:

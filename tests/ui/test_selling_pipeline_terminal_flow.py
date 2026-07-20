@@ -119,7 +119,11 @@ async def test_candidate_selection_resumes_with_structured_payload(monkeypatch):
     assert stream.closed is True
     assert len(resumed_payloads) == 1
     payload = json.loads(resumed_payloads[0])
-    assert payload == {"selected_candidate_name": "Plan A", "selected_candidate_index": 0}
+    assert payload == {
+        "selected_candidate_name": "Plan A",
+        "selected_candidate_index": 0,
+        "selected_evaluated_candidate_index": 0,
+    }
 
 
 @pytest.mark.asyncio
@@ -148,7 +152,11 @@ async def test_candidate_selection_seeds_options_when_display_tools_are_missing(
     assert selected == "Plan A"
     assert len(resumed_payloads) == 1
     payload = json.loads(resumed_payloads[0])
-    assert payload == {"selected_candidate_name": "Plan A", "selected_candidate_index": 0}
+    assert payload == {
+        "selected_candidate_name": "Plan A",
+        "selected_candidate_index": 0,
+        "selected_evaluated_candidate_index": 0,
+    }
 
 
 @pytest.mark.asyncio
@@ -177,7 +185,11 @@ async def test_streaming_candidate_detail_preserves_indexed_identity(monkeypatch
     assert selected == "Same"
     assert len(resumed_payloads) == 1
     payload = json.loads(resumed_payloads[0])
-    assert payload == {"selected_candidate_name": "Same", "selected_candidate_index": 0}
+    assert payload == {
+        "selected_candidate_name": "Same",
+        "selected_candidate_index": 0,
+        "selected_evaluated_candidate_index": 0,
+    }
 
 
 @pytest.mark.asyncio
@@ -210,5 +222,9 @@ async def test_candidate_selection_can_choose_second_duplicate_by_index(monkeypa
     assert selected == "Same"
     assert len(resumed_payloads) == 1
     payload = json.loads(resumed_payloads[0])
-    assert payload == {"selected_candidate_name": "Same", "selected_candidate_index": 1}
+    assert payload == {
+        "selected_candidate_name": "Same",
+        "selected_candidate_index": 1,
+        "selected_evaluated_candidate_index": 1,
+    }
     assert "Same #2" in repl.renderer.console.file.getvalue()

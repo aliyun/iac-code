@@ -14,8 +14,9 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.timestamp_pb2 import Timestamp
 
 from iac_code.a2a.metrics import NoOpA2AMetrics
-from iac_code.a2a.persistence import A2APersistenceStore, A2ATaskSnapshot
+from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.services.session_backup_state import SessionBackupState
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_storage import SessionStorage
 
@@ -103,6 +104,264 @@ async def test_context_reuses_runtime_until_evicted() -> None:
 
     assert again is context
     assert again.runtime == context.runtime
+
+
+@pytest.mark.asyncio
+async def test_new_a2a_session_initializes_backup_generation_zero(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    backup_root = tmp_path / "backup"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(backup_root))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+
+    context = await store.get_or_create_context(
+        context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda _session_id: object()
+    )
+
+    state_path = SessionStorage().session_dir(str(cwd), context.session_id) / ".backup-state.json"
+    state = SessionBackupState.from_dict(json.loads(state_path.read_text(encoding="utf-8")))
+    assert state.session_id == context.session_id
+    assert state.generation == 0
+
+
+def test_reconciliation_lock_is_stable_per_context() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+
+    assert store.reconciliation_lock("ctx-1") is store.reconciliation_lock("ctx-1")
+    assert store.reconciliation_lock("ctx-1") is not store.reconciliation_lock("ctx-2")
+
+
+@pytest.mark.asyncio
+async def test_context_execution_start_waits_for_reconciliation_and_blocks_new_reconcile() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    reconciliation_lock = store.reconciliation_lock("ctx-1")
+    await reconciliation_lock.acquire()
+    execution_started = asyncio.Event()
+    release_execution = asyncio.Event()
+
+    async def hold_execution_start() -> None:
+        token = await store.begin_context_execution("ctx-1")
+        execution_started.set()
+        await release_execution.wait()
+        await store.end_context_execution("ctx-1", token)
+
+    start_task = asyncio.create_task(hold_execution_start())
+    await asyncio.sleep(0)
+    assert start_task.done() is False
+
+    reconciliation_lock.release()
+    await execution_started.wait()
+    assert await store.context_reconciliation_is_blocked("ctx-1") is True
+    with pytest.raises(ValueError, match="A2A context not found"):
+        await store.ensure_context_reconciliation_safe("ctx-1")
+
+    release_execution.set()
+    await start_task
+    assert await store.context_reconciliation_is_blocked("ctx-1") is False
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_waiter_does_not_block_active_pipeline_followup() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    active_record = await store.get_or_create_task(task_id="task-active", context_id="ctx-1")
+    release_active = asyncio.Event()
+
+    async def hold_active_execution() -> None:
+        await release_active.wait()
+
+    active_owner = asyncio.create_task(hold_active_execution())
+    active_record.active_task = active_owner
+    ordinary = asyncio.create_task(
+        store.begin_context_execution_after_reconciliation(
+            "ctx-1",
+            lambda: asyncio.sleep(0),
+            wait_timeout=1,
+        )
+    )
+    await asyncio.sleep(0)
+
+    fast_followup = asyncio.create_task(
+        store.begin_context_execution_if_task_active("ctx-1", "task-active")
+    )
+    reservation = await asyncio.wait_for(fast_followup, timeout=0.1)
+
+    assert reservation is not None
+    fast_token, reserved_owner = reservation
+    assert reserved_owner is active_owner
+    await store.end_context_execution("ctx-1", fast_token)
+    release_active.set()
+    await active_owner
+    ordinary_token, _result = await ordinary
+    await store.end_context_execution("ctx-1", ordinary_token)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_reconciliation_waiter_releases_cleanup_protection() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    active_record = await store.get_or_create_task(task_id="task-active", context_id="ctx-1")
+    release_active = asyncio.Event()
+
+    async def hold_active_execution() -> None:
+        await release_active.wait()
+
+    active_owner = asyncio.create_task(hold_active_execution())
+    active_record.active_task = active_owner
+    waiter = asyncio.create_task(
+        store.begin_context_execution_after_reconciliation(
+            "ctx-1",
+            lambda: asyncio.sleep(0),
+            wait_timeout=None,
+        )
+    )
+    await asyncio.sleep(0)
+    assert store._context_reconciliation_waiters.get("ctx-1")
+
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    await asyncio.sleep(0)
+
+    assert not store._context_reconciliation_waiters.get("ctx-1")
+    release_active.set()
+    await active_owner
+
+
+@pytest.mark.asyncio
+async def test_context_execution_start_is_released_when_owner_is_cancelled() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    execution_started = asyncio.Event()
+
+    async def hold_execution_start() -> None:
+        await store.begin_context_execution("ctx-1")
+        execution_started.set()
+        await asyncio.Event().wait()
+
+    owner_task = asyncio.create_task(hold_execution_start())
+    await execution_started.wait()
+    assert await store.context_reconciliation_is_blocked("ctx-1") is True
+
+    owner_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await owner_task
+    await asyncio.sleep(0)
+
+    assert await store.context_reconciliation_is_blocked("ctx-1") is False
+
+
+@pytest.mark.asyncio
+async def test_cleanup_preserves_context_during_reconciliation_and_execution_start() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=0, cleanup_interval_seconds=300)
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd="/tmp",
+        runtime_factory=lambda _session_id: object(),
+    )
+    token = await store.begin_context_execution(context.context_id)
+
+    await store.cleanup_once(now_offset_seconds=1)
+
+    assert (await store.get_context_record(context.context_id)).session_id == context.session_id
+    await store.end_context_execution(context.context_id, token)
+
+    reconciliation_lock = store.reconciliation_lock(context.context_id)
+    await reconciliation_lock.acquire()
+    try:
+        await store.cleanup_once(now_offset_seconds=1)
+        assert (await store.get_context_record(context.context_id)).session_id == context.session_id
+    finally:
+        reconciliation_lock.release()
+
+
+@pytest.mark.asyncio
+async def test_refresh_context_from_session_closes_runtime_and_applies_proven_handoff(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    persistence = A2APersistenceStore(config_dir / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    runtime = SimpleNamespace(closed=False)
+
+    async def close_runtime() -> None:
+        runtime.closed = True
+
+    runtime.aclose = close_runtime
+    context = await store.get_or_create_context(
+        context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda _session_id: runtime
+    )
+    session_dir = SessionStorage().session_dir(str(cwd), context.session_id)
+    context_path = session_dir / "a2a" / "context.json"
+    restored = A2AContextSnapshot(
+        context_id="ctx-1",
+        session_id=context.session_id,
+        cwd=str(cwd),
+        active_task_id="restored-task",
+    )
+    context_path.write_text(json.dumps(restored.__dict__), encoding="utf-8")
+
+    refreshed = await store.refresh_context_from_session(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        session_id=context.session_id,
+        clear_active_task_for_proven_handoff=False,
+    )
+
+    assert runtime.closed is True
+    assert refreshed.active_task_id == "restored-task"
+    assert store._contexts["ctx-1"].runtime is None
+
+    cleared = await store.refresh_context_from_session(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        session_id=context.session_id,
+        clear_active_task_for_proven_handoff=True,
+    )
+
+    assert cleared.active_task_id is None
+    assert json.loads(context_path.read_text(encoding="utf-8"))["active_task_id"] is None
+    assert persistence.load_context("ctx-1").active_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_context_from_session_rejects_in_flight_task_without_closing_runtime(
+    monkeypatch, tmp_path
+) -> None:
+    config_dir = tmp_path / "config"
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    runtime = SimpleNamespace(closed=False)
+
+    async def close_runtime() -> None:
+        runtime.closed = True
+
+    runtime.aclose = close_runtime
+    context = await store.get_or_create_context(
+        context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda _session_id: runtime
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.active_task = asyncio.create_task(asyncio.sleep(60))
+    context.active_task_id = task.task_id
+    store.mirror_context(context)
+
+    try:
+        with pytest.raises(ValueError, match="A2A context not found"):
+            await store.refresh_context_from_session(
+                context_id="ctx-1",
+                cwd=str(cwd),
+                session_id=context.session_id,
+                clear_active_task_for_proven_handoff=True,
+            )
+    finally:
+        task.active_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task.active_task
+
+    assert runtime.closed is False
+    assert store._contexts["ctx-1"].active_task_id == "task-1"
 
 
 def test_mirror_session_task_treats_session_path_resolution_as_best_effort(monkeypatch: pytest.MonkeyPatch) -> None:

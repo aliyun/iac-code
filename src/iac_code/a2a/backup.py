@@ -1,13 +1,35 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
+from iac_code.services.session_backup_state import BackupPublicationProof
 
 logger = logging.getLogger(__name__)
+
+
+async def run_sync_fenced(function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    """Delay coroutine cancellation until the synchronous mutation has actually stopped."""
+    thread_task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(thread_task)
+    except asyncio.CancelledError:
+        while not thread_task.done():
+            try:
+                await asyncio.shield(thread_task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if thread_task.done() and not thread_task.cancelled():
+            with contextlib.suppress(Exception):
+                thread_task.result()
+        raise
 
 
 async def backup_session_async(
@@ -18,16 +40,14 @@ async def backup_session_async(
     reason: BackupReason,
     critical: bool,
     metrics: Any | None = None,
+    publication_proofs: dict[str, BackupPublicationProof] | None = None,
 ) -> Any | None:
     failed_recorded = False
     try:
-        result = await asyncio.to_thread(
-            backup_service.backup_session,
-            cwd,
-            session_id,
-            reason=reason,
-            critical=critical,
-        )
+        kwargs: dict[str, Any] = {"reason": reason, "critical": critical}
+        if publication_proofs is not None:
+            kwargs["publication_proofs"] = publication_proofs
+        result = await run_sync_fenced(backup_service.backup_session, cwd, session_id, **kwargs)
         retry_count = _retry_count(result)
         if getattr(result, "enabled", False) and not getattr(result, "succeeded", True):
             message = str(

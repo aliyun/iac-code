@@ -1377,7 +1377,27 @@
     if (!Number.isFinite(numericIndex)) {
       return "";
     }
-    return `选择方案${numericIndex}`;
+    const pendingOptions = state.pendingInput && Array.isArray(state.pendingInput.options)
+      ? state.pendingInput.options
+      : [];
+    const candidates = Array.isArray(state.candidates) ? state.candidates : [];
+    const displayIndex = pendingOptions.length > 0
+      ? pendingOptions.findIndex((option, index) => candidateIndexFromPendingOption(option, index) === numericIndex)
+      : candidates.findIndex((candidate, index) => candidateIndexOf(candidate, index) === numericIndex);
+    if (displayIndex < 0) {
+      return "";
+    }
+    const candidate = candidates.find(
+      (item, index) => candidateIndexOf(item, index) === numericIndex
+    ) || {};
+    const selectedName = pendingOptions.length > 0
+      ? pendingOptionLabel(pendingOptions[displayIndex], displayIndex)
+      : candidate.name || "";
+    return JSON.stringify({
+      selected_candidate_name: selectedName,
+      selected_candidate_index: displayIndex,
+      selected_evaluated_candidate_index: numericIndex,
+    });
   }
 
   window.SellingConsoleReducers = {

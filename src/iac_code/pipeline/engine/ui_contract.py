@@ -33,6 +33,7 @@ class SelectedCandidate:
 
     selected_candidate_name: str
     selected_candidate_index: int | None = None
+    selected_evaluated_candidate_index: int | None = None
     parameter_overrides: dict[str, Any] = field(default_factory=dict)
 
 
@@ -40,11 +41,15 @@ def encode_selected_candidate(
     candidate_name: str,
     candidate_index: int | None,
     parameter_overrides: dict[str, Any] | None = None,
+    *,
+    evaluated_candidate_index: int | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "selected_candidate_name": candidate_name,
         "selected_candidate_index": candidate_index,
     }
+    if evaluated_candidate_index is not None:
+        payload["selected_evaluated_candidate_index"] = evaluated_candidate_index
     if parameter_overrides:
         payload["parameter_overrides"] = parameter_overrides
     return json.dumps(payload, ensure_ascii=False)
@@ -54,6 +59,7 @@ def parse_selected_candidate(value: Any) -> SelectedCandidate | None:
     if isinstance(value, dict):
         name = value.get("selected_candidate_name")
         index = value.get("selected_candidate_index")
+        evaluated_index = value.get("selected_evaluated_candidate_index")
         parameter_overrides = _parse_parameter_overrides(value)
     elif isinstance(value, str):
         stripped = value.strip()
@@ -70,23 +76,27 @@ def parse_selected_candidate(value: Any) -> SelectedCandidate | None:
             return None
         name = decoded.get("selected_candidate_name")
         index = decoded.get("selected_candidate_index")
+        evaluated_index = decoded.get("selected_evaluated_candidate_index")
         parameter_overrides = _parse_parameter_overrides(decoded)
     else:
         return None
 
     if parameter_overrides is None:
         return None
-    if index is not None and not isinstance(index, int):
+    if index is not None and (not isinstance(index, int) or isinstance(index, bool)):
+        return None
+    if evaluated_index is not None and (not isinstance(evaluated_index, int) or isinstance(evaluated_index, bool)):
         return None
     if isinstance(name, str) and name.strip():
         candidate_name = name.strip()
-    elif index is not None:
+    elif index is not None or evaluated_index is not None:
         candidate_name = ""
     else:
         return None
     return SelectedCandidate(
         selected_candidate_name=candidate_name,
         selected_candidate_index=index,
+        selected_evaluated_candidate_index=evaluated_index,
         parameter_overrides=parameter_overrides,
     )
 

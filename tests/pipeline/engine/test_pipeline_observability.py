@@ -708,6 +708,44 @@ def test_selection_made_records_event_with_sanitized_selected_value():
     assert attrs["selected_value_present"] is True
 
 
+def test_candidate_selection_rejected_records_only_low_cardinality_metadata():
+    obs = PipelineObservability(pipeline_name="selling", session_id="sid", cwd="/repo")
+
+    with (
+        patch("iac_code.pipeline.engine.observability.log_event") as log_event,
+        patch("iac_code.pipeline.engine.observability.add_metric") as add_metric,
+    ):
+        obs.candidate_selection_rejected(
+            step_id="confirm_and_select",
+            step_attempt=2,
+            option_count=7,
+        )
+
+    assert log_event.call_args.args == (
+        Events.PIPELINE_SELECTION_REJECTED,
+        {
+            "pipeline_name": "selling",
+            "session_id": "sid",
+            "cwd_present": True,
+            "step_id": "confirm_and_select",
+            "step_attempt": 2,
+            "ui_mode": "candidate_selection",
+            "candidate_count_bucket": "6-10",
+        },
+    )
+    add_metric.assert_called_once_with(
+        Metrics.PIPELINE_SELECTION_REJECTED_COUNT,
+        1,
+        {
+            "pipeline_name": "selling",
+            "step_id": "confirm_and_select",
+            "step_attempt": 2,
+            "ui_mode": "candidate_selection",
+            "candidate_count_bucket": "6-10",
+        },
+    )
+
+
 def test_candidates_evaluated_records_event_and_count_metrics():
     obs = PipelineObservability(pipeline_name="selling", session_id="sid", cwd="/repo")
 

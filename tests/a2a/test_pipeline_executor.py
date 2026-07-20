@@ -28,6 +28,7 @@ from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.prerequisites import PrerequisiteDecision, PrerequisiteResolution
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupBlocked
+from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
@@ -583,11 +584,21 @@ class RecordingBackupService:
         self.pipeline_snapshot_dir = pipeline_snapshot_dir
         self.on_backup = on_backup
         self.calls: list[tuple[str, str, BackupReason, bool]] = []
+        self.publication_proofs: list[dict[str, BackupPublicationProof] | None] = []
         self.session_snapshots: list[tuple[BackupReason, dict, dict]] = []
         self.pipeline_snapshots: list[tuple[BackupReason, dict]] = []
 
-    def backup_session(self, cwd: str, session_id: str, *, reason: BackupReason, critical: bool) -> None:
+    def backup_session(
+        self,
+        cwd: str,
+        session_id: str,
+        *,
+        reason: BackupReason,
+        critical: bool,
+        publication_proofs: dict[str, BackupPublicationProof] | None = None,
+    ) -> None:
         self.calls.append((cwd, session_id, reason, critical))
+        self.publication_proofs.append(publication_proofs)
         session_dir = SessionStorage().session_dir(cwd, session_id)
         task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
         context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
@@ -1688,6 +1699,14 @@ async def test_pipeline_executor_runs_critical_backups_for_terminal_and_handoff_
     ]
     committed_events = [event for event in pipeline_events if event["eventType"] != "backup_committed"]
     assert [event["visibility"] for event in committed_events] == ["committed", "committed"]
+    assert backup_service.publication_proofs[0] is None
+    handoff_proof = backup_service.publication_proofs[1][NORMAL_HANDOFF_PROOF_KEY]
+    handoff_event = committed_events[1]
+    assert handoff_proof == BackupPublicationProof(
+        event_id=handoff_event["eventId"],
+        event_type=handoff_event["eventType"],
+        sequence=int(handoff_event["sequence"]),
+    )
     assert [reason for reason, _snapshot in backup_service.pipeline_snapshots] == [BackupReason.HANDOFF_READY]
     handoff_backup_snapshot = backup_service.pipeline_snapshots[0][1]
     assert handoff_backup_snapshot["status"] == "working"
@@ -6429,7 +6448,15 @@ async def test_cancel_waiting_input_backup_sees_committed_cancel_and_mirrored_ta
     from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 
     class InspectingBackupService:
-        def backup_session(self, cwd_arg, session_id_arg, *, reason, critical) -> BackupResult:
+        def backup_session(
+            self,
+            cwd_arg,
+            session_id_arg,
+            *,
+            reason,
+            critical,
+            publication_proofs,
+        ) -> BackupResult:
             assert (cwd_arg, session_id_arg, reason, critical) == (
                 str(cwd),
                 session_id,
@@ -6438,6 +6465,14 @@ async def test_cancel_waiting_input_backup_sees_committed_cancel_and_mirrored_ta
             )
             events = A2APipelineJournal(pipeline_dir).read_all()
             assert [event.get("visibility") for event in events[-2:]] == ["committed", "committed"]
+            handoff = events[-1]
+            assert publication_proofs == {
+                NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof(
+                    event_id=handoff["eventId"],
+                    event_type="pipeline_handoff_ready",
+                    sequence=handoff["sequence"],
+                )
+            }
             task_snapshot = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
             context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
             assert task_snapshot["state"] == "input-required"

@@ -482,7 +482,10 @@ steps:
           description: 用户最终选择的候选方案名称；首次展示方案时可省略
         selected_candidate_index:
           type: integer
-          description: 用户最终选择的候选方案在 evaluated_candidates 中的 0 基下标；首次展示方案时可省略
+          description: 用户最终选择的候选方案在本次 options 列表中的 0 基顺序；首次展示方案时可省略
+        selected_evaluated_candidate_index:
+          type: integer
+          description: 用户最终选择的候选方案在 evaluated_candidates 中的 0 基下标，存在时优先于 selected_candidate_index；首次展示方案时可省略
         parameter_overrides:
           type: object
           description: 用户选择方案时传入的部署参数覆盖字典；键为 ROS Parameters 名称，值为用户指定的部署参数值；首次展示方案时可省略
