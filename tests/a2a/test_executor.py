@@ -2133,6 +2133,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", "1")
     calls = []
 
     class SpyPipelineExecutor:
@@ -4016,10 +4017,12 @@ async def test_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_co
         agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]),
         session_id="session-1",
         tool_registry=object(),
+        aliyun_services=object(),
     )
 
-    def fake_register_cloud_tools(registry, credentials):
+    def fake_register_cloud_tools(registry, credentials, services):
         assert registry is runtime.tool_registry
+        assert services is runtime.aliyun_services
         credential = credentials.get_provider("aliyun")
         seen_access_key_ids.append(credential.access_key_id if credential else None)
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from iac_code.i18n import _
 from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.tools.base import Tool
@@ -74,22 +76,24 @@ def _audit(
 
 
 def _is_safety_check_ask(result: PermissionResult) -> bool:
-    return result.behavior == "ask" and result.reason is not None and result.reason.type == "safety_check"
+    return result.behavior == "ask" and "safety_check" in _structured_reason_types(result)
 
 
 def _is_sticky_ask(result: PermissionResult) -> bool:
-    return result.behavior == "ask" and result.reason is not None and result.reason.type in _STICKY_ASK_REASONS
+    return result.behavior == "ask" and not _STICKY_ASK_REASONS.isdisjoint(_structured_reason_types(result))
+
+
+def _structured_reason_types(result: PermissionResult) -> set[str]:
+    reasons = [result.reason, *(result.reasons or [])]
+    return {reason.type for reason in reasons if reason is not None}
 
 
 def _with_prompt_audit(tool: Tool, input: dict, result: PermissionResult) -> PermissionResult:
     if result.audit is not None or result.behavior != "ask":
         return result
     reason_type = result.reason.type if result.reason is not None else "prompt_required"
-    return PermissionResult(
-        behavior=result.behavior,
-        message=result.message,
-        reason=result.reason,
-        suggestions=result.suggestions,
+    return replace(
+        result,
         audit=_audit(
             scope="once",
             reason_type=reason_type,
@@ -135,11 +139,9 @@ async def check_tool_permission(
     if result.behavior == "ask" and ask_rule is not None:
         source, rule = ask_rule
         detail = _("matched ask rule(s): {}").format(rule)
-        return PermissionResult(
+        return replace(
+            result,
             behavior="ask",
-            message=result.message,
-            reason=result.reason,
-            suggestions=result.suggestions,
             audit=_audit(
                 scope=scope_for_rule_source(source),
                 rule_source=source,
@@ -155,7 +157,8 @@ async def check_tool_permission(
     if result.behavior == "allow" and ask_rule is not None:
         source, rule = ask_rule
         detail = _("matched ask rule(s): {}").format(tool.name)
-        return PermissionResult(
+        return replace(
+            result,
             behavior="ask",
             message=detail,
             reason=PermissionDecisionReason(type="rule", detail=detail),
@@ -171,13 +174,21 @@ async def check_tool_permission(
             ),
         )
 
+    if tool.name == "aliyun_api" and _is_sticky_ask(result):
+        return _with_prompt_audit(tool, input, result)
+
     if (
         context.mode == PermissionMode.BYPASS_PERMISSIONS
         and not _is_safety_check_ask(result)
         and not _is_explicit_aliyun_write_allow(result, tool)
     ):
-        return PermissionResult(
+        return replace(
+            result,
             behavior="allow",
+            message="",
+            reason=None,
+            reasons=None,
+            suggestions=None,
             audit=_audit(
                 scope="mode",
                 rule_source="mode",
@@ -198,8 +209,13 @@ async def check_tool_permission(
         and tool.supports_blanket_allow
     ):
         source, rule = allow_rule
-        return PermissionResult(
+        return replace(
+            result,
             behavior="allow",
+            message="",
+            reason=None,
+            reasons=None,
+            suggestions=None,
             audit=_audit(
                 scope=scope_for_rule_source(source),
                 rule_source=source,
@@ -213,10 +229,10 @@ async def check_tool_permission(
         )
 
     if result.behavior == "passthrough":
-        result = PermissionResult(
+        result = replace(
+            result,
             behavior="ask",
             message=_("Allow {}?").format(tool.user_facing_name(input)),
-            suggestions=result.suggestions,
             audit=_audit(
                 scope="once",
                 reason_type="prompt_required",
@@ -227,8 +243,13 @@ async def check_tool_permission(
         )
 
     if context.mode == PermissionMode.DONT_ASK and result.behavior == "ask":
-        return PermissionResult(
+        return replace(
+            result,
             behavior="deny",
+            message="",
+            reason=None,
+            reasons=None,
+            suggestions=None,
             audit=_audit(
                 scope="mode",
                 rule_source="mode",

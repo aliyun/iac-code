@@ -1,86 +1,104 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from iac_code.tools.base import ToolRegistry
-from iac_code.tools.cloud.aliyun.ros_template_tools import (
-    RosEstimateTemplateCostTool,
-    RosGetTemplateParameterConstraintsTool,
-    RosPreviewTemplateTool,
-    RosValidateTemplateTool,
+from iac_code.tools.cloud.registry import (
+    ANONYMOUS_ALIYUN_TOOL_NAMES,
+    CREDENTIAL_GATED_ALIYUN_TOOL_NAMES,
+    register_cloud_tools,
 )
-from iac_code.tools.cloud.registry import register_cloud_tools
 
 
-class TestRegisterCloudTools:
-    def test_registers_aliyun_tools_when_configured(self):
-        registry = ToolRegistry()
-        credentials = MagicMock()
-        credentials.has_provider.side_effect = lambda name: name == "aliyun"
-        register_cloud_tools(registry, credentials)
-        assert registry.get("aliyun_api") is not None
-        assert registry.get("aliyun_doc_search") is not None
-        assert registry.get("ros_validate_template") is None
-        assert registry.get("ros_get_template_parameter_constraints") is None
-        assert registry.get("ros_preview_template") is None
-        assert registry.get("ros_estimate_template_cost") is None
-        assert registry.get("ros_stack") is not None
-        assert registry.get("ros_stack_instances") is not None
+def runtime_services() -> SimpleNamespace:
+    delegated: list[tuple[str, object]] = []
 
-    def test_does_not_register_when_not_configured(self):
-        registry = ToolRegistry()
-        credentials = MagicMock()
-        credentials.has_provider.return_value = False
-        register_cloud_tools(registry, credentials)
-        assert registry.get("aliyun_api") is None
-        assert registry.get("aliyun_doc_search") is None
-        assert registry.get("ros_validate_template") is None
-        assert registry.get("ros_get_template_parameter_constraints") is None
-        assert registry.get("ros_preview_template") is None
-        assert registry.get("ros_estimate_template_cost") is None
-        assert registry.get("ros_stack") is None
-        assert registry.get("ros_stack_instances") is None
+    def delegated_executor_factory(action: str) -> object:
+        executor = SimpleNamespace(action=action)
+        delegated.append((action, executor))
+        return executor
 
-    def test_removes_stale_pipeline_only_ros_template_tools(self):
-        registry = ToolRegistry()
-        registry.register(RosValidateTemplateTool())
-        registry.register(RosGetTemplateParameterConstraintsTool())
-        registry.register(RosPreviewTemplateTool())
-        registry.register(RosEstimateTemplateCostTool())
-        credentials = MagicMock()
-        credentials.has_provider.side_effect = lambda name: name == "aliyun"
+    return SimpleNamespace(
+        openmeta=object(),
+        contract_resolver=object(),
+        delegated_executor_factory=delegated_executor_factory,
+        delegated=delegated,
+    )
 
-        register_cloud_tools(registry, credentials)
 
-        assert registry.get("aliyun_api") is not None
-        assert registry.get("aliyun_doc_search") is not None
-        assert registry.get("ros_validate_template") is None
-        assert registry.get("ros_get_template_parameter_constraints") is None
-        assert registry.get("ros_preview_template") is None
-        assert registry.get("ros_estimate_template_cost") is None
-        assert registry.get("ros_stack") is not None
-        assert registry.get("ros_stack_instances") is not None
+def credentials(available: bool) -> MagicMock:
+    value = MagicMock()
+    value.has_provider.side_effect = lambda provider: available and provider == "aliyun"
+    return value
 
-    def test_removes_stale_aliyun_tools_when_credentials_become_unavailable(self):
-        registry = ToolRegistry()
-        credentials = MagicMock()
-        credentials.has_provider.side_effect = [True, False]
 
-        register_cloud_tools(registry, credentials)
-        assert registry.get("aliyun_api") is not None
-        assert registry.get("aliyun_doc_search") is not None
-        assert registry.get("ros_validate_template") is None
-        assert registry.get("ros_get_template_parameter_constraints") is None
-        assert registry.get("ros_preview_template") is None
-        assert registry.get("ros_estimate_template_cost") is None
-        assert registry.get("ros_stack") is not None
-        assert registry.get("ros_stack_instances") is not None
+def names(registry: ToolRegistry) -> set[str]:
+    return {tool.name for tool in registry.list_tools()}
 
-        register_cloud_tools(registry, credentials)
 
-        assert registry.get("aliyun_api") is None
-        assert registry.get("aliyun_doc_search") is None
-        assert registry.get("ros_validate_template") is None
-        assert registry.get("ros_get_template_parameter_constraints") is None
-        assert registry.get("ros_preview_template") is None
-        assert registry.get("ros_estimate_template_cost") is None
-        assert registry.get("ros_stack") is None
-        assert registry.get("ros_stack_instances") is None
+def test_exact_anonymous_and_credential_gated_groups() -> None:
+    assert ANONYMOUS_ALIYUN_TOOL_NAMES == ("aliyun_doc_search", "aliyun_api_doc")
+    assert CREDENTIAL_GATED_ALIYUN_TOOL_NAMES == (
+        "aliyun_api",
+        "ros_validate_template",
+        "ros_get_template_parameter_constraints",
+        "ros_preview_template",
+        "ros_estimate_template_cost",
+        "ros_stack",
+        "ros_stack_instances",
+    )
+
+
+def test_no_credentials_keeps_exact_anonymous_tools_with_same_services() -> None:
+    registry = ToolRegistry()
+    services = runtime_services()
+
+    register_cloud_tools(registry, credentials(False), services)
+
+    assert names(registry) == set(ANONYMOUS_ALIYUN_TOOL_NAMES)
+    assert registry.get("aliyun_api_doc")._services is services
+
+
+def test_add_remove_and_repeated_refresh_preserve_anonymous_and_services_identity() -> None:
+    registry = ToolRegistry()
+    services = runtime_services()
+    absent = credentials(False)
+    present = credentials(True)
+
+    register_cloud_tools(registry, absent, services)
+    anonymous = {name: registry.get(name) for name in ANONYMOUS_ALIYUN_TOOL_NAMES}
+
+    register_cloud_tools(registry, present, services)
+    assert names(registry) == set(ANONYMOUS_ALIYUN_TOOL_NAMES + CREDENTIAL_GATED_ALIYUN_TOOL_NAMES)
+    assert registry.get("aliyun_api")._runtime_services is services
+    assert registry.get("aliyun_api_doc")._services is services
+    assert all(registry.get(name) is tool for name, tool in anonymous.items())
+    first_delegated = list(services.delegated)
+    assert [action for action, _ in first_delegated] == [
+        "ValidateTemplate",
+        "GetTemplateParameterConstraints",
+        "PreviewStack",
+        "GetTemplateEstimateCost",
+    ]
+
+    register_cloud_tools(registry, present, services)
+    assert names(registry) == set(ANONYMOUS_ALIYUN_TOOL_NAMES + CREDENTIAL_GATED_ALIYUN_TOOL_NAMES)
+    assert registry.get("aliyun_api")._runtime_services is services
+    assert registry.get("aliyun_api_doc")._services is services
+    assert all(registry.get(name) is tool for name, tool in anonymous.items())
+
+    register_cloud_tools(registry, absent, services)
+    assert names(registry) == set(ANONYMOUS_ALIYUN_TOOL_NAMES)
+    assert all(registry.get(name) is tool for name, tool in anonymous.items())
+
+
+def test_refresh_removes_stale_execution_tools_even_without_credentials() -> None:
+    registry = ToolRegistry()
+    services = runtime_services()
+    register_cloud_tools(registry, credentials(True), services)
+
+    register_cloud_tools(registry, credentials(False), services)
+
+    assert not set(CREDENTIAL_GATED_ALIYUN_TOOL_NAMES).intersection(names(registry))
+    assert set(ANONYMOUS_ALIYUN_TOOL_NAMES).issubset(names(registry))

@@ -12,6 +12,8 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
+      - "scripts/aliyun/**"
+      - ".github/workflows/test.yml"
   pull_request:
     branches: [main, master]
     paths:
@@ -19,6 +21,8 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
+      - "scripts/aliyun/**"
+      - ".github/workflows/test.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,6 +48,41 @@ jobs:
 
       - name: Run linters
         run: make lint
+
+      - name: Verify authentic pinned endpoint catalog
+        run: |
+          upstream_dir="$(mktemp -d)"
+          output_dir="$(mktemp -d)"
+          git -C "$upstream_dir" init
+          git -C "$upstream_dir" remote add origin https://github.com/aliyun/aliyun-openapi-meta.git
+          git -C "$upstream_dir" fetch --depth 1 origin 2563691c22229a0b493606e11166b95896707095
+          git -C "$upstream_dir" checkout --detach FETCH_HEAD
+          test "$(git -C "$upstream_dir" rev-parse HEAD)" = "2563691c22229a0b493606e11166b95896707095"
+          test "$(sha256sum "$upstream_dir/metadatas/products.json" | cut -d ' ' -f 1)" = \
+            "e79346fbe87dbacd73c4cb68520f897add17a8e90cadb8fb03e5efa217d04be5"
+          cmp "$upstream_dir/metadatas/products.json" \
+            tests/tools/cloud/aliyun/fixtures/endpoints/aliyun-openapi-meta/metadatas/products.json
+          uv run python scripts/aliyun/generate_endpoints.py \
+            --source "$upstream_dir/metadatas/products.json" \
+            --source-commit 2563691c22229a0b493606e11166b95896707095 \
+            --products-sha256 e79346fbe87dbacd73c4cb68520f897add17a8e90cadb8fb03e5efa217d04be5 \
+            --openmeta-products tests/tools/cloud/aliyun/fixtures/endpoints/openmeta_products.json \
+            --output-dir "$output_dir"
+          cmp "$output_dir/catalog.json" src/iac_code/tools/cloud/aliyun/data/endpoints/catalog.json
+          cmp "$output_dir/unavailable.json" src/iac_code/tools/cloud/aliyun/data/endpoints/unavailable.json
+          cmp "$output_dir/generation_report.json" src/iac_code/tools/cloud/aliyun/data/endpoints/generation_report.json
+
+      - name: Verify locked OSS async operation catalog
+        run: |
+          oss_version="$(uv run python -c 'import importlib.metadata as m; print(m.version("alibabacloud-oss-v2"))')"
+          oss_wheel_sha256="$(uv run python scripts/aliyun/generate_oss_operations.py wheel-hash --lockfile uv.lock)"
+          oss_catalog="$(mktemp)"
+          uv run python scripts/aliyun/generate_oss_operations.py generate \
+            --sdk-version "$oss_version" \
+            --sdk-wheel-sha256 "$oss_wheel_sha256" \
+            --openmeta-fixture tests/tools/cloud/aliyun/fixtures/oss/openmeta_operations.json \
+            --output "$oss_catalog"
+          cmp "$oss_catalog" src/iac_code/tools/cloud/aliyun/data/oss/operation_catalog.json
 
   test:
     name: Test (Python ${{ matrix.python-version }})

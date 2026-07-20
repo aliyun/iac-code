@@ -133,6 +133,28 @@ async def test_repl_handle_command_routes_thinking_enabled_toggle(tmp_path, monk
 
 
 class TestREPLProviderIntegration:
+    def test_init_failure_closes_only_owned_aliyun_services(self, monkeypatch):
+        from iac_code.tools.cloud.aliyun import runtime as aliyun_runtime
+        from iac_code.ui.repl import InlineREPL
+
+        owned_services = SimpleNamespace(aclose=AsyncMock())
+        external_services = SimpleNamespace(aclose=AsyncMock())
+        monkeypatch.setattr(aliyun_runtime, "create_aliyun_runtime_services", lambda **kwargs: owned_services)
+
+        def fail_initialize(self, **kwargs):
+            del self, kwargs
+            raise RuntimeError("init failed")
+
+        monkeypatch.setattr(InlineREPL, "_initialize", fail_initialize)
+
+        with pytest.raises(RuntimeError, match="init failed"):
+            InlineREPL(model="test-model")
+        with pytest.raises(RuntimeError, match="init failed"):
+            InlineREPL(model="test-model", aliyun_services=external_services)
+
+        owned_services.aclose.assert_awaited_once()
+        external_services.aclose.assert_not_awaited()
+
     @patch("iac_code.ui.repl.ProviderManager")
     @patch("iac_code.ui.repl.SessionStorage")
     @patch("iac_code.ui.repl.MemoryManager")

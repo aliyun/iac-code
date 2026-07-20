@@ -1298,6 +1298,15 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
     class FakeCloudCredentials:
         pass
 
+    class FakeAliyunServices:
+        credential_provider = None
+
+        async def aclose(self):
+            return None
+
+    fake_aliyun_services = FakeAliyunServices()
+    captured["aliyun_services"] = fake_aliyun_services
+
     class FakePromptCommand:
         def __init__(self, name="prompt", **kwargs):
             self.name = name
@@ -1313,7 +1322,11 @@ def _install_headless_fakes(monkeypatch, *, creds=None, skills=None, existing_co
     monkeypatch.setattr("iac_code.tools.base.ToolRegistry", lambda: fake_registry)
     monkeypatch.setattr(
         "iac_code.tools.cloud.registry.register_cloud_tools",
-        lambda registry, creds: captured.setdefault("cloud_tools", []).append((registry, creds)),
+        lambda registry, creds, services: captured.setdefault("cloud_tools", []).append((registry, creds, services)),
+    )
+    monkeypatch.setattr(
+        "iac_code.tools.cloud.aliyun.runtime.create_aliyun_runtime_services",
+        lambda **kwargs: fake_aliyun_services,
     )
     monkeypatch.setattr("iac_code.services.cloud_credentials.CloudCredentials", FakeCloudCredentials)
     monkeypatch.setattr("iac_code.services.session_storage.SessionStorage", FakeSessionStorage)
@@ -1385,6 +1398,7 @@ def test_create_agent_loop_builds_expected_dependencies(monkeypatch):
     assert str(Path("/tmp/iac-config/memory")) in captured["memory_dirs"]
     assert any(getattr(tool, "kind", "") == "agent" for tool in fake_registry.registered)
     assert any(getattr(tool, "kind", "") == "skill" for tool in fake_registry.registered)
+    assert captured["cloud_tools"][0][2] is captured["aliyun_services"]
     assert captured["agent_loop_kwargs"]["max_turns"] == 100
     assert captured["agent_loop_kwargs"]["session_storage"] is not None
     assert captured["agent_loop_kwargs"]["memory_recall_service"] is captured["memory_recall_service"]

@@ -455,6 +455,7 @@ class PipelineRunner:
         prerequisite_resolution: dict[str, Any] | None = None,
         mcp_manager: Any | None = None,
         mcp_config_warnings: list[Any] | None = None,
+        aliyun_delegated_executor_factory: Callable[[str], Any] | None = None,
     ) -> None:
         self._session_storage = session_storage
         self._session_id = session_id
@@ -467,6 +468,7 @@ class PipelineRunner:
         self._mcp_manager = mcp_manager
         self._mcp_config_warnings = mcp_config_warnings if mcp_config_warnings is not None else []
         self._mcp_status_event_signature: str | None = None
+        self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
         self._pipeline_dir = pipeline_dir
 
@@ -551,6 +553,7 @@ class PipelineRunner:
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
+            aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
         )
         self._apply_telemetry_correlation(self._step_executor)
 
@@ -2201,6 +2204,7 @@ class PipelineRunner:
             auto_trigger_skills=self._auto_trigger_skills,
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
+            aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
         )
         self._apply_telemetry_correlation(sub_context_executor)
         sub_context_dependencies = sub_context_executor._sub_context_dependencies(sub_spec)
@@ -2246,6 +2250,7 @@ class PipelineRunner:
                 auto_trigger_skills=self._auto_trigger_skills,
                 surface=self._surface,
                 tool_context_env_overrides=self._tool_context_env_overrides,
+                aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
             )
             self._apply_telemetry_correlation(step_executor)
             agent_context = step_executor.build_agent_loop_context(
@@ -4249,6 +4254,7 @@ class PipelineRunner:
                 surface=self._surface,
                 backup_service=self._backup_service,
                 tool_context_env_overrides=self._tool_context_env_overrides,
+                aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
             )
             for _ in candidates
         ]

@@ -137,6 +137,26 @@ class TestSubPipelineResult:
 
 
 class TestSubPipelineExecutor:
+    def test_constructor_preserves_exact_aliyun_delegated_factory(self, tmp_path):
+        factory = object()
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[],
+            context_dependencies={"intent": []},
+            max_rollbacks=3,
+            skills={},
+        )
+
+        executor = SubPipelineExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+            aliyun_delegated_executor_factory=factory,
+        )
+
+        assert executor._aliyun_delegated_executor_factory is factory
+
     @pytest.mark.asyncio
     async def test_execute_streaming_does_not_backup_after_sub_step_completion(self, tmp_path, monkeypatch):
         (tmp_path / "prompts").mkdir(exist_ok=True)

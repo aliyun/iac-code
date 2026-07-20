@@ -6,6 +6,7 @@ import json
 import os
 import queue
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -62,6 +63,14 @@ class FakePipelineRuntime:
 
     async def aclose(self) -> None:
         return None
+
+
+class ClosableFakePipelineRuntime(FakePipelineRuntime):
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class FakePipeline:
@@ -148,6 +157,142 @@ def test_default_pipeline_factory_passes_mcp_runtime_state(monkeypatch, tmp_path
     assert captured["surface"] == "process"
     assert captured["mcp_manager"] is mcp_manager
     assert captured["mcp_config_warnings"] is warnings
+
+
+def test_pipeline_process_default_factory_propagates_exact_aliyun_delegated_factory(monkeypatch, tmp_path) -> None:
+    from iac_code import pipeline as pipeline_module
+
+    delegated_factory = object()
+    captured = {}
+
+    def fake_create_pipeline(*args, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(pipeline_module, "create_pipeline", fake_create_pipeline)
+    runtime = FakePipelineRuntime()
+    runtime.agent_loop = None
+    runtime.command_registry = None
+    controller = PipelineProcessRuntimeController(
+        ProcessModeOptions(model="model-a", cwd=str(tmp_path), run_mode="pipeline"),
+        aliyun_delegated_executor_factory=delegated_factory,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "agent_runtime": runtime,
+            "iac_code_session_id": "session",
+            "cwd": str(tmp_path),
+            "resume_from_sidecar": False,
+        },
+    )()
+
+    controller._default_pipeline_factory(request)
+
+    assert captured["aliyun_delegated_executor_factory"] is delegated_factory
+
+
+def test_pipeline_process_default_factory_uses_current_runtime_services_delegated_factory(
+    monkeypatch, tmp_path
+) -> None:
+    from iac_code import pipeline as pipeline_module
+
+    delegated_factory = object()
+    captured = {}
+
+    def fake_create_pipeline(*args, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(pipeline_module, "create_pipeline", fake_create_pipeline)
+    runtime = FakePipelineRuntime()
+    runtime.agent_loop = None
+    runtime.command_registry = None
+    runtime.aliyun_services = type("AliyunServices", (), {"delegated_executor_factory": delegated_factory})()
+    controller = PipelineProcessRuntimeController(
+        ProcessModeOptions(model="model-a", cwd=str(tmp_path), run_mode="pipeline"),
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "agent_runtime": runtime,
+            "iac_code_session_id": "session",
+            "cwd": str(tmp_path),
+            "resume_from_sidecar": False,
+        },
+    )()
+
+    controller._default_pipeline_factory(request)
+
+    assert captured["aliyun_delegated_executor_factory"] is delegated_factory
+
+
+@pytest.mark.asyncio
+async def test_pipeline_process_context_switch_closes_previous_agent_runtime(tmp_path) -> None:
+    runtimes: list[ClosableFakePipelineRuntime] = []
+
+    def runtime_factory(request):
+        del request
+        runtime = ClosableFakePipelineRuntime()
+        runtimes.append(runtime)
+        return runtime
+
+    controller = PipelineProcessRuntimeController(
+        ProcessModeOptions(model="model-a", cwd=str(tmp_path), run_mode="pipeline"),
+        agent_runtime_factory=runtime_factory,
+        pipeline_factory=lambda request: object(),
+    )
+    first = PipelineProcessCreateRequest(
+        context_id="context-1",
+        task_id="task-1",
+        iac_code_session_id="session-1",
+        cwd=str(tmp_path),
+        model="model-a",
+        resume_from_sidecar=False,
+    )
+    second = replace(first, context_id="context-2", task_id="task-2", iac_code_session_id="session-2")
+
+    await controller._ensure_pipeline(first)
+    await controller._ensure_pipeline(second)
+
+    assert len(runtimes) == 2
+    assert runtimes[0].closed is True
+    assert runtimes[1].closed is False
+
+    await controller.aclose()
+
+    assert runtimes[1].closed is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_process_creation_failure_closes_new_agent_runtime(tmp_path) -> None:
+    runtime = ClosableFakePipelineRuntime()
+
+    def fail_pipeline_factory(request):
+        del request
+        raise RuntimeError("pipeline init failed")
+
+    controller = PipelineProcessRuntimeController(
+        ProcessModeOptions(model="model-a", cwd=str(tmp_path), run_mode="pipeline"),
+        agent_runtime_factory=lambda request: runtime,
+        pipeline_factory=fail_pipeline_factory,
+    )
+    request = PipelineProcessCreateRequest(
+        context_id="context-1",
+        task_id="task-1",
+        iac_code_session_id="session-1",
+        cwd=str(tmp_path),
+        model="model-a",
+        resume_from_sidecar=False,
+    )
+
+    with pytest.raises(RuntimeError, match="pipeline init failed"):
+        await controller._ensure_pipeline(request)
+
+    assert runtime.closed is True
+    assert controller._agent_runtime is None
 
 
 def _load_output(stream: io.StringIO) -> list[dict]:

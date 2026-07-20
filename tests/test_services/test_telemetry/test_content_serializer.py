@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from iac_code.agent.message import Message as AgentMessage
+from iac_code.agent.message import ToolResultBlock, ToolUseBlock
 from iac_code.providers.base import ContentBlock, Message
 from iac_code.services.telemetry.content_serializer import (
     serialize_input_messages,
@@ -127,6 +129,95 @@ def test_serialize_input_messages_tool_result_uses_provider_content_field():
     assert "ROSTemplateFormatVersion" not in response
     assert "file_content" in response
     assert "sha256-value" in response
+
+
+def test_serialize_input_messages_redacts_associated_aliyun_tool_result():
+    secret_result = json.dumps(
+        {
+            "status": 200,
+            "headers": {"authorization": "credential-secret", "host": "private.example.com"},
+            "body": {"bucket": "bucket-secret", "value": "marker-secret"},
+            "content_type": "application/json",
+            "content_encoding": None,
+            "size": 99,
+            "artifact_path": "/private/customer/artifact.bin",
+        }
+    )
+    messages = [
+        Message.assistant_tool_use(
+            tool_use_id="aliyun-call",
+            name="aliyun_api",
+            input={"params": {"bucket": "input-bucket-secret"}},
+        ),
+        Message.tool_result(tool_use_id="aliyun-call", content=secret_result),
+    ]
+
+    serialized = serialize_input_messages(messages)
+    result = json.loads(serialized)
+    response = json.loads(result[1]["parts"][0]["response"])
+
+    assert response == {
+        "is_error": False,
+        "status": 200,
+        "status_class": "2xx",
+        "headers_present": True,
+        "body_present": True,
+        "content_type_present": True,
+        "content_encoding_present": False,
+        "size_present": True,
+        "artifact_present": True,
+    }
+    for forbidden in (
+        "credential-secret",
+        "private.example.com",
+        "bucket-secret",
+        "marker-secret",
+        "/private/customer",
+    ):
+        assert forbidden not in serialized
+
+
+def test_serialize_input_messages_redacts_agent_loop_aliyun_tool_result():
+    messages = [
+        AgentMessage(
+            role="assistant",
+            content=[ToolUseBlock(id="aliyun-call", name="aliyun_api", input={})],
+        ),
+        AgentMessage(
+            role="user",
+            content=[
+                ToolResultBlock(
+                    tool_use_id="aliyun-call",
+                    content=json.dumps(
+                        {
+                            "status": 200,
+                            "headers": {"authorization": "credential-secret"},
+                            "body": {"value": "business-secret"},
+                        }
+                    ),
+                )
+            ],
+        ),
+    ]
+
+    serialized = serialize_input_messages(messages)
+    result = json.loads(serialized)
+
+    assert result[0]["parts"][0]["id"] == "aliyun-call"
+    assert json.loads(result[1]["parts"][0]["response"])["headers_present"] is True
+    assert "credential-secret" not in serialized
+    assert "business-secret" not in serialized
+
+
+def test_serialize_input_messages_keeps_associated_non_aliyun_tool_result_unchanged():
+    messages = [
+        Message.assistant_tool_use(tool_use_id="custom-call", name="custom_tool", input={}),
+        Message.tool_result(tool_use_id="custom-call", content="ordinary result output"),
+    ]
+
+    result = json.loads(serialize_input_messages(messages))
+
+    assert result[1]["parts"][0]["response"] == "ordinary result output"
 
 
 def test_serialize_input_messages_tool_result_redacts_externalized_file_content_preview(tmp_path):

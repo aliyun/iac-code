@@ -11,7 +11,6 @@ from typing import Any, Protocol
 
 from iac_code.pipeline.engine.architecture_meta import ArchitectureMetaRepository, ResourceMeta
 from iac_code.tools.base import ToolContext
-from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
 
 
 @dataclass(frozen=True)
@@ -108,6 +107,9 @@ class RosResourceTypeClient(Protocol):
 class AliyunRosResourceTypeClient:
     """ROS resource type client backed by the project AliyunApi tool."""
 
+    def __init__(self, internal_caller: Any) -> None:
+        self._internal_caller = internal_caller
+
     async def list_resource_types(self) -> list[str]:
         body = await self._call("ListResourceTypes", {})
         values = body.get("ResourceTypes")
@@ -119,7 +121,7 @@ class AliyunRosResourceTypeClient:
         return await self._call("GetResourceType", {"ResourceType": resource_type})
 
     async def _call(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
-        result = await AliyunApi().execute(
+        result = await self._internal_caller.call(
             tool_input={"product": "ros", "action": action, "params": params},
             context=ToolContext(),
         )
@@ -137,13 +139,17 @@ async def collect_ros_resource_inventory(
     fetched_at: str | None = None,
     refresh: bool = False,
     max_concurrency: int = 8,
+    internal_caller: Any = None,
 ) -> ResourceInventorySnapshot:
     """Collect an API-authoritative ROS inventory and merge local metadata.
 
     The cache stores only resource type details and errors. It never stores credentials.
     """
 
-    client = client or AliyunRosResourceTypeClient()
+    if client is None:
+        if internal_caller is None:
+            raise RuntimeError("aliyun_internal_caller_required")
+        client = AliyunRosResourceTypeClient(internal_caller)
     meta_repository = meta_repository or ArchitectureMetaRepository.load_default()
     api_resource_types = tuple(sorted(await client.list_resource_types()))
     cached_details, cached_errors = _load_inventory_cache(cache_path)

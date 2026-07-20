@@ -1,0 +1,39 @@
+{
+  "product": "Ecs",
+  "version": "2014-05-26",
+  "action": "DescribeInstances",
+  "style": "RPC",
+  "methods": ["POST"],
+  "path": "/",
+  "operationType": "read",
+  "security": [{"AK": []}],
+  "parameters": [
+    {
+      "name": "RegionId",
+      "in": "query",
+      "required": true,
+      "style": "repeatList",
+      "description": "The region.",
+      "example": "cn-hangzhou",
+      "schema": {"type": "string"}
+    },
+    {
+      "name": "InstanceIds",
+      "in": "query",
+      "required": false,
+      "schema": {"$ref": "#/components/schemas/InstanceIds"}
+    }
+  ],
+  "responses": {
+    "200": {
+      "headers": {"x-acs-request-id": {"schema": {"type": "string"}}},
+      "schema": {"$ref": "#/components/schemas/Instance"}
+    }
+  },
+  "components": {
+    "schemas": {
+      "InstanceIds": {"type": "array", "items": {"type": "string"}},
+      "Instance": {"type": "object", "properties": {"id": {"type": "string"}, "child": {"$ref": "#/components/schemas/Instance"}}}
+    }
+  }
+}

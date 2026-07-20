@@ -68,7 +68,7 @@ def _write_pipeline_yaml(pipeline_dir: Path) -> None:
     )
 
 
-def _pipeline_executor():
+def _pipeline_executor(*, aliyun_delegated_executor_factory=None):
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
 
     return IacCodeA2APipelineExecutor(
@@ -80,6 +80,7 @@ def _pipeline_executor():
         permission_resolver=None,
         auto_approve_permissions=False,
         thinking_exposure_types=None,
+        aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
     )
 
 
@@ -136,7 +137,8 @@ def test_create_pipeline_inspects_prerequisites_for_fresh_a2a_run(
     monkeypatch.setattr(pipeline_executor_module, "inspect_prerequisites", fake_inspect, raising=False)
     monkeypatch.setattr(pipeline_executor_module, "create_pipeline", fake_create_pipeline)
 
-    _pipeline_executor()._create_pipeline(
+    delegated_factory = object()
+    _pipeline_executor(aliyun_delegated_executor_factory=delegated_factory)._create_pipeline(
         session_id="session-1",
         cwd=str(tmp_path),
         runtime=_fake_runtime(),
@@ -158,6 +160,36 @@ def test_create_pipeline_inspects_prerequisites_for_fresh_a2a_run(
     ]
     assert create_kwargs["surface"] == "a2a"
     assert create_kwargs["prerequisite_resolution"] == resolution.to_metadata()
+    assert create_kwargs["aliyun_delegated_executor_factory"] is delegated_factory
+
+
+def test_create_pipeline_uses_current_runtime_services_delegated_factory_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    delegated_factory = object()
+    runtime = _fake_runtime()
+    runtime.aliyun_services = SimpleNamespace(delegated_executor_factory=delegated_factory)
+    create_kwargs: dict[str, object] = {}
+    executor = _pipeline_executor()
+    monkeypatch.setattr(executor, "_inspect_pipeline_prerequisite_metadata", lambda **kwargs: None)
+    monkeypatch.setattr(
+        pipeline_executor_module,
+        "create_pipeline",
+        lambda *args, **kwargs: create_kwargs.update(kwargs) or object(),
+    )
+
+    executor._create_pipeline(
+        session_id="session-1",
+        cwd=str(tmp_path),
+        runtime=runtime,
+        session_storage=MagicMock(),
+        resume_from_sidecar=False,
+    )
+
+    assert create_kwargs["aliyun_delegated_executor_factory"] is delegated_factory
 
 
 def test_create_pipeline_resume_sidecar_prerequisites_skip_a2a_inspection(
@@ -817,7 +849,7 @@ def test_a2a_pipeline_dir_for_session_reuses_legacy_flat_direct_a2a_sidecar(
     assert existing_a2a_pipeline_dir_for_session(cwd=str(cwd), session_id="legacy-a2a") == a2a_pipeline_dir
 
 
-def test_pipeline_publisher_prefers_session_artifact_store_when_session_available(
+def test_pipeline_publisher_uses_session_a2a_artifact_store_when_session_available(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -845,9 +877,10 @@ def test_pipeline_publisher_prefers_session_artifact_store_when_session_availabl
         thinking_exposure_types=None,
     )
 
+    pipeline = FakePipeline([], session_dir=session_dir / "pipeline")
     publisher = executor._publisher(
         event_queue=FakeEventQueue(),
-        pipeline=FakePipeline([], session_dir=session_dir / "pipeline"),
+        pipeline=pipeline,
         task_id="task-1",
         context_id="ctx-1",
         session_id=session_id,
@@ -1094,9 +1127,11 @@ async def test_pipeline_executor_refreshes_cloud_tools_with_aliyun_metadata_for_
 
     seen_access_key_ids: list[str | None] = []
     runtime = _fake_runtime()
+    runtime.aliyun_services = object()
 
-    def fake_register_cloud_tools(registry, credentials):
+    def fake_register_cloud_tools(registry, credentials, services):
         assert registry is runtime.tool_registry
+        assert services is runtime.aliyun_services
         credential = credentials.get_provider("aliyun")
         seen_access_key_ids.append(credential.access_key_id if credential else None)
 

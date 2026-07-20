@@ -14,6 +14,7 @@ repository root with `uv run python ...` unless a script-specific README says ot
 | `a2a/e2e/` | A2A session recovery end-to-end scenario runner, shared helpers, and result notes. |
 | `a2a/smoke/test_a2a_vpc.py` | Small manual smoke script for A2A VPC/pipeline behavior. |
 | `acp/smoke/test_acp_vpc.py` | Small manual smoke script for ACP VPC behavior. |
+| `aliyun/` | Alibaba Cloud endpoint, OSS operation, and offline product catalog generators. See `aliyun/README.md`. |
 | `headless/smoke/test_headless_vpc.py` | Small manual smoke script for headless VPC behavior. |
 | `observability/local_observe.py` | Local OTLP observability server entrypoint. |
 | `observability/local_observe/` | Local observe server implementation and static web UI. |
@@ -31,6 +32,7 @@ uv run python scripts/a2a/selling_console.py --port 41980 \
   --default-server-url http://127.0.0.1:41299 \
   --default-cwd "$PWD"
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py --help
+uv run python scripts/aliyun/generate_endpoints.py --help
 uv run python scripts/observability/local_observe.py --help
 uv run python scripts/rendering/preview_template_architecture_llm.py --help
 uv run python scripts/repl/e2e/run_pipeline_scenarios.py --help

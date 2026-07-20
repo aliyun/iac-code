@@ -10,6 +10,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from iac_code.tools.cloud.registry import (
+    ANONYMOUS_ALIYUN_TOOL_NAMES,
+    CREDENTIAL_GATED_ALIYUN_TOOL_NAMES,
+)
 from iac_code.utils.tool_result_redaction import redact_tool_result_file_content
 
 _MAX_CONTENT_BYTES = 4096
@@ -38,11 +42,35 @@ def serialize_user_input(user_input: str) -> str:
     return _json_dumps([{"role": "user", "parts": [{"type": "text", "content": _truncate(user_input)}]}])
 
 
+def _tool_call_id(block: Any) -> str:
+    for attribute in ("tool_use_id", "id"):
+        value = getattr(block, attribute, None)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def serialize_input_messages(messages: list) -> str:
     """Serialize provider Message list to gen_ai.input.messages JSON string.
 
     OTel semconv: [{role, parts: [{type, content|...}]}]
     """
+    tool_names_by_id: dict[str, str] = {}
+    for msg in messages:
+        content = getattr(msg, "content", "")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if getattr(block, "type", "text") != "tool_use":
+                continue
+            tool_use_id = _tool_call_id(block)
+            tool_name = getattr(block, "name", None)
+            if not tool_use_id or not isinstance(tool_name, str):
+                continue
+            existing = tool_names_by_id.get(tool_use_id)
+            if existing is None or (tool_name in _ALIYUN_TOOL_NAMES and existing not in _ALIYUN_TOOL_NAMES):
+                tool_names_by_id[tool_use_id] = tool_name
+
     result = []
     for msg in messages:
         role = getattr(msg, "role", "unknown")
@@ -60,18 +88,25 @@ def serialize_input_messages(messages: list) -> str:
                         {
                             "type": "tool_call",
                             "name": getattr(block, "name", ""),
-                            "id": getattr(block, "tool_use_id", ""),
+                            "id": _tool_call_id(block),
                         }
                     )
                 elif btype == "tool_result":
                     response = getattr(block, "text", None)
                     if response is None or response == "":
                         response = getattr(block, "content", "") or ""
+                    tool_use_id = _tool_call_id(block)
+                    tool_name = tool_names_by_id.get(tool_use_id)
+                    serialized_response = (
+                        _aliyun_tool_result(block)
+                        if tool_name in _ALIYUN_TOOL_NAMES
+                        else _redacted_tool_result_string(response)
+                    )
                     parts.append(
                         {
                             "type": "tool_call_response",
-                            "id": getattr(block, "tool_use_id", ""),
-                            "response": _truncate(_redacted_tool_result_string(response)),
+                            "id": tool_use_id,
+                            "response": _truncate(serialized_response),
                         }
                     )
                 else:
@@ -119,15 +154,105 @@ def serialize_tool_definitions(tools: list | None) -> str:
     return _json_dumps(result)
 
 
-def serialize_tool_arguments(arguments: dict | Any) -> str:
+_ALIYUN_TOOL_NAMES = frozenset(ANONYMOUS_ALIYUN_TOOL_NAMES + CREDENTIAL_GATED_ALIYUN_TOOL_NAMES)
+_API_STYLES = frozenset({"RPC", "ROA"})
+_HTTP_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
+_DOC_DETAILS = frozenset({"summary", "full"})
+_ALIYUN_PRESENCE_FIELDS = {
+    "aliyun_doc_search": ("keywords", "category_id"),
+    "aliyun_api_doc": ("product", "action", "version", "detail"),
+    "ros_validate_template": ("template_url", "region_id", "parameters", "stack_name"),
+    "ros_get_template_parameter_constraints": ("template_url", "region_id", "parameters", "stack_name"),
+    "ros_preview_template": ("template_url", "region_id", "parameters", "stack_name"),
+    "ros_estimate_template_cost": ("template_url", "region_id", "parameters", "stack_name"),
+    "ros_stack": ("action", "params", "region_id"),
+    "ros_stack_instances": ("action", "params", "region_id"),
+}
+
+
+def _aliyun_tool_arguments(arguments: Any, tool_name: str) -> str:
+    values = arguments if isinstance(arguments, dict) else {}
+    if tool_name == "aliyun_api":
+        style = values.get("style")
+        method = values.get("method")
+        body_present = "body" in values
+        body_file_present = "body_file" in values
+        if body_present and body_file_present:
+            body_source = "conflicting"
+        elif body_present:
+            body_source = "body"
+        elif body_file_present:
+            body_source = "body_file"
+        else:
+            body_source = "none"
+        result: dict[str, Any] = {
+            "body_source": body_source,
+            "product_present": "product" in values,
+            "version_present": "version" in values,
+            "action_present": "action" in values,
+            "region_id_present": "region_id" in values,
+            "pathname_present": "pathname" in values,
+            "params_present": "params" in values,
+            "body_present": body_present,
+            "body_file_present": body_file_present,
+        }
+        if isinstance(style, str) and style.upper() in _API_STYLES:
+            result["style"] = style.upper()
+        if isinstance(method, str) and method.upper() in _HTTP_METHODS:
+            result["method"] = method.upper()
+        return _json_dumps(result)
+    result = {f"{field}_present": field in values for field in _ALIYUN_PRESENCE_FIELDS.get(tool_name, ())}
+    if tool_name == "aliyun_api_doc":
+        detail = values.get("detail", "summary")
+        if isinstance(detail, str) and detail in _DOC_DETAILS:
+            result["detail"] = detail
+    return _json_dumps(result)
+
+
+def serialize_tool_arguments(arguments: dict | Any, *, tool_name: str | None = None) -> str:
     """Serialize tool call arguments to JSON string."""
+    if tool_name in _ALIYUN_TOOL_NAMES:
+        return _aliyun_tool_arguments(arguments, tool_name)
     if isinstance(arguments, str):
         return _truncate(arguments)
     return _truncate(_json_dumps(arguments))
 
 
-def serialize_tool_result(result: Any) -> str:
+def _aliyun_tool_result(result: Any) -> str:
+    raw_content = getattr(result, "content", None)
+    if raw_content is None:
+        raw_content = getattr(result, "text", result)
+    if isinstance(raw_content, str):
+        try:
+            payload = json.loads(raw_content)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            payload = {}
+    else:
+        payload = raw_content
+    payload = payload if isinstance(payload, dict) else {}
+    status = payload.get("status")
+    valid_status = isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599
+    metadata = getattr(result, "metadata", None)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    output: dict[str, Any] = {
+        "is_error": bool(getattr(result, "is_error", False)),
+        "headers_present": "headers" in payload,
+        "body_present": "body" in payload,
+        "content_type_present": "content_type" in payload,
+        "content_encoding_present": payload.get("content_encoding") is not None,
+        "size_present": "size" in payload,
+        "artifact_present": "artifact_path" in payload or bool(metadata.get("artifacts")),
+    }
+    if valid_status:
+        output["status"] = status
+        output["status_class"] = "{}xx".format(status // 100)
+    return _json_dumps(output)
+
+
+def serialize_tool_result(result: Any, *, tool_name: str | None = None) -> str:
     """Serialize tool call result to JSON string (truncated)."""
+    if tool_name in _ALIYUN_TOOL_NAMES:
+        return _aliyun_tool_result(result)
     if isinstance(result, str):
         return _truncate(_redacted_tool_result_string(result))
     content = getattr(result, "content", None)

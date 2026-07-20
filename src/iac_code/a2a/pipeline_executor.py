@@ -263,6 +263,7 @@ class IacCodeA2APipelineExecutor:
         metadata_api_key: str | None = None,
         request_policy_override: ProviderRequestPolicy | None = None,
         backup_service: Any | None = None,
+        aliyun_delegated_executor_factory: Any | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -278,6 +279,7 @@ class IacCodeA2APipelineExecutor:
         self._metadata_api_key = metadata_api_key
         self._request_policy_override = request_policy_override
         self._backup_service = backup_service or SessionBackupService()
+        self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
 
     async def execute(
         self,
@@ -1090,6 +1092,10 @@ class IacCodeA2APipelineExecutor:
         create_kwargs: dict[str, Any] = {}
         if prerequisite_resolution is not None:
             create_kwargs["prerequisite_resolution"] = prerequisite_resolution
+        delegated_factory = self._aliyun_delegated_executor_factory
+        if delegated_factory is None:
+            services = getattr(runtime, "aliyun_services", None)
+            delegated_factory = getattr(services, "delegated_executor_factory", None)
         return create_pipeline(
             pipeline_name,
             provider_manager=runtime.provider_manager,
@@ -1100,6 +1106,7 @@ class IacCodeA2APipelineExecutor:
             resume_from_sidecar=resume_from_sidecar,
             surface="a2a",
             backup_service=self._backup_service,
+            aliyun_delegated_executor_factory=delegated_factory,
             **create_kwargs,
             mcp_manager=getattr(runtime, "mcp_manager", None),
             mcp_config_warnings=getattr(runtime, "mcp_config_warnings", None),

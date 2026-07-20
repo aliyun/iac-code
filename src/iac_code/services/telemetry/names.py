@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+ALIYUN_API_TARGET_OUTCOMES = frozenset(
+    {
+        "success",
+        "http_error",
+        "invalid_response",
+        "pre_connect_failure",
+        "unknown_after_transport_error",
+        "unknown_after_cancel",
+        "target_transport_failure",
+        "pool_unavailable",
+        "connect_timeout",
+        "connect_error",
+        "read_timeout",
+        "read_error",
+        "protocol_error",
+        "stream_read_error",
+        "retryable_status",
+    }
+)
+
 # =====================================================================
 # ARMS LLM semantic conventions (gen_ai.*)
 # https://help.aliyun.com/zh/arms/application-monitoring/developer-reference/llm-trace-field-definition-description
@@ -158,8 +178,10 @@ class Events:
     SKILL_INVOKED = "iac.skill.invoked"
     SKILL_COMPLETED = "iac.skill.completed"
 
-    # --- Aliyun API (1) ---
+    # --- Aliyun API (3) ---
     ALIYUN_API_CALLED = "iac.aliyun.api.called"
+    ALIYUN_API_LEGACY_CALLED = "iac.aliyun.api.legacy.called"
+    ALIYUN_PRODUCT_RESOLVED = "iac.aliyun.product.resolved"
 
     # --- Memory (2) ---
     MEMORY_COMPACT_SUCCEEDED = "iac.memory.compact.succeeded"
@@ -218,6 +240,11 @@ class Metrics:
     RESOURCE_TYPE_OBSERVED_COUNT = "iac.resource_type.observed.count"
     ALIYUN_API_CALLED_COUNT = "iac.aliyun.api.called.count"
     ALIYUN_API_CALLED_DURATION = "iac.aliyun.api.called.duration"
+    ALIYUN_OPENMETA_REQUEST_COUNT = "iac.aliyun.openmeta.request.count"
+    ALIYUN_OPENMETA_CACHE_COUNT = "iac.aliyun.openmeta.cache.count"
+    ALIYUN_API_DOC_COUNT = "iac.aliyun.api.doc.count"
+    ALIYUN_ENDPOINT_RESOLUTION_COUNT = "iac.aliyun.endpoint.resolution.count"
+    ALIYUN_API_CONTRACT_ERROR_COUNT = "iac.aliyun.api.contract.error.count"
     TERRAFORM_PROVIDER_OBSERVED_COUNT = "iac.terraform.provider.observed.count"
 
     # Pipeline

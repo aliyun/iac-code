@@ -267,6 +267,7 @@ def _build_two_step_runner(
     resume_from_sidecar=False,
     mcp_manager=None,
     mcp_config_warnings=None,
+    aliyun_delegated_executor_factory=None,
 ):
     (tmp_path / "prompts").mkdir(exist_ok=True)
     (tmp_path / "prompts" / "a.md").write_text("A", encoding="utf-8")
@@ -305,6 +306,7 @@ def _build_two_step_runner(
         resume_from_sidecar=resume_from_sidecar,
         mcp_manager=mcp_manager,
         mcp_config_warnings=mcp_config_warnings,
+        aliyun_delegated_executor_factory=aliyun_delegated_executor_factory,
     )
 
 
@@ -359,6 +361,15 @@ def _mcp_status_events(events):
         and event.type is PipelineEventType.MCP_STATUS
         and event.data.get("kind") == "mcp_status"
     ]
+
+
+def test_pipeline_runner_propagates_exact_aliyun_delegated_factory(tmp_path):
+    factory = object()
+
+    runner = _build_two_step_runner(tmp_path, aliyun_delegated_executor_factory=factory)
+
+    assert runner._aliyun_delegated_executor_factory is factory
+    assert runner._step_executor._aliyun_delegated_executor_factory is factory
 
 
 def _build_parallel_runner(tmp_path, *, storage=None, backup_service=None):

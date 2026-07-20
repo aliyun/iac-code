@@ -507,9 +507,9 @@ class TestPermissionModeScenarios:
     """Verify different permission modes produce correct behavior."""
 
     @pytest.mark.asyncio
-    async def test_bypass_mode_auto_allows(self):
-        """BYPASS_PERMISSIONS mode should auto-allow everything."""
-        provider = FakeProvider([_bash_turn("t1", "rm -rf /tmp/test"), _text_turn("done")])
+    async def test_bypass_mode_auto_allows(self, tmp_path):
+        """BYPASS_PERMISSIONS mode should auto-allow a non-sticky write."""
+        provider = FakeProvider([_bash_turn("t1", "rm -rf build-output"), _text_turn("done")])
         registry = ToolRegistry()
         registry.register_default_tools()
         loop = AgentLoop(
@@ -517,7 +517,7 @@ class TestPermissionModeScenarios:
             system_prompt="test",
             tool_registry=registry,
             max_turns=2,
-            permission_context=_ctx(mode=PermissionMode.BYPASS_PERMISSIONS),
+            permission_context=_ctx(mode=PermissionMode.BYPASS_PERMISSIONS, cwd=str(tmp_path)),
         )
         events = await _collect_events(loop, "delete")
         assert not _has_permission_request(events)

@@ -1,0 +1,11 @@
+{
+  "product": "FC",
+  "version": "2023-03-30",
+  "action": "GetFunction",
+  "style": "ROA",
+  "methods": ["GET"],
+  "path": "/2023-03-30/functions/{functionName}",
+  "parameters": [
+    {"name": "functionName", "in": "path", "required": true, "pathEncoding": "segment", "schema": {"type": "string"}}
+  ]
+}

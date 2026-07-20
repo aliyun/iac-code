@@ -95,6 +95,14 @@ def mask_sensitive(value: str) -> str:
     return "*" * len(value)
 
 
+def _is_short_lived_access_token_sts_exchange_error(error: Exception) -> bool:
+    return (
+        getattr(error, "status_code", None) == 403
+        and getattr(error, "error_code", None) == "access_denied"
+        and "token expire time is too short" in str(error).casefold()
+    )
+
+
 class AliyunCredentials:
     @staticmethod
     def load(config_path: str | None = None) -> AliyunCredential | None:
@@ -148,6 +156,7 @@ class AliyunCredentials:
             ACCESS_TOKEN_SKEW_SECONDS,
             STS_SKEW_SECONDS,
             AliyunOAuthClient,
+            AliyunOAuthError,
             AliyunOAuthReloginRequired,
             get_oauth_site,
             is_epoch_expired,
@@ -168,6 +177,7 @@ class AliyunCredentials:
         client = AliyunOAuthClient(get_oauth_site(credential.oauth_site_type)) if oauth_client is None else oauth_client
 
         try:
+            refreshed_access_token = False
             if is_epoch_expired(credential.oauth_access_token_expire, current, ACCESS_TOKEN_SKEW_SECONDS):
                 if not credential.oauth_refresh_token:
                     raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing."))
@@ -176,11 +186,24 @@ class AliyunCredentials:
                 credential.oauth_refresh_token = token.refresh_token
                 credential.oauth_access_token_expire = token.access_token_expire
                 credential.oauth_refresh_token_expire = token.refresh_token_expire
+                refreshed_access_token = True
 
             if not credential.oauth_access_token:
                 raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth access token is missing."))
 
-            sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
+            try:
+                sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
+            except AliyunOAuthError as error:
+                if refreshed_access_token or not _is_short_lived_access_token_sts_exchange_error(error):
+                    raise
+                if not credential.oauth_refresh_token:
+                    raise AliyunOAuthReloginRequired(_("Alibaba Cloud OAuth refresh token is missing.")) from error
+                token = client.refresh_access_token(credential.oauth_refresh_token, now=current)
+                credential.oauth_access_token = token.access_token
+                credential.oauth_refresh_token = token.refresh_token
+                credential.oauth_access_token_expire = token.access_token_expire
+                credential.oauth_refresh_token_expire = token.refresh_token_expire
+                sts = client.exchange_access_token_for_sts(credential.oauth_access_token)
             credential.access_key_id = sts.access_key_id
             credential.access_key_secret = sts.access_key_secret
             credential.sts_token = sts.sts_token
@@ -219,6 +242,11 @@ class AliyunCredentials:
             oauth_access_token_expire=int(aliyun_data.get("oauth_access_token_expire") or 0),
             oauth_refresh_token_expire=int(aliyun_data.get("oauth_refresh_token_expire") or 0),
         )
+
+    @staticmethod
+    def load_from_iac_code_config() -> AliyunCredential | None:
+        """Load Alibaba Cloud credentials from iac-code cloud credentials only."""
+        return AliyunCredentials._load_from_iac_code_config()
 
     @staticmethod
     def _load_from_aliyun_cli(config_path: str | None = None) -> AliyunCredential | None:

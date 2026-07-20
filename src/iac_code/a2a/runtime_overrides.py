@@ -38,7 +38,10 @@ def refresh_runtime_cloud_tools(runtime: Any) -> None:
     from iac_code.services.cloud_credentials import CloudCredentials
     from iac_code.tools.cloud.registry import register_cloud_tools
 
-    register_cloud_tools(tool_registry, CloudCredentials())
+    services = getattr(runtime, "aliyun_services", None)
+    if services is None:
+        return
+    register_cloud_tools(tool_registry, CloudCredentials(), services)
 
 
 def configure_runtime_model(

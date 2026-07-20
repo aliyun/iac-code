@@ -1,0 +1,1376 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "source_url": "https://api.aliyun.com/meta/v1/products.json?language=ZH_CN",
+    "source_fetched_at": "2026-07-18T06:50:47.107773+00:00",
+    "source_payload_sha256": "67eca398332b32a0705a9143d1f5ac1eb687704f67476d88fd2337d1aa987605",
+    "fixture_products_sha256": "9f7d292d472feacd08d4e64d5fbe41b9d90d60267433674cac61a5a743590c49"
+  },
+  "excluded_products": [],
+  "products": [
+    {
+      "code": "acc",
+      "shortName": null
+    },
+    {
+      "code": "AccessAnalyzer",
+      "shortName": null
+    },
+    {
+      "code": "AccountCenter",
+      "shortName": null
+    },
+    {
+      "code": "acm",
+      "shortName": "ACM"
+    },
+    {
+      "code": "Actiontrail",
+      "shortName": "ActionTrail"
+    },
+    {
+      "code": "adb",
+      "shortName": "AnalyticDB for MySQL"
+    },
+    {
+      "code": "ADBAI",
+      "shortName": null
+    },
+    {
+      "code": "adcp",
+      "shortName": "ADCP"
+    },
+    {
+      "code": "address-purification",
+      "shortName": "地址标准化"
+    },
+    {
+      "code": "Advisor",
+      "shortName": "Advisor"
+    },
+    {
+      "code": "Agency",
+      "shortName": "Acpn"
+    },
+    {
+      "code": "AgentExplorer",
+      "shortName": "Skills Explorer"
+    },
+    {
+      "code": "AgentLoop",
+      "shortName": null
+    },
+    {
+      "code": "AgentRetailVision",
+      "shortName": null
+    },
+    {
+      "code": "AgentRun",
+      "shortName": null
+    },
+    {
+      "code": "AgentTeams",
+      "shortName": null
+    },
+    {
+      "code": "ahas-openapi",
+      "shortName": "ahas"
+    },
+    {
+      "code": "aiccs",
+      "shortName": "AICCS"
+    },
+    {
+      "code": "AiContent",
+      "shortName": null
+    },
+    {
+      "code": "AIDeepSign",
+      "shortName": null
+    },
+    {
+      "code": "Aidge",
+      "shortName": null
+    },
+    {
+      "code": "AIMath",
+      "shortName": "IEP"
+    },
+    {
+      "code": "AiMiaoBi",
+      "shortName": null
+    },
+    {
+      "code": "AIPodcast",
+      "shortName": null
+    },
+    {
+      "code": "Airec",
+      "shortName": "AIRec"
+    },
+    {
+      "code": "AIRegistry",
+      "shortName": null
+    },
+    {
+      "code": "airticketOpen",
+      "shortName": null
+    },
+    {
+      "code": "AISC",
+      "shortName": null
+    },
+    {
+      "code": "AiSearchEngine",
+      "shortName": null
+    },
+    {
+      "code": "AIWorkSpace",
+      "shortName": "AIWorkspace"
+    },
+    {
+      "code": "Alb",
+      "shortName": "ALB"
+    },
+    {
+      "code": "Alidns",
+      "shortName": "DNS"
+    },
+    {
+      "code": "AliGenie",
+      "shortName": "AliGenie"
+    },
+    {
+      "code": "alikafka",
+      "shortName": "ApsaraMQ for Kafka"
+    },
+    {
+      "code": "AlikafkaKopilot",
+      "shortName": null
+    },
+    {
+      "code": "alimt",
+      "shortName": "MT"
+    },
+    {
+      "code": "amqp-open",
+      "shortName": "amqpOpenApi"
+    },
+    {
+      "code": "antiddos-public",
+      "shortName": "DDOS"
+    },
+    {
+      "code": "AnyTrans",
+      "shortName": null
+    },
+    {
+      "code": "APIG",
+      "shortName": "API Gateway"
+    },
+    {
+      "code": "appflow",
+      "shortName": null
+    },
+    {
+      "code": "appstream-center",
+      "shortName": "Alibaba Cloud AppStreaming"
+    },
+    {
+      "code": "ARMS",
+      "shortName": "ARMS"
+    },
+    {
+      "code": "avatar",
+      "shortName": "DVH"
+    },
+    {
+      "code": "Baas",
+      "shortName": "BaaS"
+    },
+    {
+      "code": "bailian",
+      "shortName": "Model Studio"
+    },
+    {
+      "code": "BailianVoiceBot",
+      "shortName": null
+    },
+    {
+      "code": "BDRC",
+      "shortName": null
+    },
+    {
+      "code": "BPStudio",
+      "shortName": "CADT"
+    },
+    {
+      "code": "brain-industrial",
+      "shortName": null
+    },
+    {
+      "code": "BssOpenApi",
+      "shortName": "Billing"
+    },
+    {
+      "code": "btripOpen",
+      "shortName": null
+    },
+    {
+      "code": "cams",
+      "shortName": "cams"
+    },
+    {
+      "code": "captcha",
+      "shortName": null
+    },
+    {
+      "code": "CarbonFootprint",
+      "shortName": "CarbonFootprint"
+    },
+    {
+      "code": "cas",
+      "shortName": "SSL Certificate"
+    },
+    {
+      "code": "Cassandra",
+      "shortName": "Cassandra"
+    },
+    {
+      "code": "Cbn",
+      "shortName": "CEN"
+    },
+    {
+      "code": "CC5G",
+      "shortName": "CC5G"
+    },
+    {
+      "code": "CCC",
+      "shortName": "CC"
+    },
+    {
+      "code": "cddc",
+      "shortName": "MyBase"
+    },
+    {
+      "code": "Cdn",
+      "shortName": "CDN"
+    },
+    {
+      "code": "CGCS",
+      "shortName": "CGS"
+    },
+    {
+      "code": "Chatbot",
+      "shortName": "beebot"
+    },
+    {
+      "code": "clickhouse",
+      "shortName": "ApsaraDB for ClickHouse"
+    },
+    {
+      "code": "cloud-siem",
+      "shortName": " SC"
+    },
+    {
+      "code": "CloudAPI",
+      "shortName": "暂无"
+    },
+    {
+      "code": "Cloudauth",
+      "shortName": "ID"
+    },
+    {
+      "code": "Cloudauth-intl",
+      "shortName": null
+    },
+    {
+      "code": "cloudcontrol",
+      "shortName": null
+    },
+    {
+      "code": "cloudesl",
+      "shortName": "CloudESL"
+    },
+    {
+      "code": "Cloudfw",
+      "shortName": "CFW\n"
+    },
+    {
+      "code": "cloudphone",
+      "shortName": "ecp"
+    },
+    {
+      "code": "cloudsso",
+      "shortName": "RAM-CloudSSO"
+    },
+    {
+      "code": "Cms",
+      "shortName": "CMS"
+    },
+    {
+      "code": "cms-export",
+      "shortName": "暂无"
+    },
+    {
+      "code": "companyreg",
+      "shortName": "companyreg"
+    },
+    {
+      "code": "composer",
+      "shortName": "LC"
+    },
+    {
+      "code": "ComputeNest",
+      "shortName": "ComputeNest"
+    },
+    {
+      "code": "ComputeNestSupplier",
+      "shortName": "ComputeNestSupplier"
+    },
+    {
+      "code": "Config",
+      "shortName": "N/A"
+    },
+    {
+      "code": "ContactCenterAI",
+      "shortName": "CCAI"
+    },
+    {
+      "code": "cr",
+      "shortName": "CR"
+    },
+    {
+      "code": "CS",
+      "shortName": "ACK"
+    },
+    {
+      "code": "csas",
+      "shortName": "sase"
+    },
+    {
+      "code": "DAS",
+      "shortName": "DAS"
+    },
+    {
+      "code": "DataAnalysisGBI",
+      "shortName": null
+    },
+    {
+      "code": "datahub",
+      "shortName": null
+    },
+    {
+      "code": "DataLake",
+      "shortName": "DLF"
+    },
+    {
+      "code": "dataphin-public",
+      "shortName": "Dataphin"
+    },
+    {
+      "code": "dataworks-public",
+      "shortName": "暂无"
+    },
+    {
+      "code": "DBFS",
+      "shortName": "DBFS"
+    },
+    {
+      "code": "Dbs",
+      "shortName": "DBS"
+    },
+    {
+      "code": "dcdn",
+      "shortName": "DCDN"
+    },
+    {
+      "code": "ddosbgp",
+      "shortName": "ddosbgp"
+    },
+    {
+      "code": "ddoscoo",
+      "shortName": "DDosCoo"
+    },
+    {
+      "code": "DdosDiversion",
+      "shortName": "Anti-DDoS Diversion"
+    },
+    {
+      "code": "Dds",
+      "shortName": "MongoDB"
+    },
+    {
+      "code": "devops",
+      "shortName": "Devops 2020"
+    },
+    {
+      "code": "Devs",
+      "shortName": "Devs"
+    },
+    {
+      "code": "DFS",
+      "shortName": "HDFS"
+    },
+    {
+      "code": "DianJin",
+      "shortName": "Model Studio"
+    },
+    {
+      "code": "DlfNext",
+      "shortName": null
+    },
+    {
+      "code": "Dm",
+      "shortName": "DM"
+    },
+    {
+      "code": "Dms",
+      "shortName": "DMS"
+    },
+    {
+      "code": "dms-dg",
+      "shortName": "DMSDG"
+    },
+    {
+      "code": "dms-enterprise",
+      "shortName": "DMS"
+    },
+    {
+      "code": "documentAutoml",
+      "shortName": null
+    },
+    {
+      "code": "DocumentParseService",
+      "shortName": null
+    },
+    {
+      "code": "Domain",
+      "shortName": "Domain"
+    },
+    {
+      "code": "Drds",
+      "shortName": "DRDS"
+    },
+    {
+      "code": "Dts",
+      "shortName": "DTS"
+    },
+    {
+      "code": "DtsAI",
+      "shortName": null
+    },
+    {
+      "code": "Dyplsapi",
+      "shortName": "DYPLS"
+    },
+    {
+      "code": "Dypnsapi",
+      "shortName": "DYPNS"
+    },
+    {
+      "code": "Dypnsapi-intl",
+      "shortName": null
+    },
+    {
+      "code": "Dysmsapi",
+      "shortName": "DYSMS"
+    },
+    {
+      "code": "Dytnsapi",
+      "shortName": "CPNS"
+    },
+    {
+      "code": "Dyvmsapi",
+      "shortName": "DYVMS"
+    },
+    {
+      "code": "Dyvmsapi-intl",
+      "shortName": "VMS"
+    },
+    {
+      "code": "eais",
+      "shortName": "eais"
+    },
+    {
+      "code": "eas",
+      "shortName": "EAS"
+    },
+    {
+      "code": "EasyGene",
+      "shortName": "基因分析平台"
+    },
+    {
+      "code": "ebs",
+      "shortName": "EBS"
+    },
+    {
+      "code": "ecd",
+      "shortName": "EDS"
+    },
+    {
+      "code": "Eci",
+      "shortName": "Elastic Container Instance"
+    },
+    {
+      "code": "Ecs",
+      "shortName": "ECS"
+    },
+    {
+      "code": "ecs-workbench",
+      "shortName": null
+    },
+    {
+      "code": "Edas",
+      "shortName": "EDAS"
+    },
+    {
+      "code": "eds-aic",
+      "shortName": "Cloud Phone"
+    },
+    {
+      "code": "eds-user",
+      "shortName": "EDSUSER"
+    },
+    {
+      "code": "EduInterpreting",
+      "shortName": "IEP"
+    },
+    {
+      "code": "EduTutor",
+      "shortName": null
+    },
+    {
+      "code": "eflo",
+      "shortName": "LINGJUN"
+    },
+    {
+      "code": "eflo-cnp",
+      "shortName": null
+    },
+    {
+      "code": "eflo-controller",
+      "shortName": null
+    },
+    {
+      "code": "EHPC",
+      "shortName": "E-HPC"
+    },
+    {
+      "code": "EhpcInstant",
+      "shortName": "E-HPC Instant"
+    },
+    {
+      "code": "Eiam",
+      "shortName": null
+    },
+    {
+      "code": "Eiam-developerapi",
+      "shortName": null
+    },
+    {
+      "code": "Eipanycast",
+      "shortName": "Anycast EIP"
+    },
+    {
+      "code": "elasticsearch",
+      "shortName": "暂无"
+    },
+    {
+      "code": "emas-appmonitor",
+      "shortName": "EAPM"
+    },
+    {
+      "code": "Emr",
+      "shortName": "EMR"
+    },
+    {
+      "code": "emr-serverless-spark",
+      "shortName": null
+    },
+    {
+      "code": "EMRASSISTANT",
+      "shortName": "EMR Agent"
+    },
+    {
+      "code": "EmrStudio",
+      "shortName": null
+    },
+    {
+      "code": "energyExpertExternal",
+      "shortName": "Energy Expert"
+    },
+    {
+      "code": "Ens",
+      "shortName": "ens"
+    },
+    {
+      "code": "es-serverless",
+      "shortName": null
+    },
+    {
+      "code": "ESA",
+      "shortName": "ESA"
+    },
+    {
+      "code": "Ess",
+      "shortName": "ESS"
+    },
+    {
+      "code": "eventbridge",
+      "shortName": "EventBridge"
+    },
+    {
+      "code": "ExpressConnectRouter",
+      "shortName": null
+    },
+    {
+      "code": "facebody",
+      "shortName": "facebody"
+    },
+    {
+      "code": "FaRui",
+      "shortName": null
+    },
+    {
+      "code": "FC",
+      "shortName": "FC"
+    },
+    {
+      "code": "FC-Open",
+      "shortName": "暂无"
+    },
+    {
+      "code": "FCSandbox",
+      "shortName": null
+    },
+    {
+      "code": "fnf",
+      "shortName": "CloudFlow"
+    },
+    {
+      "code": "foasconsole",
+      "shortName": "RTC"
+    },
+    {
+      "code": "Ga",
+      "shortName": "ga"
+    },
+    {
+      "code": "GEMP",
+      "shortName": "GEMP"
+    },
+    {
+      "code": "goodstech",
+      "shortName": "goodstech"
+    },
+    {
+      "code": "governance",
+      "shortName": null
+    },
+    {
+      "code": "gpdb",
+      "shortName": "暂无"
+    },
+    {
+      "code": "grace",
+      "shortName": null
+    },
+    {
+      "code": "Green",
+      "shortName": "lvwang"
+    },
+    {
+      "code": "Gwlb",
+      "shortName": "SLB"
+    },
+    {
+      "code": "gws",
+      "shortName": "gws"
+    },
+    {
+      "code": "HBase",
+      "shortName": "HBase"
+    },
+    {
+      "code": "hbr",
+      "shortName": "hbr"
+    },
+    {
+      "code": "hcs-mgw",
+      "shortName": "Data Transport"
+    },
+    {
+      "code": "hdr",
+      "shortName": null
+    },
+    {
+      "code": "hitsdb",
+      "shortName": "TSDB"
+    },
+    {
+      "code": "Hologram",
+      "shortName": "Holo"
+    },
+    {
+      "code": "hsm",
+      "shortName": "暂无"
+    },
+    {
+      "code": "Httpdns",
+      "shortName": "HttpDNS"
+    },
+    {
+      "code": "IaCService",
+      "shortName": "Iac"
+    },
+    {
+      "code": "ICE",
+      "shortName": "ice"
+    },
+    {
+      "code": "idaas-doraemon",
+      "shortName": "idaas-doraemon"
+    },
+    {
+      "code": "idrsservice",
+      "shortName": "Intelligent Dual-Recording System"
+    },
+    {
+      "code": "imageaudit",
+      "shortName": "imageaudit"
+    },
+    {
+      "code": "imageenhan",
+      "shortName": "imageenhan"
+    },
+    {
+      "code": "imageprocess",
+      "shortName": "ImageProcess"
+    },
+    {
+      "code": "imagerecog",
+      "shortName": "imagerecog"
+    },
+    {
+      "code": "ImageSearch",
+      "shortName": "Image Search"
+    },
+    {
+      "code": "imageseg",
+      "shortName": "imageseg"
+    },
+    {
+      "code": "imgsearch",
+      "shortName": "VIAPI"
+    },
+    {
+      "code": "imm",
+      "shortName": "imm"
+    },
+    {
+      "code": "imp",
+      "shortName": "IMP"
+    },
+    {
+      "code": "Ims",
+      "shortName": "RAM-IMS"
+    },
+    {
+      "code": "Iot",
+      "shortName": "IOT"
+    },
+    {
+      "code": "IoTCC",
+      "shortName": "IoTCC"
+    },
+    {
+      "code": "iovcc",
+      "shortName": "ICC"
+    },
+    {
+      "code": "IQS",
+      "shortName": "IQS"
+    },
+    {
+      "code": "ivpd",
+      "shortName": "Intelligent visual production"
+    },
+    {
+      "code": "Kms",
+      "shortName": "KMS"
+    },
+    {
+      "code": "LingMou",
+      "shortName": null
+    },
+    {
+      "code": "Linkcard",
+      "shortName": "LinkCard"
+    },
+    {
+      "code": "linkedmall",
+      "shortName": "LinkedMall"
+    },
+    {
+      "code": "Linkvisual",
+      "shortName": "linkvisual"
+    },
+    {
+      "code": "LinkWAN",
+      "shortName": "linkwan"
+    },
+    {
+      "code": "live",
+      "shortName": "Live"
+    },
+    {
+      "code": "ltl",
+      "shortName": "LTL"
+    },
+    {
+      "code": "MaaS",
+      "shortName": "MaaS"
+    },
+    {
+      "code": "MaasAISearchProxy",
+      "shortName": null
+    },
+    {
+      "code": "Market",
+      "shortName": "marketplace"
+    },
+    {
+      "code": "MaxCompute",
+      "shortName": "暂无"
+    },
+    {
+      "code": "metaspace",
+      "shortName": null
+    },
+    {
+      "code": "Mhub",
+      "shortName": null
+    },
+    {
+      "code": "milvus",
+      "shortName": "VRSM"
+    },
+    {
+      "code": "Mns-open",
+      "shortName": "MNS"
+    },
+    {
+      "code": "ModelStudio",
+      "shortName": "Model Studio"
+    },
+    {
+      "code": "moguan-sdk",
+      "shortName": "moguan"
+    },
+    {
+      "code": "MPServerless",
+      "shortName": "MPServerless"
+    },
+    {
+      "code": "mse",
+      "shortName": "MSE"
+    },
+    {
+      "code": "mssp",
+      "shortName": "mssp"
+    },
+    {
+      "code": "Mts",
+      "shortName": "MTS"
+    },
+    {
+      "code": "MultimodalDialog",
+      "shortName": null
+    },
+    {
+      "code": "NAS",
+      "shortName": "NAS"
+    },
+    {
+      "code": "nis",
+      "shortName": null
+    },
+    {
+      "code": "Nlb",
+      "shortName": "NLB"
+    },
+    {
+      "code": "nlp-automl",
+      "shortName": "NLP-AUTOML"
+    },
+    {
+      "code": "nls-cloud-meta",
+      "shortName": "暂无"
+    },
+    {
+      "code": "nls-filetrans",
+      "shortName": "ISI"
+    },
+    {
+      "code": "Notifications",
+      "shortName": null
+    },
+    {
+      "code": "objectdet",
+      "shortName": "objectdet"
+    },
+    {
+      "code": "OceanBasePro",
+      "shortName": "oceanbase"
+    },
+    {
+      "code": "ocr",
+      "shortName": "OCR"
+    },
+    {
+      "code": "ocr-api",
+      "shortName": "OCR"
+    },
+    {
+      "code": "Ons",
+      "shortName": "RocketMQ"
+    },
+    {
+      "code": "OnsMqtt",
+      "shortName": "MQTT"
+    },
+    {
+      "code": "oos",
+      "shortName": "OOS"
+    },
+    {
+      "code": "openanalytics-open",
+      "shortName": "DLA"
+    },
+    {
+      "code": "OpenAPIExplorer",
+      "shortName": null
+    },
+    {
+      "code": "OpenITag",
+      "shortName": "ITag"
+    },
+    {
+      "code": "OpenSearch",
+      "shortName": "暂无"
+    },
+    {
+      "code": "opt",
+      "shortName": "opt"
+    },
+    {
+      "code": "Oss",
+      "shortName": "OSS"
+    },
+    {
+      "code": "OssAdmin",
+      "shortName": "OssAdmin"
+    },
+    {
+      "code": "OssSddp",
+      "shortName": "OssSddp"
+    },
+    {
+      "code": "OutboundBot",
+      "shortName": " "
+    },
+    {
+      "code": "pai-dlc",
+      "shortName": "PAI-DLC"
+    },
+    {
+      "code": "pai-dsw",
+      "shortName": "PAI-DSW"
+    },
+    {
+      "code": "paiAutoML",
+      "shortName": null
+    },
+    {
+      "code": "PAICopilot",
+      "shortName": "PAI"
+    },
+    {
+      "code": "PAIElasticDatasetAccelerator",
+      "shortName": null
+    },
+    {
+      "code": "PaiFeatureStore",
+      "shortName": "PAI-FeatureStore"
+    },
+    {
+      "code": "PAIFlow",
+      "shortName": "PAIFlow"
+    },
+    {
+      "code": "PAILangStudio",
+      "shortName": "PAILangStudio"
+    },
+    {
+      "code": "PaiLLMTrace",
+      "shortName": null
+    },
+    {
+      "code": "PAIModelGallery",
+      "shortName": null
+    },
+    {
+      "code": "PaiPlugin",
+      "shortName": "PaiPlugin"
+    },
+    {
+      "code": "PaiRecService",
+      "shortName": "PAI-REC"
+    },
+    {
+      "code": "PaiStudio",
+      "shortName": "PAI"
+    },
+    {
+      "code": "Pcdn",
+      "shortName": "PCDN"
+    },
+    {
+      "code": "pds",
+      "shortName": "PDS"
+    },
+    {
+      "code": "polardb",
+      "shortName": "PolarDB"
+    },
+    {
+      "code": "polardbx",
+      "shortName": "polardbx"
+    },
+    {
+      "code": "Privatelink",
+      "shortName": "PrivateLink"
+    },
+    {
+      "code": "PTS",
+      "shortName": "PTS"
+    },
+    {
+      "code": "Push",
+      "shortName": "CPS"
+    },
+    {
+      "code": "pvtz",
+      "shortName": "pvtz"
+    },
+    {
+      "code": "Qualitycheck",
+      "shortName": "SCA"
+    },
+    {
+      "code": "QuanMiaoLightApp",
+      "shortName": "QuanMiaoLightApp"
+    },
+    {
+      "code": "quickbi-public",
+      "shortName": "暂无"
+    },
+    {
+      "code": "quotas",
+      "shortName": "quotas"
+    },
+    {
+      "code": "R-kvstore",
+      "shortName": "Redis"
+    },
+    {
+      "code": "RAI",
+      "shortName": null
+    },
+    {
+      "code": "Ram",
+      "shortName": "RAM"
+    },
+    {
+      "code": "Rds",
+      "shortName": "RDS"
+    },
+    {
+      "code": "rds-data",
+      "shortName": null
+    },
+    {
+      "code": "RdsAi",
+      "shortName": "RDS AI"
+    },
+    {
+      "code": "RealTranslationAgent",
+      "shortName": "RTA"
+    },
+    {
+      "code": "ResourceCenter",
+      "shortName": "Resource Management"
+    },
+    {
+      "code": "ResourceDirectoryMaster",
+      "shortName": null
+    },
+    {
+      "code": "ResourceManager",
+      "shortName": "暂无"
+    },
+    {
+      "code": "ResourceSharing",
+      "shortName": "RS"
+    },
+    {
+      "code": "retailadvqa",
+      "shortName": null
+    },
+    {
+      "code": "RiskManagement",
+      "shortName": null
+    },
+    {
+      "code": "RocketMQ",
+      "shortName": "RocketMQ 5.0"
+    },
+    {
+      "code": "ROS",
+      "shortName": "ROS"
+    },
+    {
+      "code": "rtc",
+      "shortName": null
+    },
+    {
+      "code": "rtc-white-board",
+      "shortName": "IWB"
+    },
+    {
+      "code": "sae",
+      "shortName": "SAE"
+    },
+    {
+      "code": "saf",
+      "shortName": "SAF"
+    },
+    {
+      "code": "safconsole",
+      "shortName": "Fraud Detection"
+    },
+    {
+      "code": "Sas",
+      "shortName": "Security Center"
+    },
+    {
+      "code": "SasRasp",
+      "shortName": null
+    },
+    {
+      "code": "schedulerx2",
+      "shortName": "schedulerx"
+    },
+    {
+      "code": "SchedulerX3",
+      "shortName": "SchedulerX3"
+    },
+    {
+      "code": "scsp",
+      "shortName": "暂无"
+    },
+    {
+      "code": "Sddp",
+      "shortName": "sddp"
+    },
+    {
+      "code": "searchengine",
+      "shortName": "searchengine"
+    },
+    {
+      "code": "Searchplat",
+      "shortName": "searchplat"
+    },
+    {
+      "code": "selectdb",
+      "shortName": "SelectDB"
+    },
+    {
+      "code": "servicecatalog",
+      "shortName": null
+    },
+    {
+      "code": "servicemesh",
+      "shortName": "ASM"
+    },
+    {
+      "code": "sgw",
+      "shortName": "CSG"
+    },
+    {
+      "code": "Slb",
+      "shortName": "SLB"
+    },
+    {
+      "code": "Sls",
+      "shortName": "SLS"
+    },
+    {
+      "code": "Smartag",
+      "shortName": "SAG"
+    },
+    {
+      "code": "smc",
+      "shortName": "SMC"
+    },
+    {
+      "code": "SMQProxy",
+      "shortName": null
+    },
+    {
+      "code": "SOFA",
+      "shortName": null
+    },
+    {
+      "code": "sophonsoar",
+      "shortName": null
+    },
+    {
+      "code": "STAROps",
+      "shortName": null
+    },
+    {
+      "code": "starrocks",
+      "shortName": null
+    },
+    {
+      "code": "Status",
+      "shortName": null
+    },
+    {
+      "code": "Sts",
+      "shortName": "STS"
+    },
+    {
+      "code": "SuperappNlp",
+      "shortName": "[\"Su\",\"SuperappNlp\"]"
+    },
+    {
+      "code": "support-plan",
+      "shortName": "support plan"
+    },
+    {
+      "code": "SWAS-OPEN",
+      "shortName": "swas"
+    },
+    {
+      "code": "SysOM",
+      "shortName": "SysOM"
+    },
+    {
+      "code": "Tablestore",
+      "shortName": "Tablestore"
+    },
+    {
+      "code": "Tag",
+      "shortName": "tag"
+    },
+    {
+      "code": "tdsr",
+      "shortName": "tdsr"
+    },
+    {
+      "code": "tingwu",
+      "shortName": null
+    },
+    {
+      "code": "TrafficFxOpen",
+      "shortName": null
+    },
+    {
+      "code": "ververica",
+      "shortName": "VVP"
+    },
+    {
+      "code": "viapi",
+      "shortName": "VIAPI"
+    },
+    {
+      "code": "videoenhan",
+      "shortName": "VIAPI"
+    },
+    {
+      "code": "videorecog",
+      "shortName": "VIAPI"
+    },
+    {
+      "code": "videoseg",
+      "shortName": "VIAPI videoseg"
+    },
+    {
+      "code": "vod",
+      "shortName": "VOD"
+    },
+    {
+      "code": "VoiceNavigator",
+      "shortName": " VN"
+    },
+    {
+      "code": "Vpc",
+      "shortName": "VPC"
+    },
+    {
+      "code": "VpcIpam",
+      "shortName": "VpcIpam"
+    },
+    {
+      "code": "VpcPeer",
+      "shortName": "VpcPeer"
+    },
+    {
+      "code": "vs",
+      "shortName": "vs"
+    },
+    {
+      "code": "waf-openapi",
+      "shortName": "WAF"
+    },
+    {
+      "code": "WebsiteBuild",
+      "shortName": null
+    },
+    {
+      "code": "Workorder",
+      "shortName": null
+    },
+    {
+      "code": "wss",
+      "shortName": null
+    },
+    {
+      "code": "WuyingAI",
+      "shortName": null
+    },
+    {
+      "code": "wyota",
+      "shortName": "ACWT"
+    },
+    {
+      "code": "xtee",
+      "shortName": "Fraud Detection"
+    },
+    {
+      "code": "xtrace",
+      "shortName": "xtrace"
+    },
+    {
+      "code": "Yike",
+      "shortName": null
+    },
+    {
+      "code": "Yundun-bastionhost",
+      "shortName": "Bastionhost"
+    }
+  ]
+}

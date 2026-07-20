@@ -1322,3 +1322,31 @@ async def test_swap_session_resume_failed_restore_keeps_pipeline_none(tmp_path):
 async def _empty_stream():
     return
     yield  # noqa: B901
+
+
+def test_refresh_cloud_tools_reuses_repl_aliyun_services(monkeypatch) -> None:
+    from iac_code.ui.repl import InlineREPL
+
+    repl = object.__new__(InlineREPL)
+    repl.tool_registry = MagicMock()
+    repl._aliyun_services = object()
+    register = MagicMock()
+    monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", register)
+
+    InlineREPL.refresh_cloud_tools(repl)
+
+    assert register.call_args.args[0] is repl.tool_registry
+    assert register.call_args.args[2] is repl._aliyun_services
+
+
+@pytest.mark.asyncio
+async def test_close_aliyun_services_closes_shared_runtime() -> None:
+    from iac_code.ui.repl import InlineREPL
+
+    repl = object.__new__(InlineREPL)
+    services = SimpleNamespace(aclose=AsyncMock())
+    repl._aliyun_services = services
+
+    await InlineREPL._close_aliyun_services(repl)
+
+    services.aclose.assert_awaited_once()

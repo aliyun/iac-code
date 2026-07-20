@@ -14,6 +14,7 @@
 | `a2a/e2e/` | A2A 会话恢复端到端场景 runner、共享 helper 和结果说明。 |
 | `a2a/smoke/test_a2a_vpc.py` | A2A VPC / pipeline 行为的小型手工 smoke 脚本。 |
 | `acp/smoke/test_acp_vpc.py` | ACP VPC 行为的小型手工 smoke 脚本。 |
+| `aliyun/` | 阿里云 Endpoint、OSS 操作目录和离线 Product 目录生成器，详见 `aliyun/README.md`。 |
 | `headless/smoke/test_headless_vpc.py` | Headless VPC 行为的小型手工 smoke 脚本。 |
 | `observability/local_observe.py` | 本地 OTLP observability server 入口。 |
 | `observability/local_observe/` | 本地 observe server 实现和静态 Web UI。 |
@@ -30,6 +31,7 @@ uv run python scripts/a2a/selling_console.py --port 41980 \
   --default-server-url http://127.0.0.1:41299 \
   --default-cwd "$PWD"
 uv run python scripts/a2a/e2e/run_recovery_scenarios.py --help
+uv run python scripts/aliyun/generate_endpoints.py --help
 uv run python scripts/observability/local_observe.py --help
 uv run python scripts/repl/e2e/run_pipeline_scenarios.py --help
 ```

@@ -1,0 +1,26 @@
+schema_version: 1
+aliases:
+  ElasticComputeService:
+    product: Ecs
+    reason: common_expanded_service_name
+    source: reviewed_builtin_alias
+  FunctionCompute:
+    product: FC
+    reason: common_expanded_service_name
+    source: reviewed_builtin_alias
+  ObjectStorageService:
+    product: Oss
+    reason: common_expanded_service_name
+    source: reviewed_builtin_alias
+  RelationalDatabaseService:
+    product: Rds
+    reason: common_expanded_service_name
+    source: reviewed_builtin_alias
+  ResourceOrchestrationService:
+    product: ROS
+    reason: common_expanded_service_name
+    source: reviewed_builtin_alias
+  VirtualPrivateCloud:
+    product: Vpc
+    reason: common_expanded_service_name
+    source: reviewed_builtin_alias

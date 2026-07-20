@@ -4923,6 +4923,7 @@ msgstr "--permission-mode invalide : {!r}. Valeurs valides : {}"
 
 #: src/iac_code/services/permissions/pipeline.py
 #: src/iac_code/tools/bash/permissions.py
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format
 msgid "matched ask rule(s): {}"
 msgstr "Règle(s) de demande correspondante(s) : {}"
@@ -5567,8 +5568,17 @@ msgstr "Aliyun API"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_api.py
 #, python-brace-format
+msgid "matched deny rule: {rule}"
+msgstr "Règle de refus correspondante : {rule}"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api.py
+#, python-brace-format
 msgid "Call succeeded (RequestId: {request_id})"
 msgstr "Appel réussi (RequestId : {request_id})"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_api_doc.py
+msgid "Aliyun API Documentation"
+msgstr "Documentation de l'API Alibaba Cloud"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 msgid "DocSearch"
@@ -5624,6 +5634,608 @@ msgid "Use web_fetch tool to read full document content if needed."
 msgstr ""
 "Use web_fetch tool to read full document content if needed.Utilisez "
 "l’outil web_fetch pour lire le document en entier si nécessaire."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested product"
+msgstr "le produit demandé"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested action"
+msgstr "l'action demandée"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested region"
+msgstr "la région demandée"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud product must contain only letters, numbers, underscores, or"
+" hyphens."
+msgstr ""
+"Le produit Alibaba Cloud ne doit contenir que des lettres, des chiffres, "
+"des traits de soulignement ou des traits d'union."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud API action must contain only letters, numbers, underscores,"
+" or hyphens."
+msgstr ""
+"L'action de l'API Alibaba Cloud ne doit contenir que des lettres, des "
+"chiffres, des traits de soulignement ou des traits d'union."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "Alibaba Cloud API version contains unsupported characters."
+msgstr ""
+"La version de l'API Alibaba Cloud contient des caractères non pris en "
+"charge."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid ""
+"Alibaba Cloud region must contain only lowercase letters, numbers, or "
+"hyphens."
+msgstr ""
+"La région Alibaba Cloud ne doit contenir que des lettres minuscules, des "
+"chiffres ou des traits d'union."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API protocol overrides are invalid for {operation}. Remove "
+"style, method, or pathname overrides and retry."
+msgstr ""
+"Les substitutions de protocole de l'API Alibaba Cloud ne sont pas valides"
+" pour {operation}. Supprimez les substitutions de style, method ou "
+"pathname, puis réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API input is invalid for {operation}. Check product, "
+"action, version, region, and parameters."
+msgstr ""
+"L'entrée de l'API Alibaba Cloud n'est pas valide pour {operation}. "
+"Vérifiez le produit, l'action, la version, la région et les paramètres."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} detail must be one of: summary, full."
+msgstr "Le détail de l'API Alibaba Cloud {operation} doit être summary ou full."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud product {product} was not found. Check the product code and"
+" try again."
+msgstr ""
+"Le produit Alibaba Cloud {product} est introuvable. Vérifiez le code du "
+"produit et réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid " Suggested product codes: {suggestions}."
+msgstr " Codes produit suggérés : {suggestions}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {product}/{version}/{action} was not found. Check the "
+"product, version, and action."
+msgstr ""
+"L'API Alibaba Cloud {product}/{version}/{action} est introuvable. "
+"Vérifiez le produit, la version et l'action."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} was not found. Check the product, version, "
+"and action."
+msgstr ""
+"L'API Alibaba Cloud {operation} est introuvable. Vérifiez le produit, la "
+"version et l'action."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
+"try again later."
+msgstr ""
+"Les métadonnées de l'API Alibaba Cloud pour {operation} sont "
+"temporairement indisponibles. Réessayez plus tard."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API metadata for {operation} returned an incompatible "
+"response. Check the API identifiers or try again later."
+msgstr ""
+"Les métadonnées de l'API Alibaba Cloud pour {operation} ont renvoyé une "
+"réponse incompatible. Vérifiez les identifiants de l'API ou réessayez "
+"plus tard."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"No valid Alibaba Cloud API version is available for {product}; provide an"
+" explicit version."
+msgstr ""
+"Aucune version valide de l'API Alibaba Cloud n'est disponible pour "
+"{product}. Indiquez une version explicite."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} requires body_file for its binary request "
+"body."
+msgstr ""
+"L'API Alibaba Cloud {operation} nécessite body_file pour son corps de "
+"requête binaire."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} requires parameter {parameter}."
+msgstr "L'API Alibaba Cloud {operation} nécessite le paramètre {parameter}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} requires parameters {parameters}."
+msgstr "L'API Alibaba Cloud {operation} nécessite les paramètres {parameters}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} is missing required parameters."
+msgstr "Des paramètres obligatoires manquent pour l'API Alibaba Cloud {operation}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+msgid "the requested parameter"
+msgstr "le paramètre demandé"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects {expected} "
+"but received {actual}."
+msgstr ""
+"Le paramètre {parameter} de l'API Alibaba Cloud {operation} attend "
+"{expected}, mais a reçu {actual}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} is not an allowed "
+"value."
+msgstr ""
+"Le paramètre {parameter} de l'API Alibaba Cloud {operation} n'est pas une"
+" valeur autorisée."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} is missing path parameter {parameter}."
+msgstr ""
+"Le paramètre de chemin {parameter} manque pour l'API Alibaba Cloud "
+"{operation}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} is missing path parameters {parameters}."
+msgstr ""
+"Les paramètres de chemin {parameters} manquent pour l'API Alibaba Cloud "
+"{operation}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API path parameters are invalid or incomplete for "
+"{operation}."
+msgstr ""
+"Les paramètres de chemin de l'API Alibaba Cloud ne sont pas valides ou "
+"sont incomplets pour {operation}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} path parameter {parameter} expects "
+"{expected} but received {actual}."
+msgstr ""
+"Le paramètre de chemin {parameter} de l'API Alibaba Cloud {operation} "
+"attend {expected}, mais a reçu {actual}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects a scalar "
+"header value without line breaks but received {actual}."
+msgstr ""
+"Le paramètre {parameter} de l'API Alibaba Cloud {operation} attend une "
+"valeur d'en-tête scalaire sans saut de ligne, mais a reçu {actual}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects a valid "
+"header name but received a {actual} with invalid syntax."
+msgstr ""
+"Le paramètre {parameter} de l'API Alibaba Cloud {operation} attend un nom"
+" d'en-tête valide, mais a reçu {actual} avec une syntaxe non valide."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} expects a valid DNS "
+"host-label string but received {actual} with invalid syntax."
+msgstr ""
+"Le paramètre {parameter} de l'API Alibaba Cloud {operation} attend une "
+"chaîne d'étiquette d'hôte DNS valide, mais a reçu {actual} avec une "
+"syntaxe non valide."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} targets a reserved "
+"authentication header. Remove the parameter and retry."
+msgstr ""
+"Le paramètre {parameter} de l'API Alibaba Cloud {operation} cible un en-"
+"tête d'authentification réservé. Supprimez ce paramètre et réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} uses a protocol shape this runtime cannot "
+"execute. Choose another API version or action."
+msgstr ""
+"L'API Alibaba Cloud {operation} utilise une forme de protocole que cet "
+"environnement d'exécution ne peut pas exécuter. Choisissez une autre "
+"version ou action d'API."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} metadata uses a schema this runtime cannot "
+"execute. Choose another API version or action."
+msgstr ""
+"Les métadonnées de l'API Alibaba Cloud {operation} utilisent un schéma "
+"que cet environnement d'exécution ne peut pas exécuter. Choisissez une "
+"autre version ou action d'API."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud OSS API {operation} is not supported by this runtime. "
+"Choose a supported OSS action or use another client."
+msgstr ""
+"L'API OSS Alibaba Cloud {operation} n'est pas prise en charge par cet "
+"environnement d'exécution. Choisissez une action OSS prise en charge ou "
+"utilisez un autre client."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} cannot be executed from its current "
+"metadata. Choose another API version or action."
+msgstr ""
+"L'API Alibaba Cloud {operation} ne peut pas être exécutée à partir de ses"
+" métadonnées actuelles. Choisissez une autre version ou action d'API."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud endpoint cache could not be updated for {operation} in "
+"{region}. Check local configuration storage and retry."
+msgstr ""
+"Le cache des endpoints Alibaba Cloud n'a pas pu être mis à jour pour "
+"{operation} dans {region}. Vérifiez le stockage de la configuration "
+"locale et réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"No trusted Alibaba Cloud endpoint is available for {operation} in "
+"{region}. Check the region or endpoint configuration."
+msgstr ""
+"Aucun endpoint Alibaba Cloud approuvé n'est disponible pour {operation} "
+"dans {region}. Vérifiez la région ou la configuration de l'endpoint."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud host parameters are invalid for {operation} in {region}."
+msgstr ""
+"Les paramètres d'hôte Alibaba Cloud ne sont pas valides pour {operation} "
+"dans {region}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud authentication is unsupported for {operation}. Check the "
+"API contract or choose an API that supports AccessKey authentication."
+msgstr ""
+"L'authentification Alibaba Cloud n'est pas prise en charge pour "
+"{operation}. Vérifiez le contrat d'API ou choisissez une API prenant en "
+"charge l'authentification AccessKey."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud credentials are unavailable. Configure credentials and "
+"retry {operation}."
+msgstr ""
+"Les identifiants Alibaba Cloud ne sont pas disponibles. Configurez-les et"
+" réessayez {operation}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} parameter {parameter} is reserved for "
+"request signing and cannot be set."
+msgstr ""
+"Le paramètre {parameter} de l'API Alibaba Cloud {operation} est réservé à"
+" la signature de la requête et ne peut pas être défini."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud signing is unsupported for {operation}. Check the API "
+"contract."
+msgstr ""
+"La signature Alibaba Cloud n'est pas prise en charge pour {operation}. "
+"Vérifiez le contrat d'API."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API execution is unavailable for {operation}. Retry from an"
+" active runtime."
+msgstr ""
+"L'exécution de l'API Alibaba Cloud n'est pas disponible pour {operation}."
+" Réessayez depuis un environnement d'exécution actif."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API authorization expired or changed. Run {operation} again"
+" to approve the current contract."
+msgstr ""
+"L'autorisation de l'API Alibaba Cloud a expiré ou a changé. Exécutez de "
+"nouveau {operation} pour approuver le contrat actuel."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} does not accept body_file. Use the body "
+"source declared by the API contract."
+msgstr ""
+"L'API Alibaba Cloud {operation} n'accepte pas body_file. Utilisez la "
+"source de corps déclarée par le contrat d'API."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} body_file exceeds the 32 MiB limit. Use a "
+"smaller regular file."
+msgstr ""
+"Le body_file de l'API Alibaba Cloud {operation} dépasse la limite de 32 "
+"MiB. Utilisez un fichier ordinaire plus petit."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} requires a body source compatible with its "
+"API contract."
+msgstr ""
+"L'API Alibaba Cloud {operation} nécessite une source de corps compatible "
+"avec son contrat d'API."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} received multiple body sources. Provide "
+"only one of body, body_file, or body parameters."
+msgstr ""
+"L'API Alibaba Cloud {operation} a reçu plusieurs sources de corps. "
+"Fournissez uniquement body, body_file ou les paramètres body."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} received multiple template sources. Provide"
+" only one."
+msgstr ""
+"L'API Alibaba Cloud {operation} a reçu plusieurs sources de modèle. N'en "
+"fournissez qu'une."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} content_type does not match the request "
+"body. Use a compatible media type."
+msgstr ""
+"Le content_type de l'API Alibaba Cloud {operation} ne correspond pas au "
+"corps de la requête. Utilisez un type de média compatible."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} has content_type without a request body. "
+"Remove content_type or provide a body."
+msgstr ""
+"L'API Alibaba Cloud {operation} comporte un content_type sans corps de "
+"requête. Supprimez content_type ou fournissez un corps."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} body is invalid. Provide a valid JSON or "
+"form request body."
+msgstr ""
+"Le corps de l'API Alibaba Cloud {operation} n'est pas valide. Fournissez "
+"un corps de requête JSON ou de formulaire valide."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} body_file is invalid. Use a readable "
+"regular file within the allowed size."
+msgstr ""
+"Le body_file de l'API Alibaba Cloud {operation} n'est pas valide. "
+"Utilisez un fichier ordinaire lisible dans la taille autorisée."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} content_type is invalid. Use a valid media "
+"type such as application/json."
+msgstr ""
+"Le content_type de l'API Alibaba Cloud {operation} n'est pas valide. "
+"Utilisez un type de média valide tel que application/json."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} template file is invalid. Use a readable "
+"regular template file."
+msgstr ""
+"Le fichier de modèle de l'API Alibaba Cloud {operation} n'est pas valide."
+" Utilisez un fichier de modèle ordinaire lisible."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} template validation failed. Check the "
+"template syntax and resource definitions."
+msgstr ""
+"La validation du modèle de l'API Alibaba Cloud {operation} a échoué. "
+"Vérifiez la syntaxe du modèle et les définitions des ressources."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} max_response_bytes must be between 1 and "
+"16777216."
+msgstr ""
+"Le max_response_bytes de l'API Alibaba Cloud {operation} doit être "
+"compris entre 1 et 16777216."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} returned HTTP {status} with error code "
+"{code}. Check the request and cloud permissions before retrying."
+msgstr ""
+"L'API Alibaba Cloud {operation} a renvoyé HTTP {status} avec le code "
+"d'erreur {code}. Vérifiez la requête et les autorisations cloud avant de "
+"réessayer."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} returned HTTP {status}. Check the request "
+"and cloud permissions before retrying."
+msgstr ""
+"L'API Alibaba Cloud {operation} a renvoyé HTTP {status}. Vérifiez la "
+"requête et les autorisations cloud avant de réessayer."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} could not connect before the request was "
+"sent. Check network and endpoint access, then retry."
+msgstr ""
+"L'API Alibaba Cloud {operation} n'a pas pu se connecter avant l'envoi de "
+"la requête. Vérifiez le réseau et l'accès à l'endpoint, puis réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} received a retryable service response, but "
+"the retry deadline expired. Retry the read-only request later."
+msgstr ""
+"L'API Alibaba Cloud {operation} a reçu une réponse de service "
+"réessayable, mais le délai de nouvelle tentative a expiré. Réessayez "
+"ultérieurement la requête en lecture seule."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} read-only request did not complete before "
+"the retry deadline. Check network and service health, then retry."
+msgstr ""
+"La requête en lecture seule de l'API Alibaba Cloud {operation} ne s'est "
+"pas terminée avant le délai de nouvelle tentative. Vérifiez le réseau et "
+"l'état du service, puis réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} timed out after the request may have been "
+"sent. Check cloud state before retrying to avoid duplicate changes."
+msgstr ""
+"L'API Alibaba Cloud {operation} a expiré après l'envoi possible de la "
+"requête. Vérifiez l'état du cloud avant de réessayer afin d'éviter des "
+"modifications en double."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} timed out before the request was sent. "
+"Retry the operation."
+msgstr ""
+"L'API Alibaba Cloud {operation} a expiré avant l'envoi de la requête. "
+"Réessayez l'opération."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} returned an invalid response after the "
+"request was sent. Check cloud state before retrying to avoid duplicate "
+"changes."
+msgstr ""
+"L'API Alibaba Cloud {operation} a renvoyé une réponse non valide après "
+"l'envoi de la requête. Vérifiez l'état du cloud avant de réessayer afin "
+"d'éviter des modifications en double."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} may have been sent before the connection "
+"failed. Check cloud state before retrying to avoid duplicate changes."
+msgstr ""
+"La requête de l'API Alibaba Cloud {operation} a peut-être été envoyée "
+"avant l'échec de connexion. Vérifiez l'état du cloud avant de réessayer "
+"afin d'éviter des modifications en double."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} response exceeded max_response_bytes. "
+"Increase the limit or narrow the request and retry."
+msgstr ""
+"La réponse de l'API Alibaba Cloud {operation} a dépassé "
+"max_response_bytes. Augmentez la limite ou réduisez la portée de la "
+"requête, puis réessayez."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} error response exceeded the 1 MiB safety "
+"limit. Check Alibaba Cloud logs before retrying."
+msgstr ""
+"La réponse d'erreur de l'API Alibaba Cloud {operation} a dépassé la "
+"limite de sécurité de 1 MiB. Vérifiez les journaux Alibaba Cloud avant de"
+" réessayer."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API parameters are invalid for {operation}."
+msgstr ""
+"Les paramètres de l'API Alibaba Cloud ne sont pas valides pour "
+"{operation}."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid ""
+"Alibaba Cloud API {operation} could not be prepared safely. Check the "
+"request and try again."
+msgstr ""
+"L'API Alibaba Cloud {operation} n'a pas pu être préparée en toute "
+"sécurité. Vérifiez la requête et réessayez."
 
 #: src/iac_code/tools/cloud/aliyun/ros_stack.py
 msgid "ROS Stack"
@@ -8170,4 +8782,48 @@ msgstr "Refus d’ouvrir un fichier non ordinaire : {path}"
 
 #~ msgid "{option} expects KEY=VALUE, got {value!r}."
 #~ msgstr "{option} attend KEY=VALUE, reçu {value!r}."
+
+#~ msgid "detail must be one of: summary, full."
+#~ msgstr ""
+
+#~ msgid "No API version available for {product}; provide 'version'."
+#~ msgstr ""
+
+#~ msgid "Unknown Alibaba Cloud product '{product}'."
+#~ msgstr ""
+
+#~ msgid "API {product}/{version}/{action} was not found in OpenMeta."
+#~ msgstr ""
+
+#~ msgid "Alibaba Cloud OpenMeta is temporarily unavailable; try again later."
+#~ msgstr ""
+
+#~ msgid "Alibaba Cloud OpenMeta returned an invalid response."
+#~ msgstr ""
+
+#~ msgid "Alibaba Cloud API version must use YYYY-MM-DD."
+#~ msgstr "La version de l'API Alibaba Cloud doit utiliser le format YYYY-MM-DD."
+
+#~ msgid "Session does not support artifacts"
+#~ msgstr "La session ne prend pas en charge les artefacts"
+
+#~ msgid ""
+#~ "This Alibaba Cloud API response requires"
+#~ " session artifact storage. Retry from "
+#~ "an active session."
+#~ msgstr ""
+#~ "Cette réponse de l'API Alibaba Cloud "
+#~ "nécessite un stockage d'artefacts de "
+#~ "session. Réessayez depuis une session "
+#~ "active."
+
+#~ msgid ""
+#~ "Alibaba Cloud API {operation} could not"
+#~ " save its artifact. Check the active"
+#~ " session storage quota and retry."
+#~ msgstr ""
+#~ "L'API Alibaba Cloud {operation} n'a pas"
+#~ " pu enregistrer son artefact. Vérifiez "
+#~ "le quota de stockage de la session"
+#~ " active et réessayez."
 

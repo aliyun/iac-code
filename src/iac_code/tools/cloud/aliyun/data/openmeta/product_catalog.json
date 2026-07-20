@@ -1,0 +1,4278 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "source_url": "https://api.aliyun.com/meta/v1/products.json?language=ZH_CN",
+    "source_fetched_at": "2026-07-18T06:50:47.107773+00:00",
+    "source_payload_sha256": "67eca398332b32a0705a9143d1f5ac1eb687704f67476d88fd2337d1aa987605",
+    "catalog_products_sha256": "a1bf7b7f47b4773637255ebf163b339eb721a16b15a25e86ecc762ba2c476689"
+  },
+  "products": [
+    {
+      "code": "acc",
+      "defaultVersion": "2024-04-02",
+      "recommendVersions": [
+        "2024-04-02"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-04-02"
+      ]
+    },
+    {
+      "code": "AccessAnalyzer",
+      "defaultVersion": "2024-02-01",
+      "recommendVersions": [
+        "2024-02-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-02-01"
+      ]
+    },
+    {
+      "code": "AccountCenter",
+      "defaultVersion": "2024-12-09",
+      "recommendVersions": [
+        "2024-12-09"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-12-09"
+      ]
+    },
+    {
+      "code": "acm",
+      "defaultVersion": "2020-02-06",
+      "recommendVersions": [
+        "2020-02-06"
+      ],
+      "shortName": "ACM",
+      "style": "ROA",
+      "versions": [
+        "2020-02-06"
+      ]
+    },
+    {
+      "code": "Actiontrail",
+      "defaultVersion": "2020-07-06",
+      "recommendVersions": [
+        "2020-07-06"
+      ],
+      "shortName": "ActionTrail",
+      "style": "RPC",
+      "versions": [
+        "2015-09-28",
+        "2017-12-04",
+        "2020-07-06"
+      ]
+    },
+    {
+      "code": "adb",
+      "defaultVersion": "2019-03-15",
+      "recommendVersions": [
+        "2019-03-15",
+        "2021-12-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-03-15",
+        "2021-12-01"
+      ]
+    },
+    {
+      "code": "ADBAI",
+      "defaultVersion": "2025-08-12",
+      "recommendVersions": [
+        "2025-08-12"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-08-12"
+      ]
+    },
+    {
+      "code": "adcp",
+      "defaultVersion": "2022-01-01",
+      "recommendVersions": [
+        "2022-01-01"
+      ],
+      "shortName": "ADCP",
+      "style": "RPC",
+      "versions": [
+        "2022-01-01"
+      ]
+    },
+    {
+      "code": "address-purification",
+      "defaultVersion": "2019-11-18",
+      "recommendVersions": [
+        "2019-11-18"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-11-18"
+      ]
+    },
+    {
+      "code": "Advisor",
+      "defaultVersion": "2018-01-20",
+      "recommendVersions": [
+        "2018-01-20"
+      ],
+      "shortName": "Advisor",
+      "style": "RPC",
+      "versions": [
+        "2018-01-20"
+      ]
+    },
+    {
+      "code": "Agency",
+      "defaultVersion": "2022-12-16",
+      "recommendVersions": [
+        "2022-12-16",
+        "2025-02-27"
+      ],
+      "shortName": "Acpn",
+      "style": "RPC",
+      "versions": [
+        "2022-12-16",
+        "2025-02-27"
+      ]
+    },
+    {
+      "code": "AgentExplorer",
+      "defaultVersion": "2026-03-17",
+      "recommendVersions": [
+        "2026-03-17"
+      ],
+      "shortName": null,
+      "style": "ROA",
+      "versions": [
+        "2026-03-17"
+      ]
+    },
+    {
+      "code": "AgentLoop",
+      "defaultVersion": "2026-05-20",
+      "recommendVersions": [
+        "2026-05-20"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-05-20"
+      ]
+    },
+    {
+      "code": "AgentRetailVision",
+      "defaultVersion": "2026-05-06",
+      "recommendVersions": [
+        "2026-05-06"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-05-06"
+      ]
+    },
+    {
+      "code": "AgentRun",
+      "defaultVersion": "2025-09-10",
+      "recommendVersions": [
+        "2025-09-10"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-09-10"
+      ]
+    },
+    {
+      "code": "AgentTeams",
+      "defaultVersion": "2026-06-05",
+      "recommendVersions": [
+        "2026-06-05"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-06-05"
+      ]
+    },
+    {
+      "code": "ahas-openapi",
+      "defaultVersion": "2019-09-01",
+      "recommendVersions": [
+        "2019-09-01"
+      ],
+      "shortName": "ahas",
+      "style": "RPC",
+      "versions": [
+        "2019-09-01"
+      ]
+    },
+    {
+      "code": "aiccs",
+      "defaultVersion": "2023-05-16",
+      "recommendVersions": [
+        "2023-05-16",
+        "2019-10-15"
+      ],
+      "shortName": "AICCS",
+      "style": "RPC",
+      "versions": [
+        "2019-10-15",
+        "2023-05-16"
+      ]
+    },
+    {
+      "code": "AiContent",
+      "defaultVersion": "20240611",
+      "recommendVersions": [
+        "20240611"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "20240611"
+      ]
+    },
+    {
+      "code": "AIDeepSign",
+      "defaultVersion": "2026-05-11",
+      "recommendVersions": [
+        "2026-05-11"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-05-11"
+      ]
+    },
+    {
+      "code": "Aidge",
+      "defaultVersion": "2026-04-28",
+      "recommendVersions": [
+        "2026-04-28"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-28"
+      ]
+    },
+    {
+      "code": "AIMath",
+      "defaultVersion": "2024-11-14",
+      "recommendVersions": [
+        "2024-11-14"
+      ],
+      "shortName": "IEP",
+      "style": "RPC",
+      "versions": [
+        "2024-11-14"
+      ]
+    },
+    {
+      "code": "AiMiaoBi",
+      "defaultVersion": "2023-08-01",
+      "recommendVersions": [
+        "2023-08-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-08-01"
+      ]
+    },
+    {
+      "code": "AIPodcast",
+      "defaultVersion": "2025-02-28",
+      "recommendVersions": [
+        "2025-02-28"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-02-28"
+      ]
+    },
+    {
+      "code": "Airec",
+      "defaultVersion": "2020-11-26",
+      "recommendVersions": [
+        "2020-11-26"
+      ],
+      "shortName": "AIRec",
+      "style": "ROA",
+      "versions": [
+        "2018-10-12",
+        "2020-11-26"
+      ]
+    },
+    {
+      "code": "AIRegistry",
+      "defaultVersion": "2026-03-17",
+      "recommendVersions": [
+        "2026-03-17"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-03-17"
+      ]
+    },
+    {
+      "code": "airticketOpen",
+      "defaultVersion": "2023-01-17",
+      "recommendVersions": [
+        "2023-01-17"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-01-17"
+      ]
+    },
+    {
+      "code": "AISC",
+      "defaultVersion": "2026-01-01",
+      "recommendVersions": [
+        "2026-01-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-01-01"
+      ]
+    },
+    {
+      "code": "AiSearchEngine",
+      "defaultVersion": "2026-04-17",
+      "recommendVersions": [
+        "2026-04-17"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-17"
+      ]
+    },
+    {
+      "code": "AIWorkSpace",
+      "defaultVersion": "2021-02-04",
+      "recommendVersions": [
+        "2021-02-04"
+      ],
+      "shortName": "AIWorkspace",
+      "style": "RPC",
+      "versions": [
+        "2021-02-04"
+      ]
+    },
+    {
+      "code": "Alb",
+      "defaultVersion": "2020-06-16",
+      "recommendVersions": [
+        "2020-06-16"
+      ],
+      "shortName": "ALB",
+      "style": "RPC",
+      "versions": [
+        "2020-06-16"
+      ]
+    },
+    {
+      "code": "Alidns",
+      "defaultVersion": "2015-01-09",
+      "recommendVersions": [
+        "2015-01-09"
+      ],
+      "shortName": "DNS",
+      "style": "RPC",
+      "versions": [
+        "2015-01-09"
+      ]
+    },
+    {
+      "code": "AliGenie",
+      "defaultVersion": "iap_1.0",
+      "recommendVersions": [
+        "iap_1.0",
+        "ssp_1.0",
+        "ip_1.0"
+      ],
+      "shortName": "AliGenie",
+      "style": "RPC",
+      "versions": [
+        "aiso_1.0",
+        "iap_1.0",
+        "ip_1.0",
+        "oauth2_1.0",
+        "ssp_1.0"
+      ]
+    },
+    {
+      "code": "alikafka",
+      "defaultVersion": "2019-09-16",
+      "recommendVersions": [
+        "2019-09-16"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2018-10-15",
+        "2019-09-16"
+      ]
+    },
+    {
+      "code": "AlikafkaKopilot",
+      "defaultVersion": "2026-04-14",
+      "recommendVersions": [
+        "2026-04-14"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-14"
+      ]
+    },
+    {
+      "code": "alimt",
+      "defaultVersion": "2018-10-12",
+      "recommendVersions": [
+        "2018-10-12"
+      ],
+      "shortName": "MT",
+      "style": "RPC",
+      "versions": [
+        "2018-08-07",
+        "2018-10-12",
+        "2019-01-02",
+        "2019-01-07"
+      ]
+    },
+    {
+      "code": "amqp-open",
+      "defaultVersion": "2019-12-12",
+      "recommendVersions": [
+        "2019-12-12"
+      ],
+      "shortName": "amqpOpenApi",
+      "style": "RPC",
+      "versions": [
+        "2019-12-12"
+      ]
+    },
+    {
+      "code": "antiddos-public",
+      "defaultVersion": "2017-05-18",
+      "recommendVersions": [
+        "2017-05-18"
+      ],
+      "shortName": "DDOS",
+      "style": "RPC",
+      "versions": [
+        "2017-05-18"
+      ]
+    },
+    {
+      "code": "AnyTrans",
+      "defaultVersion": "2025-07-07",
+      "recommendVersions": [
+        "2025-07-07"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-07-07"
+      ]
+    },
+    {
+      "code": "APIG",
+      "defaultVersion": "2024-03-27",
+      "recommendVersions": [
+        "2024-03-27"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-03-27"
+      ]
+    },
+    {
+      "code": "appflow",
+      "defaultVersion": "2023-09-04",
+      "recommendVersions": [
+        "2023-09-04"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-09-04"
+      ]
+    },
+    {
+      "code": "appstream-center",
+      "defaultVersion": "2021-09-01",
+      "recommendVersions": [
+        "2021-09-01",
+        "2021-02-18",
+        "2021-02-20",
+        "2021-09-03"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-02-18",
+        "2021-02-20",
+        "2021-09-01",
+        "2021-09-03"
+      ]
+    },
+    {
+      "code": "ARMS",
+      "defaultVersion": "2019-08-08",
+      "recommendVersions": [
+        "2019-08-08"
+      ],
+      "shortName": "ARMS",
+      "style": "RPC",
+      "versions": [
+        "2016-08-04",
+        "2016-10-31",
+        "2016-11-25",
+        "2017-07-25",
+        "2018-06-20",
+        "2018-10-15",
+        "2018-12-19",
+        "2019-02-19",
+        "2019-08-08",
+        "2021-04-22",
+        "2021-05-19"
+      ]
+    },
+    {
+      "code": "avatar",
+      "defaultVersion": "2022-01-30",
+      "recommendVersions": [
+        "2022-01-30"
+      ],
+      "shortName": "DVH",
+      "style": "RPC",
+      "versions": [
+        "2022-01-30"
+      ]
+    },
+    {
+      "code": "Baas",
+      "defaultVersion": "2018-12-21",
+      "recommendVersions": [
+        "2018-12-21"
+      ],
+      "shortName": "BaaS",
+      "style": "RPC",
+      "versions": [
+        "2018-12-21"
+      ]
+    },
+    {
+      "code": "bailian",
+      "defaultVersion": "2023-12-29",
+      "recommendVersions": [
+        "2023-12-29"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-06-01",
+        "2023-12-29"
+      ]
+    },
+    {
+      "code": "BailianVoiceBot",
+      "defaultVersion": "2025-01-01",
+      "recommendVersions": [
+        "2025-01-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-01-01"
+      ]
+    },
+    {
+      "code": "BDRC",
+      "defaultVersion": "2023-08-08",
+      "recommendVersions": [
+        "2023-08-08"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-08-08"
+      ]
+    },
+    {
+      "code": "BPStudio",
+      "defaultVersion": "2021-09-31",
+      "recommendVersions": [
+        "2021-09-31"
+      ],
+      "shortName": "CADT",
+      "style": "RPC",
+      "versions": [
+        "2020-07-10",
+        "2021-09-31"
+      ]
+    },
+    {
+      "code": "brain-industrial",
+      "defaultVersion": "2020-09-20",
+      "recommendVersions": [
+        "2020-09-20"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-09-20"
+      ]
+    },
+    {
+      "code": "BssOpenApi",
+      "defaultVersion": "2017-12-14",
+      "recommendVersions": [
+        "2017-12-14",
+        "2023-09-30"
+      ],
+      "shortName": "Billing",
+      "style": "RPC",
+      "versions": [
+        "2017-12-14",
+        "2023-09-30"
+      ]
+    },
+    {
+      "code": "btripOpen",
+      "defaultVersion": "2022-05-20",
+      "recommendVersions": [
+        "2022-05-20"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-05-17",
+        "2022-05-20"
+      ]
+    },
+    {
+      "code": "cams",
+      "defaultVersion": "2020-06-06",
+      "recommendVersions": [
+        "2020-06-06"
+      ],
+      "shortName": "cams",
+      "style": "RPC",
+      "versions": [
+        "2020-06-06"
+      ]
+    },
+    {
+      "code": "captcha",
+      "defaultVersion": "2023-03-05",
+      "recommendVersions": [
+        "2023-03-05"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-03-05"
+      ]
+    },
+    {
+      "code": "CarbonFootprint",
+      "defaultVersion": "2023-07-11",
+      "recommendVersions": [
+        "2023-07-11"
+      ],
+      "shortName": "CarbonFootprint",
+      "style": "RPC",
+      "versions": [
+        "2023-07-11"
+      ]
+    },
+    {
+      "code": "cas",
+      "defaultVersion": "2020-04-07",
+      "recommendVersions": [
+        "2020-04-07",
+        "2020-06-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-04-07",
+        "2020-06-30"
+      ]
+    },
+    {
+      "code": "Cassandra",
+      "defaultVersion": "2019-01-01",
+      "recommendVersions": [
+        "2019-01-01"
+      ],
+      "shortName": "Cassandra",
+      "style": "RPC",
+      "versions": [
+        "2019-01-01"
+      ]
+    },
+    {
+      "code": "Cbn",
+      "defaultVersion": "2017-09-12",
+      "recommendVersions": [
+        "2017-09-12"
+      ],
+      "shortName": "CEN",
+      "style": "RPC",
+      "versions": [
+        "2017-09-12"
+      ]
+    },
+    {
+      "code": "CC5G",
+      "defaultVersion": "2022-03-14",
+      "recommendVersions": [
+        "2022-03-14"
+      ],
+      "shortName": "CC5G",
+      "style": "RPC",
+      "versions": [
+        "2022-03-14"
+      ]
+    },
+    {
+      "code": "CCC",
+      "defaultVersion": "2020-07-01",
+      "recommendVersions": [
+        "2020-07-01"
+      ],
+      "shortName": "CC",
+      "style": "RPC",
+      "versions": [
+        "2017-07-05",
+        "2020-05-27",
+        "2020-07-01"
+      ]
+    },
+    {
+      "code": "cddc",
+      "defaultVersion": "2020-03-20",
+      "recommendVersions": [
+        "2020-03-20"
+      ],
+      "shortName": "MyBase",
+      "style": "RPC",
+      "versions": [
+        "2020-03-20"
+      ]
+    },
+    {
+      "code": "Cdn",
+      "defaultVersion": "2018-05-10",
+      "recommendVersions": [
+        "2018-05-10"
+      ],
+      "shortName": "CDN",
+      "style": "RPC",
+      "versions": [
+        "2018-05-10"
+      ]
+    },
+    {
+      "code": "CGCS",
+      "defaultVersion": "2021-11-11",
+      "recommendVersions": [
+        "2021-11-11"
+      ],
+      "shortName": "CGS",
+      "style": "RPC",
+      "versions": [
+        "2021-11-11"
+      ]
+    },
+    {
+      "code": "Chatbot",
+      "defaultVersion": "2022-04-08",
+      "recommendVersions": [
+        "2022-04-08"
+      ],
+      "shortName": "beebot",
+      "style": "RPC",
+      "versions": [
+        "2017-10-11",
+        "2022-04-08"
+      ]
+    },
+    {
+      "code": "clickhouse",
+      "defaultVersion": "2023-05-22",
+      "recommendVersions": [
+        "2019-11-11",
+        "2023-05-22"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-11-11",
+        "2023-05-22"
+      ]
+    },
+    {
+      "code": "cloud-siem",
+      "defaultVersion": "2022-06-16",
+      "recommendVersions": [
+        "2022-06-16",
+        "2024-12-12"
+      ],
+      "shortName": "SC",
+      "style": "RPC",
+      "versions": [
+        "2022-06-16",
+        "2024-12-12"
+      ]
+    },
+    {
+      "code": "CloudAPI",
+      "defaultVersion": "2016-07-14",
+      "recommendVersions": [
+        "2016-07-14"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2016-02-01",
+        "2016-07-01",
+        "2016-07-14"
+      ]
+    },
+    {
+      "code": "Cloudauth",
+      "defaultVersion": "2019-03-07",
+      "recommendVersions": [
+        "2019-03-07",
+        "2022-11-25"
+      ],
+      "shortName": "ID",
+      "style": "RPC",
+      "versions": [
+        "2019-03-07",
+        "2022-11-25"
+      ]
+    },
+    {
+      "code": "Cloudauth-intl",
+      "defaultVersion": "2022-08-09",
+      "recommendVersions": [
+        "2022-08-09"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-08-09"
+      ]
+    },
+    {
+      "code": "cloudcontrol",
+      "defaultVersion": "2022-08-30",
+      "recommendVersions": [
+        "2022-08-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-08-30"
+      ]
+    },
+    {
+      "code": "cloudesl",
+      "defaultVersion": "2020-02-01",
+      "recommendVersions": [
+        "2020-02-01"
+      ],
+      "shortName": "CloudESL",
+      "style": "RPC",
+      "versions": [
+        "2018-08-01",
+        "2019-08-01",
+        "2020-02-01"
+      ]
+    },
+    {
+      "code": "Cloudfw",
+      "defaultVersion": "2017-12-07",
+      "recommendVersions": [
+        "2017-12-07"
+      ],
+      "shortName": "CFW",
+      "style": "RPC",
+      "versions": [
+        "2017-12-07"
+      ]
+    },
+    {
+      "code": "cloudphone",
+      "defaultVersion": "2020-12-30",
+      "recommendVersions": [
+        "2020-12-30"
+      ],
+      "shortName": "ecp",
+      "style": null,
+      "versions": [
+        "2020-12-30"
+      ]
+    },
+    {
+      "code": "cloudsso",
+      "defaultVersion": "2021-05-15",
+      "recommendVersions": [
+        "2021-05-15"
+      ],
+      "shortName": "RAM-CloudSSO",
+      "style": "RPC",
+      "versions": [
+        "2021-05-15"
+      ]
+    },
+    {
+      "code": "Cms",
+      "defaultVersion": "2019-01-01",
+      "recommendVersions": [
+        "2019-01-01",
+        "2024-03-30"
+      ],
+      "shortName": "CMS",
+      "style": "RPC",
+      "versions": [
+        "2015-10-20",
+        "2016-03-18",
+        "2016-09-22",
+        "2017-03-01",
+        "2018-03-08",
+        "2019-01-01",
+        "2024-03-30"
+      ]
+    },
+    {
+      "code": "cms-export",
+      "defaultVersion": "2021-11-01",
+      "recommendVersions": [
+        "2021-11-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-11-01"
+      ]
+    },
+    {
+      "code": "companyreg",
+      "defaultVersion": "2020-03-06",
+      "recommendVersions": [
+        "2020-03-06"
+      ],
+      "shortName": "companyreg",
+      "style": "RPC",
+      "versions": [
+        "2020-03-06",
+        "2026-04-23"
+      ]
+    },
+    {
+      "code": "composer",
+      "defaultVersion": "2018-12-12",
+      "recommendVersions": [
+        "2018-12-12"
+      ],
+      "shortName": "LC",
+      "style": "RPC",
+      "versions": [
+        "2018-12-12"
+      ]
+    },
+    {
+      "code": "ComputeNest",
+      "defaultVersion": "2021-06-01",
+      "recommendVersions": [
+        "2021-06-01"
+      ],
+      "shortName": "ComputeNest",
+      "style": "RPC",
+      "versions": [
+        "2021-06-01"
+      ]
+    },
+    {
+      "code": "ComputeNestSupplier",
+      "defaultVersion": "2021-05-21",
+      "recommendVersions": [
+        "2021-05-21"
+      ],
+      "shortName": "ComputeNestSupplier",
+      "style": "RPC",
+      "versions": [
+        "2021-05-21"
+      ]
+    },
+    {
+      "code": "Config",
+      "defaultVersion": "2020-09-07",
+      "recommendVersions": [
+        "2020-09-07"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-01-08",
+        "2020-09-07"
+      ]
+    },
+    {
+      "code": "ContactCenterAI",
+      "defaultVersion": "2024-06-03",
+      "recommendVersions": [
+        "2024-06-03"
+      ],
+      "shortName": "CCAI",
+      "style": "RPC",
+      "versions": [
+        "2024-06-03"
+      ]
+    },
+    {
+      "code": "cr",
+      "defaultVersion": "2018-12-01",
+      "recommendVersions": [
+        "2018-12-01"
+      ],
+      "shortName": "CR",
+      "style": "ROA",
+      "versions": [
+        "2018-12-01"
+      ]
+    },
+    {
+      "code": "CS",
+      "defaultVersion": "2015-12-15",
+      "recommendVersions": [
+        "2015-12-15"
+      ],
+      "shortName": "ACK",
+      "style": "ROA",
+      "versions": [
+        "2015-12-15"
+      ]
+    },
+    {
+      "code": "csas",
+      "defaultVersion": "2023-01-20",
+      "recommendVersions": [
+        "2023-01-20"
+      ],
+      "shortName": "sase",
+      "style": "RPC",
+      "versions": [
+        "2023-01-20"
+      ]
+    },
+    {
+      "code": "DAS",
+      "defaultVersion": "2020-01-16",
+      "recommendVersions": [
+        "2020-01-16"
+      ],
+      "shortName": "DAS",
+      "style": "RPC",
+      "versions": [
+        "2020-01-16"
+      ]
+    },
+    {
+      "code": "DataAnalysisGBI",
+      "defaultVersion": "2024-08-23",
+      "recommendVersions": [
+        "2024-08-23"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-08-23"
+      ]
+    },
+    {
+      "code": "datahub",
+      "defaultVersion": "2024-06-20",
+      "recommendVersions": [
+        "2024-06-20"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-11-20",
+        "2024-06-20"
+      ]
+    },
+    {
+      "code": "DataLake",
+      "defaultVersion": "2020-07-10",
+      "recommendVersions": [
+        "2020-07-10"
+      ],
+      "shortName": "DLF",
+      "style": "RPC",
+      "versions": [
+        "2020-07-10"
+      ]
+    },
+    {
+      "code": "dataphin-public",
+      "defaultVersion": "2023-06-30",
+      "recommendVersions": [
+        "2023-06-30"
+      ],
+      "shortName": "Dataphin",
+      "style": "RPC",
+      "versions": [
+        "2023-06-30"
+      ]
+    },
+    {
+      "code": "dataworks-public",
+      "defaultVersion": "2024-05-18",
+      "recommendVersions": [
+        "2020-05-18",
+        "2024-05-18"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2018-06-01",
+        "2020-05-18",
+        "2024-05-18"
+      ]
+    },
+    {
+      "code": "DBFS",
+      "defaultVersion": "2020-04-18",
+      "recommendVersions": [
+        "2020-04-18"
+      ],
+      "shortName": "DBFS",
+      "style": "RPC",
+      "versions": [
+        "2020-04-18"
+      ]
+    },
+    {
+      "code": "Dbs",
+      "defaultVersion": "2019-03-06",
+      "recommendVersions": [
+        "2019-03-06",
+        "2021-01-01"
+      ],
+      "shortName": "DBS",
+      "style": "RPC",
+      "versions": [
+        "2019-03-06",
+        "2021-01-01"
+      ]
+    },
+    {
+      "code": "dcdn",
+      "defaultVersion": "2018-01-15",
+      "recommendVersions": [
+        "2018-01-15"
+      ],
+      "shortName": "DCDN",
+      "style": "RPC",
+      "versions": [
+        "2018-01-15"
+      ]
+    },
+    {
+      "code": "ddosbgp",
+      "defaultVersion": "2018-07-20",
+      "recommendVersions": [
+        "2018-07-20"
+      ],
+      "shortName": "ddosbgp",
+      "style": "RPC",
+      "versions": [
+        "2018-02-01",
+        "2018-07-20"
+      ]
+    },
+    {
+      "code": "ddoscoo",
+      "defaultVersion": "2020-01-01",
+      "recommendVersions": [
+        "2020-01-01"
+      ],
+      "shortName": "DDosCoo",
+      "style": "RPC",
+      "versions": [
+        "2017-12-28",
+        "2020-01-01"
+      ]
+    },
+    {
+      "code": "DdosDiversion",
+      "defaultVersion": "2023-07-01",
+      "recommendVersions": [
+        "2023-07-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-07-01"
+      ]
+    },
+    {
+      "code": "Dds",
+      "defaultVersion": "2015-12-01",
+      "recommendVersions": [
+        "2015-12-01"
+      ],
+      "shortName": "MongoDB",
+      "style": "RPC",
+      "versions": [
+        "2015-12-01"
+      ]
+    },
+    {
+      "code": "devops",
+      "defaultVersion": "2021-06-25",
+      "recommendVersions": [
+        "2021-06-25"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-06-25"
+      ]
+    },
+    {
+      "code": "Devs",
+      "defaultVersion": "2023-07-14",
+      "recommendVersions": [
+        "2023-07-14"
+      ],
+      "shortName": "Devs",
+      "style": "RPC",
+      "versions": [
+        "2023-07-14"
+      ]
+    },
+    {
+      "code": "DFS",
+      "defaultVersion": "2018-06-20",
+      "recommendVersions": [
+        "2018-06-20"
+      ],
+      "shortName": "HDFS",
+      "style": "RPC",
+      "versions": [
+        "2018-06-20"
+      ]
+    },
+    {
+      "code": "DianJin",
+      "defaultVersion": "2024-06-28",
+      "recommendVersions": [
+        "2024-06-28"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-06-28"
+      ]
+    },
+    {
+      "code": "DlfNext",
+      "defaultVersion": "2025-03-10",
+      "recommendVersions": [
+        "2025-03-10"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-03-10"
+      ]
+    },
+    {
+      "code": "Dm",
+      "defaultVersion": "2015-11-23",
+      "recommendVersions": [
+        "2015-11-23"
+      ],
+      "shortName": "DM",
+      "style": "RPC",
+      "versions": [
+        "2015-11-23",
+        "2017-06-22"
+      ]
+    },
+    {
+      "code": "Dms",
+      "defaultVersion": "2025-04-14",
+      "recommendVersions": [
+        "2025-04-14"
+      ],
+      "shortName": "DMS",
+      "style": null,
+      "versions": [
+        "2025-04-14"
+      ]
+    },
+    {
+      "code": "dms-dg",
+      "defaultVersion": "2023-09-14",
+      "recommendVersions": [
+        "2023-09-14"
+      ],
+      "shortName": "DMSDG",
+      "style": "RPC",
+      "versions": [
+        "2023-09-14"
+      ]
+    },
+    {
+      "code": "dms-enterprise",
+      "defaultVersion": "2018-11-01",
+      "recommendVersions": [
+        "2018-11-01"
+      ],
+      "shortName": "DMS",
+      "style": "RPC",
+      "versions": [
+        "2018-11-01"
+      ]
+    },
+    {
+      "code": "documentAutoml",
+      "defaultVersion": "2022-12-29",
+      "recommendVersions": [
+        "2022-12-29"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-12-29"
+      ]
+    },
+    {
+      "code": "DocumentParseService",
+      "defaultVersion": "2026-04-14",
+      "recommendVersions": [
+        "2026-04-14"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-14"
+      ]
+    },
+    {
+      "code": "Domain",
+      "defaultVersion": "2018-01-29",
+      "recommendVersions": [
+        "2018-01-29"
+      ],
+      "shortName": "Domain",
+      "style": "RPC",
+      "versions": [
+        "2016-05-11",
+        "2018-01-29",
+        "2018-02-08"
+      ]
+    },
+    {
+      "code": "Drds",
+      "defaultVersion": "2019-01-23",
+      "recommendVersions": [
+        "2019-01-23"
+      ],
+      "shortName": "DRDS",
+      "style": "RPC",
+      "versions": [
+        "2016-05-06",
+        "2017-10-16",
+        "2019-01-23"
+      ]
+    },
+    {
+      "code": "Dts",
+      "defaultVersion": "2020-01-01",
+      "recommendVersions": [
+        "2020-01-01"
+      ],
+      "shortName": "DTS",
+      "style": "RPC",
+      "versions": [
+        "2016-08-01",
+        "2018-08-01",
+        "2020-01-01"
+      ]
+    },
+    {
+      "code": "DtsAI",
+      "defaultVersion": "2026-04-01",
+      "recommendVersions": [
+        "2026-04-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-01"
+      ]
+    },
+    {
+      "code": "Dyplsapi",
+      "defaultVersion": "2017-05-25",
+      "recommendVersions": [
+        "2017-05-25"
+      ],
+      "shortName": "DYPLS",
+      "style": "RPC",
+      "versions": [
+        "2017-05-25"
+      ]
+    },
+    {
+      "code": "Dypnsapi",
+      "defaultVersion": "2017-05-25",
+      "recommendVersions": [
+        "2017-05-25"
+      ],
+      "shortName": "DYPNS",
+      "style": "RPC",
+      "versions": [
+        "2017-05-25"
+      ]
+    },
+    {
+      "code": "Dypnsapi-intl",
+      "defaultVersion": "2017-07-25",
+      "recommendVersions": [
+        "2017-07-25"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2017-07-25"
+      ]
+    },
+    {
+      "code": "Dysmsapi",
+      "defaultVersion": "2017-05-25",
+      "recommendVersions": [
+        "2017-05-25",
+        "2018-05-01"
+      ],
+      "shortName": "DYSMS",
+      "style": "RPC",
+      "versions": [
+        "2017-05-25",
+        "2018-05-01"
+      ]
+    },
+    {
+      "code": "Dytnsapi",
+      "defaultVersion": "2020-02-17",
+      "recommendVersions": [
+        "2020-02-17",
+        "2023-01-01"
+      ],
+      "shortName": "CPNS",
+      "style": "RPC",
+      "versions": [
+        "2020-02-17",
+        "2023-01-01"
+      ]
+    },
+    {
+      "code": "Dyvmsapi",
+      "defaultVersion": "2017-05-25",
+      "recommendVersions": [
+        "2017-05-25"
+      ],
+      "shortName": "DYVMS",
+      "style": "RPC",
+      "versions": [
+        "2017-05-25"
+      ]
+    },
+    {
+      "code": "Dyvmsapi-intl",
+      "defaultVersion": "2021-10-15",
+      "recommendVersions": [
+        "2021-10-15"
+      ],
+      "shortName": "VMS",
+      "style": "RPC",
+      "versions": [
+        "2021-10-15"
+      ]
+    },
+    {
+      "code": "eais",
+      "defaultVersion": "2019-06-24",
+      "recommendVersions": [
+        "2019-06-24"
+      ],
+      "shortName": "eais",
+      "style": "RPC",
+      "versions": [
+        "2019-06-24"
+      ]
+    },
+    {
+      "code": "eas",
+      "defaultVersion": "2021-07-01",
+      "recommendVersions": [
+        "2021-07-01"
+      ],
+      "shortName": "EAS",
+      "style": "RPC",
+      "versions": [
+        "2021-07-01"
+      ]
+    },
+    {
+      "code": "EasyGene",
+      "defaultVersion": "2021-03-15",
+      "recommendVersions": [
+        "2021-03-15"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-03-15"
+      ]
+    },
+    {
+      "code": "ebs",
+      "defaultVersion": "2021-07-30",
+      "recommendVersions": [
+        "2021-07-30"
+      ],
+      "shortName": "EBS",
+      "style": "RPC",
+      "versions": [
+        "2021-07-30"
+      ]
+    },
+    {
+      "code": "ecd",
+      "defaultVersion": "2020-09-30",
+      "recommendVersions": [
+        "2020-09-30",
+        "2020-10-02",
+        "2023-06-27",
+        "2021-06-02"
+      ],
+      "shortName": "EDS",
+      "style": "RPC",
+      "versions": [
+        "2020-09-30",
+        "2020-10-02",
+        "2021-06-02",
+        "2023-06-27"
+      ]
+    },
+    {
+      "code": "Eci",
+      "defaultVersion": "2018-08-08",
+      "recommendVersions": [
+        "2018-08-08"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2018-08-08"
+      ]
+    },
+    {
+      "code": "Ecs",
+      "defaultVersion": "2014-05-26",
+      "recommendVersions": [
+        "2014-05-26"
+      ],
+      "shortName": "ECS",
+      "style": "RPC",
+      "versions": [
+        "2014-05-26"
+      ]
+    },
+    {
+      "code": "ecs-workbench",
+      "defaultVersion": "2022-02-20",
+      "recommendVersions": [
+        "2022-02-20"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-02-20",
+        "2025-11-11"
+      ]
+    },
+    {
+      "code": "Edas",
+      "defaultVersion": "2017-08-01",
+      "recommendVersions": [
+        "2017-08-01"
+      ],
+      "shortName": "EDAS",
+      "style": "ROA",
+      "versions": [
+        "2017-08-01"
+      ]
+    },
+    {
+      "code": "eds-aic",
+      "defaultVersion": "2023-09-30",
+      "recommendVersions": [
+        "2023-09-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-09-30"
+      ]
+    },
+    {
+      "code": "eds-user",
+      "defaultVersion": "2021-03-08",
+      "recommendVersions": [
+        "2021-03-08"
+      ],
+      "shortName": "EDSUSER",
+      "style": null,
+      "versions": [
+        "2021-03-08",
+        "2021-06-22"
+      ]
+    },
+    {
+      "code": "EduInterpreting",
+      "defaultVersion": "2024-08-28",
+      "recommendVersions": [
+        "2024-08-28"
+      ],
+      "shortName": "IEP",
+      "style": "RPC",
+      "versions": [
+        "2024-08-28"
+      ]
+    },
+    {
+      "code": "EduTutor",
+      "defaultVersion": "2025-07-07",
+      "recommendVersions": [
+        "2025-07-07"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-07-07"
+      ]
+    },
+    {
+      "code": "eflo",
+      "defaultVersion": "2022-05-30",
+      "recommendVersions": [
+        "2022-05-30"
+      ],
+      "shortName": "LINGJUN",
+      "style": "RPC",
+      "versions": [
+        "2022-05-30"
+      ]
+    },
+    {
+      "code": "eflo-cnp",
+      "defaultVersion": "2023-08-28",
+      "recommendVersions": [
+        "2023-08-28"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-08-28"
+      ]
+    },
+    {
+      "code": "eflo-controller",
+      "defaultVersion": "2022-12-15",
+      "recommendVersions": [
+        "2022-12-15"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-12-15",
+        "2026-06-12"
+      ]
+    },
+    {
+      "code": "EHPC",
+      "defaultVersion": "2024-07-30",
+      "recommendVersions": [
+        "2018-04-12",
+        "2024-07-30"
+      ],
+      "shortName": "E-HPC",
+      "style": "RPC",
+      "versions": [
+        "2018-04-12",
+        "2024-07-30"
+      ]
+    },
+    {
+      "code": "EhpcInstant",
+      "defaultVersion": "2023-07-01",
+      "recommendVersions": [
+        "2023-07-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-07-01"
+      ]
+    },
+    {
+      "code": "Eiam",
+      "defaultVersion": "2021-12-01",
+      "recommendVersions": [
+        "2021-12-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-12-01"
+      ]
+    },
+    {
+      "code": "Eiam-developerapi",
+      "defaultVersion": "2022-02-25",
+      "recommendVersions": [
+        "2022-02-25"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-02-25"
+      ]
+    },
+    {
+      "code": "Eipanycast",
+      "defaultVersion": "2020-03-09",
+      "recommendVersions": [
+        "2020-03-09"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-03-09"
+      ]
+    },
+    {
+      "code": "elasticsearch",
+      "defaultVersion": "2017-06-13",
+      "recommendVersions": [
+        "2017-06-13"
+      ],
+      "shortName": null,
+      "style": "ROA",
+      "versions": [
+        "2017-06-13",
+        "2019-04-22"
+      ]
+    },
+    {
+      "code": "emas-appmonitor",
+      "defaultVersion": "2019-06-11",
+      "recommendVersions": [
+        "2019-06-11"
+      ],
+      "shortName": "EAPM",
+      "style": "RPC",
+      "versions": [
+        "2019-06-11"
+      ]
+    },
+    {
+      "code": "Emr",
+      "defaultVersion": "2021-03-20",
+      "recommendVersions": [
+        "2021-03-20"
+      ],
+      "shortName": "EMR",
+      "style": "RPC",
+      "versions": [
+        "2021-03-20"
+      ]
+    },
+    {
+      "code": "emr-serverless-spark",
+      "defaultVersion": "2023-08-08",
+      "recommendVersions": [
+        "2023-08-08"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-08-08"
+      ]
+    },
+    {
+      "code": "EMRASSISTANT",
+      "defaultVersion": "2025-07-23",
+      "recommendVersions": [
+        "2025-07-23"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-07-23"
+      ]
+    },
+    {
+      "code": "EmrStudio",
+      "defaultVersion": "2024-04-30",
+      "recommendVersions": [
+        "2024-04-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-10-09",
+        "2024-04-30"
+      ]
+    },
+    {
+      "code": "energyExpertExternal",
+      "defaultVersion": "2022-09-23",
+      "recommendVersions": [
+        "2022-09-23"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-09-23"
+      ]
+    },
+    {
+      "code": "Ens",
+      "defaultVersion": "2017-11-10",
+      "recommendVersions": [
+        "2017-11-10"
+      ],
+      "shortName": "ens",
+      "style": "RPC",
+      "versions": [
+        "2017-11-10"
+      ]
+    },
+    {
+      "code": "es-serverless",
+      "defaultVersion": "2023-06-27",
+      "recommendVersions": [
+        "2023-06-27"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-06-27"
+      ]
+    },
+    {
+      "code": "ESA",
+      "defaultVersion": "2024-09-10",
+      "recommendVersions": [
+        "2024-09-10"
+      ],
+      "shortName": "ESA",
+      "style": "RPC",
+      "versions": [
+        "2024-09-10"
+      ]
+    },
+    {
+      "code": "Ess",
+      "defaultVersion": "2022-02-22",
+      "recommendVersions": [
+        "2014-08-28",
+        "2022-02-22"
+      ],
+      "shortName": "ESS",
+      "style": "RPC",
+      "versions": [
+        "2014-08-28",
+        "2022-02-22"
+      ]
+    },
+    {
+      "code": "eventbridge",
+      "defaultVersion": "2020-04-01",
+      "recommendVersions": [
+        "2020-04-01"
+      ],
+      "shortName": "EventBridge",
+      "style": "RPC",
+      "versions": [
+        "2020-04-01"
+      ]
+    },
+    {
+      "code": "ExpressConnectRouter",
+      "defaultVersion": "2023-09-01",
+      "recommendVersions": [
+        "2023-09-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-09-01"
+      ]
+    },
+    {
+      "code": "facebody",
+      "defaultVersion": "2019-12-30",
+      "recommendVersions": [
+        "2019-12-30"
+      ],
+      "shortName": "facebody",
+      "style": "RPC",
+      "versions": [
+        "2019-12-30",
+        "2020-09-10"
+      ]
+    },
+    {
+      "code": "FaRui",
+      "defaultVersion": "2024-06-28",
+      "recommendVersions": [
+        "2024-06-28"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-06-28"
+      ]
+    },
+    {
+      "code": "FC",
+      "defaultVersion": "2023-03-30",
+      "recommendVersions": [
+        "2023-03-30"
+      ],
+      "shortName": "FC",
+      "style": null,
+      "versions": [
+        "2023-03-30"
+      ]
+    },
+    {
+      "code": "FC-Open",
+      "defaultVersion": "2021-04-06",
+      "recommendVersions": [
+        "2021-04-06"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-03-10",
+        "2021-04-06"
+      ]
+    },
+    {
+      "code": "FCSandbox",
+      "defaultVersion": "2026-05-09",
+      "recommendVersions": [
+        "2026-05-09"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-05-09"
+      ]
+    },
+    {
+      "code": "fnf",
+      "defaultVersion": "2019-03-15",
+      "recommendVersions": [
+        "2019-03-15"
+      ],
+      "shortName": "CloudFlow",
+      "style": "RPC",
+      "versions": [
+        "2019-03-15"
+      ]
+    },
+    {
+      "code": "foasconsole",
+      "defaultVersion": "2021-10-28",
+      "recommendVersions": [
+        "2021-10-28"
+      ],
+      "shortName": "RTC",
+      "style": "RPC",
+      "versions": [
+        "2019-06-01",
+        "2021-10-28"
+      ]
+    },
+    {
+      "code": "Ga",
+      "defaultVersion": "2019-11-20",
+      "recommendVersions": [
+        "2019-11-20"
+      ],
+      "shortName": "ga",
+      "style": "RPC",
+      "versions": [
+        "2019-11-20"
+      ]
+    },
+    {
+      "code": "GEMP",
+      "defaultVersion": "2021-04-13",
+      "recommendVersions": [
+        "2021-04-13"
+      ],
+      "shortName": "GEMP",
+      "style": "RPC",
+      "versions": [
+        "2021-04-13"
+      ]
+    },
+    {
+      "code": "goodstech",
+      "defaultVersion": "2019-12-30",
+      "recommendVersions": [
+        "2019-12-30"
+      ],
+      "shortName": "goodstech",
+      "style": "RPC",
+      "versions": [
+        "2019-12-30"
+      ]
+    },
+    {
+      "code": "governance",
+      "defaultVersion": "2021-01-20",
+      "recommendVersions": [
+        "2021-01-20"
+      ],
+      "shortName": null,
+      "style": null,
+      "versions": [
+        "2021-01-20"
+      ]
+    },
+    {
+      "code": "gpdb",
+      "defaultVersion": "2016-05-03",
+      "recommendVersions": [
+        "2016-05-03"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2016-05-03"
+      ]
+    },
+    {
+      "code": "grace",
+      "defaultVersion": "2022-06-06",
+      "recommendVersions": [
+        "2022-06-06"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-06-06"
+      ]
+    },
+    {
+      "code": "Green",
+      "defaultVersion": "2022-03-02",
+      "recommendVersions": [
+        "2022-03-02"
+      ],
+      "shortName": "lvwang",
+      "style": "ROA",
+      "versions": [
+        "2017-08-23",
+        "2018-05-09",
+        "2022-03-02",
+        "2022-09-26"
+      ]
+    },
+    {
+      "code": "Gwlb",
+      "defaultVersion": "2024-04-15",
+      "recommendVersions": [
+        "2024-04-15"
+      ],
+      "shortName": "SLB",
+      "style": "RPC",
+      "versions": [
+        "2024-04-15"
+      ]
+    },
+    {
+      "code": "gws",
+      "defaultVersion": "2019-06-18",
+      "recommendVersions": [
+        "2019-06-18"
+      ],
+      "shortName": "gws",
+      "style": "RPC",
+      "versions": [
+        "2019-06-18"
+      ]
+    },
+    {
+      "code": "HBase",
+      "defaultVersion": "2019-01-01",
+      "recommendVersions": [
+        "2019-01-01"
+      ],
+      "shortName": "HBase",
+      "style": "RPC",
+      "versions": [
+        "2017-01-15",
+        "2019-01-01"
+      ]
+    },
+    {
+      "code": "hbr",
+      "defaultVersion": "2017-09-08",
+      "recommendVersions": [
+        "2017-09-08"
+      ],
+      "shortName": "hbr",
+      "style": "RPC",
+      "versions": [
+        "2017-09-08"
+      ]
+    },
+    {
+      "code": "hcs-mgw",
+      "defaultVersion": "2024-06-26",
+      "recommendVersions": [
+        "2024-06-26"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-06-26"
+      ]
+    },
+    {
+      "code": "hdr",
+      "defaultVersion": "2017-09-25",
+      "recommendVersions": [
+        "2017-09-25"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2017-09-25"
+      ]
+    },
+    {
+      "code": "hitsdb",
+      "defaultVersion": "2020-06-15",
+      "recommendVersions": [
+        "2020-06-15",
+        "2017-06-01"
+      ],
+      "shortName": "TSDB",
+      "style": "RPC",
+      "versions": [
+        "2017-06-01",
+        "2020-06-15"
+      ]
+    },
+    {
+      "code": "Hologram",
+      "defaultVersion": "2022-06-01",
+      "recommendVersions": [
+        "2022-06-01"
+      ],
+      "shortName": "Holo",
+      "style": "RPC",
+      "versions": [
+        "2022-06-01"
+      ]
+    },
+    {
+      "code": "hsm",
+      "defaultVersion": "2023-11-13",
+      "recommendVersions": [
+        "2023-11-13"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2023-11-13"
+      ]
+    },
+    {
+      "code": "Httpdns",
+      "defaultVersion": "2016-02-01",
+      "recommendVersions": [
+        "2016-02-01"
+      ],
+      "shortName": "HttpDNS",
+      "style": "RPC",
+      "versions": [
+        "2016-02-01"
+      ]
+    },
+    {
+      "code": "IaCService",
+      "defaultVersion": "2021-08-06",
+      "recommendVersions": [
+        "2021-08-06"
+      ],
+      "shortName": "Iac",
+      "style": "RPC",
+      "versions": [
+        "2021-07-22",
+        "2021-08-06"
+      ]
+    },
+    {
+      "code": "ICE",
+      "defaultVersion": "2020-11-09",
+      "recommendVersions": [
+        "2020-11-09"
+      ],
+      "shortName": "ice",
+      "style": "RPC",
+      "versions": [
+        "2020-11-09"
+      ]
+    },
+    {
+      "code": "idaas-doraemon",
+      "defaultVersion": "2021-05-20",
+      "recommendVersions": [
+        "2021-05-20"
+      ],
+      "shortName": "idaas-doraemon",
+      "style": "RPC",
+      "versions": [
+        "2021-05-20"
+      ]
+    },
+    {
+      "code": "idrsservice",
+      "defaultVersion": "2020-06-30",
+      "recommendVersions": [
+        "2020-06-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-06-30"
+      ]
+    },
+    {
+      "code": "imageaudit",
+      "defaultVersion": "2019-12-30",
+      "recommendVersions": [
+        "2019-12-30"
+      ],
+      "shortName": "imageaudit",
+      "style": "RPC",
+      "versions": [
+        "2019-12-30"
+      ]
+    },
+    {
+      "code": "imageenhan",
+      "defaultVersion": "2019-09-30",
+      "recommendVersions": [
+        "2019-09-30"
+      ],
+      "shortName": "imageenhan",
+      "style": "RPC",
+      "versions": [
+        "2019-09-30"
+      ]
+    },
+    {
+      "code": "imageprocess",
+      "defaultVersion": "2020-03-20",
+      "recommendVersions": [
+        "2020-03-20"
+      ],
+      "shortName": "ImageProcess",
+      "style": "RPC",
+      "versions": [
+        "2020-03-20"
+      ]
+    },
+    {
+      "code": "imagerecog",
+      "defaultVersion": "2019-09-30",
+      "recommendVersions": [
+        "2019-09-30"
+      ],
+      "shortName": "imagerecog",
+      "style": "RPC",
+      "versions": [
+        "2019-09-30"
+      ]
+    },
+    {
+      "code": "ImageSearch",
+      "defaultVersion": "2019-03-25",
+      "recommendVersions": [
+        "2019-03-25",
+        "2020-12-14",
+        "2021-05-01"
+      ],
+      "shortName": null,
+      "style": "ROA",
+      "versions": [
+        "2019-03-25",
+        "2020-12-14",
+        "2021-05-01"
+      ]
+    },
+    {
+      "code": "imageseg",
+      "defaultVersion": "2019-12-30",
+      "recommendVersions": [
+        "2019-12-30"
+      ],
+      "shortName": "imageseg",
+      "style": "RPC",
+      "versions": [
+        "2019-12-30"
+      ]
+    },
+    {
+      "code": "imgsearch",
+      "defaultVersion": "2020-03-20",
+      "recommendVersions": [
+        "2020-03-20"
+      ],
+      "shortName": "VIAPI",
+      "style": "RPC",
+      "versions": [
+        "2020-03-20"
+      ]
+    },
+    {
+      "code": "imm",
+      "defaultVersion": "2020-09-30",
+      "recommendVersions": [
+        "2020-09-30"
+      ],
+      "shortName": "imm",
+      "style": "RPC",
+      "versions": [
+        "2017-09-06",
+        "2020-09-30"
+      ]
+    },
+    {
+      "code": "imp",
+      "defaultVersion": "2021-06-30",
+      "recommendVersions": [
+        "2021-06-30"
+      ],
+      "shortName": "IMP",
+      "style": "RPC",
+      "versions": [
+        "2021-06-30"
+      ]
+    },
+    {
+      "code": "Ims",
+      "defaultVersion": "2019-08-15",
+      "recommendVersions": [
+        "2019-08-15"
+      ],
+      "shortName": "RAM-IMS",
+      "style": "RPC",
+      "versions": [
+        "2019-08-15"
+      ]
+    },
+    {
+      "code": "Iot",
+      "defaultVersion": "2018-01-20",
+      "recommendVersions": [
+        "2018-01-20"
+      ],
+      "shortName": "IOT",
+      "style": "RPC",
+      "versions": [
+        "2016-01-04",
+        "2016-05-30",
+        "2017-04-20",
+        "2017-06-20",
+        "2017-07-20",
+        "2018-01-20"
+      ]
+    },
+    {
+      "code": "IoTCC",
+      "defaultVersion": "2021-05-13",
+      "recommendVersions": [
+        "2021-05-13"
+      ],
+      "shortName": "IoTCC",
+      "style": "RPC",
+      "versions": [
+        "2021-05-13"
+      ]
+    },
+    {
+      "code": "iovcc",
+      "defaultVersion": "2018-05-01",
+      "recommendVersions": [
+        "2018-05-01"
+      ],
+      "shortName": "ICC",
+      "style": "RPC",
+      "versions": [
+        "2018-05-01"
+      ]
+    },
+    {
+      "code": "IQS",
+      "defaultVersion": "2024-11-11",
+      "recommendVersions": [
+        "2024-11-11"
+      ],
+      "shortName": "IQS",
+      "style": "RPC",
+      "versions": [
+        "2024-07-12",
+        "2024-11-11",
+        "2024-11-21"
+      ]
+    },
+    {
+      "code": "ivpd",
+      "defaultVersion": "2019-06-25",
+      "recommendVersions": [
+        "2019-06-25"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-06-25"
+      ]
+    },
+    {
+      "code": "Kms",
+      "defaultVersion": "2016-01-20",
+      "recommendVersions": [
+        "2016-01-20"
+      ],
+      "shortName": "KMS",
+      "style": "RPC",
+      "versions": [
+        "2016-01-20"
+      ]
+    },
+    {
+      "code": "LingMou",
+      "defaultVersion": "2025-05-27",
+      "recommendVersions": [
+        "2025-05-27"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-05-27"
+      ]
+    },
+    {
+      "code": "Linkcard",
+      "defaultVersion": "2021-05-20",
+      "recommendVersions": [
+        "2021-05-20"
+      ],
+      "shortName": "LinkCard",
+      "style": "RPC",
+      "versions": [
+        "2021-05-20"
+      ]
+    },
+    {
+      "code": "linkedmall",
+      "defaultVersion": "2022-05-31",
+      "recommendVersions": [
+        "2022-05-31",
+        "2023-09-30"
+      ],
+      "shortName": "LinkedMall",
+      "style": "RPC",
+      "versions": [
+        "2018-01-16",
+        "2022-05-31",
+        "2023-09-30"
+      ]
+    },
+    {
+      "code": "Linkvisual",
+      "defaultVersion": "2018-01-20",
+      "recommendVersions": [
+        "2018-01-20",
+        "2023-06-30"
+      ],
+      "shortName": "linkvisual",
+      "style": "RPC",
+      "versions": [
+        "2018-01-20",
+        "2023-06-30"
+      ]
+    },
+    {
+      "code": "LinkWAN",
+      "defaultVersion": "2019-03-01",
+      "recommendVersions": [
+        "2019-03-01"
+      ],
+      "shortName": "linkwan",
+      "style": "RPC",
+      "versions": [
+        "2018-10-30",
+        "2018-12-30",
+        "2019-03-01"
+      ]
+    },
+    {
+      "code": "live",
+      "defaultVersion": "2016-11-01",
+      "recommendVersions": [
+        "2016-11-01"
+      ],
+      "shortName": "Live",
+      "style": "RPC",
+      "versions": [
+        "2016-11-01"
+      ]
+    },
+    {
+      "code": "ltl",
+      "defaultVersion": "2019-05-10",
+      "recommendVersions": [
+        "2019-05-10"
+      ],
+      "shortName": "LTL",
+      "style": "RPC",
+      "versions": [
+        "2019-05-10"
+      ]
+    },
+    {
+      "code": "MaaS",
+      "defaultVersion": "2026-03-18",
+      "recommendVersions": [
+        "2026-03-18"
+      ],
+      "shortName": "MaaS",
+      "style": "RPC",
+      "versions": [
+        "2026-03-18"
+      ]
+    },
+    {
+      "code": "MaasAISearchProxy",
+      "defaultVersion": "2026-04-24",
+      "recommendVersions": [
+        "2026-04-24"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-24"
+      ]
+    },
+    {
+      "code": "Market",
+      "defaultVersion": "2015-11-01",
+      "recommendVersions": [
+        "2015-11-01"
+      ],
+      "shortName": "marketplace",
+      "style": "RPC",
+      "versions": [
+        "2015-11-01"
+      ]
+    },
+    {
+      "code": "MaxCompute",
+      "defaultVersion": "2022-01-04",
+      "recommendVersions": [
+        "2022-01-04"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-01-04"
+      ]
+    },
+    {
+      "code": "metaspace",
+      "defaultVersion": "2022-03-07",
+      "recommendVersions": [
+        "2022-03-07"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-03-07"
+      ]
+    },
+    {
+      "code": "Mhub",
+      "defaultVersion": "2017-08-25",
+      "recommendVersions": [
+        "2017-08-25"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2017-08-25"
+      ]
+    },
+    {
+      "code": "milvus",
+      "defaultVersion": "2023-10-12",
+      "recommendVersions": [
+        "2023-10-12"
+      ],
+      "shortName": "VRSM",
+      "style": "RPC",
+      "versions": [
+        "2023-10-12"
+      ]
+    },
+    {
+      "code": "Mns-open",
+      "defaultVersion": "2022-01-19",
+      "recommendVersions": [
+        "2022-01-19"
+      ],
+      "shortName": "MNS",
+      "style": "RPC",
+      "versions": [
+        "2022-01-19"
+      ]
+    },
+    {
+      "code": "ModelStudio",
+      "defaultVersion": "2026-02-10",
+      "recommendVersions": [
+        "2026-02-10"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-02-10"
+      ]
+    },
+    {
+      "code": "moguan-sdk",
+      "defaultVersion": "2021-04-15",
+      "recommendVersions": [
+        "2021-04-15"
+      ],
+      "shortName": "moguan",
+      "style": "RPC",
+      "versions": [
+        "2021-04-15"
+      ]
+    },
+    {
+      "code": "MPServerless",
+      "defaultVersion": "2019-06-15",
+      "recommendVersions": [
+        "2019-06-15"
+      ],
+      "shortName": "MPServerless",
+      "style": "RPC",
+      "versions": [
+        "2019-06-15"
+      ]
+    },
+    {
+      "code": "mse",
+      "defaultVersion": "2019-05-31",
+      "recommendVersions": [
+        "2019-05-31"
+      ],
+      "shortName": "MSE",
+      "style": "RPC",
+      "versions": [
+        "2019-05-31"
+      ]
+    },
+    {
+      "code": "mssp",
+      "defaultVersion": "2016-12-28",
+      "recommendVersions": [
+        "2016-12-28"
+      ],
+      "shortName": "mssp",
+      "style": "RPC",
+      "versions": [
+        "2016-12-28"
+      ]
+    },
+    {
+      "code": "Mts",
+      "defaultVersion": "2014-06-18",
+      "recommendVersions": [
+        "2014-06-18"
+      ],
+      "shortName": "MTS",
+      "style": "RPC",
+      "versions": [
+        "2014-06-18",
+        "2018-05-28",
+        "2021-07-28"
+      ]
+    },
+    {
+      "code": "MultimodalDialog",
+      "defaultVersion": "2025-09-03",
+      "recommendVersions": [
+        "2025-09-03"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-09-03"
+      ]
+    },
+    {
+      "code": "NAS",
+      "defaultVersion": "2017-06-26",
+      "recommendVersions": [
+        "2017-06-26"
+      ],
+      "shortName": "NAS",
+      "style": "RPC",
+      "versions": [
+        "2017-06-26"
+      ]
+    },
+    {
+      "code": "nis",
+      "defaultVersion": "2021-12-16",
+      "recommendVersions": [
+        "2021-12-16"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-12-16"
+      ]
+    },
+    {
+      "code": "Nlb",
+      "defaultVersion": "2022-04-30",
+      "recommendVersions": [
+        "2022-04-30"
+      ],
+      "shortName": "NLB",
+      "style": "RPC",
+      "versions": [
+        "2022-04-30"
+      ]
+    },
+    {
+      "code": "nlp-automl",
+      "defaultVersion": "2019-11-11",
+      "recommendVersions": [
+        "2019-11-11",
+        "2019-07-01"
+      ],
+      "shortName": "NLP-AUTOML",
+      "style": "RPC",
+      "versions": [
+        "2019-05-29",
+        "2019-07-01",
+        "2019-11-11"
+      ]
+    },
+    {
+      "code": "nls-cloud-meta",
+      "defaultVersion": "2019-02-28",
+      "recommendVersions": [
+        "2019-02-28"
+      ],
+      "shortName": null,
+      "style": "ROA",
+      "versions": [
+        "2018-05-18",
+        "2019-02-28"
+      ]
+    },
+    {
+      "code": "nls-filetrans",
+      "defaultVersion": "2018-08-17",
+      "recommendVersions": [
+        "2018-08-17"
+      ],
+      "shortName": "ISI",
+      "style": "RPC",
+      "versions": [
+        "2018-08-17",
+        "2019-08-23"
+      ]
+    },
+    {
+      "code": "Notifications",
+      "defaultVersion": "2024-12-25",
+      "recommendVersions": [
+        "2024-12-25"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-12-25"
+      ]
+    },
+    {
+      "code": "objectdet",
+      "defaultVersion": "2019-12-30",
+      "recommendVersions": [
+        "2019-12-30"
+      ],
+      "shortName": "objectdet",
+      "style": "RPC",
+      "versions": [
+        "2019-12-30"
+      ]
+    },
+    {
+      "code": "OceanBasePro",
+      "defaultVersion": "2019-09-01",
+      "recommendVersions": [
+        "2019-09-01"
+      ],
+      "shortName": "oceanbase",
+      "style": "RPC",
+      "versions": [
+        "2019-09-01"
+      ]
+    },
+    {
+      "code": "ocr",
+      "defaultVersion": "2019-12-30",
+      "recommendVersions": [
+        "2019-12-30"
+      ],
+      "shortName": "OCR",
+      "style": "RPC",
+      "versions": [
+        "2019-12-30"
+      ]
+    },
+    {
+      "code": "ocr-api",
+      "defaultVersion": "2021-07-07",
+      "recommendVersions": [
+        "2021-07-07"
+      ],
+      "shortName": "OCR",
+      "style": null,
+      "versions": [
+        "2021-07-07"
+      ]
+    },
+    {
+      "code": "Ons",
+      "defaultVersion": "2019-02-14",
+      "recommendVersions": [
+        "2019-02-14"
+      ],
+      "shortName": "RocketMQ",
+      "style": "RPC",
+      "versions": [
+        "2019-02-14"
+      ]
+    },
+    {
+      "code": "OnsMqtt",
+      "defaultVersion": "2020-04-20",
+      "recommendVersions": [
+        "2020-04-20"
+      ],
+      "shortName": "MQTT",
+      "style": "RPC",
+      "versions": [
+        "2019-12-11",
+        "2020-04-20"
+      ]
+    },
+    {
+      "code": "oos",
+      "defaultVersion": "2019-06-01",
+      "recommendVersions": [
+        "2019-06-01"
+      ],
+      "shortName": "OOS",
+      "style": "RPC",
+      "versions": [
+        "2019-06-01"
+      ]
+    },
+    {
+      "code": "openanalytics-open",
+      "defaultVersion": "2018-06-19",
+      "recommendVersions": [
+        "2018-06-19"
+      ],
+      "shortName": "DLA",
+      "style": "RPC",
+      "versions": [
+        "2018-06-19",
+        "2020-09-28"
+      ]
+    },
+    {
+      "code": "OpenAPIExplorer",
+      "defaultVersion": "2024-11-30",
+      "recommendVersions": [
+        "2024-11-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-11-30"
+      ]
+    },
+    {
+      "code": "OpenITag",
+      "defaultVersion": "2022-06-16",
+      "recommendVersions": [
+        "2022-06-16"
+      ],
+      "shortName": "ITag",
+      "style": "RPC",
+      "versions": [
+        "2022-06-16"
+      ]
+    },
+    {
+      "code": "OpenSearch",
+      "defaultVersion": "2017-12-25",
+      "recommendVersions": [
+        "2017-12-25"
+      ],
+      "shortName": null,
+      "style": "ROA",
+      "versions": [
+        "2017-12-25"
+      ]
+    },
+    {
+      "code": "opt",
+      "defaultVersion": "2021-07-30",
+      "recommendVersions": [
+        "2021-07-30"
+      ],
+      "shortName": "opt",
+      "style": "RPC",
+      "versions": [
+        "2021-07-30"
+      ]
+    },
+    {
+      "code": "Oss",
+      "defaultVersion": "2019-05-17",
+      "recommendVersions": [
+        "2019-05-17"
+      ],
+      "shortName": "OSS",
+      "style": "RPC",
+      "versions": [
+        "2019-05-17"
+      ]
+    },
+    {
+      "code": "OssAdmin",
+      "defaultVersion": "2019-04-22",
+      "recommendVersions": [
+        "2019-04-22"
+      ],
+      "shortName": "OssAdmin",
+      "style": "RPC",
+      "versions": [
+        "2019-04-22"
+      ]
+    },
+    {
+      "code": "OssSddp",
+      "defaultVersion": "2024-02-22",
+      "recommendVersions": [
+        "2024-02-22"
+      ],
+      "shortName": "OssSddp",
+      "style": "RPC",
+      "versions": [
+        "2024-02-22"
+      ]
+    },
+    {
+      "code": "OutboundBot",
+      "defaultVersion": "2019-12-26",
+      "recommendVersions": [
+        "2019-12-26"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-12-26"
+      ]
+    },
+    {
+      "code": "pai-dlc",
+      "defaultVersion": "2020-12-03",
+      "recommendVersions": [
+        "2020-12-03"
+      ],
+      "shortName": "PAI-DLC",
+      "style": null,
+      "versions": [
+        "2020-12-03"
+      ]
+    },
+    {
+      "code": "pai-dsw",
+      "defaultVersion": "2022-01-01",
+      "recommendVersions": [
+        "2022-01-01"
+      ],
+      "shortName": "PAI-DSW",
+      "style": null,
+      "versions": [
+        "2021-02-26",
+        "2022-01-01"
+      ]
+    },
+    {
+      "code": "paiAutoML",
+      "defaultVersion": "2022-08-28",
+      "recommendVersions": [
+        "2022-08-28"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-08-28"
+      ]
+    },
+    {
+      "code": "PAICopilot",
+      "defaultVersion": "2025-07-31",
+      "recommendVersions": [
+        "2025-07-31"
+      ],
+      "shortName": "PAI",
+      "style": "RPC",
+      "versions": [
+        "2025-07-31"
+      ]
+    },
+    {
+      "code": "PAIElasticDatasetAccelerator",
+      "defaultVersion": "2022-08-01",
+      "recommendVersions": [
+        "2022-08-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-08-01"
+      ]
+    },
+    {
+      "code": "PaiFeatureStore",
+      "defaultVersion": "2023-06-21",
+      "recommendVersions": [
+        "2023-06-21"
+      ],
+      "shortName": "PAI-FeatureStore",
+      "style": "RPC",
+      "versions": [
+        "2023-06-21"
+      ]
+    },
+    {
+      "code": "PAIFlow",
+      "defaultVersion": "2021-02-02",
+      "recommendVersions": [
+        "2021-02-02"
+      ],
+      "shortName": "PAIFlow",
+      "style": "RPC",
+      "versions": [
+        "2021-02-02"
+      ]
+    },
+    {
+      "code": "PAILangStudio",
+      "defaultVersion": "2024-07-10",
+      "recommendVersions": [
+        "2024-07-10"
+      ],
+      "shortName": "PAILangStudio",
+      "style": "RPC",
+      "versions": [
+        "2024-07-10"
+      ]
+    },
+    {
+      "code": "PaiLLMTrace",
+      "defaultVersion": "2024-03-11",
+      "recommendVersions": [
+        "2024-03-11"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-03-11"
+      ]
+    },
+    {
+      "code": "PAIModelGallery",
+      "defaultVersion": "2025-06-30",
+      "recommendVersions": [
+        "2025-06-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-06-30"
+      ]
+    },
+    {
+      "code": "PaiPlugin",
+      "defaultVersion": "2022-01-12",
+      "recommendVersions": [
+        "2022-01-12"
+      ],
+      "shortName": "PaiPlugin",
+      "style": null,
+      "versions": [
+        "2022-01-12"
+      ]
+    },
+    {
+      "code": "PaiRecService",
+      "defaultVersion": "2022-12-13",
+      "recommendVersions": [
+        "2022-12-13"
+      ],
+      "shortName": "PAI-REC",
+      "style": "RPC",
+      "versions": [
+        "2022-12-13"
+      ]
+    },
+    {
+      "code": "PaiStudio",
+      "defaultVersion": "2022-01-12",
+      "recommendVersions": [
+        "2022-01-12",
+        "2021-02-02"
+      ],
+      "shortName": "PAI",
+      "style": "RPC",
+      "versions": [
+        "2020-04-28",
+        "2021-02-02",
+        "2022-01-12"
+      ]
+    },
+    {
+      "code": "Pcdn",
+      "defaultVersion": "2017-04-11",
+      "recommendVersions": [
+        "2017-04-11"
+      ],
+      "shortName": "PCDN",
+      "style": "RPC",
+      "versions": [
+        "2017-04-11"
+      ]
+    },
+    {
+      "code": "pds",
+      "defaultVersion": "2022-03-01",
+      "recommendVersions": [
+        "2022-03-01"
+      ],
+      "shortName": "PDS",
+      "style": null,
+      "versions": [
+        "2020-03-20",
+        "2022-03-01"
+      ]
+    },
+    {
+      "code": "polardb",
+      "defaultVersion": "2017-08-01",
+      "recommendVersions": [
+        "2017-08-01"
+      ],
+      "shortName": "PolarDB",
+      "style": "RPC",
+      "versions": [
+        "2017-08-01"
+      ]
+    },
+    {
+      "code": "polardbx",
+      "defaultVersion": "2020-02-02",
+      "recommendVersions": [
+        "2020-02-02"
+      ],
+      "shortName": "polardbx",
+      "style": "RPC",
+      "versions": [
+        "2020-02-02"
+      ]
+    },
+    {
+      "code": "Privatelink",
+      "defaultVersion": "2020-04-15",
+      "recommendVersions": [
+        "2020-04-15"
+      ],
+      "shortName": "PrivateLink",
+      "style": "RPC",
+      "versions": [
+        "2020-04-15"
+      ]
+    },
+    {
+      "code": "PTS",
+      "defaultVersion": "2020-10-20",
+      "recommendVersions": [
+        "2020-10-20"
+      ],
+      "shortName": "PTS",
+      "style": "RPC",
+      "versions": [
+        "2019-08-10",
+        "2020-10-20"
+      ]
+    },
+    {
+      "code": "Push",
+      "defaultVersion": "2016-08-01",
+      "recommendVersions": [
+        "2016-08-01"
+      ],
+      "shortName": "CPS",
+      "style": "RPC",
+      "versions": [
+        "2016-08-01"
+      ]
+    },
+    {
+      "code": "pvtz",
+      "defaultVersion": "2018-01-01",
+      "recommendVersions": [
+        "2018-01-01"
+      ],
+      "shortName": "pvtz",
+      "style": "RPC",
+      "versions": [
+        "2018-01-01"
+      ]
+    },
+    {
+      "code": "Qualitycheck",
+      "defaultVersion": "2019-01-15",
+      "recommendVersions": [
+        "2019-01-15"
+      ],
+      "shortName": "SCA",
+      "style": "RPC",
+      "versions": [
+        "2019-01-15"
+      ]
+    },
+    {
+      "code": "QuanMiaoLightApp",
+      "defaultVersion": "2024-08-01",
+      "recommendVersions": [
+        "2024-08-01"
+      ],
+      "shortName": "QuanMiaoLightApp",
+      "style": "RPC",
+      "versions": [
+        "2024-08-01"
+      ]
+    },
+    {
+      "code": "quickbi-public",
+      "defaultVersion": "2022-01-01",
+      "recommendVersions": [
+        "2022-01-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-01-01"
+      ]
+    },
+    {
+      "code": "quotas",
+      "defaultVersion": "2020-05-10",
+      "recommendVersions": [
+        "2020-05-10"
+      ],
+      "shortName": "quotas",
+      "style": "RPC",
+      "versions": [
+        "2020-05-10"
+      ]
+    },
+    {
+      "code": "R-kvstore",
+      "defaultVersion": "2015-01-01",
+      "recommendVersions": [
+        "2015-01-01"
+      ],
+      "shortName": "Redis",
+      "style": "RPC",
+      "versions": [
+        "2015-01-01"
+      ]
+    },
+    {
+      "code": "RAI",
+      "defaultVersion": "2024-07-01",
+      "recommendVersions": [
+        "2024-07-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-07-01"
+      ]
+    },
+    {
+      "code": "Ram",
+      "defaultVersion": "2015-05-01",
+      "recommendVersions": [
+        "2015-05-01"
+      ],
+      "shortName": "RAM",
+      "style": "RPC",
+      "versions": [
+        "2015-05-01"
+      ]
+    },
+    {
+      "code": "Rds",
+      "defaultVersion": "2014-08-15",
+      "recommendVersions": [
+        "2014-08-15"
+      ],
+      "shortName": "RDS",
+      "style": "RPC",
+      "versions": [
+        "2014-08-15"
+      ]
+    },
+    {
+      "code": "rds-data",
+      "defaultVersion": "2022-03-30",
+      "recommendVersions": [
+        "2022-03-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-03-30"
+      ]
+    },
+    {
+      "code": "RdsAi",
+      "defaultVersion": "2025-05-07",
+      "recommendVersions": [
+        "2025-05-07"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-05-07"
+      ]
+    },
+    {
+      "code": "RealTranslationAgent",
+      "defaultVersion": "2026-06-22",
+      "recommendVersions": [
+        "2026-06-22"
+      ],
+      "shortName": "RTA",
+      "style": "RPC",
+      "versions": [
+        "2026-06-22"
+      ]
+    },
+    {
+      "code": "ResourceCenter",
+      "defaultVersion": "2022-12-01",
+      "recommendVersions": [
+        "2022-12-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-12-01"
+      ]
+    },
+    {
+      "code": "ResourceDirectoryMaster",
+      "defaultVersion": "2022-04-19",
+      "recommendVersions": [
+        "2022-04-19"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-04-19"
+      ]
+    },
+    {
+      "code": "ResourceManager",
+      "defaultVersion": "2020-03-31",
+      "recommendVersions": [
+        "2020-03-31"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2016-11-11",
+        "2020-03-31"
+      ]
+    },
+    {
+      "code": "ResourceSharing",
+      "defaultVersion": "2020-01-10",
+      "recommendVersions": [
+        "2020-01-10"
+      ],
+      "shortName": "RS",
+      "style": "RPC",
+      "versions": [
+        "2020-01-10"
+      ]
+    },
+    {
+      "code": "retailadvqa",
+      "defaultVersion": "2023-04-17",
+      "recommendVersions": [
+        "2023-04-17"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-10-27",
+        "2023-04-17"
+      ]
+    },
+    {
+      "code": "RiskManagement",
+      "defaultVersion": "2026-04-24",
+      "recommendVersions": [
+        "2026-04-24"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-24"
+      ]
+    },
+    {
+      "code": "RocketMQ",
+      "defaultVersion": "2022-08-01",
+      "recommendVersions": [
+        "2022-08-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-08-01"
+      ]
+    },
+    {
+      "code": "ROS",
+      "defaultVersion": "2019-09-10",
+      "recommendVersions": [
+        "2019-09-10"
+      ],
+      "shortName": "ROS",
+      "style": "RPC",
+      "versions": [
+        "2019-09-10"
+      ]
+    },
+    {
+      "code": "rtc",
+      "defaultVersion": "2018-01-11",
+      "recommendVersions": [
+        "2018-01-11"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2018-01-11"
+      ]
+    },
+    {
+      "code": "rtc-white-board",
+      "defaultVersion": "2020-12-14",
+      "recommendVersions": [
+        "2020-12-14"
+      ],
+      "shortName": "IWB",
+      "style": "RPC",
+      "versions": [
+        "2020-12-14"
+      ]
+    },
+    {
+      "code": "sae",
+      "defaultVersion": "2019-05-06",
+      "recommendVersions": [
+        "2019-05-06"
+      ],
+      "shortName": "SAE",
+      "style": "ROA",
+      "versions": [
+        "2019-05-06"
+      ]
+    },
+    {
+      "code": "saf",
+      "defaultVersion": "2019-05-21",
+      "recommendVersions": [
+        "2019-05-21"
+      ],
+      "shortName": "SAF",
+      "style": "RPC",
+      "versions": [
+        "2019-05-21"
+      ]
+    },
+    {
+      "code": "safconsole",
+      "defaultVersion": "2021-01-12",
+      "recommendVersions": [
+        "2021-01-12"
+      ],
+      "shortName": null,
+      "style": null,
+      "versions": [
+        "2021-01-12",
+        "2025-05-21"
+      ]
+    },
+    {
+      "code": "Sas",
+      "defaultVersion": "2018-12-03",
+      "recommendVersions": [
+        "2018-12-03"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2018-12-03",
+        "2021-01-14"
+      ]
+    },
+    {
+      "code": "SasRasp",
+      "defaultVersion": "2024-07-27",
+      "recommendVersions": [
+        "2024-07-27"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-07-27"
+      ]
+    },
+    {
+      "code": "schedulerx2",
+      "defaultVersion": "2019-04-30",
+      "recommendVersions": [
+        "2019-04-30"
+      ],
+      "shortName": "schedulerx",
+      "style": "RPC",
+      "versions": [
+        "2019-04-30"
+      ]
+    },
+    {
+      "code": "SchedulerX3",
+      "defaultVersion": "2024-06-24",
+      "recommendVersions": [
+        "2024-06-24"
+      ],
+      "shortName": "SchedulerX3",
+      "style": null,
+      "versions": [
+        "2024-06-24"
+      ]
+    },
+    {
+      "code": "scsp",
+      "defaultVersion": "2020-07-02",
+      "recommendVersions": [
+        "2020-07-02"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-07-02"
+      ]
+    },
+    {
+      "code": "Sddp",
+      "defaultVersion": "2019-01-03",
+      "recommendVersions": [
+        "2019-01-03"
+      ],
+      "shortName": "sddp",
+      "style": "RPC",
+      "versions": [
+        "2019-01-03"
+      ]
+    },
+    {
+      "code": "searchengine",
+      "defaultVersion": "2021-10-25",
+      "recommendVersions": [
+        "2021-10-25"
+      ],
+      "shortName": "searchengine",
+      "style": "RPC",
+      "versions": [
+        "2021-10-25"
+      ]
+    },
+    {
+      "code": "Searchplat",
+      "defaultVersion": "2024-04-01",
+      "recommendVersions": [
+        "2024-04-01"
+      ],
+      "shortName": "searchplat",
+      "style": "RPC",
+      "versions": [
+        "2024-04-01",
+        "2024-05-29"
+      ]
+    },
+    {
+      "code": "selectdb",
+      "defaultVersion": "2023-05-22",
+      "recommendVersions": [
+        "2023-05-22"
+      ],
+      "shortName": "SelectDB",
+      "style": "RPC",
+      "versions": [
+        "2023-05-22"
+      ]
+    },
+    {
+      "code": "servicecatalog",
+      "defaultVersion": "2021-09-01",
+      "recommendVersions": [
+        "2021-09-01"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-09-01"
+      ]
+    },
+    {
+      "code": "servicemesh",
+      "defaultVersion": "2020-01-11",
+      "recommendVersions": [
+        "2020-01-11"
+      ],
+      "shortName": "ASM",
+      "style": "RPC",
+      "versions": [
+        "2020-01-11"
+      ]
+    },
+    {
+      "code": "sgw",
+      "defaultVersion": "2018-05-11",
+      "recommendVersions": [
+        "2018-05-11"
+      ],
+      "shortName": "CSG",
+      "style": "RPC",
+      "versions": [
+        "2018-05-11"
+      ]
+    },
+    {
+      "code": "Slb",
+      "defaultVersion": "2014-05-15",
+      "recommendVersions": [
+        "2014-05-15"
+      ],
+      "shortName": "SLB",
+      "style": "RPC",
+      "versions": [
+        "2013-02-21",
+        "2014-05-15"
+      ]
+    },
+    {
+      "code": "Sls",
+      "defaultVersion": "2020-12-30",
+      "recommendVersions": [
+        "2020-12-30"
+      ],
+      "shortName": "SLS",
+      "style": "ROA",
+      "versions": [
+        "2018-06-13",
+        "2019-10-23",
+        "2020-12-30"
+      ]
+    },
+    {
+      "code": "Smartag",
+      "defaultVersion": "2018-03-13",
+      "recommendVersions": [
+        "2018-03-13"
+      ],
+      "shortName": "SAG",
+      "style": "RPC",
+      "versions": [
+        "2018-03-13"
+      ]
+    },
+    {
+      "code": "smc",
+      "defaultVersion": "2019-06-01",
+      "recommendVersions": [
+        "2019-06-01"
+      ],
+      "shortName": "SMC",
+      "style": "RPC",
+      "versions": [
+        "2019-06-01"
+      ]
+    },
+    {
+      "code": "SMQProxy",
+      "defaultVersion": "2026-04-09",
+      "recommendVersions": [
+        "2026-04-09"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-09"
+      ]
+    },
+    {
+      "code": "SOFA",
+      "defaultVersion": "2019-08-15",
+      "recommendVersions": [
+        "2019-08-15"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2019-08-15"
+      ]
+    },
+    {
+      "code": "sophonsoar",
+      "defaultVersion": "2022-07-28",
+      "recommendVersions": [
+        "2022-07-28",
+        "2025-09-03"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-07-28",
+        "2025-09-03"
+      ]
+    },
+    {
+      "code": "STAROps",
+      "defaultVersion": "2026-04-28",
+      "recommendVersions": [
+        "2026-04-28"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-04-28"
+      ]
+    },
+    {
+      "code": "starrocks",
+      "defaultVersion": "2022-10-19",
+      "recommendVersions": [
+        "2022-10-19"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-10-19"
+      ]
+    },
+    {
+      "code": "Status",
+      "defaultVersion": "2020-01-17",
+      "recommendVersions": [
+        "2020-01-17"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-01-17"
+      ]
+    },
+    {
+      "code": "Sts",
+      "defaultVersion": "2015-04-01",
+      "recommendVersions": [
+        "2015-04-01"
+      ],
+      "shortName": "STS",
+      "style": "RPC",
+      "versions": [
+        "2015-04-01"
+      ]
+    },
+    {
+      "code": "SuperappNlp",
+      "defaultVersion": "2024-09-30",
+      "recommendVersions": [
+        "2024-09-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-09-30"
+      ]
+    },
+    {
+      "code": "support-plan",
+      "defaultVersion": "2021-07-06",
+      "recommendVersions": [
+        "2021-07-06"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-07-06"
+      ]
+    },
+    {
+      "code": "SWAS-OPEN",
+      "defaultVersion": "2020-06-01",
+      "recommendVersions": [
+        "2020-06-01"
+      ],
+      "shortName": "swas",
+      "style": "RPC",
+      "versions": [
+        "2020-06-01"
+      ]
+    },
+    {
+      "code": "SysOM",
+      "defaultVersion": "2023-12-30",
+      "recommendVersions": [
+        "2023-12-30"
+      ],
+      "shortName": "SysOM",
+      "style": "RPC",
+      "versions": [
+        "2023-12-30"
+      ]
+    },
+    {
+      "code": "Tablestore",
+      "defaultVersion": "2020-12-09",
+      "recommendVersions": [
+        "2020-12-09"
+      ],
+      "shortName": "Tablestore",
+      "style": null,
+      "versions": [
+        "2020-12-09"
+      ]
+    },
+    {
+      "code": "Tag",
+      "defaultVersion": "2018-08-28",
+      "recommendVersions": [
+        "2018-08-28"
+      ],
+      "shortName": "tag",
+      "style": "RPC",
+      "versions": [
+        "2018-08-28"
+      ]
+    },
+    {
+      "code": "tdsr",
+      "defaultVersion": "2020-01-01",
+      "recommendVersions": [
+        "2020-01-01"
+      ],
+      "shortName": "tdsr",
+      "style": "RPC",
+      "versions": [
+        "2020-01-01"
+      ]
+    },
+    {
+      "code": "tingwu",
+      "defaultVersion": "2022-09-30",
+      "recommendVersions": [
+        "2022-09-30",
+        "2023-09-30"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2022-09-30",
+        "2023-09-30"
+      ]
+    },
+    {
+      "code": "TrafficFxOpen",
+      "defaultVersion": "2024-08-15",
+      "recommendVersions": [
+        "2024-08-15"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2024-08-15"
+      ]
+    },
+    {
+      "code": "ververica",
+      "defaultVersion": "2022-07-18",
+      "recommendVersions": [
+        "2022-07-18"
+      ],
+      "shortName": "VVP",
+      "style": "RPC",
+      "versions": [
+        "2020-05-01",
+        "2022-07-18"
+      ]
+    },
+    {
+      "code": "viapi",
+      "defaultVersion": "2023-01-17",
+      "recommendVersions": [
+        "2023-01-17"
+      ],
+      "shortName": "VIAPI",
+      "style": "RPC",
+      "versions": [
+        "2021-09-30",
+        "2023-01-17"
+      ]
+    },
+    {
+      "code": "videoenhan",
+      "defaultVersion": "2020-03-20",
+      "recommendVersions": [
+        "2020-03-20"
+      ],
+      "shortName": "VIAPI",
+      "style": "RPC",
+      "versions": [
+        "2020-03-20"
+      ]
+    },
+    {
+      "code": "videorecog",
+      "defaultVersion": "2020-03-20",
+      "recommendVersions": [
+        "2020-03-20"
+      ],
+      "shortName": "VIAPI",
+      "style": "RPC",
+      "versions": [
+        "2020-03-20"
+      ]
+    },
+    {
+      "code": "videoseg",
+      "defaultVersion": "2020-03-20",
+      "recommendVersions": [
+        "2020-03-20"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2020-03-20"
+      ]
+    },
+    {
+      "code": "vod",
+      "defaultVersion": "2017-03-21",
+      "recommendVersions": [
+        "2017-03-21"
+      ],
+      "shortName": "VOD",
+      "style": "RPC",
+      "versions": [
+        "2017-03-21"
+      ]
+    },
+    {
+      "code": "VoiceNavigator",
+      "defaultVersion": "2018-06-12",
+      "recommendVersions": [
+        "2018-06-12",
+        "2025-11-11"
+      ],
+      "shortName": "VN",
+      "style": "RPC",
+      "versions": [
+        "2018-06-12",
+        "2025-11-11"
+      ]
+    },
+    {
+      "code": "Vpc",
+      "defaultVersion": "2016-04-28",
+      "recommendVersions": [
+        "2016-04-28"
+      ],
+      "shortName": "VPC",
+      "style": "RPC",
+      "versions": [
+        "2016-04-28"
+      ]
+    },
+    {
+      "code": "VpcIpam",
+      "defaultVersion": "2023-02-28",
+      "recommendVersions": [
+        "2023-02-28"
+      ],
+      "shortName": "VpcIpam",
+      "style": "RPC",
+      "versions": [
+        "2023-02-28"
+      ]
+    },
+    {
+      "code": "VpcPeer",
+      "defaultVersion": "2022-01-01",
+      "recommendVersions": [
+        "2022-01-01"
+      ],
+      "shortName": "VpcPeer",
+      "style": "RPC",
+      "versions": [
+        "2022-01-01"
+      ]
+    },
+    {
+      "code": "vs",
+      "defaultVersion": "2018-12-12",
+      "recommendVersions": [
+        "2018-12-12"
+      ],
+      "shortName": "vs",
+      "style": "RPC",
+      "versions": [
+        "2018-12-12"
+      ]
+    },
+    {
+      "code": "waf-openapi",
+      "defaultVersion": "2019-09-10",
+      "recommendVersions": [
+        "2019-09-10",
+        "2021-10-01"
+      ],
+      "shortName": "WAF",
+      "style": "RPC",
+      "versions": [
+        "2017-09-30",
+        "2019-09-10",
+        "2021-10-01"
+      ]
+    },
+    {
+      "code": "WebsiteBuild",
+      "defaultVersion": "2025-04-29",
+      "recommendVersions": [
+        "2025-04-29"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2025-04-29"
+      ]
+    },
+    {
+      "code": "Workorder",
+      "defaultVersion": "2021-06-10",
+      "recommendVersions": [
+        "2021-06-10"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2016-03-21",
+        "2016-04-18",
+        "2016-08-30",
+        "2016-09-19",
+        "2018-10-10",
+        "2018-10-12",
+        "2019-05-16",
+        "2020-03-26",
+        "2020-08-01",
+        "2020-12-10",
+        "2021-05-10",
+        "2021-06-10"
+      ]
+    },
+    {
+      "code": "wss",
+      "defaultVersion": "2021-12-21",
+      "recommendVersions": [
+        "2021-12-21"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-12-21"
+      ]
+    },
+    {
+      "code": "WuyingAI",
+      "defaultVersion": "2026-03-11",
+      "recommendVersions": [
+        "2026-03-11"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-03-11"
+      ]
+    },
+    {
+      "code": "wyota",
+      "defaultVersion": "2021-04-20",
+      "recommendVersions": [
+        "2021-04-20"
+      ],
+      "shortName": "ACWT",
+      "style": "RPC",
+      "versions": [
+        "2021-04-20"
+      ]
+    },
+    {
+      "code": "xtee",
+      "defaultVersion": "2021-09-10",
+      "recommendVersions": [
+        "2021-09-10"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2021-09-10",
+        "2022-05-13"
+      ]
+    },
+    {
+      "code": "xtrace",
+      "defaultVersion": "2019-08-08",
+      "recommendVersions": [
+        "2019-08-08"
+      ],
+      "shortName": "xtrace",
+      "style": "RPC",
+      "versions": [
+        "2019-08-08"
+      ]
+    },
+    {
+      "code": "Yike",
+      "defaultVersion": "2026-03-19",
+      "recommendVersions": [
+        "2026-03-19",
+        "2026-07-07"
+      ],
+      "shortName": null,
+      "style": "RPC",
+      "versions": [
+        "2026-03-19",
+        "2026-07-07"
+      ]
+    },
+    {
+      "code": "Yundun-bastionhost",
+      "defaultVersion": "2019-12-09",
+      "recommendVersions": [
+        "2019-12-09"
+      ],
+      "shortName": "Bastionhost",
+      "style": "RPC",
+      "versions": [
+        "2019-12-09"
+      ]
+    }
+  ]
+}
