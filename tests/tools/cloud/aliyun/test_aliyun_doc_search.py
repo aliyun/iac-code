@@ -92,12 +92,16 @@ class TestAliyunDocSearchExecute:
         assert result.is_error is True
 
     @pytest.mark.asyncio
-    async def test_successful_search(self, tool: AliyunDocSearch, context: ToolContext) -> None:
+    async def test_successful_search(self, tool: AliyunDocSearch, context: ToolContext, monkeypatch) -> None:
         items = [
             {"title": "ROS 概述", "content": "资源编排服务简介", "url": "https://help.aliyun.com/doc1"},
             {"title": "ROS 模板", "content": "模板语法说明", "url": "https://help.aliyun.com/doc2"},
         ]
         response = _make_response(_success_body(items, total=50))
+        monkeypatch.setattr(
+            "iac_code.tools.cloud.aliyun.aliyun_doc_search._",
+            lambda message: "i18n:" + message,
+        )
 
         with patch("iac_code.tools.cloud.aliyun.aliyun_doc_search.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
@@ -111,7 +115,7 @@ class TestAliyunDocSearchExecute:
         assert result.is_error is False
         assert "ROS 概述" in result.content
         assert "ROS 模板" in result.content
-        assert "https://help.aliyun.com/doc1" in result.content
+        assert "i18n:Link: https://help.aliyun.com/doc1" in result.content
 
     @pytest.mark.asyncio
     async def test_no_results(self, tool: AliyunDocSearch, context: ToolContext) -> None:

@@ -3444,6 +3444,34 @@ msgstr "アーキテクチャ概要"
 msgid "Show the complete architecture diagram."
 msgstr "完全なアーキテクチャ図を表示します。"
 
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "more"
+msgstr "その他"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "across {kind} x{count}"
+msgstr "{kind} をまたぐ x{count}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "boundaries"
+msgstr "境界"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label} (expand: {detail_label})"
+msgstr "{label}（展開: {detail_label}）"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label}\\nexpand: {detail_label}"
+msgstr "{label}\\n展開: {detail_label}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{layer_label} configuration\\n{details}"
+msgstr "{layer_label} の設定\\n{details}"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -4914,6 +4942,28 @@ msgstr "{path} を読み取り中"
 msgid "Reading file..."
 msgstr "ファイルを読み取り中…"
 
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Unknown tool: {tool_name}"
+msgstr "不明なツール: {tool_name}"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid ""
+"Invalid input for tool '{tool_name}': {error}. Please provide all "
+"required parameters as defined in the tool schema."
+msgstr "ツール「{tool_name}」への入力が無効です: {error}。ツールスキーマで定義されたすべての必須パラメーターを指定してください。"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' timed out after {timeout}s"
+msgstr "ツール「{tool_name}」は {timeout} 秒後にタイムアウトしました"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' failed: {error}"
+msgstr "ツール「{tool_name}」の実行に失敗しました: {error}"
+
 #: src/iac_code/tools/web_fetch.py
 msgid "URL cannot be empty."
 msgstr "URL を空にすることはできません。"
@@ -4949,6 +4999,11 @@ msgstr "{url} の取得中に予期しないエラーが発生しました：{er
 #, python-brace-format
 msgid "Fetched {chars} chars, {lines} lines"
 msgstr "{chars} 文字、{lines} 行を取得しました"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "... ({count} more lines)"
+msgstr "...（残り {count} 行）"
 
 #: src/iac_code/tools/web_fetch.py
 msgid "Fetch"
@@ -5302,6 +5357,15 @@ msgstr "呼び出しに成功しました（RequestId: {request_id}）"
 msgid "Aliyun API Documentation"
 msgstr "Alibaba Cloud API ドキュメント"
 
+#: src/iac_code/tools/cloud/aliyun/aliyun_api_doc.py
+#, python-brace-format
+msgid ""
+"{product}/{version} {action} | {style} {method} {path} | "
+"required={required} | optional={optional} | executable={executable}"
+msgstr ""
+"{product}/{version} {action} | {style} {method} {path} | 必須={required} | "
+"任意={optional} | 実行可能={executable}"
+
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 msgid "DocSearch"
 msgstr "DocSearch"
@@ -5345,6 +5409,11 @@ msgstr "ドキュメントが見つかりません"
 #, python-brace-format
 msgid "No documents found for keywords: {keywords}"
 msgstr "キーワード {keywords} に一致するドキュメントが見つかりません"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "Link: {url}"
+msgstr "リンク: {url}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 #, python-brace-format

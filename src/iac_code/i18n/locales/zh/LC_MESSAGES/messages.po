@@ -3416,6 +3416,34 @@ msgstr "架构概览"
 msgid "Show the complete architecture diagram."
 msgstr "显示完整架构图。"
 
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "more"
+msgstr "其他"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "across {kind} x{count}"
+msgstr "跨 {kind} x{count}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "boundaries"
+msgstr "边界"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label} (expand: {detail_label})"
+msgstr "{label}（展开：{detail_label}）"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label}\\nexpand: {detail_label}"
+msgstr "{label}\\n展开：{detail_label}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{layer_label} configuration\\n{details}"
+msgstr "{layer_label} 配置\\n{details}"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -4849,6 +4877,28 @@ msgstr "正在读取 {path}"
 msgid "Reading file..."
 msgstr "正在读取文件..."
 
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Unknown tool: {tool_name}"
+msgstr "未知工具：{tool_name}"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid ""
+"Invalid input for tool '{tool_name}': {error}. Please provide all "
+"required parameters as defined in the tool schema."
+msgstr "工具“{tool_name}”的输入无效：{error}。请按照工具架构提供所有必填参数。"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' timed out after {timeout}s"
+msgstr "工具“{tool_name}”在 {timeout} 秒后超时"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' failed: {error}"
+msgstr "工具“{tool_name}”执行失败：{error}"
+
 #: src/iac_code/tools/web_fetch.py
 msgid "URL cannot be empty."
 msgstr "URL 不能为空。"
@@ -4882,6 +4932,11 @@ msgstr "获取 {url} 时发生意外错误：{error}"
 #, python-brace-format
 msgid "Fetched {chars} chars, {lines} lines"
 msgstr "获取了 {chars} 个字符，{lines} 行"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "... ({count} more lines)"
+msgstr "...（还有 {count} 行）"
 
 #: src/iac_code/tools/web_fetch.py
 msgid "Fetch"
@@ -5235,6 +5290,15 @@ msgstr "调用成功（RequestId: {request_id}）"
 msgid "Aliyun API Documentation"
 msgstr "阿里云 API 文档"
 
+#: src/iac_code/tools/cloud/aliyun/aliyun_api_doc.py
+#, python-brace-format
+msgid ""
+"{product}/{version} {action} | {style} {method} {path} | "
+"required={required} | optional={optional} | executable={executable}"
+msgstr ""
+"{product}/{version} {action} | {style} {method} {path} | 必填={required} | "
+"可选={optional} | 可执行={executable}"
+
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 msgid "DocSearch"
 msgstr "文档搜索"
@@ -5278,6 +5342,11 @@ msgstr "未找到文档"
 #, python-brace-format
 msgid "No documents found for keywords: {keywords}"
 msgstr "未找到关键词为 {keywords} 的文档"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "Link: {url}"
+msgstr "链接：{url}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 #, python-brace-format

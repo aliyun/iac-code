@@ -436,6 +436,15 @@ class TestWebFetchToolUI:
         result = web_fetch_tool.render_tool_result_message("Page content here")
         assert result is not None
 
+    def test_render_tool_result_message_translates_truncation_summary(self, web_fetch_tool, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.web_fetch._", lambda message: "i18n:" + message)
+        output = "\n".join("line{}".format(index) for index in range(55))
+
+        result = web_fetch_tool.render_tool_result_message(output, verbose=True)
+
+        assert result is not None
+        assert "i18n:... (5 more lines)" in result
+
     def test_render_tool_result_message_error(self, web_fetch_tool):
         result = web_fetch_tool.render_tool_result_message("Error occurred", is_error=True)
         assert result is not None

@@ -151,7 +151,7 @@ class AliyunDocSearch(Tool):
             if content:
                 lines.append(f"   {content}")
             if url:
-                lines.append(f"   Link: {url}")
+                lines.append("   " + _("Link: {url}").format(url=url))
             lines.append("")
 
         count = len(items)

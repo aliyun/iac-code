@@ -3578,6 +3578,34 @@ msgstr "Resumen de arquitectura"
 msgid "Show the complete architecture diagram."
 msgstr "Mostrar el diagrama de arquitectura completo."
 
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "more"
+msgstr "más"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "across {kind} x{count}"
+msgstr "entre {kind} x{count}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+msgid "boundaries"
+msgstr "límites"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label} (expand: {detail_label})"
+msgstr "{label} (ampliar: {detail_label})"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{label}\\nexpand: {detail_label}"
+msgstr "{label}\\nampliar: {detail_label}"
+
+#: src/iac_code/pipeline/engine/architecture_graph.py
+#, python-brace-format
+msgid "{layer_label} configuration\\n{details}"
+msgstr "Configuración de {layer_label}\\n{details}"
+
 #: src/iac_code/pipeline/engine/ask_user_question_tool.py
 msgid ""
 "Pipeline-only tool that asks the user to choose an option or type "
@@ -5166,6 +5194,31 @@ msgstr "Leyendo {path}"
 msgid "Reading file..."
 msgstr "Leyendo archivo..."
 
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Unknown tool: {tool_name}"
+msgstr "Herramienta desconocida: {tool_name}"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid ""
+"Invalid input for tool '{tool_name}': {error}. Please provide all "
+"required parameters as defined in the tool schema."
+msgstr ""
+"Entrada no válida para la herramienta «{tool_name}»: {error}. Proporcione"
+" todos los parámetros obligatorios definidos en el esquema de la "
+"herramienta."
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' timed out after {timeout}s"
+msgstr "La herramienta «{tool_name}» agotó el tiempo de espera tras {timeout} s"
+
+#: src/iac_code/tools/tool_executor.py
+#, python-brace-format
+msgid "Tool '{tool_name}' failed: {error}"
+msgstr "La herramienta «{tool_name}» ha fallado: {error}"
+
 #: src/iac_code/tools/web_fetch.py
 msgid "URL cannot be empty."
 msgstr "La URL no puede estar vacía."
@@ -5202,6 +5255,11 @@ msgstr "Error inesperado al obtener {url}: {error}"
 #, python-brace-format
 msgid "Fetched {chars} chars, {lines} lines"
 msgstr "Obtenidos {chars} caracteres, {lines} líneas"
+
+#: src/iac_code/tools/web_fetch.py
+#, python-brace-format
+msgid "... ({count} more lines)"
+msgstr "... ({count} líneas más)"
 
 #: src/iac_code/tools/web_fetch.py
 msgid "Fetch"
@@ -5555,6 +5613,15 @@ msgstr "Llamada correcta (RequestId: {request_id})"
 msgid "Aliyun API Documentation"
 msgstr "Documentación de la API de Alibaba Cloud"
 
+#: src/iac_code/tools/cloud/aliyun/aliyun_api_doc.py
+#, python-brace-format
+msgid ""
+"{product}/{version} {action} | {style} {method} {path} | "
+"required={required} | optional={optional} | executable={executable}"
+msgstr ""
+"{product}/{version} {action} | {style} {method} {path} | "
+"obligatorios={required} | opcionales={optional} | ejecutable={executable}"
+
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 msgid "DocSearch"
 msgstr "DocSearch"
@@ -5598,6 +5665,11 @@ msgstr "No se encontraron documentos"
 #, python-brace-format
 msgid "No documents found for keywords: {keywords}"
 msgstr "No se encontraron documentos para las palabras clave: {keywords}"
+
+#: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
+#, python-brace-format
+msgid "Link: {url}"
+msgstr "Enlace: {url}"
 
 #: src/iac_code/tools/cloud/aliyun/aliyun_doc_search.py
 #, python-brace-format

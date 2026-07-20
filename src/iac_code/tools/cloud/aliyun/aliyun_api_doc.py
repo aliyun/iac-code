@@ -112,7 +112,7 @@ class AliyunApiDoc(Tool):
         required = document.get("required_parameters")
         optional = document.get("optional_parameters")
         executable = document.get("executable")
-        return (
+        return _(
             "{product}/{version} {action} | {style} {method} {path} | "
             "required={required} | optional={optional} | executable={executable}"
         ).format(

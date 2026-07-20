@@ -221,7 +221,9 @@ class TestToolExecutor:
         assert results[0].content == "written"
         assert results[1].content == "after"
 
-    async def test_error_no_block(self):
+    async def test_error_no_block(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
+
         class ErrorTool(FakeReadTool):
             async def execute(self, *, tool_input, context):
                 raise RuntimeError("boom")
@@ -236,10 +238,12 @@ class TestToolExecutor:
         ]
         results = await executor.execute_batch(calls, ToolContext())
         assert results[0].is_error is True
-        assert "boom" in results[0].content
+        assert results[0].content == "i18n:Tool 'error' failed: boom"
         assert results[1].content == "read result"
 
-    async def test_timeout(self):
+    async def test_timeout(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
+
         class SlowTool(FakeReadTool):
             async def execute(self, *, tool_input, context):
                 await asyncio.sleep(10)
@@ -252,7 +256,20 @@ class TestToolExecutor:
         calls = [ToolCallRequest(id="s1", name="slow", input={})]
         results = await executor.execute_batch(calls, ToolContext())
         assert results[0].is_error is True
-        assert "timed out" in results[0].content
+        assert results[0].content == "i18n:Tool 'slow' timed out after 0.1s"
+
+    async def test_unknown_tool_error_uses_gettext(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
+        registry = MagicMock()
+        registry.get.return_value = None
+        executor = ToolExecutor(registry=registry)
+
+        results = await executor.execute_batch(
+            [ToolCallRequest(id="missing", name="missing", input={})],
+            ToolContext(),
+        )
+
+        assert results == [ToolResult.error("i18n:Unknown tool: missing")]
 
     async def test_tool_specific_timeout_result_overrides_generic_message(self):
         class SafeTimeoutTool(FakeReadTool):
@@ -401,7 +418,8 @@ class TestToolExecutorValidation:
         assert results[0].is_error is False
         assert "got /tmp/f" in results[0].content
 
-    async def test_invalid_input_returns_error(self):
+    async def test_invalid_input_returns_error(self, monkeypatch):
+        monkeypatch.setattr("iac_code.tools.tool_executor._", lambda message: "i18n:" + message)
         tool = FakeStrictTool()
         registry = MagicMock()
         registry.get = lambda name: tool
@@ -409,6 +427,7 @@ class TestToolExecutorValidation:
         calls = [ToolCallRequest(id="v2", name="strict", input={})]
         results = await executor.execute_batch(calls, ToolContext())
         assert results[0].is_error is True
+        assert results[0].content.startswith("i18n:Invalid input for tool 'strict':")
         assert "path" in results[0].content
 
     async def test_invalid_input_does_not_execute(self):

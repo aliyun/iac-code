@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from iac_code.i18n import _
 from iac_code.services.telemetry import add_metric, log_event, start_span
 from iac_code.services.telemetry.config import should_capture_content_on_span
 from iac_code.services.telemetry.content_serializer import serialize_tool_arguments, serialize_tool_result
@@ -64,7 +65,7 @@ class ToolExecutor:
         """Validate input then execute. Returns error ToolResult on validation failure."""
         tool = self._registry.get(call.name)
         if not tool:
-            return ToolResult.error(f"Unknown tool: {call.name}")
+            return ToolResult.error(_("Unknown tool: {tool_name}").format(tool_name=call.name))
 
         # Input validation
         valid, error = tool.validate_input(call.input)
@@ -73,8 +74,10 @@ class ToolExecutor:
             if tool_error is not None:
                 return tool_error
             return ToolResult.error(
-                f"Invalid input for tool '{call.name}': {error}. "
-                f"Please provide all required parameters as defined in the tool schema."
+                _(
+                    "Invalid input for tool '{tool_name}': {error}. "
+                    "Please provide all required parameters as defined in the tool schema."
+                ).format(tool_name=call.name, error=error)
             )
 
         # Pass event_queue from call to context for tools that emit progress events.
@@ -143,7 +146,9 @@ class ToolExecutor:
             timeout_error = tool.timeout_error_result_with_context(call.input, timeout, context)
             if timeout_error is not None:
                 return timeout_error
-            return ToolResult.error(f"Tool '{call.name}' timed out after {timeout}s")
+            return ToolResult.error(
+                _("Tool '{tool_name}' timed out after {timeout}s").format(tool_name=call.name, timeout=timeout)
+            )
         except Exception as e:
             log_event(
                 Events.TOOL_USE_FAILED,
@@ -154,7 +159,7 @@ class ToolExecutor:
                 },
             )
             add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "error"})
-            return ToolResult.error(f"Tool '{call.name}' failed: {e}")
+            return ToolResult.error(_("Tool '{tool_name}' failed: {error}").format(tool_name=call.name, error=e))
 
     async def _execute_concurrent(
         self, calls: list[ToolCallRequest], context: ToolContext

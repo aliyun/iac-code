@@ -508,15 +508,16 @@ def test_schema_defaults_detail_to_summary_and_is_anonymous_read_only() -> None:
     assert tool.is_concurrency_safe({"product": "Ecs", "action": "DescribeInstances"}) is True
 
 
-def test_repl_result_is_compact_until_verbose_transcript_is_requested() -> None:
+def test_repl_result_is_compact_until_verbose_transcript_is_requested(monkeypatch) -> None:
     metadata, _, document = rpc_case()
     tool, _, _ = tool_for(metadata)
     document["components"] = {"schemas": {"Large": {"description": "x" * 2_000}}}
     output = compact(document)
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.aliyun_api_doc._", lambda message: "i18n:" + message)
 
     assert tool.render_verbose_result_in_transcript is True
     assert tool.render_tool_result_message(output) == (
-        "Ecs/2014-05-26 DescribeInstances | RPC POST / | required=1 | optional=1 | executable=true"
+        "i18n:Ecs/2014-05-26 DescribeInstances | RPC POST / | required=1 | optional=1 | executable=true"
     )
     assert tool.render_tool_result_message(output, verbose=True) == output
 
