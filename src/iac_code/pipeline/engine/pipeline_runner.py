@@ -67,6 +67,16 @@ _CURRENT_STEP_PRECOMPLETED_TOOLS_KEY = "current_step_precompleted_tools"
 _PENDING_ASK_USER_QUESTION_RESUME_KEY = "pending_ask_user_question_resume"
 _PENDING_INPUT_KIND_KEY = "pending_input_kind"
 _PIPELINE_PAUSE_CONFIRMATION_KIND = "pipeline_pause_confirmation"
+_CANDIDATE_SELECTION_PAYLOAD_FIELDS = frozenset(
+    {
+        "selected_candidate_name",
+        "selected_candidate_index",
+        "selected_evaluated_candidate_index",
+        "parameter_overrides",
+        "deployment_parameters",
+        "parameters",
+    }
+)
 _REAL_RESTORE_FAILURE_REASONS = {
     "corrupt_meta",
     "invalid_meta",
@@ -2314,6 +2324,24 @@ class PipelineRunner:
             return matches[0]
         return None
 
+    @staticmethod
+    def _is_explicit_candidate_selection_payload(selected_value: str) -> bool:
+        stripped = selected_value.strip()
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return stripped.startswith("{") and any(field in stripped for field in _CANDIDATE_SELECTION_PAYLOAD_FIELDS)
+        return isinstance(decoded, dict) and bool(_CANDIDATE_SELECTION_PAYLOAD_FIELDS.intersection(decoded))
+
+    def _is_invalid_candidate_selection_payload(self, selected_value: str, options: list[Any]) -> bool:
+        if self._infer_selected_index(selected_value, options) is not None:
+            return False
+        structured = parse_selected_candidate(selected_value)
+        has_explicit_index = structured is not None and (
+            structured.selected_candidate_index is not None or structured.selected_evaluated_candidate_index is not None
+        )
+        return has_explicit_index or self._is_explicit_candidate_selection_payload(selected_value)
+
     def _next_step_attempt(self, step_id: str) -> int:
         attempt = self._step_attempts.get(step_id, 0) + 1
         self._step_attempts[step_id] = attempt
@@ -2431,9 +2459,9 @@ class PipelineRunner:
         selected_index: int | None = None
         if step.ui_mode == "candidate_selection":
             selected_index = self._infer_selected_index(user_text, waiting_options)
-            if selected_index is None:
+            if selected_index is None and self._is_invalid_candidate_selection_payload(user_text, waiting_options):
                 logger.debug(
-                    "Pipeline candidate selection did not match a unique option: step_id=%s option_count=%d",
+                    "Pipeline candidate selection payload is invalid: step_id=%s option_count=%d",
                     step.step_id,
                     len(waiting_options),
                 )

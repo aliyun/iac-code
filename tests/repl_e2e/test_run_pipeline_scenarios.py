@@ -510,6 +510,16 @@ def test_first_stack_created_patterns_do_not_match_create_stack_start() -> None:
     )
 
 
+def test_create_stack_started_patterns_match_tool_render_not_prompt_text() -> None:
+    runner = _load_runner()
+
+    assert any(re.search(pattern, "● ROS Deploy") for pattern in runner.CREATE_STACK_STARTED_PATTERNS)
+    assert not any(
+        re.search(pattern, "第一次 CreateStack 的 params.StackName 必须精确等于 test")
+        for pattern in runner.CREATE_STACK_STARTED_PATTERNS
+    )
+
+
 def test_candidate_selection_patterns_do_not_match_schema_explanation() -> None:
     runner = _load_runner()
     schema_error = (
@@ -543,7 +553,11 @@ def test_candidate_selection_waits_for_input_ready_sequence() -> None:
 
     runner._expect_candidate_selection(FakePty(), args, description="candidate selection visible")
 
-    assert descriptions == ["candidate selection visible", "candidate selection controls ready"]
+    assert descriptions == [
+        "candidate selection visible",
+        "candidate selection controls ready",
+        "candidate selection input ready",
+    ]
 
 
 def test_expect_any_auto_approves_permission_prompt(tmp_path: Path) -> None:
@@ -706,6 +720,110 @@ def test_find_available_vswitch_cidrs_returns_distinct_subnets() -> None:
     cidrs = runner._find_available_vswitch_cidrs("192.168.0.0/16", ["192.168.255.0/24"], count=2)
 
     assert cidrs == ["192.168.254.0/24", "192.168.253.0/24"]
+
+
+def test_call_aliyun_api_uses_runtime_services_and_unwraps_body(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    from iac_code import config
+    from iac_code.services import cloud_credentials
+    from iac_code.tools import base
+    from iac_code.tools.cloud.aliyun import aliyun_api, runtime
+
+    credential = type("Credential", (), {"mode": "AK", "region_id": "cn-test"})()
+
+    class FakeCloudCredentials:
+        def get_provider(self, provider: str):
+            assert provider == "aliyun"
+            return credential
+
+    class FakeServices:
+        credential_provider = None
+        default_region_provider = None
+
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    services = FakeServices()
+
+    class FakeAliyunApi:
+        name = "aliyun_api"
+
+        def __init__(self, *, services: FakeServices) -> None:
+            self.services = services
+
+        def prepare_invocation_input(self, tool_input):
+            assert self.services.default_region_provider() == "cn-test"
+            return {**tool_input, "region_id": "cn-test"}
+
+        async def check_permissions(self, tool_input, context):
+            assert tool_input["region_id"] == "cn-test"
+            assert context.invocation_binding.tool_name == self.name
+            return type(
+                "Permission",
+                (),
+                {
+                    "behavior": "ask",
+                    "message": "",
+                    "snapshot_id": "snapshot-test",
+                    "security_digest": "digest-test",
+                    "execution_class": "concurrent",
+                },
+            )()
+
+        async def execute(self, *, tool_input, context):
+            assert tool_input == {
+                "product": "vpc",
+                "action": "DescribeVpcs",
+                "params": {"PageSize": 50},
+                "region_id": "cn-test",
+            }
+            assert isinstance(context, base.ToolContext)
+            assert self.services.credential_provider() is credential
+            assert context.snapshot_id == "snapshot-test"
+            assert context.security_digest == "digest-test"
+            assert context.execution_class == "concurrent"
+            return base.ToolResult(
+                content=runner.json.dumps(
+                    {"status": 200, "headers": {}, "body": {"Vpcs": {"Vpc": [{"VpcId": "vpc-test"}]}}}
+                )
+            )
+
+    monkeypatch.setattr(config, "get_config_dir", lambda: tmp_path)
+    monkeypatch.setattr(cloud_credentials, "CloudCredentials", FakeCloudCredentials)
+    monkeypatch.setattr(runtime, "create_aliyun_runtime_services", lambda **_: services)
+    monkeypatch.setattr(aliyun_api, "AliyunApi", FakeAliyunApi)
+
+    result = runner._call_aliyun_api("vpc", "DescribeVpcs", {"PageSize": 50})
+
+    assert result == {"Vpcs": {"Vpc": [{"VpcId": "vpc-test"}]}}
+    assert services.closed is True
+
+
+def test_cleanup_ledger_path_falls_back_from_stale_transcript_session(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    from iac_code.services.session_storage import SessionStorage
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    storage = SessionStorage()
+    expected = Path(storage.session_dir(str(cwd), "22222222-2222-2222-2222-222222222222")) / "pipeline" / "cleanup.yaml"
+    expected.parent.mkdir(parents=True)
+    expected.write_text("schema_version: 1\n", encoding="utf-8")
+
+    pty = type(
+        "Pty",
+        (),
+        {
+            "cwd": cwd,
+            "transcript": "Session: 11111111-1111-1111-1111-111111111111",
+        },
+    )()
+
+    assert runner._cleanup_ledger_path(pty) == expected
 
 
 def test_cleanup_rollback_prompt_forces_second_stack_name(tmp_path: Path) -> None:
@@ -1560,6 +1678,33 @@ def test_acceptance_records_vswitch_stack_business_evidence_without_vswitch_id()
     assert checks["acceptance: VSwitch evidence found in PTY transcript"] is True
 
 
+def test_acceptance_records_standard_ros_deploy_success_render_as_business_evidence() -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+
+    class FakePty:
+        transcript = (
+            "● Confirm and select (4/5)\n"
+            "VSwitch（交换机） 单可用区\n"
+            "● ROS Deploy\n"
+            "  ⎿  iac-e2e-demo creation succeeded (0d9a9bee)\n"
+            "✔ Pipeline completed\n"
+        )
+        events: list[dict[str, object]] = []
+
+    checks: dict[str, bool] = {}
+
+    runner._apply_acceptance_checks("selection-invalid-then-valid", args, FakePty(), checks)
+
+    assert checks["acceptance: VSwitch evidence found in PTY transcript"] is True
+
+
+def test_acceptance_rejects_unqualified_creation_succeeded_text() -> None:
+    runner = _load_runner()
+
+    assert runner._has_vswitch_business_evidence("VSwitch creation succeeded") is False
+
+
 def test_acceptance_rejects_completed_vswitch_scenario_without_resource_evidence() -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud"])
@@ -1715,6 +1860,42 @@ def test_acceptance_allows_post_rollback_change_reason_mentions_old_vswitch_targ
     checks: dict[str, bool] = {}
 
     runner._apply_acceptance_checks("rollback-step4-selection", args, FakePty(), checks)
+
+    assert checks["acceptance: post-rollback target is security group"] is True
+    assert checks["acceptance: post-rollback target is not VSwitch"] is True
+
+
+def test_acceptance_ignores_delayed_pre_rollback_candidate_render() -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    transcript = (
+        "● Confirm and select (4/5)\n"
+        + args.rollback_prompt
+        + "\ngraph TD\n  subgraph layer_VSwitch [VSwitch]\n  end\n"
+        + "在用户已有的 VPC 中新建一个 VSwitch。\n"
+        + "╭─ Interrupt handling ─╮\n"
+        + "● Intent parsing (1/5)\n"
+        + "Step Intent parsing completed. Conclusion submitted.\n"
+        + "● Architecture planning (2/5)\n"
+        + "在已有 VPC 中创建一个安全组，不创建新的交换机。\n"
+    )
+
+    class FakePty:
+        pass
+
+    pty = FakePty()
+    pty.transcript = transcript
+    pty.events = [
+        {
+            "type": "sendline",
+            "text": args.rollback_prompt,
+            "transcript_offset": transcript.find(args.rollback_prompt),
+        }
+    ]
+
+    checks: dict[str, bool] = {}
+
+    runner._apply_acceptance_checks("rollback-step4-selection", args, pty, checks)
 
     assert checks["acceptance: post-rollback target is security group"] is True
     assert checks["acceptance: post-rollback target is not VSwitch"] is True
@@ -1902,6 +2083,7 @@ def test_image_initial_pastes_static_prompt_image(monkeypatch, tmp_path: Path) -
         ("sendline", runner._stack_name_constraint(tmp_path, "image-initial")),
         ("expect", "pipeline started"),
         ("expect", "candidate selection visible"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after image initial"),
         ("sendline", "/exit"),
@@ -1942,6 +2124,7 @@ def test_image_ask_waiting_resume_pastes_static_answer_image(monkeypatch, tmp_pa
         ("paste-image-fixture", "ask-first-answer"),
         ("sendline", runner._stack_name_constraint(tmp_path, "image-ask-waiting-resume")),
         ("expect", "pipeline continued after ask image resume"),
+        ("expect", "candidate selection input ready after ask"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after ask image resume"),
         ("sendline", "/exit"),
@@ -1973,9 +2156,11 @@ def test_image_selection_waiting_resume_starts_with_image_and_recovers_selection
         ("paste-image-fixture", "initial"),
         ("sendline", runner._stack_name_constraint(tmp_path, "image-selection-waiting-resume")),
         ("expect", "candidate selection visible before image resume kill"),
+        ("expect", "candidate selection input ready"),
         ("terminate", "True"),
         ("spawn", "--continue"),
         ("expect", "candidate selection replayed after image resume"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after image selection resume"),
         ("sendline", "/exit"),
@@ -2011,6 +2196,7 @@ def test_image_normal_handoff_pastes_static_followup_image(monkeypatch, tmp_path
         ("sendline", stack_owned_initial),
         ("expect", "pipeline started"),
         ("expect", "candidate selection visible"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline fully completed"),
         ("expect", "normal prompt input ready"),
@@ -2258,6 +2444,7 @@ def test_evaluate_resume_runs_expected_terminal_flow(monkeypatch, tmp_path: Path
         ("expect", "evaluate resume prompt input ready"),
         ("sendline", args.evaluate_resume_continue_prompt),
         ("expect", "candidate selection visible after resume continue"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after evaluate resume"),
         ("sendline", "/exit"),
@@ -2297,6 +2484,7 @@ def test_ask_waiting_resume_runs_expected_terminal_flow(monkeypatch, tmp_path: P
         ("expect", "ask answer input ready after resume"),
         ("sendline", stack_owned_answer),
         ("expect", "pipeline continued after ask resume"),
+        ("expect", "candidate selection input ready after ask"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after ask resume"),
         ("sendline", "/exit"),
@@ -2328,6 +2516,7 @@ def test_selection_invalid_then_valid_runs_expected_terminal_flow(monkeypatch, t
         ("expect", "prompt input ready"),
         ("sendline", stack_owned_initial),
         ("expect", "candidate selection visible"),
+        ("expect", "candidate selection input ready"),
         ("select-invalid-candidate", "9"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed"),
@@ -2383,12 +2572,14 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
         ("expect", "initial candidate selection visible"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
         ("expect", "post-rollback candidate selection visible"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
         ("sendline", args.normal_followup_prompt),
@@ -2440,7 +2631,7 @@ def test_rollback_step5_cleanup_recovery_runs_expected_terminal_flow(monkeypatch
         (kind, value)
         for kind, value in actions
         if kind in {"expect", "spawn", "terminate", "send-esc", "sendline", "select-default-candidate"}
-        or (kind == "expect_optional" and value == "cleanup completed")
+        or (kind == "expect_optional" and value in {"cleanup resume summary", "cleanup completed"})
     ]
     assert ordered_actions == [
         ("spawn", ""),
@@ -2448,21 +2639,47 @@ def test_rollback_step5_cleanup_recovery_runs_expected_terminal_flow(monkeypatch
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
         ("expect", "initial candidate selection visible"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
         ("expect", "post-rollback candidate selection visible"),
+        ("expect", "candidate selection input ready"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
         ("sendline", args.normal_followup_prompt),
         ("expect", "cleanup started before kill"),
         ("terminate", "True"),
         ("spawn", "--continue"),
-        ("expect", "cleanup resume summary"),
+        ("expect_optional", "cleanup resume summary"),
         ("expect_optional", "cleanup completed"),
         ("expect", "post-cleanup prompt input ready"),
         ("sendline", "/exit"),
         ("terminate", "False"),
+    ]
+
+
+def test_cleanup_recovery_uses_ledger_when_resume_summary_is_not_visible(monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    calls: list[tuple[object, ...]] = []
+
+    class FakePty:
+        def expect_optional(self, patterns, *, description, timeout):
+            calls.append((patterns, description, timeout))
+            return False
+
+    monkeypatch.setattr(
+        runner,
+        "_wait_for_cleanup_resource_status",
+        lambda pty, stack_id, statuses, *, timeout: calls.append((pty, stack_id, statuses, timeout)),
+    )
+    pty = FakePty()
+
+    assert runner._wait_for_cleanup_resume_summary_or_completion(pty, args, "first-stack-id") is False
+    assert calls == [
+        (runner.CLEANUP_RESUME_SUMMARY_PATTERNS, "cleanup resume summary", 5.0),
+        (pty, "first-stack-id", {"completed"}, args.stream_timeout),
     ]

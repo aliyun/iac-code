@@ -86,7 +86,7 @@ POST_ROLLBACK_PROGRESS_PATTERNS = (
     r"Step Intent parsing completed",
 )
 DEPLOYING_STEP_PATTERNS = (r"●\s*Deploying\s*\(5/5\)", r"CreateStack", r"开始部署")
-CREATE_STACK_STARTED_PATTERNS = (r"ROS Stack\(CreateStack", r"CreateStack")
+CREATE_STACK_STARTED_PATTERNS = (r"●\s*ROS Deploy",)
 FIRST_STACK_CREATED_PATTERNS = (r"CREATE_COMPLETE", r"Stack ID", r"StackId", r"stack_id")
 CLEANUP_STARTED_PATTERNS = (
     r"检测到\s*\d+\s*个回滚残留资源",
@@ -791,7 +791,9 @@ def _has_vswitch_business_evidence(transcript: str) -> bool:
     if _has_any_pattern(transcript, VSWITCH_EVIDENCE_PATTERNS):
         return True
     has_vswitch_text = bool(re.search(r"(?i)VSwitch|交换机", transcript))
-    has_deploy_result = bool(re.search(r"Stack ID|Stack 名称|CREATE_COMPLETE|部署成功", transcript))
+    has_deploy_result = bool(
+        re.search(r"Stack ID|Stack 名称|CREATE_COMPLETE|部署成功|creation succeeded\s*\([0-9a-f]{8}\)", transcript)
+    )
     return has_vswitch_text and has_deploy_result
 
 
@@ -844,6 +846,16 @@ def _suffix_after_sendline_text(
     if normalized_text and normalized_text in suffix:
         return suffix.split(normalized_text, 1)[1]
     return suffix
+
+
+def _suffix_after_rollback_progress(text: str) -> str:
+    normalized = _normalize_transcript(text)
+    starts = [
+        match.start()
+        for pattern in POST_ROLLBACK_PROGRESS_PATTERNS
+        if (match := re.search(pattern, normalized)) is not None
+    ]
+    return normalized[min(starts) :] if starts else normalized
 
 
 def _suffix_after_image_fixture(
@@ -967,17 +979,67 @@ def _cleanup_rollback_prompt(args: argparse.Namespace, run_dir: Path) -> str:
 
 
 async def _call_aliyun_api_async(product: str, action: str, params: dict[str, Any]) -> dict[str, Any]:
+    from iac_code.config import get_config_dir
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.services.providers.aliyun import AliyunCredentials, DEFAULT_REGION
     from iac_code.tools.base import ToolContext
     from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
+    from iac_code.tools.cloud.aliyun.contract_store import canonical_input_sha256
+    from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
+    from iac_code.types.permissions import InvocationBinding, ToolPermissionContext
 
-    result = await AliyunApi().execute(
-        tool_input={"product": product, "action": action, "params": params},
-        context=ToolContext(),
-    )
+    services = create_aliyun_runtime_services(cache_dir=get_config_dir() / "openmeta-cache")
+
+    def credential_provider() -> Any:
+        credential = CloudCredentials().get_provider("aliyun")
+        if credential is not None and credential.mode == "OAuth":
+            credential = AliyunCredentials.refresh_oauth_if_needed(credential)
+        return credential
+
+    def default_region_provider() -> str:
+        credential = CloudCredentials().get_provider("aliyun")
+        return credential.region_id if credential is not None and credential.region_id else DEFAULT_REGION
+
+    services.credential_provider = credential_provider
+    services.default_region_provider = default_region_provider
+    try:
+        tool = AliyunApi(services=services)
+        tool_input = tool.prepare_invocation_input({"product": product, "action": action, "params": params})
+        tool_use_id = f"repl-e2e-{uuid.uuid4()}"
+        binding = InvocationBinding(
+            runtime_nonce="repl-e2e",
+            session_id="repl-e2e",
+            tool_use_id=tool_use_id,
+            tool_name=tool.name,
+            canonical_input_sha256=canonical_input_sha256(tool_input),
+        )
+        permission = await tool.check_permissions(
+            tool_input,
+            ToolPermissionContext(invocation_binding=binding),
+        )
+        if permission.behavior not in {"allow", "ask"}:
+            raise RuntimeError(permission.message or f"Permission denied for {product}/{action}.")
+        if permission.snapshot_id is None or permission.security_digest is None:
+            raise RuntimeError(f"Permission snapshot missing for {product}/{action}.")
+        result = await tool.execute(
+            tool_input=tool_input,
+            context=ToolContext(
+                tool_use_id=tool_use_id,
+                invocation_binding=binding,
+                snapshot_id=permission.snapshot_id,
+                security_digest=permission.security_digest,
+                execution_class=permission.execution_class,
+            ),
+        )
+    finally:
+        await services.aclose()
     if result.is_error:
         raise RuntimeError(_compact_text(result.content, max_chars=1000))
-    body = json.loads(result.content)
-    return body if isinstance(body, dict) else {}
+    payload = json.loads(result.content)
+    if not isinstance(payload, dict):
+        return {}
+    body = payload.get("body")
+    return body if isinstance(body, dict) else payload
 
 
 def _call_aliyun_api(product: str, action: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -1097,8 +1159,11 @@ def _cleanup_ledger_path(pty: Any) -> Path | None:
         from iac_code.services.session_storage import SessionStorage
 
         storage = SessionStorage()
+        session_path: Path | None = None
         if session_id:
-            return Path(storage.session_dir(cwd, session_id)) / "pipeline" / "cleanup.yaml"
+            session_path = Path(storage.session_dir(cwd, session_id)) / "pipeline" / "cleanup.yaml"
+            if session_path.exists():
+                return session_path
 
         project_dir_for = getattr(storage, "_project_dir_for", None)
         if callable(project_dir_for):
@@ -1110,9 +1175,9 @@ def _cleanup_ledger_path(pty: Any) -> Path | None:
             )
             if candidates:
                 return candidates[0]
+        return session_path
     except Exception:
         return None
-    return None
 
 
 def _cleanup_ledger_data(pty: Any) -> dict[str, Any]:
@@ -1839,6 +1904,7 @@ def _apply_acceptance_checks(
         )
     elif scenario == "image-interrupt":
         after_rollback = _suffix_after_image_fixture(raw_transcript, events, "rollback-interrupt")
+        effective_after_rollback = _suffix_after_rollback_progress(after_rollback)
         _add_acceptance_check(
             checks,
             "rollback image fixture was pasted",
@@ -1857,12 +1923,12 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(after_rollback),
+            _has_security_group_target_evidence(effective_after_rollback),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(after_rollback),
+            not _has_positive_vswitch_target_evidence(effective_after_rollback),
         )
     elif scenario == "ask-waiting":
         after_answer = _normalize_transcript(
@@ -1899,6 +1965,7 @@ def _apply_acceptance_checks(
         )
     elif scenario == "rollback-step3":
         after_rollback = _suffix_after_sendline_text(raw_transcript, events, args.rollback_prompt)
+        effective_after_rollback = _suffix_after_rollback_progress(after_rollback)
         _add_acceptance_check(
             checks,
             "rollback reached evaluate_candidates step",
@@ -1912,15 +1979,16 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(after_rollback),
+            _has_security_group_target_evidence(effective_after_rollback),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(after_rollback),
+            not _has_positive_vswitch_target_evidence(effective_after_rollback),
         )
     elif scenario == "rollback-step2":
         after_rollback = _suffix_after_sendline_text(raw_transcript, events, args.rollback_prompt)
+        effective_after_rollback = _suffix_after_rollback_progress(after_rollback)
         _add_acceptance_check(
             checks,
             "rollback reached architecture_planning step",
@@ -1934,15 +2002,16 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(after_rollback),
+            _has_security_group_target_evidence(effective_after_rollback),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(after_rollback),
+            not _has_positive_vswitch_target_evidence(effective_after_rollback),
         )
     elif scenario == "rollback-step4-selection":
         after_rollback = _suffix_after_sendline_text(raw_transcript, events, args.rollback_prompt)
+        effective_after_rollback = _suffix_after_rollback_progress(after_rollback)
         _add_acceptance_check(
             checks,
             "rollback reached candidate selection step",
@@ -1956,12 +2025,12 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(after_rollback),
+            _has_security_group_target_evidence(effective_after_rollback),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(after_rollback),
+            not _has_positive_vswitch_target_evidence(effective_after_rollback),
         )
     elif scenario == "evaluate-resume":
         after_continue = _normalize_transcript(
@@ -2071,6 +2140,7 @@ def _expect_candidate_selection(pty: ReplPty, args: argparse.Namespace, *, descr
         description="candidate selection controls ready",
         timeout=args.candidate_selection_ready_timeout,
     )
+    _expect_raw_input_ready(pty, args, description="candidate selection input ready")
 
 
 def _expect_raw_input_ready(pty: ReplPty, args: argparse.Namespace, *, description: str) -> None:
@@ -2091,6 +2161,21 @@ def _wait_for_cleanup_completed_and_ready(pty: ReplPty, args: argparse.Namespace
     _expect_raw_input_ready(pty, args, description="post-cleanup prompt input ready")
 
 
+def _wait_for_cleanup_resume_summary_or_completion(
+    pty: ReplPty,
+    args: argparse.Namespace,
+    first_stack_id: str,
+) -> bool:
+    summary_visible = pty.expect_optional(
+        CLEANUP_RESUME_SUMMARY_PATTERNS,
+        description="cleanup resume summary",
+        timeout=min(args.timeout, 5.0),
+    )
+    if not summary_visible:
+        _wait_for_cleanup_resource_status(pty, first_stack_id, {"completed"}, timeout=args.stream_timeout)
+    return summary_visible
+
+
 def _finish_vswitch_pipeline_after_possible_selection(
     pty: ReplPty,
     args: argparse.Namespace,
@@ -2107,6 +2192,7 @@ def _finish_vswitch_pipeline_after_possible_selection(
             description="candidate selection controls ready after ask",
             timeout=args.candidate_selection_ready_timeout,
         )
+        _expect_raw_input_ready(pty, args, description="candidate selection input ready after ask")
         _select_default_candidate(pty, args)
         checks[selection_check] = True
         pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description=completion_description, timeout=args.stream_timeout)
@@ -2517,7 +2603,6 @@ def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int
         pty.sendline(args.initial_prompt)
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection reached"] = True
-        _expect_raw_input_ready(pty, args, description="candidate selection input ready")
         checks["candidate selection input ready"] = True
         pty.send("\x1b", label="send-esc")
         checks["esc sent"] = True
@@ -2566,14 +2651,15 @@ def _run_rollback_step5_cleanup(
             description="first stack create started",
             timeout=args.stream_timeout,
         )
-        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
-        pty.cleanup_first_stack_id = first_stack_id
-        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
-
         pty.send("\x1b", label="send-esc")
         checks["esc sent during deploying"] = True
         _expect_raw_input_ready(pty, args, description="deploying interrupt input ready")
         checks["deploying interrupt input ready"] = True
+
+        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
+        pty.cleanup_first_stack_id = first_stack_id
+        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
+
         pty.sendline(_cleanup_rollback_prompt(args, pty.run_dir))
         checks["rollback prompt sent"] = True
         _expect_candidate_selection(pty, args, description="post-rollback candidate selection visible")
@@ -2620,14 +2706,10 @@ def _run_rollback_step5_cleanup(
             pty.terminate(force=True)
             checks["cleanup process killed"] = True
             pty.spawn(extra_args=["--continue"])
-            pty.expect_any(
-                CLEANUP_RESUME_SUMMARY_PATTERNS,
-                description="cleanup resume summary",
-                timeout=args.stream_timeout,
-            )
+            resume_summary_visible = _wait_for_cleanup_resume_summary_or_completion(pty, args, first_stack_id)
             if _cleanup_resource_completed(_cleanup_resource_for_stack(pty, first_stack_id)):
                 checks["cleanup already completed after restart"] = True
-            else:
+            elif resume_summary_visible:
                 _expect_raw_input_ready(pty, args, description="cleanup resume prompt input ready")
                 pty.sendline(args.cleanup_continue_prompt)
                 checks["cleanup continue prompt sent after restart"] = True

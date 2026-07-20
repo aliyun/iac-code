@@ -8,10 +8,10 @@
   },
   "selection": {
     "filename": "selection.png",
-    "text": "{\"selected_candidate_index\": 0}",
+    "text": "你随便选一个方案。",
     "mediaType": "image/png",
-    "byteSize": 8177,
-    "sha256": "40c73eca9e43c2bf0049d60041a07efd69392b1b1ad20ca56139bf6372022dc2"
+    "byteSize": 9907,
+    "sha256": "3aa92a48eed5c37115f18dc89a058ebbb06ac5eeea59f2870d4d58b355ac924b"
   },
   "normal-followup": {
     "filename": "normal-followup.png",

@@ -17,6 +17,7 @@ class PipelineTransportDeliveryClosedError(RuntimeError):
 class PipelineTransportDeliveryTracker:
     active: bool = True
     pending: dict[int, _PendingDelivery] = field(default_factory=dict)
+    routes: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -65,9 +66,12 @@ def bind_pipeline_transport_delivery_route(
     key = (task_id, context_id)
     trackers = _ROUTED_DELIVERY_TRACKERS.setdefault(key, [])
     trackers.append(tracker)
+    tracker.routes.append(key)
     try:
         yield
     finally:
+        with suppress(ValueError):
+            tracker.routes.remove(key)
         current = _ROUTED_DELIVERY_TRACKERS.get(key)
         if current is not None:
             with suppress(ValueError):
@@ -90,6 +94,12 @@ def close_pipeline_transport_delivery_tracker(tracker: PipelineTransportDelivery
         return
     tracker.active = False
     for event_id, pending in list(tracker.pending.items()):
+        replacement = _replacement_pipeline_transport_delivery_tracker(tracker)
+        if replacement is not None:
+            tracker.pending.pop(event_id, None)
+            pending.tracker = replacement
+            replacement.pending[event_id] = pending
+            continue
         if _PENDING_DELIVERIES.get(event_id) is pending:
             _PENDING_DELIVERIES.pop(event_id, None)
         _notify_delivery_stage(pending, "closed")
@@ -99,6 +109,20 @@ def close_pipeline_transport_delivery_tracker(tracker: PipelineTransportDelivery
                 PipelineTransportDeliveryClosedError("A2A streaming transport closed before frame delivery")
             )
     tracker.pending.clear()
+
+
+def _replacement_pipeline_transport_delivery_tracker(
+    tracker: PipelineTransportDeliveryTracker,
+) -> PipelineTransportDeliveryTracker | None:
+    for key in reversed(tracker.routes):
+        candidates = _ROUTED_DELIVERY_TRACKERS.get(key, ())
+        replacement = next(
+            (candidate for candidate in reversed(candidates) if candidate is not tracker and candidate.active),
+            None,
+        )
+        if replacement is not None:
+            return replacement
+    return None
 
 
 @contextmanager

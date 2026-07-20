@@ -783,6 +783,53 @@ async def test_inherited_closed_tracker_uses_reconnected_task_transport(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_pending_delivery_moves_to_another_active_task_transport(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    surviving_tracker = create_pipeline_transport_delivery_tracker()
+    closing_tracker = create_pipeline_transport_delivery_tracker()
+
+    with bind_pipeline_transport_delivery_route(
+        surviving_tracker,
+        task_id="task-1",
+        context_id="ctx-1",
+    ):
+        with bind_pipeline_transport_delivery_route(
+            closing_tracker,
+            task_id="task-1",
+            context_id="ctx-1",
+        ):
+            with bind_pipeline_transport_delivery_tracker(closing_tracker), pipeline_transport_delivery_required():
+                publication = asyncio.create_task(publisher.publish(TextDeltaEvent(text="during-reconnect")))
+            while not queue.events:
+                await asyncio.sleep(0)
+
+            close_pipeline_transport_delivery_tracker(closing_tracker)
+
+            assert publication.done() is False
+            acknowledge_pipeline_transport_delivery(queue.events[0])
+            assert await publication == "during-reconnect"
+
+    close_pipeline_transport_delivery_tracker(surviving_tracker)
+
+
+@pytest.mark.asyncio
+async def test_pending_delivery_fails_when_its_only_task_transport_closes(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    tracker = create_pipeline_transport_delivery_tracker()
+
+    with bind_pipeline_transport_delivery_route(tracker, task_id="task-1", context_id="ctx-1"):
+        with bind_pipeline_transport_delivery_tracker(tracker), pipeline_transport_delivery_required():
+            publication = asyncio.create_task(publisher.publish(TextDeltaEvent(text="disconnect")))
+        while not queue.events:
+            await asyncio.sleep(0)
+
+        close_pipeline_transport_delivery_tracker(tracker)
+
+        with pytest.raises(PipelineTransportDeliveryClosedError):
+            await publication
+
+
+@pytest.mark.asyncio
 async def test_publish_direct_auto_approve_denies_untrusted_aliyun_write(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path)
     future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
