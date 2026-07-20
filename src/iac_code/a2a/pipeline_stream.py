@@ -36,6 +36,7 @@ from iac_code.a2a.pipeline_transport_delivery import (
     pipeline_transport_delivery_is_required,
     pipeline_transport_delivery_tracking_enabled,
     register_pipeline_transport_delivery,
+    routed_pipeline_transport_delivery_tracker,
 )
 from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_COMPLETED,
@@ -1085,7 +1086,15 @@ class PipelineA2AEventPublisher:
             return
 
         stage_observer = self.flow_monitor.transport_stage_changed if self.flow_monitor is not None else None
-        completion = register_pipeline_transport_delivery(event, stage_observer=stage_observer)
+        fallback_tracker = routed_pipeline_transport_delivery_tracker(
+            task_id=self.delivery_task_id or self.translator.context.task_id,
+            context_id=self.delivery_context_id or self.translator.context.context_id,
+        )
+        completion = register_pipeline_transport_delivery(
+            event,
+            fallback_tracker=fallback_tracker,
+            stage_observer=stage_observer,
+        )
         try:
             if completion.done():
                 await completion

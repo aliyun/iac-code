@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
-from contextlib import AsyncExitStack, suppress
+from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, cast
@@ -65,6 +65,7 @@ from iac_code.a2a.pipeline_executor import (
 )
 from iac_code.a2a.pipeline_transport_delivery import (
     acknowledge_pipeline_transport_delivery,
+    bind_pipeline_transport_delivery_route,
     bind_pipeline_transport_delivery_tracker,
     close_pipeline_transport_delivery_tracker,
     create_pipeline_transport_delivery_tracker,
@@ -456,7 +457,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 finally:
                     await active_stream.aclose()
                 return
-        tracked_stream = _iterate_with_pipeline_transport_tracking(super().on_message_send_stream(params, context))
+        tracked_stream = _iterate_with_pipeline_transport_tracking(
+            super().on_message_send_stream(params, context),
+            task_id=getattr(params.message, "task_id", None) or None,
+            context_id=getattr(params.message, "context_id", None) or None,
+        )
         try:
             async for event in tracked_stream:
                 mark_pipeline_transport_delivery_dequeued(event)
@@ -488,41 +493,46 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     await tapped_queue._put_internal((_ACTIVE_MESSAGE_STREAM_COMPLETED, None))
 
         delivery_tracker = create_pipeline_transport_delivery_tracker()
-        with bind_pipeline_transport_delivery_tracker(delivery_tracker):
-            producer_task = asyncio.create_task(run_active_message())
+        with bind_pipeline_transport_delivery_route(
+            delivery_tracker,
+            task_id=task.id,
+            context_id=getattr(task, "context_id", None) or params.message.context_id,
+        ):
+            with bind_pipeline_transport_delivery_tracker(delivery_tracker):
+                producer_task = asyncio.create_task(run_active_message())
 
-        try:
-            while True:
-                try:
-                    dequeued = await tapped_queue.dequeue_event()
-                except QueueShutDown:
-                    break
-                event, _updated_task = cast(Any, dequeued)
-                if event is _ACTIVE_MESSAGE_STREAM_COMPLETED:
-                    tapped_queue.task_done()
-                    break
-                if isinstance(event, BaseException):
-                    raise event
-                try:
-                    mark_pipeline_transport_delivery_dequeued(event)
-                    if isinstance(event, Task):
-                        self._validate_task_id_match(task.id, event.id)
-                        yield apply_history_length(event, params.configuration)
-                    else:
-                        yield event
-                finally:
-                    tapped_queue.task_done()
-                acknowledge_pipeline_transport_delivery(event)
-        except (asyncio.CancelledError, GeneratorExit):
-            producer_task.cancel()
-            raise
-        finally:
-            close_pipeline_transport_delivery_tracker(delivery_tracker)
-            await tapped_queue.close(immediate=True)
-            async with active_task._lock:
-                active_task._reference_count -= 1
-            await active_task._maybe_cleanup()
-            await self._cleanup_active_message_producer(producer_task, task.id)
+            try:
+                while True:
+                    try:
+                        dequeued = await tapped_queue.dequeue_event()
+                    except QueueShutDown:
+                        break
+                    event, _updated_task = cast(Any, dequeued)
+                    if event is _ACTIVE_MESSAGE_STREAM_COMPLETED:
+                        tapped_queue.task_done()
+                        break
+                    if isinstance(event, BaseException):
+                        raise event
+                    try:
+                        mark_pipeline_transport_delivery_dequeued(event)
+                        if isinstance(event, Task):
+                            self._validate_task_id_match(task.id, event.id)
+                            yield apply_history_length(event, params.configuration)
+                        else:
+                            yield event
+                    finally:
+                        tapped_queue.task_done()
+                    acknowledge_pipeline_transport_delivery(event)
+            except (asyncio.CancelledError, GeneratorExit):
+                producer_task.cancel()
+                raise
+            finally:
+                close_pipeline_transport_delivery_tracker(delivery_tracker)
+                await tapped_queue.close(immediate=True)
+                async with active_task._lock:
+                    active_task._reference_count -= 1
+                await active_task._maybe_cleanup()
+                await self._cleanup_active_message_producer(producer_task, task.id)
 
     async def _hydrate_recoverable_pipeline_task_id(self, params: SendMessageRequest) -> None:
         if get_run_mode() is not RunMode.PIPELINE or not isinstance(self.task_store, A2ATaskStore):
@@ -777,22 +787,33 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             raise ExtensionSupportRequiredError(f"Required A2A extensions were not requested: {', '.join(missing)}")
 
 
-async def _iterate_with_pipeline_transport_tracking(events) -> AsyncGenerator[Any, None]:
+async def _iterate_with_pipeline_transport_tracking(
+    events,
+    *,
+    task_id: str | None = None,
+    context_id: str | None = None,
+) -> AsyncGenerator[Any, None]:
     iterator = events.__aiter__()
     delivery_tracker = create_pipeline_transport_delivery_tracker()
-    try:
-        while True:
-            with bind_pipeline_transport_delivery_tracker(delivery_tracker):
-                try:
-                    event = await anext(iterator)
-                except StopAsyncIteration:
-                    return
-            yield event
-    finally:
-        close_pipeline_transport_delivery_tracker(delivery_tracker)
-        close = getattr(iterator, "aclose", None)
-        if callable(close):
-            await close()
+    route = (
+        bind_pipeline_transport_delivery_route(delivery_tracker, task_id=task_id, context_id=context_id)
+        if task_id and context_id
+        else nullcontext()
+    )
+    with route:
+        try:
+            while True:
+                with bind_pipeline_transport_delivery_tracker(delivery_tracker):
+                    try:
+                        event = await anext(iterator)
+                    except StopAsyncIteration:
+                        return
+                yield event
+        finally:
+            close_pipeline_transport_delivery_tracker(delivery_tracker)
+            close = getattr(iterator, "aclose", None)
+            if callable(close):
+                await close()
 
 
 def _task_is_input_required(task: Task) -> bool:

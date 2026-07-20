@@ -101,7 +101,7 @@ the rest of the tests.
 | Scenario | Cut point / special condition | Recovery input | Main assertion |
 | --- | --- | --- | --- |
 | `scenario1` | After pipeline completion and one normal-chat follow-up | Ask what the previous normal-chat question was | Normal-chat history survives restart; VSwitch evidence exists. |
-| `selection-waiting` | Step 4 waits for candidate selection | `你随便选一个方案。` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
+| `selection-waiting` | Step 4 waits for candidate selection | `{"selected_candidate_index": 0}` without `taskId` | Waiting step4 task is recovered and selected; VSwitch evidence exists. |
 | `ask-waiting` | `ask_user_question` waits for user input | Clarification answers without `taskId` | Pending ask input is recovered and pipeline completes; VSwitch evidence exists. |
 | `image-initial` | Initial user message is the static `initial.png` image fixture | Candidate selection text | The image starts the pipeline, reaches step4 selection, completes, and produces VSwitch evidence. |
 | `image-ask-waiting` | `ask_user_question` waits for user input, then the server restarts | Static `ask-first-answer.png` / `ask-second-answer.png` image fixtures without `taskId` | Pending ask input is recovered, image answers hydrate the recovered task, and the pipeline completes with VSwitch evidence. |
@@ -131,7 +131,7 @@ Most scenarios use the same baseline task:
 Candidate selection uses:
 
 ```text
-你随便选一个方案。
+{"selected_candidate_index": 0}
 ```
 
 Running-state recovery uses:

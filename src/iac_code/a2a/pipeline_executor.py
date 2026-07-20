@@ -1315,7 +1315,12 @@ class IacCodeA2APipelineExecutor:
         outbound_registered = False
         stream_iter = stream.__aiter__()
         restart_event = _restart_requested_event(runtime)
-        next_task: asyncio.Task[Any] | None = None
+        stream_requests: asyncio.Queue[asyncio.Future[Any]] = asyncio.Queue()
+        stream_driver = asyncio.create_task(
+            _drive_stream_events(stream_iter, stream_requests),
+            name="pipeline-a2a-stream-driver",
+        )
+        next_event: asyncio.Future[Any] | None = None
         restart_task: asyncio.Task[Any] | None = None
         close_stream_on_exit = False
         terminal_handoff_unavailable = False
@@ -1353,18 +1358,19 @@ class IacCodeA2APipelineExecutor:
                         terminal_handoff_unavailable=terminal_handoff_unavailable,
                     )
 
-                next_task = asyncio.create_task(_next_stream_event(stream_iter))
+                next_event = asyncio.get_running_loop().create_future()
+                stream_requests.put_nowait(next_event)
                 restart_task = asyncio.create_task(restart_event.wait())
                 done, _pending = await asyncio.wait(
-                    {next_task, restart_task},
+                    {next_event, restart_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
                 if restart_task in done and runtime.restart_after_interrupt:
                     restart_event.clear()
                     runtime.restart_after_interrupt = False
-                    await _cancel_task_safely(next_task)
-                    next_task = None
+                    await _cancel_task_safely(stream_driver)
+                    next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
                     await _close_stream_safely(stream_iter)
@@ -1376,8 +1382,8 @@ class IacCodeA2APipelineExecutor:
                 if restart_task in done and runtime.pause_after_interrupt:
                     restart_event.clear()
                     runtime.pause_after_interrupt = False
-                    await _cancel_task_safely(next_task)
-                    next_task = None
+                    await _cancel_task_safely(stream_driver)
+                    next_event = None
                     await _cancel_task_safely(restart_task)
                     restart_task = None
                     await _close_stream_safely(stream_iter)
@@ -1390,9 +1396,9 @@ class IacCodeA2APipelineExecutor:
                 await _cancel_task_safely(restart_task)
                 restart_task = None
                 try:
-                    event = await next_task
+                    event = await next_event
                 except StopAsyncIteration:
-                    next_task = None
+                    next_event = None
                     await self._publish_pending_mcp_warnings(
                         runtime=runtime,
                         outbound=outbound,
@@ -1404,7 +1410,7 @@ class IacCodeA2APipelineExecutor:
                         terminal_handoff_unavailable=terminal_handoff_unavailable,
                     )
                 finally:
-                    next_task = None
+                    next_event = None
 
                 if _is_pipeline_terminal_stream_event(event):
                     terminal_publication = await self._publish_terminal_stream_event(
@@ -1488,8 +1494,9 @@ class IacCodeA2APipelineExecutor:
             stream_exception = exc
             raise
         finally:
-            if next_task is not None:
-                await _cancel_task_safely(next_task)
+            if next_event is not None and not next_event.done():
+                next_event.cancel()
+            await _cancel_task_safely(stream_driver)
             if restart_task is not None:
                 await _cancel_task_safely(restart_task)
             if close_stream_on_exit:
@@ -3827,8 +3834,25 @@ async def _save_pipeline_interrupt_pause(pipeline: Any, verdict: Any) -> Pipelin
     return event if isinstance(event, PipelineEvent) else None
 
 
-async def _next_stream_event(stream: AsyncIterator[Any]) -> Any:
-    return await anext(stream)
+async def _drive_stream_events(
+    stream: AsyncIterator[Any],
+    requests: asyncio.Queue[asyncio.Future[Any]],
+) -> None:
+    while True:
+        completion = await requests.get()
+        if completion.cancelled():
+            continue
+        try:
+            event = await anext(stream)
+        except asyncio.CancelledError:
+            completion.cancel()
+            raise
+        except BaseException as exc:
+            if not completion.done():
+                completion.set_exception(exc)
+            return
+        if not completion.done():
+            completion.set_result(event)
 
 
 async def _cancel_task_safely(task: asyncio.Task[Any]) -> None:

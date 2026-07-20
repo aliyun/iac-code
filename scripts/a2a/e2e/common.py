@@ -36,17 +36,17 @@ from debugger import (  # noqa: E402
 )
 
 DEFAULT_INITIAL_PROMPT = "选择一个已有vpc，创建一个vswitch"
-DEFAULT_SELECTION_PROMPT = "你随便选一个方案。"
+DEFAULT_SELECTION_PROMPT = '{"selected_candidate_index": 0}'
 DEFAULT_NORMAL_FOLLOWUP_PROMPT = "你刚才创建了什么"
 DEFAULT_RECOVERY_PROMPT = (
     "我刚才问了你哪些问题？请查看完整会话历史，只输出 [Pipeline Handoff Context] 注入上下文之后、"
     "当前这条消息之前的最后一条真实用户消息原文。排除空消息、以“请完成当前步骤”开头的 pipeline 控制消息、"
-    "更早的方案选择消息（例如“你随便选一个方案。”），以及当前这条消息本身。不要解释。"
+    '更早的方案选择消息（例如“{"selected_candidate_index": 0}”），以及当前这条消息本身。不要解释。'
 )
 DEFAULT_NORMAL_RUNNING_RECOVERY_PROMPT = (
     "我刚才问了你哪些问题？请查看完整会话历史，只输出 [Pipeline Handoff Context] 注入上下文之后、"
     "当前这条消息之前的最后一条真实用户消息原文。排除空消息、内容等于“继续”的消息、"
-    "以“请完成当前步骤”开头的 pipeline 控制消息、更早的方案选择消息（例如“你随便选一个方案。”），"
+    '以“请完成当前步骤”开头的 pipeline 控制消息、更早的方案选择消息（例如“{"selected_candidate_index": 0}”），'
     "以及当前这条消息本身。不要解释。"
 )
 DEFAULT_EXPECTED_TEXT = DEFAULT_NORMAL_FOLLOWUP_PROMPT

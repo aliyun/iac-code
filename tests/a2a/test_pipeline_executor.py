@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import os
 import shutil
@@ -46,6 +47,35 @@ from .fakes import FakeEventQueue, FakeRequestContext
 RETRY_TEXT = "A temporary error occurred. Please retry."
 AUTH_TEXT = "Authentication required. Configure credentials and retry."
 _A2A_ASYNC_TEST_TIMEOUT = 5
+
+
+@pytest.mark.asyncio
+async def test_stream_event_driver_preserves_generator_context_across_yields() -> None:
+    from iac_code.a2a.pipeline_executor import _drive_stream_events
+
+    marker = contextvars.ContextVar("stream_driver_test_marker", default="outside")
+
+    async def events():
+        token = marker.set("inside")
+        try:
+            yield marker.get()
+            yield marker.get()
+        finally:
+            marker.reset(token)
+
+    requests: asyncio.Queue[asyncio.Future[object]] = asyncio.Queue()
+    driver = asyncio.create_task(_drive_stream_events(events(), requests))
+
+    for _ in range(2):
+        completion = asyncio.get_running_loop().create_future()
+        requests.put_nowait(completion)
+        assert await completion == "inside"
+
+    exhausted = asyncio.get_running_loop().create_future()
+    requests.put_nowait(exhausted)
+    with pytest.raises(StopAsyncIteration):
+        await exhausted
+    await driver
 
 
 def _write_pipeline_yaml(pipeline_dir: Path) -> None:

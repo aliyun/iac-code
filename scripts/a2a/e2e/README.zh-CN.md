@@ -94,7 +94,7 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 | 场景 | 切点 / 特殊条件 | 恢复时输入 | 主要验收 |
 | --- | --- | --- | --- |
 | `scenario1` | pipeline 完成并完成一轮 normal-chat follow-up 后 | 询问上一条 normal-chat 问题是什么 | normal-chat 历史重启后仍可用；存在 VSwitch 证据。 |
-| `selection-waiting` | step4 等待候选方案选择时 | 不带 `taskId` 发送 `你随便选一个方案。` | 能恢复等待中的 step4 task 并完成选择；存在 VSwitch 证据。 |
+| `selection-waiting` | step4 等待候选方案选择时 | 不带 `taskId` 发送 `{"selected_candidate_index": 0}` | 能恢复等待中的 step4 task 并完成选择；存在 VSwitch 证据。 |
 | `ask-waiting` | `ask_user_question` 等待用户输入时 | 不带 `taskId` 发送澄清回答 | 能恢复 pending ask 输入并完成 pipeline；存在 VSwitch 证据。 |
 | `image-initial` | 首轮用户消息就是静态 `initial.png` 图片 fixture | 文本选择候选方案 | 图片能启动 pipeline，进入 step4 选择，最终完成并产生 VSwitch 证据。 |
 | `image-ask-waiting` | `ask_user_question` 等待用户输入，随后重启 server | 不带 `taskId` 发送静态 `ask-first-answer.png` / `ask-second-answer.png` 图片 fixture | pending ask 输入能恢复，图片回答能 hydrate 到恢复后的 task，最终完成并产生 VSwitch 证据。 |
@@ -124,7 +124,7 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 候选方案选择使用：
 
 ```text
-你随便选一个方案。
+{"selected_candidate_index": 0}
 ```
 
 running 状态恢复使用：

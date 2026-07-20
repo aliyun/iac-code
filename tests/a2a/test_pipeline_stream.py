@@ -26,6 +26,7 @@ from iac_code.a2a.pipeline_stream import (
 from iac_code.a2a.pipeline_transport_delivery import (
     PipelineTransportDeliveryClosedError,
     acknowledge_pipeline_transport_delivery,
+    bind_pipeline_transport_delivery_route,
     bind_pipeline_transport_delivery_tracker,
     close_pipeline_transport_delivery_tracker,
     create_pipeline_transport_delivery_tracker,
@@ -748,6 +749,37 @@ async def test_inherited_closed_transport_tracker_rejects_later_publication(tmp_
     with pytest.raises(PipelineTransportDeliveryClosedError):
         await publication
     assert queue.events == []
+
+
+@pytest.mark.asyncio
+async def test_inherited_closed_tracker_uses_reconnected_task_transport(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    disconnected_tracker = create_pipeline_transport_delivery_tracker()
+    reconnected_tracker = create_pipeline_transport_delivery_tracker()
+    release = asyncio.Event()
+
+    async def publish_after_reconnect() -> str | None:
+        await release.wait()
+        with pipeline_transport_delivery_required():
+            return await publisher.publish(TextDeltaEvent(text="after-reconnect"))
+
+    with bind_pipeline_transport_delivery_tracker(disconnected_tracker):
+        publication = asyncio.create_task(publish_after_reconnect())
+    close_pipeline_transport_delivery_tracker(disconnected_tracker)
+
+    with bind_pipeline_transport_delivery_route(
+        reconnected_tracker,
+        task_id="task-1",
+        context_id="ctx-1",
+    ):
+        release.set()
+        while not queue.events:
+            await asyncio.sleep(0)
+        assert publication.done() is False
+        acknowledge_pipeline_transport_delivery(queue.events[0])
+        assert await publication == "after-reconnect"
+
+    close_pipeline_transport_delivery_tracker(reconnected_tracker)
 
 
 @pytest.mark.asyncio

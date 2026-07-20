@@ -4,7 +4,7 @@ import asyncio
 import contextvars
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,6 +31,7 @@ PipelineTransportDeliveryStageObserver = Callable[[str, int], None]
 
 
 _PENDING_DELIVERIES: dict[int, _PendingDelivery] = {}
+_ROUTED_DELIVERY_TRACKERS: dict[tuple[str, str], list[PipelineTransportDeliveryTracker]] = {}
 _DELIVERY_TRACKER: contextvars.ContextVar[PipelineTransportDeliveryTracker | None] = contextvars.ContextVar(
     "pipeline_transport_delivery_tracker",
     default=None,
@@ -52,6 +53,36 @@ def bind_pipeline_transport_delivery_tracker(tracker: PipelineTransportDeliveryT
         yield
     finally:
         _DELIVERY_TRACKER.reset(token)
+
+
+@contextmanager
+def bind_pipeline_transport_delivery_route(
+    tracker: PipelineTransportDeliveryTracker,
+    *,
+    task_id: str,
+    context_id: str,
+) -> Iterator[None]:
+    key = (task_id, context_id)
+    trackers = _ROUTED_DELIVERY_TRACKERS.setdefault(key, [])
+    trackers.append(tracker)
+    try:
+        yield
+    finally:
+        current = _ROUTED_DELIVERY_TRACKERS.get(key)
+        if current is not None:
+            with suppress(ValueError):
+                current.remove(tracker)
+            if not current:
+                _ROUTED_DELIVERY_TRACKERS.pop(key, None)
+
+
+def routed_pipeline_transport_delivery_tracker(
+    *,
+    task_id: str,
+    context_id: str,
+) -> PipelineTransportDeliveryTracker | None:
+    trackers = _ROUTED_DELIVERY_TRACKERS.get((task_id, context_id), ())
+    return next((tracker for tracker in reversed(trackers) if tracker.active), None)
 
 
 def close_pipeline_transport_delivery_tracker(tracker: PipelineTransportDeliveryTracker) -> None:
@@ -100,10 +131,13 @@ def pipeline_transport_delivery_is_required() -> bool:
 def register_pipeline_transport_delivery(
     event: Any,
     *,
+    fallback_tracker: PipelineTransportDeliveryTracker | None = None,
     stage_observer: PipelineTransportDeliveryStageObserver | None = None,
 ) -> asyncio.Future[None]:
     completion = asyncio.get_running_loop().create_future()
     tracker = _DELIVERY_TRACKER.get()
+    if (tracker is None or not tracker.active) and fallback_tracker is not None and fallback_tracker.active:
+        tracker = fallback_tracker
     if tracker is None:
         if stage_observer is not None:
             now_ns = time.monotonic_ns()
