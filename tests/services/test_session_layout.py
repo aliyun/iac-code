@@ -43,6 +43,8 @@ def test_layout_v2_paths_are_session_scoped(tmp_path: Path) -> None:
     assert paths.usage_path == session_dir / "usage.jsonl"
     assert paths.permission_audit_path == session_dir / "permission-audit.jsonl"
     assert paths.a2a_artifacts_dir == session_dir / "a2a" / "artifacts"
+    assert paths.logs_dir == session_dir / "logs"
+    assert paths.a2a_pipeline_flow_log_path == session_dir / "logs" / "a2a-pipeline-flow.jsonl"
     assert paths.transcript_dir("transcript_att_0001") == (
         session_dir / "pipeline" / "transcripts" / "transcript_att_0001"
     )

@@ -246,32 +246,52 @@ def _pipeline_from_metadata(metadata: Any) -> dict[str, Any] | None:
     return None
 
 
-def _extract_pipeline_envelope(payload: Any) -> dict[str, Any] | None:
-    if not isinstance(payload, dict | list):
-        return None
-    if isinstance(payload, list):
-        for item in payload:
-            envelope = _extract_pipeline_envelope(item)
-            if envelope is not None:
-                return envelope
-        return None
+def _pipeline_batch_from_metadata(metadata: Any) -> list[dict[str, Any]]:
+    if not isinstance(metadata, dict):
+        return []
+    iac_code = metadata.get("iac_code") or metadata.get("iacCode") or metadata.get("iac-code")
+    if not isinstance(iac_code, dict):
+        return []
+    batch = iac_code.get("pipelineBatch") or iac_code.get("pipeline_batch")
+    if not isinstance(batch, dict) or not isinstance(batch.get("events"), list):
+        return []
+    return [event for event in batch["events"] if isinstance(event, dict)]
 
-    if isinstance(payload.get("eventType") or payload.get("event_type"), str):
-        return payload
+
+def _extract_pipeline_envelopes(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict | list):
+        return []
+    if isinstance(payload, list):
+        envelopes: list[dict[str, Any]] = []
+        for item in payload:
+            envelopes.extend(_extract_pipeline_envelopes(item))
+        return envelopes
+
+    metadata_batch = _pipeline_batch_from_metadata(payload.get("metadata"))
+    if metadata_batch:
+        return metadata_batch
 
     for key in ("pipeline", "pipelineEvent", "pipelineSnapshot"):
         if isinstance(payload.get(key), dict):
-            return payload[key]
+            return [payload[key]]
 
     metadata_envelope = _pipeline_from_metadata(payload.get("metadata"))
     if metadata_envelope is not None:
-        return metadata_envelope
+        return [metadata_envelope]
+
+    if isinstance(payload.get("eventType") or payload.get("event_type"), str):
+        return [payload]
 
     for key in ("result", "params", "task", "statusUpdate", "status_update", "status", "message", "event", "events"):
-        envelope = _extract_pipeline_envelope(payload.get(key))
-        if envelope is not None:
-            return envelope
-    return None
+        envelopes = _extract_pipeline_envelopes(payload.get(key))
+        if envelopes:
+            return envelopes
+    return []
+
+
+def _extract_pipeline_envelope(payload: Any) -> dict[str, Any] | None:
+    envelopes = _extract_pipeline_envelopes(payload)
+    return envelopes[0] if envelopes else None
 
 
 def _a2a_task_identity(payload: Any) -> dict[str, Any] | None:
@@ -418,23 +438,21 @@ def load_debug_log_export(log_dir: str | Path) -> dict[str, Any]:
                 state=identity.get("state"),
                 role="active",
             )
-        envelope = _extract_pipeline_envelope(item)
-        if envelope is None:
-            continue
-        latest_pipeline = envelope
-        remember_task(
-            task_id=envelope.get("taskId"),
-            context_id=envelope.get("contextId"),
-            state=envelope.get("state") or envelope.get("status"),
-            role="pipeline",
-        )
-        sequence = sequence_value(envelope.get("sequence"))
-        if sequence is not None:
-            last_sequence = max(last_sequence, sequence)
-        if terminal_pipeline_status(envelope.get("state") or envelope.get("status")) and active_task_id == str(
-            envelope.get("taskId") or ""
-        ):
-            active_task_id = ""
+        for envelope in _extract_pipeline_envelopes(item):
+            latest_pipeline = envelope
+            remember_task(
+                task_id=envelope.get("taskId"),
+                context_id=envelope.get("contextId"),
+                state=envelope.get("state") or envelope.get("status"),
+                role="pipeline",
+            )
+            sequence = sequence_value(envelope.get("sequence"))
+            if sequence is not None:
+                last_sequence = max(last_sequence, sequence)
+            if terminal_pipeline_status(envelope.get("state") or envelope.get("status")) and active_task_id == str(
+                envelope.get("taskId") or ""
+            ):
+                active_task_id = ""
     return {
         "schemaVersion": "iac-code-a2a-debugger-export-v1",
         "exportedAt": _utc_now(),
@@ -1564,11 +1582,7 @@ def render_index_html(config: DebuggerConfig) -> str:
       return JSON.stringify(value, null, 2);
     }
 
-    function pipelineEventDedupKey(payload) {
-      const envelope = extractPipelineEnvelope(rawItemValue(payload));
-      if (!envelope || typeof envelope !== "object") {
-        return "";
-      }
+    function pipelineEventDedupKeyForEnvelope(envelope) {
       const eventId = envelope.eventId || envelope.event_id || "";
       if (eventId) {
         return `event:${eventId}`;
@@ -1586,6 +1600,16 @@ def render_index_html(config: DebuggerConfig) -> str:
       ].join("|");
     }
 
+    function pipelineEventDedupKeys(payload) {
+      return extractPipelineEnvelopes(rawItemValue(payload))
+        .map((envelope) => pipelineEventDedupKeyForEnvelope(envelope))
+        .filter(Boolean);
+    }
+
+    function pipelineEventDedupKey(payload) {
+      return pipelineEventDedupKeys(payload)[0] || "";
+    }
+
     function rememberPipelineEvent(payload) {
       const dedupKey = pipelineEventDedupKey(payload);
       if (!dedupKey) {
@@ -1601,10 +1625,7 @@ def render_index_html(config: DebuggerConfig) -> str:
     function resetPipelineEventDedup() {
       state.rawPipelineEventKeys = new Set();
       state.raw.sse.forEach((row) => {
-        const dedupKey = pipelineEventDedupKey(row);
-        if (dedupKey) {
-          state.rawPipelineEventKeys.add(dedupKey);
-        }
+        pipelineEventDedupKeys(row).forEach((dedupKey) => state.rawPipelineEventKeys.add(dedupKey));
       });
     }
 
@@ -1612,12 +1633,27 @@ def render_index_html(config: DebuggerConfig) -> str:
       const seen = new Set();
       const result = [];
       rows.forEach((row) => {
-        const dedupKey = pipelineEventDedupKey(row);
-        if (dedupKey && seen.has(dedupKey)) {
+        const envelopes = pipelineEnvelopesFromRawItem(row);
+        if (envelopes.length) {
+          const unseenEnvelopes = envelopes.filter((envelope) => {
+            const dedupKey = pipelineEventDedupKeyForEnvelope(envelope);
+            return !dedupKey || !seen.has(dedupKey);
+          });
+          if (!unseenEnvelopes.length) {
+            return;
+          }
+          unseenEnvelopes.forEach((envelope) => {
+            const dedupKey = pipelineEventDedupKeyForEnvelope(envelope);
+            if (dedupKey) {
+              seen.add(dedupKey);
+            }
+          });
+          result.push(
+            unseenEnvelopes.length === envelopes.length
+              ? row
+              : rawItemWithValue(row, unseenEnvelopes.length === 1 ? unseenEnvelopes[0] : unseenEnvelopes)
+          );
           return;
-        }
-        if (dedupKey) {
-          seen.add(dedupKey);
         }
         result.push(row);
       });
@@ -1737,16 +1773,29 @@ def render_index_html(config: DebuggerConfig) -> str:
         };
         state.raw.requests.push(row);
       } else {
-        const dedupKey = pipelineEventDedupKey(value);
-        if (dedupKey && state.rawPipelineEventKeys.has(dedupKey)) {
-          return null;
-        }
-        if (dedupKey) {
-          state.rawPipelineEventKeys.add(dedupKey);
+        const envelopes = extractPipelineEnvelopes(value);
+        let storedValue = value;
+        if (envelopes.length) {
+          const unseenEnvelopes = envelopes.filter((envelope) => {
+            const dedupKey = pipelineEventDedupKeyForEnvelope(envelope);
+            return !dedupKey || !state.rawPipelineEventKeys.has(dedupKey);
+          });
+          if (!unseenEnvelopes.length) {
+            return null;
+          }
+          unseenEnvelopes.forEach((envelope) => {
+            const dedupKey = pipelineEventDedupKeyForEnvelope(envelope);
+            if (dedupKey) {
+              state.rawPipelineEventKeys.add(dedupKey);
+            }
+          });
+          if (unseenEnvelopes.length !== envelopes.length) {
+            storedValue = unseenEnvelopes.length === 1 ? unseenEnvelopes[0] : unseenEnvelopes;
+          }
         }
         row = {
           at: new Date().toISOString(),
-          value
+          value: storedValue
         };
         state.raw.sse.push(row);
       }
@@ -1804,54 +1853,71 @@ def render_index_html(config: DebuggerConfig) -> str:
       return null;
     }
 
-    function extractPipelineEnvelope(payload) {
+    function pipelineBatchFromMetadata(metadata) {
+      if (!metadata || typeof metadata !== "object") {
+        return [];
+      }
+      const iacCode = metadata.iac_code || metadata.iacCode || metadata["iac-code"];
+      if (!iacCode || typeof iacCode !== "object") {
+        return [];
+      }
+      const batch = iacCode.pipelineBatch || iacCode.pipeline_batch;
+      return batch && Array.isArray(batch.events)
+        ? batch.events.filter((event) => event && typeof event === "object")
+        : [];
+    }
+
+    function extractPipelineEnvelopes(payload) {
       if (!payload || typeof payload !== "object") {
-        return null;
+        return [];
       }
       if (Array.isArray(payload)) {
-        for (const item of payload) {
-          const envelope = extractPipelineEnvelope(item);
-          if (envelope) {
-            return envelope;
-          }
-        }
-        return null;
+        return payload.flatMap((item) => extractPipelineEnvelopes(item));
+      }
+      const metadataBatch = pipelineBatchFromMetadata(payload.metadata);
+      if (metadataBatch.length) {
+        return metadataBatch;
+      }
+      const directIacCode = payload.iac_code || payload.iacCode || payload["iac-code"];
+      const directBatch = directIacCode && (directIacCode.pipelineBatch || directIacCode.pipeline_batch);
+      if (directBatch && Array.isArray(directBatch.events)) {
+        return directBatch.events.filter((event) => event && typeof event === "object");
       }
       if (payload.pipeline || payload.pipelineEvent || payload.pipelineSnapshot) {
-        return payload.pipeline || payload.pipelineEvent || payload.pipelineSnapshot;
+        return [payload.pipeline || payload.pipelineEvent || payload.pipelineSnapshot];
       }
       const metadataEnvelope = pipelineFromMetadata(payload.metadata);
       if (metadataEnvelope) {
-        return metadataEnvelope;
+        return [metadataEnvelope];
       }
-      if (payload.result) {
-        return extractPipelineEnvelope(payload.result);
+      if (payload.eventType || payload.event_type) {
+        return [payload];
       }
-      if (payload.params) {
-        return extractPipelineEnvelope(payload.params);
+      const wrapperKeys = [
+        "result",
+        "params",
+        "task",
+        "statusUpdate",
+        "status_update",
+        "status",
+        "message",
+        "event",
+        "events"
+      ];
+      for (const key of wrapperKeys) {
+        if (!payload[key]) {
+          continue;
+        }
+        const envelopes = extractPipelineEnvelopes(payload[key]);
+        if (envelopes.length) {
+          return envelopes;
+        }
       }
-      if (payload.task) {
-        return extractPipelineEnvelope(payload.task);
-      }
-      if (payload.statusUpdate) {
-        return extractPipelineEnvelope(payload.statusUpdate);
-      }
-      if (payload.status_update) {
-        return extractPipelineEnvelope(payload.status_update);
-      }
-      if (payload.status) {
-        return extractPipelineEnvelope(payload.status);
-      }
-      if (payload.message) {
-        return extractPipelineEnvelope(payload.message);
-      }
-      if (payload.event) {
-        return extractPipelineEnvelope(payload.event);
-      }
-      if (payload.events) {
-        return extractPipelineEnvelope(payload.events);
-      }
-      return null;
+      return [];
+    }
+
+    function extractPipelineEnvelope(payload) {
+      return extractPipelineEnvelopes(payload)[0] || null;
     }
 
     function a2aTaskIdentity(payload) {
@@ -2139,12 +2205,34 @@ def render_index_html(config: DebuggerConfig) -> str:
       return item;
     }
 
+    function rawItemWithValue(item, value) {
+      if (item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, "value")) {
+        return {...item, value};
+      }
+      return value;
+    }
+
     function rawItemTimestamp(item) {
       return item && typeof item === "object" ? item.at || item.receivedAt || "" : "";
     }
 
     function pipelineEnvelopeFromRawItem(item) {
       return extractPipelineEnvelope(rawItemValue(item));
+    }
+
+    function pipelineEnvelopesFromRawItem(item) {
+      return extractPipelineEnvelopes(rawItemValue(item));
+    }
+
+    function expandPipelineBatchRawItem(item) {
+      const envelopes = pipelineEnvelopesFromRawItem(item);
+      if (envelopes.length <= 1) {
+        return [item];
+      }
+      if (item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, "value")) {
+        return envelopes.map((envelope) => ({...item, value: envelope}));
+      }
+      return envelopes;
     }
 
     function a2aMessageText(message) {
@@ -2232,9 +2320,12 @@ def render_index_html(config: DebuggerConfig) -> str:
     }
 
     function textDeltaText(item) {
-      const envelope = pipelineEnvelopeFromRawItem(item);
-      const data = envelope && envelope.data && typeof envelope.data === "object" ? envelope.data : {};
-      return typeof data.text === "string" ? data.text : "";
+      return extractPipelineEnvelopes(rawItemValue(item))
+        .map((envelope) => {
+          const data = envelope && envelope.data && typeof envelope.data === "object" ? envelope.data : {};
+          return typeof data.text === "string" ? data.text : "";
+        })
+        .join("");
     }
 
     function textDeltaGroupKey(item) {
@@ -2389,7 +2480,7 @@ def render_index_html(config: DebuggerConfig) -> str:
     function groupSseEvents(events) {
       const grouped = [];
       let currentGroup = null;
-      events.forEach((event) => {
+      events.flatMap((event) => expandPipelineBatchRawItem(event)).forEach((event) => {
         const eventType = eventTypeFromRawItem(event);
         if (eventType === "text_delta" || eventType === "thinking_delta") {
           const envelope = pipelineEnvelopeFromRawItem(event) || {};
@@ -3301,11 +3392,26 @@ def render_index_html(config: DebuggerConfig) -> str:
 
     function applyPipelineEvent(payload, rawRow = null, options = {}) {
       captureA2ATaskIdentity(payload);
-      const envelope = extractPipelineEnvelope(payload);
+      const envelopes = extractPipelineEnvelopes(payload);
+      if (envelopes.length > 1) {
+        envelopes.forEach((envelope) => {
+          if (!options.alreadyRecorded && !rememberPipelineEvent(envelope)) {
+            return;
+          }
+          applyPipelineEvent(envelope, rawRow, {...options, alreadyRecorded: true, deferRender: true});
+        });
+        if (!options.deferRender) {
+          renderPipeline();
+        }
+        return;
+      }
+      const envelope = envelopes[0] || null;
       if (!envelope || typeof envelope !== "object") {
         appendNormalMessageEvent(rawRow || payload);
         appendNormalMetadataEvent(rawRow || payload);
-        renderPipeline();
+        if (!options.deferRender) {
+          renderPipeline();
+        }
         return;
       }
       if (!options.alreadyRecorded && !rememberPipelineEvent(payload)) {
@@ -3422,7 +3528,9 @@ def render_index_html(config: DebuggerConfig) -> str:
       }
 
       appendExecutionTreeEvent(envelope);
-      renderPipeline();
+      if (!options.deferRender) {
+        renderPipeline();
+      }
     }
 
     function rebuildFromSnapshot(snapshot) {
@@ -4619,7 +4727,7 @@ def render_index_html(config: DebuggerConfig) -> str:
             }
             const rawRow = appendRawEvent("sse", parsed);
             if (rawRow) {
-              applyPipelineEvent(parsed, rawRow, {alreadyRecorded: true});
+              applyPipelineEvent(rawItemValue(rawRow), rawRow, {alreadyRecorded: true});
             }
             await yieldToBrowserAfterStreamEvent(parsed, ++streamEventCount);
             if (shouldStopStreamingAfterPayload(parsed)) {
@@ -4806,9 +4914,9 @@ def render_index_html(config: DebuggerConfig) -> str:
       }
       resetPipelineEventDedup();
       rows.forEach((row) => {
-        const envelope = pipelineEnvelopeFromRawItem(row);
-        if (envelope) {
-          appendExecutionTreeEvent(envelope);
+        const envelopes = pipelineEnvelopesFromRawItem(row);
+        if (envelopes.length) {
+          envelopes.forEach((envelope) => appendExecutionTreeEvent(envelope));
         } else {
           appendNormalMessageEvent(row);
           appendNormalMetadataEvent(row);

@@ -105,13 +105,13 @@ msgstr ""
 "Bereinigung abgeschlossen ist."
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid "Task is already working."
+msgstr "Die Aufgabe läuft bereits."
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "Aufgabe abgebrochen."
-
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid "Task is already working."
-msgstr "Die Aufgabe läuft bereits."
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -4771,6 +4771,11 @@ msgstr "Sitzungsbackup erfordert ein unterstütztes Sitzungslayout."
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format
+msgid "session source is not a directory: {source}"
+msgstr "Sitzungsquelle ist kein Verzeichnis: {source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
 msgid "backup root must be an absolute directory: {path}"
 msgstr "Backup-Root muss ein absolutes Verzeichnis sein: {path}"
 
@@ -4820,11 +4825,6 @@ msgstr "Der übergeordnete Pfad von {label} enthält einen Symlink: {path}"
 #, python-brace-format
 msgid "session source is a symlink: {source}"
 msgstr "Sitzungsquelle ist ein Symlink: {source}"
-
-#: src/iac_code/services/session_backup.py
-#, python-brace-format
-msgid "session source is not a directory: {source}"
-msgstr "Sitzungsquelle ist kein Verzeichnis: {source}"
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format

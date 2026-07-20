@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import json
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from a2a.types import TaskState, TaskStatus, TaskStatusUpdateEvent
@@ -18,10 +20,23 @@ from iac_code.a2a.events import (
     _extract_artifact_metadata,
 )
 from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
-from iac_code.a2a.pipeline_events import PipelineEventTranslator, safe_permission_metadata
+from iac_code.a2a.pipeline_events import (
+    PIPELINE_EVENTS_EXTENSION_URI,
+    PIPELINE_METADATA_SCHEMA_VERSION,
+    PipelineEventTranslator,
+    safe_permission_metadata,
+)
 from iac_code.a2a.pipeline_journal import A2APipelineJournal, to_json_safe
+from iac_code.a2a.pipeline_outbound import OUTBOUND_HARD_MAX_BATCH_BYTES, OUTBOUND_HARD_MAX_BATCH_EVENTS
 from iac_code.a2a.pipeline_performance import a2a_extreme_performance_enabled
 from iac_code.a2a.pipeline_snapshot import SNAPSHOT_SCHEMA_VERSION, A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.a2a.pipeline_transport_delivery import (
+    discard_pipeline_transport_delivery,
+    mark_pipeline_transport_delivery_enqueued,
+    pipeline_transport_delivery_is_required,
+    pipeline_transport_delivery_tracking_enabled,
+    register_pipeline_transport_delivery,
+)
 from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_COMPLETED,
     PIPELINE_EVENT_CLEANUP_FAILED,
@@ -103,6 +118,19 @@ class _SequenceHighWaterUnavailableError(Exception):
     pass
 
 
+class PipelineA2APersistenceError(RuntimeError):
+    pass
+
+
+@dataclass
+class PreparedPipelinePermission:
+    request: PermissionRequestEvent
+    envelopes: list[dict[str, Any]]
+    approved: bool
+    permission_audit_emitted: bool
+    resolver_used: bool
+
+
 class PipelineA2AEventPublisher:
     def __init__(
         self,
@@ -118,6 +146,7 @@ class PipelineA2AEventPublisher:
         after_backup_commit: PipelineAfterBackupCommitHook | None = None,
         backup_commit_gate: PipelineBackupCommitGate | None = None,
         extreme_performance: bool | None = None,
+        flow_monitor: Any | None = None,
     ) -> None:
         self.event_queue = event_queue
         self.translator = translator
@@ -130,6 +159,7 @@ class PipelineA2AEventPublisher:
         self.before_enqueue = before_enqueue
         self.after_backup_commit = after_backup_commit
         self.backup_commit_gate = backup_commit_gate
+        self.flow_monitor = flow_monitor
         self._sequence_lock = asyncio.Lock()
         self._delivery_lock = asyncio.Lock()
         self._delivery_lock_owner: asyncio.Task[Any] | None = None
@@ -227,6 +257,132 @@ class PipelineA2AEventPublisher:
                 text_parts.append(_text_from_envelope(envelope))
 
         return "".join(text_parts) if text_parts else None
+
+    async def publish_batch(self, events: list[Any]) -> None:
+        persisted = await self.persist_batch_events(events)
+        await self.enqueue_persisted_batch(persisted)
+
+    async def persist_batch_events(self, events: list[Any]) -> list[dict[str, Any]]:
+        persisted: list[dict[str, Any]] = []
+        for event in events:
+            tool_result = _tool_result_from(event)
+            for envelope in self.translator.translate(event):
+                if _should_skip_envelope(envelope, exposure_types=self.exposure_types):
+                    continue
+
+                artifact_metadata = await self._maybe_externalize_artifact(envelope, tool_result)
+                if envelope.get("eventType") == "artifact_created" and artifact_metadata is None:
+                    continue
+                if (
+                    envelope.get("eventType") == "tool_result"
+                    and artifact_metadata is None
+                    and A2AExposureType.TOOL_TRACE not in self.exposure_types
+                ):
+                    continue
+
+                safe_envelope = await self.persist_envelope(envelope, artifact_metadata=artifact_metadata)
+                if safe_envelope is None:
+                    raise PipelineA2APersistenceError("Failed to persist an outbound A2A pipeline event")
+                persisted.append(safe_envelope)
+        return persisted
+
+    async def prepare_permission_event(
+        self,
+        event: Any,
+        *,
+        approved: bool,
+        resolver_used: bool,
+    ) -> PreparedPipelinePermission:
+        request = _permission_request_from(event)
+        if request is None:
+            raise TypeError("Expected a permission request event")
+
+        persisted: list[dict[str, Any]] = []
+        permission_audit_emitted = False
+        try:
+            for envelope in self.translator.translate(event):
+                if _should_skip_envelope(envelope, exposure_types=self.exposure_types):
+                    continue
+                self._set_permission_metadata(request, envelope, approved=approved)
+                if approved and _can_resolve_permission_future(request):
+                    audit_ok = (
+                        _emit_resolver_permission_audit(request, approved)
+                        if resolver_used
+                        else _emit_auto_permission_audit(request, approved)
+                    )
+                    permission_audit_emitted = True
+                    if not audit_ok:
+                        approved = False
+                        _set_permission_approval(envelope, approved)
+                safe_envelope = await self.persist_envelope(envelope, require_durable_metadata=True)
+                if safe_envelope is None:
+                    raise PipelineA2APersistenceError("Failed to persist an outbound A2A permission event")
+                persisted.append(safe_envelope)
+        except BaseException:
+            _resolve_permission_future(request, False)
+            raise
+
+        return PreparedPipelinePermission(
+            request=request,
+            envelopes=persisted,
+            approved=approved,
+            permission_audit_emitted=permission_audit_emitted,
+            resolver_used=resolver_used,
+        )
+
+    async def resolve_permission_event(
+        self,
+        event: Any,
+        *,
+        permission_resolver: PipelinePermissionResolver | None = None,
+        auto_approve_permissions: bool = False,
+    ) -> bool:
+        request = _permission_request_from(event)
+        if request is None:
+            raise TypeError("Expected a permission request event")
+        try:
+            approved = bool(auto_approve_permissions)
+            if permission_resolver is not None:
+                result = permission_resolver(request)
+                approved = bool(await result) if inspect.isawaitable(result) else bool(result)
+            elif is_aliyun_api_non_read_only_permission_event(request):
+                approved = False
+            return approved
+        except BaseException:
+            _resolve_permission_future(request, False)
+            raise
+
+    def fail_permission_event(self, event: Any) -> None:
+        request = _permission_request_from(event)
+        if request is not None:
+            _resolve_permission_future(request, False)
+
+    async def enqueue_prepared_permission(self, prepared: PreparedPipelinePermission) -> bool:
+        delivered = bool(prepared.envelopes)
+        for envelope in prepared.envelopes:
+            delivered = await self.enqueue_persisted(envelope, wait_for_transport=True) and delivered
+        return delivered
+
+    def complete_prepared_permission(self, prepared: PreparedPipelinePermission, *, delivered: bool) -> None:
+        request = prepared.request
+        if not _can_resolve_permission_future(request):
+            return
+
+        final_approved = prepared.approved and delivered and bool(prepared.envelopes)
+        if prepared.permission_audit_emitted and prepared.approved and not final_approved:
+            if prepared.resolver_used:
+                _emit_resolver_permission_audit(request, False, persistence_failure=True)
+            else:
+                _emit_auto_permission_audit(request, False, persistence_failure=True)
+        elif not prepared.permission_audit_emitted:
+            audit_ok = (
+                _emit_resolver_permission_audit(request, final_approved)
+                if prepared.resolver_used
+                else _emit_auto_permission_audit(request, final_approved)
+            )
+            if final_approved and not audit_ok:
+                final_approved = False
+        _resolve_permission_future(request, final_approved)
 
     async def publish_interrupt(
         self,
@@ -473,6 +629,14 @@ class PipelineA2AEventPublisher:
 
         try:
             snapshot_events = [*self._extreme_pending_snapshot_events, safe_envelope]
+            if safe_envelope.get("eventType") == BACKUP_COMMITTED_EVENT_TYPE:
+                journal_events = self.journal.read_all_repairing_tail()
+                scoped_events = _events_for_envelope_identity(journal_events, safe_envelope)
+                snapshot_events = _include_backup_ack_committed_event(
+                    snapshot_events,
+                    scoped_events,
+                    safe_envelope,
+                )
             snapshot = reduce_pipeline_events(snapshot_events, existing_snapshot=self._extreme_snapshot_base())
             snapshot_persisted = self.snapshot_store.save(snapshot, durable=False, compact=True)
             if snapshot_persisted:
@@ -534,6 +698,7 @@ class PipelineA2AEventPublisher:
         *,
         artifact_metadata: dict[str, Any] | None = None,
         run_before_enqueue: bool = True,
+        wait_for_transport: bool = False,
     ) -> bool:
         async with self._delivery_guard():
             if run_before_enqueue:
@@ -541,9 +706,55 @@ class PipelineA2AEventPublisher:
                     return False
             if artifact_metadata is not None:
                 await self._enqueue_artifact_update(envelope, artifact_metadata)
-            await self._enqueue_status(envelope)
+            await self._enqueue_status(envelope, wait_for_transport=wait_for_transport)
             self.last_envelope = envelope
         return True
+
+    async def enqueue_persisted_batch(
+        self,
+        envelopes: list[dict[str, Any]],
+        *,
+        wait_for_transport: bool = False,
+    ) -> int:
+        if not envelopes:
+            return 0
+
+        frame_count = 0
+        async with self._delivery_guard():
+            deliverable = [envelope for envelope in envelopes if await self._run_before_enqueue_hook(envelope)]
+            pending: list[dict[str, Any]] = []
+            for envelope in deliverable:
+                artifact = envelope.get("artifact")
+                if envelope.get("eventType") == "artifact_created" and isinstance(artifact, dict):
+                    frame_count += await self._enqueue_persisted_batches(
+                        pending,
+                        wait_for_transport=wait_for_transport,
+                    )
+                    pending = []
+                    await self._enqueue_artifact_update(envelope, artifact)
+                    frame_count += 1
+                pending.append(envelope)
+            frame_count += await self._enqueue_persisted_batches(
+                pending,
+                wait_for_transport=wait_for_transport,
+            )
+        return frame_count
+
+    async def _enqueue_persisted_batches(
+        self,
+        envelopes: list[dict[str, Any]],
+        *,
+        wait_for_transport: bool,
+    ) -> int:
+        frame_count = 0
+        for batch in _envelope_batches(envelopes):
+            if len(batch) == 1:
+                await self._enqueue_status(batch[0], wait_for_transport=wait_for_transport)
+            else:
+                await self._enqueue_status_batch(batch, wait_for_transport=wait_for_transport)
+            self.last_envelope = batch[-1]
+            frame_count += 1
+        return frame_count
 
     async def _persist_and_enqueue(
         self,
@@ -809,21 +1020,28 @@ class PipelineA2AEventPublisher:
         permission_resolver: PipelinePermissionResolver | None,
         auto_approve_permissions: bool,
     ) -> bool:
-        approved = bool(auto_approve_permissions)
-        if permission_resolver is not None:
-            result = permission_resolver(request)
-            approved = bool(await result) if inspect.isawaitable(result) else bool(result)
-        elif is_aliyun_api_non_read_only_permission_event(request):
-            approved = False
+        approved = await self.resolve_permission_event(
+            request,
+            permission_resolver=permission_resolver,
+            auto_approve_permissions=auto_approve_permissions,
+        )
+        self._set_permission_metadata(request, envelope, approved=approved)
+        return approved
 
+    def _set_permission_metadata(
+        self,
+        request: PermissionRequestEvent,
+        envelope: dict[str, Any],
+        *,
+        approved: bool,
+    ) -> None:
         include_tool_input = A2AExposureType.TOOL_TRACE in self.exposure_types
         permission = envelope.setdefault("permission", {})
         permission.clear()
         permission.update(safe_permission_metadata(request, include_tool_input=include_tool_input))
         permission.update(_permission_approval_metadata(approved))
-        return approved
 
-    async def _enqueue_status(self, envelope: dict[str, Any]) -> None:
+    async def _enqueue_status(self, envelope: dict[str, Any], *, wait_for_transport: bool = False) -> None:
         task_id = self._delivery_task_id(envelope)
         context_id = self._delivery_context_id(envelope)
         update = TaskStatusUpdateEvent(
@@ -834,7 +1052,48 @@ class PipelineA2AEventPublisher:
             ),
         )
         ParseDict({"iac_code": {"pipeline": envelope}}, update.metadata)
-        await self.event_queue.enqueue_event(update)
+        await self._enqueue_transport_event(update, wait_for_transport=wait_for_transport)
+
+    async def _enqueue_status_batch(
+        self,
+        envelopes: list[dict[str, Any]],
+        *,
+        wait_for_transport: bool = False,
+    ) -> None:
+        final_envelope = envelopes[-1]
+        update = TaskStatusUpdateEvent(
+            task_id=self._delivery_task_id(final_envelope),
+            context_id=self._delivery_context_id(final_envelope),
+            status=TaskStatus(
+                state=_a2a_task_state_name(final_envelope),
+            ),
+        )
+        ParseDict(
+            {
+                "iac_code": {
+                    "pipelineBatch": _pipeline_batch_payload(envelopes),
+                }
+            },
+            update.metadata,
+        )
+        await self._enqueue_transport_event(update, wait_for_transport=wait_for_transport)
+
+    async def _enqueue_transport_event(self, event: Any, *, wait_for_transport: bool) -> None:
+        wait_for_transport = wait_for_transport or pipeline_transport_delivery_is_required()
+        if not wait_for_transport or not pipeline_transport_delivery_tracking_enabled():
+            await self.event_queue.enqueue_event(event)
+            return
+
+        stage_observer = self.flow_monitor.transport_stage_changed if self.flow_monitor is not None else None
+        completion = register_pipeline_transport_delivery(event, stage_observer=stage_observer)
+        try:
+            if completion.done():
+                await completion
+            await self.event_queue.enqueue_event(event)
+            mark_pipeline_transport_delivery_enqueued(event)
+            await asyncio.shield(completion)
+        finally:
+            discard_pipeline_transport_delivery(event)
 
     def _delivery_task_id(self, envelope: dict[str, Any]) -> str:
         return self.delivery_task_id or str(envelope["taskId"])
@@ -869,6 +1128,52 @@ def _unwrap_stream_event(event: Any) -> Any:
     while isinstance(event, SubPipelineStreamEvent):
         event = event.inner
     return event
+
+
+def _envelope_batches(envelopes: list[dict[str, Any]]) -> Iterator[list[dict[str, Any]]]:
+    batch: list[dict[str, Any]] = []
+    batch_size = _encoded_pipeline_batch_size([])
+    for envelope in envelopes:
+        envelope_size = _encoded_pipeline_envelope_size(envelope)
+        separator_size = 1 if batch else 0
+        candidate_size = batch_size + separator_size + envelope_size
+        if batch and (len(batch) >= OUTBOUND_HARD_MAX_BATCH_EVENTS or candidate_size > OUTBOUND_HARD_MAX_BATCH_BYTES):
+            yield batch
+            batch = []
+            batch_size = _encoded_pipeline_batch_size([])
+            candidate_size = batch_size + envelope_size
+        batch.append(envelope)
+        batch_size = candidate_size
+    if batch:
+        yield batch
+
+
+def _pipeline_batch_payload(envelopes: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schemaVersion": PIPELINE_METADATA_SCHEMA_VERSION,
+        "extensionUri": PIPELINE_EVENTS_EXTENSION_URI,
+        "events": envelopes,
+    }
+
+
+def _encoded_pipeline_batch_size(envelopes: list[dict[str, Any]]) -> int:
+    payload = json.dumps(
+        _pipeline_batch_payload(envelopes),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return len(payload)
+
+
+def _encoded_pipeline_envelope_size(envelope: dict[str, Any]) -> int:
+    payload = json.dumps(
+        envelope,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return len(payload)
 
 
 def _resolve_permission_future(request: PermissionRequestEvent, approved: bool) -> bool:

@@ -91,13 +91,13 @@ msgid ""
 msgstr "回滚清理仍在进行中。请在清理完成后继续。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid "Task is already working."
+msgstr "任务已在运行。"
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "任务已取消。"
-
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid "Task is already working."
-msgstr "任务已在运行。"
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -4443,6 +4443,11 @@ msgstr "会话备份需要受支持的 session layout。"
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format
+msgid "session source is not a directory: {source}"
+msgstr "会话源不是目录：{source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
 msgid "backup root must be an absolute directory: {path}"
 msgstr "备份根目录必须是绝对目录：{path}"
 
@@ -4490,11 +4495,6 @@ msgstr "{label} 的上级路径包含符号链接：{path}"
 #, python-brace-format
 msgid "session source is a symlink: {source}"
 msgstr "会话源目录是符号链接：{source}"
-
-#: src/iac_code/services/session_backup.py
-#, python-brace-format
-msgid "session source is not a directory: {source}"
-msgstr "会话源不是目录：{source}"
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format

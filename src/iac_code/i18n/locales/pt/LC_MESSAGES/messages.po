@@ -105,13 +105,13 @@ msgstr ""
 "terminar."
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid "Task is already working."
+msgstr "A tarefa já está em execução."
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "Tarefa cancelada."
-
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid "Task is already working."
-msgstr "A tarefa já está em execução."
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -4710,6 +4710,11 @@ msgstr "O backup da sessão requer um layout de sessão compatível."
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format
+msgid "session source is not a directory: {source}"
+msgstr "A origem da sessão não é um diretório: {source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
 msgid "backup root must be an absolute directory: {path}"
 msgstr "A raiz de backup deve ser um diretório absoluto: {path}"
 
@@ -4757,11 +4762,6 @@ msgstr "O caminho pai de {label} contém um link simbólico: {path}"
 #, python-brace-format
 msgid "session source is a symlink: {source}"
 msgstr "A origem da sessão é um link simbólico: {source}"
-
-#: src/iac_code/services/session_backup.py
-#, python-brace-format
-msgid "session source is not a directory: {source}"
-msgstr "A origem da sessão não é um diretório: {source}"
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format

@@ -11,12 +11,27 @@ import pytest
 from a2a.types import TaskArtifactUpdateEvent, TaskStatusUpdateEvent
 from google.protobuf.json_format import MessageToDict
 
+import iac_code.a2a.pipeline_stream as pipeline_stream
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
+from iac_code.a2a.pipeline_performance import A2A_EXTREME_PERFORMANCE_ENV
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
-from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, is_recovery_semantic_event
+from iac_code.a2a.pipeline_stream import (
+    PipelineA2AEventPublisher,
+    PipelineA2APersistenceError,
+    is_recovery_semantic_event,
+)
+from iac_code.a2a.pipeline_transport_delivery import (
+    PipelineTransportDeliveryClosedError,
+    acknowledge_pipeline_transport_delivery,
+    bind_pipeline_transport_delivery_tracker,
+    close_pipeline_transport_delivery_tracker,
+    create_pipeline_transport_delivery_tracker,
+    pipeline_transport_delivery_required,
+    pipeline_transport_delivery_tracking,
+)
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.types.permissions import PermissionAuditMetadata
@@ -92,6 +107,24 @@ def _envelope(event_type: str, status: str = "working") -> dict[str, Any]:
         "status": status,
         "data": {},
     }
+
+
+def _encoded_envelope_size(envelope: dict[str, Any]) -> int:
+    return len(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _encoded_pipeline_batch_size(envelopes: list[dict[str, Any]]) -> int:
+    return len(
+        json.dumps(
+            {
+                "schemaVersion": "1.0",
+                "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+                "events": envelopes,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
 
 
 def test_pipeline_warning_is_recovery_semantic() -> None:
@@ -279,6 +312,216 @@ async def test_publish_thinking_delta_writes_pipeline_metadata_when_exposed(tmp_
 
 
 @pytest.mark.asyncio
+async def test_publish_batch_persists_each_delta_but_enqueues_once(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    await publisher.publish_batch([TextDeltaEvent(text="a"), TextDeltaEvent(text="b")])
+
+    payload = dump(queue.events[0])["metadata"]["iac_code"]["pipelineBatch"]
+    assert payload["schemaVersion"] == "1.0"
+    assert payload["extensionUri"] == "urn:iac-code:a2a:pipeline-events:v1"
+    assert [event["data"]["text"] for event in payload["events"]] == ["a", "b"]
+    assert [event["data"]["text"] for event in publisher.journal.read_all()] == ["a", "b"]
+    assert [event["sequence"] for event in publisher.journal.read_all()] == [1, 2]
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert snapshot["display"]["messages"][0]["text"] == "ab"
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_mixes_adjacent_exposed_thinking_and_text_deltas(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path, exposure_types=[A2AExposureType.RAW_THINKING])
+
+    await publisher.publish_batch([ThinkingDeltaEvent(text="reasoning"), TextDeltaEvent(text="answer")])
+
+    envelopes = dump(queue.events[0])["metadata"]["iac_code"]["pipelineBatch"]["events"]
+    assert [envelope["eventType"] for envelope in envelopes] == ["thinking_delta", "text_delta"]
+    assert [envelope["sequence"] for envelope in envelopes] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_extreme_mode_defers_delta_sidecar_persistence_until_semantic_flush(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(A2A_EXTREME_PERFORMANCE_ENV, raising=False)
+    publisher, queue = _publisher(tmp_path)
+
+    await publisher.publish_batch([TextDeltaEvent(text="a"), TextDeltaEvent(text="b")])
+
+    assert len(queue.events) == 1
+    assert publisher.journal.read_all() == []
+    assert publisher.snapshot_store.load() is None
+
+    await publisher.publish_manual("pipeline_warning", "pipeline", data={"message": "flush"})
+
+    assert [event["eventType"] for event in publisher.journal.read_all()] == [
+        "text_delta",
+        "text_delta",
+        "pipeline_warning",
+    ]
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert snapshot["display"]["messages"][0]["text"] == "ab"
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_holds_delivery_lock_while_before_enqueue_waits(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    hook_started = asyncio.Event()
+    release_hook = asyncio.Event()
+
+    async def before_enqueue(envelope: dict[str, Any]) -> bool:
+        if envelope.get("data", {}).get("text") == "a":
+            hook_started.set()
+            await release_hook.wait()
+        return True
+
+    publisher.before_enqueue = before_enqueue
+    batch = asyncio.create_task(publisher.publish_batch([TextDeltaEvent(text="a"), TextDeltaEvent(text="b")]))
+    await asyncio.wait_for(hook_started.wait(), timeout=1)
+    concurrent = asyncio.create_task(publisher.publish(TextDeltaEvent(text="c")))
+    await asyncio.sleep(0.05)
+
+    assert queue.events == []
+    assert not concurrent.done()
+
+    release_hook.set()
+    await asyncio.wait_for(asyncio.gather(batch, concurrent), timeout=1)
+
+    first = dump(queue.events[0])["metadata"]["iac_code"]["pipelineBatch"]["events"]
+    second = dump(queue.events[1])["metadata"]["iac_code"]["pipeline"]
+    assert [envelope["data"]["text"] for envelope in first] == ["a", "b"]
+    assert second["data"]["text"] == "c"
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_translates_nested_sub_pipeline_delta_events(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    event = SubPipelineStreamEvent(
+        sub_pipeline_id="outer",
+        candidate_index=1,
+        inner=SubPipelineStreamEvent(
+            sub_pipeline_id="inner",
+            candidate_index=0,
+            inner=TextDeltaEvent(text="hello"),
+        ),
+    )
+
+    await publisher.publish_batch([event, TextDeltaEvent(text=" world")])
+
+    events = dump(queue.events[0])["metadata"]["iac_code"]["pipelineBatch"]["events"]
+    assert events[0]["candidate"]["id"] == "inner"
+    assert [event["data"]["text"] for event in publisher.journal.read_all()] == ["hello", " world"]
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert [message["text"] for message in snapshot["display"]["messages"]] == ["hello", " world"]
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_filters_hidden_thinking_deltas(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path, exposure_types=[])
+
+    await publisher.publish_batch([ThinkingDeltaEvent(text="hidden"), TextDeltaEvent(text="visible")])
+
+    envelope = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]
+    assert envelope["data"]["text"] == "visible"
+    assert [event["data"]["text"] for event in publisher.journal.read_all()] == ["visible"]
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_uses_legacy_metadata_for_one_persisted_envelope(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    await publisher.publish_batch([TextDeltaEvent(text="only")])
+
+    metadata = dump(queue.events[0])["metadata"]["iac_code"]
+    assert metadata["pipeline"]["data"]["text"] == "only"
+    assert "pipelineBatch" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_splits_persisted_envelopes_by_count_and_encoded_size(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_EVENTS", 2)
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_BYTES", 10_000)
+
+    await publisher.publish_batch([TextDeltaEvent(text="a"), TextDeltaEvent(text="b"), TextDeltaEvent(text="c")])
+
+    count_chunks = [dump(event)["metadata"]["iac_code"] for event in queue.events]
+    assert [envelope["data"]["text"] for envelope in count_chunks[0]["pipelineBatch"]["events"]] == ["a", "b"]
+    assert count_chunks[1]["pipeline"]["data"]["text"] == "c"
+
+    publisher, queue = _publisher(tmp_path / "bytes")
+    first = await publisher.persist_envelope(publisher.translator.translate(TextDeltaEvent(text="a"))[0])
+    assert first is not None
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_EVENTS", 64)
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_BYTES", _encoded_envelope_size(first) * 2 - 1)
+
+    frame_count = await publisher.enqueue_persisted_batch(
+        await publisher.persist_batch_events([TextDeltaEvent(text="b"), TextDeltaEvent(text="c")])
+    )
+
+    assert [dump(event)["metadata"]["iac_code"]["pipeline"]["data"]["text"] for event in queue.events] == ["b", "c"]
+    assert frame_count == 2
+
+
+def test_envelope_batch_size_is_computed_once_per_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    envelopes = [_envelope(f"event-{index}") for index in range(130)]
+    original = pipeline_stream._encoded_pipeline_envelope_size
+    calls = 0
+
+    def count_size(envelope: dict[str, Any]) -> int:
+        nonlocal calls
+        calls += 1
+        return original(envelope)
+
+    monkeypatch.setattr(pipeline_stream, "_encoded_pipeline_envelope_size", count_size)
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_EVENTS", 64)
+
+    batches = list(pipeline_stream._envelope_batches(envelopes))
+
+    assert [len(batch) for batch in batches] == [64, 64, 2]
+    assert calls == len(envelopes)
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_counts_pipeline_batch_wrapper_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+    first = publisher.translator.translate(TextDeltaEvent(text="a"))[0]
+    second = publisher.translator.translate(TextDeltaEvent(text="b"))[0]
+    envelope_bytes = _encoded_envelope_size(first) + _encoded_envelope_size(second)
+    assert _encoded_pipeline_batch_size([first, second]) > envelope_bytes
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_EVENTS", 64)
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_BYTES", envelope_bytes)
+
+    await publisher.publish_batch([TextDeltaEvent(text="a"), TextDeltaEvent(text="b")])
+
+    assert [dump(event)["metadata"]["iac_code"]["pipeline"]["data"]["text"] for event in queue.events] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_publish_batch_uses_legacy_delivery_for_one_oversized_envelope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+    monkeypatch.setattr(pipeline_stream, "OUTBOUND_HARD_MAX_BATCH_BYTES", 1)
+
+    await publisher.publish_batch([TextDeltaEvent(text="oversized")])
+
+    metadata = dump(queue.events[0])["metadata"]["iac_code"]
+    assert metadata["pipeline"]["data"]["text"] == "oversized"
+    assert "pipelineBatch" not in metadata
+
+
+@pytest.mark.asyncio
 async def test_publish_top_level_candidate_detail_updates_metadata_and_snapshot(tmp_path: Path) -> None:
     publisher, queue = _publisher(tmp_path)
     await publisher.publish(
@@ -439,6 +682,72 @@ async def test_publish_direct_permission_resolver_overrides_auto_approve(tmp_pat
     assert permission["approved"] is False
     assert permission["decision"] == "deny"
     assert permission["toolUseId"] == "toolu-direct"
+
+
+@pytest.mark.asyncio
+async def test_prepared_permission_resolves_only_after_transport_consumes_frame(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+    event = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": "pwd"},
+        tool_use_id="toolu-prepared",
+        response_future=future,
+    )
+
+    approved = await publisher.resolve_permission_event(event, auto_approve_permissions=True)
+    prepared = await publisher.prepare_permission_event(event, approved=approved, resolver_used=False)
+    with pipeline_transport_delivery_tracking():
+        delivery = asyncio.create_task(publisher.enqueue_prepared_permission(prepared))
+        while not queue.events:
+            await asyncio.sleep(0)
+
+        assert future.done() is False
+        assert delivery.done() is False
+        await asyncio.sleep(0.12)
+        assert delivery.done() is False
+        acknowledge_pipeline_transport_delivery(queue.events[0])
+        delivered = await delivery
+    publisher.complete_prepared_permission(prepared, delivered=delivered)
+
+    assert future.result() is True
+    permission = dump(queue.events[0])["metadata"]["iac_code"]["pipeline"]["permission"]
+    assert permission["toolUseId"] == "toolu-prepared"
+
+
+@pytest.mark.asyncio
+async def test_direct_publication_waits_for_transport_inside_outbound_callback_scope(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    with pipeline_transport_delivery_tracking(), pipeline_transport_delivery_required():
+        delivery = asyncio.create_task(publisher.publish(TextDeltaEvent(text="callback")))
+        while not queue.events:
+            await asyncio.sleep(0)
+
+        assert delivery.done() is False
+        acknowledge_pipeline_transport_delivery(queue.events[0])
+        assert await delivery == "callback"
+
+
+@pytest.mark.asyncio
+async def test_inherited_closed_transport_tracker_rejects_later_publication(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    tracker = create_pipeline_transport_delivery_tracker()
+    release = asyncio.Event()
+
+    async def publish_later() -> str | None:
+        await release.wait()
+        with pipeline_transport_delivery_required():
+            return await publisher.publish(TextDeltaEvent(text="after-disconnect"))
+
+    with bind_pipeline_transport_delivery_tracker(tracker):
+        publication = asyncio.create_task(publish_later())
+    close_pipeline_transport_delivery_tracker(tracker)
+    release.set()
+
+    with pytest.raises(PipelineTransportDeliveryClosedError):
+        await publication
+    assert queue.events == []
 
 
 @pytest.mark.asyncio
@@ -706,6 +1015,58 @@ async def test_publish_tool_result_externalizes_artifact_and_updates_snapshot(tm
         rendered = str(value)
         assert "file://" not in rendered
         assert str(tmp_path) not in rendered
+
+
+@pytest.mark.asyncio
+async def test_batch_persistence_externalizes_tool_artifact_without_losing_mixed_events(tmp_path: Path) -> None:
+    store = A2AArtifactStore(tmp_path / "artifacts")
+    publisher, queue = _publisher(tmp_path, artifact_store=store, exposure_types=[A2AExposureType.TOOL_TRACE])
+    persisted = await publisher.persist_batch_events(
+        [
+            TextDeltaEvent(text="before"),
+            ToolResultEvent(
+                tool_use_id="toolu-write",
+                tool_name="write_file",
+                result={"artifact": {"filename": "template.yaml", "content": "ROSTemplate"}},
+            ),
+            TextDeltaEvent(text="after"),
+        ]
+    )
+
+    await publisher.enqueue_persisted_batch(persisted)
+
+    assert any(isinstance(event, TaskArtifactUpdateEvent) for event in queue.events)
+    status_envelopes = [
+        envelope
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        for envelope in (
+            dump(event)["metadata"]["iac_code"]["pipelineBatch"]["events"]
+            if "pipelineBatch" in dump(event)["metadata"]["iac_code"]
+            else [dump(event)["metadata"]["iac_code"]["pipeline"]]
+        )
+    ]
+    assert [envelope["eventType"] for envelope in status_envelopes] == [
+        "text_delta",
+        "artifact_created",
+        "text_delta",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_persistence_failure_is_explicit_instead_of_dropping_event(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+
+    def fail_read_all() -> list[dict[str, Any]]:
+        raise OSError("read failed")
+
+    publisher.journal.read_all_repairing_tail = fail_read_all  # type: ignore[method-assign]
+
+    with pytest.raises(PipelineA2APersistenceError):
+        await publisher.persist_batch_events([TextDeltaEvent(text="must-not-drop")])
+
+    assert queue.events == []
+    assert "ROSTemplate" not in str(queue.events)
 
 
 @pytest.mark.asyncio

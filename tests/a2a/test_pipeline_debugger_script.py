@@ -43,6 +43,35 @@ def load_debugger_module():
     return module
 
 
+def test_extract_pipeline_envelopes_expands_batch_in_order() -> None:
+    debugger = load_debugger_module()
+    payload = {
+        "result": {
+            "statusUpdate": {
+                "eventType": "status_update",
+                "metadata": {
+                    "iac_code": {
+                        "pipelineBatch": {
+                            "events": [
+                                {"eventType": "text_delta", "sequence": 10, "data": {"text": "first"}},
+                                {"eventType": "text_delta", "sequence": 11, "data": {"text": "second"}},
+                            ]
+                        }
+                    }
+                },
+            }
+        }
+    }
+
+    envelopes = debugger._extract_pipeline_envelopes(payload)
+
+    assert [(item["sequence"], item["data"]["text"]) for item in envelopes] == [
+        (10, "first"),
+        (11, "second"),
+    ]
+    assert debugger._extract_pipeline_envelope(payload) is envelopes[0]
+
+
 class JsonTargetHandler(BaseHTTPRequestHandler):
     response_status = 200
     response_body: dict[str, Any] = {"ok": True}
@@ -498,6 +527,87 @@ def test_index_html_embedded_script_is_valid_javascript(tmp_path: Path) -> None:
 
     try:
         result = subprocess.run(["node", "--check", str(script_path)], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        pytest.skip("node is not installed")
+
+    assert result.returncode == 0, result.stderr
+    assert "function pipelineEventDedupKeys" in script
+    assert "events.flatMap((event) => expandPipelineBatchRawItem(event)).forEach" in script
+    assert "envelopes.forEach((envelope) => appendExecutionTreeEvent(envelope))" in script
+
+
+def test_index_html_deduplicates_partially_overlapping_pipeline_batches(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+    html = debugger.render_index_html(
+        debugger.DebuggerConfig(
+            host="127.0.0.1",
+            port=41880,
+            default_server_url="http://127.0.0.1:41299",
+            default_cwd="/workspace/demo",
+        )
+    )
+    script = html[html.index("<script>") + len("<script>") : html.rindex("</script>")]
+
+    def extract_function(name: str) -> str:
+        start = script.index(f"function {name}")
+        brace = script.index("{", start)
+        depth = 0
+        for index in range(brace, len(script)):
+            char = script[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return script[start : index + 1]
+        raise AssertionError(f"Could not extract {name}")
+
+    functions = [
+        extract_function(name)
+        for name in (
+            "pipelineFromMetadata",
+            "pipelineBatchFromMetadata",
+            "extractPipelineEnvelopes",
+            "rawItemValue",
+            "rawItemWithValue",
+            "pipelineEventDedupKeyForEnvelope",
+            "pipelineEnvelopesFromRawItem",
+            "dedupeRawSseEvents",
+            "appendRawEvent",
+        )
+    ]
+    js_path = tmp_path / "debugger-batch-dedup.js"
+    js_path.write_text(
+        "\n".join(
+            [
+                (
+                    'const state = {taskId: "", contextId: "", rawPipelineEventKeys: new Set(), '
+                    "raw: {snapshot: null, requests: [], sse: []}};"
+                ),
+                "function renderRaw() {}",
+                *functions,
+                'const eventA = {eventId: "A", eventType: "text_delta", sequence: 1};',
+                'const eventB = {eventId: "B", eventType: "text_delta", sequence: 2};',
+                "const wrap = (events) => ({value: {metadata: {iac_code: {pipelineBatch: {events}}}}});",
+                "const rows = dedupeRawSseEvents([wrap([eventA]), wrap([eventA, eventB])]);",
+                'if (rows.length !== 2) throw new Error("unexpected row count");',
+                "const remaining = pipelineEnvelopesFromRawItem(rows[1]);",
+                'if (remaining.length !== 1 || remaining[0].eventId !== "B") {',
+                '  throw new Error("partial overlap was not filtered");',
+                "}",
+                'state.rawPipelineEventKeys.add("event:A");',
+                'const liveRow = appendRawEvent("sse", wrap([eventA, eventB]).value);',
+                "const liveRemaining = pipelineEnvelopesFromRawItem(liveRow);",
+                'if (liveRemaining.length !== 1 || liveRemaining[0].eventId !== "B") {',
+                '  throw new Error("live partial overlap was not filtered");',
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        result = subprocess.run(["node", str(js_path)], capture_output=True, text=True, check=False)
     except FileNotFoundError:
         pytest.skip("node is not installed")
 
@@ -1078,9 +1188,11 @@ def test_index_html_deduplicates_pipeline_events_across_overlapping_streams() ->
         "dedupeRawSseEvents",
         "rawPipelineEventKeys: new Set()",
         "applyPipelineEvent(event)",
-        "applyPipelineEvent(parsed, rawRow, {alreadyRecorded: true})",
+        "applyPipelineEvent(rawItemValue(rawRow), rawRow, {alreadyRecorded: true})",
         "if (!options.alreadyRecorded && !rememberPipelineEvent(payload))",
-        "if (dedupKey && state.rawPipelineEventKeys.has(dedupKey))",
+        "const unseenEnvelopes = envelopes.filter",
+        "rawItemWithValue(row",
+        "pipelineEventDedupKeys(row).forEach",
         "state.raw.sse = dedupeRawSseEvents(restoredSseEvents);",
         "resetPipelineEventDedup();",
     ]:
@@ -1484,6 +1596,47 @@ def test_index_html_can_restore_debugger_log_replay_payload(tmp_path: Path) -> N
     assert {"taskId": "task-active", "contextId": "ctx-1", "state": "working", "role": "active"} in replay[
         "taskHistory"
     ]
+
+
+def test_load_log_dir_replays_every_pipeline_batch_envelope(tmp_path: Path) -> None:
+    debugger = load_debugger_module()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    batch = {
+        "metadata": {
+            "iac_code": {
+                "pipelineBatch": {
+                    "events": [
+                        {
+                            "eventId": "event-10",
+                            "eventType": "text_delta",
+                            "sequence": 10,
+                            "taskId": "task-pipeline",
+                            "contextId": "ctx-1",
+                            "status": "working",
+                        },
+                        {
+                            "eventId": "event-11",
+                            "eventType": "text_delta",
+                            "sequence": 11,
+                            "taskId": "task-pipeline",
+                            "contextId": "ctx-1",
+                            "status": "working",
+                        },
+                    ]
+                }
+            }
+        }
+    }
+    (log_dir / "sse-events.jsonl").write_text(
+        json.dumps({"raw": batch}) + "\n",
+        encoding="utf-8",
+    )
+
+    replay = debugger.load_debug_log_export(log_dir)
+
+    assert replay["task"]["taskId"] == "task-pipeline"
+    assert replay["task"]["lastSequence"] == 11
 
 
 def test_load_log_dir_replays_state_fetch_cancel_handoff_events(tmp_path: Path) -> None:

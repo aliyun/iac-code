@@ -4898,6 +4898,45 @@ return {
     }
 
 
+def test_reducer_applies_pipeline_batch_events_in_order() -> None:
+    output = reducer_harness(
+        """
+const state = reducers.createInitialState();
+state.currentStepId = "architecture_planning";
+state.steps.architecture_planning.status = "working";
+const next = reducers.reducePipelinePayload(state, {
+  metadata: {iac_code: {pipelineBatch: {events: [
+    {
+      eventType: "text_delta",
+      sequence: 10,
+      taskId: "task-1",
+      contextId: "ctx-1",
+      step: {id: "architecture_planning"},
+      data: {text: "first"}
+    },
+    {
+      eventType: "text_delta",
+      sequence: 11,
+      taskId: "task-1",
+      contextId: "ctx-1",
+      step: {id: "architecture_planning"},
+      data: {text: "second"}
+    }
+  ]}}}
+});
+return {
+  lastSequence: next.lastSequence,
+  texts: next.steps.architecture_planning.events.map((event) => event.data.text)
+};
+"""
+    )
+
+    assert output == {
+        "lastSequence": 11,
+        "texts": ["first", "second"],
+    }
+
+
 def test_reducer_clears_active_task_on_normal_handoff() -> None:
     output = reducer_harness(
         """

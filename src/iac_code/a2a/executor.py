@@ -992,12 +992,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                     context_execution_token, active_pipeline_owner = reservation
             if context_execution_token is None:
                 try:
-                    context_execution_token, _reconcile_result = (
-                        await self._task_store.begin_context_execution_after_reconciliation(
-                            context_id,
-                            lambda: self._reconcile_session_before_route_locked(context_id=context_id, cwd=cwd),
-                            wait_timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS,
-                        )
+                    (
+                        context_execution_token,
+                        _reconcile_result,
+                    ) = await self._task_store.begin_context_execution_after_reconciliation(
+                        context_id,
+                        lambda: self._reconcile_session_before_route_locked(context_id=context_id, cwd=cwd),
+                        wait_timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS,
                     )
                 except TimeoutError as exc:
                     raise ValueError(_("Task is already working.")) from exc

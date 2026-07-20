@@ -182,9 +182,7 @@ async def test_reconciliation_waiter_does_not_block_active_pipeline_followup() -
     )
     await asyncio.sleep(0)
 
-    fast_followup = asyncio.create_task(
-        store.begin_context_execution_if_task_active("ctx-1", "task-active")
-    )
+    fast_followup = asyncio.create_task(store.begin_context_execution_if_task_active("ctx-1", "task-active"))
     reservation = await asyncio.wait_for(fast_followup, timeout=0.1)
 
     assert reservation is not None

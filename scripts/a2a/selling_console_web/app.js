@@ -249,6 +249,18 @@
     return null;
   }
 
+  function pipelineBatchFromMetadata(metadata) {
+    if (!metadata || typeof metadata !== "object") {
+      return [];
+    }
+    const iacCode = metadata.iac_code || metadata.iacCode || metadata["iac-code"];
+    if (!iacCode || typeof iacCode !== "object") {
+      return [];
+    }
+    const batch = iacCode.pipelineBatch || iacCode.pipeline_batch;
+    return batch && Array.isArray(batch.events) ? batch.events.filter((event) => event && typeof event === "object") : [];
+  }
+
   function valueOf(source, ...keys) {
     if (!source || typeof source !== "object") {
       return undefined;
@@ -297,38 +309,42 @@
     }
   }
 
-  function extractPipelineEnvelope(payload) {
+  function extractPipelineEnvelopes(payload) {
     if (!payload || typeof payload !== "object") {
-      return null;
+      return [];
     }
     if (Array.isArray(payload)) {
-      for (const item of payload) {
-        const envelope = extractPipelineEnvelope(item);
-        if (envelope) {
-          return envelope;
-        }
-      }
-      return null;
+      return payload.flatMap((item) => extractPipelineEnvelopes(item));
+    }
+
+    const metadataBatch = pipelineBatchFromMetadata(payload.metadata);
+    if (metadataBatch.length) {
+      return metadataBatch;
+    }
+    const directIacCode = payload.iac_code || payload.iacCode || payload["iac-code"];
+    const directBatch = directIacCode && (directIacCode.pipelineBatch || directIacCode.pipeline_batch);
+    if (directBatch && Array.isArray(directBatch.events)) {
+      return directBatch.events.filter((event) => event && typeof event === "object");
     }
 
     const metadataPipeline = pipelineFromMetadata(payload.metadata);
     if (metadataPipeline) {
-      return metadataPipeline;
+      return [metadataPipeline];
     }
     if (payload.iac_code && payload.iac_code.pipeline) {
-      return payload.iac_code.pipeline;
+      return [payload.iac_code.pipeline];
     }
     if (payload.iacCode && payload.iacCode.pipeline) {
-      return payload.iacCode.pipeline;
+      return [payload.iacCode.pipeline];
     }
     if (payload["iac-code"] && payload["iac-code"].pipeline) {
-      return payload["iac-code"].pipeline;
+      return [payload["iac-code"].pipeline];
     }
     if (payload.pipeline || payload.pipelineEvent || payload.pipelineSnapshot) {
-      return payload.pipeline || payload.pipelineEvent || payload.pipelineSnapshot;
+      return [payload.pipeline || payload.pipelineEvent || payload.pipelineSnapshot];
     }
     if (eventTypeOf(payload) || taskIdOf(payload) || contextIdOf(payload) || payload.step) {
-      return payload;
+      return [payload];
     }
 
     const wrapperKeys = [
@@ -345,13 +361,17 @@
     ];
     for (const key of wrapperKeys) {
       if (payload[key] && typeof payload[key] === "object") {
-        const envelope = extractPipelineEnvelope(payload[key]);
-        if (envelope) {
-          return envelope;
+        const envelopes = extractPipelineEnvelopes(payload[key]);
+        if (envelopes.length) {
+          return envelopes;
         }
       }
     }
-    return null;
+    return [];
+  }
+
+  function extractPipelineEnvelope(payload) {
+    return extractPipelineEnvelopes(payload)[0] || null;
   }
 
   function normalizeStatus(status) {
@@ -1008,16 +1028,14 @@
   function reducePipelinePayload(state, payload) {
     const nextState = cloneState(state);
     const hasEvents = payload && Array.isArray(payload.events);
-    applyPipelineEnvelope(nextState, hasEvents ? null : extractPipelineEnvelope(payload));
+    const envelopes = hasEvents
+      ? payload.events.flatMap((event) => extractPipelineEnvelopes(event))
+      : extractPipelineEnvelopes(payload);
+    envelopes.forEach((envelope) => applyPipelineEnvelope(nextState, envelope));
     if (payload && payload.snapshot) {
       applySnapshot(nextState, payload.snapshot);
     } else if (isSnapshotLike(payload)) {
       applySnapshot(nextState, payload);
-    }
-    if (payload && Array.isArray(payload.events)) {
-      payload.events.forEach((event) => {
-        applyPipelineEnvelope(nextState, extractPipelineEnvelope(event));
-      });
     }
     applyNormalChatPayload(nextState, payload);
     return nextState;
@@ -1405,6 +1423,7 @@
     STEP_LABELS,
     createInitialState,
     extractPipelineEnvelope,
+    extractPipelineEnvelopes,
     normalizeStepId,
     upsertCandidate,
     reducePipelinePayload,

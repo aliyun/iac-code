@@ -106,13 +106,13 @@ msgstr ""
 "nettoyage terminé."
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
+msgid "Task is already working."
+msgstr "La tâche est déjà en cours."
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "Tâche annulée."
-
-#: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-msgid "Task is already working."
-msgstr "La tâche est déjà en cours."
 
 #: src/iac_code/a2a/executor.py
 #, python-brace-format
@@ -4754,6 +4754,11 @@ msgstr "La sauvegarde de session nécessite un layout de session pris en charge.
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format
+msgid "session source is not a directory: {source}"
+msgstr "La source de session n’est pas un répertoire : {source}"
+
+#: src/iac_code/services/session_backup.py
+#, python-brace-format
 msgid "backup root must be an absolute directory: {path}"
 msgstr "La racine de sauvegarde doit être un répertoire absolu : {path}"
 
@@ -4813,11 +4818,6 @@ msgstr "Les répertoires parents de {label} contiennent un lien symbolique : {pa
 #, python-brace-format
 msgid "session source is a symlink: {source}"
 msgstr "La source de session est un lien symbolique : {source}"
-
-#: src/iac_code/services/session_backup.py
-#, python-brace-format
-msgid "session source is not a directory: {source}"
-msgstr "La source de session n’est pas un répertoire : {source}"
 
 #: src/iac_code/services/session_backup.py
 #, python-brace-format
