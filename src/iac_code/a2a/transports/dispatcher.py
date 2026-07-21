@@ -434,12 +434,14 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
         await self._hydrate_recoverable_pipeline_task_id(params)
+        await self._reconcile_recoverable_pipeline_task(params, context)
         return await super().on_message_send(params, context)
 
     async def on_message_send_stream(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
         await self._hydrate_recoverable_pipeline_task_id(params)
+        await self._reconcile_recoverable_pipeline_task(params, context)
         task_id = params.message.task_id or None
         if task_id and isinstance(self.task_store, A2ATaskStore) and await self.task_store.is_task_active(task_id):
             task = await self.task_store.get(task_id, context)
@@ -557,6 +559,47 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             return
         if task_id:
             message.task_id = task_id
+
+    async def _reconcile_recoverable_pipeline_task(self, params: SendMessageRequest, context) -> None:
+        if get_run_mode() is not RunMode.PIPELINE or not isinstance(self.task_store, A2ATaskStore):
+            return
+        message = getattr(params, "message", None)
+        if message is None:
+            return
+        task_id = getattr(message, "task_id", None)
+        if not isinstance(task_id, str) or not task_id:
+            return
+        try:
+            task = await self.task_store.get(task_id, context)
+        except Exception:
+            logger.debug("Failed to load A2A task %s before pipeline reconciliation", task_id, exc_info=True)
+            return
+        if task is None or task.status.state not in TERMINAL_TASK_STATES:
+            return
+
+        context_id = getattr(message, "context_id", None) or getattr(task, "context_id", None)
+        if not isinstance(context_id, str) or not context_id:
+            return
+        try:
+            context_record = await self.task_store.get_context_record(context_id)
+            recoverable_task_id = recoverable_task_id_from_sidecar(
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                context_id=context_id,
+            )
+        except Exception:
+            logger.debug("Failed to inspect recoverable A2A pipeline task %s", task_id, exc_info=True)
+            return
+        if recoverable_task_id != task_id:
+            return
+
+        task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
+        task.status.timestamp.GetCurrentTime()
+        await self.task_store.save(task, context)
+        if context_record.active_task_id == task_id:
+            context_record.active_task_id = None
+            context_record.touch()
+            self.task_store.mirror_context(context_record)
 
     async def _wait_for_active_message_events(self, active_task) -> None:
         event_queue_agent = getattr(active_task, "_event_queue_agent", None)

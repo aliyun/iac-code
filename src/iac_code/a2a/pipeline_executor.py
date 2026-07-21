@@ -324,23 +324,39 @@ class IacCodeA2APipelineExecutor:
             ctx.lock = asyncio.Lock()
 
         if ctx.active_task_id is not None:
-            preserve_active_task = _is_active_task_record(task, ctx.active_task_id)
-            if _is_active_task_request(task, task_id, ctx.active_task_id):
-                with self._request_context(session_id=ctx.session_id):
-                    self._configure_runtime_for_request(ctx.runtime)
-                    routed = await self._route_active_pipeline_interrupt(
+            self._clear_stale_recoverable_active_task(
+                task=task,
+                ctx=ctx,
+                task_id=task_id,
+                context_id=context_id,
+                cwd=cwd,
+            )
+            if ctx.active_task_id is not None:
+                preserve_active_task = _is_active_task_record(task, ctx.active_task_id)
+                if _is_active_task_request(task, task_id, ctx.active_task_id):
+                    with self._request_context(session_id=ctx.session_id):
+                        self._configure_runtime_for_request(ctx.runtime)
+                        routed = await self._route_active_pipeline_interrupt(
+                            event_queue,
+                            task=task,
+                            ctx=ctx,
+                            task_id=task_id,
+                            context_id=context_id,
+                            cwd=cwd,
+                            pipeline_input=pipeline_input,
+                            preserve_task_record=preserve_active_task,
+                        )
+                    if routed:
+                        return True
+                if active_followup_only:
+                    await self._fail_already_active(
                         event_queue,
                         task=task,
-                        ctx=ctx,
                         task_id=task_id,
                         context_id=context_id,
-                        cwd=cwd,
-                        pipeline_input=pipeline_input,
                         preserve_task_record=preserve_active_task,
                     )
-                if routed:
                     return True
-            if active_followup_only:
                 await self._fail_already_active(
                     event_queue,
                     task=task,
@@ -348,15 +364,7 @@ class IacCodeA2APipelineExecutor:
                     context_id=context_id,
                     preserve_task_record=preserve_active_task,
                 )
-                return True
-            await self._fail_already_active(
-                event_queue,
-                task=task,
-                task_id=task_id,
-                context_id=context_id,
-                preserve_task_record=preserve_active_task,
-            )
-            return
+                return
 
         if active_followup_only:
             return False
@@ -679,6 +687,34 @@ class IacCodeA2APipelineExecutor:
         return A2APipelineRuntime(
             agent_runtime=create_agent_runtime(AgentFactoryOptions(model=self._model, session_id=session_id, cwd=cwd)),
         )
+
+    def _clear_stale_recoverable_active_task(
+        self,
+        *,
+        task: Any,
+        ctx: Any,
+        task_id: str,
+        context_id: str,
+        cwd: str,
+    ) -> bool:
+        if not _is_active_task_request(task, task_id, getattr(ctx, "active_task_id", None)):
+            return False
+        if _task_has_live_owner(task):
+            return False
+        try:
+            recoverable_task_id = recoverable_task_id_from_sidecar(
+                cwd=cwd,
+                session_id=ctx.session_id,
+                context_id=context_id,
+            )
+        except Exception:
+            return False
+        if recoverable_task_id != task_id:
+            return False
+        ctx.active_task_id = None
+        ctx.touch()
+        self._task_store.mirror_context(ctx)
+        return True
 
     async def _route_active_pipeline_interrupt(
         self,
@@ -1760,6 +1796,7 @@ class IacCodeA2APipelineExecutor:
             task_snapshot = copy.copy(task)
             task_snapshot.state = state
             context_snapshot = copy.copy(ctx)
+            context_snapshot.active_task_id = None
             self._task_store.mirror_task(task_snapshot)
             self._task_store.mirror_context(context_snapshot)
             return
@@ -3989,6 +4026,11 @@ def _is_active_task_record(task: Any, active_task_id: str | None) -> bool:
 
 def _is_active_task_request(task: Any, task_id: str, active_task_id: str | None) -> bool:
     return _is_active_task_record(task, active_task_id) and task_id == active_task_id
+
+
+def _task_has_live_owner(task: Any) -> bool:
+    active_task = getattr(task, "active_task", None)
+    return active_task is not None and not active_task.done()
 
 
 def _pipeline_sidecar_dir(pipeline: Any, cwd: str, session_id: str) -> Path:

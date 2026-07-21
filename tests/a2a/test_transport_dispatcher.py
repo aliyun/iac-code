@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -9,6 +10,8 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.types import SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
+from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.pipeline_transport_delivery import (
     PipelineTransportDeliveryClosedError,
     bind_pipeline_transport_delivery_tracker,
@@ -26,6 +29,7 @@ from iac_code.a2a.transports.dispatcher import (
     create_runtime_components,
 )
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent
 
 from .fakes import FakeAgentLoop, FakeRuntime
@@ -117,6 +121,85 @@ async def test_dispatcher_stream_yields_events(monkeypatch, tmp_path) -> None:
     assert any(event["result"]["status"]["state"] == "working" for event in events)
     assert events[-1]["result"]["status"]["state"] == "input-required"
     await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting_input(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    context_id = "ctx-1"
+    task_id = "task-1"
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    ctx = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    ctx.active_task_id = task_id
+    store.mirror_context(ctx)
+    await store.save(
+        Task(
+            id=task_id,
+            context_id=context_id,
+            status=TaskStatus(state=TaskState.TASK_STATE_FAILED),
+        ),
+        call_context,
+    )
+
+    pending_input = {
+        "inputId": "input-confirm_and_select-1",
+        "kind": "candidate_selection",
+        "prompt": "请选择方案",
+        "options": [{"name": "方案A", "candidate_index": 0}],
+    }
+    pending_event = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-06-08T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": context_id,
+        "taskId": task_id,
+        "contextId": context_id,
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-confirm_and_select-1", "id": "confirm_and_select", "attempt": 1},
+        "input": pending_input,
+        "data": pending_input,
+    }
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=ctx.session_id)
+    A2APipelineJournal(pipeline_dir).append(pending_event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_event]))
+    observed: dict[str, int] = {}
+
+    async def sdk_send(_handler, _params, sdk_context):
+        task = await store.get(task_id, sdk_context)
+        assert task is not None
+        observed["state"] = task.status.state
+        return task
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send", sdk_send)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    params = SimpleNamespace(message=SimpleNamespace(task_id=task_id, context_id=context_id))
+
+    result = await handler.on_message_send(params, call_context)
+
+    assert isinstance(result, Task)
+    assert observed["state"] == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert result.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    session_dir = SessionStorage().session_dir(str(cwd), ctx.session_id)
+    context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+    assert context_snapshot["active_task_id"] is None
 
 
 @pytest.mark.asyncio
