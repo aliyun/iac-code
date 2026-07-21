@@ -1729,7 +1729,7 @@ async def test_delegated_local_template_materializes_from_symlinked_logical_cwd(
     logical_cwd = logical_root / "ctx-1"
 
     template_body = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n"
-    (physical_templates / "template.yml").write_text(template_body, encoding="utf-8")
+    (physical_templates / "template.yml").write_bytes(template_body.encode("utf-8"))
     template_url = (
         "templates/template.yml"
         if template_url_kind == "relative"
